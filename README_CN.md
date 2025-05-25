@@ -53,7 +53,7 @@ bash mcp_servers/run_all_mcp_server.sh
 ```bash
 streamlit run sage_demo.py -- --api-key your_api_key --model deepseek-chat --base-url https://api.deepseek.com/v1
 ```
-
+![demo](assets/demo.png)
 ## 架构
 
 ```mermaid
