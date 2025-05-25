@@ -155,4 +155,12 @@ examples/
 
 MIT
 
+## Roadmap
+
+1. **Tool System Enhancements**: Improve and design more comprehensive MCP server support
+2. **Logger Optimization**: Enhance logging functionality and output formatting  
+3. **Supported Models**: Maintain and expand the list of tested and supported AI models
+4. **Infinite Context**: Support for ultra-long and complex tasks
+5. **Professional Agents**: Expand collection of specialized agents
+
 欢迎加我微信入群交流 微信号是 zhangzheng-thu
