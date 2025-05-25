@@ -22,8 +22,8 @@ Provides capabilities for task decomposition and execution in both modes.
 ## Installation
 
 ```bash
-git clone https://github.com/your-repo/multi-agent.git
-cd multi-agent
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
 pip install -r requirements.txt
 ```
 
