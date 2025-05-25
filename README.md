@@ -154,3 +154,5 @@ examples/
 ## License
 
 MIT
+
+欢迎加我微信入群交流 微信号是 zhangzheng-thu
