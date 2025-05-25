@@ -184,9 +184,8 @@ It executes subtasks directly based on the provided context and tools. That will
                         logger.info(f"ExecutorAgent.run: tool response {tool_response}")
                         processed_response = self.process_tool_response(tool_response,tool_call_id)
                         # 逐个返回工具调用的结果
-                        all_new_response_chunks.append(processed_response)
-                        yield [processed_response]
-                    
+                        all_new_response_chunks.extend(processed_response)
+                        yield processed_response
                 else:
                     # 返回换行消息
                     if len(all_new_response_chunks)>0:

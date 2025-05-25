@@ -161,7 +161,7 @@ async def search_image_from_web(query: str, date_range: str = None,country:str =
             data = response.json()
             # print(f'search response: {data}')
             
-            if "organic" not in data:
+            if "images" not in data:
                 return "No results found."
 
             results = []
