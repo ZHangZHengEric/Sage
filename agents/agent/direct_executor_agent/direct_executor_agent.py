@@ -115,8 +115,8 @@ It executes subtasks directly based on the provided context and tools. That will
                 for chunk in response:
                     if chunk.choices[0].delta.tool_calls:
                         for tool_call in chunk.choices[0].delta.tool_calls:
-                            if tool_call.id is not None:
-                                last_tool_call_id = tool_call.id                            
+                            if tool_call.id is not None and len(tool_call.id)>0:
+                                last_tool_call_id = tool_call.id                          
                             if last_tool_call_id not in tool_calls:
                                 logger.info(f"ExecutorAgent.run: New tool call detected: {last_tool_call_id},tool name: {tool_call.function.name} ")
                                 tool_calls[last_tool_call_id] = {

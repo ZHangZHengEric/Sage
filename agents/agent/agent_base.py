@@ -226,3 +226,36 @@ class AgentBase(ABC):
                 messages_str_list.append(f"Tool: {msg['content']}")
         result = "\n".join(messages_str_list) or "None"
         return result
+    
+    def _judge_delta_content_type(self,delta_content,all_tokens_str,tag_type=[]):
+        start_tag = [f"<{tag}>" for tag in tag_type]
+        end_tag = [f"</{tag}>" for tag in tag_type]
+        
+        # 构造出 end_tag 所有的从左到右的字符串
+        end_tag_process_list = []
+        for tag in end_tag:
+            for i in range(len(tag)):
+                end_tag_process_list.append(tag[:i+1])    
+        last_tag = None
+        last_tag_index = None
+        
+        all_tokens_str  = (all_tokens_str+ delta_content).strip()
+        
+        for tag in start_tag + end_tag:
+            index = all_tokens_str.rfind(tag)
+            if index != -1:
+                if last_tag_index is None or index > last_tag_index:
+                    last_tag = tag
+                    last_tag_index = index
+        if last_tag is None:
+            return "tag"
+        if last_tag in start_tag:
+            if last_tag_index + len(last_tag) == len(all_tokens_str):
+                return 'tag'    
+            for end_tag_process in end_tag_process_list:
+                if all_tokens_str.endswith(end_tag_process):
+                    return 'unknown'
+            else:
+                return last_tag.replace('<', '').replace('>', '')
+        elif last_tag in end_tag:
+            return 'tag'

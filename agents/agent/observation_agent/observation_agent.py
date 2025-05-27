@@ -77,7 +77,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         logger.debug("ObservationAgent.stream_run: Generated analysis prompt")
         # print(prompt)
         # Call LLM and parse response
-        chunk_count = 0
         all_content = ""
         message_id = str(uuid.uuid4())
         last_tag_type = None
@@ -94,7 +93,7 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
 你当前数据库_id或者知识库_id：{session_id}
 '''.format(session_id=session_id,current_time=current_time,file_workspace=file_workspace)
         }
-            
+        unknown_content = ''
         for chunk in self.model.chat.completions.create(
             messages=[system_message]+[{"role": "user", "content": prompt.format(task_description=task_description, execution_results=execution_results)}],
             stream=True,
@@ -102,29 +101,34 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         ):
             if chunk.choices[0].delta.content is not None:
                 delta_content = chunk.choices[0].delta.content
-                chunk_count += 1
+                for delta_content_char in delta_content:
+                    delta_content_all = unknown_content+ delta_content_char
                 # 判断delta_content的类型
-                tag_type = self._judge_delta_content_type(delta_content,all_content)
-                # print(f'delta_content: {delta_content}, tag_type: {tag_type}')
-                # 如果是tag 则不返回，因为show_content 是不包含tag的
-                if tag_type in ['analysis']:
-                    if tag_type != last_tag_type:
-                        yield [{
-                            'role': 'assistant',
-                            'content': '',
-                            'type': 'observation_result',
-                          'message_id': message_id,
-                          'show_content': '\n\n'
-                        }]
-                    yield [{
-                        'role': 'assistant',
-                        'content': '',
-                        'type': 'observation_result',
-                        'message_id': message_id,
-                        'show_content': delta_content
-                    }]
-                    last_tag_type = tag_type
-                all_content += delta_content
+                    tag_type = self._judge_delta_content_type(delta_content_all,all_content,tag_type=['needs_more_input','finish_percent','is_completed','analysis','suggestions','user_query'])
+                    print(f'delta_content: {delta_content}, tag_type: {tag_type}')
+                    all_content += delta_content_char
+                    if tag_type == 'unknown':
+                        unknown_content = delta_content_all
+                        continue
+                    else:
+                        unknown_content = ''
+                        if tag_type in ['analysis']:
+                            if tag_type != last_tag_type:
+                                yield [{
+                                    'role': 'assistant',
+                                    'content': '',
+                                    'type': 'observation_result',
+                                'message_id': message_id,
+                                'show_content': '\n\n'
+                                }]
+                            yield [{
+                                'role': 'assistant',
+                                'content': '',
+                                'type': 'observation_result',
+                                'message_id': message_id,
+                                'show_content': delta_content_all
+                            }]
+                        last_tag_type = tag_type
 
         response_json = self.convert_xlm_to_json(all_content)
         result = [{
@@ -134,7 +138,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
             'message_id': message_id,
             'show_content': '\n'
         }]
-        logger.info(f"ObservationAgent.stream_run: Observation analysis completed with {chunk_count} chunks")
         yield result
 
     def convert_xlm_to_json(self,xlm_content):
@@ -207,60 +210,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         }
         logger.info(f"ObservationAgent.convert_xlm_to_json response_json: {response_json}")
         return response_json
-
-    def _judge_delta_content_type(self, delta_content,all_content):
-        """
-        delta_content 是下列字符串的流式结果，可能是其中的一个或者多个字符：
-        <needs_more_input>
-        boolea类型，true表示需要用户提供更多信息，false表示不需要用户提供更多信息
-        </needs_more_input>
-        <finish_percent>
-        任务完成百分比，范围0-100，100表示任务完成
-        </finish_percent>
-        <is_completed>
-        boolean类型,true表示任务已完成，false表示任务未完成
-        </is_completed>
-        <analysis>
-        详细分析，一段话不要有换行
-        </analysis>
-        <suggestions>
-        ["建议1", "建议2"]
-        </suggestions>
-        <user_query>
-        当needs_more_input为true时需要询问用户的具体问题，否则为空字符串
-        </user_query>
-
-        判断delta_content的类型，是 needs_more_input 还是 is_completed 还是 analysis 还是 suggestions 还是user_query 或者<tag>即xml中的标签
-        规则：
-        1. 当all_content+ delta_content 最后一个字符还处于xlm的标签的部分时，返回标签类型tag
-        2. 当all_content+ delta_content 不在xlm的标签中时，返回前一个开始标签的类型
-        3. tag一定是单独的一行
-        
-        return 标签的类型
-        """
-        # 定义标签类型
-        tag_types = ['needs_more_input','finish_percent', 'is_completed', 'analysis', 'suggestions', 'user_query']
-        # 定义标签的开始和结束
-        tag_starts = ["<" + tag + ">" for tag in tag_types]
-        tag_ends = ["</" + tag + ">" for tag in tag_types]
-
-        # 先判断当前的最后一行是否是xml的标签例如<needs_more_input>、<is_completed>、<analysis>、<suggestions>、<user_query> 的一部分，如果是，返回标签类型
-        lines = (all_content+delta_content).split("\n")
-        # print('lines[-1]' ,lines[-1])
-        if lines[-1] in '```':
-            return "tag"
-        for  tag_start in tag_starts:
-            if lines[-1] in tag_start and len(lines[-1])>0 :
-                return "tag"
-        for  tag_end in tag_ends:
-            if lines[-1] in tag_end and len(lines[-1])>0 :
-                return "tag"
-        # 如果不是，返回前一个开始标签的类型
-        for line in lines[::-1]:
-            for tag_start in tag_starts:
-                if tag_start in line :
-                    return tag_types[tag_starts.index(tag_start)]
-
     
     def _extract_task_description_to_str(self, messages):
         """Extract completed actions from messages."""

@@ -93,11 +93,10 @@ class PlanningAgent(AgentBase):
         # print(prompt)
         # Call LLM for planning
         logger.info("PlanningAgent.run: Calling LLM for planning")
-        chunk_count = 0
         all_content = ""
         message_id = str(uuid.uuid4())
         last_tag_type = None
-        
+        unknown_content = ''
         for chunk in self.model.chat.completions.create(
             messages=[system_message] +[{"role": "user", "content": prompt.format(task_description=task_description, completed_actions=completed_actions, available_tools_str=available_tools_str,current_time=current_time,session_id=session_id)}],
             stream=True,
@@ -105,29 +104,34 @@ class PlanningAgent(AgentBase):
         ):
             if chunk.choices[0].delta.content is not None:
                 delta_content = chunk.choices[0].delta.content
-                chunk_count += 1
-                # 判断delta_content的类型
-                tag_type = self._judge_delta_content_type(delta_content,all_content)
-                # print(f'delta_content: {delta_content}, tag_type: {tag_type}')
-                # 如果是tag 则不返回，因为show_content 是不包含tag的
-                if tag_type in ['next_step_description','expected_output']:
-                    if tag_type != last_tag_type:
-                        yield [{
-                            'role': 'assistant',
-                            'content': '',
-                            'type': 'planning_result',
-                          'message_id': message_id,
-                          'show_content': '\n\n'
-                        }]
-                    yield [{
-                        'role': 'assistant',
-                        'content': '',
-                        'type': 'planning_result',
-                        'message_id': message_id,
-                        'show_content': delta_content
-                    }]
-                    last_tag_type = tag_type
-                all_content += delta_content
+                for delta_content_char in delta_content:
+                    delta_content_all = unknown_content+ delta_content_char
+                    # 判断delta_content的类型
+                    tag_type = self._judge_delta_content_type(delta_content_all,all_content,['next_step_description','required_tools','expected_output','success_criteria'])
+                    all_content += delta_content_char
+                    # print(f'delta_content: {delta_content}, tag_type: {tag_type}')
+                    if tag_type == 'unknown':
+                        unknown_content = delta_content_all
+                        continue
+                    else:
+                        unknown_content = ''
+                        if tag_type in ['next_step_description','expected_output']:
+                            if tag_type != last_tag_type:
+                                yield [{
+                                    'role': 'assistant',
+                                    'content': '',
+                                    'type': 'planning_result',
+                                'message_id': message_id,
+                                'show_content': '\n\n'
+                                }]
+                            yield [{
+                                'role': 'assistant',
+                                'content': '',
+                                'type': 'planning_result',
+                                'message_id': message_id,
+                                'show_content': delta_content_all
+                            }]
+                        last_tag_type = tag_type
 
         response_json = self.convert_xlm_to_json(all_content)
         result = [{
@@ -179,54 +183,6 @@ class PlanningAgent(AgentBase):
             }
         }
                     
-            
-    def _judge_delta_content_type(self, delta_content,all_content):
-        """
-        delta_content 是下列字符串的流式结果，可能是其中的一个或者多个字符：
-        <next_step_description>
-        子任务的清晰描述
-        </next_step_description>
-        <required_tools>
-        所需工具列表
-        </required_tools>
-        <expected_output>
-        预期结果描述
-        </expected_output>
-        <success_criteria>
-        如何验证完成
-        </success_criteria>
-
-        判断delta_content的类型，是 next_step_description 还是 required_tools 还是 expected_output 还是 success_criteria 或者<tag>即xml中的标签
-        规则：
-        1. 当all_content+ delta_content 最后一个字符还处于xlm的标签的部分时，返回标签类型tag
-        2. 当all_content+ delta_content 不在xlm的标签中时，返回前一个开始标签的类型
-        3. tag一定是单独的一行
-        
-        return 标签的类型
-        """
-        # 定义标签类型
-        tag_types = ["next_step_description", "required_tools", "expected_output", "success_criteria"]
-        # 定义标签的开始和结束
-        tag_starts = ["<" + tag + ">" for tag in tag_types]
-        tag_ends = ["</" + tag + ">" for tag in tag_types]
-
-        # 先判断当前的最后一行是否是xml的标签例如<next_step_description>、<required_tools>、<expected_output>、<success_criteria>的一部分，如果是，返回标签类型
-        lines = (all_content+delta_content).split("\n")
-        # print('lines[-1]' ,lines[-1])
-        if lines[-1] in '```':
-            return "tag"
-        for  tag_start in tag_starts:
-            if lines[-1] in tag_start and len(lines[-1])>0 :
-                return "tag"
-        for  tag_end in tag_ends:
-            if lines[-1] in tag_end and len(lines[-1])>0 :
-                return "tag"
-        # 如果不是，返回前一个开始标签的类型
-        for line in lines[::-1]:
-            for tag_start in tag_starts:
-                if tag_start in line :
-                    return tag_types[tag_starts.index(tag_start)]
-
     def _extract_task_description(self, messages):
         """Extract original task description from messages."""
         logger.debug(f"PlanningAgent._extract_task_description: Processing {len(messages)} messages")

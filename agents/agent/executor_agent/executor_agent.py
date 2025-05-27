@@ -61,13 +61,12 @@ the expected output is:{next_expected_output}
 
 注意以下的任务执行规则：
 1. 如果不需要使用工具，直接返回中文内容。你的文字输出都要是markdown格式。
-2. 调用工具时，不要在其他的输出文字,你一次只能执行一个任务。
-3. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
-当你有file_write 的相关工具时，需要注意：
-4. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
-5. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
-6. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
-7. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。 
+2. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
+3. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
+4. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
+5. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
+6. 调用工具时，不要在其他的输出文字,你一次只能执行一个任务。
+7. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
 8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
 '''
         
@@ -153,7 +152,7 @@ the expected output is:{next_expected_output}
                 if chunk.choices[0].delta.tool_calls:
                     tool_calls_delta = chunk.choices[0].delta.tool_calls
                     for tool_call in chunk.choices[0].delta.tool_calls:
-                        if tool_call.id is not None:
+                        if tool_call.id is not None and len(tool_call.id)>0:
                             last_tool_call_id = tool_call.id                            
                         if last_tool_call_id not in tool_calls:
                             logger.debug(f"ExecutorAgent.run: New tool call detected: {last_tool_call_id}，tool call name: {tool_call.function.name}")

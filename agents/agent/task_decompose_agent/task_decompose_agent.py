@@ -87,6 +87,7 @@ class TaskDecomposeAgent(AgentBase):
             'content': prompt.format(task_description=task_description_str)
         }
         new_input_messages.append(new_input_user_message)
+        unknown_content = ''
         for chunk in self.model.chat.completions.create(
             messages=new_input_messages,
             stream=True,
@@ -94,27 +95,36 @@ class TaskDecomposeAgent(AgentBase):
         ):
             if chunk.choices[0].delta.content is not None:
                 delta_content = chunk.choices[0].delta.content
-                # 判断delta_content的类型
-                tag_type = self._judge_delta_content_type(delta_content,full_response)
-                full_response += delta_content
-                # 如果是task_item标签内容则返回
-                if tag_type == 'task_item':
-                    if last_tag_type != 'task_item':
-                        yield [{
-                            'role': 'assistant',
-                            'content': '',
-                            'type': 'task_decomposition',
-                          'message_id': message_id,
-                          'show_content': '\n- '
-                        }]
-                    yield [{
-                        'role': 'assistant',
-                        'content': '',
-                        'type': 'task_decomposition',
-                        'message_id': message_id,
-                        'show_content': delta_content
-                    }]
-                last_tag_type = tag_type
+                
+                for delta_content_char in delta_content:
+                    delta_content_all = unknown_content+ delta_content_char
+                    # 判断delta_content的类型
+                    tag_type = self._judge_delta_content_type(delta_content_all,full_response,tag_type=['task_item'])
+                    # print(delta_content_all,tag_type)
+                    full_response += delta_content_char
+                    if tag_type == 'unknown':
+                        unknown_content = delta_content_all
+                        continue
+                    else:
+                        unknown_content = ''
+                        # 如果是task_item标签内容则返回
+                        if tag_type == 'task_item':
+                            if last_tag_type != 'task_item':
+                                yield [{
+                                    'role': 'assistant',
+                                    'content': '',
+                                    'type': 'task_decomposition',
+                                'message_id': message_id,
+                                'show_content': '\n- '
+                                }]
+                            yield [{
+                                'role': 'assistant',
+                                'content': '',
+                                'type': 'task_decomposition',
+                                'message_id': message_id,
+                                'show_content': delta_content_all
+                            }]
+                        last_tag_type = tag_type
         # 解析完整响应
         tasks = self._convert_xlm_to_json(full_response)
         
@@ -134,6 +144,7 @@ class TaskDecomposeAgent(AgentBase):
         将任务列表从XML格式转换为JSON格式
         """
         tasks = []
+        # print(f"content:{content}" )
         task_items = re.findall(r'<task_item>(.*?)</task_item>', content, re.DOTALL)
 
         for item in task_items:
@@ -165,48 +176,3 @@ class TaskDecomposeAgent(AgentBase):
         except json.JSONDecodeError as e:
             logger.error(f"{self.__class__.__name__}: Failed to parse tasks from response: {str(e)}")
             return []
-    
-    def _judge_delta_content_type(self, delta_content,all_content):
-        """
-        delta_content 是下列字符串的流式结果，可能是其中的一个或者多个字符：
-        <task_item>
-        子任务1的清晰描述
-        </task_item>
-        <task_item>
-        子任务2的清晰描述
-        </task_item>
-        <task_item>
-        子任务3的清晰描述
-        </task_item>
-
-        判断delta_content的类型，是 task_item 或者<tag>即xml中的标签
-        规则：
-        1. 当all_content+ delta_content 最后一个字符还处于xlm的标签的部分时，返回标签类型tag
-        2. 当all_content+ delta_content 不在xlm的标签中时，返回前一个开始标签的类型
-        3. tag一定是单独的一行
-        
-        return 标签的类型
-        """
-        # 定义标签类型
-        tag_types = ["task_item"]
-        # 定义标签的开始和结束
-        tag_starts = ["<" + tag + ">" for tag in tag_types]
-        tag_ends = ["</" + tag + ">" for tag in tag_types]
-
-        # 先判断当前的最后一行是否是xml的标签例如<task_item>的一部分，如果是，返回标签类型
-        lines = (all_content+delta_content).strip().split("\n")
-        # print('delta_content' ,delta_content)
-        # print('lines[-1]' ,lines[-1])
-        if lines[-1] in '```':
-            return "tag"
-        for  tag_start in tag_starts:
-            if lines[-1] in tag_start and len(lines[-1])>0 :
-                return "tag"
-        for  tag_end in tag_ends:
-            if lines[-1] in tag_end and len(lines[-1])>0 :
-                return "tag"
-        # 如果不是，返回前一个开始标签的类型
-        for line in lines[::-1]:
-            for tag_start in tag_starts:
-                if tag_start in line :
-                    return tag_types[tag_starts.index(tag_start)]
