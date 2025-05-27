@@ -47,6 +47,10 @@ bash mcp_servers/run_all_mcp_server.sh
 
 The system will automatically discover and register tools from running MCP servers.
 
+## Supported Models
+- Currently supported: deepseek-v3, Qwen3
+- Other models are pending testing.
+
 ## Examples
 
 Run the web demo:

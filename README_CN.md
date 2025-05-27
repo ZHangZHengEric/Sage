@@ -47,6 +47,10 @@ bash mcp_servers/run_all_mcp_server.sh
 
 系统会自动发现并注册运行中的MCP服务器提供的工具。
 
+## 支持的模型
+- 当前支持: deepseek-v3, Qwen3
+- 其他模型待测试
+
 ## 示例
 
 运行网页演示:
