@@ -1,48 +1,35 @@
-from typing import List, Dict, Any, Optional, Generator
+"""
+TaskDecomposeAgent 重构版本
+
+任务分解智能体，负责将复杂任务分解为可执行的子任务。
+改进了代码结构、错误处理、日志记录和可维护性。
+
+作者: Multi-Agent Framework Team
+日期: 2024
+版本: 2.0 (重构版)
+"""
+
 import json
 import uuid
-import logging
 import re
-from ..agent_base import AgentBase
 import datetime
+import traceback
+from typing import List, Dict, Any, Optional, Generator
 
-logger = logging.getLogger(__name__)
+from agents.agent.agent_base import AgentBase
+from agents.utils.logger import logger
+
 
 class TaskDecomposeAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
-        
+    """
+    任务分解智能体
     
-    def run_stream(self, messages: List[Dict[str, Any]], 
-                 tool_manager: Optional[Any] = None,
-                 context: Optional[Dict[str, Any]] = None,
-                 session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
-        """
-        流式版本的任务分解
-        """
-        logger.info(f"{self.__class__.__name__}.run_stream: Starting streaming task decomposition")
-        
-        # 提取任务描述
-        task_description = self._extract_task_description_messages(messages)
-        task_description_str = self.convert_messages_to_str(task_description)
-        logger.debug(f"{self.__class__.__name__}.run_stream: Extracted task description of length {len(task_description)}")
-        
-        current_time = context.get('current_time',datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        file_workspace = context.get('file_workspace','无')
-        if len(self.system_prefix)==0:
-            self.system_prefix = """你是一个任务分解者，你需要根据用户需求，将复杂任务分解为清晰可执行的子任务。"""
-        system_message = {
-                'role':'system',
-                'content': self.system_prefix+'''
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-'''.format(session_id=session_id,current_time=current_time,file_workspace=file_workspace)
-        }
+    负责将复杂的用户需求分解为清晰可执行的子任务。
+    支持流式输出，实时返回分解过程。
+    """
 
-
-        # 生成任务分解提示,输出子任务的描述和是否必须完成的标志
-        prompt = """# 任务分解指南
+    # 任务分解提示模板常量
+    DECOMPOSITION_PROMPT_TEMPLATE = """# 任务分解指南
 
 ## 用户需求
 {task_description}
@@ -65,100 +52,411 @@ class TaskDecomposeAgent(AgentBase):
 </task_item>
 ```
 """
+
+    # 系统提示模板常量
+    SYSTEM_PREFIX_DEFAULT = """你是一个任务分解者，你需要根据用户需求，将复杂任务分解为清晰可执行的子任务。"""
+    
+    # 系统消息模板常量
+    SYSTEM_MESSAGE_TEMPLATE = """
+你的当前工作目录是：{file_workspace}
+当前时间是：{current_time}
+你当前数据库_id或者知识库_id：{session_id}
+"""
+
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+        """
+        初始化任务分解智能体
         
-        logger.debug(f"{self.__class__.__name__}.run_stream: Generated streaming decomposition prompt")
+        Args:
+            model: 语言模型实例
+            model_config: 模型配置参数
+            system_prefix: 系统前缀提示
+        """
+        super().__init__(model, model_config, system_prefix)
+        self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
+        logger.info("TaskDecomposeAgent 初始化完成")
+    
+    def run_stream(self, 
+                   messages: List[Dict[str, Any]], 
+                   tool_manager: Optional[Any] = None,
+                   context: Optional[Dict[str, Any]] = None,
+                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        流式执行任务分解
         
-        # 流式调用LLM
-        logger.info(f"{self.__class__.__name__}.run_stream: Calling LLM with streaming enabled")
+        将复杂任务分解为清晰可执行的子任务并实时返回分解结果。
+        
+        Args:
+            messages: 对话历史记录
+            tool_manager: 可选的工具管理器
+            context: 附加上下文信息
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的任务分解消息块
+            
+        Raises:
+            Exception: 当分解过程出现错误时抛出异常
+        """
+        logger.info("TaskDecomposeAgent: 开始流式任务分解")
+        
+        try:
+            # 准备分解上下文
+            decomposition_context = self._prepare_decomposition_context(
+                messages=messages,
+                context=context,
+                session_id=session_id
+            )
+            
+            # 生成分解提示
+            prompt = self._generate_decomposition_prompt(decomposition_context)
+            
+            # 执行流式任务分解
+            yield from self._execute_streaming_decomposition(prompt, context, session_id)
+            
+        except Exception as e:
+            logger.error(f"TaskDecomposeAgent: 任务分解过程中发生异常: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            yield from self._handle_decomposition_error(e)
+
+    def _prepare_decomposition_context(self, 
+                                     messages: List[Dict[str, Any]],
+                                     context: Optional[Dict[str, Any]],
+                                     session_id: str) -> Dict[str, Any]:
+        """
+        准备任务分解所需的上下文信息
+        
+        Args:
+            messages: 对话消息列表
+            context: 附加上下文
+            session_id: 会话ID
+            
+        Returns:
+            Dict[str, Any]: 包含任务分解所需信息的上下文字典
+        """
+        logger.debug("TaskDecomposeAgent: 准备任务分解上下文")
+        
+        # 提取任务描述
+        task_description_messages = self._extract_task_description_messages(messages)
+        task_description_str = self.convert_messages_to_str(task_description_messages)
+        
+        logger.debug(f"TaskDecomposeAgent: 提取任务描述，消息数量: {len(task_description_messages)}")
+        
+        decomposition_context = {
+            'task_description': task_description_str
+        }
+        
+        logger.info("TaskDecomposeAgent: 任务分解上下文准备完成")
+        return decomposition_context
+
+    def _generate_decomposition_prompt(self, context: Dict[str, Any]) -> str:
+        """
+        生成任务分解提示
+        
+        Args:
+            context: 任务分解上下文信息
+            
+        Returns:
+            str: 格式化后的任务分解提示
+        """
+        logger.debug("TaskDecomposeAgent: 生成任务分解提示")
+        
+        prompt = self.DECOMPOSITION_PROMPT_TEMPLATE.format(
+            task_description=context['task_description']
+        )
+        
+        logger.debug("TaskDecomposeAgent: 任务分解提示生成完成")
+        return prompt
+
+    def _execute_streaming_decomposition(self, 
+                                       prompt: str, 
+                                       context: Optional[Dict[str, Any]],
+                                       session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行流式任务分解
+        
+        Args:
+            prompt: 分解提示
+            context: 附加上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的消息块
+        """
+        logger.info("TaskDecomposeAgent: 开始执行流式任务分解")
+        
+        # 准备系统消息
+        system_message = self._prepare_system_message(context, session_id)
+        
+        # 初始化流式处理参数
         full_response = ""
         message_id = str(uuid.uuid4())
         last_tag_type = 'tag'
-        yield [{
-            'role': 'assistant',
-            'content': '',
-            'type': 'task_decomposition',
-            'message_id': message_id,
-            'show_content': '接下来执行如下的安排：\n\n'
-        }]
-        new_input_messages = []
-        new_input_messages.append(system_message)
-        new_input_user_message = {
-            'role':'user',
-            'content': prompt.format(task_description=task_description_str)
-        }
-        new_input_messages.append(new_input_user_message)
         unknown_content = ''
-        for chunk in self.model.chat.completions.create(
-            messages=new_input_messages,
-            stream=True,
-            **self.model_config
-        ):
+        
+        # 发送初始消息
+        yield self._create_decomposition_chunk(
+            content='',
+            message_id=message_id,
+            show_content='接下来执行如下的安排：\\n\\n'
+        )
+        
+        # 准备LLM输入消息
+        input_messages = self._prepare_llm_messages(system_message, prompt)
+        
+        logger.debug("TaskDecomposeAgent: 调用语言模型进行流式生成")
+        
+        # 执行流式分解
+        for chunk in self._call_llm_streaming(input_messages):
             if chunk.choices[0].delta.content is not None:
                 delta_content = chunk.choices[0].delta.content
                 
                 for delta_content_char in delta_content:
-                    delta_content_all = unknown_content+ delta_content_char
-                    # 判断delta_content的类型
-                    tag_type = self._judge_delta_content_type(delta_content_all,full_response,tag_type=['task_item'])
-                    # print(delta_content_all,tag_type)
+                    delta_content_all = unknown_content + delta_content_char
+                    
+                    # 判断内容类型
+                    tag_type = self._judge_delta_content_type(
+                        delta_content_all, 
+                        full_response, 
+                        tag_type=['task_item']
+                    )
+                    
+                    logger.debug(f"TaskDecomposeAgent: 处理内容块，类型: {tag_type}")
                     full_response += delta_content_char
+                    
                     if tag_type == 'unknown':
                         unknown_content = delta_content_all
                         continue
                     else:
                         unknown_content = ''
-                        # 如果是task_item标签内容则返回
+                        # 处理task_item标签内容
                         if tag_type == 'task_item':
                             if last_tag_type != 'task_item':
-                                yield [{
-                                    'role': 'assistant',
-                                    'content': '',
-                                    'type': 'task_decomposition',
-                                'message_id': message_id,
-                                'show_content': '\n- '
-                                }]
-                            yield [{
-                                'role': 'assistant',
-                                'content': '',
-                                'type': 'task_decomposition',
-                                'message_id': message_id,
-                                'show_content': delta_content_all
-                            }]
+                                yield self._create_decomposition_chunk(
+                                    content='',
+                                    message_id=message_id,
+                                    show_content='\\n- '
+                                )
+                            yield self._create_decomposition_chunk(
+                                content='',
+                                message_id=message_id,
+                                show_content=delta_content_all
+                            )
                         last_tag_type = tag_type
-        # 解析完整响应
-        tasks = self._convert_xlm_to_json(full_response)
         
-        # 返回最终结果
-        yield [{
+        # 处理最终结果
+        yield from self._finalize_decomposition_result(full_response, message_id)
+        
+        logger.info("TaskDecomposeAgent: 流式任务分解完成")
+
+    def _prepare_system_message(self, 
+                              context: Optional[Dict[str, Any]], 
+                              session_id: str) -> Dict[str, Any]:
+        """
+        准备系统消息
+        
+        Args:
+            context: 附加上下文
+            session_id: 会话ID
+            
+        Returns:
+            Dict[str, Any]: 系统消息字典
+        """
+        logger.debug("TaskDecomposeAgent: 准备系统消息")
+        
+        # 设置默认系统前缀
+        if len(self.system_prefix) == 0:
+            self.system_prefix = self.SYSTEM_PREFIX_DEFAULT
+        
+        # 获取上下文信息
+        current_time = context.get('current_time', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file_workspace = context.get('file_workspace', '无') if context else '无'
+        
+        # 构建系统消息
+        system_content = self.system_prefix + self.SYSTEM_MESSAGE_TEMPLATE.format(
+            session_id=session_id,
+            current_time=current_time,
+            file_workspace=file_workspace
+        )
+        
+        return {
+            'role': 'system',
+            'content': system_content
+        }
+
+    def _prepare_llm_messages(self, 
+                            system_message: Dict[str, Any], 
+                            prompt: str) -> List[Dict[str, Any]]:
+        """
+        准备LLM输入消息
+        
+        Args:
+            system_message: 系统消息
+            prompt: 用户提示
+            
+        Returns:
+            List[Dict[str, Any]]: LLM输入消息列表
+        """
+        logger.debug("TaskDecomposeAgent: 准备LLM输入消息")
+        
+        user_message = {
+            'role': 'user',
+            'content': prompt
+        }
+        
+        return [system_message, user_message]
+
+    def _call_llm_streaming(self, messages: List[Dict[str, Any]]):
+        """
+        调用语言模型进行流式生成
+        
+        Args:
+            messages: 输入消息列表
+            
+        Returns:
+            Generator: 语言模型的流式响应
+        """
+        logger.debug("TaskDecomposeAgent: 调用语言模型进行流式生成")
+        
+        return self.model.chat.completions.create(
+            messages=messages,
+            stream=True,
+            **self.model_config
+        )
+
+    def _create_decomposition_chunk(self, 
+                                  content: str, 
+                                  message_id: str, 
+                                  show_content: str) -> List[Dict[str, Any]]:
+        """
+        创建任务分解消息块
+        
+        Args:
+            content: 消息内容
+            message_id: 消息ID
+            show_content: 显示内容
+            
+        Returns:
+            List[Dict[str, Any]]: 格式化的任务分解消息块列表
+        """
+        return [{
             'role': 'assistant',
-            'content': '任务拆解规划：\n'+json.dumps({"tasks": tasks}, ensure_ascii=False),
+            'content': content,
             'type': 'task_decomposition',
             'message_id': message_id,
-            'show_content': ''
+            'show_content': show_content
         }]
+
+    def _finalize_decomposition_result(self, 
+                                     full_response: str, 
+                                     message_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        完成任务分解并返回最终结果
         
-        logger.info(f"{self.__class__.__name__}.run_stream: Streaming task decomposition completed")
-    
+        Args:
+            full_response: 完整的响应内容
+            message_id: 消息ID
+            
+        Yields:
+            List[Dict[str, Any]]: 最终任务分解结果消息块
+        """
+        logger.debug("TaskDecomposeAgent: 处理最终任务分解结果")
+        
+        try:
+            # 解析任务列表
+            tasks = self._convert_xlm_to_json(full_response)
+            logger.info(f"TaskDecomposeAgent: 成功分解为 {len(tasks)} 个子任务")
+            
+            # 返回最终结果
+            result_content = '任务拆解规划：\\n' + json.dumps({"tasks": tasks}, ensure_ascii=False)
+            
+            yield [{
+                'role': 'assistant',
+                'content': result_content,
+                'type': 'task_decomposition',
+                'message_id': message_id,
+                'show_content': ''
+            }]
+            
+        except Exception as e:
+            logger.error(f"TaskDecomposeAgent: 处理最终结果时发生错误: {str(e)}")
+            yield from self._handle_decomposition_error(e)
+
+    def _handle_decomposition_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        处理任务分解过程中的错误
+        
+        Args:
+            error: 发生的异常
+            
+        Yields:
+            List[Dict[str, Any]]: 错误消息块
+        """
+        logger.error(f"TaskDecomposeAgent: 处理任务分解错误: {str(error)}")
+        
+        error_message = f"\\n任务分解失败: {str(error)}"
+        message_id = str(uuid.uuid4())
+        
+        yield [{
+            'role': 'tool',
+            'content': error_message,
+            'type': 'task_decomposition',
+            'message_id': message_id,
+            'show_content': error_message
+        }]
+
     def _convert_xlm_to_json(self, content: str) -> List[Dict[str, Any]]:
         """
         将任务列表从XML格式转换为JSON格式
+        
+        Args:
+            content: XML格式的内容字符串
+            
+        Returns:
+            List[Dict[str, Any]]: 转换后的任务列表
+            
+        Example:
+            输入XML格式：
+            <task_item>任务1描述</task_item>
+            <task_item>任务2描述</task_item>
+            
+            输出JSON格式：
+            [
+                {"description": "任务1描述"},
+                {"description": "任务2描述"}
+            ]
         """
-        tasks = []
-        # print(f"content:{content}" )
-        task_items = re.findall(r'<task_item>(.*?)</task_item>', content, re.DOTALL)
+        logger.debug("TaskDecomposeAgent: 转换XML内容为JSON格式")
+        
+        try:
+            tasks = []
+            task_items = re.findall(r'<task_item>(.*?)</task_item>', content, re.DOTALL)
 
-        for item in task_items:
-            task = {
-                "description": item.strip(),
-            }
-            tasks.append(task)
+            for item in task_items:
+                task = {
+                    "description": item.strip(),
+                }
+                tasks.append(task)
 
-        return tasks
+            logger.debug(f"TaskDecomposeAgent: XML转JSON完成，共提取 {len(tasks)} 个任务")
+            return tasks
+            
+        except Exception as e:
+            logger.error(f"TaskDecomposeAgent: XML转JSON失败: {str(e)}")
+            raise
 
     def _extract_tasks_from_response(self, content: str) -> List[Dict[str, Any]]:
         """
-        从LLM响应中提取任务列表
+        从LLM响应中提取任务列表（备用方法）
+        
+        Args:
+            content: LLM响应内容
+            
+        Returns:
+            List[Dict[str, Any]]: 提取的任务列表
         """
+        logger.debug("TaskDecomposeAgent: 从响应中提取任务列表")
+        
         try:
             # 尝试从markdown代码块中提取JSON
             json_str = self._extract_json_from_markdown(content)
@@ -167,12 +465,42 @@ class TaskDecomposeAgent(AgentBase):
             tasks_data = json.loads(json_str)
             
             if isinstance(tasks_data, dict) and "tasks" in tasks_data:
+                logger.debug(f"TaskDecomposeAgent: 从字典格式提取任务，数量: {len(tasks_data['tasks'])}")
                 return tasks_data["tasks"]
             elif isinstance(tasks_data, list):
+                logger.debug(f"TaskDecomposeAgent: 从列表格式提取任务，数量: {len(tasks_data)}")
                 return tasks_data
             else:
-                logger.warning(f"{self.__class__.__name__}: Unexpected tasks format in response")
+                logger.warning("TaskDecomposeAgent: 响应中的任务格式不符合预期")
                 return []
+                
         except json.JSONDecodeError as e:
-            logger.error(f"{self.__class__.__name__}: Failed to parse tasks from response: {str(e)}")
+            logger.error(f"TaskDecomposeAgent: 从响应中解析任务失败: {str(e)}")
             return []
+
+    def run(self, 
+            messages: List[Dict[str, Any]], 
+            tool_manager: Optional[Any] = None,
+            context: Optional[Dict[str, Any]] = None,
+            session_id: str = None) -> List[Dict[str, Any]]:
+        """
+        执行任务分解（非流式版本）
+        
+        Args:
+            messages: 对话历史记录
+            tool_manager: 可选的工具管理器
+            context: 附加上下文信息
+            session_id: 会话ID
+            
+        Returns:
+            List[Dict[str, Any]]: 任务分解结果消息列表
+        """
+        logger.info("TaskDecomposeAgent: 执行非流式任务分解")
+        
+        # 调用父类的默认实现，将流式结果合并
+        return super().run(
+            messages=messages,
+            tool_manager=tool_manager,
+            context=context,
+            session_id=session_id
+        )

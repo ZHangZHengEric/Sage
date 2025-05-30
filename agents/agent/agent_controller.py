@@ -1,5 +1,23 @@
-from telnetlib import LOGOUT
-from typing import List, Dict, Any
+"""
+AgentController 重构版本
+
+智能体控制器，负责协调多个智能体协同工作。
+改进了代码结构、错误处理、日志记录和可维护性。
+
+作者: Multi-Agent Framework Team
+日期: 2024
+版本: 2.0 (重构版)
+"""
+
+import json
+import uuid
+import re
+import os
+import sys
+import datetime
+import traceback
+from typing import List, Dict, Any, Optional, Generator
+
 from .agent_base import AgentBase
 from .task_analysis_agent.task_analysis_agent import TaskAnalysisAgent
 from .executor_agent.executor_agent import ExecutorAgent
@@ -9,317 +27,889 @@ from .observation_agent.observation_agent import ObservationAgent
 from .direct_executor_agent.direct_executor_agent import DirectExecutorAgent
 from .task_decompose_agent.task_decompose_agent import TaskDecomposeAgent
 from agents.utils.logger import logger
-import json
-import uuid
-import re,os,sys
-import datetime
+
+
 class AgentController:
-    def __init__(self, model: Any, model_config: Dict[str, Any],system_prefix:str=""):
-        """Initialize with model instance and config"""
+    """
+    智能体控制器
+    
+    负责协调多个智能体协同工作，管理任务执行流程，
+    包括任务分析、规划、执行、观察和总结等阶段。
+    """
+
+    # 默认配置常量
+    DEFAULT_MAX_LOOP_COUNT = 10
+    DEFAULT_MESSAGE_LIMIT = 10000
+    
+    # 工作目录模板
+    WORKSPACE_TEMPLATE = "/tmp/sage/{session_id}"
+
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+        """
+        初始化智能体控制器
+        
+        Args:
+            model: 语言模型实例
+            model_config: 模型配置参数
+            system_prefix: 系统前缀提示
+        """
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
         self._init_agents()
-        logger.info("AgentController initialized with model and config")
+        logger.info("AgentController: 智能体控制器初始化完成")
         
-    def _init_agents(self):
-        """Initialize all required agents with shared model"""
-        self.task_analysis_agent = TaskAnalysisAgent(self.model, self.model_config,system_prefix=self.system_prefix)
-        self.executor_agent = ExecutorAgent(self.model, self.model_config,system_prefix=self.system_prefix)
-        self.task_summary_agent = TaskSummaryAgent(self.model, self.model_config,system_prefix=self.system_prefix)
-        self.planning_agent = PlanningAgent(self.model, self.model_config,system_prefix=self.system_prefix)
-        self.observation_agent = ObservationAgent(self.model, self.model_config,system_prefix=self.system_prefix)
-        self.direct_executor_agent = DirectExecutorAgent(self.model, self.model_config,system_prefix=self.system_prefix)
-        self.task_decompose_agent = TaskDecomposeAgent(self.model, self.model_config,system_prefix=self.system_prefix)
+    def _init_agents(self) -> None:
+        """
+        初始化所有必需的智能体
+        
+        使用共享的模型实例为所有智能体进行初始化。
+        """
+        logger.debug("AgentController: 初始化各类智能体")
+        
+        self.task_analysis_agent = TaskAnalysisAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.executor_agent = ExecutorAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.task_summary_agent = TaskSummaryAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.planning_agent = PlanningAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.observation_agent = ObservationAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.direct_executor_agent = DirectExecutorAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.task_decompose_agent = TaskDecomposeAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        
+        logger.info("AgentController: 所有智能体初始化完成")
 
-    def run_stream(self, input_messages: List[Dict], tool_manager: Any = None, session_id=None, deep_thinking=True, summary=True,max_loop_count=10,deep_research=True):
-        """Execute agent workflow with streaming output
+    def run_stream(self, 
+                   input_messages: List[Dict[str, Any]], 
+                   tool_manager: Optional[Any] = None, 
+                   session_id: Optional[str] = None, 
+                   deep_thinking: bool = True, 
+                   summary: bool = True,
+                   max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
+                   deep_research: bool = True) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行智能体工作流并流式输出结果
         
         Args:
-            input_messages: List of message dictionaries
-            tool_manager: ToolManager instance
-            session_id: Session ID
-            deep_thinking: Whether to perform task analysis
-            summary: Whether to generate task summary
+            input_messages: 输入消息字典列表
+            tool_manager: 工具管理器实例
+            session_id: 会话ID
+            deep_thinking: 是否进行任务分析
+            summary: 是否生成任务总结
+            max_loop_count: 最大循环次数
+            deep_research: 是否进行深度研究（完整流程）
             
         Yields:
-            List[Dict]: List of new message dictionaries since last yield, each with:
-            - message_id: Unique identifier for the message
-            - Other standard message fields (role, content, type, etc.)
+            List[Dict[str, Any]]: 自上次yield以来的新消息字典列表，每个消息包含：
+            - message_id: 消息的唯一标识符
+            - 其他标准消息字段（role、content、type等）
         """
-        logger.info(f"Starting run_stream workflow with session_id: {session_id}")
+        logger.info(f"AgentController: 开始流式工作流，会话ID: {session_id}")
+        
+        try:
+            # 准备会话和消息
+            session_id = self._prepare_session_id(session_id)
+            all_messages = self._prepare_initial_messages(input_messages)
+            
+            # 设置执行上下文
+            context = self._setup_execution_context(session_id)
+            
+            # 执行工作流
+            if deep_research:
+                yield from self._execute_full_workflow(
+                    all_messages=all_messages,
+                    tool_manager=tool_manager,
+                    context=context,
+                    session_id=session_id,
+                    deep_thinking=deep_thinking,
+                    summary=summary,
+                    max_loop_count=max_loop_count
+                )
+            else:
+                yield from self._execute_direct_workflow(
+                    all_messages=all_messages,
+                    tool_manager=tool_manager,
+                    context=context,
+                    session_id=session_id
+                )
+            
+            logger.info(f"AgentController: 流式工作流完成，会话ID: {session_id}")
+            
+        except Exception as e:
+            logger.error(f"AgentController: 流式工作流执行过程中发生异常: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            yield from self._handle_workflow_error(e)
+
+    def _prepare_session_id(self, session_id: Optional[str]) -> str:
+        """
+        准备会话ID
+        
+        Args:
+            session_id: 可选的会话ID
+            
+        Returns:
+            str: 准备好的会话ID
+        """
         if session_id is None:
             session_id = str(uuid.uuid1())
-            logger.info(f"Generated new session_id: {session_id}")
+            logger.info(f"AgentController: 生成新会话ID: {session_id}")
+        return session_id
+
+    def _prepare_initial_messages(self, input_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        准备初始消息
         
-        # Initialize messages, preserving existing message_id if present
+        Args:
+            input_messages: 输入消息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 准备好的消息列表
+        """
+        logger.debug("AgentController: 准备初始消息")
+        
+        # 为消息添加message_id（如果没有的话）
         all_messages = []
         for msg in input_messages.copy():
             if 'message_id' not in msg:
                 msg = {**msg, 'message_id': str(uuid.uuid4())} 
             all_messages.append(msg)
-        last_returned_ids = {m['message_id'] for m in all_messages}
-        # 检测all_messages有多少的字符，如果超过10000个字符，就删除前面非role user或者非final_answer的消息，直到字符数小于10000
+        
+        # 清理过长的消息历史
+        all_messages = self._trim_message_history(all_messages)
+        
+        logger.info(f"AgentController: 初始化消息数量: {len(all_messages)}")
+        return all_messages
+
+    def _trim_message_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        修剪消息历史，防止内容过长
+        
+        Args:
+            messages: 原始消息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 修剪后的消息列表
+        """
+        logger.debug("AgentController: 检查并修剪消息历史")
+        
+        # 如果消息内容过长，删除非关键消息
         start_index = 0
-        while len(json.dumps(all_messages)) > 10000 and start_index < len(all_messages):
-            if all_messages[start_index]['role'] == 'user' or all_messages[start_index]['type'] == 'final_answer':
+        while len(json.dumps(messages)) > self.DEFAULT_MESSAGE_LIMIT and start_index < len(messages):
+            if messages[start_index]['role'] == 'user' or messages[start_index].get('type') == 'final_answer':
                 start_index += 1
                 continue
             else:
-                del all_messages[start_index]
+                del messages[start_index]
                 continue
-        logger.info(f"Initialized messages count: {len(all_messages)}")
         
-        logger.info('prepare to basic info')
-        current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %A %H:%M:%S')
-        file_workspace = '''/tmp/sage/{session_id}'''.format(session_id=session_id)
-        logger.info(f"ExecutorAgent.run: Using file workspace: {file_workspace}")
-        if os.path.exists(file_workspace):
-            logger.debug(f"ExecutorAgent.run: Use existing workspace directory")
-            # logger.debug(f"ExecutorAgent.run: Removing existing workspace directory")
-            # os.system(f'rm -rf {file_workspace.format(session_id=session_id)}')
-        os.makedirs(file_workspace, exist_ok=True)
-        context = {'current_time': current_time_str, 'file_workspace': file_workspace}
-        logger.info(f"ExecutorAgent.run: Using context: {context}")
+        logger.debug(f"AgentController: 修剪后消息数量: {len(messages)}")
+        return messages
 
-
-        # 1. Task Analysis Phase
-        if deep_thinking:
-            logger.info("Starting Task Analysis Phase")
-            analysis_chunks = []
-            for chunk in self.task_analysis_agent.run_stream(messages=all_messages,tool_manager= tool_manager,context=context,session_id=session_id):
-                analysis_chunks.append(chunk)
-                all_messages = self._merge_messages(all_messages, chunk)
-                yield chunk
-            logger.info(f"Task Analysis Phase completed with {len(analysis_chunks)} chunks")
-        
-        # 2. Planning-Execution-Observation Loop
-        if deep_research:
-            # 执行任务分解
-            logger.info("Starting Task Decomposition Phase")
-            decompose_chunks = []
-            for chunk in self.task_decompose_agent.run_stream(messages=all_messages,tool_manager= tool_manager,context=context,session_id=session_id):
-                decompose_chunks.append(chunk)
-                all_messages = self._merge_messages(all_messages, chunk)
-                yield chunk
-            logger.info(f"Task Decomposition Phase completed with {len(decompose_chunks)} chunks")
-
-            loop_count = 0
-            while True:
-                loop_count += 1
-                logger.info(f"Starting Planning-Execution-Observation Loop #{loop_count}")
-                
-                if loop_count > max_loop_count:
-                    logger.warning("Reached maximum loop count, stopping workflow")
-                    # yield [{'role': 'assistant', 'content': 'Maximum loop count reached. Stopping workflow.', 'type': 'final_answer'}]
-                    break
-
-
-                # Planning Phase
-                logger.info("Starting Planning Phase")
-                plan_chunks = []
-                for chunk in self.planning_agent.run_stream(messages=all_messages, tool_manager=tool_manager,context=context,session_id=session_id):
-                    plan_chunks.append(chunk)
-                    all_messages = self._merge_messages(all_messages, chunk)
-                    yield chunk
-                logger.info(f"Planning Phase completed with {len(plan_chunks)} chunks")
-                
-                # Execution Phase
-                logger.info("Starting Execution Phase")
-                exec_chunks = []
-                for chunk in self.executor_agent.run_stream(messages=all_messages,tool_manager= tool_manager, context=context,session_id=session_id):
-                    exec_chunks.append(chunk)
-                    all_messages = self._merge_messages(all_messages, chunk)
-                    yield chunk
-                logger.info(f"Execution Phase completed with {len(exec_chunks)} chunks")
-                
-                # Observation Phase
-                logger.info("Starting Observation Phase")
-                obs_chunks = []
-                for chunk in self.observation_agent.run_stream(messages=all_messages,tool_manager= tool_manager,context=context,session_id=session_id):
-                    obs_chunks.append(chunk)
-                    all_messages = self._merge_messages(all_messages, chunk)
-                    yield chunk
-                logger.info(f"Observation Phase completed with {len(obs_chunks)} chunks")
-                
-                # Check completion
-                obs_content = all_messages[-1]['content'].replace('Observation: ', '')
-                try:
-                    obs_result = json.loads(obs_content)
-                    if obs_result.get('is_completed', False):
-                        logger.info("Task completed as indicated by Observation")
-                        break
-                    if obs_result.get('needs_more_input', False):
-                        logger.info("Task needs more input from user")
-                        clarify_msg = {
-                            'role': 'assistant',
-                            'content': obs_result.get('user_query', ''),
-                            'type': 'final_answer',
-                            'message_id': str(uuid.uuid4()),
-                            'show_content': obs_result.get('user_query', '') + '\n'
-                        }
-                        all_messages.append(clarify_msg)
-                        yield [clarify_msg]
-                        return
-                except json.JSONDecodeError:
-                    logger.warning("Failed to decode Observation result JSON, continuing loop")
-                    continue
-            
-            # 3. Task Summary Phase
-            if summary:
-                logger.info("Starting Task Summary Phase")
-                summary_chunks = []
-                for chunk in self.task_summary_agent.run_stream(messages= all_messages,tool_manager= tool_manager,context=context ,session_id=session_id):
-                    summary_chunks.append(chunk)
-                    all_messages = self._merge_messages(all_messages, chunk)
-                    yield chunk
-                logger.info(f"Task Summary Phase completed with {len(summary_chunks)} chunks")
-        else:
-            # use direct executor agent to execute the task
-            logger.info("Starting Direct Executor Agent")
-            for chunk in self.direct_executor_agent.run_stream(messages= all_messages,tool_manager= tool_manager,context=context,session_id=session_id):
-                all_messages = self._merge_messages(all_messages, chunk)
-                yield chunk
-            logger.info(f"Direct Executor Agent completed")
-        logger.info(f"run_stream workflow completed for session_id: {session_id}")
-        logger.info(f"all messages :{all_messages}")
-        
-    def run(self, input_messages: List[Dict], tool_manager: Any = None, session_id=None, deep_thinking=True,summary=True ) -> Dict[str, Any]:
-        """Execute complete agent workflow with Planning-Observation loop
+    def _setup_execution_context(self, session_id: str) -> Dict[str, Any]:
+        """
+        设置执行上下文
         
         Args:
-            input_messages: List of message dictionaries with 'role' and 'content' keys
-            tool_manager: Optional ToolManager instance for tool execution
-            deep_thinking: Whether to perform initial task analysis
+            session_id: 会话ID
             
         Returns:
-            Dictionary containing:
-            - all_messages: Complete message history
-            - new_messages: New messages generated in this run
-            - final_output: Final output message
+            Dict[str, Any]: 执行上下文字典
         """
-        logger.info(f"Starting run workflow with session_id: {session_id}")
-        if session_id is None:
-            # session_id = str(uuid.uuid1())+'-'+ datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            session_id = str(uuid.uuid1())
-            logger.info(f"Generated new session_id: {session_id}")
-        # remove type is not normal message
+        logger.debug("AgentController: 设置执行上下文")
         
-        # input_messages = [msg for msg in input_messages if msg.get('type','normal') == 'normal']
+        current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %A %H:%M:%S')
+        file_workspace = self.WORKSPACE_TEMPLATE.format(session_id=session_id)
         
-        # 1. Initial task analysis
-        all_messages = input_messages.copy()
-        new_messages = []
-        logger.info(f"Initialized with {len(all_messages)} input messages")
+        # 创建工作目录
+        if os.path.exists(file_workspace):
+            logger.debug("AgentController: 使用现有工作目录")
+        else:
+            os.makedirs(file_workspace, exist_ok=True)
+            logger.debug(f"AgentController: 创建工作目录: {file_workspace}")
         
+        context = {
+            'current_time': current_time_str, 
+            'file_workspace': file_workspace
+        }
+        
+        logger.info(f"AgentController: 执行上下文设置完成: {context}")
+        return context
+
+    def _execute_full_workflow(self, 
+                             all_messages: List[Dict[str, Any]],
+                             tool_manager: Optional[Any],
+                             context: Dict[str, Any],
+                             session_id: str,
+                             deep_thinking: bool,
+                             summary: bool,
+                             max_loop_count: int) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行完整的工作流
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            deep_thinking: 是否进行深度思考
+            summary: 是否生成总结
+            max_loop_count: 最大循环次数
+            
+        Yields:
+            List[Dict[str, Any]]: 工作流输出的消息块
+        """
+        logger.info("AgentController: 开始执行完整工作流")
+        
+        # 1. 任务分析阶段
         if deep_thinking:
-            logger.info('Starting initial task analysis')
-            analysis_messages = self.task_analysis_agent.run(input_messages, tool_manager)
-            logger.info(f'Task analysis completed with {len(analysis_messages)} messages')
-            print('Analysis结果:', json.dumps(analysis_messages, ensure_ascii=False, indent=2))
-            all_messages.extend(analysis_messages)
-            new_messages.extend(analysis_messages)
+            all_messages = yield from self._execute_task_analysis_phase(
+                all_messages, tool_manager, context, session_id
+            )
         
-        # 2. Planning-Execution-Observation loop
+        # 2. 任务分解阶段
+        all_messages = yield from self._execute_task_decomposition_phase(
+            all_messages, tool_manager, context, session_id
+        )
+        
+        # 3. 规划-执行-观察循环
+        all_messages = yield from self._execute_main_loop(
+            all_messages, tool_manager, context, session_id, max_loop_count
+        )
+        
+        # 4. 任务总结阶段
+        if summary:
+            all_messages = yield from self._execute_task_summary_phase(
+                all_messages, tool_manager, context, session_id
+            )
+
+    def _execute_task_analysis_phase(self, 
+                                   all_messages: List[Dict[str, Any]],
+                                   tool_manager: Optional[Any],
+                                   context: Dict[str, Any],
+                                   session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行任务分析阶段
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 任务分析输出的消息块
+            
+        Returns:
+            List[Dict[str, Any]]: 更新后的消息列表
+        """
+        logger.info("AgentController: 开始任务分析阶段")
+        
+        analysis_chunks = []
+        for chunk in self.task_analysis_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            analysis_chunks.append(chunk)
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 任务分析阶段完成，生成 {len(analysis_chunks)} 个块")
+        return all_messages
+
+    def _execute_task_decomposition_phase(self, 
+                                        all_messages: List[Dict[str, Any]],
+                                        tool_manager: Optional[Any],
+                                        context: Dict[str, Any],
+                                        session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行任务分解阶段
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 任务分解输出的消息块
+            
+        Returns:
+            List[Dict[str, Any]]: 更新后的消息列表
+        """
+        logger.info("AgentController: 开始任务分解阶段")
+        
+        decompose_chunks = []
+        for chunk in self.task_decompose_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            decompose_chunks.append(chunk)
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 任务分解阶段完成，生成 {len(decompose_chunks)} 个块")
+        return all_messages
+
+    def _execute_main_loop(self, 
+                         all_messages: List[Dict[str, Any]],
+                         tool_manager: Optional[Any],
+                         context: Dict[str, Any],
+                         session_id: str,
+                         max_loop_count: int) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行主要的规划-执行-观察循环
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            max_loop_count: 最大循环次数
+            
+        Yields:
+            List[Dict[str, Any]]: 循环输出的消息块
+            
+        Returns:
+            List[Dict[str, Any]]: 更新后的消息列表
+        """
+        logger.info("AgentController: 开始规划-执行-观察循环")
+        
         loop_count = 0
         while True:
             loop_count += 1
-            logger.info(f"Starting Planning-Execution-Observation Loop #{loop_count}")
+            logger.info(f"AgentController: 开始第 {loop_count} 轮循环")
             
-            # Planning phase - get next steps
-            logger.info('Starting planning phase')
-            plan_messages = self.planning_agent.run(all_messages,tool_manager)
-            logger.info(f'Planning phase completed with {len(plan_messages)} messages')
-            print('Planning结果:', json.dumps(plan_messages, ensure_ascii=False, indent=2))
+            if loop_count > max_loop_count:
+                logger.warning(f"AgentController: 达到最大循环次数 {max_loop_count}，停止工作流")
+                break
+
+            # 规划阶段
+            all_messages = yield from self._execute_planning_phase(
+                all_messages, tool_manager, context, session_id
+            )
+            
+            # 执行阶段
+            all_messages = yield from self._execute_execution_phase(
+                all_messages, tool_manager, context, session_id
+            )
+            
+            # 观察阶段
+            all_messages, should_break = yield from self._execute_observation_phase(
+                all_messages, tool_manager, context, session_id
+            )
+            
+            if should_break:
+                break
+        
+        logger.info("AgentController: 规划-执行-观察循环完成")
+        return all_messages
+
+    def _execute_planning_phase(self, 
+                              all_messages: List[Dict[str, Any]],
+                              tool_manager: Optional[Any],
+                              context: Dict[str, Any],
+                              session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行规划阶段
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 规划输出的消息块
+            
+        Returns:
+            List[Dict[str, Any]]: 更新后的消息列表
+        """
+        logger.info("AgentController: 开始规划阶段")
+        
+        plan_chunks = []
+        for chunk in self.planning_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            plan_chunks.append(chunk)
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 规划阶段完成，生成 {len(plan_chunks)} 个块")
+        return all_messages
+
+    def _execute_execution_phase(self, 
+                               all_messages: List[Dict[str, Any]],
+                               tool_manager: Optional[Any],
+                               context: Dict[str, Any],
+                               session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行执行阶段
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 执行输出的消息块
+            
+        Returns:
+            List[Dict[str, Any]]: 更新后的消息列表
+        """
+        logger.info("AgentController: 开始执行阶段")
+        
+        exec_chunks = []
+        for chunk in self.executor_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            exec_chunks.append(chunk)
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 执行阶段完成，生成 {len(exec_chunks)} 个块")
+        return all_messages
+
+    def _execute_observation_phase(self, 
+                                 all_messages: List[Dict[str, Any]],
+                                 tool_manager: Optional[Any],
+                                 context: Dict[str, Any],
+                                 session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行观察阶段
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 观察输出的消息块
+            
+        Returns:
+            Tuple[List[Dict[str, Any]], bool]: 更新后的消息列表和是否应该中断循环
+        """
+        logger.info("AgentController: 开始观察阶段")
+        
+        obs_chunks = []
+        for chunk in self.observation_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            obs_chunks.append(chunk)
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 观察阶段完成，生成 {len(obs_chunks)} 个块")
+        
+        # 检查是否应该继续循环
+        should_break = self._check_loop_completion(all_messages)
+        
+        return all_messages, should_break
+
+    def _execute_task_summary_phase(self, 
+                                  all_messages: List[Dict[str, Any]],
+                                  tool_manager: Optional[Any],
+                                  context: Dict[str, Any],
+                                  session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行任务总结阶段
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 总结输出的消息块
+            
+        Returns:
+            List[Dict[str, Any]]: 更新后的消息列表
+        """
+        logger.info("AgentController: 开始任务总结阶段")
+        
+        summary_chunks = []
+        for chunk in self.task_summary_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            summary_chunks.append(chunk)
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 任务总结阶段完成，生成 {len(summary_chunks)} 个块")
+        return all_messages
+
+    def _execute_direct_workflow(self, 
+                               all_messages: List[Dict[str, Any]],
+                               tool_manager: Optional[Any],
+                               context: Dict[str, Any],
+                               session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行直接工作流（使用直接执行智能体）
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 直接执行输出的消息块
+        """
+        logger.info("AgentController: 使用直接执行智能体")
+        
+        for chunk in self.direct_executor_agent.run_stream(
+            messages=all_messages, 
+            tool_manager=tool_manager, 
+            context=context, 
+            session_id=session_id
+        ):
+            all_messages = self._merge_messages(all_messages, chunk)
+            yield chunk
+        
+        logger.info("AgentController: 直接执行智能体完成")
+
+    def _check_loop_completion(self, all_messages: List[Dict[str, Any]]) -> bool:
+        """
+        检查循环是否应该完成
+        
+        Args:
+            all_messages: 所有消息列表
+            
+        Returns:
+            bool: 是否应该中断循环
+        """
+        logger.debug("AgentController: 检查循环完成条件")
+        
+        try:
+            obs_content = all_messages[-1]['content'].replace('Observation: ', '')
+            obs_result = json.loads(obs_content)
+            
+            if obs_result.get('is_completed', False):
+                logger.info("AgentController: 观察阶段指示任务已完成")
+                return True
+                
+            if obs_result.get('needs_more_input', False):
+                logger.info("AgentController: 任务需要用户提供更多输入")
+                clarify_msg = {
+                    'role': 'assistant',
+                    'content': obs_result.get('user_query', ''),
+                    'type': 'final_answer',
+                    'message_id': str(uuid.uuid4()),
+                    'show_content': obs_result.get('user_query', '') + '\n'
+                }
+                all_messages.append(clarify_msg)
+                return True
+                
+        except (json.JSONDecodeError, IndexError, KeyError) as e:
+            logger.warning(f"AgentController: 解析观察结果失败: {str(e)}，继续循环")
+            
+        return False
+
+    def _handle_workflow_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        处理工作流执行错误
+        
+        Args:
+            error: 发生的异常
+            
+        Yields:
+            List[Dict[str, Any]]: 错误消息块
+        """
+        logger.error(f"AgentController: 处理工作流错误: {str(error)}")
+        
+        error_message = f"工作流执行失败: {str(error)}"
+        message_id = str(uuid.uuid4())
+        
+        yield [{
+            'role': 'assistant',
+            'content': error_message,
+            'type': 'final_answer',
+            'message_id': message_id,
+            'show_content': error_message
+        }]
+
+    def run(self, 
+            input_messages: List[Dict[str, Any]], 
+            tool_manager: Optional[Any] = None, 
+            session_id: Optional[str] = None, 
+            deep_thinking: bool = True,
+            summary: bool = True) -> Dict[str, Any]:
+        """
+        执行完整的智能体工作流
+        
+        Args:
+            input_messages: 包含'role'和'content'键的消息字典列表
+            tool_manager: 可选的工具管理器实例，用于工具执行
+            session_id: 会话ID
+            deep_thinking: 是否执行初始任务分析
+            summary: 是否生成任务总结
+            
+        Returns:
+            Dict[str, Any]: 包含以下内容的字典：
+            - all_messages: 完整的消息历史
+            - new_messages: 本次运行生成的新消息
+            - final_output: 最终输出消息
+            - session_id: 会话ID
+        """
+        logger.info(f"AgentController: 开始非流式工作流，会话ID: {session_id}")
+        
+        try:
+            # 准备会话和消息
+            session_id = self._prepare_session_id(session_id)
+            
+            # 初始化消息和状态
+            all_messages = input_messages.copy()
+            new_messages = []
+            
+            logger.info(f"AgentController: 初始化 {len(all_messages)} 条输入消息")
+            
+            # 执行各个阶段
+            if deep_thinking:
+                all_messages, new_messages = self._execute_task_analysis_non_stream(
+                    all_messages, new_messages, tool_manager
+                )
+            
+            # 主循环
+            all_messages, new_messages = self._execute_main_loop_non_stream(
+                all_messages, new_messages, tool_manager, session_id
+            )
+            
+            # 总结阶段
+            if summary:
+                all_messages, new_messages, final_output = self._execute_task_summary_non_stream(
+                    all_messages, new_messages, tool_manager
+                )
+            else:
+                final_output = new_messages[-1] if new_messages else None
+            
+            logger.info(f"AgentController: 非流式工作流完成，会话ID: {session_id}")
+            
+            return {
+                'all_messages': all_messages,
+                'new_messages': new_messages,
+                'final_output': final_output,
+                'session_id': session_id,
+            }
+            
+        except Exception as e:
+            logger.error(f"AgentController: 非流式工作流执行过程中发生异常: {str(e)}")
+            logger.error(f"异常详情: {traceback.format_exc()}")
+            
+            error_message = {
+                'role': 'assistant',
+                'content': f"工作流执行失败: {str(e)}",
+                'type': 'final_answer'
+            }
+            
+            return {
+                'all_messages': input_messages + [error_message],
+                'new_messages': [error_message],
+                'final_output': error_message,
+                'session_id': session_id or str(uuid.uuid1()),
+            }
+
+    def _execute_task_analysis_non_stream(self, 
+                                        all_messages: List[Dict[str, Any]], 
+                                        new_messages: List[Dict[str, Any]], 
+                                        tool_manager: Optional[Any]) -> tuple:
+        """
+        执行任务分析（非流式版本）
+        
+        Args:
+            all_messages: 所有消息列表
+            new_messages: 新消息列表
+            tool_manager: 工具管理器
+            
+        Returns:
+            tuple: 更新后的(all_messages, new_messages)
+        """
+        logger.info("AgentController: 开始初始任务分析")
+        
+        analysis_messages = self.task_analysis_agent.run(all_messages, tool_manager)
+        logger.info(f"AgentController: 任务分析完成，生成 {len(analysis_messages)} 条消息")
+        
+        all_messages.extend(analysis_messages)
+        new_messages.extend(analysis_messages)
+        
+        return all_messages, new_messages
+
+    def _execute_main_loop_non_stream(self, 
+                                    all_messages: List[Dict[str, Any]], 
+                                    new_messages: List[Dict[str, Any]], 
+                                    tool_manager: Optional[Any], 
+                                    session_id: str) -> tuple:
+        """
+        执行主循环（非流式版本）
+        
+        Args:
+            all_messages: 所有消息列表
+            new_messages: 新消息列表
+            tool_manager: 工具管理器
+            session_id: 会话ID
+            
+        Returns:
+            tuple: 更新后的(all_messages, new_messages)
+        """
+        loop_count = 0
+        
+        while True:
+            loop_count += 1
+            logger.info(f"AgentController: 开始第 {loop_count} 轮规划-执行-观察循环")
+            
+            # 规划阶段
+            plan_messages = self.planning_agent.run(all_messages, tool_manager)
+            logger.info(f"AgentController: 规划阶段完成，生成 {len(plan_messages)} 条消息")
             all_messages.extend(plan_messages)
             new_messages.extend(plan_messages)
             
-            # Execution phase
-            logger.info('Starting execution phase')
-            exec_messages = self.executor_agent.run(all_messages, tool_manager,session_id=session_id)
-            logger.info(f'Execution phase completed with {len(exec_messages)} messages')
-            print('Execution结果:', json.dumps(exec_messages, ensure_ascii=False, indent=2))
+            # 执行阶段
+            exec_messages = self.executor_agent.run(all_messages, tool_manager, session_id=session_id)
+            logger.info(f"AgentController: 执行阶段完成，生成 {len(exec_messages)} 条消息")
             all_messages.extend(exec_messages)
             new_messages.extend(exec_messages)
             
-            # Observation phase - check progress
-            logger.info('Starting observation phase')
+            # 观察阶段
             obs_messages = self.observation_agent.run(all_messages)
-            logger.info(f'Observation phase completed with {len(obs_messages)} messages')
-            print('Observation结果:', json.dumps(obs_messages, ensure_ascii=False, indent=2))
+            logger.info(f"AgentController: 观察阶段完成，生成 {len(obs_messages)} 条消息")
             all_messages.extend(obs_messages)
             new_messages.extend(obs_messages)
             
-            # Check if task is completed
-            obs_result_content = obs_messages[-1]['content'].replace('Observation: ', '')
-            try:
-                obs_result_json = json.loads(obs_result_content)
-                print('obs_result_json:', obs_result_json)
-                if obs_result_json.get('is_completed', False):
-                    logger.info("Task completed as indicated by Observation")
-                    break
-                if obs_result_json.get('needs_more_input', False):
-                    logger.info("Task needs more input from user")
-                    print('需要更多输入')
-                    # 需要返回询问用户的message
-                    clrify_message = {
-                        'role': 'assistant',
-                        'content': obs_result_json.get('user_query', ''),
-                        'type': 'normal'
-                    }
-                    all_messages.append(clrify_message)
-                    new_messages.append(clrify_message)
-                    return {
-                        'all_messages': all_messages,
-                        'new_messages': new_messages,
-                        'final_output': clrify_message,
-                        "session_id": session_id
-                    }
-                    
-            except json.JSONDecodeError:
-                logger.warning("Failed to decode Observation result JSON, continuing loop")
-                print('Observation结果解析失败，继续执行')
-                continue
+            # 检查任务是否完成
+            should_break = self._check_task_completion(obs_messages, all_messages, new_messages)
+            if should_break:
+                break
         
-        # 3. Task summary
-        if summary:
-            logger.info('Starting task summary phase')
-            summary_result = self.task_summary_agent.run(all_messages, tool_manager)
-            logger.info(f'Task summary completed with {len(summary_result)} messages')
-            print('总结结果:', json.dumps(summary_result, ensure_ascii=False, indent=2))
-            all_messages.extend(summary_result)
-            new_messages.extend(summary_result)
-            
-        # Get final output (last normal message)
-        final_output = next(
-            (m for m in reversed(summary_result) if m.get('type') == 'normal'),
-            summary_result[-1]
-        )
-        
-        logger.info(f"run workflow completed for session_id: {session_id}")
-        return {
-            'all_messages': all_messages,
-            'new_messages': new_messages,
-            'final_output': final_output,
-            "session_id": session_id,
-        }
+        return all_messages, new_messages
 
-    def _merge_messages(self, all_messages: List[Dict], new_messages: List[Dict]) -> List[Dict]:
-        """Merge new messages into existing messages by message_id.
+    def _check_task_completion(self, 
+                             obs_messages: List[Dict[str, Any]], 
+                             all_messages: List[Dict[str, Any]], 
+                             new_messages: List[Dict[str, Any]]) -> bool:
+        """
+        检查任务是否完成
         
         Args:
-            all_messages: Current complete message list
-            new_messages: New messages to merge
+            obs_messages: 观察消息列表
+            all_messages: 所有消息列表
+            new_messages: 新消息列表
             
         Returns:
-            Merged message list with updated content
+            bool: 是否应该中断循环
+        """
+        try:
+            obs_result_content = obs_messages[-1]['content'].replace('Observation: ', '')
+            obs_result_json = json.loads(obs_result_content)
+            
+            if obs_result_json.get('is_completed', False):
+                logger.info("AgentController: 观察阶段指示任务已完成")
+                return True
+                
+            if obs_result_json.get('needs_more_input', False):
+                logger.info("AgentController: 任务需要用户提供更多输入")
+                clarify_message = {
+                    'role': 'assistant',
+                    'content': obs_result_json.get('user_query', ''),
+                    'type': 'final_answer'
+                }
+                all_messages.append(clarify_message)
+                new_messages.append(clarify_message)
+                return True
+                
+        except (json.JSONDecodeError, IndexError, KeyError) as e:
+            logger.warning(f"AgentController: 观察结果解析失败: {str(e)}，继续执行")
+            
+        return False
+
+    def _execute_task_summary_non_stream(self, 
+                                       all_messages: List[Dict[str, Any]], 
+                                       new_messages: List[Dict[str, Any]], 
+                                       tool_manager: Optional[Any]) -> tuple:
+        """
+        执行任务总结（非流式版本）
+        
+        Args:
+            all_messages: 所有消息列表
+            new_messages: 新消息列表
+            tool_manager: 工具管理器
+            
+        Returns:
+            tuple: 更新后的(all_messages, new_messages, final_output)
+        """
+        logger.info("AgentController: 开始任务总结阶段")
+        
+        summary_result = self.task_summary_agent.run(all_messages, tool_manager)
+        logger.info(f"AgentController: 任务总结完成，生成 {len(summary_result)} 条消息")
+        
+        all_messages.extend(summary_result)
+        new_messages.extend(summary_result)
+        
+        # 获取最终输出（最后一条正常消息）
+        final_output = next(
+            (m for m in reversed(summary_result) if m.get('type') == 'final_answer'),
+            summary_result[-1] if summary_result else None
+        )
+        
+        return all_messages, new_messages, final_output
+
+    def _merge_messages(self, 
+                       all_messages: List[Dict[str, Any]], 
+                       new_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        通过message_id将新消息合并到现有消息中
+        
+        Args:
+            all_messages: 当前完整的消息列表
+            new_messages: 要合并的新消息
+            
+        Returns:
+            List[Dict[str, Any]]: 合并后的消息列表
         """
         merged = self.task_analysis_agent._merge_messages(all_messages, new_messages)
         return merged
 
     def _is_task_complete(self, messages: List[Dict[str, Any]]) -> bool:
-        """Check if task is complete based on evaluation output"""
-        # Find the tool response message
+        """
+        基于评估输出检查任务是否完成
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            bool: 任务是否完成
+        """
+        logger.debug("AgentController: 检查任务完成状态")
+        
+        # 查找工具响应消息
         tool_response = next(
             (msg for msg in messages 
              if msg.get('role') == 'tool' and 
@@ -333,10 +923,10 @@ class AgentController:
         content = tool_response['content']
         
         try:
-            # Try to parse as JSON directly
+            # 尝试直接解析为JSON
             result = json.loads(content)
         except json.JSONDecodeError:
-            # Try to extract JSON from markdown code block
+            # 尝试从markdown代码块中提取JSON
             code_block_pattern = r'```(?:json)?\n([\s\S]*?)\n```'
             match = re.search(code_block_pattern, content)
             if match:
@@ -347,4 +937,6 @@ class AgentController:
             else:
                 return False
                 
-        return result.get('task_status', '') == 'completed'
+        is_complete = result.get('task_status', '') == 'completed'
+        logger.debug(f"AgentController: 任务完成状态: {is_complete}")
+        return is_complete
