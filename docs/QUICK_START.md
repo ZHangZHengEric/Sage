@@ -5,12 +5,25 @@ nav_order: 2
 description: "Get started with Sage Multi-Agent Framework in just 5 minutes"
 ---
 
-# 🏃 Quick Start Guide
+# 🚀 Quick Start Guide
 
-Welcome to Sage Multi-Agent Framework v2.0! This guide will get you up and running in just 5 minutes with enhanced token tracking and production-ready features.
+Get up and running with Sage Multi-Agent Framework in minutes!
 
-{: .note }
-> Looking for the Chinese version? Check out [快速开始指南](QUICK_START_CN.html)
+## 📦 Installation
+
+### Prerequisites
+
+- Python 3.10 or higher
+- pip package manager
+- Git
+
+### Clone and Setup
+
+```bash
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
+pip install -r requirements.txt
+```
 
 ## Table of Contents
 {: .no_toc .text-delta }
@@ -30,8 +43,8 @@ Welcome to Sage Multi-Agent Framework v2.0! This guide will get you up and runni
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/sage-multi-agent.git
-cd sage-multi-agent
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
 
 # Install dependencies
 pip install -r requirements.txt

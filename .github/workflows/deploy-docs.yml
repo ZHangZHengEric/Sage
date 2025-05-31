@@ -1,11 +1,8 @@
-name: Deploy Documentation to GitHub Pages
+name: Deploy Documentation
 
 on:
   push:
-    branches: [ main, master ]
-    paths: [ 'docs/**' ]
-  pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
     paths: [ 'docs/**' ]
   workflow_dispatch:
 
@@ -28,10 +25,9 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.1'
+          ruby-version: '3.2'
           bundler-cache: true
-          cache-version: 0
-          working-directory: docs
+          working-directory: ./docs
       
       - name: Setup Pages
         id: pages
@@ -47,10 +43,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/_site/
+          path: ./docs/_site
 
   deploy:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

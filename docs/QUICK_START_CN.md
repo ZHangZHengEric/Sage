@@ -5,12 +5,25 @@ nav_order: 3
 description: "5分钟快速上手Sage多智能体框架"
 ---
 
-# 🏃 快速入门指南
+# 🚀 快速开始指南
 
-欢迎使用 Sage 多智能体框架 v2.0！本指南将帮助您在短短 5 分钟内快速上手，包含增强的token跟踪和生产就绪功能。
+几分钟内开始使用 Sage 多智能体框架！
 
-{: .note }
-> 需要英文版本？请查看 [Quick Start Guide](QUICK_START.html)
+## 📦 安装
+
+### 前置要求
+
+- Python 3.10 或更高版本
+- pip 包管理器
+- Git
+
+### 克隆和设置
+
+```bash
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
+pip install -r requirements.txt
+```
 
 ## 目录
 {: .no_toc .text-delta }
@@ -24,16 +37,16 @@ description: "5分钟快速上手Sage多智能体框架"
 - **OpenAI API 密钥** 或兼容的 API 端点（OpenRouter、DeepSeek 等）
 - **Git** 用于克隆仓库
 
-## ⚡ 5 分钟设置
+## ⚡ 5分钟快速设置
 
 ### 1. 克隆和安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/sage-multi-agent.git
-cd sage-multi-agent
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
 
-# 安装依赖项
+# 安装依赖
 pip install -r requirements.txt
 ```
 

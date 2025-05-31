@@ -4,7 +4,7 @@
 [![简体中文](https://img.shields.io/badge/简体中文-点击查看-orange)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-0.8-green.svg)](https://github.com/your-repo/sage-multi-agent)
+[![Version](https://img.shields.io/badge/Version-0.8-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
 # 🚀 Sage Multi-Agent Framework
 
@@ -90,8 +90,8 @@ graph TD
 ### Installation
 
 ```bash
-git clone https://github.com/your-repo/sage-multi-agent.git
-cd sage-multi-agent
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
 pip install -r requirements.txt
 ```
 
