@@ -396,7 +396,7 @@ the expected output is:{next_expected_output}
             logger.warning("ExecutorAgent: 未提供工具管理器")
             return []
         
-        # 获取所有工具
+        # 获取所有工具 
         tools_json = tool_manager.get_openai_tools()
         
         # 根据建议的工具进行过滤
