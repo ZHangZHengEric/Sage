@@ -68,29 +68,51 @@ class TaskSummaryAgent(AgentBase):
         logger.info("TaskSummaryAgent 初始化完成")
 
     def run_stream(self, 
-                   messages: List[Dict[str, Any]],
+                   messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
                    context: Optional[Dict[str, Any]] = None,
                    session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务总结
         
-        根据原始任务和执行历史生成清晰完整的回答并实时返回总结结果。
+        分析整个任务流程并生成详细总结，实时返回总结结果。
         
         Args:
-            messages: 对话历史记录
+            messages: 对话历史记录，包含整个任务流程
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
+            context: 附加执行上下文
             session_id: 会话ID
             
         Yields:
-            List[Dict[str, Any]]: 流式输出的总结消息块
+            List[Dict[str, Any]]: 流式输出的任务总结消息块
             
         Raises:
             Exception: 当总结过程出现错误时抛出异常
         """
         logger.info(f"TaskSummaryAgent: 开始流式任务总结，消息数量: {len(messages)}")
         
+        # 使用基类方法收集和记录流式输出
+        yield from self._collect_and_log_stream_output(
+            self._execute_summary_stream_internal(messages, tool_manager, context, session_id)
+        )
+
+    def _execute_summary_stream_internal(self, 
+                                       messages: List[Dict[str, Any]], 
+                                       tool_manager: Optional[Any],
+                                       context: Optional[Dict[str, Any]],
+                                       session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        内部任务总结流式执行方法
+        
+        Args:
+            messages: 对话历史记录，包含整个任务流程
+            tool_manager: 可选的工具管理器
+            context: 附加执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的任务总结消息块
+        """
         try:
             # 准备总结上下文
             summary_context = self._prepare_summary_context(
@@ -102,11 +124,11 @@ class TaskSummaryAgent(AgentBase):
             # 生成总结提示
             prompt = self._generate_summary_prompt(summary_context)
             
-            # 执行流式总结
+            # 执行流式任务总结
             yield from self._execute_streaming_summary(prompt, summary_context)
             
         except Exception as e:
-            logger.error(f"TaskSummaryAgent: 总结过程中发生异常: {str(e)}")
+            logger.error(f"TaskSummaryAgent: 任务总结过程中发生异常: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             yield from self._handle_summary_error(e)
 
@@ -186,98 +208,18 @@ class TaskSummaryAgent(AgentBase):
         logger.info("TaskSummaryAgent: 开始执行流式任务总结")
         
         # 准备系统消息
-        system_message = self._prepare_system_message(summary_context)
-        
-        # 执行流式总结
-        message_id = str(uuid.uuid4())
-        chunk_count = 0
-        
-        logger.debug("TaskSummaryAgent: 调用语言模型进行流式生成")
-        
-        for chunk in self._call_llm_streaming(system_message, prompt):
-            if chunk.choices[0].delta.content is not None:
-                delta_content = chunk.choices[0].delta.content
-                chunk_count += 1
-                
-                yield self._create_summary_chunk(
-                    content=delta_content,
-                    message_id=message_id,
-                    show_content=delta_content
-                )
-        
-        logger.info(f"TaskSummaryAgent: 流式总结完成，共生成 {chunk_count} 个文本块")
-
-    def _prepare_system_message(self, summary_context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        准备系统消息
-        
-        Args:
-            summary_context: 总结上下文
-            
-        Returns:
-            Dict[str, Any]: 系统消息字典
-        """
-        logger.debug("TaskSummaryAgent: 准备系统消息")
-        
-        # 设置默认系统前缀
-        if len(self.system_prefix) == 0:
-            self.system_prefix = self.SYSTEM_PREFIX_DEFAULT
-        
-        # 构建系统消息
-        system_content = self.system_prefix + self.SYSTEM_MESSAGE_TEMPLATE.format(
-            session_id=summary_context['session_id'],
-            current_time=summary_context['current_time'],
-            file_workspace=summary_context['file_workspace']
+        system_message = self._prepare_system_message_with_context(
+            context=summary_context,
+            default_prefix=self.SYSTEM_PREFIX_DEFAULT
         )
         
-        return {
-            'role': 'system',
-            'content': system_content
-        }
-
-    def _call_llm_streaming(self, system_message: Dict[str, Any], prompt: str):
-        """
-        调用语言模型进行流式生成
-        
-        Args:
-            system_message: 系统消息
-            prompt: 用户提示
-            
-        Returns:
-            Generator: 语言模型的流式响应
-        """
-        logger.debug("TaskSummaryAgent: 调用语言模型进行流式生成")
-        
-        messages = [system_message, {"role": "user", "content": prompt}]
-        
-        return self.model.chat.completions.create(
-            messages=messages,
-            stream=True,
-            **self.model_config
+        # 使用基类的流式处理和token跟踪
+        yield from self._execute_streaming_with_token_tracking(
+            prompt=prompt,
+            step_name="task_summary",
+            system_message=system_message,
+            message_type='final_answer'
         )
-
-    def _create_summary_chunk(self, 
-                            content: str, 
-                            message_id: str, 
-                            show_content: str) -> List[Dict[str, Any]]:
-        """
-        创建总结消息块
-        
-        Args:
-            content: 消息内容
-            message_id: 消息ID
-            show_content: 显示内容
-            
-        Returns:
-            List[Dict[str, Any]]: 格式化的总结消息块列表
-        """
-        return [{
-            'role': 'assistant',
-            'content': content,
-            'type': 'final_answer',
-            'message_id': message_id,
-            'show_content': show_content
-        }]
 
     def _handle_summary_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -289,18 +231,11 @@ class TaskSummaryAgent(AgentBase):
         Yields:
             List[Dict[str, Any]]: 错误消息块
         """
-        logger.error(f"TaskSummaryAgent: 处理总结错误: {str(error)}")
-        
-        error_message = f"\\n任务总结失败: {str(error)}"
-        message_id = str(uuid.uuid4())
-        
-        yield [{
-            'role': 'tool',
-            'content': error_message,
-            'type': 'final_answer',
-            'message_id': message_id,
-            'show_content': error_message
-        }]
+        yield from self._handle_error_generic(
+            error=error,
+            error_context="任务总结",
+            message_type='final_answer'
+        )
 
     def _extract_task_description(self, messages: List[Dict[str, Any]]) -> str:
         """

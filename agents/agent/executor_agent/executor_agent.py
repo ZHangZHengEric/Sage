@@ -13,6 +13,7 @@ import json
 import datetime
 import traceback
 import uuid
+import time
 from copy import deepcopy
 from typing import List, Dict, Any, Optional, Generator
 
@@ -96,6 +97,28 @@ the expected output is:{next_expected_output}
             logger.warning("ExecutorAgent: 未提供消息，返回空列表")
             return
         
+        # 使用基类方法收集和记录流式输出
+        yield from self._collect_and_log_stream_output(
+            self._execute_stream_internal(messages, tool_manager, context, session_id)
+        )
+
+    def _execute_stream_internal(self, 
+                               messages: List[Dict[str, Any]], 
+                               tool_manager: Optional[ToolManager],
+                               context: Optional[Dict[str, Any]],
+                               session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        内部流式执行方法
+        
+        Args:
+            messages: 包含子任务的对话历史记录
+            tool_manager: 工具管理器
+            context: 附加执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的执行结果消息块
+        """
         try:
             # 准备执行上下文
             execution_context = self._prepare_execution_context(
@@ -188,10 +211,30 @@ the expected output is:{next_expected_output}
             
             # 解析子任务内容
             content = last_subtask_message['content']
+            logger.warning(f"ExecutorAgent: 📋 原始子任务content: {repr(content)[:200]}...")
+            
             if content.startswith('Planning: '):
                 content = content[len('Planning: '):]
+                logger.warning(f"ExecutorAgent: 🔄 移除'Planning: '前缀后的content: {repr(content)[:200]}...")
             
-            subtask_dict = json.loads(content.strip('```json\\n').strip('```'))
+            # 清理content内容
+            cleaned_content = content.strip('```json\\n').strip('```')
+            logger.warning(f"ExecutorAgent: 🧹 清理markdown标记后的content: {repr(cleaned_content)[:200]}...")
+            
+            # 尝试解析JSON
+            logger.warning(f"ExecutorAgent: 🔍 准备解析JSON，内容长度: {len(cleaned_content)}")
+            try:
+                subtask_dict = json.loads(cleaned_content)
+                logger.warning(f"ExecutorAgent: ✅ JSON解析成功，keys: {list(subtask_dict.keys())}")
+            except json.JSONDecodeError as json_err:
+                logger.error(f"ExecutorAgent: ❌ JSON解析失败!")
+                logger.error(f"ExecutorAgent: 错误详情: {str(json_err)}")
+                logger.error(f"ExecutorAgent: 错误位置: 第{json_err.lineno}行，第{json_err.colno}列")
+                logger.error(f"ExecutorAgent: 完整content内容: {repr(cleaned_content)}")
+                logger.error(f"ExecutorAgent: content字节长度: {len(cleaned_content.encode('utf-8'))}")
+                logger.error(f"ExecutorAgent: content前50字符: {repr(cleaned_content[:50])}")
+                logger.error(f"ExecutorAgent: content后50字符: {repr(cleaned_content[-50:])}")
+                raise json_err
             
             subtask_info = {
                 'description': subtask_dict['next_step']['description'],
@@ -205,7 +248,11 @@ the expected output is:{next_expected_output}
             return subtask_info
             
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error(f"ExecutorAgent: 解析子任务失败: {str(e)}")
+            logger.error(f"ExecutorAgent: ❌ 解析子任务失败: {str(e)}")
+            logger.error(f"ExecutorAgent: 异常类型: {type(e).__name__}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"ExecutorAgent: 完整堆栈跟踪:\n{traceback.format_exc()}")
             raise json.JSONDecodeError("Failed to parse subtask message as JSON", doc=str(e), pos=0)
 
     def _prepare_execution_messages(self, 
@@ -253,7 +300,7 @@ the expected output is:{next_expected_output}
 
     def _prepare_system_message(self, execution_context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        准备系统消息
+        准备系统消息 - 兼容性方法
         
         Args:
             execution_context: 执行上下文
@@ -261,26 +308,10 @@ the expected output is:{next_expected_output}
         Returns:
             Dict[str, Any]: 系统消息字典
         """
-        logger.debug("ExecutorAgent: 准备系统消息")
-        
-        # 设置默认系统前缀
-        if len(self.system_prefix) == 0:
-            self.system_prefix = self.SYSTEM_PREFIX_DEFAULT
-        
-        # 构建系统消息
-        system_content = self.system_prefix + self.SYSTEM_MESSAGE_TEMPLATE.format(
-            session_id=execution_context['session_id'],
-            current_time=execution_context['current_time'],
-            file_workspace=execution_context['file_workspace']
+        return self._prepare_system_message_with_context(
+            context=execution_context,
+            default_prefix=self.SYSTEM_PREFIX_DEFAULT
         )
-        
-        system_message = {
-            'role': 'system',
-            'content': system_content
-        }
-        
-        logger.info(f"ExecutorAgent: 系统消息准备完成")
-        return system_message
 
     def _send_task_execution_prompt(self, subtask_info: Dict[str, Any]) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -402,6 +433,7 @@ the expected output is:{next_expected_output}
             tools=tools_json if tools_json else None,
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
             **self.model_config
         )
 
@@ -428,8 +460,15 @@ the expected output is:{next_expected_output}
         unused_tool_content_message_id = str(uuid.uuid4())
         last_tool_call_id = None
         
+        # 收集所有chunks用于token跟踪
+        start_time = time.time()
+        chunks = []
+        
         # 处理流式响应
         for chunk in response:
+            chunks.append(chunk)
+            if len(chunk.choices) ==0:
+                continue
             if chunk.choices[0].delta.tool_calls:
                 yield from self._handle_tool_calls_chunk(
                     chunk=chunk,
@@ -447,13 +486,16 @@ the expected output is:{next_expected_output}
                     logger.debug(f"ExecutorAgent: 检测到 {len(tool_calls)} 个工具调用，停止收集文本内容")
                     break
                 
-                yield [{
-                    'role': 'assistant',
-                    'content': chunk.choices[0].delta.content,
-                    'type': 'do_subtask_result',
-                    'message_id': unused_tool_content_message_id,
-                    'show_content': chunk.choices[0].delta.content
-                }]
+                # 使用基类的消息创建函数
+                yield self._create_message_chunk(
+                    content=chunk.choices[0].delta.content,
+                    message_id=unused_tool_content_message_id,
+                    show_content=chunk.choices[0].delta.content,
+                    message_type='do_subtask_result'
+                )
+        
+        # 跟踪token使用
+        self._track_streaming_token_usage(chunks, "tool_execution", start_time)
         
         # 处理工具调用或发送结束消息
         if tool_calls:
@@ -464,14 +506,13 @@ the expected output is:{next_expected_output}
                 session_id=session_id
             )
         else:
-            # 发送结束消息
-            yield [{
-                'role': 'assistant',
-                'content': '',
-                'type': 'do_subtask_result',
-                'message_id': unused_tool_content_message_id,
-                'show_content': '\\n'
-            }]
+            # 发送结束消息（使用基类函数）
+            yield self._create_message_chunk(
+                content='',
+                message_id=unused_tool_content_message_id,
+                show_content='\n',
+                message_type='do_subtask_result'
+            )
 
     def _handle_tool_calls_chunk(self, 
                                chunk,
@@ -565,7 +606,7 @@ the expected output is:{next_expected_output}
                         }],
                         'type': 'tool_call',
                         'message_id': str(uuid.uuid4()),
-                        'show_content': f"调用工具：{tool_name}\\n\\n"
+                        'show_content': f"调用工具：{tool_name}\n\n"
                     }]
                 
                 # 解析并执行工具
@@ -598,18 +639,11 @@ the expected output is:{next_expected_output}
         Yields:
             List[Dict[str, Any]]: 错误消息块
         """
-        logger.error(f"ExecutorAgent: 处理执行错误: {str(error)}")
-        
-        error_message = f"\\n任务执行失败: {str(error)}"
-        message_id = str(uuid.uuid4())
-        
-        yield [{
-            'role': 'tool',
-            'content': error_message,
-            'type': 'do_subtask_result',
-            'message_id': message_id,
-            'show_content': error_message
-        }]
+        yield from self._handle_error_generic(
+            error=error,
+            error_context="任务执行",
+            message_type='do_subtask_result'
+        )
 
     def _handle_tool_error(self, 
                           tool_call_id: str, 
@@ -636,7 +670,7 @@ the expected output is:{next_expected_output}
             'tool_call_id': tool_call_id,
             'message_id': str(uuid.uuid4()),
             'type': 'tool_call_result',
-            'show_content': f"工具调用失败\\n\\n"
+            'show_content': f"工具调用失败\n\n"
         }]
 
     def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
@@ -662,7 +696,7 @@ the expected output is:{next_expected_output}
                     'tool_call_id': tool_call_id,
                     'message_id': str(uuid.uuid4()),
                     'type': 'tool_call_result',
-                    'show_content': '\\n```json\\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\\n```\\n'
+                    'show_content': '\n```json\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\n```\n'
                 }]
             elif 'messages' in tool_response_dict:
                 result = tool_response_dict['messages']
@@ -674,7 +708,7 @@ the expected output is:{next_expected_output}
                     'tool_call_id': tool_call_id,
                     'message_id': str(uuid.uuid4()),
                     'type': 'tool_call_result',
-                    'show_content': '\\n' + tool_response + '\\n'
+                    'show_content': '\n' + tool_response + '\n'
                 }]
             
             logger.debug("ExecutorAgent: 工具响应处理成功")
@@ -684,11 +718,11 @@ the expected output is:{next_expected_output}
             logger.warning("ExecutorAgent: 处理工具响应时JSON解码错误")
             return [{
                 'role': 'tool',
-                'content': '\\n' + tool_response + '\\n',
+                'content': '\n' + tool_response + '\n',
                 'tool_call_id': tool_call_id,
                 'message_id': str(uuid.uuid4()),
                 'type': 'tool_call_result',
-                'show_content': "工具调用失败\\n\\n"
+                'show_content': "工具调用失败\n\n"
             }]
 
     def _get_last_sub_task(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

@@ -2,4 +2,5 @@ gradio>=4.0.0
 openai>=1.0.0
 requests>=2.31.0
 python-dotenv>=1.0.0
-mermaid-py
+mermaid-pypyyaml>=6.0
+aiofiles>=0.8.0

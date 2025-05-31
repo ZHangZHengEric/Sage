@@ -13,6 +13,7 @@ import json
 import uuid
 import datetime
 import traceback
+import time
 from copy import deepcopy
 from typing import List, Dict, Any, Optional, Generator
 
@@ -95,42 +96,64 @@ class DirectExecutorAgent(AgentBase):
                    context: Optional[Dict[str, Any]] = None,
                    session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
-        流式执行子任务
+        流式执行直接任务处理
         
-        使用工具调用或直接LLM生成来执行子任务，不使用推理策略。
+        直接处理用户输入的任务，不进行复杂的分解和规划，适用于简单任务。
         
         Args:
-            messages: 包含子任务的对话历史记录
-            tool_manager: 用于执行基于工具的子任务的工具管理器
+            messages: 对话历史记录
+            tool_manager: 用于执行工具的工具管理器
             context: 附加执行上下文
             session_id: 会话ID
             
         Yields:
-            List[Dict[str, Any]]: 流式输出的执行结果消息块
+            List[Dict[str, Any]]: 流式输出的直接执行结果消息块
             
         Raises:
-            Exception: 当执行过程出现错误时抛出异常
+            Exception: 当直接执行过程出现错误时抛出异常
         """
-        logger.info(f"DirectExecutorAgent: 开始流式执行，会话ID: {session_id}")
+        logger.info(f"DirectExecutorAgent: 开始流式直接执行，会话ID: {session_id}")
         
         if not messages:
             logger.warning("DirectExecutorAgent: 未提供消息，返回空列表")
             return
         
+        # 使用基类方法收集和记录流式输出
+        yield from self._collect_and_log_stream_output(
+            self._execute_direct_stream_internal(messages, tool_manager, context, session_id)
+        )
+
+    def _execute_direct_stream_internal(self, 
+                                      messages: List[Dict[str, Any]], 
+                                      tool_manager: Optional[ToolManager],
+                                      context: Optional[Dict[str, Any]],
+                                      session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        内部直接执行流式方法
+        
+        Args:
+            messages: 对话历史记录
+            tool_manager: 工具管理器
+            context: 附加执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的直接执行结果消息块
+        """
         try:
-            # 准备执行上下文
+            # 准备直接执行上下文
             execution_context = self._prepare_execution_context(
                 messages=messages,
                 context=context,
                 session_id=session_id
             )
             
-            # 准备初始消息
-            messages_input = self._prepare_initial_messages(messages, execution_context)
+            # 生成直接执行消息
+            execution_messages = self._prepare_initial_messages(messages, execution_context)
             
             # 获取建议工具
             suggested_tools = self._get_suggested_tools(
-                messages_input=messages_input,
+                messages_input=execution_messages,
                 tool_manager=tool_manager,
                 context=context,
                 session_id=session_id
@@ -139,16 +162,16 @@ class DirectExecutorAgent(AgentBase):
             # 准备工具列表
             tools_json = self._prepare_tools(tool_manager, suggested_tools)
             
-            # 执行循环
+            # 执行直接任务处理
             yield from self._execute_loop(
-                messages_input=messages_input,
+                messages_input=execution_messages,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
                 session_id=session_id
             )
             
         except Exception as e:
-            logger.error(f"DirectExecutorAgent: 执行过程中发生异常: {str(e)}")
+            logger.error(f"DirectExecutorAgent: 直接执行过程中发生异常: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             yield from self._handle_execution_error(e)
 
@@ -197,16 +220,14 @@ class DirectExecutorAgent(AgentBase):
         logger.debug("DirectExecutorAgent: 准备初始消息")
         
         # 构造系统消息
-        system_message = {
-            'role': 'system',
-            'content': self.SYSTEM_PROMPT_TEMPLATE.format(
+        system_message = self._prepare_system_message_with_context(
+            context=execution_context,
+            default_prefix=self.SYSTEM_PROMPT_TEMPLATE.format(
                 session_id=execution_context['session_id'],
                 current_time=execution_context['current_time'],
                 file_workspace=execution_context['file_workspace']
-            ),
-            "type": "system",
-            "message_id": str(uuid.uuid4())
-        }
+            )
+        )
         
         # 深拷贝原始消息并添加系统消息
         messages_input = deepcopy(messages)
@@ -254,7 +275,7 @@ class DirectExecutorAgent(AgentBase):
             )
             
             # 调用LLM获取建议
-            suggested_tools = self._call_llm_for_tool_suggestion(prompt)
+            suggested_tools = self._get_tool_suggestions(prompt)
             
             # 添加complete_task工具
             suggested_tools.append('complete_task')
@@ -295,7 +316,7 @@ class DirectExecutorAgent(AgentBase):
         logger.debug(f"DirectExecutorAgent: 清理后消息数量: {len(new_messages)}")
         return new_messages
 
-    def _call_llm_for_tool_suggestion(self, prompt: str) -> List[str]:
+    def _get_tool_suggestions(self, prompt: str) -> List[str]:
         """
         调用LLM获取工具建议
         
@@ -309,10 +330,25 @@ class DirectExecutorAgent(AgentBase):
         
         messages_input = [{'role': 'user', 'content': prompt}]
         
+        # 跟踪token使用
+        start_time = time.time()
         response = self.model.chat.completions.create(
             messages=messages_input,
+            stream_options={"include_usage": True},
             **self.model_config
         )
+        self._track_token_usage(response, "tool_suggestion", start_time)
+        
+        # 这里虽然没有流式消息生成，但可以记录usage信息用于后续分析
+        if hasattr(response, 'usage') and response.usage:
+            usage_info = {
+                'prompt_tokens': getattr(response.usage, 'prompt_tokens', 0),
+                'completion_tokens': getattr(response.usage, 'completion_tokens', 0),
+                'total_tokens': getattr(response.usage, 'total_tokens', 0),
+                'cached_tokens': getattr(getattr(response.usage, 'prompt_tokens_details', {}), 'cached_tokens', 0) or getattr(response.usage, 'cached_tokens', 0),
+                'reasoning_tokens': getattr(getattr(response.usage, 'completion_tokens_details', {}), 'reasoning_tokens', 0) or getattr(response.usage, 'reasoning_tokens', 0)
+            }
+            logger.debug(f"DirectExecutorAgent: 工具建议调用usage: {usage_info}")
         
         try:
             result_clean = self._extract_json_from_markdown(response.choices[0].message.content)
@@ -437,33 +473,41 @@ class DirectExecutorAgent(AgentBase):
         clean_message_input = self.clean_messages(messages_input)
         logger.info(f"DirectExecutorAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
         
-        # 调用LLM
+        # 调用LLM并开始token跟踪
+        start_time = time.time()
         response = self.model.chat.completions.create(
             tools=tools_json if len(tools_json) > 0 else None,
             messages=clean_message_input,
-            **self.model_config,
-            stream=True
+            stream=True,
+            stream_options={"include_usage": True},
+            **self.model_config
         )
         
-        # 处理流式响应
-        call_task_complete = yield from self._process_streaming_response(
+        # 处理流式响应并收集chunks用于token跟踪
+        chunks = []
+        call_task_complete = yield from self._process_streaming_response_with_tracking(
             response=response,
             tool_manager=tool_manager,
             messages_input=messages_input,
             session_id=session_id,
-            all_new_response_chunks=all_new_response_chunks
+            all_new_response_chunks=all_new_response_chunks,
+            chunks=chunks
         )
+        
+        # 跟踪token使用
+        self._track_streaming_token_usage(chunks, "direct_execution", start_time)
         
         return call_task_complete
 
-    def _process_streaming_response(self, 
-                                  response,
-                                  tool_manager: Optional[ToolManager],
-                                  messages_input: List[Dict[str, Any]],
-                                  session_id: str,
-                                  all_new_response_chunks: List[Dict[str, Any]]) -> Generator[bool, List[Dict[str, Any]], None]:
+    def _process_streaming_response_with_tracking(self, 
+                                                response,
+                                                tool_manager: Optional[ToolManager],
+                                                messages_input: List[Dict[str, Any]],
+                                                session_id: str,
+                                                all_new_response_chunks: List[Dict[str, Any]],
+                                                chunks: List) -> Generator[bool, List[Dict[str, Any]], None]:
         """
-        处理流式响应
+        处理流式响应并跟踪token使用
         
         Args:
             response: LLM流式响应
@@ -471,6 +515,7 @@ class DirectExecutorAgent(AgentBase):
             messages_input: 输入消息列表
             session_id: 会话ID
             all_new_response_chunks: 用于收集响应块的列表
+            chunks: 用于token跟踪的chunk列表
             
         Yields:
             List[Dict[str, Any]]: 处理后的响应消息块
@@ -486,22 +531,27 @@ class DirectExecutorAgent(AgentBase):
         
         # 处理流式响应块
         for chunk in response:
+            chunks.append(chunk)  # 收集chunk用于token跟踪
+            if len(chunk.choices) == 0:
+                continue
             if chunk.choices[0].delta.tool_calls:
                 self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)
                 # 更新last_tool_call_id
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-                        
+            
             elif chunk.choices[0].delta.content:
                 if len(tool_calls) > 0:
                     logger.info(f"DirectExecutorAgent: LLM响应包含 {len(tool_calls)} 个工具调用和内容，停止收集文本内容")
                     break
                 
                 if len(chunk.choices[0].delta.content) > 0:
-                    output_messages = self._create_content_message(
+                    output_messages = self._create_message_chunk(
                         content=chunk.choices[0].delta.content,
-                        message_id=unused_tool_content_message_id
+                        message_id=unused_tool_content_message_id,
+                        show_content=chunk.choices[0].delta.content,
+                        message_type="do_subtask_result"
                     )
                     all_new_response_chunks.extend(output_messages)
                     yield output_messages
@@ -517,12 +567,13 @@ class DirectExecutorAgent(AgentBase):
                 all_new_response_chunks=all_new_response_chunks
             )
         else:
-            # 发送换行消息
+            # 发送换行消息（也包含usage信息）
             if len(all_new_response_chunks) > 0:
-                output_messages = self._create_content_message(
+                output_messages = self._create_message_chunk(
                     content='',
                     message_id=unused_tool_content_message_id,
-                    show_content='\\n'
+                    show_content='\n',
+                    message_type="do_subtask_result"
                 )
                 all_new_response_chunks.extend(output_messages)
                 yield output_messages
@@ -561,32 +612,6 @@ class DirectExecutorAgent(AgentBase):
                     tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
                 if tool_call.function.arguments:
                     tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
-
-    def _create_content_message(self, 
-                              content: str, 
-                              message_id: str, 
-                              show_content: str = None) -> List[Dict[str, Any]]:
-        """
-        创建内容消息
-        
-        Args:
-            content: 消息内容
-            message_id: 消息ID
-            show_content: 显示内容
-            
-        Returns:
-            List[Dict[str, Any]]: 消息列表
-        """
-        if show_content is None:
-            show_content = content
-            
-        return [{
-            'role': 'assistant',
-            'content': content,
-            "type": "do_subtask_result",
-            "message_id": message_id,
-            "show_content": show_content
-        }]
 
     def _handle_tool_calls(self, 
                          tool_calls: Dict[str, Any],
@@ -661,7 +686,7 @@ class DirectExecutorAgent(AgentBase):
             }],
             "type": "tool_call",
             "message_id": str(uuid.uuid4()),
-            "show_content": "调用工具：" + tool_call['function']['name'] + '\\n\\n'
+            "show_content": "调用工具：" + tool_call['function']['name'] + '\n\n'
         }]
 
     def _execute_tool(self, 
@@ -745,18 +770,11 @@ class DirectExecutorAgent(AgentBase):
         Yields:
             List[Dict[str, Any]]: 错误消息块
         """
-        logger.error(f"DirectExecutorAgent: 处理执行错误: {str(error)}")
-        
-        error_message = f"\\n任务执行失败: {str(error)}"
-        message_id = str(uuid.uuid4())
-        
-        yield [{
-            'role': 'tool',
-            'content': error_message,
-            'type': 'do_subtask_result',
-            'message_id': message_id,
-            'show_content': error_message
-        }]
+        yield from self._handle_error_generic(
+            error=error,
+            error_context="任务执行",
+            message_type='do_subtask_result'
+        )
 
     def _handle_tool_error(self, 
                           tool_call_id: str, 
@@ -783,7 +801,7 @@ class DirectExecutorAgent(AgentBase):
             'tool_call_id': tool_call_id,
             "message_id": str(uuid.uuid4()),
             "type": "tool_call_result",
-            "show_content": "工具调用失败\\n\\n"
+            "show_content": "工具调用失败\n\n"
         }]
 
     def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
@@ -809,7 +827,7 @@ class DirectExecutorAgent(AgentBase):
                     'tool_call_id': tool_call_id,
                     "message_id": str(uuid.uuid4()),
                     "type": "tool_call_result",
-                    "show_content": '\\n```json\\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\\n```\\n'
+                    "show_content": '\n```json\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\n```\n'
                 }]
             elif 'messages' in tool_response_dict:
                 result = tool_response_dict['messages']
@@ -821,7 +839,7 @@ class DirectExecutorAgent(AgentBase):
                     'tool_call_id': tool_call_id,
                     "message_id": str(uuid.uuid4()),
                     "type": "tool_call_result",
-                    "show_content": '\\n' + tool_response + '\\n'
+                    "show_content": '\n' + tool_response + '\n'
                 }]
             
             logger.debug("DirectExecutorAgent: 工具响应处理成功")
@@ -831,11 +849,11 @@ class DirectExecutorAgent(AgentBase):
             logger.warning("DirectExecutorAgent: 处理工具响应时JSON解码错误")
             return [{
                 'role': 'tool',
-                'content': '\\n' + tool_response + '\\n',
+                'content': '\n' + tool_response + '\n',
                 'tool_call_id': tool_call_id,
                 "message_id": str(uuid.uuid4()),
                 "type": "tool_call_result",
-                "show_content": "工具调用失败\\n\\n"
+                "show_content": "工具调用失败\n\n"
             }]
 
     def _get_last_sub_task(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

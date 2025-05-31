@@ -13,6 +13,7 @@ import json
 import uuid
 import datetime
 import traceback
+import time
 from typing import List, Dict, Any, Optional, Generator
 
 from agents.agent.agent_base import AgentBase
@@ -114,6 +115,28 @@ class PlanningAgent(AgentBase):
         """
         logger.info(f"PlanningAgent: 开始流式任务规划，消息数量: {len(messages)}")
         
+        # 使用基类方法收集和记录流式输出
+        yield from self._collect_and_log_stream_output(
+            self._execute_planning_stream_internal(messages, tool_manager, context, session_id)
+        )
+
+    def _execute_planning_stream_internal(self, 
+                                        messages: List[Dict[str, Any]], 
+                                        tool_manager: Optional[Any],
+                                        context: Optional[Dict[str, Any]],
+                                        session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        内部规划流式执行方法
+        
+        Args:
+            messages: 包含任务分析的对话历史记录
+            tool_manager: 提供可用工具的工具管理器实例
+            context: 附加执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的规划结果消息块
+        """
         try:
             # 准备规划上下文
             planning_context = self._prepare_planning_context(
@@ -127,7 +150,7 @@ class PlanningAgent(AgentBase):
             prompt = self._generate_planning_prompt(planning_context)
             
             # 执行流式规划
-            yield from self._execute_streaming_planning(prompt, planning_context)
+            yield from self._execute_streaming_planning(planning_context)
             
         except Exception as e:
             logger.error(f"PlanningAgent: 规划过程中发生异常: {str(e)}")
@@ -206,13 +229,11 @@ class PlanningAgent(AgentBase):
         return prompt
 
     def _execute_streaming_planning(self, 
-                                  prompt: str, 
                                   planning_context: Dict[str, Any]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行流式任务规划
         
         Args:
-            prompt: 规划提示
             planning_context: 规划上下文
             
         Yields:
@@ -223,54 +244,66 @@ class PlanningAgent(AgentBase):
         # 准备系统消息
         system_message = self._prepare_system_message(planning_context)
         
-        # 执行流式规划
-        all_content = ""
+        # 生成规划提示
+        prompt = self._generate_planning_prompt(planning_context)
+        
+        # 使用基类的流式处理和token跟踪
         message_id = str(uuid.uuid4())
-        last_tag_type = None
+        chunk_count = 0
+        all_content = ""
+        
+        # 收集流式响应内容
+        start_time = time.time()
+        chunks = []
+        
+        # 状态管理
         unknown_content = ''
+        last_tag_type = 'tag'
         
-        logger.debug("PlanningAgent: 调用语言模型进行流式生成")
-        
-        for chunk in self._call_llm_streaming(system_message, prompt):
-            if chunk.choices[0].delta.content is not None:
+        messages = [system_message, {"role": "user", "content": prompt}]
+        for chunk in self._call_llm_streaming(messages):
+            chunks.append(chunk)
+            if len(chunk.choices) == 0:
+                continue
+            if chunk.choices[0].delta.content:
                 delta_content = chunk.choices[0].delta.content
                 
                 for delta_content_char in delta_content:
                     delta_content_all = unknown_content + delta_content_char
-                    
-                    # 判断内容类型
-                    tag_type = self._judge_delta_content_type(
-                        delta_content_all, 
-                        all_content, 
-                        ['next_step_description', 'required_tools', 'expected_output', 'success_criteria']
-                    )
-                    
+                    # 判断delta_content的类型
+                    tag_type = self._judge_delta_content_type(delta_content_all, all_content, ['next_step_description','required_tools','expected_output','success_criteria'])
                     all_content += delta_content_char
-                    logger.debug(f"PlanningAgent: 处理内容块，类型: {tag_type}")
-                    
+                    chunk_count += 1
+                    # print(f'delta_content: {delta_content}, tag_type: {tag_type}')
                     if tag_type == 'unknown':
                         unknown_content = delta_content_all
                         continue
                     else:
                         unknown_content = ''
-                        if tag_type in ['next_step_description', 'expected_output']:
+                        if tag_type in ['next_step_description','expected_output']:
                             if tag_type != last_tag_type:
-                                yield self._create_planning_chunk(
+                                yield self._create_message_chunk(
                                     content='',
                                     message_id=message_id,
-                                    show_content='\\n\\n'
+                                    show_content='\n\n',
+                                    message_type='planning_result'
                                 )
-                            yield self._create_planning_chunk(
+                            
+                            yield self._create_message_chunk(
                                 content='',
                                 message_id=message_id,
-                                show_content=delta_content_all
+                                show_content=delta_content_all,
+                                message_type='planning_result'
                             )
                         last_tag_type = tag_type
-
+        
+        # 跟踪token使用
+        self._track_streaming_token_usage(chunks, "planning", start_time)
+        
+        logger.info(f"PlanningAgent: 流式规划完成，共生成 {chunk_count} 个文本块")
+        
         # 处理最终结果
         yield from self._finalize_planning_result(all_content, message_id)
-        
-        logger.info("PlanningAgent: 流式任务规划完成")
 
     def _prepare_system_message(self, planning_context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -300,50 +333,6 @@ class PlanningAgent(AgentBase):
             'content': system_content
         }
 
-    def _call_llm_streaming(self, system_message: Dict[str, Any], prompt: str):
-        """
-        调用语言模型进行流式生成
-        
-        Args:
-            system_message: 系统消息
-            prompt: 用户提示
-            
-        Returns:
-            Generator: 语言模型的流式响应
-        """
-        logger.debug("PlanningAgent: 调用语言模型进行流式生成")
-        
-        messages = [system_message, {"role": "user", "content": prompt}]
-        
-        return self.model.chat.completions.create(
-            messages=messages,
-            stream=True,
-            **self.model_config
-        )
-
-    def _create_planning_chunk(self, 
-                             content: str, 
-                             message_id: str, 
-                             show_content: str) -> List[Dict[str, Any]]:
-        """
-        创建规划消息块
-        
-        Args:
-            content: 消息内容
-            message_id: 消息ID
-            show_content: 显示内容
-            
-        Returns:
-            List[Dict[str, Any]]: 格式化的规划消息块列表
-        """
-        return [{
-            'role': 'assistant',
-            'content': content,
-            'type': 'planning_result',
-            'message_id': message_id,
-            'show_content': show_content
-        }]
-
     def _finalize_planning_result(self, 
                                 all_content: str, 
                                 message_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -370,6 +359,7 @@ class PlanningAgent(AgentBase):
                 'message_id': message_id,
                 'show_content': ''
             }]
+            
             yield result
             
         except Exception as e:
@@ -386,18 +376,11 @@ class PlanningAgent(AgentBase):
         Yields:
             List[Dict[str, Any]]: 错误消息块
         """
-        logger.error(f"PlanningAgent: 处理规划错误: {str(error)}")
-        
-        error_message = f"\\n任务规划失败: {str(error)}"
-        message_id = str(uuid.uuid4())
-        
-        yield [{
-            'role': 'tool',
-            'content': error_message,
-            'type': 'planning_result',
-            'message_id': message_id,
-            'show_content': error_message
-        }]
+        yield from self._handle_error_generic(
+            error=error,
+            error_context="任务规划",
+            message_type='planning_result'
+        )
 
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
         """

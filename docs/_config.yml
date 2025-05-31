@@ -1,0 +1,46 @@
+title: "Sage Multi-Agent Framework Documentation"
+description: "Comprehensive documentation for the Sage Multi-Agent Framework"
+baseurl: ""
+url: "https://your-username.github.io/sage-multi-agent"
+
+markdown: kramdown
+highlighter: rouge
+theme: minima
+
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+# Navigation structure
+navigation:
+  - title: "Quick Start"
+    url: "/QUICK_START/"
+  - title: "Architecture" 
+    url: "/ARCHITECTURE/"
+  - title: "Tool Development"
+    url: "/TOOL_DEVELOPMENT/"
+  - title: "API Reference"
+    url: "/API_REFERENCE/"
+  - title: "Examples"
+    url: "/EXAMPLES/"
+  - title: "Configuration"
+    url: "/CONFIGURATION/"
+
+# Language support
+languages:
+  en:
+    title: "English"
+    description: "English documentation"
+  zh:
+    title: "中文"
+    description: "Chinese documentation"
+
+# Exclude files
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/ 

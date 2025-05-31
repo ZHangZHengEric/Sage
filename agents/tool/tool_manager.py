@@ -17,20 +17,32 @@ import time
 import os,sys
 
 class ToolManager:
-    def __init__(self,is_auto_discover=True):
+    def __init__(self, is_auto_discover=True):
         """初始化工具管理器"""
         logger.info("Initializing ToolManager")
-        self.tools: Dict[str, Union[ToolSpec, McpToolSpec,AgentToolSpec]] = {}
+        
+        # 工具执行统计
+        self.execution_stats = {
+            'total_executions': 0,
+            'successful_executions': 0,
+            'failed_executions': 0,
+            'tools_called': {},
+            'error_types': {}
+        }
+        
+        self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec]] = {}
         self._mcp_sessions: Dict[str, Dict[str, Union[ClientSession]]] = {}  # {session_id: {server_name: session}}
+        
         if is_auto_discover:
             self._auto_discover_tools()
-            self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),'mcp_servers', 'mcp_setting.json')
+            self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
             # 在测试环境中，我们不希望自动发现MCP工具
             if not os.environ.get('TESTING'):
                 logger.debug("Not in testing environment, discovering MCP tools")
                 asyncio.run(self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path))
             else:
                 logger.debug("In testing environment, skipping MCP tool discovery")
+
     def discover_tools_from_path(self, path: str):
         """Discover and register tools from a custom path
         
@@ -351,98 +363,262 @@ class ToolManager:
             }
         } for tool in self.tools.values()]
 
-    def run_tool(self, tool_name: str,messages:list ,session_id: str, **kwargs) -> Any:
+    def run_tool(self, tool_name: str, messages: list, session_id: str, **kwargs) -> Any:
         """Execute a tool by name with provided arguments"""
-        logger.info(f"Running tool: {tool_name} with {len(kwargs)} arguments")
-        session_id = kwargs.pop('session_id', None)
-        logger.debug(f"Session ID for tool execution: {session_id}")
+        execution_start = time.time()
+        logger.info(f"Executing tool: {tool_name} (session: {session_id})")
+        
+        # Remove duplicate session_id from kwargs if present
+        session_id = kwargs.pop('session_id', session_id)
+        
+        # Step 1: Tool Lookup
         tool = self.get_tool(tool_name)
         if not tool:
-            error_msg = f"Tool not found: {tool_name}"
+            error_msg = f"Tool '{tool_name}' not found. Available: {list(self.tools.keys())}"
             logger.error(error_msg)
-            return f"Error: {error_msg}"
+            self._log_execution(tool_name, False, "TOOL_NOT_FOUND")
+            return self._format_error_response(error_msg, tool_name, "TOOL_NOT_FOUND")
+        
+        logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
         
         try:
+            # Step 2: Execute based on tool type
             if isinstance(tool, McpToolSpec):
-                logger.debug(f"Executing MCP tool: {tool_name}")
-                mcp_tool_result  = asyncio.run(self._run_mcp_tool(tool, session_id=session_id, **kwargs))
-                return json.dumps(mcp_tool_result,ensure_ascii=False, indent=2)
+                final_result = self._execute_mcp_tool(tool, session_id, **kwargs)
             elif isinstance(tool, ToolSpec):
-                if hasattr(tool.func, '__self__'):
-                    execute_result = tool.func(**kwargs)
-                else:
-                    tool_class = getattr(tool.func, '__objclass__', None)
-                    print('tool_class',tool_class)
-                    if tool_class:
-                        instance = tool_class()
-                        execute_result = tool.func.__get__(instance)(**kwargs)
-                    else:
-                        execute_result = tool.func(**kwargs)
-                if isinstance(execute_result, dict) or instanceof(execute_result, list):
-                    return json.dumps({"content":json.dumps(execute_result,ensure_ascii=False,indent=2)},ensure_ascii=False, indent=2)
-                else:
-                    return json.dumps({"content": execute_result},ensure_ascii=False, indent=2)
+                final_result = self._execute_standard_tool(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
-                logger.debug(f"Executing AgentToolSpec: {tool_name}")
-                agent_tool_result = tool.func(messages=messages,session_id=session_id)
-                return json.dumps({"messages": agent_tool_result},ensure_ascii=False, indent=2)
+                final_result = self._execute_agent_tool(tool, messages, session_id)
+            else:
+                error_msg = f"Unknown tool type: {type(tool).__name__}"
+                logger.error(error_msg)
+                self._log_execution(tool_name, False, "UNKNOWN_TOOL_TYPE")
+                return self._format_error_response(error_msg, tool_name, "UNKNOWN_TOOL_TYPE")
+            
+            # Step 3: Validate Result
+            execution_time = time.time() - execution_start
+            logger.info(f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s")
+            
+            # Validate JSON format
+            is_valid, validation_msg = self._validate_json_response(final_result, tool_name)
+            if not is_valid:
+                logger.error(f"Tool '{tool_name}' returned invalid JSON: {validation_msg}")
+                self._log_execution(tool_name, False, "INVALID_JSON")
+                return self._format_error_response(f"Invalid JSON response: {validation_msg}", 
+                                                 tool_name, "INVALID_JSON")
+            
+            self._log_execution(tool_name, True, execution_time=execution_time)
+            return final_result
+            
         except Exception as e:
-            error_msg = f"Error executing tool {tool_name}: {str(e)}"
+            execution_time = time.time() - execution_start
+            error_msg = f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
             logger.error(error_msg)
-            logger.error(traceback.format_exc())
-            return f"Error: {error_msg}"
+            logger.error(f"Exception details: {type(e).__name__}")
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
+            
+            self._log_execution(tool_name, False, "EXECUTION_ERROR")
+            return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
 
-    async def _run_mcp_tool(self, tool: McpToolSpec, session_id: str = None, **kwargs) -> CallToolResult:
-        """Run an MCP tool through its server connection"""
-        logger.debug(f"Running MCP tool: {tool.name} with session ID: {session_id}")
+    def _execute_mcp_tool(self, tool: McpToolSpec, session_id: str, **kwargs) -> str:
+        """Execute MCP tool and format result"""
+        logger.debug(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
+        
+        try:
+            result = asyncio.run(self._run_mcp_tool_async(tool, session_id, **kwargs))
+            
+            # Process MCP result
+            if isinstance(result, dict) and result.get('content'):
+                content = result['content']
+                if isinstance(content, list) and len(content) > 0:
+                    # Handle list content (e.g., from text/plain results)
+                    formatted_content = '\n'.join([item.get('text', str(item)) for item in content])
+                else:
+                    formatted_content = str(content)
+                return json.dumps({"content": formatted_content}, ensure_ascii=False, indent=2)
+            else:
+                return json.dumps(result, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
+            raise
+
+    def _execute_standard_tool(self, tool: ToolSpec, **kwargs) -> str:
+        """Execute standard tool and format result"""
+        logger.debug(f"Executing standard tool: {tool.name}")
+        
+        try:
+            # Execute the tool function
+            if hasattr(tool.func, '__self__'):
+                # Bound method
+                result = tool.func(**kwargs)
+            else:
+                # Unbound method - need to create instance
+                tool_class = getattr(tool.func, '__objclass__', None)
+                if tool_class:
+                    instance = tool_class()
+                    result = tool.func.__get__(instance)(**kwargs)
+                else:
+                    result = tool.func(**kwargs)
+            
+            # Format result
+            if isinstance(result, (dict, list)):
+                content = json.dumps(result, ensure_ascii=False, indent=2)
+                return json.dumps({"content": content}, ensure_ascii=False, indent=2)
+            else:
+                return json.dumps({"content": str(result)}, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
+            raise
+
+    def _execute_agent_tool(self, tool: AgentToolSpec, messages: list, session_id: str) -> str:
+        """Execute agent tool and format result"""
+        logger.debug(f"Executing agent tool: {tool.name}")
+        
+        try:
+            result = tool.func(messages=messages, session_id=session_id)
+            return json.dumps({"messages": result}, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Agent tool execution failed: {tool.name} - {str(e)}")
+            raise
+
+    def _format_error_response(self, error_msg: str, tool_name: str, error_type: str, 
+                              exception_detail: str = None) -> str:
+        """Format a consistent error response"""
+        error_response = {
+            "error": True,
+            "error_type": error_type,
+            "message": error_msg,
+            "tool_name": tool_name,
+            "timestamp": time.time()
+        }
+        
+        if exception_detail:
+            error_response["exception_detail"] = exception_detail
+            
+        return json.dumps(error_response, ensure_ascii=False, indent=2)
+
+    async def _run_mcp_tool_async(self, tool: McpToolSpec, session_id: str = None, **kwargs) -> Any:
+        """Run an MCP tool asynchronously"""
         if not session_id:
             session_id = "default"
-            logger.debug(f"No session ID provided, using default")
         
         if session_id not in self._mcp_sessions:
             self._mcp_sessions[session_id] = {}
-            logger.debug(f"Created new session mapping for session ID: {session_id}")
         
         server_name = tool.server_name
-        logger.debug(f"Server name for tool {tool.name}: {server_name}")
+        logger.debug(f"MCP tool execution: {tool.name} on {server_name}")
         
-        # Get or create server session
-        # if server_name not in self._mcp_sessions[session_id]:
-        logger.debug(f"Creating new MCP session for server: {server_name}")
-        if isinstance(tool.server_params, SseServerParameters):
-            async with sse_client(tool.server_params.url) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    self._mcp_sessions[session_id][server_name] = session
-                    logger.debug(f"Created new SSE session for server: {server_name}")
-                    logger.debug(f"Calling MCP tool {tool.name} with arguments: {kwargs}")
-                    try:
-                        result = await session.call_tool(tool.name, kwargs)
-                        logger.debug(f"MCP tool {tool.name} execution completed successfully")
-                        return result.model_dump()
-                    except Exception as e:
-                        error_msg = f"Error calling MCP tool {tool.name}: {str(e)}"
-                        logger.error(error_msg)
-                        logger.error(traceback.format_exc())
-                        return f"Error: {error_msg}"
-        else:
-            async with stdio_client(tool.server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    self._mcp_sessions[session_id][server_name] = session
-                    logger.debug(f"Created new stdio session for server: {server_name}")
-                    # Use existing session to call tool
-                    logger.debug(f"Calling MCP tool {tool.name} with arguments: {kwargs}")
-                    try:
-                        result = await session.call_tool(tool.name, kwargs)
-                        logger.debug(f"MCP tool {tool.name} execution completed successfully")
-                        return result.model_dump()
-                    except Exception as e:
-                        error_msg = f"Error calling MCP tool {tool.name}: {str(e)}"
-                        logger.error(error_msg)
-                        logger.error(traceback.format_exc())
-                        return f"Error: {error_msg}"
-        
-        
+        try:
+            if isinstance(tool.server_params, SseServerParameters):
+                return await self._execute_sse_mcp_tool(tool, **kwargs)
+            else:
+                return await self._execute_stdio_mcp_tool(tool, **kwargs)
+        except Exception as e:
+            logger.error(f"MCP tool '{tool.name}' failed on server '{server_name}': {str(e)}")
+            logger.debug(f"MCP error details - Tool: {tool.name}, Server: {server_name}, Args: {kwargs}")
+            raise
 
-    # [Remaining methods stay unchanged...]
+    async def _execute_sse_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
+        """Execute SSE MCP tool"""
+        async with sse_client(tool.server_params.url) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
+                return result.model_dump()
+
+    async def _execute_stdio_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
+        """Execute stdio MCP tool"""
+        async with stdio_client(tool.server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
+                return result.model_dump()
+
+    def _validate_json_response(self, response_text: str, tool_name: str) -> tuple[bool, str]:
+        """Validate if response is proper JSON and return validation result"""
+        if not response_text:
+            return False, "Empty response"
+        
+        try:
+            parsed = json.loads(response_text)
+            
+            # Check for common issues
+            if isinstance(parsed, str) and len(parsed) > 10000:
+                logger.warning(f"Tool '{tool_name}' returned very large response ({len(parsed)} chars)")
+                
+            return True, "Valid JSON"
+            
+        except json.JSONDecodeError as e:
+            error_pos = getattr(e, 'pos', 'unknown')
+            if hasattr(e, 'pos') and e.pos < len(response_text):
+                start = max(0, e.pos - 50)
+                end = min(len(response_text), e.pos + 50)
+                context = response_text[start:end]
+                logger.error(f"JSON parse error at position {error_pos}: {context}")
+            
+            return False, f"JSON decode error at position {error_pos}: {e}"
+        except Exception as e:
+            logger.error(f"Unexpected JSON validation error for '{tool_name}': {e}")
+            return False, f"Validation error: {e}"
+
+    def get_execution_stats(self) -> dict:
+        """获取工具执行统计信息"""
+        total = max(1, self.execution_stats['total_executions'])
+        return {
+            **self.execution_stats,
+            'success_rate': (self.execution_stats['successful_executions'] / total) * 100,
+            'total_tools_registered': len(self.tools)
+        }
+
+    def _log_execution(self, tool_name: str, success: bool, error_type: str = None, execution_time: float = None):
+        """记录工具执行统计"""
+        self.execution_stats['total_executions'] += 1
+        
+        if tool_name not in self.execution_stats['tools_called']:
+            self.execution_stats['tools_called'][tool_name] = {'success': 0, 'failed': 0, 'avg_time': 0}
+            
+        if success:
+            self.execution_stats['successful_executions'] += 1
+            self.execution_stats['tools_called'][tool_name]['success'] += 1
+            if execution_time:
+                prev_avg = self.execution_stats['tools_called'][tool_name].get('avg_time', 0)
+                count = self.execution_stats['tools_called'][tool_name]['success']
+                self.execution_stats['tools_called'][tool_name]['avg_time'] = (prev_avg * (count - 1) + execution_time) / count
+        else:
+            self.execution_stats['failed_executions'] += 1
+            self.execution_stats['tools_called'][tool_name]['failed'] += 1
+            
+            if error_type:
+                self.execution_stats['error_types'][error_type] = self.execution_stats['error_types'].get(error_type, 0) + 1
+
+    def print_execution_summary(self):
+        """Print a summary of tool execution statistics"""
+        stats = self.get_execution_stats()
+        print("\n" + "="*50)
+        print("🔧 TOOL EXECUTION SUMMARY")
+        print("="*50)
+        print(f"Total executions: {stats['total_executions']}")
+        print(f"Success rate: {stats['success_rate']:.1f}%")
+        print(f"Total tools registered: {stats['total_tools_registered']}")
+        
+        if stats['error_types']:
+            print("\nError breakdown:")
+            for error_type, count in stats['error_types'].items():
+                print(f"  {error_type}: {count}")
+        
+        if stats['tools_called']:
+            print("\nMost used tools:")
+            sorted_tools = sorted(stats['tools_called'].items(), 
+                                key=lambda x: x[1]['success'] + x[1]['failed'], reverse=True)
+            for tool_name, tool_stats in sorted_tools[:5]:
+                total_calls = tool_stats['success'] + tool_stats['failed']
+                success_rate = (tool_stats['success'] / total_calls) * 100 if total_calls > 0 else 0
+                avg_time = tool_stats.get('avg_time', 0)
+                print(f"  {tool_name}: {total_calls} calls, {success_rate:.1f}% success, {avg_time:.2f}s avg")
+        print("="*50)
+
+    async def _run_mcp_tool(self, tool: McpToolSpec, session_id: str = None, **kwargs) -> CallToolResult:
+        """Run an MCP tool through its server connection (legacy compatibility)"""
+        return await self._run_mcp_tool_async(tool, session_id, **kwargs)

@@ -16,6 +16,7 @@ import os
 import sys
 import datetime
 import traceback
+import time
 from typing import List, Dict, Any, Optional, Generator
 
 from .agent_base import AgentBase
@@ -57,6 +58,19 @@ class AgentController:
         self.model_config = model_config
         self.system_prefix = system_prefix
         self._init_agents()
+        
+        # 总体token统计
+        self.overall_token_stats = {
+            'total_input_tokens': 0,
+            'total_output_tokens': 0,
+            'total_cached_tokens': 0,
+            'total_reasoning_tokens': 0,
+            'total_calls': 0,
+            'total_execution_time': 0,
+            'workflow_start_time': None,
+            'workflow_end_time': None
+        }
+        
         logger.info("AgentController: 智能体控制器初始化完成")
         
     def _init_agents(self) -> None:
@@ -116,6 +130,12 @@ class AgentController:
             - message_id: 消息的唯一标识符
             - 其他标准消息字段（role、content、type等）
         """
+        # 重置所有agent的token统计
+        logger.info("AgentController: 重置所有Agent的Token统计")
+        self.reset_all_token_stats()
+        
+        # 记录工作流开始时间
+        self.overall_token_stats['workflow_start_time'] = time.time()
         logger.info(f"AgentController: 开始流式工作流，会话ID: {session_id}")
         
         try:
@@ -151,6 +171,10 @@ class AgentController:
             logger.error(f"AgentController: 流式工作流执行过程中发生异常: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             yield from self._handle_workflow_error(e)
+        finally:
+            # 记录工作流结束时间并打印统计
+            self.overall_token_stats['workflow_end_time'] = time.time()
+            self.print_comprehensive_token_stats()
 
     def _prepare_session_id(self, session_id: Optional[str]) -> str:
         """
@@ -324,7 +348,7 @@ class AgentController:
             session_id=session_id
         ):
             analysis_chunks.append(chunk)
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 任务分析阶段完成，生成 {len(analysis_chunks)} 个块")
@@ -360,7 +384,7 @@ class AgentController:
             session_id=session_id
         ):
             decompose_chunks.append(chunk)
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 任务分解阶段完成，生成 {len(decompose_chunks)} 个块")
@@ -450,7 +474,7 @@ class AgentController:
             session_id=session_id
         ):
             plan_chunks.append(chunk)
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 规划阶段完成，生成 {len(plan_chunks)} 个块")
@@ -486,7 +510,7 @@ class AgentController:
             session_id=session_id
         ):
             exec_chunks.append(chunk)
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 执行阶段完成，生成 {len(exec_chunks)} 个块")
@@ -522,7 +546,7 @@ class AgentController:
             session_id=session_id
         ):
             obs_chunks.append(chunk)
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 观察阶段完成，生成 {len(obs_chunks)} 个块")
@@ -562,7 +586,7 @@ class AgentController:
             session_id=session_id
         ):
             summary_chunks.append(chunk)
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 任务总结阶段完成，生成 {len(summary_chunks)} 个块")
@@ -593,7 +617,7 @@ class AgentController:
             context=context, 
             session_id=session_id
         ):
-            all_messages = self._merge_messages(all_messages, chunk)
+            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info("AgentController: 直接执行智能体完成")
@@ -663,25 +687,32 @@ class AgentController:
             tool_manager: Optional[Any] = None, 
             session_id: Optional[str] = None, 
             deep_thinking: bool = True,
-            summary: bool = True) -> Dict[str, Any]:
+            summary: bool = True,
+            max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
+            deep_research: bool = True) -> Dict[str, Any]:
         """
-        执行完整的智能体工作流
+        执行智能体工作流（非流式版本）
         
         Args:
-            input_messages: 包含'role'和'content'键的消息字典列表
-            tool_manager: 可选的工具管理器实例，用于工具执行
+            input_messages: 输入消息字典列表
+            tool_manager: 工具管理器实例
             session_id: 会话ID
-            deep_thinking: 是否执行初始任务分析
+            deep_thinking: 是否进行任务分析
             summary: 是否生成任务总结
+            max_loop_count: 最大循环次数
+            deep_research: 是否进行深度研究（完整流程）
             
         Returns:
-            Dict[str, Any]: 包含以下内容的字典：
-            - all_messages: 完整的消息历史
-            - new_messages: 本次运行生成的新消息
-            - final_output: 最终输出消息
-            - session_id: 会话ID
+            Dict[str, Any]: 包含all_messages、new_messages、final_output和session_id的结果字典
         """
         logger.info(f"AgentController: 开始非流式工作流，会话ID: {session_id}")
+        
+        # 重置所有agent的token统计
+        logger.info("AgentController: 重置所有Agent的Token统计")
+        self.reset_all_token_stats()
+        
+        # 记录工作流开始时间
+        self.overall_token_stats['workflow_start_time'] = time.time()
         
         try:
             # 准备会话和消息
@@ -693,23 +724,38 @@ class AgentController:
             
             logger.info(f"AgentController: 初始化 {len(all_messages)} 条输入消息")
             
-            # 执行各个阶段
-            if deep_thinking:
-                all_messages, new_messages = self._execute_task_analysis_non_stream(
+            # 根据deep_research参数选择执行路径
+            if deep_research:
+                # 完整流程
+                if deep_thinking:
+                    all_messages, new_messages = self._execute_task_analysis_non_stream(
+                        all_messages, new_messages, tool_manager
+                    )
+                
+                # 任务分解阶段
+                all_messages, new_messages = self._execute_task_decompose_non_stream(
                     all_messages, new_messages, tool_manager
                 )
-            
-            # 主循环
-            all_messages, new_messages = self._execute_main_loop_non_stream(
-                all_messages, new_messages, tool_manager, session_id
-            )
-            
-            # 总结阶段
-            if summary:
-                all_messages, new_messages, final_output = self._execute_task_summary_non_stream(
-                    all_messages, new_messages, tool_manager
+                
+                # 主循环
+                all_messages, new_messages = self._execute_main_loop_non_stream(
+                    all_messages, new_messages, tool_manager, session_id, max_loop_count
                 )
+                
+                # 总结阶段
+                if summary:
+                    all_messages, new_messages, final_output = self._execute_task_summary_non_stream(
+                        all_messages, new_messages, tool_manager
+                    )
+                else:
+                    final_output = new_messages[-1] if new_messages else None
             else:
+                # 直接执行模式
+                direct_messages = self.direct_executor_agent.run(
+                    all_messages, tool_manager, session_id=session_id
+                )
+                all_messages.extend(direct_messages)
+                new_messages.extend(direct_messages)
                 final_output = new_messages[-1] if new_messages else None
             
             logger.info(f"AgentController: 非流式工作流完成，会话ID: {session_id}")
@@ -737,6 +783,10 @@ class AgentController:
                 'final_output': error_message,
                 'session_id': session_id or str(uuid.uuid1()),
             }
+        finally:
+            # 记录工作流结束时间并打印统计
+            self.overall_token_stats['workflow_end_time'] = time.time()
+            self.print_comprehensive_token_stats()
 
     def _execute_task_analysis_non_stream(self, 
                                         all_messages: List[Dict[str, Any]], 
@@ -763,11 +813,37 @@ class AgentController:
         
         return all_messages, new_messages
 
+    def _execute_task_decompose_non_stream(self, 
+                                         all_messages: List[Dict[str, Any]], 
+                                         new_messages: List[Dict[str, Any]], 
+                                         tool_manager: Optional[Any]) -> tuple:
+        """
+        执行任务分解（非流式版本）
+        
+        Args:
+            all_messages: 所有消息列表
+            new_messages: 新消息列表
+            tool_manager: 工具管理器
+            
+        Returns:
+            tuple: 更新后的(all_messages, new_messages)
+        """
+        logger.info("AgentController: 开始任务分解")
+        
+        decompose_messages = self.task_decompose_agent.run(all_messages, tool_manager)
+        logger.info(f"AgentController: 任务分解完成，生成 {len(decompose_messages)} 条消息")
+        
+        all_messages.extend(decompose_messages)
+        new_messages.extend(decompose_messages)
+        
+        return all_messages, new_messages
+
     def _execute_main_loop_non_stream(self, 
                                     all_messages: List[Dict[str, Any]], 
                                     new_messages: List[Dict[str, Any]], 
                                     tool_manager: Optional[Any], 
-                                    session_id: str) -> tuple:
+                                    session_id: str,
+                                    max_loop_count: int) -> tuple:
         """
         执行主循环（非流式版本）
         
@@ -776,13 +852,14 @@ class AgentController:
             new_messages: 新消息列表
             tool_manager: 工具管理器
             session_id: 会话ID
+            max_loop_count: 最大循环次数
             
         Returns:
             tuple: 更新后的(all_messages, new_messages)
         """
         loop_count = 0
         
-        while True:
+        while loop_count < max_loop_count:
             loop_count += 1
             logger.info(f"AgentController: 开始第 {loop_count} 轮规划-执行-观察循环")
             
@@ -808,6 +885,9 @@ class AgentController:
             should_break = self._check_task_completion(obs_messages, all_messages, new_messages)
             if should_break:
                 break
+        
+        if loop_count >= max_loop_count:
+            logger.warning(f"AgentController: 达到最大循环次数 {max_loop_count}，强制结束")
         
         return all_messages, new_messages
 
@@ -881,22 +961,6 @@ class AgentController:
         
         return all_messages, new_messages, final_output
 
-    def _merge_messages(self, 
-                       all_messages: List[Dict[str, Any]], 
-                       new_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        通过message_id将新消息合并到现有消息中
-        
-        Args:
-            all_messages: 当前完整的消息列表
-            new_messages: 要合并的新消息
-            
-        Returns:
-            List[Dict[str, Any]]: 合并后的消息列表
-        """
-        merged = self.task_analysis_agent._merge_messages(all_messages, new_messages)
-        return merged
-
     def _is_task_complete(self, messages: List[Dict[str, Any]]) -> bool:
         """
         基于评估输出检查任务是否完成
@@ -940,3 +1004,127 @@ class AgentController:
         is_complete = result.get('task_status', '') == 'completed'
         logger.debug(f"AgentController: 任务完成状态: {is_complete}")
         return is_complete
+
+    def _collect_agent_stats(self) -> Dict[str, Any]:
+        """
+        收集所有agent的token统计信息
+        
+        Returns:
+            Dict[str, Any]: 汇总的统计信息
+        """
+        all_stats = {}
+        total_stats = {
+            'total_input_tokens': 0,
+            'total_output_tokens': 0,
+            'total_cached_tokens': 0,
+            'total_reasoning_tokens': 0,
+            'total_calls': 0,
+            'agents': {}
+        }
+        
+        # 收集各个agent的统计
+        agents = [
+            self.task_analysis_agent,
+            self.executor_agent,
+            self.task_summary_agent,
+            self.planning_agent,
+            self.observation_agent,
+            self.direct_executor_agent,
+            self.task_decompose_agent
+        ]
+        
+        for agent in agents:
+            if hasattr(agent, 'get_token_stats'):
+                stats = agent.get_token_stats()
+                all_stats[stats['agent_name']] = stats
+                
+                # 累加到总统计
+                total_stats['total_input_tokens'] += stats['total_input_tokens']
+                total_stats['total_output_tokens'] += stats['total_output_tokens']
+                total_stats['total_cached_tokens'] += stats['total_cached_tokens']
+                total_stats['total_reasoning_tokens'] += stats['total_reasoning_tokens']
+                total_stats['total_calls'] += stats['total_calls']
+                total_stats['agents'][stats['agent_name']] = stats
+        
+        return {
+            'individual_stats': all_stats,
+            'total_stats': total_stats
+        }
+    
+    def print_comprehensive_token_stats(self):
+        """
+        打印综合的token使用统计
+        """
+        stats = self._collect_agent_stats()
+        total = stats['total_stats']
+        
+        print("\n" + "="*80)
+        print("🚀 AgentController 综合Token使用统计")
+        print("="*80)
+        
+        # 总体统计
+        print(f"\n📊 总体统计:")
+        print(f"  📞 总调用次数: {total['total_calls']}")
+        print(f"  📥 总输入tokens: {total['total_input_tokens']:,}")
+        print(f"  📤 总输出tokens: {total['total_output_tokens']:,}")
+        print(f"  🏃 总缓存tokens: {total['total_cached_tokens']:,}")
+        print(f"  🧠 总推理tokens: {total['total_reasoning_tokens']:,}")
+        print(f"  🔢 总计tokens: {total['total_input_tokens'] + total['total_output_tokens']:,}")
+        
+        if self.overall_token_stats['workflow_start_time'] and self.overall_token_stats['workflow_end_time']:
+            workflow_time = self.overall_token_stats['workflow_end_time'] - self.overall_token_stats['workflow_start_time']
+            print(f"  ⏱️  工作流总耗时: {workflow_time:.2f}秒")
+        
+        # 各agent详细统计
+        print(f"\n🤖 各Agent详细统计:")
+        for agent_name, agent_stats in total['agents'].items():
+            if agent_stats['total_calls'] > 0:  # 只显示有调用的agent
+                print(f"\n  🔹 {agent_name}:")
+                print(f"    📞 调用: {agent_stats['total_calls']} 次")
+                print(f"    📥 输入: {agent_stats['total_input_tokens']:,} tokens")
+                print(f"    📤 输出: {agent_stats['total_output_tokens']:,} tokens")
+                if agent_stats['total_cached_tokens'] > 0:
+                    print(f"    🏃 缓存: {agent_stats['total_cached_tokens']:,} tokens")
+                if agent_stats['total_reasoning_tokens'] > 0:
+                    print(f"    🧠 推理: {agent_stats['total_reasoning_tokens']:,} tokens")
+                print(f"    🔢 小计: {agent_stats['total_input_tokens'] + agent_stats['total_output_tokens']:,} tokens")
+                
+                # 显示步骤详情
+                if agent_stats.get('step_details'):
+                    print(f"    📋 步骤详情:")
+                    for detail in agent_stats['step_details']:
+                        print(f"      • {detail['step']}: 输入{detail['input_tokens']}, 输出{detail['output_tokens']}, 耗时{detail['execution_time']}s")
+        
+        print("\n" + "="*80)
+        
+    def reset_all_token_stats(self):
+        """
+        重置所有agent的token统计
+        """
+        agents = [
+            self.task_analysis_agent,
+            self.executor_agent,
+            self.task_summary_agent,
+            self.planning_agent,
+            self.observation_agent,
+            self.direct_executor_agent,
+            self.task_decompose_agent
+        ]
+        
+        for agent in agents:
+            if hasattr(agent, 'reset_token_stats'):
+                agent.reset_token_stats()
+        
+        # 重置总体统计
+        self.overall_token_stats = {
+            'total_input_tokens': 0,
+            'total_output_tokens': 0,
+            'total_cached_tokens': 0,
+            'total_reasoning_tokens': 0,
+            'total_calls': 0,
+            'total_execution_time': 0,
+            'workflow_start_time': None,
+            'workflow_end_time': None
+        }
+        
+        logger.info("AgentController: 所有Token统计已重置")

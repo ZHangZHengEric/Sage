@@ -19,12 +19,12 @@ class CodeAgent(AgentBase):
         self.controller = AgentController(model, model_config, system_prefix=system_prefix)
         self.tool_manager = ToolManager(is_auto_discover=False)
 
-    def run_stream(self, input_messages: List[Dict],
+    def run_stream(self, messages: List[Dict],
                     session_id: Any | None = None,
                     deep_thinking: bool = True,
                     summary: bool = True,
                     max_loop_count: int = 10,
                     deep_research: bool = True) -> Generator[List[Dict[str, Any]], None, None]:
-        chunk_iter = self.controller.run_stream(input_messages,tool_manager=self.tool_manager,session_id=session_id,deep_thinking=deep_thinking,summary=summary,max_loop_count=max_loop_count,deep_research=deep_research)
+        chunk_iter = self.controller.run_stream(input_messages=messages,tool_manager=self.tool_manager,session_id=session_id,deep_thinking=deep_thinking,summary=summary,max_loop_count=max_loop_count,deep_research=deep_research)
         for chunk in chunk_iter:
             yield chunk

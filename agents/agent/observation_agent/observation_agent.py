@@ -13,6 +13,7 @@ import json
 import uuid
 import datetime
 import traceback
+import time
 from typing import List, Dict, Any, Optional, Generator
 
 from agents.agent.agent_base import AgentBase
@@ -119,6 +120,28 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         """
         logger.info(f"ObservationAgent: 开始流式观察分析，消息数量: {len(messages)}")
         
+        # 使用基类方法收集和记录流式输出
+        yield from self._collect_and_log_stream_output(
+            self._execute_observation_stream_internal(messages, tool_manager, context, session_id)
+        )
+
+    def _execute_observation_stream_internal(self, 
+                                           messages: List[Dict[str, Any]],
+                                           tool_manager: Optional[Any],
+                                           context: Optional[Dict[str, Any]],
+                                           session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        内部观察流式执行方法
+        
+        Args:
+            messages: 对话历史记录，包含执行结果
+            tool_manager: 可选的工具管理器
+            context: 附加执行上下文
+            session_id: 可选的会话标识符
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的观察分析消息块
+        """
         try:
             # 准备分析上下文
             analysis_context = self._prepare_observation_context(
@@ -192,8 +215,8 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         return prompt
 
     def _execute_streaming_observation(self, 
-                                     prompt: str, 
-                                     context: Optional[Dict[str, Any]],
+                                     prompt: str,
+                                     context: Optional[Dict[str, Any]], 
                                      session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行流式观察分析
@@ -211,32 +234,32 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         # 准备系统消息
         system_message = self._prepare_system_message(context, session_id)
         
-        # 执行流式分析
-        all_content = ""
+        # 使用基类的流式处理和token跟踪（简化版本）
         message_id = str(uuid.uuid4())
-        last_tag_type = None
+        chunk_count = 0
+        all_content = ""
+        
+        # 收集流式响应内容
+        start_time = time.time()
+        chunks = []
+        
+        # 状态管理
         unknown_content = ''
+        last_tag_type = 'tag'
         
-        logger.debug("ObservationAgent: 调用语言模型进行流式生成")
-        
-        for chunk in self._call_llm_streaming(system_message, prompt):
-            if chunk.choices[0].delta.content is not None:
+        for chunk in self._call_llm_streaming([system_message, {"role": "user", "content": prompt}]):
+            chunks.append(chunk)
+            if len(chunk.choices) == 0:
+                continue
+            if chunk.choices[0].delta.content:
                 delta_content = chunk.choices[0].delta.content
                 
                 for delta_content_char in delta_content:
                     delta_content_all = unknown_content + delta_content_char
-                    
-                    # 判断内容类型
-                    tag_type = self._judge_delta_content_type(
-                        delta_content_all, 
-                        all_content,
-                        tag_type=['needs_more_input', 'finish_percent', 'is_completed', 
-                                'analysis', 'suggestions', 'user_query']
-                    )
-                    
-                    logger.debug(f"ObservationAgent: 处理内容块，类型: {tag_type}")
+                    tag_type = self._judge_delta_content_type(delta_content_all, all_content, tag_type=['needs_more_input','finish_percent','is_completed','analysis','suggestions','user_query'])
+                    # print(f'delta_content: {delta_content}, tag_type: {tag_type}')
                     all_content += delta_content_char
-                    
+                    chunk_count += 1
                     if tag_type == 'unknown':
                         unknown_content = delta_content_all
                         continue
@@ -244,28 +267,34 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
                         unknown_content = ''
                         if tag_type in ['analysis']:
                             if tag_type != last_tag_type:
-                                yield self._create_observation_chunk(
+                                yield self._create_message_chunk(
                                     content='',
                                     message_id=message_id,
-                                    show_content='\\n\\n'
+                                    show_content='\n\n',
+                                    message_type='observation_result'
                                 )
-                            yield self._create_observation_chunk(
+                            
+                            yield self._create_message_chunk(
                                 content='',
                                 message_id=message_id,
-                                show_content=delta_content_all
+                                show_content=delta_content_all,
+                                message_type='observation_result'
                             )
                         last_tag_type = tag_type
-
-        # 解析并返回最终结果
-        yield from self._finalize_observation_result(all_content, message_id)
         
-        logger.info("ObservationAgent: 流式观察分析完成")
+        # 跟踪token使用
+        self._track_streaming_token_usage(chunks, "observation", start_time)
+        
+        logger.info(f"ObservationAgent: 流式观察分析完成，共生成 {chunk_count} 个文本块")
+        
+        # 处理最终结果
+        yield from self._finalize_observation_result(all_content, message_id)
 
     def _prepare_system_message(self, 
                               context: Optional[Dict[str, Any]], 
                               session_id: str) -> Dict[str, Any]:
         """
-        准备系统消息
+        准备系统消息 - 兼容性方法
         
         Args:
             context: 附加上下文
@@ -274,71 +303,14 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         Returns:
             Dict[str, Any]: 系统消息字典
         """
-        logger.debug("ObservationAgent: 准备系统消息")
-        
-        # 设置默认系统前缀
-        if len(self.system_prefix) == 0:
-            self.system_prefix = self.SYSTEM_PREFIX_DEFAULT
-        
-        # 获取上下文信息
-        current_time = context.get('current_time', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_workspace = context.get('file_workspace', '无') if context else '无'
-        
-        # 构建系统消息
-        system_content = self.system_prefix + self.SYSTEM_MESSAGE_TEMPLATE.format(
-            session_id=session_id,
-            current_time=current_time,
-            file_workspace=file_workspace
+        return self._prepare_system_message_with_context(
+            context={
+                'session_id': session_id,
+                'current_time': context.get('current_time') if context else '',
+                'file_workspace': context.get('file_workspace') if context else ''
+            },
+            default_prefix=self.SYSTEM_PREFIX_DEFAULT
         )
-        
-        return {
-            'role': 'system',
-            'content': system_content
-        }
-
-    def _call_llm_streaming(self, system_message: Dict[str, Any], prompt: str):
-        """
-        调用语言模型进行流式生成
-        
-        Args:
-            system_message: 系统消息
-            prompt: 用户提示
-            
-        Returns:
-            Generator: 语言模型的流式响应
-        """
-        logger.debug("ObservationAgent: 调用语言模型进行流式生成")
-        
-        messages = [system_message, {"role": "user", "content": prompt}]
-        
-        return self.model.chat.completions.create(
-            messages=messages,
-            stream=True,
-            **self.model_config
-        )
-
-    def _create_observation_chunk(self, 
-                                content: str, 
-                                message_id: str, 
-                                show_content: str) -> List[Dict[str, Any]]:
-        """
-        创建观察消息块
-        
-        Args:
-            content: 消息内容
-            message_id: 消息ID
-            show_content: 显示内容
-            
-        Returns:
-            List[Dict[str, Any]]: 格式化的观察消息块列表
-        """
-        return [{
-            'role': 'assistant',
-            'content': content,
-            'type': 'observation_result',
-            'message_id': message_id,
-            'show_content': show_content
-        }]
 
     def _finalize_observation_result(self, 
                                    all_content: str, 
@@ -359,14 +331,16 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
             response_json = self.convert_xlm_to_json(all_content)
             logger.info(f"ObservationAgent: 观察分析结果: {response_json}")
             
-            result = [{
+            # 创建最终结果消息（不需要usage信息，因为这是转换过程）
+            result_message = {
                 'role': 'assistant',
                 'content': 'Observation: ' + json.dumps(response_json, ensure_ascii=False),
                 'type': 'observation_result',
                 'message_id': message_id,
-                'show_content': '\\n'
-            }]
-            yield result
+                'show_content': '\n'
+            }
+            
+            yield [result_message]
             
         except Exception as e:
             logger.error(f"ObservationAgent: 解析观察结果时发生错误: {str(e)}")
@@ -382,18 +356,11 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         Yields:
             List[Dict[str, Any]]: 错误消息块
         """
-        logger.error(f"ObservationAgent: 处理观察分析错误: {str(error)}")
-        
-        error_message = f"\\n观察分析失败: {str(error)}"
-        message_id = str(uuid.uuid4())
-        
-        yield [{
-            'role': 'tool',
-            'content': error_message,
-            'type': 'observation_result',
-            'message_id': message_id,
-            'show_content': error_message
-        }]
+        yield from self._handle_error_generic(
+            error=error,
+            error_context="观察分析",
+            message_type='observation_result'
+        )
 
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
         """

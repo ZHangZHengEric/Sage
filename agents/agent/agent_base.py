@@ -13,8 +13,10 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Generator
 import re,json
 import uuid
+import time
 from agents.utils.logger import logger
 from agents.tool.tool_base import AgentToolSpec
+import traceback
 
 
 class AgentBase(ABC):
@@ -38,8 +40,356 @@ class AgentBase(ABC):
         self.model_config = model_config
         self.system_prefix = system_prefix
         self.agent_description = f"{self.__class__.__name__} agent"
+        
+        # Token使用统计
+        self.token_stats = {
+            'total_calls': 0,
+            'total_input_tokens': 0,
+            'total_output_tokens': 0,
+            'total_cached_tokens': 0,
+            'total_reasoning_tokens': 0,
+            'step_details': []  # 详细的每步记录
+        }
+        
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}")
     
+    def _track_token_usage(self, response, step_name: str, start_time: float = None):
+        """
+        跟踪模型调用的token使用情况
+        
+        Args:
+            response: 模型响应对象
+            step_name: 步骤名称（如"task_analysis", "planning", "execution"等）
+            start_time: 开始时间戳
+        """
+        if hasattr(response, 'usage') and response.usage:
+            usage = response.usage
+            
+            # 提取token信息
+            input_tokens = getattr(usage, 'prompt_tokens', 0)
+            output_tokens = getattr(usage, 'completion_tokens', 0)
+            total_tokens = getattr(usage, 'total_tokens', input_tokens + output_tokens)
+            
+            # 处理不同模型的特殊字段 - 修复对象访问方式
+            cached_tokens = 0
+            reasoning_tokens = 0
+            
+            # 处理prompt_tokens_details
+            if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
+                if hasattr(usage.prompt_tokens_details, 'cached_tokens'):
+                    cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+            else:
+                # 兼容性处理，某些模型可能直接在usage对象上有cached_tokens
+                cached_tokens = getattr(usage, 'cached_tokens', 0) or 0
+            
+            # 处理completion_tokens_details  
+            if hasattr(usage, 'completion_tokens_details') and usage.completion_tokens_details:
+                if hasattr(usage.completion_tokens_details, 'reasoning_tokens'):
+                    reasoning_tokens = getattr(usage.completion_tokens_details, 'reasoning_tokens', 0) or 0
+            else:
+                # 兼容性处理，某些模型可能直接在usage对象上有reasoning_tokens
+                reasoning_tokens = getattr(usage, 'reasoning_tokens', 0) or 0
+            
+            # 更新统计
+            self.token_stats['total_calls'] += 1
+            self.token_stats['total_input_tokens'] += input_tokens
+            self.token_stats['total_output_tokens'] += output_tokens
+            self.token_stats['total_cached_tokens'] += cached_tokens
+            self.token_stats['total_reasoning_tokens'] += reasoning_tokens
+            
+            # 记录详细步骤
+            execution_time = time.time() - start_time if start_time else 0
+            step_detail = {
+                'step': step_name,
+                'agent': self.__class__.__name__,
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens,
+                'cached_tokens': cached_tokens,
+                'reasoning_tokens': reasoning_tokens,
+                'total_tokens': total_tokens,
+                'execution_time': round(execution_time, 2),
+                'timestamp': time.time()
+            }
+            self.token_stats['step_details'].append(step_detail)
+            
+            logger.info(f"{self.__class__.__name__}: {step_name} - 输入:{input_tokens}, 输出:{output_tokens}, 缓存:{cached_tokens}, 推理:{reasoning_tokens}, 总计:{total_tokens} tokens, 耗时:{execution_time:.2f}s")
+    
+    def _track_streaming_token_usage(self, chunks, step_name: str, start_time: float = None):
+        """
+        跟踪流式响应的token使用情况
+        
+        Args:
+            chunks: 流式响应的所有chunks
+            step_name: 步骤名称
+            start_time: 开始时间戳
+        """
+        # 记录调试信息
+        logger.debug(f"{self.__class__.__name__}: 开始跟踪流式token使用，收到 {len(chunks)} 个chunks")
+        
+        # 对于流式响应，只使用最后一个包含usage信息的chunk，避免重复统计
+        final_usage_chunk = None
+        for chunk in reversed(chunks):  # 从后往前找，使用最后的usage信息
+            if hasattr(chunk, 'usage') and chunk.usage:
+                final_usage_chunk = chunk
+                logger.debug(f"{self.__class__.__name__}: 找到最终usage信息")
+                break
+        
+        if final_usage_chunk:
+            logger.debug(f"{self.__class__.__name__}: 使用最终chunk中的usage信息进行token跟踪")
+            self._track_token_usage(final_usage_chunk, step_name, start_time)
+        else:
+            # 如果没有usage信息，记录一个空调用但计算execution_time
+            self.token_stats['total_calls'] += 1
+            execution_time = time.time() - start_time if start_time else 0
+            step_detail = {
+                'step': step_name,
+                'agent': self.__class__.__name__,
+                'input_tokens': 0,
+                'output_tokens': 0,
+                'cached_tokens': 0,
+                'reasoning_tokens': 0,
+                'total_tokens': 0,
+                'execution_time': round(execution_time, 2),
+                'timestamp': time.time(),
+                'note': f'No usage info in {len(chunks)} chunks'
+            }
+            self.token_stats['step_details'].append(step_detail)
+            logger.warning(f"{self.__class__.__name__}: {step_name} - 无法从 {len(chunks)} 个chunks中获取token使用信息，耗时:{execution_time:.2f}s")
+    
+    def get_token_stats(self) -> Dict[str, Any]:
+        """
+        获取当前agent的token使用统计
+        
+        Returns:
+            Dict[str, Any]: Token使用统计信息
+        """
+        return {
+            'agent_name': self.__class__.__name__,
+            **self.token_stats
+        }
+    
+    def reset_token_stats(self):
+        """重置token统计"""
+        self.token_stats = {
+            'total_calls': 0,
+            'total_input_tokens': 0,
+            'total_output_tokens': 0,
+            'total_cached_tokens': 0,
+            'total_reasoning_tokens': 0,
+            'step_details': []
+        }
+        logger.debug(f"{self.__class__.__name__}: Token统计已重置")
+    
+    def print_token_stats(self):
+        """打印当前agent的token使用统计"""
+        stats = self.get_token_stats()
+        print(f"\n🤖 {stats['agent_name']} Token使用统计:")
+        print(f"  📞 调用次数: {stats['total_calls']}")
+        print(f"  📥 输入tokens: {stats['total_input_tokens']}")
+        print(f"  📤 输出tokens: {stats['total_output_tokens']}")
+        print(f"  🏃 缓存tokens: {stats['total_cached_tokens']}")
+        print(f"  🧠 推理tokens: {stats['total_reasoning_tokens']}")
+        print(f"  🔢 总计tokens: {stats['total_input_tokens'] + stats['total_output_tokens']}")
+        
+        if stats['step_details']:
+            print(f"  📋 详细步骤:")
+            for detail in stats['step_details']:
+                print(f"    • {detail['step']}: 输入{detail['input_tokens']}, 输出{detail['output_tokens']}, 总计{detail['total_tokens']} tokens, 耗时{detail['execution_time']}s")
+
+    def _call_llm_streaming(self, messages: List[Dict[str, Any]]):
+        """
+        通用的流式模型调用方法
+        
+        Args:
+            messages: 输入消息列表
+            
+        Returns:
+            Generator: 语言模型的流式响应
+        """
+        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
+        
+        return self.model.chat.completions.create(
+            messages=messages,
+            stream=True,
+            stream_options={"include_usage": True},
+            **self.model_config
+        )
+    
+    def _call_llm_non_streaming(self, messages: List[Dict[str, Any]]):
+        """
+        通用的非流式模型调用方法
+        
+        Args:
+            messages: 输入消息列表
+            
+        Returns:
+            模型响应对象
+        """
+        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行非流式生成")
+        
+        return self.model.chat.completions.create(
+            messages=messages,
+            stream=False,
+            **self.model_config
+        )
+    
+    def _create_message_chunk(self, 
+                            content: str, 
+                            message_id: str, 
+                            show_content: str,
+                            message_type: str = 'assistant',
+                            role: str = 'assistant') -> List[Dict[str, Any]]:
+        """
+        创建通用的消息块
+        
+        Args:
+            content: 消息内容
+            message_id: 消息ID
+            show_content: 显示内容
+            message_type: 消息类型
+            role: 消息角色
+            
+        Returns:
+            List[Dict[str, Any]]: 格式化的消息块列表
+        """
+        message_chunk = {
+            'role': role,
+            'content': content,
+            'type': message_type,
+            'message_id': message_id,
+            'show_content': show_content
+        }
+            
+        return [message_chunk]
+    
+    def _handle_error_generic(self, 
+                            error: Exception, 
+                            error_context: str,
+                            message_type: str = 'error') -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        通用的错误处理方法
+        
+        Args:
+            error: 发生的异常
+            error_context: 错误上下文描述
+            message_type: 消息类型
+            
+        Yields:
+            List[Dict[str, Any]]: 错误消息块
+        """
+        logger.error(f"{self.__class__.__name__}: {error_context}错误: {str(error)}")
+        
+        error_message = f"\n{error_context}失败: {str(error)}"
+        message_id = str(uuid.uuid4())
+        
+        yield [{
+            'role': 'tool',
+            'content': error_message,
+            'type': message_type,
+            'message_id': message_id,
+            'show_content': error_message
+        }]
+    
+    def _execute_streaming_with_token_tracking(self, 
+                                             prompt: str, 
+                                             step_name: str,
+                                             system_message: Optional[Dict[str, Any]] = None,
+                                             message_type: str = 'assistant') -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行流式处理并跟踪token使用
+        
+        Args:
+            prompt: 用户提示
+            step_name: 步骤名称（用于token统计）
+            system_message: 可选的系统消息
+            message_type: 消息类型
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的消息块
+        """
+        logger.info(f"{self.__class__.__name__}: 开始执行流式{step_name}")
+        
+        message_id = str(uuid.uuid4())
+        
+        # 准备消息
+        if system_message:
+            messages = [system_message, {"role": "user", "content": prompt}]
+        else:
+            messages = [{"role": "user", "content": prompt}]
+        
+        # 执行流式处理
+        chunk_count = 0
+        start_time = time.time()
+        
+        # 收集所有chunks以便跟踪token使用
+        chunks = []
+        for chunk in self._call_llm_streaming(messages):
+            chunks.append(chunk)
+            if len(chunk.choices) ==0:
+                continue
+            if chunk.choices[0].delta.content:
+                delta_content = chunk.choices[0].delta.content
+                chunk_count += 1
+                
+                # 传递usage信息到消息块
+                yield self._create_message_chunk(
+                    content=delta_content,
+                    message_id=message_id,
+                    show_content=delta_content,
+                    message_type=message_type
+                )
+        
+        # 跟踪token使用情况
+        self._track_streaming_token_usage(chunks, step_name, start_time)
+        
+        logger.info(f"{self.__class__.__name__}: 流式{step_name}完成，共生成 {chunk_count} 个文本块")
+        
+        # 发送结束标记（也包含最终的usage信息）
+        yield self._create_message_chunk(
+            content="",
+            message_id=message_id,
+            show_content="\n",
+            message_type=message_type
+        )
+    
+    def _prepare_system_message_with_context(self, 
+                                           context: Dict[str, Any],
+                                           default_prefix: str = "") -> Dict[str, Any]:
+        """
+        准备带有上下文的系统消息
+        
+        Args:
+            context: 上下文字典，包含session_id, current_time, file_workspace等
+            default_prefix: 默认系统前缀
+            
+        Returns:
+            Dict[str, Any]: 系统消息字典
+        """
+        logger.debug(f"{self.__class__.__name__}: 准备系统消息")
+        
+        # 设置默认系统前缀
+        if len(self.system_prefix) == 0:
+            self.system_prefix = default_prefix
+        
+        # 构建系统消息模板
+        system_template = """
+你的当前工作目录是：{file_workspace}
+当前时间是：{current_time}
+你当前数据库_id或者知识库_id：{session_id}
+"""
+        
+        # 构建系统消息
+        system_content = self.system_prefix + system_template.format(
+            session_id=context.get('session_id', ''),
+            current_time=context.get('current_time', ''),
+            file_workspace=context.get('file_workspace', '')
+        )
+        
+        return {
+            'role': 'system',
+            'content': system_content
+        }
+
     @abstractmethod
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
@@ -66,37 +416,85 @@ class AgentBase(ABC):
             context: Optional[Dict[str, Any]] = None,
             session_id: str = None) -> List[Dict[str, Any]]:
         """
-        处理消息并可选择性使用工具
+        执行Agent任务（非流式版本）
         
-        默认实现通过调用run_stream并合并结果来实现。
+        默认实现：收集流式输出的所有块并合并为最终结果
         
         Args:
-            messages: 对话消息列表
-            tool_manager: 可选的工具管理器
-            context: 可选的上下文字典
+            messages: 对话历史记录
+            tool_manager: 工具管理器
+            context: 附加上下文信息
             session_id: 会话ID
             
         Returns:
-            List[Dict[str, Any]]: 处理后的消息列表
+            List[Dict[str, Any]]: 任务执行结果消息列表
         """
-        logger.debug(f"AgentBase: {self.__class__.__name__} 开始非流式处理")
+        logger.debug(f"AgentBase: 开始执行非流式任务，Agent类型: {self.__class__.__name__}")
         
-        result_iter = self.run_stream(
-            messages=messages, 
-            tool_manager=tool_manager, 
-            context=context, 
+        # 收集所有流式输出的块
+        all_chunks = []
+        for chunk_batch in self.run_stream(
+            messages=messages,
+            tool_manager=tool_manager,
+            context=context,
             session_id=session_id
-        )
+        ):
+            all_chunks.extend(chunk_batch)
         
-        result = []
-        for chunk in result_iter:
-            result.extend(chunk)
+        # 合并相同message_id的块
+        merged_messages = self._merge_chunks(all_chunks)
         
-        # 合并消息块
-        result = self._merge_chunks(result)
+        logger.debug(f"AgentBase: 非流式任务完成，返回 {len(merged_messages)} 条合并消息")
+        return merged_messages
+
+    def _log_agent_output(self, final_messages: List[Dict[str, Any]]) -> None:
+        """
+        记录Agent的完整输出日志
         
-        logger.debug(f"AgentBase: {self.__class__.__name__} 非流式处理完成，返回 {len(result)} 条消息")
-        return result
+        Args:
+            final_messages: Agent最终输出的完整消息列表
+        """
+        agent_name = self.__class__.__name__
+        
+        logger.info(f"🎯 {agent_name} 执行完成!")
+        logger.info(f"📊 {agent_name} 总共输出 {len(final_messages)} 条完整消息")
+        
+        if final_messages:
+            logger.info(f"📋 {agent_name} 完整输出messages:")
+            
+            for i, msg in enumerate(final_messages):
+                # 简化消息内容以便日志查看
+                simplified_msg = {
+                    'role': msg.get('role', 'unknown'),
+                    'type': msg.get('type', 'unknown'),
+                    'message_id': msg.get('message_id', 'unknown')[:8] + '...' if msg.get('message_id') else 'none',
+                    'content_length': len(str(msg.get('content', ''))),
+                    'show_content_length': len(str(msg.get('show_content', '')))
+                }
+                
+                # 特殊字段处理
+                if 'tool_calls' in msg and msg['tool_calls']:
+                    simplified_msg['has_tool_calls'] = True
+                    simplified_msg['tool_calls_count'] = len(msg['tool_calls'])
+                if 'tool_call_id' in msg:
+                    simplified_msg['tool_call_id'] = msg['tool_call_id'][:8] + '...' if len(msg['tool_call_id']) > 8 else msg['tool_call_id']
+                
+                # 显示关键内容摘要
+                if msg.get('content'):
+                    content_preview = str(msg['content'])[:100].replace('\n', ' ')
+                    if len(content_preview) < len(str(msg['content'])):
+                        content_preview += '...'
+                    simplified_msg['content_preview'] = content_preview
+                
+                if msg.get('show_content'):
+                    show_preview = str(msg['show_content'])[:50].replace('\n', ' ')
+                    if len(show_preview) < len(str(msg['show_content'])):
+                        show_preview += '...'
+                    simplified_msg['show_content_preview'] = show_preview
+                
+                logger.info(f"  [{i+1}] {simplified_msg}")
+        
+        logger.info(f"🏁 {agent_name} 执行流程结束")
 
     def to_tool(self) -> AgentToolSpec:
         """
@@ -266,15 +664,20 @@ class AgentBase(ABC):
         # 首先添加所有现有消息
         for msg in all_messages:
             msg_copy = msg.copy()
+            # 确保消息有message_id
+            if 'message_id' not in msg_copy:
+                msg_copy['message_id'] = str(uuid.uuid4())
+                logger.warning(f"AgentBase: 为现有消息自动生成message_id: {msg_copy['message_id'][:8]}...")
             merged.append(msg_copy)
             message_map[msg_copy['message_id']] = msg_copy
         
         # 然后合并新消息
         for msg in new_messages:
             msg_copy = msg.copy()
+            # 确保消息有message_id
             if 'message_id' not in msg_copy:
-                logger.warning("AgentBase: 发现缺少message_id的消息")
-                continue
+                msg_copy['message_id'] = str(uuid.uuid4())
+                logger.warning(f"AgentBase: 为新消息自动生成message_id: {msg_copy['message_id'][:8]}...")
                 
             msg_id = msg_copy['message_id']
             
@@ -409,3 +812,93 @@ class AgentBase(ABC):
                 return last_tag.replace('<', '').replace('>', '')
         elif last_tag in end_tag:
             return 'tag'
+
+    def _collect_and_log_stream_output(self, stream_generator: Generator[List[Dict[str, Any]], None, None]) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        收集流式输出并在最后记录完整日志的装饰器方法
+        
+        Args:
+            stream_generator: 流式输出生成器
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的消息块
+        """
+        agent_name = self.__class__.__name__
+        logger.debug(f"🔍 {agent_name} 开始收集流式输出...")
+        
+        all_output_chunks = []
+        chunk_count = 0
+        
+        try:
+            for chunk_batch in stream_generator:
+                chunk_count += 1
+                all_output_chunks.extend(chunk_batch)
+                yield chunk_batch
+        except Exception as e:
+            logger.error(f"🔍 {agent_name} 在流式处理中发生异常: {str(e)}")
+            logger.error(f"🔍 {agent_name} 异常堆栈: {traceback.format_exc()}")
+            raise
+        finally:
+            logger.debug(f"🔍 {agent_name} 流式处理完成，总共收集 {len(all_output_chunks)} 个chunks")
+            
+            # 合并相同message_id的chunks
+            merged_messages = self._merge_chunks(all_output_chunks)
+            logger.debug(f"🔍 {agent_name} 合并后得到 {len(merged_messages)} 条消息")
+            
+            # 记录完整输出日志
+            self._log_agent_output(merged_messages)
+
+    def _extract_usage_from_chunk(self, chunk) -> Optional[Dict[str, Any]]:
+        """
+        从LLM chunk中提取usage信息的统一函数
+        
+        注意：这个函数用于在流式处理中为消息块添加usage信息，供前端显示使用。
+        真正的token统计是在_track_streaming_token_usage中完成的，只统计最终的usage信息，避免重复统计。
+        
+        两个用途：
+        1. 消息传递：每个消息块都包含当前可用的usage信息（可能是中间状态）
+        2. 统计汇总：只在最后统计一次完整的usage信息
+        
+        Args:
+            chunk: LLM响应chunk
+            
+        Returns:
+            Optional[Dict[str, Any]]: 提取的usage信息，如果没有则返回None
+        """
+        if hasattr(chunk, 'usage') and chunk.usage:
+            usage = chunk.usage
+            
+            # 处理不同模型的特殊字段 - 修复对象访问方式
+            cached_tokens = 0
+            reasoning_tokens = 0
+            
+            # 处理prompt_tokens_details
+            if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
+                if hasattr(usage.prompt_tokens_details, 'cached_tokens'):
+                    cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+            else:
+                # 兼容性处理，某些模型可能直接在usage对象上有cached_tokens
+                cached_tokens = getattr(usage, 'cached_tokens', 0) or 0
+            
+            # 处理completion_tokens_details  
+            if hasattr(usage, 'completion_tokens_details') and usage.completion_tokens_details:
+                if hasattr(usage.completion_tokens_details, 'reasoning_tokens'):
+                    reasoning_tokens = getattr(usage.completion_tokens_details, 'reasoning_tokens', 0) or 0
+            else:
+                # 兼容性处理，某些模型可能直接在usage对象上有reasoning_tokens
+                reasoning_tokens = getattr(usage, 'reasoning_tokens', 0) or 0
+            
+            return {
+                'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
+                'completion_tokens': getattr(usage, 'completion_tokens', 0),
+                'total_tokens': getattr(usage, 'total_tokens', 0),
+                'cached_tokens': cached_tokens,
+                'reasoning_tokens': reasoning_tokens
+            }
+        return None
+
+    def _ensure_message_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # This method is mentioned in the clean_messages method but not implemented in the provided code block.
+        # It's assumed to exist as it's called in the clean_messages method.
+        # Since the method is not provided in the original file or the code block, it's left unchanged.
+        pass
