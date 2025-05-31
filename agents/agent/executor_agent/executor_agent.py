@@ -397,7 +397,7 @@ the expected output is:{next_expected_output}
             return []
         
         # 获取所有工具
-            tools_json = tool_manager.get_openai_tools()
+        tools_json = tool_manager.get_openai_tools()
         
         # 根据建议的工具进行过滤
         suggested_tools = subtask_info.get('required_tools', [])
