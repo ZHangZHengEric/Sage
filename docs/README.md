@@ -12,34 +12,14 @@ Welcome to the comprehensive documentation for Sage Multi-Agent Framework. This 
 
 ## 🌐 Language Selection
 
-<div class="code-example" markdown="1">
-<div style="display: flex; gap: 20px;">
-<div style="flex: 1;">
-
-### 🇺🇸 English Documentation
-
-- [🏃 Quick Start Guide](QUICK_START.html)
-- [🏗️ Architecture Guide](ARCHITECTURE.html) 
-- [🛠️ Tool Development](TOOL_DEVELOPMENT.html)
-- [📖 API Reference](API_REFERENCE.html)
-- [🎯 Examples & Use Cases](EXAMPLES.html)
-- [⚙️ Configuration Reference](CONFIGURATION.html)
-
-</div>
-<div style="flex: 1;">
-
-### 🇨🇳 中文文档
-
-- [🏃 快速开始指南](QUICK_START_CN.html)
-- [🏗️ 架构指南](ARCHITECTURE_CN.html)
-- [🛠️ 工具开发指南](TOOL_DEVELOPMENT_CN.html)
-- [📖 API 参考](API_REFERENCE_CN.html)
-- [🎯 示例和用例](EXAMPLES_CN.html)
-- [⚙️ 配置参考](CONFIGURATION_CN.html)
-
-</div>
-</div>
-</div>
+| 🇺🇸 English Documentation | 🇨🇳 中文文档 |
+|:---------------------------|:-------------|
+| [🏃 Quick Start Guide](QUICK_START.html) | [🏃 快速开始指南](QUICK_START_CN.html) |
+| [🏗️ Architecture Guide](ARCHITECTURE.html) | [🏗️ 架构指南](ARCHITECTURE_CN.html) |
+| [🛠️ Tool Development](TOOL_DEVELOPMENT.html) | [🛠️ 工具开发指南](TOOL_DEVELOPMENT_CN.html) |
+| [📖 API Reference](API_REFERENCE.html) | [📖 API 参考](API_REFERENCE_CN.html) |
+| [🎯 Examples & Use Cases](EXAMPLES.html) | [🎯 示例和用例](EXAMPLES_CN.html) |
+| [⚙️ Configuration Reference](CONFIGURATION.html) | [⚙️ 配置参考](CONFIGURATION_CN.html) |
 
 {: .note }
 > **选择语言 / Choose Language**: 所有文档都提供中英文双语版本。All documentation is available in both Chinese and English.

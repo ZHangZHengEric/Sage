@@ -17,6 +17,10 @@ plugins:
   - jekyll-seo-tag
   - jekyll-remote-theme
 
+# Mermaid support
+mermaid:
+  src: 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'
+
 # Search functionality
 search_enabled: true
 search:

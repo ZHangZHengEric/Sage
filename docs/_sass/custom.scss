@@ -23,11 +23,13 @@ pre, code {
 table {
   border-collapse: collapse;
   margin: 1rem 0;
+  width: 100%;
   
   th, td {
     padding: 0.75rem;
     border: 1px solid #e1e4e8;
     text-align: left;
+    vertical-align: top;
   }
   
   th {
@@ -37,6 +39,16 @@ table {
   
   tr:nth-child(even) {
     background-color: #f9f9f9;
+  }
+  
+  // Ensure tables are responsive
+  overflow-x: auto;
+  display: block;
+  white-space: nowrap;
+  
+  @media (min-width: 768px) {
+    display: table;
+    white-space: normal;
   }
 }
 
@@ -85,29 +97,37 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-// Custom note styling
+// Custom note styling - override theme defaults
 .note {
-  padding: 1rem;
-  margin: 1rem 0;
-  border-left: 4px solid #0366d6;
-  background-color: #f1f8ff;
-  border-radius: 0 4px 4px 0;
+  padding: 1rem !important;
+  margin: 1rem 0 !important;
+  border-left: 4px solid #0366d6 !important;
+  background-color: #f1f8ff !important;
+  border-radius: 0 4px 4px 0 !important;
   
   > p:first-child {
-    margin-top: 0;
+    margin-top: 0 !important;
   }
   
   > p:last-child {
-    margin-bottom: 0;
+    margin-bottom: 0 !important;
+  }
+  
+  blockquote {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    color: inherit !important;
   }
 }
 
 .highlight {
-  padding: 1rem;
-  margin: 1rem 0;
-  border-left: 4px solid #28a745;
-  background-color: #f1f8ff;
-  border-radius: 0 4px 4px 0;
+  padding: 1rem !important;
+  margin: 1rem 0 !important;
+  border-left: 4px solid #28a745 !important;
+  background-color: #f0fff4 !important;
+  border-radius: 0 4px 4px 0 !important;
 }
 
 // Improve search functionality
@@ -117,11 +137,7 @@ h1, h2, h3, h4, h5, h6 {
 
 // Better mobile responsiveness
 @media (max-width: 768px) {
-  .code-example {
-    overflow-x: auto;
-  }
-  
-  table {
+  .main-content table {
     font-size: 14px;
     
     th, td {
@@ -136,6 +152,11 @@ h1, h2, h3, h4, h5, h6 {
       text-align: center;
     }
   }
+  
+  // Make tables scroll horizontally on mobile
+  .main-content {
+    overflow-x: auto;
+  }
 }
 
 // Fix for Chinese punctuation
@@ -144,4 +165,42 @@ h1, h2, h3, h4, h5, h6 {
     word-break: break-word;
     overflow-wrap: break-word;
   }
+}
+
+// Improve code syntax highlighting
+.highlight {
+  background-color: #f6f8fa;
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  
+  code {
+    background-color: transparent;
+    padding: 0;
+  }
+}
+
+// Better spacing for lists
+.main-content {
+  ul, ol {
+    margin: 1rem 0;
+    
+    li {
+      margin: 0.5rem 0;
+    }
+  }
+}
+
+// Improve blockquote styling
+blockquote {
+  border-left: 4px solid #dfe2e5;
+  padding-left: 1rem;
+  color: #6a737d;
+  font-style: italic;
+  margin: 1rem 0;
+}
+
+// Better button styling for any buttons
+.btn {
+  font-family: inherit;
 } 

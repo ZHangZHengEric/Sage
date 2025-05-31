@@ -397,7 +397,7 @@ the expected output is:{next_expected_output}
             return []
         
         # 获取所有工具
-        tools_json = tool_manager.get_openai_tools()
+            tools_json = tool_manager.get_openai_tools()
         
         # 根据建议的工具进行过滤
         suggested_tools = subtask_info.get('required_tools', [])
@@ -408,7 +408,7 @@ the expected output is:{next_expected_output}
             ]
             if tools_suggest_json:
                 tools_json = tools_suggest_json
-        
+
         tool_names = [tool['function']['name'] for tool in tools_json]
         logger.info(f"ExecutorAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
         
@@ -531,18 +531,18 @@ the expected output is:{next_expected_output}
         """
         for tool_call in chunk.choices[0].delta.tool_calls:
             if tool_call.id and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id
+                last_tool_call_id = tool_call.id                            
                 
             if last_tool_call_id not in tool_calls:
                 logger.debug(f"ExecutorAgent: 检测到新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
                 tool_calls[last_tool_call_id] = {
                     'id': last_tool_call_id,
-                    'type': tool_call.type,
-                    'function': {
-                        'name': tool_call.function.name,
-                        'arguments': tool_call.function.arguments
-                    }
-                }
+                                'type': tool_call.type,
+                                'function': {
+                                    'name': tool_call.function.name,
+                                    'arguments': tool_call.function.arguments
+                                }
+                            }
             else:
                 if tool_call.function.name:
                     tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
@@ -595,7 +595,7 @@ the expected output is:{next_expected_output}
                 else:
                     # 发送工具调用消息
                     yield [{
-                        'role': 'assistant',
+                            'role': 'assistant',
                         'tool_calls': [{
                             'id': tool_call['id'],
                             'type': tool_call['type'],
@@ -617,8 +617,8 @@ the expected output is:{next_expected_output}
                     session_id=session_id,
                     **arguments
                 )
-                
-                # 处理工具响应
+                    
+                    # 处理工具响应
                 logger.debug("ExecutorAgent: 收到工具响应，正在处理")
                 logger.info(f"ExecutorAgent: 工具响应 {tool_response}")
                 
