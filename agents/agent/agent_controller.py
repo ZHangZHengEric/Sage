@@ -148,7 +148,9 @@ class AgentController:
             
             # 执行工作流
             if deep_research:
-                yield from self._execute_full_workflow(
+                # 多智能体协作模式：执行完整工作流（分解->规划->执行->观察->总结）
+                # deep_thinking 独立控制是否执行任务分析
+                yield from self._execute_multi_agent_workflow(
                     all_messages=all_messages,
                     tool_manager=tool_manager,
                     context=context,
@@ -158,11 +160,13 @@ class AgentController:
                     max_loop_count=max_loop_count
                 )
             else:
-                yield from self._execute_direct_workflow(
+                # 直接执行模式：可选的任务分析 + 直接执行
+                yield from self._execute_simplified_workflow(
                     all_messages=all_messages,
                     tool_manager=tool_manager,
                     context=context,
-                    session_id=session_id
+                    session_id=session_id,
+                    deep_thinking=deep_thinking
                 )
             
             logger.info(f"AgentController: 流式工作流完成，会话ID: {session_id}")
@@ -271,14 +275,14 @@ class AgentController:
         logger.info(f"AgentController: 执行上下文设置完成: {context}")
         return context
 
-    def _execute_full_workflow(self, 
-                             all_messages: List[Dict[str, Any]],
-                             tool_manager: Optional[Any],
-                             context: Dict[str, Any],
-                             session_id: str,
-                             deep_thinking: bool,
-                             summary: bool,
-                             max_loop_count: int) -> Generator[List[Dict[str, Any]], None, None]:
+    def _execute_multi_agent_workflow(self, 
+                                     all_messages: List[Dict[str, Any]],
+                                     tool_manager: Optional[Any],
+                                     context: Dict[str, Any],
+                                     session_id: str,
+                                     deep_thinking: bool,
+                                     summary: bool,
+                                     max_loop_count: int) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行完整的工作流
         
@@ -592,6 +596,41 @@ class AgentController:
         logger.info(f"AgentController: 任务总结阶段完成，生成 {len(summary_chunks)} 个块")
         return all_messages
 
+    def _execute_simplified_workflow(self, 
+                                    all_messages: List[Dict[str, Any]],
+                                    tool_manager: Optional[Any],
+                                    context: Dict[str, Any],
+                                    session_id: str,
+                                    deep_thinking: bool) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行简化工作流（可选的任务分析 + 直接执行）
+        
+        Args:
+            all_messages: 所有消息列表
+            tool_manager: 工具管理器
+            context: 执行上下文
+            session_id: 会话ID
+            deep_thinking: 是否进行任务分析
+            
+        Yields:
+            List[Dict[str, Any]]: 工作流输出的消息块
+        """
+        logger.info("AgentController: 开始简化工作流")
+        
+        # 1. 任务分析阶段
+        if deep_thinking:
+            all_messages = yield from self._execute_task_analysis_phase(
+                all_messages, tool_manager, context, session_id
+            )
+        
+        # 2. 直接执行
+        yield from self._execute_direct_workflow(
+            all_messages=all_messages,
+            tool_manager=tool_manager,
+            context=context,
+            session_id=session_id
+        )
+
     def _execute_direct_workflow(self, 
                                all_messages: List[Dict[str, Any]],
                                tool_manager: Optional[Any],
@@ -726,7 +765,8 @@ class AgentController:
             
             # 根据deep_research参数选择执行路径
             if deep_research:
-                # 完整流程
+                # 多智能体协作模式：执行完整流程（分解->规划->执行->观察->总结）
+                # deep_thinking 独立控制是否执行任务分析
                 if deep_thinking:
                     all_messages, new_messages = self._execute_task_analysis_non_stream(
                         all_messages, new_messages, tool_manager
@@ -750,7 +790,13 @@ class AgentController:
                 else:
                     final_output = new_messages[-1] if new_messages else None
             else:
-                # 直接执行模式
+                # 简化模式：可选的任务分析 + 直接执行
+                if deep_thinking:
+                    all_messages, new_messages = self._execute_task_analysis_non_stream(
+                        all_messages, new_messages, tool_manager
+                    )
+                
+                # 直接执行
                 direct_messages = self.direct_executor_agent.run(
                     all_messages, tool_manager, session_id=session_id
                 )

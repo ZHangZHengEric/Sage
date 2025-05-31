@@ -1,0 +1,42 @@
+# Sage Multi-Agent Framework 配置文件
+# 在启动时自动加载，避免每次手动配置
+
+# 模型配置
+model:
+  # API 密钥 (必填)
+  api_key: ""  # 请填入您的API密钥，如: sk-xxxxx
+  
+  # 模型名称
+  model_name: ""
+  
+  # API 基础URL
+  base_url: ""
+  
+  # 最大Token数
+  max_tokens: 4096
+  
+  # 温度参数 (0.0-2.0)
+  temperature: 0.7
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8001
+  reload: true
+  log_level: "info"
+
+# 工具配置
+tools:
+  auto_discover: true
+  enabled_tools: []  # 空数组表示启用所有工具
+
+# 多智能体配置
+agents:
+  enable_deep_thinking: true
+  enable_multi_agent: true
+  max_agents: 7
+
+# 日志配置
+logging:
+  level: "info"
+  format: "detailed" 
