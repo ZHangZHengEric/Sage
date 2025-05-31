@@ -1,3 +1,19 @@
+---
+layout: default
+title: 配置参考
+nav_order: 13
+description: "Sage多智能体框架完整配置参考"
+---
+
+{: .note }
+> 需要英文版本？请查看 [Configuration Reference](CONFIGURATION.html)
+
+## 目录
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # ⚙️ 配置参考
 
 本文档提供 Sage 多智能体框架配置的完整参考。

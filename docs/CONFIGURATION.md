@@ -1,3 +1,19 @@
+---
+layout: default
+title: Configuration Reference
+nav_order: 12
+description: "Complete configuration reference for the Sage Multi-Agent Framework"
+---
+
+{: .note }
+> Looking for the Chinese version? Check out [配置参考](CONFIGURATION_CN.html)
+
+## Table of Contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # ⚙️ Configuration Reference
 
 This document provides a complete reference for configuring Sage Multi-Agent Framework.

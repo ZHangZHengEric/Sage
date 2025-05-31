@@ -1,3 +1,19 @@
+---
+layout: default
+title: 示例和用例
+nav_order: 11
+description: "Sage多智能体框架的实际示例和用例"
+---
+
+{: .note }
+> 需要英文版本？请查看 [Examples & Use Cases](EXAMPLES.html)
+
+## 目录
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 🎯 示例和用例
 
 本文档提供在各种场景中使用 Sage 多智能体框架的实际示例。

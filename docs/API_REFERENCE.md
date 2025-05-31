@@ -1,3 +1,19 @@
+---
+layout: default
+title: API Reference
+nav_order: 8
+description: "Complete API reference for the Sage Multi-Agent Framework"
+---
+
+{: .note }
+> Looking for the Chinese version? Check out [API 参考](API_REFERENCE_CN.html)
+
+## Table of Contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 📖 API Reference
 
 This document provides comprehensive API documentation for Sage Multi-Agent Framework.

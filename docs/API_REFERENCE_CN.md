@@ -1,3 +1,19 @@
+---
+layout: default
+title: API 参考
+nav_order: 9
+description: "Sage多智能体框架完整API参考文档"
+---
+
+{: .note }
+> 需要英文版本？请查看 [API Reference](API_REFERENCE.html)
+
+## 目录
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 📖 API 参考文档
 
 本文档提供 Sage 多智能体框架的全面 API 文档。

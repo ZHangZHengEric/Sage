@@ -1,3 +1,19 @@
+---
+layout: default
+title: Examples & Use Cases
+nav_order: 10
+description: "Practical examples and use cases for the Sage Multi-Agent Framework"
+---
+
+{: .note }
+> Looking for the Chinese version? Check out [示例和用例](EXAMPLES_CN.html)
+
+## Table of Contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 🎯 Examples and Use Cases
 
 This document provides practical examples for using Sage Multi-Agent Framework in various scenarios.

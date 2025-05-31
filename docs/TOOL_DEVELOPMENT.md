@@ -1,3 +1,20 @@
+---
+layout: default
+title: Tool Development
+nav_order: 6
+description: "Learn how to create custom tools for the Sage Multi-Agent Framework"
+has_children: false
+---
+
+{: .note }
+> Looking for the Chinese version? Check out [工具开发指南](TOOL_DEVELOPMENT_CN.html)
+
+## Table of Contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 🛠️ Tool Development Guide
 
 This guide covers everything you need to know about developing custom tools for Sage Multi-Agent Framework.

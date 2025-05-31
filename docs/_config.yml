@@ -3,37 +3,111 @@ description: "Comprehensive documentation for the Sage Multi-Agent Framework"
 baseurl: ""
 url: "https://your-username.github.io/sage-multi-agent"
 
+# Use a better theme with more features
+remote_theme: just-the-docs/just-the-docs
+
+# Markdown processor
 markdown: kramdown
 highlighter: rouge
-theme: minima
 
+# Plugins
 plugins:
   - jekyll-feed
   - jekyll-sitemap
+  - jekyll-seo-tag
+  - jekyll-remote-theme
+
+# Search functionality
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 3
+  preview_words_before: 5
+  preview_words_after: 10
+  tokenizer_separator: /[\s/]+/
+  rel_url: true
 
 # Navigation structure
-navigation:
-  - title: "Quick Start"
-    url: "/QUICK_START/"
-  - title: "Architecture" 
-    url: "/ARCHITECTURE/"
-  - title: "Tool Development"
-    url: "/TOOL_DEVELOPMENT/"
-  - title: "API Reference"
-    url: "/API_REFERENCE/"
-  - title: "Examples"
-    url: "/EXAMPLES/"
-  - title: "Configuration"
-    url: "/CONFIGURATION/"
+nav_order_title: "Navigation"
+
+# Color scheme
+color_scheme: light
+
+# Site logo
+logo: "/assets/logo.png"
+
+# Footer content
+footer_content: "Copyright &copy; 2024 Sage Multi-Agent Framework. Distributed by an <a href=\"https://github.com/\">MIT license.</a>"
 
 # Language support
-languages:
-  en:
-    title: "English"
-    description: "English documentation"
-  zh:
-    title: "中文"
-    description: "Chinese documentation"
+lang: en
+
+# Enable heading anchors
+heading_anchors: true
+
+# Code copy button
+enable_copy_code_button: true
+
+# Custom CSS
+sass:
+  sass_dir: _sass
+  style: compressed
+
+# Aux navigation
+aux_links:
+  "GitHub Repository":
+    - "//github.com/your-repo/sage-multi-agent"
+  "中文文档":
+    - "#chinese-docs"
+
+aux_links_new_tab: true
+
+# Collections for better organization
+collections:
+  guides:
+    permalink: "/:collection/:name/"
+    output: true
+  api:
+    permalink: "/:collection/:name/"
+    output: true
+  examples:
+    permalink: "/:collection/:name/"
+    output: true
+
+# Default layouts
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"
+  - scope:
+      path: ""
+      type: "guides"
+    values:
+      layout: "default"
+  - scope:
+      path: ""
+      type: "api"
+    values:
+      layout: "default"
+  - scope:
+      path: ""
+      type: "examples"
+    values:
+      layout: "default"
+
+# Kramdown settings for better Chinese support
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    css_class: 'highlight'
+    span:
+      line_numbers: false
+    block:
+      line_numbers: false
 
 # Exclude files
 exclude:
@@ -43,4 +117,6 @@ exclude:
   - vendor/bundle/
   - vendor/cache/
   - vendor/gems/
-  - vendor/ruby/ 
+  - vendor/ruby/
+  - "*.gemspec"
+  - "*.gem" 

@@ -1,3 +1,19 @@
+---
+layout: default
+title: 架构指南
+nav_order: 5
+description: "理解Sage多智能体框架的架构和设计原则"
+---
+
+{: .note }
+> 需要英文版本？请查看 [Architecture Guide](ARCHITECTURE.html)
+
+## 目录
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 🏗️ 架构指南 (v2.0)
 
 本文档提供了 Sage 多智能体框架增强架构、设计原则和生产就绪功能的内部工作流程的全面概述。

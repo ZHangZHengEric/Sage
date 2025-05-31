@@ -1,6 +1,22 @@
+---
+layout: default
+title: Quick Start Guide
+nav_order: 2
+description: "Get started with Sage Multi-Agent Framework in just 5 minutes"
+---
+
 # 🏃 Quick Start Guide
 
 Welcome to Sage Multi-Agent Framework v2.0! This guide will get you up and running in just 5 minutes with enhanced token tracking and production-ready features.
+
+{: .note }
+> Looking for the Chinese version? Check out [快速开始指南](QUICK_START_CN.html)
+
+## Table of Contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
 
 ## 📋 Prerequisites
 

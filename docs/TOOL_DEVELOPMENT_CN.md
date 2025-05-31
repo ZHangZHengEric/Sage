@@ -1,3 +1,20 @@
+---
+layout: default
+title: 工具开发指南
+nav_order: 7
+description: "学习如何为Sage多智能体框架创建自定义工具"
+has_children: false
+---
+
+{: .note }
+> 需要英文版本？请查看 [Tool Development](TOOL_DEVELOPMENT.html)
+
+## 目录
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 🛠️ 工具开发指南
 
 本指南涵盖了为 Sage 多智能体框架开发自定义工具所需的一切知识。

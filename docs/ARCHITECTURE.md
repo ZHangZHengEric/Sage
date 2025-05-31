@@ -1,3 +1,19 @@
+---
+layout: default
+title: Architecture Guide
+nav_order: 4
+description: "Understanding the Sage Multi-Agent Framework architecture and design principles"
+---
+
+{: .note }
+> Looking for the Chinese version? Check out [架构指南](ARCHITECTURE_CN.html)
+
+## Table of Contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
 # 🏗️ Architecture Guide (v2.0)
 
 This document provides a comprehensive overview of Sage Multi-Agent Framework's enhanced architecture, design principles, and internal workflows with production-ready features.
