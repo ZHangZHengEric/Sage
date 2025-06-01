@@ -119,6 +119,38 @@ streamlit run examples/sage_demo.py -- \
   --base_url https://api.openai.com/v1
 ```
 
+### 🌐 Modern Web Application (FastAPI + React)
+
+Experience Sage through our cutting-edge web application featuring a modern React frontend with FastAPI backend:
+
+![Sage Web App](assets/sage_web_app.png)
+
+**Features:**
+- 🤖 **Multi-Agent Collaboration** - Visual workflow with decomposition, planning, execution, observation, and summary
+- 🧠 **Deep Thinking Mode** - Expandable thought bubbles showing agent reasoning process
+- 🚀 **FastAPI Backend** - High-performance async API server with streaming support
+- ⚛️ **React Frontend** - Modern responsive UI with Ant Design components
+- 📡 **Real-time Communication** - WebSocket + SSE dual support for live updates
+- 🎨 **Beautiful Interface** - Collapsible deep thinking bubbles with modern design
+- 🔧 **Tool Management** - Automatic tool discovery and management
+- 📱 **Responsive Design** - Adapts to all screen sizes
+- 🔧 **TypeScript Support** - Full type safety throughout
+
+**Quick Start:**
+```bash
+cd examples/fastapi_react_demo
+
+# Backend setup
+python start_backend.py
+
+# Frontend setup (new terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Access the application at `http://localhost:8080`. For detailed setup instructions, see the [FastAPI React Demo README](examples/fastapi_react_demo/README.md).
+
 ### 💻 Command Line Usage
 
 ```python

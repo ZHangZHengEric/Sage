@@ -1,0 +1,23 @@
+# Sage FastAPI + React Demo 依赖
+
+# Web框架
+fastapi==0.100.0
+uvicorn[standard]==0.21.0
+
+# WebSocket支持
+websockets==11.0.3
+
+# HTTP客户端
+httpx==0.24.1
+
+# 数据验证
+pydantic==1.10.12
+
+# 配置文件支持
+PyYAML==6.0.1
+
+# OpenAI客户端
+openai>=1.0.0
+
+# 其他工具
+python-multipart==0.0.6 
