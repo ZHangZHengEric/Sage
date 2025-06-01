@@ -1,3 +1,4 @@
+examples/fastapi_react_demo/backend/config.yaml
 # Byte-compiled / optimized / DLL files
 */__pycache__/*
 */logs/*
