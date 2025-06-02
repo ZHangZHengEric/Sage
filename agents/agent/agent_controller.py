@@ -4,8 +4,7 @@ AgentController 重构版本
 智能体控制器，负责协调多个智能体协同工作。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -72,7 +71,7 @@ class AgentController:
         }
         
         logger.info("AgentController: 智能体控制器初始化完成")
-        
+
     def _init_agents(self) -> None:
         """
         初始化所有必需的智能体
@@ -112,7 +111,8 @@ class AgentController:
                    deep_thinking: bool = True, 
                    summary: bool = True,
                    max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
-                   deep_research: bool = True) -> Generator[List[Dict[str, Any]], None, None]:
+                   deep_research: bool = True,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行智能体工作流并流式输出结果
         
@@ -124,6 +124,7 @@ class AgentController:
             summary: 是否生成任务总结
             max_loop_count: 最大循环次数
             deep_research: 是否进行深度研究（完整流程）
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Yields:
             List[Dict[str, Any]]: 自上次yield以来的新消息字典列表，每个消息包含：
@@ -138,13 +139,16 @@ class AgentController:
         self.overall_token_stats['workflow_start_time'] = time.time()
         logger.info(f"AgentController: 开始流式工作流，会话ID: {session_id}")
         
+        if system_context:
+            logger.info(f"AgentController: 设置了system_context参数: {list(system_context.keys())}")
+        
         try:
             # 准备会话和消息
             session_id = self._prepare_session_id(session_id)
             all_messages = self._prepare_initial_messages(input_messages)
             
             # 设置执行上下文
-            context = self._setup_execution_context(session_id)
+            system_context = self._setup_system_context(session_id, system_context)
             
             # 执行工作流
             if deep_research:
@@ -153,7 +157,7 @@ class AgentController:
                 yield from self._execute_multi_agent_workflow(
                     all_messages=all_messages,
                     tool_manager=tool_manager,
-                    context=context,
+                    system_context=system_context,
                     session_id=session_id,
                     deep_thinking=deep_thinking,
                     summary=summary,
@@ -164,7 +168,7 @@ class AgentController:
                 yield from self._execute_simplified_workflow(
                     all_messages=all_messages,
                     tool_manager=tool_manager,
-                    context=context,
+                    system_context=system_context,
                     session_id=session_id,
                     deep_thinking=deep_thinking
                 )
@@ -245,17 +249,18 @@ class AgentController:
         logger.debug(f"AgentController: 修剪后消息数量: {len(messages)}")
         return messages
 
-    def _setup_execution_context(self, session_id: str) -> Dict[str, Any]:
+    def _setup_system_context(self, session_id: str, user_system_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        设置执行上下文
+        设置系统上下文（合并基础信息和用户自定义信息）
         
         Args:
             session_id: 会话ID
+            user_system_context: 用户提供的系统上下文
             
         Returns:
-            Dict[str, Any]: 执行上下文字典
+            Dict[str, Any]: 完整的系统上下文字典
         """
-        logger.debug("AgentController: 设置执行上下文")
+        logger.debug("AgentController: 设置系统上下文")
         
         current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %A %H:%M:%S')
         file_workspace = self.WORKSPACE_TEMPLATE.format(session_id=session_id)
@@ -267,18 +272,25 @@ class AgentController:
             os.makedirs(file_workspace, exist_ok=True)
             logger.debug(f"AgentController: 创建工作目录: {file_workspace}")
         
-        context = {
+        # 构建完整的系统上下文，基础信息在前
+        system_context = {
+            'session_id': session_id,
             'current_time': current_time_str, 
             'file_workspace': file_workspace
         }
         
-        logger.info(f"AgentController: 执行上下文设置完成: {context}")
-        return context
+        # 如果用户提供了自定义上下文，则合并
+        if user_system_context:
+            system_context.update(user_system_context)
+            logger.info(f"AgentController: 合并用户系统上下文: {list(user_system_context.keys())}")
+        
+        logger.info(f"AgentController: 系统上下文设置完成，包含 {len(system_context)} 个字段")
+        return system_context
 
     def _execute_multi_agent_workflow(self, 
                                      all_messages: List[Dict[str, Any]],
                                      tool_manager: Optional[Any],
-                                     context: Dict[str, Any],
+                                     system_context: Dict[str, Any],
                                      session_id: str,
                                      deep_thinking: bool,
                                      summary: bool,
@@ -289,7 +301,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             deep_thinking: 是否进行深度思考
             summary: 是否生成总结
@@ -303,29 +315,29 @@ class AgentController:
         # 1. 任务分析阶段
         if deep_thinking:
             all_messages = yield from self._execute_task_analysis_phase(
-                all_messages, tool_manager, context, session_id
+                all_messages, tool_manager, system_context, session_id
             )
         
         # 2. 任务分解阶段
         all_messages = yield from self._execute_task_decomposition_phase(
-            all_messages, tool_manager, context, session_id
+            all_messages, tool_manager, system_context, session_id
         )
         
         # 3. 规划-执行-观察循环
         all_messages = yield from self._execute_main_loop(
-            all_messages, tool_manager, context, session_id, max_loop_count
+            all_messages, tool_manager, system_context, session_id, max_loop_count
         )
         
         # 4. 任务总结阶段
         if summary:
             all_messages = yield from self._execute_task_summary_phase(
-                all_messages, tool_manager, context, session_id
+                all_messages, tool_manager, system_context, session_id
             )
 
     def _execute_task_analysis_phase(self, 
                                    all_messages: List[Dict[str, Any]],
                                    tool_manager: Optional[Any],
-                                   context: Dict[str, Any],
+                                   system_context: Dict[str, Any],
                                    session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行任务分析阶段
@@ -333,7 +345,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -348,7 +360,7 @@ class AgentController:
         for chunk in self.task_analysis_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             analysis_chunks.append(chunk)
@@ -361,7 +373,7 @@ class AgentController:
     def _execute_task_decomposition_phase(self, 
                                         all_messages: List[Dict[str, Any]],
                                         tool_manager: Optional[Any],
-                                        context: Dict[str, Any],
+                                        system_context: Dict[str, Any],
                                         session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行任务分解阶段
@@ -369,7 +381,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -384,7 +396,7 @@ class AgentController:
         for chunk in self.task_decompose_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             decompose_chunks.append(chunk)
@@ -397,7 +409,7 @@ class AgentController:
     def _execute_main_loop(self, 
                          all_messages: List[Dict[str, Any]],
                          tool_manager: Optional[Any],
-                         context: Dict[str, Any],
+                         system_context: Dict[str, Any],
                          session_id: str,
                          max_loop_count: int) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -406,7 +418,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             max_loop_count: 最大循环次数
             
@@ -429,17 +441,17 @@ class AgentController:
 
             # 规划阶段
             all_messages = yield from self._execute_planning_phase(
-                all_messages, tool_manager, context, session_id
+                all_messages, tool_manager, system_context, session_id
             )
             
             # 执行阶段
             all_messages = yield from self._execute_execution_phase(
-                all_messages, tool_manager, context, session_id
+                all_messages, tool_manager, system_context, session_id
             )
             
             # 观察阶段
             all_messages, should_break = yield from self._execute_observation_phase(
-                all_messages, tool_manager, context, session_id
+                all_messages, tool_manager, system_context, session_id
             )
             
             if should_break:
@@ -451,7 +463,7 @@ class AgentController:
     def _execute_planning_phase(self, 
                               all_messages: List[Dict[str, Any]],
                               tool_manager: Optional[Any],
-                              context: Dict[str, Any],
+                              system_context: Dict[str, Any],
                               session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行规划阶段
@@ -459,7 +471,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -474,7 +486,7 @@ class AgentController:
         for chunk in self.planning_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             plan_chunks.append(chunk)
@@ -487,7 +499,7 @@ class AgentController:
     def _execute_execution_phase(self, 
                                all_messages: List[Dict[str, Any]],
                                tool_manager: Optional[Any],
-                               context: Dict[str, Any],
+                               system_context: Dict[str, Any],
                                session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行执行阶段
@@ -495,7 +507,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -510,7 +522,7 @@ class AgentController:
         for chunk in self.executor_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             exec_chunks.append(chunk)
@@ -523,7 +535,7 @@ class AgentController:
     def _execute_observation_phase(self, 
                                  all_messages: List[Dict[str, Any]],
                                  tool_manager: Optional[Any],
-                                 context: Dict[str, Any],
+                                 system_context: Dict[str, Any],
                                  session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行观察阶段
@@ -531,7 +543,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -546,7 +558,7 @@ class AgentController:
         for chunk in self.observation_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             obs_chunks.append(chunk)
@@ -563,7 +575,7 @@ class AgentController:
     def _execute_task_summary_phase(self, 
                                   all_messages: List[Dict[str, Any]],
                                   tool_manager: Optional[Any],
-                                  context: Dict[str, Any],
+                                  system_context: Dict[str, Any],
                                   session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行任务总结阶段
@@ -571,7 +583,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -586,7 +598,7 @@ class AgentController:
         for chunk in self.task_summary_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             summary_chunks.append(chunk)
@@ -599,7 +611,7 @@ class AgentController:
     def _execute_simplified_workflow(self, 
                                     all_messages: List[Dict[str, Any]],
                                     tool_manager: Optional[Any],
-                                    context: Dict[str, Any],
+                                    system_context: Dict[str, Any],
                                     session_id: str,
                                     deep_thinking: bool) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -608,7 +620,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             deep_thinking: 是否进行任务分析
             
@@ -620,21 +632,21 @@ class AgentController:
         # 1. 任务分析阶段
         if deep_thinking:
             all_messages = yield from self._execute_task_analysis_phase(
-                all_messages, tool_manager, context, session_id
+                all_messages, tool_manager, system_context, session_id
             )
         
         # 2. 直接执行
         yield from self._execute_direct_workflow(
             all_messages=all_messages,
             tool_manager=tool_manager,
-            context=context,
+            system_context=system_context,
             session_id=session_id
         )
 
     def _execute_direct_workflow(self, 
                                all_messages: List[Dict[str, Any]],
                                tool_manager: Optional[Any],
-                               context: Dict[str, Any],
+                               system_context: Dict[str, Any],
                                session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行直接工作流（使用直接执行智能体）
@@ -642,7 +654,7 @@ class AgentController:
         Args:
             all_messages: 所有消息列表
             tool_manager: 工具管理器
-            context: 执行上下文
+            system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
@@ -653,7 +665,7 @@ class AgentController:
         for chunk in self.direct_executor_agent.run_stream(
             messages=all_messages, 
             tool_manager=tool_manager, 
-            context=context, 
+            system_context=system_context, 
             session_id=session_id
         ):
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
@@ -728,7 +740,8 @@ class AgentController:
             deep_thinking: bool = True,
             summary: bool = True,
             max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
-            deep_research: bool = True) -> Dict[str, Any]:
+            deep_research: bool = True,
+            system_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         执行智能体工作流（非流式版本）
         
@@ -740,11 +753,15 @@ class AgentController:
             summary: 是否生成任务总结
             max_loop_count: 最大循环次数
             deep_research: 是否进行深度研究（完整流程）
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             Dict[str, Any]: 包含all_messages、new_messages、final_output和session_id的结果字典
         """
         logger.info(f"AgentController: 开始非流式工作流，会话ID: {session_id}")
+        
+        if system_context:
+            logger.info(f"AgentController: 设置了system_context参数: {list(system_context.keys())}")
         
         # 重置所有agent的token统计
         logger.info("AgentController: 重置所有Agent的Token统计")
@@ -769,23 +786,23 @@ class AgentController:
                 # deep_thinking 独立控制是否执行任务分析
                 if deep_thinking:
                     all_messages, new_messages = self._execute_task_analysis_non_stream(
-                        all_messages, new_messages, tool_manager
+                        all_messages, new_messages, tool_manager, system_context
                     )
                 
                 # 任务分解阶段
                 all_messages, new_messages = self._execute_task_decompose_non_stream(
-                    all_messages, new_messages, tool_manager
+                    all_messages, new_messages, tool_manager, system_context
                 )
                 
                 # 主循环
                 all_messages, new_messages = self._execute_main_loop_non_stream(
-                    all_messages, new_messages, tool_manager, session_id, max_loop_count
+                    all_messages, new_messages, tool_manager, session_id, max_loop_count, system_context
                 )
                 
                 # 总结阶段
                 if summary:
                     all_messages, new_messages, final_output = self._execute_task_summary_non_stream(
-                        all_messages, new_messages, tool_manager
+                        all_messages, new_messages, tool_manager, system_context
                     )
                 else:
                     final_output = new_messages[-1] if new_messages else None
@@ -793,12 +810,12 @@ class AgentController:
                 # 简化模式：可选的任务分析 + 直接执行
                 if deep_thinking:
                     all_messages, new_messages = self._execute_task_analysis_non_stream(
-                        all_messages, new_messages, tool_manager
+                        all_messages, new_messages, tool_manager, system_context
                     )
                 
                 # 直接执行
                 direct_messages = self.direct_executor_agent.run(
-                    all_messages, tool_manager, session_id=session_id
+                    all_messages, tool_manager, session_id=session_id, system_context=system_context
                 )
                 all_messages.extend(direct_messages)
                 new_messages.extend(direct_messages)
@@ -837,7 +854,8 @@ class AgentController:
     def _execute_task_analysis_non_stream(self, 
                                         all_messages: List[Dict[str, Any]], 
                                         new_messages: List[Dict[str, Any]], 
-                                        tool_manager: Optional[Any]) -> tuple:
+                                        tool_manager: Optional[Any],
+                                        system_context: Optional[Dict[str, Any]]) -> tuple:
         """
         执行任务分析（非流式版本）
         
@@ -845,13 +863,14 @@ class AgentController:
             all_messages: 所有消息列表
             new_messages: 新消息列表
             tool_manager: 工具管理器
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             tuple: 更新后的(all_messages, new_messages)
         """
         logger.info("AgentController: 开始初始任务分析")
         
-        analysis_messages = self.task_analysis_agent.run(all_messages, tool_manager)
+        analysis_messages = self.task_analysis_agent.run(all_messages, tool_manager, system_context=system_context)
         logger.info(f"AgentController: 任务分析完成，生成 {len(analysis_messages)} 条消息")
         
         all_messages.extend(analysis_messages)
@@ -862,7 +881,8 @@ class AgentController:
     def _execute_task_decompose_non_stream(self, 
                                          all_messages: List[Dict[str, Any]], 
                                          new_messages: List[Dict[str, Any]], 
-                                         tool_manager: Optional[Any]) -> tuple:
+                                         tool_manager: Optional[Any],
+                                         system_context: Optional[Dict[str, Any]]) -> tuple:
         """
         执行任务分解（非流式版本）
         
@@ -870,13 +890,14 @@ class AgentController:
             all_messages: 所有消息列表
             new_messages: 新消息列表
             tool_manager: 工具管理器
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             tuple: 更新后的(all_messages, new_messages)
         """
         logger.info("AgentController: 开始任务分解")
         
-        decompose_messages = self.task_decompose_agent.run(all_messages, tool_manager)
+        decompose_messages = self.task_decompose_agent.run(all_messages, tool_manager, system_context=system_context)
         logger.info(f"AgentController: 任务分解完成，生成 {len(decompose_messages)} 条消息")
         
         all_messages.extend(decompose_messages)
@@ -889,7 +910,8 @@ class AgentController:
                                     new_messages: List[Dict[str, Any]], 
                                     tool_manager: Optional[Any], 
                                     session_id: str,
-                                    max_loop_count: int) -> tuple:
+                                    max_loop_count: int,
+                                    system_context: Optional[Dict[str, Any]]) -> tuple:
         """
         执行主循环（非流式版本）
         
@@ -899,6 +921,7 @@ class AgentController:
             tool_manager: 工具管理器
             session_id: 会话ID
             max_loop_count: 最大循环次数
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             tuple: 更新后的(all_messages, new_messages)
@@ -910,19 +933,19 @@ class AgentController:
             logger.info(f"AgentController: 开始第 {loop_count} 轮规划-执行-观察循环")
             
             # 规划阶段
-            plan_messages = self.planning_agent.run(all_messages, tool_manager)
+            plan_messages = self.planning_agent.run(all_messages, tool_manager, system_context=system_context)
             logger.info(f"AgentController: 规划阶段完成，生成 {len(plan_messages)} 条消息")
             all_messages.extend(plan_messages)
             new_messages.extend(plan_messages)
             
             # 执行阶段
-            exec_messages = self.executor_agent.run(all_messages, tool_manager, session_id=session_id)
+            exec_messages = self.executor_agent.run(all_messages, tool_manager, session_id=session_id, system_context=system_context)
             logger.info(f"AgentController: 执行阶段完成，生成 {len(exec_messages)} 条消息")
             all_messages.extend(exec_messages)
             new_messages.extend(exec_messages)
             
             # 观察阶段
-            obs_messages = self.observation_agent.run(all_messages)
+            obs_messages = self.observation_agent.run(all_messages, system_context=system_context)
             logger.info(f"AgentController: 观察阶段完成，生成 {len(obs_messages)} 条消息")
             all_messages.extend(obs_messages)
             new_messages.extend(obs_messages)
@@ -979,7 +1002,8 @@ class AgentController:
     def _execute_task_summary_non_stream(self, 
                                        all_messages: List[Dict[str, Any]], 
                                        new_messages: List[Dict[str, Any]], 
-                                       tool_manager: Optional[Any]) -> tuple:
+                                       tool_manager: Optional[Any],
+                                       system_context: Optional[Dict[str, Any]]) -> tuple:
         """
         执行任务总结（非流式版本）
         
@@ -987,13 +1011,14 @@ class AgentController:
             all_messages: 所有消息列表
             new_messages: 新消息列表
             tool_manager: 工具管理器
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             tuple: 更新后的(all_messages, new_messages, final_output)
         """
         logger.info("AgentController: 开始任务总结阶段")
         
-        summary_result = self.task_summary_agent.run(all_messages, tool_manager)
+        summary_result = self.task_summary_agent.run(all_messages, tool_manager, system_context=system_context)
         logger.info(f"AgentController: 任务总结完成，生成 {len(summary_result)} 条消息")
         
         all_messages.extend(summary_result)

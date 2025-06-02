@@ -4,8 +4,7 @@ TaskAnalysisAgent 重构版本
 任务分析智能体，负责分析任务并将其分解为组件。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -63,6 +62,9 @@ class TaskAnalysisAgent(AgentBase):
 当前时间是 {current_datatime_str}
 """
 
+    # 系统提示模板常量
+    SYSTEM_PREFIX_DEFAULT = """你是一个任务分析智能体，专门负责分析任务并将其分解为组件。请仔细理解用户需求，提供清晰、自然的分析过程。"""
+    
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
         初始化任务分析智能体
@@ -79,8 +81,8 @@ class TaskAnalysisAgent(AgentBase):
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
-                   context: Optional[Dict[str, Any]] = None,
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务分析
         
@@ -89,8 +91,8 @@ class TaskAnalysisAgent(AgentBase):
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加执行上下文
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分析消息块
@@ -102,22 +104,22 @@ class TaskAnalysisAgent(AgentBase):
         
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_analysis_stream_internal(messages, tool_manager, context, session_id)
+            self._execute_analysis_stream_internal(messages, tool_manager, session_id, system_context)
         )
 
     def _execute_analysis_stream_internal(self, 
                                         messages: List[Dict[str, Any]], 
                                         tool_manager: Optional[Any],
-                                        context: Optional[Dict[str, Any]],
-                                        session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                        session_id: str,
+                                        system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部任务分析流式执行方法
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加执行上下文
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分析消息块
@@ -127,8 +129,8 @@ class TaskAnalysisAgent(AgentBase):
             analysis_context = self._prepare_analysis_context(
                 messages=messages,
                 tool_manager=tool_manager,
-                context=context,
-                session_id=session_id
+                session_id=session_id,
+                system_context=system_context
             )
             
             # 生成分析提示
@@ -145,16 +147,16 @@ class TaskAnalysisAgent(AgentBase):
     def _prepare_analysis_context(self, 
                                 messages: List[Dict[str, Any]],
                                 tool_manager: Optional[Any],
-                                context: Optional[Dict[str, Any]],
-                                session_id: str) -> Dict[str, Any]:
+                                session_id: str,
+                                system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         准备任务分析所需的上下文信息
         
         Args:
             messages: 对话消息列表
             tool_manager: 工具管理器
-            context: 附加上下文
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             Dict[str, Any]: 包含分析所需信息的上下文字典
@@ -170,14 +172,15 @@ class TaskAnalysisAgent(AgentBase):
         available_tools = tool_manager.list_tools_simplified() if tool_manager else []
         logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools)}")
         
-        # 获取当前时间
-        current_datatime_str = context.get('current_datatime_str', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # 获取当前时间（从system_context或生成默认值）
+        current_datatime_str = system_context.get('current_time') if system_context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         analysis_context = {
             'conversation': conversation,
             'available_tools': available_tools,
             'current_datatime_str': current_datatime_str,
-            'session_id': session_id
+            'session_id': session_id,
+            'system_context': system_context
         }
         
         logger.info("TaskAnalysisAgent: 任务分析上下文准备完成")
@@ -228,10 +231,17 @@ class TaskAnalysisAgent(AgentBase):
             message_type='task_analysis_result'
         )
         
+        # 始终准备系统消息
+        system_message = self.prepare_unified_system_message(
+            session_id=context.get('session_id'),
+            system_context=context.get('system_context')  # 传递system_context作为补充信息
+        )
+        
         # 使用基类的流式处理和token跟踪
         yield from self._execute_streaming_with_token_tracking(
             prompt=prompt,
             step_name="task_analysis",
+            system_message=system_message,
             message_type='task_analysis_result'
         )
 
@@ -254,16 +264,16 @@ class TaskAnalysisAgent(AgentBase):
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         执行任务分析（非流式版本）
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             List[Dict[str, Any]]: 任务分析结果消息列表
@@ -274,6 +284,6 @@ class TaskAnalysisAgent(AgentBase):
         return super().run(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         )
