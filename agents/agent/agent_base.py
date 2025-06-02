@@ -4,8 +4,7 @@ AgentBase 重构版本
 智能体基类，提供所有智能体的通用功能和接口。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -27,7 +26,7 @@ class AgentBase(ABC):
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any],system_prefix: str = ""):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
         初始化智能体基类
         
@@ -352,58 +351,141 @@ class AgentBase(ABC):
             message_type=message_type
         )
     
-    def _prepare_system_message_with_context(self, 
-                                           context: Dict[str, Any],
-                                           default_prefix: str = "") -> Dict[str, Any]:
+    def prepare_unified_system_message(self,
+                                     session_id: Optional[str] = None,
+                                     system_context: Optional[Dict[str, Any]] = None,
+                                     custom_prefix: Optional[str] = None) -> Dict[str, Any]:
         """
-        准备带有上下文的系统消息
+        统一的系统消息生成方法
+        
+        这个方法会自动使用每个agent定义的SYSTEM_PREFIX_DEFAULT常量，
+        如果agent没有定义该常量，则使用传入的custom_prefix或默认的system_prefix。
         
         Args:
-            context: 上下文字典，包含session_id, current_time, file_workspace等
-            default_prefix: 默认系统前缀
+            session_id: 会话ID（向后兼容，现在可从system_context获取）
+            system_context: 运行时系统上下文字典，包含所有需要的信息
+            custom_prefix: 自定义前缀，如果agent没有SYSTEM_PREFIX_DEFAULT时使用
             
         Returns:
-            Dict[str, Any]: 系统消息字典
+            Dict[str, Any]: 统一格式的系统消息字典
         """
-        logger.debug(f"{self.__class__.__name__}: 准备系统消息")
+        logger.debug(f"{self.__class__.__name__}: 生成统一系统消息")
         
-        # 设置默认系统前缀
-        if len(self.system_prefix) == 0:
-            self.system_prefix = default_prefix
+        # 1. 确定系统前缀
+        system_prefix = self._get_system_prefix(custom_prefix)
         
-        # 构建系统消息模板
-        system_template = """
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-"""
+        # 2. 构建基础系统内容
+        system_content = system_prefix
         
-        # 构建系统消息
-        system_content = self.system_prefix + system_template.format(
-            session_id=context.get('session_id', ''),
-            current_time=context.get('current_time', ''),
-            file_workspace=context.get('file_workspace', '')
-        )
+        # 3. 添加运行时system_context信息
+        if system_context:
+            system_content += self._build_system_context_section(system_context)
+        
+        logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_content)}")
+        
+        # 4. 打印完整的系统提示信息（新增）
+        print("\n" + "="*100)
+        print(f"🤖 {self.__class__.__name__} - 系统提示消息")
+        print("="*100)
+        print(f"📋 Agent类型: {self.__class__.__name__}")
+        print(f"🆔 会话ID: {session_id if session_id else system_context.get('session_id', 'None') if system_context else 'None'}")
+        
+        if system_context:
+            print(f"🔧 System Context字段: {list(system_context.keys())}")
+            print(f"📊 System Context详情:")
+            for key, value in system_context.items():
+                if isinstance(value, str) and len(value) > 100:
+                    print(f"   • {key}: {value[:100]}... (长度: {len(value)})")
+                else:
+                    print(f"   • {key}: {value}")
+        else:
+            print("🔧 System Context: None")
+        
+        print(f"📏 完整系统消息长度: {len(system_content)} 字符")
+        print("📝 完整系统消息内容:")
+        print("-" * 50)
+        print(system_content)
+        print("-" * 50)
+        print("="*100 + "\n")
         
         return {
             'role': 'system',
             'content': system_content
         }
+    
+    def _get_system_prefix(self, custom_prefix: Optional[str] = None) -> str:
+        """
+        获取系统前缀
+        
+        优先级：
+        1. agent的SYSTEM_PREFIX_DEFAULT常量
+        2. custom_prefix参数
+        3. agent的system_prefix实例变量
+        4. 默认描述
+        
+        Args:
+            custom_prefix: 自定义前缀
+            
+        Returns:
+            str: 最终的系统前缀
+        """
+        # 优先使用agent定义的SYSTEM_PREFIX_DEFAULT常量
+        if hasattr(self, 'SYSTEM_PREFIX_DEFAULT'):
+            return self.SYSTEM_PREFIX_DEFAULT
+        
+        # 其次使用传入的custom_prefix
+        if custom_prefix:
+            return custom_prefix
+        
+        # 再次使用实例的system_prefix
+        if self.system_prefix:
+            return self.system_prefix
+        
+        # 最后使用默认描述
+        return f"你是一个{self.__class__.__name__}智能体。"
+    
+    def _build_system_context_section(self, system_context: Dict[str, Any]) -> str:
+        """
+        构建运行时system_context信息部分
+        
+        Args:
+            system_context: 运行时系统上下文字典
+            
+        Returns:
+            str: 格式化的system_context字符串
+        """
+        logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
+        section = "\n\n补充上下文信息：\n"
+        
+        for key, value in system_context.items():
+            if isinstance(value, dict):
+                # 如果值是字典，格式化显示
+                formatted_dict = json.dumps(value, ensure_ascii=False, indent=2)
+                section += f"{key}: {formatted_dict}\n"
+            elif isinstance(value, (list, tuple)):
+                # 如果值是列表或元组，格式化显示
+                formatted_list = json.dumps(list(value), ensure_ascii=False, indent=2)
+                section += f"{key}: {formatted_list}\n"
+            else:
+                # 其他类型直接转换为字符串
+                section += f"{key}: {str(value)}\n"
+        
+        return section
 
     @abstractmethod
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
-                   context: Optional[Dict[str, Any]] = None,
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式处理消息的抽象方法
         
         Args:
             messages: 对话消息列表
             tool_manager: 可选的工具管理器
-            context: 可选的上下文字典
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，包含基础信息和用户自定义信息
             
         Yields:
             List[Dict[str, Any]]: 流式输出的消息块
@@ -413,8 +495,8 @@ class AgentBase(ABC):
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         执行Agent任务（非流式版本）
         
@@ -423,8 +505,8 @@ class AgentBase(ABC):
         Args:
             messages: 对话历史记录
             tool_manager: 工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，包含基础信息和用户自定义信息
             
         Returns:
             List[Dict[str, Any]]: 任务执行结果消息列表
@@ -436,8 +518,8 @@ class AgentBase(ABC):
         for chunk_batch in self.run_stream(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         ):
             all_chunks.extend(chunk_batch)
         
@@ -624,23 +706,23 @@ class AgentBase(ABC):
         clean_messages = []
         
         for msg in messages:
-            if 'tool_calls' in msg and msg['tool_calls'] is not None:
-                clean_messages.append({
-                    'role': msg['role'],
-                    'tool_calls': msg['tool_calls']
-                })
-            elif 'content' in msg:
-                if 'tool_call_id' in msg:
+                if 'tool_calls' in msg and msg['tool_calls'] is not None:
                     clean_messages.append({
                         'role': msg['role'],
-                        'content': msg['content'],
-                        'tool_call_id': msg['tool_call_id']
+                        'tool_calls': msg['tool_calls']
                     })
-                else:
-                    clean_messages.append({
-                        'role': msg['role'],
-                        'content': msg['content']
-                    })
+                elif 'content' in msg:
+                    if 'tool_call_id' in msg:
+                        clean_messages.append({
+                            'role': msg['role'],
+                            'content': msg['content'],
+                            'tool_call_id': msg['tool_call_id']
+                        })
+                    else:
+                        clean_messages.append({
+                            'role': msg['role'],
+                            'content': msg['content']
+                        })
         
         logger.debug(f"AgentBase: 清理后保留 {len(clean_messages)} 条消息")
         return clean_messages
@@ -896,9 +978,3 @@ class AgentBase(ABC):
                 'reasoning_tokens': reasoning_tokens
             }
         return None
-
-    def _ensure_message_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        # This method is mentioned in the clean_messages method but not implemented in the provided code block.
-        # It's assumed to exist as it's called in the clean_messages method.
-        # Since the method is not provided in the original file or the code block, it's left unchanged.
-        pass

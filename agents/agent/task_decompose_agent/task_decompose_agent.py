@@ -1,11 +1,10 @@
 """
 TaskDecomposeAgent 重构版本
 
-任务分解智能体，负责将复杂任务分解为可执行的子任务。
+任务分解智能体，负责将复杂任务分解为清晰可执行的子任务。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -57,13 +56,6 @@ class TaskDecomposeAgent(AgentBase):
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是一个任务分解者，你需要根据用户需求，将复杂任务分解为清晰可执行的子任务。"""
     
-    # 系统消息模板常量
-    SYSTEM_MESSAGE_TEMPLATE = """
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-"""
-
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
         初始化任务分解智能体
@@ -80,8 +72,8 @@ class TaskDecomposeAgent(AgentBase):
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
-                   context: Optional[Dict[str, Any]] = None,
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务分解
         
@@ -90,8 +82,8 @@ class TaskDecomposeAgent(AgentBase):
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分解消息块
@@ -103,22 +95,22 @@ class TaskDecomposeAgent(AgentBase):
         
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_decompose_stream_internal(messages, tool_manager, context, session_id)
+            self._execute_decompose_stream_internal(messages, tool_manager, session_id, system_context)
         )
 
     def _execute_decompose_stream_internal(self, 
                                          messages: List[Dict[str, Any]], 
                                          tool_manager: Optional[Any],
-                                         context: Optional[Dict[str, Any]],
-                                         session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                         session_id: str,
+                                         system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部任务分解流式执行方法
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分解消息块
@@ -127,8 +119,8 @@ class TaskDecomposeAgent(AgentBase):
             # 准备分解上下文
             decomposition_context = self._prepare_decomposition_context(
                 messages=messages,
-                context=context,
-                session_id=session_id
+                session_id=session_id,
+                system_context=system_context
             )
             
             # 生成分解提示
@@ -144,15 +136,15 @@ class TaskDecomposeAgent(AgentBase):
 
     def _prepare_decomposition_context(self, 
                                      messages: List[Dict[str, Any]],
-                                     context: Optional[Dict[str, Any]],
-                                     session_id: str) -> Dict[str, Any]:
+                                     session_id: str,
+                                     system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         准备任务分解所需的上下文信息
         
         Args:
             messages: 对话消息列表
-            context: 附加上下文
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
             Dict[str, Any]: 包含任务分解所需信息的上下文字典
@@ -167,8 +159,10 @@ class TaskDecomposeAgent(AgentBase):
         
         decomposition_context = {
             'task_description': task_description_str,
+            'current_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'file_workspace': '无' if system_context is None else system_context.get('file_workspace', '无'),
             'session_id': session_id,
-            'context': context
+            'system_context': system_context
         }
         
         logger.info("TaskDecomposeAgent: 任务分解上下文准备完成")
@@ -206,10 +200,10 @@ class TaskDecomposeAgent(AgentBase):
         """
         logger.info("TaskDecomposeAgent: 开始执行流式任务分解")
         
-        # 准备系统消息和提示
-        system_message = self._prepare_system_message(
-            decomposition_context.get('context'), 
-            decomposition_context['session_id']
+        # 准备系统消息
+        system_message = self.prepare_unified_system_message(
+            session_id=decomposition_context.get('session_id'),
+            system_context=decomposition_context.get('system_context')
         )
         prompt = self._generate_decomposition_prompt(decomposition_context)
         
@@ -273,41 +267,6 @@ class TaskDecomposeAgent(AgentBase):
         
         # 处理最终结果
         yield from self._finalize_decomposition_result(full_response, message_id)
-
-    def _prepare_system_message(self, 
-                              context: Optional[Dict[str, Any]], 
-                              session_id: str) -> Dict[str, Any]:
-        """
-        准备系统消息
-        
-        Args:
-            context: 附加上下文
-            session_id: 会话ID
-            
-        Returns:
-            Dict[str, Any]: 系统消息字典
-        """
-        logger.debug("TaskDecomposeAgent: 准备系统消息")
-        
-        # 设置默认系统前缀
-        if len(self.system_prefix) == 0:
-            self.system_prefix = self.SYSTEM_PREFIX_DEFAULT
-        
-        # 获取上下文信息
-        current_time = context.get('current_time', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_workspace = context.get('file_workspace', '无') if context else '无'
-        
-        # 构建系统消息
-        system_content = self.system_prefix + self.SYSTEM_MESSAGE_TEMPLATE.format(
-            session_id=session_id,
-            current_time=current_time,
-            file_workspace=file_workspace
-        )
-        
-        return {
-            'role': 'system',
-            'content': system_content
-        }
 
     def _prepare_llm_messages(self, 
                             system_message: Dict[str, Any], 
@@ -460,16 +419,16 @@ class TaskDecomposeAgent(AgentBase):
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         执行任务分解（非流式版本）
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
             List[Dict[str, Any]]: 任务分解结果消息列表
@@ -480,6 +439,6 @@ class TaskDecomposeAgent(AgentBase):
         return super().run(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         )
