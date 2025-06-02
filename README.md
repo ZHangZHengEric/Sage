@@ -4,7 +4,7 @@
 [![简体中文](https://img.shields.io/badge/简体中文-点击查看-orange)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-0.8-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
 # 🚀 Sage Multi-Agent Framework
 
@@ -51,23 +51,24 @@ Sage has been extensively tested with the following language models:
 graph TD
     A[🔍 User Input] --> B(📋 Task Analysis Agent)
     B --> C{✅ Analysis Complete?}
-    C -->|Yes| D[🎯 Planning Agent]
+    C -->|Yes| D[🎯 Task Decompose Agent]
     C -->|No| B
-    D --> E[⚡ Executor Agent]
-    E --> F[👁️ Observation Agent]
-    F --> G{🎪 Task Complete?}
-    G -->|Yes| H[📄 Summary Agent]
-    G -->|No| D
-    H --> I[🎉 Final Output]
+    D --> E[📝 Planning Agent]
+    E --> F[⚡ Executor Agent]
+    F --> G[👁️ Observation Agent]
+    G --> H{🎪 Task Complete?}
+    H -->|Yes| I[📄 Summary Agent]
+    H -->|No| E
+    I --> J[🎉 Final Output]
     
     subgraph "🛠️ Tool Ecosystem"
-        E --> J[🔧 Tool Manager]
-        J -->|Local| K[📱 Built-in Tools]
-        J -->|Remote| L[🌐 MCP Servers]
-        L --> M[🔌 External APIs]
-        K --> N[📊 Results]
-        M --> N
-        N --> F
+        F --> K[🔧 Tool Manager]
+        K -->|Local| L[📱 Built-in Tools]
+        K -->|Remote| M[🌐 MCP Servers]
+        M --> N[🔌 External APIs]
+        L --> O[📊 Results]
+        N --> O
+        O --> G
     end
     
     subgraph "📊 Token Tracking"
@@ -75,13 +76,14 @@ graph TD
         D --> P
         E --> P
         F --> P
-        H --> P
+        G --> P
+        I --> P
         P --> Q[📈 Cost Analytics]
     end
     
     style A fill:#e1f5fe
-    style I fill:#e8f5e8
-    style J fill:#fff3e0
+    style J fill:#e8f5e8
+    style K fill:#fff3e0
     style P fill:#f3e5f5
 ```
 
@@ -172,7 +174,21 @@ controller = AgentController(model, {
 
 # Execute task with comprehensive tracking
 messages = [{"role": "user", "content": "Analyze the current trends in AI and provide actionable insights"}]
-result = controller.run(messages, tool_manager, deep_thinking=True, summary=True)
+
+# Use system_context to provide additional runtime information
+system_context = {
+    "task_priority": "high",
+    "deadline": "2024-01-15",
+    "target_audience": "technical team"
+}
+
+result = controller.run(
+    messages, 
+    tool_manager, 
+    deep_thinking=True, 
+    summary=True,
+    system_context=system_context
+)
 
 # Access results and usage statistics
 print("Final Output:", result['final_output']['content'])
@@ -182,20 +198,21 @@ print("Execution Time:", result['execution_time'])
 
 ## 🎯 Core Features
 
-### 🤖 **Multi-Agent Collaboration (v0.8)**
-- **Task Analysis Agent**: Enhanced deep understanding with context awareness
-- **Planning Agent**: Strategic decomposition with dependency management and tool selection
-- **Executor Agent**: Intelligent tool execution with error recovery and retry mechanisms
-- **Observation Agent**: Advanced progress monitoring with completion detection
-- **Summary Agent**: Comprehensive result synthesis with structured output
+### 🤖 **Multi-Agent Collaboration (v0.9)**
+- **Task Analysis Agent**: Enhanced deep understanding with context awareness and unified system prompt management
+- **Task Decompose Agent**: New intelligent task breakdown with dependency analysis and parallel execution planning
+- **Planning Agent**: Strategic decomposition with dependency management and optimal tool selection
+- **Executor Agent**: Intelligent tool execution with error recovery, retry mechanisms, and parallel processing
+- **Observation Agent**: Advanced progress monitoring with completion detection and quality assessment
+- **Summary Agent**: Comprehensive result synthesis with structured output and actionable insights
 
 ### 🛠️ **Advanced Tool System**
-- **Plugin Architecture**: Hot-reloadable tool development with automatic registration
-- **MCP Server Support**: Seamless integration with Model Context Protocol servers
-- **Auto-Discovery**: Intelligent tool detection from directories and modules
-- **Type Safety**: Comprehensive parameter validation with schema enforcement
-- **Error Handling**: Robust error recovery, timeout management, and detailed logging
-- **Performance Monitoring**: Tool execution time tracking and optimization suggestions
+- **Plugin Architecture**: Hot-reloadable tool development with automatic registration and versioning
+- **MCP Server Support**: Seamless integration with Model Context Protocol servers and remote APIs
+- **Auto-Discovery**: Intelligent tool detection from directories, modules, and remote endpoints
+- **Type Safety**: Comprehensive parameter validation with schema enforcement and runtime checks
+- **Error Handling**: Robust error recovery, timeout management, retry strategies, and detailed logging
+- **Performance Monitoring**: Tool execution time tracking, bottleneck detection, and optimization suggestions
 
 ### 📊 **Token Usage & Cost Monitoring**
 - **Real-time Tracking**: Monitor token consumption across all agents and operations
@@ -226,12 +243,18 @@ controller.print_comprehensive_token_stats()
 
 #### Deep Research Mode (Recommended for Complex Tasks)
 ```python
+# Enhanced with system_context support
 result = controller.run(
     messages, 
     tool_manager,
     deep_thinking=True,    # Enable comprehensive task analysis
     summary=True,          # Generate detailed summary with insights
-    deep_research=True     # Full multi-agent pipeline
+    deep_research=True,    # Full multi-agent pipeline with decomposition
+    system_context={       # Unified system context management
+        "project_context": "AI research project",
+        "constraints": ["time: 2 hours", "resources: limited"],
+        "preferences": {"output_format": "detailed_report"}
+    }
 )
 
 # Streaming version with real-time updates
@@ -240,7 +263,8 @@ for chunk in controller.run_stream(
     tool_manager,
     deep_thinking=True,
     summary=True,
-    deep_research=True
+    deep_research=True,
+    system_context=system_context  # Consistent system context across streaming
 ):
     for message in chunk:
         print(f"[{message['type']}] {message['role']}: {message['show_content']}")
@@ -253,7 +277,8 @@ result = controller.run(
     tool_manager,
     deep_thinking=True,    # Enable task analysis
     summary=True,          # Generate summary
-    deep_research=False    # Skip detailed research phase
+    deep_research=False,   # Skip detailed decomposition phase
+    system_context=system_context  # Runtime context support
 )
 ```
 
@@ -263,13 +288,14 @@ result = controller.run(
     messages,
     tool_manager, 
     deep_thinking=False,   # Skip analysis
-    deep_research=False    # Direct execution
+    deep_research=False,   # Direct execution
+    system_context=system_context  # Even rapid mode supports context
 )
 ```
 
 ## 📊 Real-time Streaming & Monitoring
 
-Watch your agents work in real-time with detailed progress tracking:
+Watch your agents work in real-time with detailed progress tracking and performance metrics:
 
 ```python
 import time
@@ -277,7 +303,14 @@ import time
 start_time = time.time()
 token_count = 0
 
-for chunk in controller.run_stream(messages, tool_manager):
+# Enhanced streaming with system context
+system_context = {
+    "monitoring_level": "detailed",
+    "progress_tracking": True,
+    "performance_metrics": True
+}
+
+for chunk in controller.run_stream(messages, tool_manager, system_context=system_context):
     for message in chunk:
         # Display agent activity
         print(f"🤖 {message['role']}: {message['show_content']}")
@@ -433,28 +466,36 @@ update_settings(
 controller = AgentController.from_config("production.yaml")
 ```
 
-## 🔄 Recent Updates (v0.8)
+## 🔄 Recent Updates (v0.9)
 
 ### ✨ New Features
-- 🎯 **Enhanced Token Tracking**: Comprehensive usage statistics with cost monitoring
-- 🛡️ **Robust Error Handling**: Advanced error recovery and retry mechanisms
-- ⚡ **Performance Optimization**: 40% faster execution with better resource management
-- 🔧 **Improved Tool System**: Auto-discovery, better validation, and MCP integration
-- 📊 **Real-time Monitoring**: Live performance metrics and bottleneck detection
-- 🤖 **Extended Model Support**: Native support for DeepSeek-V3, Qwen-3, and more
+- 🎯 **Task Decompose Agent**: New specialized agent for intelligent task breakdown and dependency management
+- 🔧 **Unified System Prompt Management**: Centralized system context handling with `system_context` parameter across all agents
+- 📊 **Enhanced Token Tracking**: Comprehensive usage statistics with detailed cost monitoring and optimization suggestions
+- 🛡️ **Robust Error Handling**: Advanced error recovery, retry mechanisms, and comprehensive exception handling
+- ⚡ **Performance Optimization**: 50% faster execution with improved resource management and parallel processing
+- 🌐 **Modern Web Application**: Complete FastAPI + React web application with TypeScript support and real-time collaboration
 
 ### 🔧 Technical Improvements
-- 🏗️ **Agent Architecture**: Refactored for better modularity and maintainability
-- 💾 **Memory Management**: Optimized memory usage for long-running tasks
-- 🌐 **Streaming Enhancement**: Improved real-time updates with better UI feedback
-- ⚙️ **Configuration System**: More flexible and powerful configuration options
-- 📝 **Documentation**: Complete rewrite with more examples and best practices
+- 🏗️ **Agent Architecture**: Added Task Decompose Agent to the workflow for better task breakdown
+- 💬 **System Context API**: New `system_context` parameter for unified runtime information management
+- 📝 **System Prompt Organization**: Centralized system prompt management with `SYSTEM_PREFIX_DEFAULT` constants
+- 💾 **Memory Management**: Optimized memory usage for long-running tasks and large-scale deployments
+- 🌐 **Streaming Enhancement**: Improved real-time updates with better UI feedback and WebSocket reliability
+- 📊 **Token Analytics**: Comprehensive usage tracking with cost optimization suggestions and budget management
 
 ### 🐛 Bug Fixes
-- Fixed token usage calculation errors in streaming mode
-- Resolved memory leaks in long-running agent sessions
-- Improved error handling for malformed tool responses
-- Enhanced compatibility with different OpenAI API versions
+- Fixed streaming response interruption issues
+- Resolved tool execution timeout problems
+- Improved session management and cleanup
+- Enhanced error message clarity and debugging information
+- Fixed memory leaks in long-running sessions
+
+### 📋 API Changes
+- **New Parameter**: `system_context` added to `run()` and `run_stream()` methods for unified context management
+- **Workflow Enhancement**: Added Task Decompose Agent between Task Analysis and Planning phases
+- **System Prompt**: All agents now use unified system prompt management with `SYSTEM_PREFIX_DEFAULT` constants
+- **Backward Compatibility**: All existing APIs remain fully compatible
 
 ## 📄 License
 
