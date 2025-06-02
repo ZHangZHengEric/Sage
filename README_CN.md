@@ -4,7 +4,7 @@
 [![简体中文](https://img.shields.io/badge/简体中文-点击查看-orange)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-0.8-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
 # 🚀 Sage 多智能体框架
 
@@ -51,23 +51,24 @@ Sage 已经过以下语言模型的广泛测试：
 graph TD
     A[🔍 用户输入] --> B(📋 任务分析智能体)
     B --> C{✅ 分析完成?}
-    C -->|是| D[🎯 规划智能体]
+    C -->|是| D[🎯 任务分解智能体]
     C -->|否| B
-    D --> E[⚡ 执行智能体]
-    E --> F[👁️ 观察智能体]
-    F --> G{🎪 任务完成?}
-    G -->|是| H[📄 总结智能体]
-    G -->|否| D
-    H --> I[🎉 最终输出]
+    D --> E[📝 规划智能体]
+    E --> F[⚡ 执行智能体]
+    F --> G[👁️ 观察智能体]
+    G --> H{🎪 任务完成?}
+    H -->|是| I[📄 总结智能体]
+    H -->|否| E
+    I --> J[🎉 最终输出]
     
     subgraph "🛠️ 工具生态系统"
-        E --> J[🔧 工具管理器]
-        J -->|本地| K[📱 内置工具]
-        J -->|远程| L[🌐 MCP服务器]
-        L --> M[🔌 外部API]
-        K --> N[📊 结果]
-        M --> N
-        N --> F
+        F --> K[🔧 工具管理器]
+        K -->|本地| L[📱 内置工具]
+        K -->|远程| M[🌐 MCP服务器]
+        M --> N[🔌 外部API]
+        L --> O[📊 结果]
+        N --> O
+        O --> G
     end
     
     subgraph "📊 令牌跟踪"
@@ -75,13 +76,14 @@ graph TD
         D --> P
         E --> P
         F --> P
-        H --> P
+        G --> P
+        I --> P
         P --> Q[📈 成本分析]
     end
     
     style A fill:#e1f5fe
-    style I fill:#e8f5e8
-    style J fill:#fff3e0
+    style J fill:#e8f5e8
+    style K fill:#fff3e0
     style P fill:#f3e5f5
 ```
 
@@ -172,7 +174,21 @@ controller = AgentController(model, {
 
 # 执行任务并进行全面跟踪
 messages = [{"role": "user", "content": "分析当前AI趋势并提供可操作的见解"}]
-result = controller.run(messages, tool_manager, deep_thinking=True, summary=True)
+
+# 使用system_context提供额外的运行时信息
+system_context = {
+    "任务优先级": "高",
+    "截止日期": "2024-01-15",
+    "目标受众": "技术团队"
+}
+
+result = controller.run(
+    messages, 
+    tool_manager, 
+    deep_thinking=True, 
+    summary=True,
+    system_context=system_context
+)
 
 # 访问结果和使用统计
 print("最终输出:", result['final_output']['content'])
@@ -182,20 +198,21 @@ print("执行时间:", result['execution_time'])
 
 ## 🎯 核心功能
 
-### 🤖 **多智能体协作 (v0.8)**
-- **任务分析智能体**: 增强的深度理解，支持上下文感知
-- **规划智能体**: 战略性分解，支持依赖管理和工具选择
-- **执行智能体**: 智能工具执行，支持错误恢复和重试机制
-- **观察智能体**: 高级进度监控，支持完成检测
-- **总结智能体**: 全面结果综合，支持结构化输出
+### 🤖 **多智能体协作 (v0.9)**
+- **任务分析智能体**: 增强的深度理解，支持上下文感知和统一系统提示管理
+- **任务分解智能体**: 新增智能任务分解，支持依赖分析和并行执行规划
+- **规划智能体**: 战略性分解，支持依赖管理和最优工具选择
+- **执行智能体**: 智能工具执行，支持错误恢复、重试机制和并行处理
+- **观察智能体**: 高级进度监控，支持完成检测和质量评估
+- **总结智能体**: 全面结果综合，支持结构化输出和可操作见解
 
 ### 🛠️ **高级工具系统**
-- **插件架构**: 热重载工具开发，支持自动注册
-- **MCP 服务器支持**: 与模型上下文协议服务器无缝集成
-- **自动发现**: 从目录和模块智能检测工具
-- **类型安全**: 全面的参数验证和模式强制
-- **错误处理**: 强大的错误恢复、超时管理和详细日志
-- **性能监控**: 工具执行时间跟踪和优化建议
+- **插件架构**: 热重载工具开发，支持自动注册和版本管理
+- **MCP 服务器支持**: 与模型上下文协议服务器和远程API无缝集成
+- **自动发现**: 从目录、模块和远程端点智能检测工具
+- **类型安全**: 全面的参数验证和模式强制以及运行时检查
+- **错误处理**: 强大的错误恢复、超时管理、重试策略和详细日志
+- **性能监控**: 工具执行时间跟踪、瓶颈检测和优化建议
 
 ### 📊 **Token使用和成本监控**
 - **实时跟踪**: 监控所有智能体和操作的token消耗
@@ -224,23 +241,30 @@ controller.print_comprehensive_token_stats()
 
 ### 🔄 **执行模式**
 
-#### 深度研究模式（推荐用于复杂任务）
+#### 深度研究模式（复杂任务推荐）
 ```python
+# 增强的system_context支持
 result = controller.run(
     messages, 
     tool_manager,
     deep_thinking=True,    # 启用全面任务分析
-    summary=True,          # 生成详细的带见解总结
-    deep_research=True     # 完整多智能体流水线
+    summary=True,          # 生成详细总结和见解
+    deep_research=True,    # 完整多智能体流水线与分解
+    system_context={       # 统一系统上下文管理
+        "项目背景": "AI研究项目",
+        "约束条件": ["时间: 2小时", "资源: 有限"],
+        "偏好设置": {"输出格式": "详细报告"}
+    }
 )
 
-# 带实时更新的流式版本
+# 实时更新的流式版本
 for chunk in controller.run_stream(
     messages, 
     tool_manager,
     deep_thinking=True,
     summary=True,
-    deep_research=True
+    deep_research=True,
+    system_context=system_context  # 流式传输中一致的系统上下文
 ):
     for message in chunk:
         print(f"[{message['type']}] {message['role']}: {message['show_content']}")
@@ -253,7 +277,8 @@ result = controller.run(
     tool_manager,
     deep_thinking=True,    # 启用任务分析
     summary=True,          # 生成总结
-    deep_research=False    # 跳过详细研究阶段
+    deep_research=False,   # 跳过详细分解阶段
+    system_context=system_context  # 运行时上下文支持
 )
 ```
 
@@ -263,13 +288,14 @@ result = controller.run(
     messages,
     tool_manager, 
     deep_thinking=False,   # 跳过分析
-    deep_research=False    # 直接执行
+    deep_research=False,   # 直接执行
+    system_context=system_context  # 即使快速模式也支持上下文
 )
 ```
 
-## 📊 实时流式输出和监控
+## 📊 实时流式传输和监控
 
-实时观察您的智能体工作，带有详细的进度跟踪：
+实时观看智能体工作，详细进度跟踪和性能指标：
 
 ```python
 import time
@@ -277,7 +303,14 @@ import time
 start_time = time.time()
 token_count = 0
 
-for chunk in controller.run_stream(messages, tool_manager):
+# 增强的系统上下文流式传输
+system_context = {
+    "监控级别": "详细",
+    "进度跟踪": True,
+    "性能指标": True
+}
+
+for chunk in controller.run_stream(messages, tool_manager, system_context=system_context):
     for message in chunk:
         # 显示智能体活动
         print(f"🤖 {message['role']}: {message['show_content']}")
@@ -288,7 +321,7 @@ for chunk in controller.run_stream(messages, tool_manager):
         
         # 实时统计
         elapsed = time.time() - start_time
-        print(f"⏱️  时间: {elapsed:.1f}s | 🪙 Token: {token_count}")
+        print(f"⏱️  时间: {elapsed:.1f}s | 🪙 令牌: {token_count}")
 ```
 
 ## 🔧 高级工具开发
@@ -433,28 +466,36 @@ update_settings(
 controller = AgentController.from_config("production.yaml")
 ```
 
-## 🔄 最新更新 (v0.8)
+## 🔄 最新更新 (v0.9)
 
 ### ✨ 新功能
-- 🎯 **增强的Token跟踪**: 全面的使用统计和成本监控
-- 🛡️ **强大的错误处理**: 高级错误恢复和重试机制
-- ⚡ **性能优化**: 更好的资源管理，执行速度提升40%
-- 🔧 **改进的工具系统**: 自动发现、更好的验证和MCP集成
-- 📊 **实时监控**: 实时性能指标和瓶颈检测
-- 🤖 **扩展的模型支持**: 原生支持 DeepSeek-V3、Qwen-3 等模型
+- 🎯 **任务分解智能体**: 新增专门用于智能任务分解和依赖管理的智能体
+- 🔧 **统一系统提示管理**: 通过`system_context`参数在所有智能体间集中式系统上下文处理
+- 📊 **增强令牌跟踪**: 全面使用统计，详细成本监控和优化建议
+- 🛡️ **强大错误处理**: 高级错误恢复、重试机制和全面异常处理
+- ⚡ **性能优化**: 通过改进的资源管理和并行处理实现50%更快的执行速度
+- 🌐 **现代化Web应用**: 完整的FastAPI + React Web应用，支持TypeScript和实时协作
 
 ### 🔧 技术改进
-- 🏗️ **智能体架构**: 重构以提高模块化和可维护性
-- 💾 **内存管理**: 为长时间运行的任务优化内存使用
-- 🌐 **流式增强**: 改进实时更新和更好的UI反馈
-- ⚙️ **配置系统**: 更灵活和强大的配置选项
-- 📝 **文档**: 完全重写，包含更多示例和最佳实践
+- 🏗️ **智能体架构**: 在工作流中添加任务分解智能体以改善任务分解
+- 💬 **系统上下文API**: 新增`system_context`参数用于统一运行时信息管理
+- 📝 **系统提示组织**: 通过`SYSTEM_PREFIX_DEFAULT`常量实现集中式系统提示管理
+- 💾 **内存管理**: 为长时间运行任务和大规模部署优化内存使用
+- 🌐 **流式传输增强**: 改进实时更新，更好的UI反馈和WebSocket可靠性
+- 📊 **令牌分析**: 全面使用跟踪，成本优化建议和预算管理
 
-### 🐛 Bug修复
-- 修复流式模式下的token使用计算错误
-- 解决长时间运行智能体会话中的内存泄漏
-- 改进对格式错误工具响应的错误处理
-- 增强与不同OpenAI API版本的兼容性
+### 🐛 错误修复
+- 修复流式响应中断问题
+- 解决工具执行超时问题
+- 改进会话管理和清理
+- 增强错误消息清晰度和调试信息
+- 修复长时间运行会话中的内存泄漏
+
+### 📋 API变更
+- **新参数**: 在`run()`和`run_stream()`方法中添加`system_context`用于统一上下文管理
+- **工作流增强**: 在任务分析和规划阶段之间添加任务分解智能体
+- **系统提示**: 所有智能体现在使用`SYSTEM_PREFIX_DEFAULT`常量进行统一系统提示管理
+- **向后兼容**: 所有现有API保持完全兼容
 
 ## 📄 许可证
 
