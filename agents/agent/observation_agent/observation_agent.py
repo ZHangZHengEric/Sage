@@ -4,8 +4,7 @@ ObservationAgent 重构版本
 观察智能体，负责分析任务执行进度和完成状态。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -76,13 +75,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是一个智能AI助手，你的任务是分析任务的执行情况，并提供后续建议。"""
     
-    # 系统消息模板常量
-    SYSTEM_MESSAGE_TEMPLATE = """
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-"""
-
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
         初始化观察智能体
@@ -97,10 +89,10 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         logger.info("ObservationAgent 初始化完成")
 
     def run_stream(self, 
-                   messages: List[Dict[str, Any]],
+                   messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
-                   context: Optional[Dict[str, Any]] = None,
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行观察分析
         
@@ -109,35 +101,32 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         Args:
             messages: 对话历史记录，包含执行结果
             tool_manager: 可选的工具管理器
-            context: 附加执行上下文
             session_id: 可选的会话标识符
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的观察分析消息块
-            
-        Raises:
-            Exception: 当分析过程出现错误时抛出异常
         """
         logger.info(f"ObservationAgent: 开始流式观察分析，消息数量: {len(messages)}")
         
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_observation_stream_internal(messages, tool_manager, context, session_id)
+            self._execute_observation_stream_internal(messages, tool_manager, session_id, system_context)
         )
 
     def _execute_observation_stream_internal(self, 
                                            messages: List[Dict[str, Any]],
                                            tool_manager: Optional[Any],
-                                           context: Optional[Dict[str, Any]],
-                                           session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                           session_id: str,
+                                           system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部观察流式执行方法
         
         Args:
             messages: 对话历史记录，包含执行结果
             tool_manager: 可选的工具管理器
-            context: 附加执行上下文
             session_id: 可选的会话标识符
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的观察分析消息块
@@ -146,7 +135,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
             # 准备分析上下文
             analysis_context = self._prepare_observation_context(
                 messages=messages,
-                context=context,
                 session_id=session_id
             )
             
@@ -154,7 +142,7 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
             prompt = self._generate_observation_prompt(analysis_context)
             
             # 执行流式观察分析
-            yield from self._execute_streaming_observation(prompt, context, session_id)
+            yield from self._execute_streaming_observation(prompt, session_id, system_context)
             
         except Exception as e:
             logger.error(f"ObservationAgent: 观察分析过程中发生异常: {str(e)}")
@@ -163,14 +151,12 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
 
     def _prepare_observation_context(self, 
                                    messages: List[Dict[str, Any]],
-                                   context: Optional[Dict[str, Any]],
                                    session_id: str) -> Dict[str, Any]:
         """
         准备观察分析所需的上下文信息
         
         Args:
             messages: 对话消息列表
-            context: 附加上下文
             session_id: 会话ID
             
         Returns:
@@ -216,15 +202,15 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
 
     def _execute_streaming_observation(self, 
                                      prompt: str,
-                                     context: Optional[Dict[str, Any]], 
-                                     session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                     session_id: str,
+                                     system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行流式观察分析
         
         Args:
             prompt: 分析提示
-            context: 附加上下文
             session_id: 会话ID
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的消息块
@@ -232,7 +218,10 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         logger.info("ObservationAgent: 开始执行流式观察分析")
         
         # 准备系统消息
-        system_message = self._prepare_system_message(context, session_id)
+        system_message = self.prepare_unified_system_message(
+            session_id=session_id,
+            system_context=system_context
+        )
         
         # 使用基类的流式处理和token跟踪（简化版本）
         message_id = str(uuid.uuid4())
@@ -289,28 +278,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         
         # 处理最终结果
         yield from self._finalize_observation_result(all_content, message_id)
-
-    def _prepare_system_message(self, 
-                              context: Optional[Dict[str, Any]], 
-                              session_id: str) -> Dict[str, Any]:
-        """
-        准备系统消息 - 兼容性方法
-        
-        Args:
-            context: 附加上下文
-            session_id: 会话ID
-            
-        Returns:
-            Dict[str, Any]: 系统消息字典
-        """
-        return self._prepare_system_message_with_context(
-            context={
-                'session_id': session_id,
-                'current_time': context.get('current_time') if context else '',
-                'file_workspace': context.get('file_workspace') if context else ''
-            },
-            default_prefix=self.SYSTEM_PREFIX_DEFAULT
-        )
 
     def _finalize_observation_result(self, 
                                    all_content: str, 
@@ -472,16 +439,16 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         执行观察分析（非流式版本）
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
             List[Dict[str, Any]]: 观察分析结果消息列表
@@ -492,6 +459,6 @@ boolean类型,true表示任务已经执行完毕，不需要再做其他的尝�
         return super().run(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         )

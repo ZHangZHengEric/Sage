@@ -4,8 +4,7 @@ TaskSummaryAgent 重构版本
 任务总结智能体，负责根据原始任务和执行历史生成清晰完整的回答。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -49,13 +48,6 @@ class TaskSummaryAgent(AgentBase):
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是一个任务总结者，你需要根据原始任务和执行历史，生成清晰完整的回答。"""
     
-    # 系统消息模板常量
-    SYSTEM_MESSAGE_TEMPLATE = """
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-"""
-
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
         初始化任务总结智能体
@@ -72,45 +64,40 @@ class TaskSummaryAgent(AgentBase):
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
-                   context: Optional[Dict[str, Any]] = None,
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务总结
         
-        分析整个任务流程并生成详细总结，实时返回总结结果。
-        
         Args:
-            messages: 对话历史记录，包含整个任务流程
+            messages: 对话历史记录，包含完整的任务执行过程
             tool_manager: 可选的工具管理器
-            context: 附加执行上下文
-            session_id: 会话ID
+            session_id: 可选的会话标识符
+            system_context: 运行时系统上下文字典
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务总结消息块
-            
-        Raises:
-            Exception: 当总结过程出现错误时抛出异常
         """
-        logger.info(f"TaskSummaryAgent: 开始流式任务总结，消息数量: {len(messages)}")
+        logger.info("TaskSummaryAgent: 开始流式任务总结")
         
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_summary_stream_internal(messages, tool_manager, context, session_id)
+            self._execute_summary_stream_internal(messages, tool_manager, session_id, system_context)
         )
 
     def _execute_summary_stream_internal(self, 
-                                       messages: List[Dict[str, Any]], 
+                                       messages: List[Dict[str, Any]],
                                        tool_manager: Optional[Any],
-                                       context: Optional[Dict[str, Any]],
-                                       session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                       session_id: str,
+                                       system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部任务总结流式执行方法
         
         Args:
             messages: 对话历史记录，包含整个任务流程
             tool_manager: 可选的工具管理器
-            context: 附加执行上下文
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务总结消息块
@@ -119,8 +106,8 @@ class TaskSummaryAgent(AgentBase):
             # 准备总结上下文
             summary_context = self._prepare_summary_context(
                 messages=messages,
-                context=context,
-                session_id=session_id
+                session_id=session_id,
+                system_context=system_context
             )
             
             # 生成总结提示
@@ -136,15 +123,15 @@ class TaskSummaryAgent(AgentBase):
 
     def _prepare_summary_context(self, 
                                 messages: List[Dict[str, Any]],
-                                context: Optional[Dict[str, Any]],
-                                session_id: str) -> Dict[str, Any]:
+                                session_id: str,
+                                system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         准备任务总结所需的上下文信息
         
         Args:
             messages: 对话消息列表
-            context: 附加上下文
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             Dict[str, Any]: 包含总结所需信息的上下文字典
@@ -160,15 +147,16 @@ class TaskSummaryAgent(AgentBase):
         logger.debug(f"TaskSummaryAgent: 提取完成操作，长度: {len(completed_actions)}")
         
         # 获取上下文信息
-        current_time = context.get('current_time', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_workspace = context.get('file_workspace', '无') if context else '无'
+        current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file_workspace = '无'
         
         summary_context = {
             'task_description': task_description,
             'completed_actions': completed_actions,
             'current_time': current_time,
             'file_workspace': file_workspace,
-            'session_id': session_id
+            'session_id': session_id,
+            'system_context': system_context
         }
         
         logger.info("TaskSummaryAgent: 任务总结上下文准备完成")
@@ -210,9 +198,9 @@ class TaskSummaryAgent(AgentBase):
         logger.info("TaskSummaryAgent: 开始执行流式任务总结")
         
         # 准备系统消息
-        system_message = self._prepare_system_message_with_context(
-            context=summary_context,
-            default_prefix=self.SYSTEM_PREFIX_DEFAULT
+        system_message = self.prepare_unified_system_message(
+            session_id=summary_context.get('session_id'),
+            system_context=summary_context.get('system_context')
         )
         
         # 使用基类的流式处理和token跟踪
@@ -278,16 +266,16 @@ class TaskSummaryAgent(AgentBase):
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         执行任务总结（非流式版本）
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Returns:
             List[Dict[str, Any]]: 任务总结结果消息列表
@@ -298,7 +286,7 @@ class TaskSummaryAgent(AgentBase):
         return super().run(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         )
         

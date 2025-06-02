@@ -4,8 +4,7 @@ PlanningAgent 重构版本
 规划智能体，负责基于当前状态生成下一步执行计划。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -70,13 +69,6 @@ class PlanningAgent(AgentBase):
 
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是一个任务执行计划指定者，你需要根据当前任务和已完成的动作，生成下一个要执行的动作。"""
-    
-    # 系统消息模板常量
-    SYSTEM_MESSAGE_TEMPLATE = """
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-"""
 
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
@@ -93,46 +85,41 @@ class PlanningAgent(AgentBase):
 
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
-                   tool_manager: Optional[Any] = None, 
-                   context: Optional[Dict[str, Any]] = None, 
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   tool_manager: Optional[Any] = None,
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
-        流式执行任务规划
-        
-        基于对话历史和上下文生成下一步计划并实时返回规划结果。
+        流式执行规划任务
         
         Args:
-            messages: 包含任务分析的对话历史记录
-            tool_manager: 提供可用工具的工具管理器实例
-            context: 附加执行上下文
+            messages: 对话历史记录
+            tool_manager: 工具管理器
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Yields:
-            List[Dict[str, Any]]: 流式输出的规划结果消息块
-            
-        Raises:
-            Exception: 当规划过程出现错误时抛出异常
+            List[Dict[str, Any]]: 流式输出的规划消息块
         """
-        logger.info(f"PlanningAgent: 开始流式任务规划，消息数量: {len(messages)}")
+        logger.info("PlanningAgent: 开始流式规划任务")
         
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_planning_stream_internal(messages, tool_manager, context, session_id)
+            self._execute_planning_stream_internal(messages, tool_manager, session_id, system_context)
         )
 
     def _execute_planning_stream_internal(self, 
                                         messages: List[Dict[str, Any]], 
                                         tool_manager: Optional[Any],
-                                        context: Optional[Dict[str, Any]],
-                                        session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                        session_id: str,
+                                        system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部规划流式执行方法
         
         Args:
             messages: 包含任务分析的对话历史记录
             tool_manager: 提供可用工具的工具管理器实例
-            context: 附加执行上下文
             session_id: 会话ID
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的规划结果消息块
@@ -142,8 +129,8 @@ class PlanningAgent(AgentBase):
             planning_context = self._prepare_planning_context(
                 messages=messages,
                 tool_manager=tool_manager,
-                context=context,
-                session_id=session_id
+                session_id=session_id,
+                system_context=system_context
             )
             
             # 生成规划提示
@@ -160,16 +147,16 @@ class PlanningAgent(AgentBase):
     def _prepare_planning_context(self, 
                                 messages: List[Dict[str, Any]],
                                 tool_manager: Optional[Any],
-                                context: Optional[Dict[str, Any]],
-                                session_id: str) -> Dict[str, Any]:
+                                session_id: str,
+                                system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         准备任务规划所需的上下文信息
         
         Args:
             messages: 对话消息列表
             tool_manager: 工具管理器
-            context: 附加上下文
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
             Dict[str, Any]: 包含规划所需信息的上下文字典
@@ -190,8 +177,8 @@ class PlanningAgent(AgentBase):
         available_tools_str = json.dumps(available_tools, ensure_ascii=False, indent=2) if available_tools else '无可用工具'
         
         # 获取上下文信息
-        current_time = context.get('current_datatime_str', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_workspace = context.get('file_workspace', '无') if context else '无'
+        current_time = system_context.get('current_datatime_str', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if system_context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file_workspace = system_context.get('file_workspace', '无') if system_context else '无'
         
         logger.debug(f"PlanningAgent: 当前时间: {current_time}, 文件工作空间: {file_workspace}")
         
@@ -201,7 +188,8 @@ class PlanningAgent(AgentBase):
             'available_tools_str': available_tools_str,
             'current_time': current_time,
             'file_workspace': file_workspace,
-            'session_id': session_id
+            'session_id': session_id,
+            'system_context': system_context
         }
         
         logger.info("PlanningAgent: 任务规划上下文准备完成")
@@ -242,7 +230,10 @@ class PlanningAgent(AgentBase):
         logger.info("PlanningAgent: 开始执行流式任务规划")
         
         # 准备系统消息
-        system_message = self._prepare_system_message(planning_context)
+        system_message = self.prepare_unified_system_message(
+            session_id=planning_context.get('session_id'),
+            system_context=planning_context.get('system_context')
+        )
         
         # 生成规划提示
         prompt = self._generate_planning_prompt(planning_context)
@@ -304,34 +295,6 @@ class PlanningAgent(AgentBase):
         
         # 处理最终结果
         yield from self._finalize_planning_result(all_content, message_id)
-
-    def _prepare_system_message(self, planning_context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        准备系统消息
-        
-        Args:
-            planning_context: 规划上下文
-            
-        Returns:
-            Dict[str, Any]: 系统消息字典
-        """
-        logger.debug("PlanningAgent: 准备系统消息")
-        
-        # 设置默认系统前缀
-        if len(self.system_prefix) == 0:
-            self.system_prefix = self.SYSTEM_PREFIX_DEFAULT
-        
-        # 构建系统消息
-        system_content = self.system_prefix + self.SYSTEM_MESSAGE_TEMPLATE.format(
-            session_id=planning_context['session_id'],
-            current_time=planning_context['current_time'],
-            file_workspace=planning_context['file_workspace']
-        )
-        
-        return {
-            'role': 'system',
-            'content': system_content
-        }
 
     def _finalize_planning_result(self, 
                                 all_content: str, 
@@ -473,16 +436,16 @@ class PlanningAgent(AgentBase):
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         执行任务规划（非流式版本）
         
         Args:
             messages: 对话历史记录
             tool_manager: 可选的工具管理器
-            context: 附加上下文信息
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
             List[Dict[str, Any]]: 任务规划结果消息列表
@@ -493,6 +456,6 @@ class PlanningAgent(AgentBase):
         return super().run(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         )

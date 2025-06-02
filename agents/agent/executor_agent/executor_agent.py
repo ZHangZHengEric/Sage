@@ -4,8 +4,7 @@ ExecutorAgent 重构版本
 执行智能体，负责使用工具或LLM直接执行子任务。
 改进了代码结构、错误处理、日志记录和可维护性。
 
-作者: Multi-Agent Framework Team
-日期: 2024
+作者: Eric ZZ
 版本: 2.0 (重构版)
 """
 
@@ -49,13 +48,6 @@ the expected output is:{next_expected_output}
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是个任务执行助手，你需要根据任务描述，执行任务。"""
     
-    # 系统消息模板常量
-    SYSTEM_MESSAGE_TEMPLATE = """
-你的当前工作目录是：{file_workspace}
-当前时间是：{current_time}
-你当前数据库_id或者知识库_id：{session_id}
-"""
-
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
         初始化执行智能体
@@ -71,50 +63,41 @@ the expected output is:{next_expected_output}
 
     def run_stream(self, 
                    messages: List[Dict[str, Any]], 
-                   tool_manager: Optional[ToolManager] = None,
-                   context: Optional[Dict[str, Any]] = None,
-                   session_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   tool_manager: Optional[Any] = None,
+                   session_id: str = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
-        流式执行子任务
-        
-        使用工具调用或直接LLM生成来执行子任务并实时返回执行结果。
+        流式执行任务
         
         Args:
-            messages: 包含子任务的对话历史记录
-            tool_manager: 用于执行基于工具的子任务的工具管理器
-            context: 附加执行上下文
+            messages: 对话历史记录
+            tool_manager: 工具管理器
             session_id: 会话ID
+            system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
             
         Yields:
-            List[Dict[str, Any]]: 流式输出的执行结果消息块
-            
-        Raises:
-            Exception: 当执行过程出现错误时抛出异常
+            List[Dict[str, Any]]: 流式输出的消息块
         """
-        logger.info(f"ExecutorAgent: 开始流式执行，会话ID: {session_id}")
-        
-        if not messages:
-            logger.warning("ExecutorAgent: 未提供消息，返回空列表")
-            return
+        logger.info("ExecutorAgent: 开始流式任务执行")
         
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_stream_internal(messages, tool_manager, context, session_id)
+            self._execute_stream_internal(messages, tool_manager, session_id, system_context)
         )
 
     def _execute_stream_internal(self, 
-                               messages: List[Dict[str, Any]], 
-                               tool_manager: Optional[ToolManager],
-                               context: Optional[Dict[str, Any]],
-                               session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                               messages: List[Dict[str, Any]],
+                               tool_manager: Optional[Any],
+                               session_id: str,
+                               system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部流式执行方法
         
         Args:
             messages: 包含子任务的对话历史记录
             tool_manager: 工具管理器
-            context: 附加执行上下文
             session_id: 会话ID
+            system_context: 系统上下文
             
         Yields:
             List[Dict[str, Any]]: 流式输出的执行结果消息块
@@ -123,8 +106,8 @@ the expected output is:{next_expected_output}
             # 准备执行上下文
             execution_context = self._prepare_execution_context(
                 messages=messages,
-                context=context,
-                session_id=session_id
+                session_id=session_id,
+                system_context=system_context
             )
             
             # 解析子任务信息
@@ -155,15 +138,15 @@ the expected output is:{next_expected_output}
 
     def _prepare_execution_context(self, 
                                  messages: List[Dict[str, Any]],
-                                 context: Optional[Dict[str, Any]],
-                                 session_id: str) -> Dict[str, Any]:
+                                 session_id: str,
+                                 system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         准备执行所需的上下文信息
         
         Args:
             messages: 对话消息列表
-            context: 附加上下文
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
             Dict[str, Any]: 包含执行所需信息的上下文字典
@@ -175,15 +158,16 @@ the expected output is:{next_expected_output}
         completed_actions_messages = self._extract_completed_actions_messages(messages)
         
         # 获取上下文信息
-        current_time = context.get('current_time', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_workspace = context.get('file_workspace', '无') if context else '无'
+        current_time = system_context.get('current_time', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if system_context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file_workspace = system_context.get('file_workspace', '无') if system_context else '无'
         
         execution_context = {
             'task_description_messages': task_description_messages,
             'completed_actions_messages': completed_actions_messages,
             'current_time': current_time,
             'file_workspace': file_workspace,
-            'session_id': session_id
+            'session_id': session_id,
+            'system_context': system_context
         }
         
         logger.info("ExecutorAgent: 执行上下文准备完成")
@@ -273,7 +257,10 @@ the expected output is:{next_expected_output}
         logger.debug("ExecutorAgent: 准备执行消息")
         
         # 准备系统消息
-        system_message = self._prepare_system_message(execution_context)
+        system_message = self.prepare_unified_system_message(
+            session_id=execution_context.get('session_id'),
+            system_context=execution_context.get('system_context')
+        )
         
         # 深拷贝消息
         messages_input = deepcopy(messages)
@@ -297,21 +284,6 @@ the expected output is:{next_expected_output}
         
         logger.debug(f"ExecutorAgent: 准备了 {len(messages_input)} 条执行消息")
         return messages_input
-
-    def _prepare_system_message(self, execution_context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        准备系统消息 - 兼容性方法
-        
-        Args:
-            execution_context: 执行上下文
-            
-        Returns:
-            Dict[str, Any]: 系统消息字典
-        """
-        return self._prepare_system_message_with_context(
-            context=execution_context,
-            default_prefix=self.SYSTEM_PREFIX_DEFAULT
-        )
 
     def _send_task_execution_prompt(self, subtask_info: Dict[str, Any]) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -342,7 +314,7 @@ the expected output is:{next_expected_output}
 
     def _execute_task_with_tools(self, 
                                execution_messages: List[Dict[str, Any]],
-                               tool_manager: Optional[ToolManager],
+                               tool_manager: Optional[Any],
                                subtask_info: Dict[str, Any],
                                session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -378,7 +350,7 @@ the expected output is:{next_expected_output}
         )
 
     def _prepare_tools(self, 
-                      tool_manager: Optional[ToolManager], 
+                      tool_manager: Optional[Any], 
                       subtask_info: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         准备工具列表
@@ -396,7 +368,7 @@ the expected output is:{next_expected_output}
             logger.warning("ExecutorAgent: 未提供工具管理器")
             return []
         
-        # 获取所有工具 
+        # 获取所有工具
         tools_json = tool_manager.get_openai_tools()
         
         # 根据建议的工具进行过滤
@@ -439,7 +411,7 @@ the expected output is:{next_expected_output}
 
     def _process_streaming_response(self, 
                                   response,
-                                  tool_manager: Optional[ToolManager],
+                                  tool_manager: Optional[Any],
                                   execution_messages: List[Dict[str, Any]],
                                   session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -555,7 +527,7 @@ the expected output is:{next_expected_output}
 
     def _execute_tool_calls(self, 
                           tool_calls: Dict[str, Any],
-                          tool_manager: Optional[ToolManager],
+                          tool_manager: Optional[Any],
                           execution_messages: List[Dict[str, Any]],
                           session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -749,26 +721,26 @@ the expected output is:{next_expected_output}
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[ToolManager] = None,
-            context: Optional[Dict[str, Any]] = None,
-            session_id: str = None) -> List[Dict[str, Any]]:
+            session_id: str = None,
+            system_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
-        执行任务（非流式版本）
+        执行子任务（非流式版本）
         
         Args:
             messages: 对话历史记录
-            tool_manager: 工具管理器
-            context: 附加上下文信息
+            tool_manager: 可选的工具管理器
             session_id: 会话ID
+            system_context: 系统上下文
             
         Returns:
-            List[Dict[str, Any]]: 任务执行结果消息列表
+            List[Dict[str, Any]]: 执行结果消息列表
         """
-        logger.info("ExecutorAgent: 执行非流式任务执行")
+        logger.info("ExecutorAgent: 执行非流式子任务")
         
         # 调用父类的默认实现，将流式结果合并
         return super().run(
             messages=messages,
             tool_manager=tool_manager,
-            context=context,
-            session_id=session_id
+            session_id=session_id,
+            system_context=system_context
         )
