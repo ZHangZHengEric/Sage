@@ -14,7 +14,7 @@ description: "Understanding the Sage Multi-Agent Framework architecture and desi
 1. TOC
 {:toc}
 
-# 🏗️ Architecture Guide (v2.0)
+# 🏗️ Architecture Guide (v0.9)
 
 This document provides a comprehensive overview of Sage Multi-Agent Framework's enhanced architecture, design principles, and internal workflows with production-ready features.
 
@@ -81,8 +81,9 @@ graph TB
         EM[ErrorManager<br/>🛡️ Recovery]
     end
     
-    subgraph "🤖 Agent Layer (v2.0)"
+    subgraph "🤖 Agent Layer (v0.9)"
         TA[TaskAnalysisAgent<br/>🎯 Context Aware]
+        TDA[TaskDecomposeAgent<br/>🎯 Intelligent Breakdown]
         PA[PlanningAgent<br/>🧩 Dependency Management]
         EA[ExecutorAgent<br/>🔧 Tool Integration]
         OA[ObservationAgent<br/>👁️ Progress Tracking]
@@ -115,6 +116,7 @@ graph TB
     AC <--> EM
     
     AC --> TA
+    AC --> TDA
     AC --> PA
     AC --> EA
     AC --> OA
@@ -134,6 +136,7 @@ graph TB
     AC --> CACHE
     
     TT -.-> TA
+    TT -.-> TDA
     TT -.-> PA
     TT -.-> EA
     TT -.-> OA
@@ -147,7 +150,7 @@ graph TB
 
 ## 🔧 Component Architecture
 
-### AgentController (Enhanced v2.0)
+### AgentController (Enhanced v0.9)
 The central orchestrator with enterprise-grade features.
 
 ```python
@@ -155,12 +158,14 @@ class AgentController:
     """
     Enhanced multi-agent workflow orchestrator
     
-    New v2.0 Features:
+    New v0.9 Features:
     - Comprehensive token tracking and cost monitoring
     - Performance metrics and bottleneck detection
     - Advanced error recovery with retry mechanisms
     - Real-time streaming with progress visualization
     - Memory optimization for long-running tasks
+    - Task Decompose Agent integration
+    - Unified system context management
     """
     
     def run(self, messages, tool_manager, **kwargs):
@@ -182,12 +187,14 @@ class AgentController:
 - **Memory Management**: Automatic cleanup and resource optimization
 - **Circuit Breakers**: Automatic failure detection and recovery
 - **Load Balancing**: Intelligent tool selection and request distribution
+- **Task Decomposition**: New specialized agent for intelligent task breakdown
 
-### Agent Hierarchy (Refactored v2.0)
+### Agent Hierarchy (Enhanced v0.9)
 
 ```mermaid
 classDiagram
     AgentBase <|-- TaskAnalysisAgent
+    AgentBase <|-- TaskDecomposeAgent
     AgentBase <|-- PlanningAgent
     AgentBase <|-- ExecutorAgent
     AgentBase <|-- ObservationAgent
@@ -199,39 +206,22 @@ classDiagram
         +performance_metrics: Dict
         +run(messages, tool_manager)
         +run_stream(messages, tool_manager)
-        +_track_token_usage(response, step_name)
-        +_track_streaming_token_usage(chunks, step_name)
-        +get_token_stats()
-        +reset_token_stats()
-        +_handle_error_generic(error, context)
+        +prepare_unified_system_message()
     }
     
     class TaskAnalysisAgent {
-        +analyze_requirements()
-        +extract_objectives()
-        +assess_complexity()
-        +determine_execution_strategy()
+        +SYSTEM_PREFIX_DEFAULT: str
+        +analyze_task()
+    }
+    
+    class TaskDecomposeAgent {
+        +SYSTEM_PREFIX_DEFAULT: str
+        +decompose_task()
     }
     
     class PlanningAgent {
-        +decompose_tasks()
-        +identify_dependencies()
-        +create_execution_plan()
-        +optimize_resource_allocation()
-    }
-    
-    class ExecutorAgent {
-        +execute_plan()
-        +call_tools_with_retry()
-        +handle_tool_results()
-        +manage_concurrent_execution()
-    }
-    
-    class ObservationAgent {
-        +monitor_progress()
-        +detect_completion()
-        +identify_failures()
-        +suggest_corrections()
+        +SYSTEM_PREFIX_DEFAULT: str
+        +create_plan()
     }
 ```
 
