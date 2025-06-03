@@ -85,7 +85,7 @@ python examples/multi_turn_demo.py
 
 ## 🎮 Using the Web Interface
 
-### Enhanced Features (v2.0)
+### Enhanced Features (v0.9)
 
 1. **💬 Chat Interface**: Type your questions in natural language
 2. **⚙️ Advanced Settings**: Configure agents, models, and performance options
