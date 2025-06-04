@@ -381,7 +381,7 @@ class ToolSpec:
 MCP (Model Context Protocol) server tool specification.
 
 ```python
-@dataclass  
+@dataclass
 class McpToolSpec:
     name: str
     description: str
@@ -705,7 +705,7 @@ result = controller.run(
         "sandboxed": True,
         "allowed_tools": ["calculator", "text_processor"],
         "restricted_domains": ["file_system", "network"]
-    }
+}
 )
 ```
 
