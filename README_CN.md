@@ -6,6 +6,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
+[试一下](http://36.133.44.114:20040/)
+
 # 🚀 Sage 多智能体框架
 
 > **生产就绪、模块化、智能的多智能体编排框架，专为复杂问题解决而设计**
