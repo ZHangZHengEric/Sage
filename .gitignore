@@ -1,5 +1,6 @@
 mcp_servers/run_all_mcp_server.sh
 mcp_server/hub/*
+mcp_servers/standard_search/*
 examples/fastapi_react_demo/backend/config.yaml
 # Byte-compiled / optimized / DLL files
 */__pycache__/*
