@@ -6,6 +6,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
+[Do a quick test](http://36.133.44.114:20040/)
+
 # 🚀 Sage Multi-Agent Framework
 
 > **A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving**
