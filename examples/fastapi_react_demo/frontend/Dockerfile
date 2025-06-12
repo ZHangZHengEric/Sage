@@ -2,10 +2,10 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY ./examples/fastapi_react_demo/frontend/package*.json ./
 RUN npm install
 
-COPY . .
+COPY ./examples/fastapi_react_demo/frontend/. .
 
 EXPOSE 3000
 
