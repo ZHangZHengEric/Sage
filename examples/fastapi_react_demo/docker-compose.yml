@@ -3,13 +3,11 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: ./examples/fastapi_react_demo/backend/Dockerfile
     ports:
       - "20039:8000"
-    volumes:
-      - ./backend:/app
-      - ./backend/static:/app/static
+    command: "python main.py"
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:
@@ -17,10 +15,10 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: ./examples/fastapi_react_demo/frontend/Dockerfile
     ports:
-      - "20040:3000"
+      - "20040:8080"
     volumes:
       - ./frontend:/app
       - /app/node_modules
