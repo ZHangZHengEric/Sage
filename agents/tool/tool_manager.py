@@ -194,7 +194,7 @@ class ToolManager:
                 
                 if 'sse_url' in config:
                     logger.debug(f"Setting up SSE server: {server_name} at URL: {config['sse_url']}")
-                    server_params = SseServerParameters(url=config['sse_url'])
+                    server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
                     await self._register_mcp_tools_sse(server_name, server_params)
                 else:
                     logger.debug(f"Setting up stdio server: {server_name} with command: {config['command']}")
@@ -237,7 +237,14 @@ class ToolManager:
         logger.info(f"Registering tools from SSE MCP server: {server_name} at {server_params.url}")
         print(f"Connecting to SSE MCP server {server_name} at {server_params.url}")
         try:
-            async with sse_client(server_params.url) as (read, write):
+            headers= None
+            if server_params.api_key:
+                headers = {
+                    "Authorization": f"Bearer {server_params.api_key}",
+                    "Content-Type": "application/json"
+                }
+            logger.info(f'SSE MCP server header {headers}')
+            async with sse_client(server_params.url,headers=headers) as (read, write):
                 async with ClientSession(read, write) as session:
                     logger.debug(f"Initializing session for SSE MCP server {server_name}")
                     print(f"Initializing session for SSE MCP server {server_name}")
@@ -367,7 +374,7 @@ class ToolManager:
         """Execute a tool by name with provided arguments"""
         execution_start = time.time()
         logger.info(f"Executing tool: {tool_name} (session: {session_id})")
-        
+        logger.info(f"Tool arguments: {kwargs}")
         # Remove duplicate session_id from kwargs if present
         session_id = kwargs.pop('session_id', session_id)
         
@@ -454,12 +461,12 @@ class ToolManager:
                 result = tool.func(**kwargs)
             else:
                 # Unbound method - need to create instance
-                tool_class = getattr(tool.func, '__objclass__', None)
-                if tool_class:
-                    instance = tool_class()
-                    result = tool.func.__get__(instance)(**kwargs)
-                else:
-                    result = tool.func(**kwargs)
+                    tool_class = getattr(tool.func, '__objclass__', None)
+                    if tool_class:
+                        instance = tool_class()
+                        result = tool.func.__get__(instance)(**kwargs)
+                    else:
+                        result = tool.func(**kwargs)
             
             # Format result
             if isinstance(result, (dict, list)):
@@ -522,7 +529,13 @@ class ToolManager:
 
     async def _execute_sse_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
         """Execute SSE MCP tool"""
-        async with sse_client(tool.server_params.url) as (read, write):
+        headers= None
+        if tool.server_params.api_key:
+            headers = {
+                "Authorization": f"Bearer {tool.server_params.api_key}",
+                "Content-Type": "application/json"
+            }
+        async with sse_client(tool.server_params.url,headers=headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool.name, kwargs)
