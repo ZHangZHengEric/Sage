@@ -6,6 +6,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
+[试一下](http://36.133.44.114:20040/)
+
 # 🚀 Sage 多智能体框架
 
 > **生产就绪、模块化、智能的多智能体编排框架，专为复杂问题解决而设计**
@@ -208,7 +210,7 @@ print("执行时间:", result['execution_time'])
 
 ### 🛠️ **高级工具系统**
 - **插件架构**: 热重载工具开发，支持自动注册和版本管理
-- **MCP 服务器支持**: 与模型上下文协议服务器和远程API无缝集成
+- **MCP 服务器支持**: 与模型上下文协议服务器和远程API无缝集成，并为SSE MCP服务器连接添加了API密钥认证功能
 - **自动发现**: 从目录、模块和远程端点智能检测工具
 - **类型安全**: 全面的参数验证和模式强制以及运行时检查
 - **错误处理**: 强大的错误恢复、超时管理、重试策略和详细日志
