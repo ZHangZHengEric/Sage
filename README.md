@@ -210,7 +210,7 @@ print("Execution Time:", result['execution_time'])
 
 ### 🛠️ **Advanced Tool System**
 - **Plugin Architecture**: Hot-reloadable tool development with automatic registration and versioning
-- **MCP Server Support**: Seamless integration with Model Context Protocol servers and remote APIs
+- **MCP Server Support: Seamless integration with Model Context Protocol servers and remote APIs, with added API key authentication for SSE MCP server connections
 - **Auto-Discovery**: Intelligent tool detection from directories, modules, and remote endpoints
 - **Type Safety**: Comprehensive parameter validation with schema enforcement and runtime checks
 - **Error Handling**: Robust error recovery, timeout management, retry strategies, and detailed logging
