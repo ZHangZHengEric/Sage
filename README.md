@@ -6,6 +6,8 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
 
+[Do a quick test](http://36.133.44.114:20040/)
+
 # 🚀 Sage Multi-Agent Framework
 
 > **A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving**
@@ -208,7 +210,7 @@ print("Execution Time:", result['execution_time'])
 
 ### 🛠️ **Advanced Tool System**
 - **Plugin Architecture**: Hot-reloadable tool development with automatic registration and versioning
-- **MCP Server Support**: Seamless integration with Model Context Protocol servers and remote APIs
+- **MCP Server Support: Seamless integration with Model Context Protocol servers and remote APIs, with added API key authentication for SSE MCP server connections
 - **Auto-Discovery**: Intelligent tool detection from directories, modules, and remote endpoints
 - **Type Safety**: Comprehensive parameter validation with schema enforcement and runtime checks
 - **Error Handling**: Robust error recovery, timeout management, retry strategies, and detailed logging
