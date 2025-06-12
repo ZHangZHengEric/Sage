@@ -183,6 +183,7 @@ async def initialize_system():
         tool_manager = ToolManager(is_auto_discover=False)
         # 手动进行自动发现本地工具
         tool_manager._auto_discover_tools()
+        await tool_manager._discover_mcp_tools(mcp_setting_path='/app/mcp_servers/mcp_setting.json')
         logger.info("工具管理器初始化完成")
         
         # 优先使用配置文件中的模型配置
@@ -572,4 +573,4 @@ if __name__ == "__main__":
         port=app_config.server.port,
         reload=app_config.server.reload,
         log_level=app_config.server.log_level
-    ) 
+    )
