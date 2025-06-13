@@ -391,7 +391,21 @@ class ToolManager:
         try:
             # Step 2: Execute based on tool type
             if isinstance(tool, McpToolSpec):
-                final_result = self._execute_mcp_tool(tool, session_id, **kwargs)
+                from concurrent.futures import ThreadPoolExecutor
+                
+                def run_async_task():
+                    return asyncio.run(self._execute_mcp_tool(tool, session_id, **kwargs))
+                
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    try:
+                        future = executor.submit(run_async_task)
+                        final_result = future.result(timeout=10)
+                    except TimeoutError:
+                        logger.error(f"MCP tool {tool.name} execution timed out")
+                        raise RuntimeError(f"MCP tool {tool.name} execution timed out after 10 seconds")
+                    except Exception as e:
+                        logger.error(f"MCP tool {tool.name} execution failed: {str(e)}")
+                        raise
             elif isinstance(tool, ToolSpec):
                 final_result = self._execute_standard_tool(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
@@ -427,13 +441,13 @@ class ToolManager:
             self._log_execution(tool_name, False, "EXECUTION_ERROR")
             return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
 
-    def _execute_mcp_tool(self, tool: McpToolSpec, session_id: str, **kwargs) -> str:
+    async def _execute_mcp_tool(self, tool: McpToolSpec, session_id: str, **kwargs) -> str:
         """Execute MCP tool and format result"""
-        logger.debug(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
+        logger.info(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
         
         try:
-            result = asyncio.run(self._run_mcp_tool_async(tool, session_id, **kwargs))
-            
+            result = await self._run_mcp_tool_async(tool, session_id, **kwargs)
+            logger.info(f"MCP tool {tool.name} execution completed successfully")
             # Process MCP result
             if isinstance(result, dict) and result.get('content'):
                 content = result['content']
