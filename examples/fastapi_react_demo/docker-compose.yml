@@ -1,26 +1,28 @@
 version: '3.8'
 
 services:
-  backend:
+  sage_backend:
     build:
       context: ../../
       dockerfile: ./examples/fastapi_react_demo/backend/Dockerfile
     container_name: sage_backend
     ports:
-      - "40039:8000"
+      - "20039:8000"
+    volumes:
+      - /tmp/sage:/tmp/sage
     command: "python main.py"
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:
-      - frontend
+      - sage_frontend
 
-  frontend:
+  sage_frontend:
     build:
       context: ../../
       dockerfile: ./examples/fastapi_react_demo/frontend/Dockerfile
     container_name: sage_frontend
     ports:
-      - "40040:8080"
+      - "20040:8080"
     volumes:
       - ./frontend:/app
       - /app/node_modules
