@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Typography, Tag, Button, Divider } from 'antd';
 import { CloseOutlined, CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { ToolCallData } from '../types/toolCall';
@@ -15,6 +15,17 @@ interface ToolDetailPanelProps {
 }
 
 const ToolDetailPanel: React.FC<ToolDetailPanelProps> = ({ visible, toolCall, onClose }) => {
+  // 添加状态来强制重新渲染
+  const [refreshKey, setRefreshKey] = useState(0);
+  
+  // 监听toolCall变化，自动更新内容
+  useEffect(() => {
+    if (toolCall) {
+      console.log('🔄 工具详情面板更新:', toolCall.toolName, toolCall.id);
+      setRefreshKey(prev => prev + 1);
+    }
+  }, [toolCall]);
+
   if (!visible || !toolCall) {
     return null;
   }
@@ -237,18 +248,17 @@ const ToolDetailPanel: React.FC<ToolDetailPanelProps> = ({ visible, toolCall, on
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      width: '600px',
-      height: '100vh',
-      background: '#ffffff',
-      borderLeft: '1px solid #f0f0f0',
-      boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
-      zIndex: 1000,
-      overflow: 'auto'
-    }}>
+    <div 
+      key={`tool-panel-${toolCall.id}-${refreshKey}`}
+      style={{
+        width: visible ? '40%' : '0',
+        height: '100vh',
+        background: '#ffffff',
+        borderLeft: '1px solid #f0f0f0',
+        boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
+        overflow: visible ? 'auto' : 'hidden',
+        transition: 'all 0.3s ease'
+      }}>
       {/* 头部 */}
       <div style={{
         padding: '16px',
