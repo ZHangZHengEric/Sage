@@ -10,6 +10,7 @@ from docstring_parser import parse,DocstringStyle
 @dataclass
 class SseServerParameters:
     url: str
+    api_key: Optional[str] = None
 @dataclass
 class McpToolSpec:
     name: str
