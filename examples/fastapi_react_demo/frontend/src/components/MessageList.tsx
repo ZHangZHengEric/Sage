@@ -148,7 +148,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onT
               justifyContent: 'flex-start'
             }}>
               <div style={{
-                maxWidth: '75%',
+                maxWidth: '95%',
                 minWidth: '120px'
               }}>
                 {/* 智能体类型标签 */}
