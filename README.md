@@ -1,49 +1,117 @@
+<div align="center">
+
+# 🌟 **Experience Sage's Power**
+### 🚀 [**Try Live Demo Now →**](http://36.133.44.114:20040/)
+
 ![logo](assets/logo.png)
 
-[![English](https://img.shields.io/badge/English-Click-yellow)](README.md)
-[![简体中文](https://img.shields.io/badge/简体中文-点击查看-orange)](README_CN.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-brightgreen.svg)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-0.9-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![English](https://img.shields.io/badge/🌍_English-Current-yellow?style=for-the-badge)](README.md)
+[![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
-[Do a quick test](http://36.133.44.114:20040/)
+</div>
 
-# 🚀 Sage Multi-Agent Framework
+---
 
-> **A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving**
+<div align="center">
 
-Sage is an advanced multi-agent system that intelligently breaks down complex tasks into manageable subtasks through seamless agent collaboration. Built with enterprise-grade reliability and extensibility in mind, it provides **Deep Research Mode** for comprehensive analysis and **Rapid Execution Mode** for quick task completion.
+# 🧠 **Sage Multi-Agent Framework**
 
-## ✨ Key Highlights
+### 🎯 **Making Complex Tasks Simple**
+
+</div>
+
+> 🌟 **A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving**
+
+**Sage** is an advanced multi-agent system that intelligently breaks down complex tasks into manageable subtasks through seamless agent collaboration. Built with enterprise-grade reliability and extensibility in mind, it provides **Deep Research Mode** for comprehensive analysis and **Rapid Execution Mode** for quick task completion.
+
+## ✨ **Key Highlights**
+
+<div align="center">
+
+### 🎯 **Why Choose Sage?**
+
+</div>
 
 🧠 **Intelligent Task Decomposition** - Automatically breaks complex problems into manageable subtasks with dependency tracking  
 🔄 **Agent Orchestration** - Seamless coordination between specialized agents with robust error handling  
 🛠️ **Extensible Tool System** - Plugin-based architecture with MCP server support and auto-discovery  
 ⚡ **Dual Execution Modes** - Choose between thorough analysis or rapid execution based on your needs  
-🌐 **Interactive Web Interface** - Beautiful Streamlit-based UI with real-time streaming visualization  
+🌐 **Interactive Web Interface** - Modern React + FastAPI UI with real-time streaming visualization  
 📊 **Advanced Token Tracking** - Comprehensive usage statistics and cost monitoring across all agents  
 ⚙️ **Rich Configuration** - Environment variables, config files, CLI options, and runtime updates  
 🔧 **Developer Friendly** - Clean APIs, comprehensive docs, examples, and extensive error handling  
 🎯 **Production Ready** - Robust error recovery, logging, retry mechanisms, and performance optimization
 
-## 🤖 Supported Models
+---
 
-Sage has been extensively tested with the following language models:
+<div align="center">
 
-### ✅ Officially Tested Models
-- **🔥 DeepSeek-V3** - `deepseek-chat` - Excellent performance for complex reasoning
-- **🌟 Qwen-3** - `qwen-turbo`, `qwen-plus` - Outstanding Chinese and English capabilities  
-- **🧠 GPT-4.1** - `gpt-4-turbo`, `gpt-4o` - Premium performance for all tasks
-- **⚡ Claude-3.5 Sonnet** - `claude-3-5-sonnet-20241022` - Exceptional reasoning abilities
+### 🚀 **Start Your AI Journey Now!**
 
-### 🌐 Compatible Providers
-- **OpenAI** - Direct API integration
-- **OpenRouter** - Access to 200+ models
-- **Anthropic** - Claude family models
-- **Google AI** - Gemini series
-- **DeepSeek** - Native API support
-- **Alibaba Cloud** - Qwen series
-- **Mistral AI** - All Mistral models
+</div>
+
+## 🤖 **Supported Models**
+
+<div align="center">
+
+### 🎯 **Extensively Tested Language Models**
+
+</div>
+
+### ✅ **Officially Tested Models**
+
+<table align="center">
+<tr>
+<th>🏆 Model</th>
+<th>🔧 API Identifier</th>
+<th>🌟 Key Strengths</th>
+<th>🎯 Best Use Cases</th>
+</tr>
+<tr>
+<td><strong>🔥 DeepSeek-V3</strong></td>
+<td><code>deepseek-chat</code></td>
+<td>Excellent complex reasoning</td>
+<td>Deep analysis, Code generation</td>
+</tr>
+<tr>
+<td><strong>🌟 Qwen-3</strong></td>
+<td><code>qwen-turbo</code>, <code>qwen-plus</code></td>
+<td>Outstanding bilingual capabilities</td>
+<td>Multilingual tasks, Text processing</td>
+</tr>
+<tr>
+<td><strong>🧠 GPT-4.1</strong></td>
+<td><code>gpt-4-turbo</code>, <code>gpt-4o</code></td>
+<td>Premium performance for all tasks</td>
+<td>Enterprise apps, Complex reasoning</td>
+</tr>
+<tr>
+<td><strong>⚡ Claude-3.5 Sonnet</strong></td>
+<td><code>claude-3-5-sonnet-20241022</code></td>
+<td>Exceptional reasoning abilities</td>
+<td>Creative writing, Logic analysis</td>
+</tr>
+</table>
+
+### 🌐 **Compatible Providers**
+
+<div align="center">
+
+| 🏢 **Provider** | 🔗 **Integration** | 🌟 **Supported Models** |
+|:---:|:---:|:---:|
+| **OpenAI** | Direct API | All GPT models |
+| **OpenRouter** | Unified API | 200+ models access |
+| **Anthropic** | Native support | Claude family |
+| **Google AI** | Official API | Gemini series |
+| **DeepSeek** | Native API | All DeepSeek models |
+| **Alibaba Cloud** | Direct integration | Qwen series |
+| **Mistral AI** | Full support | All Mistral models |
+
+</div>
 
 > 💡 **Note**: While Sage is optimized for the models listed above, it's designed to work with any OpenAI-compatible API endpoint.
 
