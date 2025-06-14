@@ -305,8 +305,8 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           session_id: sessionId
       };
 
-        console.log('🌐 发起Fetch请求:', 'http://localhost:40039/api/chat-stream');
-        const response = await fetch('http://localhost:40039/api/chat-stream', {
+        console.log('🌐 发起Fetch请求:', '/api/chat-stream');
+        const response = await fetch('/api/chat-stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -575,4 +575,4 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
   }
   );
 
-export default ChatInterface; 
+export default ChatInterface;
