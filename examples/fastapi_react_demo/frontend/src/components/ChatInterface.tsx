@@ -530,46 +530,45 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     <div style={{ 
       height: '100vh', 
       display: 'flex', 
-        flexDirection: 'row',
+      flexDirection: 'row',
       overflow: 'hidden',
       background: '#f8fafc'
     }}>
-        {/* 主聊天区域 */}
+      {/* 主聊天区域 */}
       <div style={{ 
-        flex: 1, 
+        width: toolPanelVisible ? '60%' : '100%',
         display: 'flex',
         flexDirection: 'column',
-          overflow: 'hidden',
-          transition: 'all 0.3s ease',
-          marginRight: toolPanelVisible ? '600px' : '0'
-                        }}>
-          {/* 消息列表 */}
-          <MessageList 
-            messages={messages} 
-            onExampleClick={handleExampleClick}
-            onToolCallClick={handleToolCallClick}
-            settings={{ useDeepThink, useMultiAgent }}
-          />
+        overflow: 'hidden',
+        transition: 'all 0.3s ease'
+      }}>
+        {/* 消息列表 */}
+        <MessageList 
+          messages={messages} 
+          onExampleClick={handleExampleClick}
+          onToolCallClick={handleToolCallClick}
+          settings={{ useDeepThink, useMultiAgent }}
+        />
 
-          {/* 输入区域 */}
-          <ChatInput
-                  value={inputValue}
-            onChange={setInputValue}
-            onSend={handleSendMessage}
-            isLoading={isLoading}
-            useDeepThink={useDeepThink}
-            useMultiAgent={useMultiAgent}
-            onDeepThinkChange={setUseDeepThink}
-            onMultiAgentChange={setUseMultiAgent}
-          />
-              </div>
-              
-        {/* 工具详情侧边栏 */}
-        <ToolDetailPanel
-          visible={toolPanelVisible}
-          toolCall={selectedToolCall}
-          onClose={handleToolPanelClose}
-              />
+        {/* 输入区域 */}
+        <ChatInput
+          value={inputValue}
+          onChange={setInputValue}
+          onSend={handleSendMessage}
+          isLoading={isLoading}
+          useDeepThink={useDeepThink}
+          useMultiAgent={useMultiAgent}
+          onDeepThinkChange={setUseDeepThink}
+          onMultiAgentChange={setUseMultiAgent}
+        />
+      </div>
+      
+      {/* 工具详情侧边栏 */}
+      <ToolDetailPanel
+        visible={toolPanelVisible}
+        toolCall={selectedToolCall}
+        onClose={handleToolPanelClose}
+      />
     </div>
   );
   }
