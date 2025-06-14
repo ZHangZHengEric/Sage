@@ -11,4 +11,9 @@ uvicorn[standard]>=0.24.0
 websockets>=12.0
 pydantic>=2.5.0
 mcp>=1.9.2
+fastmcp>=0.9.0
 docstring_parser>=0.16
+
+# Tool dependencies
+chardet>=5.0.0
+httpx>=0.24.0

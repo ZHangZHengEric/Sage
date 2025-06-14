@@ -34,14 +34,15 @@ class ExecutorAgent(AgentBase):
     TASK_EXECUTION_PROMPT_TEMPLATE = """Do the following subtask:{next_subtask_description}.
 the expected output is:{next_expected_output}
 
-注意以下的任务执行规则：
+注意以下的任务执行规则，不要使用工具集合之外的工具，否则会报错：
 1. 如果不需要使用工具，直接返回中文内容。你的文字输出都要是markdown格式。
-2. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
-3. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
-4. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
-5. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
-6. 调用工具时，不要在其他的输出文字,你一次只能执行一个任务。
-7. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
+2. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
+3. 调用工具时，不要在其他的输出文字,你一次只能执行一个任务。
+4. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
+在工具集合包含file_write函数工具，要求如下：
+5. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
+6. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
+7. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
 8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
 """
 
@@ -562,10 +563,12 @@ the expected output is:{next_expected_output}
                         'content': f"该任务交接给了{tool.name}，进行执行",
                         'show_content': f"该任务交接给了{tool.name}，进行执行",
                         'message_id': str(uuid.uuid4()),
-                        'type': 'tool_call',
+                        'type': 'handoff_agent',
                     }]
                 else:
-                    # 发送工具调用消息
+                    # 格式化工具参数显示
+                    formatted_params = self._format_tool_parameters(tool_call['function']['arguments'])
+                    
                     yield [{
                             'role': 'assistant',
                         'tool_calls': [{
@@ -578,7 +581,7 @@ the expected output is:{next_expected_output}
                         }],
                         'type': 'tool_call',
                         'message_id': str(uuid.uuid4()),
-                        'show_content': f"调用工具：{tool_name}\n\n"
+                        'show_content': f"🔧 **调用工具：{tool_name}**\n\n{formatted_params}\n"
                     }]
                 
                 # 解析并执行工具
@@ -589,13 +592,51 @@ the expected output is:{next_expected_output}
                     session_id=session_id,
                     **arguments
                 )
-                    
-                    # 处理工具响应
-                logger.debug("ExecutorAgent: 收到工具响应，正在处理")
-                logger.info(f"ExecutorAgent: 工具响应 {tool_response}")
                 
-                processed_response = self.process_tool_response(tool_response, tool_call_id)
-                yield processed_response
+                # 检查是否为流式响应（AgentToolSpec）
+                if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
+                    # 检查是否为专业agent工具
+                    tool_spec = tool_manager.get_tool(tool_name) if tool_manager else None
+                    is_agent_tool = isinstance(tool_spec, AgentToolSpec)
+                    
+                    # 处理流式响应
+                    logger.debug(f"ExecutorAgent: 收到流式工具响应，工具类型: {'专业Agent' if is_agent_tool else '普通工具'}")
+                    try:
+                        for chunk in tool_response:
+                            if is_agent_tool:
+                                # 专业agent工具：直接返回原始结果，不做任何处理
+                                yield chunk
+                            else:
+                                # 普通工具：添加必要的元数据
+                                if isinstance(chunk, list):
+                                    # 为每个消息添加tool_call_id
+                                    for message in chunk:
+                                        if isinstance(message, dict):
+                                            message['tool_call_id'] = tool_call_id
+                                            if 'message_id' not in message:
+                                                message['message_id'] = str(uuid.uuid4())
+                                            if 'type' not in message:
+                                                message['type'] = 'tool_call_result'
+                                    yield chunk
+                                else:
+                                    # 单个消息
+                                    if isinstance(chunk, dict):
+                                        chunk['tool_call_id'] = tool_call_id
+                                        if 'message_id' not in chunk:
+                                            chunk['message_id'] = str(uuid.uuid4())
+                                        if 'type' not in chunk:
+                                            chunk['type'] = 'tool_call_result'
+                                    yield [chunk]
+                    except Exception as e:
+                        logger.error(f"ExecutorAgent: 处理流式工具响应时发生错误: {str(e)}")
+                        yield from self._handle_tool_error(tool_call_id, tool_name, e)
+                else:
+                    # 处理非流式响应
+                    logger.debug("ExecutorAgent: 收到非流式工具响应，正在处理")
+                    logger.info(f"ExecutorAgent: 工具响应 {tool_response}")
+                    
+                    processed_response = self.process_tool_response(tool_response, tool_call_id)
+                    yield processed_response
                 
             except Exception as e:
                 logger.error(f"ExecutorAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
@@ -744,3 +785,60 @@ the expected output is:{next_expected_output}
             session_id=session_id,
             system_context=system_context
         )
+
+    def _format_tool_parameters(self, arguments_str: str) -> str:
+        """
+        格式化工具参数为美观的 markdown 显示
+        
+        Args:
+            arguments_str: 工具参数的 JSON 字符串
+            
+        Returns:
+            str: 格式化后的 markdown 字符串
+        """
+        try:
+            # 解析参数
+            params = json.loads(arguments_str)
+            
+            if not params:
+                return "📝 **参数**: 无"
+            
+            formatted_lines = ["📝 **参数**:"]
+            
+            for key, value in params.items():
+                # 处理不同类型的参数值
+                if isinstance(value, str):
+                    # 处理长字符串参数
+                    if len(value) > 100:
+                        truncated_value = value[:97] + "..."
+                        formatted_value = f'"{truncated_value}"'
+                    else:
+                        formatted_value = f'"{value}"'
+                elif isinstance(value, (dict, list)):
+                    # 处理复杂对象
+                    value_str = json.dumps(value, ensure_ascii=False, indent=2)
+                    if len(value_str) > 150:
+                        formatted_value = "复杂对象 (已省略详细内容)"
+                    else:
+                        formatted_value = f"`{value_str}`"
+                elif isinstance(value, bool):
+                    formatted_value = "✅ 是" if value else "❌ 否"
+                elif isinstance(value, (int, float)):
+                    formatted_value = f"`{value}`"
+                else:
+                    formatted_value = f"`{str(value)}`"
+                
+                formatted_lines.append(f"- **{key}**: {formatted_value}")
+            
+            return "\n".join(formatted_lines)
+            
+        except json.JSONDecodeError:
+            # 如果无法解析 JSON，直接显示原始字符串
+            if len(arguments_str) > 100:
+                truncated = arguments_str[:97] + "..."
+                return f"📝 **参数**: `{truncated}`"
+            else:
+                return f"📝 **参数**: `{arguments_str}`"
+        except Exception as e:
+            logger.warning(f"ExecutorAgent: 格式化工具参数时发生错误: {str(e)}")
+            return "📝 **参数**: 解析失败"
