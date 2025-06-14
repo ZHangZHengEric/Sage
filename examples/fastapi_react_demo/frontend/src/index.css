@@ -45,4 +45,52 @@ html, body, #root {
   --text-color-secondary: rgba(0, 0, 0, 0.45);
   --background-color: #fff;
   --component-background: #fff;
+}
+
+/* 加载动画 */
+@keyframes loadingDot {
+  0%, 80%, 100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* 深度思考脉冲动画 */
+@keyframes deepThinkPulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+/* 聊天输入框样式 */
+.chat-input-container:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.chat-input-container:focus-within {
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.15) !important;
+  border-color: #6366f1 !important;
+}
+
+/* 深度思考折叠面板样式 */
+.deep-think-collapse .ant-collapse-header {
+  padding: 12px 16px !important;
+}
+
+.deep-think-collapse .ant-collapse-content-box {
+  padding: 8px 16px 16px !important;
+}
+
+/* 消息气泡样式 */
+.message-bubble {
+  transition: all 0.2s ease;
 } 

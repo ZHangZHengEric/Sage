@@ -18,6 +18,7 @@ from typing import List, Dict, Any, Optional, Generator
 
 from agents.agent.agent_base import AgentBase
 from agents.tool.tool_manager import ToolManager
+from agents.tool.tool_base import AgentToolSpec
 from agents.utils.logger import logger
 
 
@@ -31,12 +32,13 @@ class DirectExecutorAgent(AgentBase):
 
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是一个直接执行智能体，负责无推理策略的直接任务执行。你比ReAct策略更快速，适用于不需要推理或早期处理的任务。
-一定要先执行用户的问题或者请求，即使用户问题不清楚，也要回答或者询问用户的问题，不要直接结束任务。"""
+"""
     
     # 工具建议提示模板常量
     TOOL_SUGGESTION_PROMPT_TEMPLATE = """你是一个智能助手，你要根据用户的需求，为用户提供帮助，回答用户的问题或者满足用户的需求。
-你当前数据库_id或者知识库_id：{session_id}
 你要根据历史的对话以及用户的请求，获取解决用户请求用到的所有可能的工具。
+一定要先执行用户的问题或者请求，即使用户问题不清楚，也要回答或者询问用户的问题，不要直接结束任务。
+调用完工具后，一定要用文字描述工具调用的结果，不要直接结束任务。
 
 ## 可用工具
 {available_tools_str}
@@ -659,6 +661,10 @@ class DirectExecutorAgent(AgentBase):
         Returns:
             List[Dict[str, Any]]: 工具调用消息列表
         """
+        # 格式化工具参数显示
+        formatted_params = self._format_tool_parameters(tool_call['function']['arguments'])
+        tool_name = tool_call['function']['name']
+        
         return [{
             'role': 'assistant',
             'tool_calls': [{
@@ -671,7 +677,7 @@ class DirectExecutorAgent(AgentBase):
             }],
             "type": "tool_call",
             "message_id": str(uuid.uuid4()),
-            "show_content": "调用工具：" + tool_call['function']['name'] + '\n\n'
+            "show_content": f"🔧 **调用工具：{tool_name}**\n\n{formatted_params}\n"
         }]
 
     def _execute_tool(self, 
@@ -706,12 +712,56 @@ class DirectExecutorAgent(AgentBase):
                 **arguments
             )
             
-            # 处理工具响应
-            logger.debug("DirectExecutorAgent: 收到工具响应，正在处理")
-            logger.info(f"DirectExecutorAgent: 工具响应 {tool_response}")
-            processed_response = self.process_tool_response(tool_response, tool_call['id'])
-            all_new_response_chunks.extend(processed_response)
-            yield processed_response
+            # 检查是否为流式响应（AgentToolSpec）
+            if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
+                # 检查是否为专业agent工具
+                tool_spec = tool_manager.get_tool(tool_name) if tool_manager else None
+                is_agent_tool = isinstance(tool_spec, AgentToolSpec)
+                
+                # 处理流式响应
+                logger.debug(f"DirectExecutorAgent: 收到流式工具响应，工具类型: {'专业Agent' if is_agent_tool else '普通工具'}")
+                try:
+                    for chunk in tool_response:
+                        if is_agent_tool:
+                            # 专业agent工具：直接返回原始结果，不做任何处理
+                            if isinstance(chunk, list):
+                                all_new_response_chunks.extend(chunk)
+                            else:
+                                all_new_response_chunks.append(chunk)
+                            yield chunk
+                        else:
+                            # 普通工具：添加必要的元数据
+                            if isinstance(chunk, list):
+                                # 为每个消息添加tool_call_id
+                                for message in chunk:
+                                    if isinstance(message, dict):
+                                        message['tool_call_id'] = tool_call['id']
+                                        if 'message_id' not in message:
+                                            message['message_id'] = str(uuid.uuid4())
+                                        if 'type' not in message:
+                                            message['type'] = 'tool_call_result'
+                                all_new_response_chunks.extend(chunk)
+                                yield chunk
+                            else:
+                                # 单个消息
+                                if isinstance(chunk, dict):
+                                    chunk['tool_call_id'] = tool_call['id']
+                                    if 'message_id' not in chunk:
+                                        chunk['message_id'] = str(uuid.uuid4())
+                                    if 'type' not in chunk:
+                                        chunk['type'] = 'tool_call_result'
+                                all_new_response_chunks.append(chunk)
+                                yield [chunk]
+                except Exception as e:
+                    logger.error(f"DirectExecutorAgent: 处理流式工具响应时发生错误: {str(e)}")
+                    yield from self._handle_tool_error(tool_call['id'], tool_name, e)
+            else:
+                # 处理非流式响应
+                logger.debug("DirectExecutorAgent: 收到非流式工具响应，正在处理")
+                logger.info(f"DirectExecutorAgent: 工具响应 {tool_response}")
+                processed_response = self.process_tool_response(tool_response, tool_call['id'])
+                all_new_response_chunks.extend(processed_response)
+                yield processed_response
             
         except Exception as e:
             logger.error(f"DirectExecutorAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
@@ -888,3 +938,60 @@ class DirectExecutorAgent(AgentBase):
             session_id=session_id,
             system_context=system_context
         )
+
+    def _format_tool_parameters(self, arguments_str: str) -> str:
+        """
+        格式化工具参数为美观的 markdown 显示
+        
+        Args:
+            arguments_str: 工具参数的 JSON 字符串
+            
+        Returns:
+            str: 格式化后的 markdown 字符串
+        """
+        try:
+            # 解析参数
+            params = json.loads(arguments_str)
+            
+            if not params:
+                return "📝 **参数**: 无"
+            
+            formatted_lines = ["📝 **参数**:"]
+            
+            for key, value in params.items():
+                # 处理不同类型的参数值
+                if isinstance(value, str):
+                    # 处理长字符串参数
+                    if len(value) > 100:
+                        truncated_value = value[:97] + "..."
+                        formatted_value = f'"{truncated_value}"'
+                    else:
+                        formatted_value = f'"{value}"'
+                elif isinstance(value, (dict, list)):
+                    # 处理复杂对象
+                    value_str = json.dumps(value, ensure_ascii=False, indent=2)
+                    if len(value_str) > 150:
+                        formatted_value = "复杂对象 (已省略详细内容)"
+                    else:
+                        formatted_value = f"`{value_str}`"
+                elif isinstance(value, bool):
+                    formatted_value = "✅ 是" if value else "❌ 否"
+                elif isinstance(value, (int, float)):
+                    formatted_value = f"`{value}`"
+                else:
+                    formatted_value = f"`{str(value)}`"
+                
+                formatted_lines.append(f"- **{key}**: {formatted_value}")
+            
+            return "\n".join(formatted_lines)
+            
+        except json.JSONDecodeError:
+            # 如果无法解析 JSON，直接显示原始字符串
+            if len(arguments_str) > 100:
+                truncated = arguments_str[:97] + "..."
+                return f"📝 **参数**: `{truncated}`"
+            else:
+                return f"📝 **参数**: `{arguments_str}`"
+        except Exception as e:
+            logger.warning(f"DirectExecutorAgent: 格式化工具参数时发生错误: {str(e)}")
+            return "📝 **参数**: 解析失败"

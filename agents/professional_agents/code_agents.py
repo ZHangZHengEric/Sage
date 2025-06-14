@@ -1,8 +1,8 @@
-from pandas.compat import F
 from agents.agent.agent_controller import AgentController
 from agents.tool.tool_manager import ToolManager
 from agents.agent.agent_base import AgentBase
 from typing import List, Dict, Any, Optional, Generator
+from agents.utils.logger import logger
 
 class CodeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any]):
@@ -18,13 +18,56 @@ class CodeAgent(AgentBase):
 """
         self.controller = AgentController(model, model_config, system_prefix=system_prefix)
         self.tool_manager = ToolManager(is_auto_discover=False)
-
+        self.deep_thinking: bool = False
+        self.summary: bool = False
+        self.max_loop_count: int = 10
+        self.deep_research: bool = True
+        
+    def _create_filtered_tool_manager(self, original_tool_manager: Optional[Any] = None) -> ToolManager:
+        """
+        创建一个过滤掉自己的tool_manager副本，避免自调用
+        
+        Args:
+            original_tool_manager: 原始的tool_manager
+            
+        Returns:
+            ToolManager: 过滤后的tool_manager
+        """
+        if original_tool_manager is None:
+            return self.tool_manager
+            
+        # 创建新的tool_manager实例
+        filtered_tool_manager = ToolManager(is_auto_discover=False)
+        
+        # 复制所有工具，但排除自己
+        agent_name = self.__class__.__name__
+        for tool_name, tool_spec in original_tool_manager.tools.items():
+            if tool_name != agent_name:
+                filtered_tool_manager.tools[tool_name] = tool_spec
+            else:
+                logger.info(f"CodeAgent: 过滤掉自调用工具: {tool_name}")
+                
+        logger.info(f"CodeAgent: 创建过滤后的tool_manager，原有{len(original_tool_manager.tools)}个工具，过滤后{len(filtered_tool_manager.tools)}个工具")
+        return filtered_tool_manager
+        
     def run_stream(self, messages: List[Dict],
+                    tool_manager: Optional[Any] = None,
                     session_id: Any | None = None,
-                    deep_thinking: bool = True,
-                    summary: bool = True,
-                    max_loop_count: int = 10,
-                    deep_research: bool = True) -> Generator[List[Dict[str, Any]], None, None]:
-        chunk_iter = self.controller.run_stream(input_messages=messages,tool_manager=self.tool_manager,session_id=session_id,deep_thinking=deep_thinking,summary=summary,max_loop_count=max_loop_count,deep_research=deep_research)
+                    system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
+        # 创建过滤后的tool_manager，避免自调用
+        filtered_tool_manager = self._create_filtered_tool_manager(tool_manager)
+        
+        chunk_iter = self.controller.run_stream(
+            input_messages=messages,
+            tool_manager=filtered_tool_manager,
+            session_id=session_id,
+            deep_thinking=self.deep_thinking,
+            summary=self.summary,
+            max_loop_count=self.max_loop_count,
+            deep_research=self.deep_research,
+            system_context=system_context
+        )
+        
+        # 直接返回流式结果，不做任何处理
         for chunk in chunk_iter:
             yield chunk

@@ -32,6 +32,7 @@ class ToolManager:
         
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec]] = {}
         self._mcp_sessions: Dict[str, Dict[str, Union[ClientSession]]] = {}  # {session_id: {server_name: session}}
+        self._tool_instances: Dict[type, ToolBase] = {}  # 缓存工具实例
         
         if is_auto_discover:
             self._auto_discover_tools()
@@ -143,6 +144,8 @@ class ToolManager:
         """Register all tools from a ToolBase subclass"""
         logger.info(f"Registering tools from class: {tool_class.__name__}")
         tool_instance = tool_class()
+        # 缓存工具实例，以便后续执行时重用
+        self._tool_instances[tool_class] = tool_instance
         instance_tools = tool_instance.tools
         
         if not instance_tools:
@@ -153,6 +156,9 @@ class ToolManager:
         print(f"\nRegistering tools to manager from {tool_class.__name__}:")
         registered = False
         for tool_name, tool_spec in instance_tools.items():
+            # 修正工具规格中的__objclass__
+            if hasattr(tool_spec.func, '__objclass__'):
+                tool_spec.func.__objclass__ = tool_class
             if self.register_tool(tool_spec):
                 registered = True
         logger.info(f"Completed registering tools from {tool_class.__name__}, success: {registered}")
@@ -354,6 +360,42 @@ class ToolManager:
             'description': tool.description
         } for tool in self.tools.values()]
 
+    def list_tools_with_type(self) -> List[Dict[str, Any]]:
+        """List all available tools with type and source information"""
+        logger.debug(f"Listing all {len(self.tools)} tools with type information")
+        tools_with_type = []
+        
+        for tool in self.tools.values():
+            # 根据工具类型判断
+            if isinstance(tool, McpToolSpec):
+                tool_type = "mcp"
+                source = f"MCP Server: {tool.server_name}"
+            elif isinstance(tool, AgentToolSpec):
+                tool_type = "agent"
+                source = "专业智能体"
+            elif isinstance(tool, ToolSpec):
+                tool_type = "basic"
+                # 根据工具名称推断来源
+                if 'calculate' in tool.name.lower() or 'factorial' in tool.name.lower():
+                    source = "内置计算器"
+                elif 'database' in tool.name.lower() or 'sql' in tool.name.lower():
+                    source = "数据库工具"
+                else:
+                    source = "基础工具"
+            else:
+                tool_type = "unknown"
+                source = "未知来源"
+            
+            tools_with_type.append({
+                'name': tool.name,
+                'description': tool.description,
+                'parameters': getattr(tool, 'parameters', {}),
+                'type': tool_type,
+                'source': source
+            })
+        
+        return tools_with_type
+
     def get_openai_tools(self) -> List[Dict[str, Any]]:
         """Get tool specifications in OpenAI-compatible format"""
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
@@ -388,8 +430,10 @@ class ToolManager:
         
         logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
         
+        # Step 2: Execute based on tool type (self-call prevention handled at agent level)
+        
         try:
-            # Step 2: Execute based on tool type
+            # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
                 from concurrent.futures import ThreadPoolExecutor
                 
@@ -409,14 +453,15 @@ class ToolManager:
             elif isinstance(tool, ToolSpec):
                 final_result = self._execute_standard_tool(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
-                final_result = self._execute_agent_tool(tool, messages, session_id)
+                # For AgentToolSpec, return a generator for streaming
+                return self._execute_agent_tool_streaming(tool, messages, session_id)
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
                 self._log_execution(tool_name, False, "UNKNOWN_TOOL_TYPE")
                 return self._format_error_response(error_msg, tool_name, "UNKNOWN_TOOL_TYPE")
             
-            # Step 3: Validate Result
+            # Step 4: Validate Result (for non-streaming tools)
             execution_time = time.time() - execution_start
             logger.info(f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s")
             
@@ -440,6 +485,74 @@ class ToolManager:
             
             self._log_execution(tool_name, False, "EXECUTION_ERROR")
             return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
+
+
+
+    def _execute_agent_tool_streaming(self, tool: AgentToolSpec, messages: list, session_id: str):
+        """
+        执行AgentToolSpec并返回流式结果
+        
+        Args:
+            tool: AgentToolSpec实例
+            messages: 消息列表
+            session_id: 会话ID
+            
+        Yields:
+            流式返回的结果
+        """
+        logger.info(f"Executing agent tool with streaming: {tool.name}")
+        execution_start = time.time()
+        
+        try:
+            # 检查agent是否有run_stream方法
+            agent_instance = tool.func.__self__ if hasattr(tool.func, '__self__') else None
+            
+            if agent_instance and hasattr(agent_instance, 'run_stream'):
+                logger.debug(f"Using run_stream method for agent: {tool.name}")
+                # 使用流式方法
+                stream_generator = agent_instance.run_stream(
+                    messages=messages, 
+                    session_id=session_id
+                )
+                
+                # 流式返回结果
+                for chunk in stream_generator:
+                    yield chunk
+                    
+            else:
+                logger.debug(f"Using non-streaming method for agent: {tool.name}")
+                # 回退到非流式方法
+                result = tool.func(messages=messages, session_id=session_id)
+                
+                # 将结果包装为流式格式
+                if isinstance(result, list):
+                    for message in result:
+                        yield [message]
+                else:
+                    yield [{"role": "assistant", "content": str(result)}]
+            
+            # 记录执行统计
+            execution_time = time.time() - execution_start
+            logger.info(f"Agent tool '{tool.name}' completed streaming in {execution_time:.2f}s")
+            self._log_execution(tool.name, True, execution_time=execution_time)
+            
+        except Exception as e:
+            execution_time = time.time() - execution_start
+            error_msg = f"Agent tool '{tool.name}' failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"Exception details: {type(e).__name__}")
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
+            
+            self._log_execution(tool.name, False, "EXECUTION_ERROR")
+            
+            # 返回错误消息作为流
+            error_response = {
+                "role": "assistant",
+                "content": f"工具执行失败: {error_msg}",
+                "error": True,
+                "error_type": "EXECUTION_ERROR"
+            }
+            yield [error_response]
 
     async def _execute_mcp_tool(self, tool: McpToolSpec, session_id: str, **kwargs) -> str:
         """Execute MCP tool and format result"""
@@ -475,12 +588,16 @@ class ToolManager:
                 result = tool.func(**kwargs)
             else:
                 # Unbound method - need to create instance
-                    tool_class = getattr(tool.func, '__objclass__', None)
-                    if tool_class:
-                        instance = tool_class()
-                        result = tool.func.__get__(instance)(**kwargs)
+                tool_class = getattr(tool.func, '__objclass__', None)
+                if tool_class:
+                    # 检查是否有预先创建的实例
+                    if hasattr(self, '_tool_instances') and tool_class in self._tool_instances:
+                        instance = self._tool_instances[tool_class]
                     else:
-                        result = tool.func(**kwargs)
+                        instance = tool_class()
+                    result = tool.func.__get__(instance)(**kwargs)
+                else:
+                    result = tool.func(**kwargs)
             
             # Format result
             if isinstance(result, (dict, list)):

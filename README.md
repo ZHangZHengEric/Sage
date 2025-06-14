@@ -93,11 +93,40 @@ graph TD
 
 ### Installation
 
+#### 🚀 Quick Installation (Recommended)
+
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-pip install -r requirements.txt
+
+# Run the automated installation script
+./install_dependencies.sh
 ```
+
+#### 📦 Manual Installation
+
+```bash
+git clone https://github.com/ZHangZHengEric/Sage.git
+cd Sage
+
+# Install core dependencies
+pip install -r requirements.txt
+
+# For FastAPI React Demo
+pip install -r examples/fastapi_react_demo/requirements.txt
+```
+
+#### 🔧 Dependencies Overview
+
+Sage includes several powerful tool systems that require specific dependencies:
+
+- **Core Framework**: `openai`, `pydantic`, `python-dotenv`
+- **Tool System**: `chardet`, `docstring_parser`, `requests`, `httpx`
+- **MCP Support**: `mcp`, `fastmcp` 
+- **Web Interface**: `fastapi`, `uvicorn`, `websockets`
+- **Demo Applications**: `streamlit`, `gradio`
+
+All dependencies are automatically managed by the installation script.
 
 ### 🎮 Interactive Web Demo
 

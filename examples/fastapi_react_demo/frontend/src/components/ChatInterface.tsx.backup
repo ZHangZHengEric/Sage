@@ -1,0 +1,211 @@
+import React, { useState, useImperativeHandle, forwardRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { Message, ChatSettings } from '../types/chat';
+import { useChatMessages } from '../hooks/useChatMessages';
+import MessageList from './MessageList';
+import ChatInput from './ChatInput';
+import ToolDetailPanel from './ToolDetailPanel';
+import { ToolCallData } from '../types/toolCall';
+import { ChatHistoryItem } from '../hooks/useChatHistory';
+
+interface ChatInterfaceProps {
+  currentChatId?: string;
+  loadedMessages?: ChatHistoryItem['messages'] | null;
+}
+
+export interface ChatInterfaceRef {
+  startNewChat: () => void;
+  loadChat: (messages: ChatHistoryItem['messages']) => void;
+}
+
+const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
+  ({ currentChatId, loadedMessages }, ref) => {
+    const [inputValue, setInputValue] = useState('');
+    const [useDeepThink, setUseDeepThink] = useState(false);
+    const [useMultiAgent, setUseMultiAgent] = useState(false);
+    const [sessionId] = useState(uuidv4());
+    const [toolPanelVisible, setToolPanelVisible] = useState(false);
+    const [selectedToolCall, setSelectedToolCall] = useState<ToolCallData | null>(null);
+
+    const {
+      messages,
+      isLoading,
+      setIsLoading,
+      addLoadingMessage,
+      addUserMessage,
+      handleMessageChunk,
+      addErrorMessage,
+      clearMessages,
+      setMessages
+    } = useChatMessages();
+
+    // 暴露给父组件的方法
+    useImperativeHandle(ref, () => ({
+      startNewChat: () => {
+        clearMessages();
+        setInputValue('');
+        setIsLoading(false);
+      },
+      loadChat: (chatMessages: ChatHistoryItem['messages']) => {
+        setMessages(chatMessages.map(msg => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        })));
+        setInputValue('');
+        setIsLoading(false);
+      }
+    }));
+
+    const handleSendMessage = async () => {
+      if (!inputValue.trim() || isLoading) return;
+
+      // 添加用户消息
+      const userMessage = addUserMessage(inputValue.trim());
+      
+      // 添加loading消息
+      const settings: ChatSettings = { useDeepThink, useMultiAgent };
+      addLoadingMessage(settings);
+      
+      setInputValue('');
+      setIsLoading(true);
+
+      try {
+        // 构建请求数据
+        const requestData = {
+          type: 'chat',
+          messages: [...messages, userMessage].map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            message_id: msg.id,
+            type: msg.type || 'normal'
+          })),
+          use_deepthink: useDeepThink,
+          use_multi_agent: useMultiAgent,
+          session_id: sessionId
+        };
+
+        console.log('🌐 发起Fetch请求:', 'http://localhost:40039/api/chat-stream');
+        const response = await fetch('http://localhost:40039/api/chat-stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestData),
+        });
+
+        console.log('📡 收到响应:', response.status, response.statusText);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        console.log('📺 这是流式响应，不能在这里读取body');
+
+        // 处理流式响应
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('无法获取响应流');
+        }
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                console.log('📦 收到数据:', data);
+                
+                switch (data.type) {
+                  case 'chat_chunk':
+                    handleMessageChunk(data);
+                    break;
+                  case 'chat_complete':
+                    setIsLoading(false);
+                    console.log('✅ 对话完成');
+                    break;
+                  case 'error':
+                    setIsLoading(false);
+                    addErrorMessage(data.message);
+                    break;
+                }
+              } catch (error) {
+                console.error('❌ 解析JSON失败:', error, line);
+              }
+            }
+          }
+        }
+
+      } catch (error) {
+        console.error('❌ 发送消息失败:', error);
+        setIsLoading(false);
+        addErrorMessage(`连接错误: ${error}`);
+      }
+    };
+
+    const handleExampleClick = (example: string) => {
+      setInputValue(example);
+    };
+
+    const handleToolCallClick = (toolCall: ToolCallData) => {
+      setSelectedToolCall(toolCall);
+      setToolPanelVisible(true);
+    };
+
+    const handleToolPanelClose = () => {
+      setToolPanelVisible(false);
+      setSelectedToolCall(null);
+    };
+
+    return (
+      <div style={{
+        height: '100vh', 
+        display: 'flex', 
+        flexDirection: 'row',
+        overflow: 'hidden',
+        background: '#f8fafc'
+      }}>
+        {/* 主聊天区域 */}
+        <div style={{
+          flex: 1,
+          display: 'flex', 
+          flexDirection: 'column',
+          overflow: 'hidden',
+          transition: 'all 0.3s ease',
+          marginRight: toolPanelVisible ? '400px' : '0'
+        }}>
+          {/* 消息列表 */}
+          <MessageList 
+            messages={messages} 
+            onExampleClick={handleExampleClick}
+          />
+
+          {/* 输入区域 */}
+          <ChatInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSend={handleSendMessage}
+            isLoading={isLoading}
+            useDeepThink={useDeepThink}
+            useMultiAgent={useMultiAgent}
+            onDeepThinkChange={setUseDeepThink}
+            onMultiAgentChange={setUseMultiAgent}
+          />
+        </div>
+
+        {/* 工具详情侧边栏 */}
+        <ToolDetailPanel
+          visible={toolPanelVisible}
+          toolCall={selectedToolCall}
+          onClose={handleToolPanelClose}
+        />
+      </div>
+    );
+  }
+);
+
+export default ChatInterface; 
