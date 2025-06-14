@@ -54,7 +54,7 @@ const Header: React.FC<HeaderProps> = ({
           color: '#1f2937',
           marginLeft: '8px'
         }}>
-          🧠 Sage
+          🧠 Zavix
         </Text>
       </Space>
       

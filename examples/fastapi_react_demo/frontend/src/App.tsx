@@ -16,7 +16,8 @@ const AppContent: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string>('');
   const [loadedMessages, setLoadedMessages] = useState<ChatHistoryItem['messages'] | null>(null);
-  const chatInterfaceRef = useRef<{ startNewChat: () => void; loadChat: (messages: ChatHistoryItem['messages']) => void }>(null);
+  const [loadedSettings, setLoadedSettings] = useState<ChatHistoryItem['settings'] | null>(null);
+  const chatInterfaceRef = useRef<{ startNewChat: () => void; loadChat: (messages: ChatHistoryItem['messages'], settings?: ChatHistoryItem['settings']) => void }>(null);
   const navigate = useNavigate();
 
   // 处理新对话
@@ -29,6 +30,7 @@ const AppContent: React.FC = () => {
     // 重置状态
     setCurrentChatId('');
     setLoadedMessages(null);
+    setLoadedSettings(null);
     
     // 使用setTimeout确保ChatInterface组件已经渲染完成
     setTimeout(() => {
@@ -52,16 +54,22 @@ const AppContent: React.FC = () => {
   };
 
   // 处理选择历史对话
-  const handleChatSelect = (chatId: string, messages: ChatHistoryItem['messages']) => {
+  const handleChatSelect = (chatId: string, messages: ChatHistoryItem['messages'], settings?: ChatHistoryItem['settings']) => {
     // 导航到首页
     navigate('/');
     
     setCurrentChatId(chatId);
     setLoadedMessages(messages);
+    setLoadedSettings(settings);
     
     // 确保ChatInterface组件已渲染
     setTimeout(() => {
-      chatInterfaceRef.current?.loadChat(messages);
+      chatInterfaceRef.current?.loadChat(messages, settings);
+      // 加载完成后清除loadedMessages，避免重复触发
+      setTimeout(() => {
+        setLoadedMessages(null);
+        setLoadedSettings(null);
+      }, 100);
     }, 50);
   };
 
@@ -121,6 +129,7 @@ const AppContent: React.FC = () => {
                         ref={chatInterfaceRef}
                         currentChatId={currentChatId}
                         loadedMessages={loadedMessages}
+                        loadedSettings={loadedSettings}
                       />
                     } 
                   />

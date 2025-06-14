@@ -20,7 +20,7 @@ const { confirm } = Modal;
 
 interface SidebarProps {
   collapsed: boolean;
-  onChatSelect?: (chatId: string, messages: ChatHistoryItem['messages']) => void;
+  onChatSelect?: (chatId: string, messages: ChatHistoryItem['messages'], settings?: ChatHistoryItem['settings']) => void;
   onNewChat?: () => void;
   onToggleCollapse?: () => void;
 }
@@ -77,7 +77,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
   };
 
   const handleChatClick = (chatItem: ChatHistoryItem) => {
-    onChatSelect?.(chatItem.id, chatItem.messages);
+    onChatSelect?.(chatItem.id, chatItem.messages, chatItem.settings);
   };
 
   const handleDeleteChat = (e: React.MouseEvent, chatId: string) => {
@@ -167,7 +167,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
               fontWeight: 600,
               marginBottom: '4px'
             }}>
-              🧠 Sage
+              🧠 Zavix
             </div>
             <div style={{ 
               color: '#6b7280', 

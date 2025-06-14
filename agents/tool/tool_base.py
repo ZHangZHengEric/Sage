@@ -152,7 +152,7 @@ class ToolBase:
     @classmethod
     def get_tools(cls) -> Dict[str, ToolSpec]:
         logger.debug(f"Getting tools for {cls.__name__}")
-        return cls.tools
+        return cls._tools
 
     @classmethod
     def get_openai_specs(cls) -> List[Dict[str, Any]]:
@@ -169,3 +169,22 @@ class ToolBase:
                 }
             })
         return specs
+
+    def get_openai_tools(self) -> List[Dict[str, Any]]:
+        """Get OpenAI-compatible tool specifications for this instance"""
+        logger.debug(f"Getting OpenAI tools for {self.__class__.__name__} instance")
+        tools = []
+        for tool_spec in self.tools.values():
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool_spec.name,
+                    "description": tool_spec.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": tool_spec.parameters,
+                        "required": tool_spec.required
+                    }
+                }
+            })
+        return tools

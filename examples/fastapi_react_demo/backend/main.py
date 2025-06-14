@@ -30,6 +30,7 @@ sys.path.append(str(project_root))
 
 from agents.agent.agent_controller import AgentController
 from agents.tool.tool_manager import ToolManager
+from agents.professional_agents.code_agents import CodeAgent
 from agents.utils.logger import logger
 from agents.config import get_settings
 from openai import OpenAI
@@ -44,6 +45,7 @@ class ChatMessage(BaseModel):
     content: str
     message_id: str = None
     type: str = "normal"
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 class ChatRequest(BaseModel):
     type: str = "chat"
@@ -63,6 +65,8 @@ class ToolInfo(BaseModel):
     name: str
     description: str
     parameters: Dict[str, Any]
+    type: str  # 工具类型：basic, mcp, agent
+    source: str  # 工具来源
 
 class SystemStatus(BaseModel):
     status: str
@@ -199,7 +203,8 @@ async def initialize_system():
                 "temperature": app_config.model.temperature,
                 "max_tokens": app_config.model.max_tokens
             }
-            
+            code_agent = CodeAgent(model, model_config)
+            tool_manager.register_tool(code_agent.to_tool())
             controller = AgentController(model, model_config)
             logger.info(f"✅ 智能体控制器初始化完成 (使用配置文件)")
             print(f"✅ 系统已就绪，模型: {app_config.model.model_name}")
@@ -364,12 +369,14 @@ async def get_tools(response: Response):
         if not tool_manager:
             return []
         
-        tools = tool_manager.list_tools_simplified()
+        tools = tool_manager.list_tools_with_type()
         return [
             ToolInfo(
                 name=tool["name"],
                 description=tool["description"],
-                parameters=tool.get("parameters", {})
+                parameters=tool.get("parameters", {}),
+                type=tool["type"],
+                source=tool["source"]
             )
             for tool in tools
         ]
@@ -429,12 +436,18 @@ async def chat_stream(request: ChatRequest):
             # 构建消息历史
             message_history = []
             for msg in request.messages:
-                message_history.append({
+                message_data = {
                     "role": msg.role,
                     "content": msg.content,
                     "message_id": msg.message_id or str(uuid.uuid4()),
                     "type": msg.type
-                })
+                }
+                
+                # 处理工具调用信息
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    message_data["tool_calls"] = msg.tool_calls
+                    
+                message_history.append(message_data)
             
             # 生成回复消息ID
             message_id = str(uuid.uuid4())
@@ -453,17 +466,225 @@ async def chat_stream(request: ChatRequest):
             ):
                 # 处理消息块
                 for msg in chunk:
+                    # 添加详细的工具消息日志
+                    if msg.get('role') == 'tool':
+                        print(f"🔧 [TOOL MESSAGE] 完整消息结构:")
+                        print(f"   role: {msg.get('role')}")
+                        print(f"   content: {msg.get('content', '')[:200]}...")
+                        print(f"   show_content: {msg.get('show_content', '')[:200]}...")
+                        print(f"   type: {msg.get('type')}")
+                        print(f"   tool_calls: {msg.get('tool_calls')}")
+                        print(f"   所有字段: {list(msg.keys())}")
+                        print("=" * 50)
+                    
+                    # 安全处理content和show_content，避免JSON转义问题
+                    content = msg.get('content', '')
+                    show_content = msg.get('show_content', '')
+                    
+                    # 清理show_content中的base64图片数据，避免JSON过大
+                    if isinstance(show_content, str) and 'data:image' in show_content:
+                        try:
+                            # 如果show_content是JSON字符串，解析并清理
+                            if show_content.strip().startswith('{'):
+                                show_content_data = json.loads(show_content)
+                                if isinstance(show_content_data, dict) and 'results' in show_content_data:
+                                    if isinstance(show_content_data['results'], list):
+                                        for result in show_content_data['results']:
+                                            if isinstance(result, dict) and 'image' in result:
+                                                if result['image'] and isinstance(result['image'], str) and result['image'].startswith('data:image'):
+                                                    result['image'] = None
+                                show_content = json.dumps(show_content_data, ensure_ascii=False)
+                            else:
+                                # 如果不是JSON，直接移除base64数据
+                                import re
+                                show_content = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', 'null', show_content)
+                        except (json.JSONDecodeError, Exception) as e:
+                            print(f"⚠️ [SHOW_CONTENT CLEANUP] 清理失败: {e}")
+                            # 如果清理失败，使用正则表达式移除base64数据
+                            import re
+                            show_content = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', 'null', show_content)
+                    
+                    # 特殊处理工具调用结果，避免JSON嵌套问题
+                    if msg.get('role') == 'tool' and isinstance(content, str):
+                        try:
+                            # 尝试解析content中的JSON数据
+                            if content.strip().startswith('{'):
+                                parsed_content = json.loads(content)
+                                
+                                # 检查是否是嵌套的JSON结构
+                                if isinstance(parsed_content, dict) and 'content' in parsed_content:
+                                    inner_content = parsed_content['content']
+                                    if isinstance(inner_content, str) and inner_content.strip().startswith('{'):
+                                        try:
+                                            # 解析内层JSON，这通常是实际的工具结果
+                                            search_data = json.loads(inner_content)
+                                            
+                                            # 清理搜索结果中的大数据，避免JSON过大
+                                            if isinstance(search_data, dict) and 'results' in search_data:
+                                                if isinstance(search_data['results'], list):
+                                                    for result in search_data['results']:
+                                                        if isinstance(result, dict):
+                                                            # 移除base64图片数据，避免JSON过大
+                                                            if 'image' in result and result['image']:
+                                                                if isinstance(result['image'], str) and result['image'].startswith('data:image'):
+                                                                    result['image'] = None
+                                                            # 限制文本字段长度
+                                                            for field in ['snippet', 'description', 'content']:
+                                                                if field in result and isinstance(result[field], str):
+                                                                    if len(result[field]) > 500:
+                                                                        result[field] = result[field][:500] + '...'
+                                            
+                                            # 直接使用解析后的数据，避免再次嵌套
+                                            content = search_data
+                                            print(f"🔍 [SEARCH RESULT] 成功解析嵌套JSON结果")
+                                        except json.JSONDecodeError:
+                                            # 内层解析失败，使用外层数据
+                                            content = parsed_content
+                                    else:
+                                        # 内层不是JSON字符串，直接使用
+                                        content = parsed_content
+                                else:
+                                    # 不是嵌套结构，直接使用
+                                    content = parsed_content
+                                    
+                                # 确保content是可序列化的
+                                if not isinstance(content, (str, dict, list, int, float, bool, type(None))):
+                                    content = str(content)
+                                    
+                        except json.JSONDecodeError as e:
+                            print(f"⚠️ [JSON PARSE ERROR] 解析失败: {e}")
+                            # 如果解析失败，保持原始字符串但清理特殊字符
+                            content = str(content).replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+                            # 移除可能导致JSON解析问题的转义字符
+                            content = content.replace('\\"', '"').replace('\\\\', '\\')
+                    
                     data = {
                         'type': 'chat_chunk',
                         'message_id': msg.get('message_id', message_id),
                         'role': msg.get('role', 'assistant'),
-                        'content': msg.get('content', ''),
-                        'show_content': msg.get('show_content', ''),
+                        'content': content,
+                        'show_content': show_content,
                         'step_type': msg.get('type', ''),
                         'agent_type': msg.get('role', '')
                     }
                     
-                    yield f"data: {json.dumps(data)}\n\n"
+                    # 处理工具调用信息
+                    if 'tool_calls' in msg and msg['tool_calls']:
+                        data['tool_calls'] = []
+                        for tool_call in msg['tool_calls']:
+                            tool_call_data = {
+                                'id': tool_call.get('id', ''),
+                                'name': tool_call.get('function', {}).get('name', ''),
+                                'arguments': {},
+                                'status': 'running'
+                            }
+                            
+                            # 解析工具参数
+                            if 'function' in tool_call and 'arguments' in tool_call['function']:
+                                try:
+                                    args_str = tool_call['function']['arguments']
+                                    if isinstance(args_str, str):
+                                        tool_call_data['arguments'] = json.loads(args_str)
+                                    else:
+                                        tool_call_data['arguments'] = args_str
+                                except json.JSONDecodeError:
+                                    logger.warning(f"Failed to parse tool arguments: {args_str}")
+                                    tool_call_data['arguments'] = {}
+                            
+                            data['tool_calls'].append(tool_call_data)
+                    
+                    # 序列化JSON - 保证完整传输大JSON
+                    try:
+                        json_str = json.dumps(data, ensure_ascii=False)
+                        json_size = len(json_str)
+                        
+                        # print(f"📊 [JSON SIZE] 准备发送JSON: {json_size} 字符")
+                        
+                        # 对于超大JSON，使用分块发送确保完整性
+                        if json_size > 32768:  # 32KB以上使用分块发送
+                            print(f"🔄 [CHUNKED SEND] 大JSON分块发送: {json_size} 字符")
+                            
+                            # 分块发送大JSON
+                            chunk_size = 8192  # 8KB per chunk，更小的分块确保稳定性
+                            total_chunks = (json_size + chunk_size - 1) // chunk_size
+                            
+                            # 发送分块开始标记
+                            start_marker = {
+                                'type': 'chunk_start',
+                                'message_id': data.get('message_id', 'unknown'),
+                                'total_size': json_size,
+                                'total_chunks': total_chunks,
+                                'chunk_size': chunk_size
+                            }
+                            yield f"data: {json.dumps(start_marker, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0.01)  # 稍长延迟确保前端准备好
+                            
+                            for i in range(total_chunks):
+                                start = i * chunk_size
+                                end = min(start + chunk_size, json_size)
+                                chunk_data = json_str[start:end]
+                                
+                                # 创建分块消息，包含校验信息
+                                chunk_message = {
+                                    'type': 'json_chunk',
+                                    'chunk_id': f"{data.get('message_id', 'unknown')}_{i}",
+                                    'chunk_index': i,
+                                    'total_chunks': total_chunks,
+                                    'chunk_data': chunk_data,
+                                    'chunk_size': len(chunk_data),
+                                    'is_final': i == total_chunks - 1,
+                                    'checksum': hash(chunk_data) % 1000000  # 简单校验和
+                                }
+                                
+                                yield f"data: {json.dumps(chunk_message, ensure_ascii=False)}\n\n"
+                                await asyncio.sleep(0.005)  # 适中延迟确保顺序和稳定性
+                            
+                            # 发送分块结束标记
+                            end_marker = {
+                                'type': 'chunk_end',
+                                'message_id': data.get('message_id', 'unknown'),
+                                'total_chunks': total_chunks,
+                                'expected_size': json_size
+                            }
+                            yield f"data: {json.dumps(end_marker, ensure_ascii=False)}\n\n"
+                            
+                            print(f"✅ [CHUNKED SEND] 完成分块发送: {total_chunks} 块")
+                        else:
+                            # 小JSON直接发送，但添加完整性标记
+                            complete_message = {
+                                'type': 'complete_json',
+                                'data': data,
+                                'size': json_size
+                            }
+                            yield f"data: {json.dumps(complete_message, ensure_ascii=False)}\n\n"
+                        
+                    except Exception as e:
+                        print(f"❌ [JSON SERIALIZE] 序列化失败: {e}")
+                        print(f"❌ [ERROR DETAILS] 数据类型: {type(data)}, 大小估计: {len(str(data))}")
+                        
+                        # 创建错误响应，但保留原始数据结构
+                        try:
+                            # 尝试创建包含错误信息但保持结构的响应
+                            error_data = {
+                                'type': 'chat_chunk',
+                                'message_id': data.get('message_id', 'error'),
+                                'role': data.get('role', 'tool'),
+                                'content': {'error': f'JSON序列化失败: {str(e)}', 'original_type': str(type(data.get('content', {})))},
+                                'show_content': f'❌ 数据处理错误: {str(e)[:100]}...',
+                                'step_type': data.get('step_type', ''),
+                                'agent_type': data.get('agent_type', ''),
+                                'error': True
+                            }
+                            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                        except Exception as nested_error:
+                            print(f"❌ [NESTED ERROR] 连错误响应都无法序列化: {nested_error}")
+                            # 最后的备用方案
+                            simple_error = {
+                                'type': 'error',
+                                'message': 'JSON处理失败，数据过大或格式异常'
+                            }
+                            yield f"data: {json.dumps(simple_error)}\n\n"
+                    
                     await asyncio.sleep(0.01)  # 小延迟避免过快
             
             # 发送完成标记
