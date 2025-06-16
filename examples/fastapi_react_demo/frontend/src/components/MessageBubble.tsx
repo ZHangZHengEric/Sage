@@ -209,7 +209,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick 
                         }
 
                         // 处理 ECharts 代码块
-                        if (match[1] === 'echart') {
+                        if (match[1] === 'echarts') {
                           try {
                             const chartOption = JSON.parse(String(children).replace(/\n$/, ''));
                             return (
