@@ -4,6 +4,7 @@ from agents.tool.calculation_tool import Calculator
 from agents.tool.task_completion_tool import TaskCompletionTool
 from agents.tool.file_system_tool import FileSystemTool
 from agents.tool.execute_command_tool import ExecuteCommandTool
+from agents.tool.file_parser_tool import FileParserTool
 
 __all__ = [
     'ToolManager',
@@ -14,5 +15,6 @@ __all__ = [
     'Calculator',
     'TaskCompletionTool',
     'FileSystemTool',
-    'ExecuteCommandTool'
+    'ExecuteCommandTool',
+    'FileParserTool'
 ]
