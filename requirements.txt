@@ -17,3 +17,13 @@ docstring_parser>=0.16
 # Tool dependencies
 chardet>=5.0.0
 httpx>=0.24.0
+pdfplumber
+html2text
+openpyxl
+pypandoc
+python-docx
+markdown
+python-pptx
+PyMuPDF
+tqdm
+unstructured

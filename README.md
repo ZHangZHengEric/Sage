@@ -234,6 +234,7 @@ Experience Sage through our cutting-edge web application featuring a modern Reac
 - 📡 **Real-time Communication** - WebSocket + SSE dual support for live updates
 - 🎨 **Beautiful Interface** - Collapsible deep thinking bubbles with modern design
 - 🔧 **Tool Management** - Automatic tool discovery and management
+- 💡 **Rule Preferences** - Personalized AI behavior configuration with custom rules and preferences
 - 📱 **Responsive Design** - Adapts to all screen sizes
 - 🔧 **TypeScript Support** - Full type safety throughout
 
@@ -305,6 +306,15 @@ print("Execution Time:", result['execution_time'])
 - **Observation Agent**: Advanced progress monitoring with completion detection and quality assessment
 - **Summary Agent**: Comprehensive result synthesis with structured output and actionable insights
 
+### 💡 **Rule Preferences System**
+- **Personalized AI Behavior**: Configure AI assistant behavior with custom rules and preferences
+- **Code Style Preferences**: Define coding standards, naming conventions, and style guidelines
+- **Response Language Settings**: Control language preferences and localization settings
+- **Detail Level Control**: Adjust verbosity and explanation depth according to your needs
+- **Template Library**: Quick-start templates for common preference patterns
+- **Real-time Management**: Add, edit, enable/disable rules through intuitive web interface
+- **Context Integration**: Rules automatically apply across all agent interactions
+
 ### 🛠️ **Advanced Tool System**
 - **Plugin Architecture**: Hot-reloadable tool development with automatic registration and versioning
 - **MCP Server Support: Seamless integration with Model Context Protocol servers and remote APIs, with added API key authentication for SSE MCP server connections
@@ -329,6 +339,29 @@ print(f"Agent Breakdown: {stats['agent_breakdown']}")
 
 # Print detailed statistics
 controller.print_comprehensive_token_stats()
+```
+
+### 💡 **Rule Preferences Configuration**
+- **Web Interface**: Configure rules through the modern React interface at `/rules`
+- **Runtime Application**: Rules automatically apply to all agent interactions
+- **Template System**: Quick-start with predefined rule templates
+- **Export/Import**: Share rule configurations across environments
+
+```python
+# Rule preferences are automatically applied through system context
+system_context = {
+    "user_preferences": {
+        "code_style": "Use clean, readable code with meaningful variable names",
+        "response_language": "Provide responses in English with Chinese comments",
+        "detail_level": "Provide detailed explanations with examples"
+    }
+}
+
+result = controller.run(
+    messages, 
+    tool_manager,
+    system_context=system_context  # Rules automatically integrated
+)
 ```
 
 ### ⚙️ **Rich Configuration System**
@@ -570,6 +603,7 @@ controller = AgentController.from_config("production.yaml")
 ### ✨ New Features
 - 🎯 **Task Decompose Agent**: New specialized agent for intelligent task breakdown and dependency management
 - 🔧 **Unified System Prompt Management**: Centralized system context handling with `system_context` parameter across all agents
+- 💡 **Rule Preferences System**: Personalized AI behavior configuration with custom rules, templates, and real-time management
 - 📊 **Enhanced Token Tracking**: Comprehensive usage statistics with detailed cost monitoring and optimization suggestions
 - 🛡️ **Robust Error Handling**: Advanced error recovery, retry mechanisms, and comprehensive exception handling
 - ⚡ **Performance Optimization**: 50% faster execution with improved resource management and parallel processing
