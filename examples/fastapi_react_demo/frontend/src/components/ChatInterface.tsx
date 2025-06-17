@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Message, ChatSettings, ToolCall } from '../types/chat';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useChatHistory } from '../hooks/useChatHistory';
+import { useSystem } from '../context/SystemContext';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ToolDetailPanel from './ToolDetailPanel';
@@ -22,6 +23,7 @@ export interface ChatInterfaceRef {
 
 const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
   ({ currentChatId, loadedMessages, loadedSettings }, ref) => {
+  const { state } = useSystem();
   const [inputValue, setInputValue] = useState('');
     const [useDeepThink, setUseDeepThink] = useState(false);
     const [useMultiAgent, setUseMultiAgent] = useState(false);
@@ -275,6 +277,15 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     setIsLoading(true);
 
     try {
+      // 构建规则偏好context
+      const enabledPreferences = state.rulePreferences.filter(pref => pref.enabled);
+      const systemContext = enabledPreferences.length > 0 ? {
+        rule_preferences: enabledPreferences.map(pref => ({
+          name: pref.name,
+          content: pref.content
+        }))
+      } : null;
+
       // 构建请求数据
       const requestData = {
         type: 'chat',
@@ -302,7 +313,8 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         }),
         use_deepthink: useDeepThink,
         use_multi_agent: useMultiAgent,
-          session_id: sessionId
+        session_id: sessionId,
+        system_context: systemContext
       };
 
         console.log('🌐 发起Fetch请求:', '/api/chat-stream');

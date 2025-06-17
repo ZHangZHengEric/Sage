@@ -53,6 +53,7 @@ class ChatRequest(BaseModel):
     use_deepthink: bool = True
     use_multi_agent: bool = True
     session_id: Optional[str] = None
+    system_context: Optional[Dict[str, Any]] = None
 
 class ConfigRequest(BaseModel):
     api_key: str
@@ -410,7 +411,8 @@ async def chat_endpoint(request: ChatRequest):
             session_id=request.session_id,
             deep_thinking=request.use_deepthink,
             summary=True,
-            deep_research=request.use_multi_agent
+            deep_research=request.use_multi_agent,
+            system_context=request.system_context
         )
         
         return {
@@ -462,7 +464,8 @@ async def chat_stream(request: ChatRequest):
                 session_id=str(uuid.uuid4()),
                 deep_thinking=request.use_deepthink,
                 summary=True,
-                deep_research=request.use_multi_agent
+                deep_research=request.use_multi_agent,
+                system_context=request.system_context
             ):
                 # 处理消息块
                 for msg in chunk:
