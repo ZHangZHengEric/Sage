@@ -32,3 +32,13 @@ aiofiles>=0.8.0
 
 # 其他工具
 python-multipart>=0.0.6 
+pdfplumber
+html2text
+openpyxl
+pypandoc
+pylibmagic
+pypdf
+opencc-python-reimplemented
+docx2txt
+lxml
+lxml_html_clean
