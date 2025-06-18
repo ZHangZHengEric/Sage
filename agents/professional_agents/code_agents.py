@@ -6,7 +6,7 @@ from agents.utils.logger import logger
 
 class CodeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any]):
-        self.agent_description = """这是一个专门用于代码或者软件开发的助手。
+        self.agent_description = """这是一个专门用于代码或者软件开发的助手和工具。
 当需要完成代码编写或者软件开发任务时，你可以使用这个助手。他会更加的专业和准确。
 """
         system_prefix = """你是一个代码或者软件开发助手，你需要根据用户需求，生成清晰可执行的代码。
@@ -15,6 +15,8 @@ class CodeAgent(AgentBase):
 1. 输出的代码必须是完整的，不能有任何缺失或者错误。
 2. 输出的代码必须是可执行的，不能有任何语法错误或者逻辑错误。
 3. 输出的代码必须是符合用户需求的，不能有任何多余的功能。
+4. 当代码文件较长时，可以通过search_and_replace工具，对代码进行搜索和替换更多的内容，以满足用户需求。
+5. 不要创建太多的代码版本，尽可能的修改已有的代码，以满足用户需求。
 """
         self.controller = AgentController(model, model_config, system_prefix=system_prefix)
         self.tool_manager = ToolManager(is_auto_discover=False)

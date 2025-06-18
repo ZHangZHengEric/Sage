@@ -79,24 +79,51 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick 
       // 工具调用相关消息：不显示气泡，只显示按钮
       shouldShowBubble = false;
     } else if (message.toolCalls && message.toolCalls.length > 0) {
-      // 其他包含工具调用的消息：过滤重复内容
-      displayContent = message.displayContent
-        // 移除工具调用标题和描述
-        .replace(/🔧\s*\*\*调用工具[：:]\s*.*?\*\*[\s\S]*?(?=\n\n|\n(?=[^\s])|$)/g, '')
-        // 移除参数描述
-        .replace(/📝\s*\*\*参数\*\*[：:]?[\s\S]*?(?=\n\n|\n(?=[^\s])|$)/g, '')
-        // 移除JSON代码块
-        .replace(/```json[\s\S]*?```/g, '')
-        // 移除工具执行状态信息
-        .replace(/⚙️\s*执行工具[\s\S]*?(?=\n\n|\n(?=[^\s])|$)/g, '')
-        // 移除多余的换行符
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-        
-      // 如果过滤后内容为空，显示简洁的提示信息
-      if (!displayContent) {
-        const toolNames = message.toolCalls.map(tc => tc.name).join(', ');
-        displayContent = `🔧 调用了 ${message.toolCalls.length} 个工具: ${toolNames}`;
+      // 检查是否为专业智能体的结构化输出
+      const isStructuredOutput = message.displayContent.includes('tasks') || 
+                                 message.displayContent.includes('description') || 
+                                 message.displayContent.includes('任务拆解') ||
+                                 message.displayContent.includes('planning') ||
+                                 message.displayContent.includes('observation') ||
+                                 message.displayContent.includes('code') ||
+                                 message.agentType === 'CodeAgent' ||
+                                 message.agentType === 'PlanningAgent' ||
+                                 message.agentType === '代码智能体' ||
+                                 message.agentType === '任务分析师' ||
+                                 message.displayContent.length > 300; // 长内容通常包含有价值信息
+      
+      if (isStructuredOutput) {
+        // 对于专业智能体的结构化输出，只移除明显的重复工具调用信息
+        displayContent = message.displayContent
+          // 移除工具调用标题
+          .replace(/🔧\s*\*\*调用工具[：:]\s*.*?\*\*\s*/g, '')
+          // 移除简单的参数描述行
+          .replace(/📝\s*\*\*参数\*\*[：:]?\s*/g, '')
+          // 移除工具执行状态信息
+          .replace(/⚙️\s*执行工具[^。]*。?\s*/g, '')
+          // 清理多余的换行符
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      } else {
+        // 对于普通工具调用消息，进行更完整的过滤
+        displayContent = message.displayContent
+          // 移除工具调用标题和描述
+          .replace(/🔧\s*\*\*调用工具[：:]\s*.*?\*\*[\s\S]*?(?=\n\n|\n(?=[^\s])|$)/g, '')
+          // 移除参数描述
+          .replace(/📝\s*\*\*参数\*\*[：:]?[\s\S]*?(?=\n\n|\n(?=[^\s])|$)/g, '')
+          // 移除简单的JSON参数块
+          .replace(/```json\s*\{[^}]*\}\s*```/g, '')
+          // 移除工具执行状态信息
+          .replace(/⚙️\s*执行工具[\s\S]*?(?=\n\n|\n(?=[^\s])|$)/g, '')
+          // 移除多余的换行符
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+          
+        // 如果过滤后内容为空，显示简洁的提示信息
+        if (!displayContent) {
+          const toolNames = message.toolCalls.map(tc => tc.name).join(', ');
+          displayContent = `🔧 调用了 ${message.toolCalls.length} 个工具: ${toolNames}`;
+        }
       }
     } else {
       // 普通消息：检查是否为loading状态

@@ -375,12 +375,47 @@ async def execute_python_code(
         python_path = shutil.which("python") or shutil.which("python3")
         if not python_path:
             raise RuntimeError("未找到Python解释器，请确保Python已正确安装")
-        python_cmd = f"{python_path} {temp_file}"
-        result = await execute_shell_command(
-            python_cmd,
-            workdir=workdir,
-            timeout=timeout
-        )
+        
+        # 使用subprocess直接执行，避免shell解析问题
+        logger.debug(f"🐍 执行命令: {python_path} {temp_file}")
+        
+        try:
+            process = subprocess.Popen(
+                [python_path, temp_file],  # 使用列表形式，避免shell解析
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=workdir
+            )
+            
+            process_manager.add_process(process_id, process)
+            
+            # 等待执行完成
+            stdout, stderr = process.communicate(timeout=timeout)
+            return_code = process.returncode
+            
+            process_manager.remove_process(process_id)
+            
+            result = {
+                "success": return_code == 0,
+                "stdout": stdout,
+                "stderr": stderr,
+                "return_code": return_code,
+                "command": f"{python_path} {temp_file}",
+                "workdir": workdir,
+                "process_id": process_id,
+                "pid": process.pid
+            }
+            
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process_manager.remove_process(process_id)
+            result = {
+                "success": False,
+                "error": f"Python代码执行超时 (>{timeout}秒)",
+                "process_id": process_id,
+                "pid": process.pid
+            }
         
         execution_time = time.time() - exec_start_time
         total_time = time.time() - start_time

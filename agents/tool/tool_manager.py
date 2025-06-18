@@ -512,6 +512,7 @@ class ToolManager:
                 # 使用流式方法
                 stream_generator = agent_instance.run_stream(
                     messages=messages, 
+                    tool_manager=self,
                     session_id=session_id
                 )
                 

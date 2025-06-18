@@ -401,70 +401,281 @@ class WebParser:
     def extract_text_from_url(url: str, timeout: int = 30) -> str:
         """从URL提取文本"""
         max_retries = 3
-        retry_delay = 1  # 秒
+        initial_retry_delay = 2  # 初始重试延迟增加到2秒
         
-        for attempt in range(max_retries):
-            try:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
+        # 根据URL特征调整超时时间和策略
+        adjusted_timeout = timeout
+        is_github = 'github.com' in url or 'githubusercontent.com' in url
+        
+        if is_github:
+            adjusted_timeout = max(timeout, 45)  # GitHub至少45秒
+        elif any(domain in url for domain in ['google.com', 'microsoft.com', 'amazon.com']):
+            adjusted_timeout = max(timeout, 40)  # 大型网站至少40秒
+        
+        # 创建会话对象复用连接
+        session = requests.Session()
+        
+        # 针对GitHub使用更强的反检测策略
+        if is_github:
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"macOS"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1'
+            })
+        else:
+            # 普通网站使用标准请求头
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1'
+            })
+        
+        try:
+            for attempt in range(max_retries):
+                retry_delay = initial_retry_delay * (2 ** attempt)  # 指数退避：2, 4, 8秒
                 
-                logger.debug(f"🌐 尝试第{attempt + 1}次访问URL: {url}")
-                response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+                # 对于GitHub，在首次请求前添加随机延迟，模拟人类行为
+                if is_github and attempt == 0:
+                    import random
+                    human_delay = random.uniform(1, 3)  # 1-3秒随机延迟
+                    logger.debug(f"🤖 GitHub反检测：等待{human_delay:.1f}秒模拟人类行为")
+                    time.sleep(human_delay)
                 
-                # 检查响应状态
-                if response.status_code == 404:
-                    raise FileParserError(f"URL不存在 (404): {url}")
-                elif response.status_code == 403:
-                    raise FileParserError(f"访问被禁止 (403): {url}")
-                elif response.status_code == 500:
-                    raise FileParserError(f"服务器内部错误 (500): {url}")
-                elif response.status_code >= 400:
-                    # 对于其他4xx和5xx错误，如果不是最后一次尝试，则重试
+                try:
+                    logger.debug(f"🌐 尝试第{attempt + 1}次访问URL: {url} (超时: {adjusted_timeout}秒)")
+                    
+                    # 使用会话发起请求，设置连接和读取超时
+                    response = session.get(
+                        url, 
+                        timeout=(10, adjusted_timeout),  # (连接超时, 读取超时)
+                        allow_redirects=True,
+                        stream=False  # 不使用流式下载，确保完整获取内容
+                    )
+                    
+                    # 检查响应状态
+                    if response.status_code == 404:
+                        raise FileParserError(f"URL不存在 (404): {url}")
+                    elif response.status_code == 403:
+                        raise FileParserError(f"访问被禁止 (403): {url}")
+                    elif response.status_code == 500:
+                        raise FileParserError(f"服务器内部错误 (500): {url}")
+                    elif response.status_code == 502:
+                        # 502错误通常是暂时的，值得重试
+                        if attempt < max_retries - 1:
+                            logger.warning(f"⚠️ 服务器网关错误 (502)，第{attempt + 1}次重试，{retry_delay}秒后重试")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            raise FileParserError(f"服务器网关错误 (502): {url}")
+                    elif response.status_code == 503:
+                        # 503服务不可用，值得重试
+                        if attempt < max_retries - 1:
+                            logger.warning(f"⚠️ 服务暂时不可用 (503)，第{attempt + 1}次重试，{retry_delay}秒后重试")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            raise FileParserError(f"服务暂时不可用 (503): {url}")
+                    elif response.status_code >= 400:
+                        # 对于其他4xx和5xx错误，如果不是最后一次尝试，则重试
+                        if attempt < max_retries - 1:
+                            logger.warning(f"⚠️ HTTP错误 {response.status_code}，第{attempt + 1}次重试，{retry_delay}秒后重试")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            raise FileParserError(f"URL访问失败 (HTTP {response.status_code}): {url}")
+                    
+                    response.raise_for_status()
+                    
+                    # 检查内容长度
+                    if len(response.content) == 0:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"⚠️ 响应内容为空，第{attempt + 1}次重试，{retry_delay}秒后重试")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            raise FileParserError(f"响应内容为空: {url}")
+                    
+                    # 检查内容类型
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if 'text/html' not in content_type and 'text/plain' not in content_type and 'application/xhtml' not in content_type:
+                        logger.warning(f"⚠️ 检测到非文本内容类型: {content_type}，仍尝试解析")
+                    
+                    # 智能编码检测和处理
+                    final_text = WebParser._smart_decode_response(response, url)
+                    
+                    logger.debug(f"✅ 成功获取内容，长度: {len(final_text)} 字符")
+                    return WebParser._html_to_text(final_text)
+                    
+                except requests.exceptions.ConnectTimeout as e:
                     if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ HTTP错误 {response.status_code}，第{attempt + 1}次重试，{retry_delay}秒后重试")
+                        logger.warning(f"⚠️ 连接超时，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
                         time.sleep(retry_delay)
-                        retry_delay *= 2  # 指数退避
                         continue
                     else:
-                        raise FileParserError(f"URL访问失败 (HTTP {response.status_code}): {url}")
-                
-                response.raise_for_status()
-                
-                # 检查内容类型
-                content_type = response.headers.get('Content-Type', '').lower()
-                if 'text/html' not in content_type and 'text/plain' not in content_type and 'application/xhtml' not in content_type:
-                    logger.warning(f"⚠️ 检测到非文本内容类型: {content_type}，仍尝试解析")
-                
-                return WebParser._html_to_text(response.text)
-                
-            except requests.exceptions.ConnectionError as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ 连接错误，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    raise FileParserError(f"无法连接到URL: {url} - {str(e)}")
+                        raise FileParserError(f"连接超时: {url} (连接超时: 10秒)")
+                        
+                except requests.exceptions.ReadTimeout as e:
+                    if attempt < max_retries - 1:
+                        # 对于读取超时，增加下次尝试的超时时间
+                        adjusted_timeout = min(adjusted_timeout * 1.5, 90)  # 最大90秒
+                        logger.warning(f"⚠️ 读取超时，第{attempt + 1}次重试，{retry_delay}秒后重试，调整超时至{adjusted_timeout:.0f}秒: {str(e)}")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        raise FileParserError(f"读取超时: {url} (读取超时: {adjusted_timeout:.0f}秒)")
+                        
+                except requests.exceptions.Timeout as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ 请求超时，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        raise FileParserError(f"请求超时: {url} (超时时间: {adjusted_timeout}秒)")
+                        
+                except requests.exceptions.ConnectionError as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ 连接错误，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        raise FileParserError(f"无法连接到URL: {url} - {str(e)}")
+                        
+                except requests.exceptions.RequestException as e:
+                    # 对于其他请求异常，根据错误类型决定是否重试
+                    error_str = str(e).lower()
+                    if any(keyword in error_str for keyword in ['timeout', 'connection', 'network', 'dns']):
+                        if attempt < max_retries - 1:
+                            logger.warning(f"⚠️ 网络相关错误，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
+                            time.sleep(retry_delay)
+                            continue
+                    raise FileParserError(f"URL访问失败: {url} - {str(e)}")
                     
-            except requests.exceptions.Timeout as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ 请求超时，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    raise FileParserError(f"URL访问超时: {url} (超时时间: {timeout}秒)")
-                    
-            except requests.exceptions.RequestException as e:
-                # 对于其他请求异常，不重试
-                raise FileParserError(f"URL访问失败: {url} - {str(e)}")
-                
-            except Exception as e:
-                raise FileParserError(f"URL解析失败: {url} - {str(e)}")
+                except Exception as e:
+                    # 对于其他异常，记录详细信息
+                    logger.error(f"💥 意外异常: {type(e).__name__}: {str(e)}")
+                    raise FileParserError(f"URL解析失败: {url} - {str(e)}")
+            
+            # 如果所有重试都失败了（理论上不会到达这里）
+            raise FileParserError(f"URL访问失败，已重试{max_retries}次: {url}")
+            
+        finally:
+            # 确保关闭会话
+            session.close()
+    
+    @staticmethod
+    def _smart_decode_response(response, url: str) -> str:
+        """智能解码HTTP响应内容"""
+        import chardet
+        import re
         
-        # 如果所有重试都失败了（理论上不会到达这里）
-        raise FileParserError(f"URL访问失败，已重试{max_retries}次: {url}")
+        # 1. 首先尝试从Content-Type header获取编码
+        content_type = response.headers.get('Content-Type', '')
+        charset_match = re.search(r'charset=([^;\s]+)', content_type, re.IGNORECASE)
+        header_encoding = None
+        if charset_match:
+            header_encoding = charset_match.group(1).strip('"\'').lower()
+            logger.debug(f"🔍 从HTTP头获取编码: {header_encoding}")
+        
+        # 2. 尝试从HTML的meta标签获取编码
+        html_encoding = None
+        try:
+            # 用原始字节数据检查HTML meta标签
+            content_preview = response.content[:2048]  # 只检查前2KB
+            content_str = content_preview.decode('ascii', errors='ignore')
+            
+            # 查找meta charset
+            meta_matches = [
+                re.search(r'<meta[^>]+charset["\s]*=["\s]*([^">\s]+)', content_str, re.IGNORECASE),
+                re.search(r'<meta[^>]+content[^>]*charset=([^">\s;]+)', content_str, re.IGNORECASE)
+            ]
+            
+            for match in meta_matches:
+                if match:
+                    html_encoding = match.group(1).strip('"\'').lower()
+                    logger.debug(f"🔍 从HTML meta标签获取编码: {html_encoding}")
+                    break
+        except Exception as e:
+            logger.debug(f"⚠️ HTML编码检测失败: {e}")
+        
+        # 3. 使用chardet进行自动检测
+        detected_encoding = None
+        try:
+            detection_result = chardet.detect(response.content)
+            if detection_result and detection_result.get('confidence', 0) > 0.7:
+                detected_encoding = detection_result['encoding'].lower()
+                confidence = detection_result.get('confidence', 0)
+                logger.debug(f"🔍 chardet检测编码: {detected_encoding} (置信度: {confidence:.2f})")
+        except Exception as e:
+            logger.debug(f"⚠️ chardet编码检测失败: {e}")
+        
+        # 4. 根据URL判断可能的编码（针对中文网站）
+        url_encoding = None
+        if any(domain in url.lower() for domain in ['.cn', '.com.cn', 'baidu', 'sina', 'qq', '163', 'sohu', 'taobao', 'jd']):
+            url_encoding = 'utf-8'  # 大多数中文网站使用UTF-8
+            logger.debug(f"🔍 根据URL推测中文网站编码: {url_encoding}")
+        
+        # 5. 编码优先级和尝试顺序
+        encoding_candidates = []
+        
+        # 优先级排序
+        if header_encoding:
+            encoding_candidates.append(header_encoding)
+        if html_encoding and html_encoding != header_encoding:
+            encoding_candidates.append(html_encoding)
+        if detected_encoding and detected_encoding not in encoding_candidates:
+            encoding_candidates.append(detected_encoding)
+        if url_encoding and url_encoding not in encoding_candidates:
+            encoding_candidates.append(url_encoding)
+        
+        # 添加常见编码作为后备
+        fallback_encodings = ['utf-8', 'gbk', 'gb2312', 'big5', 'iso-8859-1', 'windows-1252']
+        for enc in fallback_encodings:
+            if enc not in encoding_candidates:
+                encoding_candidates.append(enc)
+        
+        # 6. 逐个尝试解码
+        for encoding in encoding_candidates:
+            try:
+                if encoding:
+                    # 规范化编码名称
+                    encoding = encoding.replace('gb2312', 'gbk')  # gb2312是gbk的子集
+                    encoding = encoding.replace('iso-8859-1', 'latin1')
+                    
+                    decoded_text = response.content.decode(encoding, errors='replace')
+                    
+                    # 简单验证：检查是否包含大量替换字符
+                    replacement_ratio = decoded_text.count('�') / max(len(decoded_text), 1)
+                    if replacement_ratio < 0.1:  # 替换字符少于10%
+                        logger.debug(f"✅ 成功使用编码 {encoding} 解码内容")
+                        return decoded_text
+                    else:
+                        logger.debug(f"⚠️ 编码 {encoding} 产生过多替换字符 ({replacement_ratio:.2%})")
+            except (UnicodeDecodeError, LookupError) as e:
+                logger.debug(f"⚠️ 编码 {encoding} 解码失败: {e}")
+                continue
+        
+        # 7. 最后的fallback：使用UTF-8并忽略错误
+        logger.warning(f"⚠️ 所有编码尝试失败，使用UTF-8强制解码: {url}")
+        return response.content.decode('utf-8', errors='replace')
     
     @staticmethod
     def _html_to_text(html_content: str) -> str:
@@ -739,6 +950,12 @@ class FileParserTool(ToolBase):
                 elif "连接" in error_msg or "Connection" in error_msg:
                     error_type = "connection_error"
                     user_friendly_error = f"无法连接到目标网站，请检查网络连接: {url}"
+                elif "连接超时" in error_msg or "ConnectTimeout" in error_msg:
+                    error_type = "connect_timeout_error"
+                    user_friendly_error = f"连接超时，网站响应过慢，请稍后重试: {url}"
+                elif "读取超时" in error_msg or "ReadTimeout" in error_msg:
+                    error_type = "read_timeout_error"
+                    user_friendly_error = f"数据读取超时，网页内容较大或网速较慢，建议增加超时时间: {url}"
                 elif "超时" in error_msg or "Timeout" in error_msg:
                     error_type = "timeout_error"
                     user_friendly_error = f"网页加载超时，请稍后重试或增加超时时间: {url}"
@@ -822,6 +1039,18 @@ class FileParserTool(ToolBase):
                 "检查网络连接是否正常",
                 "确认防火墙是否阻止了访问",
                 "尝试访问其他网站确认网络状态"
+            ]
+        elif error_type == "connect_timeout_error":
+            suggestions = [
+                "检查网络连接是否稳定",
+                "稍后重试",
+                "尝试使用VPN或代理服务"
+            ]
+        elif error_type == "read_timeout_error":
+            suggestions = [
+                "显著增加超时时间参数（如设置为60-90秒）",
+                "检查网络速度是否正常",
+                "分段获取内容，或稍后重试"
             ]
         elif error_type == "timeout_error":
             suggestions = [
