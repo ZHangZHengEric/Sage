@@ -570,28 +570,50 @@ class AgentBase(ABC):
                 # 显示完整的content内容
                 if msg.get('content'):
                     content = str(msg['content'])
-                    logger.info(f"    📄 Content ({len(content)} 字符):")
-                    # 分行显示内容，保持格式
-                    content_lines = content.split('\n')
-                    for line_num, line in enumerate(content_lines, 1):
-                        if line_num <= 50:  # 限制显示前50行，避免日志过长
-                            logger.info(f"      {line_num:3d}: {line}")
-                        elif line_num == 51:
-                            logger.info(f"      ...: [省略剩余 {len(content_lines) - 50} 行内容]")
-                            break
+                    # 优化日志：单行显示内容，超长则截断
+                    if len(content) <= 200:
+                        # 短内容：替换换行符并单行显示
+                        content_oneline = content.replace('\n', ' | ').replace('\r', ' ')
+                        logger.info(f"    📄 Content ({len(content)} 字符): {content_oneline}")
+                    else:
+                        # 长内容：显示前200字符并截断
+                        content_preview = content[:200].replace('\n', ' | ').replace('\r', ' ')
+                        logger.info(f"    📄 Content ({len(content)} 字符): {content_preview}... [截断显示]")
+                    
+                    # 如果内容包含多行，额外显示行数信息
+                    line_count = content.count('\n') + 1
+                    if line_count > 1:
+                        logger.info(f"    📄 Content详情: 共 {line_count} 行")
+                    
+                    # 如果是JSON格式，尝试简化显示
+                    if content.strip().startswith('{') and content.strip().endswith('}'):
+                        try:
+                            import json
+                            parsed = json.loads(content)
+                            # 显示JSON的关键信息
+                            if isinstance(parsed, dict):
+                                keys = list(parsed.keys())[:5]  # 显示前5个键
+                                logger.info(f"    📄 JSON结构: 包含字段 {keys}{'...' if len(parsed) > 5 else ''}")
+                        except:
+                            pass
                 
                 # 显示完整的show_content内容
                 if msg.get('show_content'):
                     show_content = str(msg['show_content'])
-                    logger.info(f"    🎨 Show Content ({len(show_content)} 字符):")
-                    # 分行显示内容，保持格式
-                    show_lines = show_content.split('\n')
-                    for line_num, line in enumerate(show_lines, 1):
-                        if line_num <= 30:  # show_content显示前30行
-                            logger.info(f"      {line_num:3d}: {line}")
-                        elif line_num == 31:
-                            logger.info(f"      ...: [省略剩余 {len(show_lines) - 30} 行内容]")
-                            break
+                    # 优化日志：单行显示内容，超长则截断
+                    if len(show_content) <= 200:
+                        # 短内容：替换换行符并单行显示
+                        show_oneline = show_content.replace('\n', ' | ').replace('\r', ' ')
+                        logger.info(f"    🎨 Show Content ({len(show_content)} 字符): {show_oneline}")
+                    else:
+                        # 长内容：显示前200字符并截断
+                        show_preview = show_content[:200].replace('\n', ' | ').replace('\r', ' ')
+                        logger.info(f"    🎨 Show Content ({len(show_content)} 字符): {show_preview}... [截断显示]")
+                    
+                    # 如果内容包含多行，额外显示行数信息
+                    line_count = show_content.count('\n') + 1
+                    if line_count > 1:
+                        logger.info(f"    🎨 Show Content详情: 共 {line_count} 行")
                 
                 # 显示其他重要字段
                 other_fields = {k: v for k, v in msg.items() 

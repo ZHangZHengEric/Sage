@@ -150,8 +150,18 @@ export const useChatMessages = () => {
         return;
       }
       
-      const showContent = data.show_content || '';
-      // 绝对不使用content字段，只使用show_content
+      let showContent = data.show_content || '';
+      
+      // // 智能回退：如果show_content为空但来自专业智能体，显示友好提示
+      // if (!showContent && data.agent_type && 
+      //     (data.agent_type === 'code_agent' || 
+      //      data.agent_type === 'task_analyzer' ||
+      //      data.step_type === 'do_subtask' ||
+      //      data.step_type === 'task_analysis_result')) {
+      //   showContent = `🤖 ${getAgentType(data.agent_type)}正在处理中...`;
+      // }
+      
+      // 绝对不直接使用content字段，只使用处理后的show_content
       
       setMessages(prev => {
         const existingIndex = prev.findIndex(m => m.id === messageId);
