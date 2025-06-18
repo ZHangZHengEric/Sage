@@ -400,19 +400,71 @@ class WebParser:
     @staticmethod
     def extract_text_from_url(url: str, timeout: int = 30) -> str:
         """从URL提取文本"""
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=timeout)
-            response.raise_for_status()
-            
-            return WebParser._html_to_text(response.text)
-            
-        except requests.RequestException as e:
-            raise FileParserError(f"URL访问失败: {str(e)}")
-        except Exception as e:
-            raise FileParserError(f"URL解析失败: {str(e)}")
+        max_retries = 3
+        retry_delay = 1  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+                
+                logger.debug(f"🌐 尝试第{attempt + 1}次访问URL: {url}")
+                response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+                
+                # 检查响应状态
+                if response.status_code == 404:
+                    raise FileParserError(f"URL不存在 (404): {url}")
+                elif response.status_code == 403:
+                    raise FileParserError(f"访问被禁止 (403): {url}")
+                elif response.status_code == 500:
+                    raise FileParserError(f"服务器内部错误 (500): {url}")
+                elif response.status_code >= 400:
+                    # 对于其他4xx和5xx错误，如果不是最后一次尝试，则重试
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ HTTP错误 {response.status_code}，第{attempt + 1}次重试，{retry_delay}秒后重试")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                        continue
+                    else:
+                        raise FileParserError(f"URL访问失败 (HTTP {response.status_code}): {url}")
+                
+                response.raise_for_status()
+                
+                # 检查内容类型
+                content_type = response.headers.get('Content-Type', '').lower()
+                if 'text/html' not in content_type and 'text/plain' not in content_type and 'application/xhtml' not in content_type:
+                    logger.warning(f"⚠️ 检测到非文本内容类型: {content_type}，仍尝试解析")
+                
+                return WebParser._html_to_text(response.text)
+                
+            except requests.exceptions.ConnectionError as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ 连接错误，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    raise FileParserError(f"无法连接到URL: {url} - {str(e)}")
+                    
+            except requests.exceptions.Timeout as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ 请求超时，第{attempt + 1}次重试，{retry_delay}秒后重试: {str(e)}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    raise FileParserError(f"URL访问超时: {url} (超时时间: {timeout}秒)")
+                    
+            except requests.exceptions.RequestException as e:
+                # 对于其他请求异常，不重试
+                raise FileParserError(f"URL访问失败: {url} - {str(e)}")
+                
+            except Exception as e:
+                raise FileParserError(f"URL解析失败: {url} - {str(e)}")
+        
+        # 如果所有重试都失败了（理论上不会到达这里）
+        raise FileParserError(f"URL访问失败，已重试{max_retries}次: {url}")
     
     @staticmethod
     def _html_to_text(html_content: str) -> str:
@@ -651,6 +703,7 @@ class FileParserTool(ToolBase):
                 return {
                     "success": False,
                     "error": "URL必须以http://或https://开头",
+                    "error_type": "invalid_url_format",
                     "url": url,
                     "execution_time": error_time,
                     "operation_id": operation_id
@@ -660,10 +713,48 @@ class FileParserTool(ToolBase):
             fetch_start_time = time.time()
             logger.info(f"🌐 开始获取网页内容")
             
-            extracted_text = WebParser.extract_text_from_url(url, timeout)
-            
-            fetch_time = time.time() - fetch_start_time
-            logger.info(f"✅ 网页内容获取成功 [{operation_id}] - 原始文本长度: {len(extracted_text)}, 获取耗时: {fetch_time:.2f}秒")
+            try:
+                extracted_text = WebParser.extract_text_from_url(url, timeout)
+                fetch_time = time.time() - fetch_start_time
+                logger.info(f"✅ 网页内容获取成功 [{operation_id}] - 原始文本长度: {len(extracted_text)}, 获取耗时: {fetch_time:.2f}秒")
+                
+            except FileParserError as e:
+                error_msg = str(e)
+                fetch_time = time.time() - fetch_start_time
+                error_time = time.time() - start_time
+                
+                # 根据错误类型提供更友好的错误信息
+                error_type = "unknown_error"
+                user_friendly_error = error_msg
+                
+                if "404" in error_msg or "不存在" in error_msg:
+                    error_type = "url_not_found"
+                    user_friendly_error = f"URL不存在或已失效: {url}"
+                elif "403" in error_msg or "禁止" in error_msg:
+                    error_type = "access_forbidden"
+                    user_friendly_error = f"访问被拒绝，可能需要登录或权限: {url}"
+                elif "500" in error_msg or "服务器" in error_msg:
+                    error_type = "server_error"
+                    user_friendly_error = f"目标服务器出现问题: {url}"
+                elif "连接" in error_msg or "Connection" in error_msg:
+                    error_type = "connection_error"
+                    user_friendly_error = f"无法连接到目标网站，请检查网络连接: {url}"
+                elif "超时" in error_msg or "Timeout" in error_msg:
+                    error_type = "timeout_error"
+                    user_friendly_error = f"网页加载超时，请稍后重试或增加超时时间: {url}"
+                
+                logger.error(f"❌ 网页内容获取失败 [{operation_id}] - 错误类型: {error_type}, 耗时: {error_time:.2f}秒")
+                
+                return {
+                    "success": False,
+                    "error": user_friendly_error,
+                    "error_type": error_type,
+                    "error_details": error_msg,
+                    "url": url,
+                    "suggestions": self._get_error_suggestions(error_type, url),
+                    "execution_time": error_time,
+                    "operation_id": operation_id
+                }
             
             # 清理和处理文本
             logger.debug(f"🧹 开始文本清理和处理")
@@ -703,11 +794,55 @@ class FileParserTool(ToolBase):
             
             return {
                 "success": False,
-                "error": str(e),
+                "error": f"处理URL时发生意外错误: {str(e)}",
+                "error_type": "unexpected_error",
                 "url": url,
                 "execution_time": error_time,
                 "operation_id": operation_id
             }
+    
+    def _get_error_suggestions(self, error_type: str, url: str) -> List[str]:
+        """根据错误类型提供建议"""
+        suggestions = []
+        
+        if error_type == "url_not_found":
+            suggestions = [
+                "检查URL是否正确拼写",
+                "确认网页是否还存在",
+                "尝试访问网站首页确认网站是否可用"
+            ]
+        elif error_type == "access_forbidden":
+            suggestions = [
+                "检查是否需要登录账户",
+                "确认是否有访问权限",
+                "尝试在浏览器中手动访问该URL"
+            ]
+        elif error_type == "connection_error":
+            suggestions = [
+                "检查网络连接是否正常",
+                "确认防火墙是否阻止了访问",
+                "尝试访问其他网站确认网络状态"
+            ]
+        elif error_type == "timeout_error":
+            suggestions = [
+                "增加超时时间参数",
+                "稍后重试",
+                "检查网络速度是否正常"
+            ]
+        elif error_type == "server_error":
+            suggestions = [
+                "稍后重试",
+                "联系网站管理员",
+                "尝试访问网站的其他页面"
+            ]
+        else:
+            suggestions = [
+                "检查URL格式是否正确",
+                "确认网络连接正常",
+                "稍后重试"
+            ]
+        
+        return suggestions
 
     @ToolBase.tool()
     def batch_extract_text(

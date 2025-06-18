@@ -15,7 +15,7 @@ import {
   Tooltip
 } from 'antd';
 import { 
-  SettingOutlined, 
+  BulbOutlined, 
   PlusOutlined, 
   EditOutlined, 
   DeleteOutlined,
@@ -127,11 +127,15 @@ const RulePreferences: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ 
+      maxWidth: 1000, 
+      margin: '0 auto',
+      padding: '24px'
+    }}>
       <Card
         title={
           <Space>
-            <SettingOutlined />
+            <BulbOutlined />
             规则偏好管理
           </Space>
         }
@@ -140,10 +144,18 @@ const RulePreferences: React.FC = () => {
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => setIsModalVisible(true)}
+            style={{
+              borderRadius: '8px',
+              height: '40px'
+            }}
           >
             添加规则
           </Button>
         }
+        style={{
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+          borderRadius: '12px'
+        }}
       >
         <Alert
           message="规则偏好说明"
@@ -156,7 +168,7 @@ const RulePreferences: React.FC = () => {
 
         {state.rulePreferences.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
-            <SettingOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+            <BulbOutlined style={{ fontSize: 48, marginBottom: 16 }} />
             <div>暂无规则偏好</div>
             <div style={{ fontSize: 14, marginTop: 8 }}>
               点击"添加规则"开始配置您的个性化偏好

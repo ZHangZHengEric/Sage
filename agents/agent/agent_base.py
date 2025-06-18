@@ -526,6 +526,9 @@ class AgentBase(ABC):
         # 合并相同message_id的块
         merged_messages = self._merge_chunks(all_chunks)
         
+        # 记录Agent的完整输出
+        self._log_agent_output(merged_messages)
+        
         logger.debug(f"AgentBase: 非流式任务完成，返回 {len(merged_messages)} 条合并消息")
         return merged_messages
 
@@ -545,38 +548,60 @@ class AgentBase(ABC):
             logger.info(f"📋 {agent_name} 完整输出messages:")
             
             for i, msg in enumerate(final_messages):
-                # 简化消息内容以便日志查看
-                simplified_msg = {
-                    'role': msg.get('role', 'unknown'),
-                    'type': msg.get('type', 'unknown'),
-                    'message_id': msg.get('message_id', 'unknown')[:8] + '...' if msg.get('message_id') else 'none',
-                    'content_length': len(str(msg.get('content', ''))),
-                    'show_content_length': len(str(msg.get('show_content', '')))
-                }
+                logger.info(f"  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                logger.info(f"  📝 消息 [{i+1}/{len(final_messages)}]:")
+                logger.info(f"    🔹 Role: {msg.get('role', 'unknown')}")
+                logger.info(f"    🔹 Type: {msg.get('type', 'unknown')}")
+                logger.info(f"    🔹 Message ID: {msg.get('message_id', 'none')}")
                 
-                # 特殊字段处理
+                # 处理tool_calls
                 if 'tool_calls' in msg and msg['tool_calls']:
-                    simplified_msg['has_tool_calls'] = True
-                    simplified_msg['tool_calls_count'] = len(msg['tool_calls'])
+                    logger.info(f"    🔹 Tool Calls: {len(msg['tool_calls'])} 个")
+                    for j, tool_call in enumerate(msg['tool_calls']):
+                        logger.info(f"      🔧 Tool Call [{j+1}]:")
+                        logger.info(f"        • ID: {tool_call.get('id', 'none')}")
+                        logger.info(f"        • Function: {tool_call.get('function', {}).get('name', 'unknown')}")
+                        logger.info(f"        • Arguments: {tool_call.get('function', {}).get('arguments', 'none')}")
+                
+                # 处理tool_call_id
                 if 'tool_call_id' in msg:
-                    simplified_msg['tool_call_id'] = msg['tool_call_id'][:8] + '...' if len(msg['tool_call_id']) > 8 else msg['tool_call_id']
+                    logger.info(f"    🔹 Tool Call ID: {msg['tool_call_id']}")
                 
-                # 显示关键内容摘要
+                # 显示完整的content内容
                 if msg.get('content'):
-                    content_preview = str(msg['content'])[:100].replace('\n', ' ')
-                    if len(content_preview) < len(str(msg['content'])):
-                        content_preview += '...'
-                    simplified_msg['content_preview'] = content_preview
+                    content = str(msg['content'])
+                    logger.info(f"    📄 Content ({len(content)} 字符):")
+                    # 分行显示内容，保持格式
+                    content_lines = content.split('\n')
+                    for line_num, line in enumerate(content_lines, 1):
+                        if line_num <= 50:  # 限制显示前50行，避免日志过长
+                            logger.info(f"      {line_num:3d}: {line}")
+                        elif line_num == 51:
+                            logger.info(f"      ...: [省略剩余 {len(content_lines) - 50} 行内容]")
+                            break
                 
+                # 显示完整的show_content内容
                 if msg.get('show_content'):
-                    show_preview = str(msg['show_content'])[:50].replace('\n', ' ')
-                    if len(show_preview) < len(str(msg['show_content'])):
-                        show_preview += '...'
-                    simplified_msg['show_content_preview'] = show_preview
+                    show_content = str(msg['show_content'])
+                    logger.info(f"    🎨 Show Content ({len(show_content)} 字符):")
+                    # 分行显示内容，保持格式
+                    show_lines = show_content.split('\n')
+                    for line_num, line in enumerate(show_lines, 1):
+                        if line_num <= 30:  # show_content显示前30行
+                            logger.info(f"      {line_num:3d}: {line}")
+                        elif line_num == 31:
+                            logger.info(f"      ...: [省略剩余 {len(show_lines) - 30} 行内容]")
+                            break
                 
-                logger.info(f"  [{i+1}] {simplified_msg}")
+                # 显示其他重要字段
+                other_fields = {k: v for k, v in msg.items() 
+                              if k not in ['role', 'type', 'message_id', 'content', 'show_content', 'tool_calls', 'tool_call_id']}
+                if other_fields:
+                    logger.info(f"    🔹 其他字段: {other_fields}")
         
+        logger.info(f"  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         logger.info(f"🏁 {agent_name} 执行流程结束")
+        logger.info("")  # 添加一个空行以便阅读
 
     def to_tool(self) -> AgentToolSpec:
         """
