@@ -3,6 +3,7 @@ import { Layout, ConfigProvider, theme } from 'antd';
 import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
 import ChatInterface from './components/ChatInterface';
 import SystemConfig from './components/SystemConfig';
+import RulePreferences from './components/RulePreferences';
 import ToolsPanel from './components/ToolsPanel';
 import Sidebar from './components/Sidebar';
 import { SystemProvider } from './context/SystemContext';
@@ -134,6 +135,7 @@ const AppContent: React.FC = () => {
                     } 
                   />
                   <Route path="/config" element={<SystemConfig />} />
+                  <Route path="/rules" element={<RulePreferences />} />
                   <Route path="/tools" element={<ToolsPanel />} />
                 </Routes>
               </Content>
