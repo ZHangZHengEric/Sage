@@ -1,5 +1,6 @@
 import React from 'react';
 import { RobotOutlined, ThunderboltOutlined, BranchesOutlined } from '@ant-design/icons';
+import MarkdownWithMath from './MarkdownWithMath';
 
 interface WelcomeScreenProps {
   onExampleClick: (example: string) => void;
@@ -8,9 +9,9 @@ interface WelcomeScreenProps {
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onExampleClick }) => {
   const examples = [
     {
-      title: "数学计算",
-      example: "计算 45 乘以 76 再减去 4 的结果",
-      icon: "🔢"
+      title: "数学公式",
+      example: "解释二次公式：$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$",
+      icon: "📊"
     },
     {
       title: "代码编程", 
@@ -24,8 +25,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onExampleClick }) => {
     },
     {
       title: "数据分析",
-      example: "分析这组销售数据的趋势和特点",
-      icon: "📊"
+      example: "分析这组销售数据的趋势和特点，计算平均值：$\\bar{x} = \\frac{1}{n}\\sum_{i=1}^{n} x_i$",
+      icon: "🔢"
     }
   ];
 
@@ -167,7 +168,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onExampleClick }) => {
                 color: '#6b7280', 
                 lineHeight: '1.4' 
               }}>
-                {item.example}
+                <MarkdownWithMath>
+                  {item.example}
+                </MarkdownWithMath>
               </div>
             </div>
           ))}
