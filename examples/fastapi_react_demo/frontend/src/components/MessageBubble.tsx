@@ -6,6 +6,7 @@ import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ReactECharts from 'echarts-for-react';
 import LoadingMessage from './LoadingMessage';
 import ToolCallBubble from './ToolCallBubble';
+import MarkdownWithMath from './MarkdownWithMath';
 import { Message, ToolCall } from '../types/chat';
 
 interface MessageBubbleProps {
@@ -194,221 +195,27 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick 
             {message.type === 'loading' ? (
               <LoadingMessage message={message.displayContent} />
             ) : (
-              <div>
+              <div style={{ position: 'relative' }}>
                 {/* 消息类型emoji */}
                 {!isUser && getMessageTypeEmoji(message.type) && (
                   <span style={{
                     fontSize: '16px',
-                    marginRight: '8px',
-                    display: 'inline-block',
-                    verticalAlign: 'top'
+                    position: 'absolute',
+                    left: '0',
+                    top: '0',
+                    display: 'block',
+                    lineHeight: '1.5'
                   }}>
                     {getMessageTypeEmoji(message.type)}
                   </span>
                 )}
-                <div style={{ display: 'inline-block', width: !isUser && getMessageTypeEmoji(message.type) ? 'calc(100% - 24px)' : '100%' }}>
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      code({node, className, children, ...props}) {
-                        const match = /language-(\w+)/.exec(className || '');
-                        const isInline = !match;
-                        
-                        if (isInline) {
-                          return (
-                            <code 
-                              style={{
-                                background: isUser 
-                                  ? 'rgba(255, 255, 255, 0.2)' 
-                                  : '#f8fafc',
-                                color: isUser 
-                                  ? '#ffffff' 
-                                  : '#475569',
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                fontSize: '13px',
-                                fontFamily: 'SF Mono, Monaco, Consolas, monospace'
-                              }}
-                            >
-                              {children}
-                            </code>
-                          );
-                        }
-
-                        // 处理 ECharts 代码块
-                        if (match[1] === 'echarts') {
-                          try {
-                            const chartOption = JSON.parse(String(children).replace(/\n$/, ''));
-                            return (
-                              <div style={{ 
-                                margin: '12px 0',
-                                borderRadius: '8px',
-                                overflow: 'hidden',
-                                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-                              }}>
-                                <ReactECharts
-                                  option={chartOption}
-                                  style={{ 
-                                    height: '400px',
-                                    width: '100%'
-                                  }}
-                                  opts={{ renderer: 'canvas' }}
-                                />
-                              </div>
-                            );
-                          } catch (error) {
-                            console.error('ECharts 配置解析失败:', error);
-                            return (
-                              <div style={{
-                                background: '#fff2f0',
-                                border: '1px solid #ffccc7',
-                                borderRadius: '8px',
-                                padding: '12px',
-                                margin: '8px 0',
-                                color: '#dc2626'
-                              }}>
-                                <strong>ECharts 渲染错误:</strong> 配置格式不正确
-                                <details style={{ marginTop: '8px' }}>
-                                  <summary>查看原始配置</summary>
-                                  <pre style={{ 
-                                    background: '#f5f5f5',
-                                    padding: '8px',
-                                    borderRadius: '4px',
-                                    marginTop: '8px',
-                                    fontSize: '12px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {String(children)}
-                                  </pre>
-                                </details>
-                              </div>
-                            );
-                          }
-                        }
-                        
-                        return (
-                          <SyntaxHighlighter
-                            style={tomorrow as any}
-                            language={match[1]}
-                            PreTag="div"
-                            customStyle={{
-                              background: '#1e293b',
-                              borderRadius: '8px',
-                              fontSize: '12px',
-                              margin: '8px 0',
-                              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-                            }}
-                          >
-                            {String(children).replace(/\n$/, '')}
-                          </SyntaxHighlighter>
-                        );
-                      },
-                      // 表格支持
-                      table({children}) {
-                        return (
-                          <div style={{ 
-                            margin: '12px 0',
-                            overflowX: 'auto',
-                            borderRadius: '8px',
-                            border: '1px solid #e5e7eb'
-                          }}>
-                            <table style={{
-                              width: '100%',
-                              borderCollapse: 'collapse',
-                              fontSize: '13px'
-                            }}>
-                              {children}
-                            </table>
-                          </div>
-                        );
-                      },
-                      thead({children}) {
-                        return (
-                          <thead style={{
-                            background: '#f9fafb'
-                          }}>
-                            {children}
-                          </thead>
-                        );
-                      },
-                      tbody({children}) {
-                        return <tbody>{children}</tbody>;
-                      },
-                      tr({children}) {
-                        return (
-                          <tr style={{
-                            borderBottom: '1px solid #e5e7eb'
-                          }}>
-                            {children}
-                          </tr>
-                        );
-                      },
-                      th({children}) {
-                        return (
-                          <th style={{
-                            padding: '8px 12px',
-                            textAlign: 'left',
-                            fontWeight: 600,
-                            color: '#374151',
-                            borderRight: '1px solid #e5e7eb'
-                          }}>
-                            {children}
-                          </th>
-                        );
-                      },
-                      td({children}) {
-                        return (
-                          <td style={{
-                            padding: '8px 12px',
-                            borderRight: '1px solid #e5e7eb',
-                            color: '#6b7280'
-                          }}>
-                            {children}
-                          </td>
-                        );
-                      },
-                      p({children}) {
-                        return <div style={{ margin: '4px 0' }}>{children}</div>;
-                      },
-                      ul({children}) {
-                        return (
-                          <ul style={{ 
-                            margin: '4px 0', 
-                            paddingLeft: '16px',
-                            listStyleType: 'disc'
-                          }}>
-                            {children}
-                          </ul>
-                        );
-                      },
-                      ol({children}) {
-                        return (
-                          <ol style={{ 
-                            margin: '4px 0', 
-                            paddingLeft: '16px',
-                            listStyleType: 'decimal'
-                          }}>
-                            {children}
-                          </ol>
-                        );
-                      },
-                      blockquote({children}) {
-                        return (
-                          <blockquote style={{
-                            borderLeft: '3px solid #e5e7eb',
-                            paddingLeft: '12px',
-                            margin: '8px 0',
-                            fontStyle: 'italic',
-                            color: '#6b7280'
-                          }}>
-                            {children}
-                          </blockquote>
-                        );
-                      }
-                    }}
-                  >
+                <div style={{ 
+                  display: 'block', 
+                  marginLeft: !isUser && getMessageTypeEmoji(message.type) ? '24px' : '0'
+                }}>
+                  <MarkdownWithMath>
                     {displayContent}
-                  </ReactMarkdown>
+                  </MarkdownWithMath>
                 </div>
               </div>
             )}
