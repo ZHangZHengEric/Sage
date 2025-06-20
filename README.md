@@ -306,6 +306,14 @@ print("Execution Time:", result['execution_time'])
 - **Observation Agent**: Advanced progress monitoring with completion detection and quality assessment
 - **Summary Agent**: Comprehensive result synthesis with structured output and actionable insights
 
+### 🔄 **Custom Workflow Engine**
+- **Predefined Workflow Templates**: Ready-to-use workflow configurations for common scenarios (research, analysis, content creation, problem-solving)
+- **Workflow Stability**: Deterministic execution paths with consistent results for production environments
+- **Scenario-Specific Optimization**: Fine-tuned agent behaviors and tool selections for specific use cases
+- **Workflow Customization**: Define custom agent sequences, skip unnecessary steps, and configure parallel execution
+- **Template Management**: Save, load, and share workflow templates across teams and projects
+- **Fixed-Scenario Reliability**: Enhanced stability and predictability for recurring tasks and standardized processes
+
 ### 💡 **Rule Preferences System**
 - **Personalized AI Behavior**: Configure AI assistant behavior with custom rules and preferences
 - **Code Style Preferences**: Define coding standards, naming conventions, and style guidelines
@@ -604,6 +612,7 @@ controller = AgentController.from_config("production.yaml")
 - 🎯 **Task Decompose Agent**: New specialized agent for intelligent task breakdown and dependency management
 - 🔧 **Unified System Prompt Management**: Centralized system context handling with `system_context` parameter across all agents
 - 💡 **Rule Preferences System**: Personalized AI behavior configuration with custom rules, templates, and real-time management
+- 🔄 **Custom Workflow Engine**: Predefined workflow templates and custom workflow support for enhanced stability in fixed scenarios
 - 📊 **Enhanced Token Tracking**: Comprehensive usage statistics with detailed cost monitoring and optimization suggestions
 - 🛡️ **Robust Error Handling**: Advanced error recovery, retry mechanisms, and comprehensive exception handling
 - ⚡ **Performance Optimization**: 50% faster execution with improved resource management and parallel processing
@@ -613,6 +622,7 @@ controller = AgentController.from_config("production.yaml")
 - 🏗️ **Agent Architecture**: Added Task Decompose Agent to the workflow for better task breakdown
 - 💬 **System Context API**: New `system_context` parameter for unified runtime information management
 - 📝 **System Prompt Organization**: Centralized system prompt management with `SYSTEM_PREFIX_DEFAULT` constants
+- 🔄 **Workflow Engine**: Custom workflow support with template management and scenario-specific optimizations
 - 💾 **Memory Management**: Optimized memory usage for long-running tasks and large-scale deployments
 - 🌐 **Streaming Enhancement**: Improved real-time updates with better UI feedback and WebSocket reliability
 - 📊 **Token Analytics**: Comprehensive usage tracking with cost optimization suggestions and budget management
