@@ -293,7 +293,8 @@ class AgentBase(ABC):
                                              prompt: str, 
                                              step_name: str,
                                              system_message: Optional[Dict[str, Any]] = None,
-                                             message_type: str = 'assistant') -> Generator[List[Dict[str, Any]], None, None]:
+                                             message_type: str = 'assistant',
+                                             session_id: Optional[str] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行流式处理并跟踪token使用
         
