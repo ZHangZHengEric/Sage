@@ -28,6 +28,7 @@ from .planning_agent.planning_agent import PlanningAgent
 from .observation_agent.observation_agent import ObservationAgent
 from .direct_executor_agent.direct_executor_agent import DirectExecutorAgent
 from .task_decompose_agent.task_decompose_agent import TaskDecomposeAgent
+from .workflow_selector import select_workflow_with_llm, create_workflow_guidance
 from .session_manager import SessionManager, SessionStatus
 from agents.utils.logger import logger
 
@@ -119,7 +120,8 @@ class AgentController:
                    summary: bool = True,
                    max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
                    deep_research: bool = True,
-                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   system_context: Optional[Dict[str, Any]] = None,
+                   available_workflows: Optional[Dict[str, List[str]]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行智能体工作流并流式输出结果
         
@@ -132,6 +134,7 @@ class AgentController:
             max_loop_count: 最大循环次数
             deep_research: 是否进行深度研究（完整流程）
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
+            available_workflows: 可用的工作流模板字典 {name: [steps]}
             
         Yields:
             List[Dict[str, Any]]: 自上次yield以来的新消息字典列表，每个消息包含：
@@ -148,6 +151,8 @@ class AgentController:
         
         if system_context:
             logger.info(f"AgentController: 设置了system_context参数: {list(system_context.keys())}")
+        if available_workflows:
+            logger.info(f"AgentController: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
         
         try:
             # 准备会话和消息
@@ -161,6 +166,14 @@ class AgentController:
             # 设置执行上下文
             system_context = self._setup_system_context(session_id, system_context)
             
+            # 只有在多智能体协作模式下才进行工作流选择
+            if available_workflows and deep_research:
+                system_context = self._select_and_apply_workflow(
+                    all_messages, available_workflows, system_context
+                )
+                if self._check_session_interrupt(session_id):
+                    logger.info(f"AgentController: 工作流选择阶段被中断，会话ID: {session_id}")
+                    return 
             # 执行工作流
             if deep_research:
                 # 多智能体协作模式：执行完整工作流（分解->规划->执行->观察->总结）
@@ -311,6 +324,50 @@ class AgentController:
             logger.info(f"AgentController: 合并用户系统上下文: {list(user_system_context.keys())}")
         
         logger.info(f"AgentController: 系统上下文设置完成，包含 {len(system_context)} 个字段")
+        return system_context
+
+    def _select_and_apply_workflow(self, 
+                                   all_messages: List[Dict[str, Any]], 
+                                   available_workflows: Dict[str, List[str]], 
+                                   system_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        选择并应用合适的工作流到系统上下文中
+        
+        Args:
+            all_messages: 所有消息列表
+            available_workflows: 可用的工作流模板
+            system_context: 当前系统上下文
+            
+        Returns:
+            Dict[str, Any]: 更新后的系统上下文
+        """
+        logger.info("AgentController: 开始工作流选择")
+        
+        try:
+            # 使用LLM选择工作流，传入完整的消息历史
+            workflow_name, workflow_steps = select_workflow_with_llm(
+                model=self.model,
+                model_config=self.model_config,
+                messages=all_messages,
+                available_workflows=available_workflows
+            )
+            
+            if workflow_name and workflow_steps:
+                # 创建工作流指导文本
+                workflow_guidance = create_workflow_guidance(workflow_name, workflow_steps)
+                
+                # 添加到系统上下文（简化版本）
+                system_context['workflow_guidance'] = workflow_guidance
+                
+                logger.info(f"AgentController: 成功选择工作流 '{workflow_name}'")
+                logger.info(f"AgentController: 工作流指导已添加到系统上下文")
+                
+            else:
+                logger.info("AgentController: 未选择工作流")
+                
+        except Exception as e:
+            logger.error(f"AgentController: 工作流选择失败: {str(e)}")
+        
         return system_context
 
     def _execute_multi_agent_workflow(self, 
@@ -869,7 +926,8 @@ class AgentController:
             summary: bool = True,
             max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
             deep_research: bool = True,
-            system_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            system_context: Optional[Dict[str, Any]] = None,
+            available_workflows: Optional[Dict[str, List[str]]] = None) -> Dict[str, Any]:
         """
         执行智能体工作流（非流式版本）
         
@@ -882,6 +940,7 @@ class AgentController:
             max_loop_count: 最大循环次数
             deep_research: 是否进行深度研究（完整流程）
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
+            available_workflows: 可用的工作流模板字典 {name: [steps]}
             
         Returns:
             Dict[str, Any]: 包含all_messages、new_messages、final_output和session_id的结果字典
@@ -907,6 +966,15 @@ class AgentController:
             new_messages = []
             
             logger.info(f"AgentController: 初始化 {len(all_messages)} 条输入消息")
+            
+            # 设置执行上下文
+            system_context = self._setup_system_context(session_id, system_context)
+            
+            # 只有在多智能体协作模式下才进行工作流选择
+            if available_workflows and deep_research:
+                system_context = self._select_and_apply_workflow(
+                    all_messages, available_workflows, system_context
+                )
             
             # 根据deep_research参数选择执行路径
             if deep_research:
