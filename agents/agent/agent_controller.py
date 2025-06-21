@@ -16,7 +16,9 @@ import sys
 import datetime
 import traceback
 import time
+import threading
 from typing import List, Dict, Any, Optional, Generator
+from enum import Enum
 
 from .agent_base import AgentBase
 from .task_analysis_agent.task_analysis_agent import TaskAnalysisAgent
@@ -26,7 +28,9 @@ from .planning_agent.planning_agent import PlanningAgent
 from .observation_agent.observation_agent import ObservationAgent
 from .direct_executor_agent.direct_executor_agent import DirectExecutorAgent
 from .task_decompose_agent.task_decompose_agent import TaskDecomposeAgent
+from .session_manager import SessionManager, SessionStatus
 from agents.utils.logger import logger
+
 
 
 class AgentController:
@@ -57,6 +61,9 @@ class AgentController:
         self.model_config = model_config
         self.system_prefix = system_prefix
         self._init_agents()
+        
+        # 会话状态管理器
+        self.session_manager = SessionManager()
         
         # 总体token统计
         self.overall_token_stats = {
@@ -147,6 +154,10 @@ class AgentController:
             session_id = self._prepare_session_id(session_id)
             all_messages = self._prepare_initial_messages(input_messages)
             
+            # 创建会话并设置为运行状态
+            self.session_manager.create_session(session_id)
+            self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "初始化")
+            
             # 设置执行上下文
             system_context = self._setup_system_context(session_id, system_context)
             
@@ -173,9 +184,17 @@ class AgentController:
                     deep_thinking=deep_thinking
                 )
             
-            logger.info(f"AgentController: 流式工作流完成，会话ID: {session_id}")
+            # 检查最终状态，如果不是中断状态则标记为完成
+            session_info = self.session_manager.get_session(session_id)
+            if session_info and session_info['status'] != SessionStatus.INTERRUPTED:
+                self.session_manager.update_session_status(session_id, SessionStatus.COMPLETED, "完成")
+                logger.info(f"AgentController: 流式工作流完成，会话ID: {session_id}")
+            else:
+                logger.info(f"AgentController: 流式工作流被中断，会话ID: {session_id}")
             
         except Exception as e:
+            # 标记会话错误
+            self.session_manager.update_session_status(session_id, SessionStatus.ERROR, "错误")
             logger.error(f"AgentController: 流式工作流执行过程中发生异常: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
             yield from self._handle_workflow_error(e)
@@ -183,6 +202,13 @@ class AgentController:
             # 记录工作流结束时间并打印统计
             self.overall_token_stats['workflow_end_time'] = time.time()
             self.print_comprehensive_token_stats()
+            
+            # 清理会话，防止内存泄漏
+            try:
+                self.session_manager.remove_session(session_id)
+                logger.info(f"AgentController: 已清理会话 {session_id}")
+            except Exception as cleanup_error:
+                logger.warning(f"AgentController: 清理会话 {session_id} 时出错: {cleanup_error}")
 
     def _prepare_session_id(self, session_id: Optional[str]) -> str:
         """
@@ -355,6 +381,12 @@ class AgentController:
             List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始任务分析阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "任务分析")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 任务分析阶段被中断，会话ID: {session_id}")
+            return all_messages
         
         analysis_chunks = []
         for chunk in self.task_analysis_agent.run_stream(
@@ -363,6 +395,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 任务分析阶段在块处理中被中断，会话ID: {session_id}")
+                return all_messages
+            
             analysis_chunks.append(chunk)
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
@@ -391,6 +428,12 @@ class AgentController:
             List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始任务分解阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "任务分解")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 任务分解阶段被中断，会话ID: {session_id}")
+            return all_messages
         
         decompose_chunks = []
         for chunk in self.task_decompose_agent.run_stream(
@@ -399,6 +442,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 任务分解阶段在块处理中被中断，会话ID: {session_id}")
+                return all_messages
+            
             decompose_chunks.append(chunk)
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
@@ -434,6 +482,11 @@ class AgentController:
         while True:
             loop_count += 1
             logger.info(f"AgentController: 开始第 {loop_count} 轮循环")
+            
+            # 在每轮循环开始时检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 主循环第 {loop_count} 轮被中断，会话ID: {session_id}")
+                return all_messages
             
             if loop_count > max_loop_count:
                 logger.warning(f"AgentController: 达到最大循环次数 {max_loop_count}，停止工作流")
@@ -481,6 +534,12 @@ class AgentController:
             List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始规划阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "规划")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 规划阶段被中断，会话ID: {session_id}")
+            return all_messages
         
         plan_chunks = []
         for chunk in self.planning_agent.run_stream(
@@ -489,6 +548,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 规划阶段在块处理中被中断，会话ID: {session_id}")
+                return all_messages
+            
             plan_chunks.append(chunk)
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
@@ -517,6 +581,12 @@ class AgentController:
             List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始执行阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "执行")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 执行阶段被中断，会话ID: {session_id}")
+            return all_messages
         
         exec_chunks = []
         for chunk in self.executor_agent.run_stream(
@@ -525,6 +595,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 执行阶段在块处理中被中断，会话ID: {session_id}")
+                return all_messages
+            
             exec_chunks.append(chunk)
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
@@ -553,6 +628,12 @@ class AgentController:
             Tuple[List[Dict[str, Any]], bool]: 更新后的消息列表和是否应该中断循环
         """
         logger.info("AgentController: 开始观察阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "观察")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 观察阶段被中断，会话ID: {session_id}")
+            return all_messages, True  # 中断时也返回should_break=True
         
         obs_chunks = []
         for chunk in self.observation_agent.run_stream(
@@ -561,6 +642,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 观察阶段在块处理中被中断，会话ID: {session_id}")
+                return all_messages, True  # 中断时也返回should_break=True
+            
             obs_chunks.append(chunk)
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
@@ -593,6 +679,12 @@ class AgentController:
             List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始任务总结阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "总结")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 任务总结阶段被中断，会话ID: {session_id}")
+            return all_messages
         
         summary_chunks = []
         for chunk in self.task_summary_agent.run_stream(
@@ -601,6 +693,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 任务总结阶段在块处理中被中断，会话ID: {session_id}")
+                return all_messages
+            
             summary_chunks.append(chunk)
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
@@ -661,6 +758,12 @@ class AgentController:
             List[Dict[str, Any]]: 直接执行输出的消息块
         """
         logger.info("AgentController: 使用直接执行智能体")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "直接执行")
+        
+        # 检查中断
+        if self._check_session_interrupt(session_id):
+            logger.info(f"AgentController: 直接执行阶段被中断，会话ID: {session_id}")
+            return
         
         for chunk in self.direct_executor_agent.run_stream(
             messages=all_messages, 
@@ -668,6 +771,11 @@ class AgentController:
             system_context=system_context, 
             session_id=session_id
         ):
+            # 在每个块之间检查中断
+            if self._check_session_interrupt(session_id):
+                logger.info(f"AgentController: 直接执行阶段在块处理中被中断，会话ID: {session_id}")
+                return
+            
             all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
@@ -709,6 +817,26 @@ class AgentController:
             logger.warning(f"AgentController: 解析观察结果失败: {str(e)}，继续循环")
             
         return False
+
+    def _check_session_interrupt(self, session_id: str) -> bool:
+        """
+        检查会话是否被中断
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            bool: 如果会话被中断返回True，否则返回False
+        """
+        if self.session_manager.is_interrupted(session_id):
+            interrupt_message = self.session_manager.get_interrupt_message(session_id)
+            logger.info(f"AgentController: 检测到会话 {session_id} 中断请求: {interrupt_message}")
+            # 更新会话状态为中断
+            self.session_manager.update_session_status(session_id, SessionStatus.INTERRUPTED)
+            return True
+        return False
+
+
 
     def _handle_workflow_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -1199,3 +1327,89 @@ class AgentController:
         }
         
         logger.info("AgentController: 所有Token统计已重置")
+
+    # ==================== 会话管理接口 ====================
+    
+    def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
+        """
+        中断指定会话
+        
+        Args:
+            session_id: 会话ID
+            message: 中断消息
+            
+        Returns:
+            bool: 是否成功请求中断
+        """
+        return self.session_manager.request_interrupt(session_id, message)
+    
+    def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取会话状态
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            Optional[Dict[str, Any]]: 会话信息，如果会话不存在则返回 None
+        """
+        return self.session_manager.get_session(session_id)
+    
+    def list_active_sessions(self) -> List[Dict[str, Any]]:
+        """
+        列出所有活跃会话
+        
+        Returns:
+            List[Dict[str, Any]]: 会话信息列表
+        """
+        return self.session_manager.list_active_sessions()
+    
+    def cleanup_session(self, session_id: str) -> bool:
+        """
+        清理指定会话
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            bool: 是否成功清理
+        """
+        return self.session_manager.remove_session(session_id)
+    
+    def cleanup_old_sessions(self, max_age_seconds: int = 3600) -> int:
+        """
+        清理过期会话
+        
+        Args:
+            max_age_seconds: 最大存活时间（秒）
+            
+        Returns:
+            int: 清理的会话数量
+        """
+        return self.session_manager.cleanup_old_sessions(max_age_seconds)
+    
+    def is_session_running(self, session_id: str) -> bool:
+        """
+        检查会话是否正在运行
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            bool: 会话是否正在运行
+        """
+        session = self.session_manager.get_session(session_id)
+        return session and session['status'] == SessionStatus.RUNNING
+    
+    def get_session_phase(self, session_id: str) -> Optional[str]:
+        """
+        获取会话当前执行阶段
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            Optional[str]: 当前执行阶段，如果会话不存在则返回 None
+        """
+        session = self.session_manager.get_session(session_id)
+        return session.get('current_phase') if session else None
