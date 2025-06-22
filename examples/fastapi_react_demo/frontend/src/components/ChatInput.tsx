@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Button, Switch, Input } from 'antd';
-import { SendOutlined, ThunderboltOutlined, BranchesOutlined } from '@ant-design/icons';
+import { SendOutlined, ThunderboltOutlined, BranchesOutlined, StopOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
 
@@ -133,7 +133,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 autoSize={{ minRows: 2, maxRows: 6 }}
                 bordered={false}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading}
                 style={{
                   padding: '0',
                   fontSize: '14px',
@@ -149,21 +148,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
             
             <Button
               type="primary"
-              icon={<SendOutlined />}
+              icon={isLoading ? <StopOutlined /> : <SendOutlined />}
               onClick={onSend}
-              disabled={isLoading || !value.trim()}
+              // 修改disabled逻辑：在加载时总是可点击（用于中断），非加载时需要有内容才能点击
+              disabled={!isLoading && !value.trim()}
               style={{
                 borderRadius: '12px',
                 height: '32px',
                 width: '32px',
                 padding: 0,
-                background: value.trim() 
-                  ? '#6366f1' 
-                  : '#f1f5f9',
-                borderColor: value.trim() 
-                  ? '#6366f1' 
-                  : '#f1f5f9',
-                color: value.trim() 
+                background: isLoading 
+                  ? '#ef4444'
+                  : (value.trim() ? '#6366f1' : '#f1f5f9'),
+                borderColor: isLoading 
+                  ? '#ef4444'
+                  : (value.trim() ? '#6366f1' : '#f1f5f9'),
+                color: isLoading || value.trim() 
                   ? '#ffffff' 
                   : '#9ca3af',
                 transition: 'all 0.2s ease',
@@ -172,6 +172,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 justifyContent: 'center',
                 flexShrink: 0
               }}
+              title={isLoading ? '中断对话' : '发送消息'}
             />
           </div>
         </div>
