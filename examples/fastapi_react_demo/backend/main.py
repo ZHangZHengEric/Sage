@@ -404,6 +404,14 @@ async def chat_endpoint(request: ChatRequest):
             for msg in request.messages
         ]
         
+        # 从system_context中提取available_workflows
+        available_workflows = None
+        system_context = request.system_context
+        if system_context and 'available_workflows' in system_context:
+            available_workflows = system_context['available_workflows']
+            # 从system_context中移除available_workflows，避免重复传递
+            system_context = {k: v for k, v in system_context.items() if k != 'available_workflows'}
+        
         # 执行智能体对话
         result = controller.run(
             messages,
@@ -412,7 +420,8 @@ async def chat_endpoint(request: ChatRequest):
             deep_thinking=request.use_deepthink,
             summary=True,
             deep_research=request.use_multi_agent,
-            system_context=request.system_context
+            system_context=system_context,
+            available_workflows=available_workflows
         )
         
         return {
@@ -457,6 +466,14 @@ async def chat_stream(request: ChatRequest):
             # 发送开始标记
             yield f"data: {json.dumps({'type': 'chat_start', 'message_id': message_id})}\n\n"
             
+            # 从system_context中提取available_workflows
+            available_workflows = None
+            system_context = request.system_context
+            if system_context and 'available_workflows' in system_context:
+                available_workflows = system_context['available_workflows']
+                # 从system_context中移除available_workflows，避免重复传递
+                system_context = {k: v for k, v in system_context.items() if k != 'available_workflows'}
+            
             # 使用AgentController进行流式处理
             for chunk in controller.run_stream(
                 input_messages=message_history,
@@ -465,7 +482,8 @@ async def chat_stream(request: ChatRequest):
                 deep_thinking=request.use_deepthink,
                 summary=True,
                 deep_research=request.use_multi_agent,
-                system_context=request.system_context
+                system_context=system_context,
+                available_workflows=available_workflows
             ):
                 # 处理消息块
                 for msg in chunk:
