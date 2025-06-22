@@ -10,11 +10,8 @@ services:
       - "20039:8000"
     volumes:
       - /tmp/sage:/tmp/sage
-    command: "python main.py"
     environment:
       - PYTHONUNBUFFERED=1
-    depends_on:
-      - sage_frontend
 
   sage_frontend:
     build:
@@ -23,10 +20,9 @@ services:
     container_name: sage_frontend
     ports:
       - "20040:8080"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
     stdin_open: true
     tty: true
+    depends_on:
+      - sage_backend

@@ -9,15 +9,118 @@
 """
 
 import json
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 from agents.utils.logger import logger
+
+# 嵌套工作流步骤类型定义
+WorkflowStep = Dict[str, Any]  # 包含 id, name, description, order, substeps?
+NestedWorkflow = Dict[str, WorkflowStep]  # {step_id: WorkflowStep}
+WorkflowFormat = Union[Dict[str, List[str]], Dict[str, NestedWorkflow]]  # 兼容旧格式和新格式
+
+
+def convert_nested_workflow_to_steps(nested_workflow: NestedWorkflow) -> List[str]:
+    """
+    将嵌套对象格式的工作流转换为字符串列表格式
+    
+    Args:
+        nested_workflow: 嵌套对象格式的工作流 {step_id: WorkflowStep}
+        
+    Returns:
+        List[str]: 字符串格式的工作流步骤列表
+    """
+    steps = []
+    
+    def process_step(step: WorkflowStep, level: int = 0) -> None:
+        """递归处理步骤，保持层次结构"""
+        indent = "  " * level
+        step_text = f"{indent}{step.get('name', '')}: {step.get('description', '')}"
+        steps.append(step_text)
+        
+        # 如果有子步骤，递归处理
+        substeps = step.get('substeps', {})
+        if substeps:
+            # 按order排序子步骤
+            sorted_substeps = sorted(
+                substeps.items(), 
+                key=lambda x: x[1].get('order', 0)
+            )
+            for substep_id, substep in sorted_substeps:
+                process_step(substep, level + 1)
+    
+    # 按order排序根步骤
+    if nested_workflow:
+        sorted_steps = sorted(
+            nested_workflow.items(), 
+            key=lambda x: x[1].get('order', 0)
+        )
+        for step_id, step in sorted_steps:
+            process_step(step)
+    
+    return steps
+
+
+def detect_workflow_format(available_workflows: WorkflowFormat) -> str:
+    """
+    检测工作流格式类型
+    
+    Args:
+        available_workflows: 工作流数据
+        
+    Returns:
+        str: 'legacy' (旧格式 Dict[str, List[str]]) 或 'nested' (新格式 Dict[str, NestedWorkflow])
+    """
+    if not available_workflows:
+        return 'legacy'
+    
+    # 获取第一个工作流来检测格式
+    first_workflow = next(iter(available_workflows.values()))
+    
+    if isinstance(first_workflow, list):
+        return 'legacy'
+    elif isinstance(first_workflow, dict):
+        # 进一步检查是否是嵌套工作流格式
+        if first_workflow and isinstance(next(iter(first_workflow.values()), {}), dict):
+            return 'nested'
+    
+    return 'legacy'
+
+
+def normalize_workflows(available_workflows: WorkflowFormat) -> Dict[str, List[str]]:
+    """
+    将工作流标准化为字符串列表格式
+    
+    Args:
+        available_workflows: 原始工作流数据（支持新旧格式）
+        
+    Returns:
+        Dict[str, List[str]]: 标准化后的工作流（统一为字符串列表格式）
+    """
+    if not available_workflows:
+        return {}
+    
+    format_type = detect_workflow_format(available_workflows)
+    logger.info(f"WorkflowSelector: 检测到工作流格式: {format_type}")
+    
+    if format_type == 'legacy':
+        # 旧格式，直接返回
+        return available_workflows
+    elif format_type == 'nested':
+        # 新格式，需要转换
+        normalized = {}
+        for workflow_name, nested_workflow in available_workflows.items():
+            normalized[workflow_name] = convert_nested_workflow_to_steps(nested_workflow)
+        
+        logger.info(f"WorkflowSelector: 已转换 {len(normalized)} 个嵌套工作流为字符串格式")
+        return normalized
+    
+    return {}
 
 
 def select_workflow_with_llm(
     model: Any, 
     model_config: Dict[str, Any],
     messages: List[Dict[str, Any]], 
-    available_workflows: Dict[str, List[str]]
+    available_workflows: WorkflowFormat
 ) -> Tuple[Optional[str], Optional[List[str]]]:
     """
     使用大语言模型选择最合适的工作流
@@ -26,13 +129,16 @@ def select_workflow_with_llm(
         model: 语言模型实例
         model_config: 模型配置
         messages: 包含用户新输入的完整消息历史
-        available_workflows: 可用的工作流字典 {name: [steps]}
+        available_workflows: 可用的工作流字典 (支持新旧格式)
         
     Returns:
         Tuple[workflow_name, workflow_steps]: 选择的工作流名称、步骤
     """
     if not messages or not available_workflows:
         return None, None
+    
+    # 标准化工作流格式为字符串列表格式，用于LLM处理
+    normalized_workflows = normalize_workflows(available_workflows)
     
     # 提取用户消息内容用于日志显示
     user_content = ""
@@ -49,7 +155,7 @@ def select_workflow_with_llm(
         # 构建工作流列表，使用索引编号
         workflow_list = ""
         workflow_index_map = {}  # 索引到名称的映射
-        for idx, (name, steps) in enumerate(available_workflows.items(), 1):
+        for idx, (name, steps) in enumerate(normalized_workflows.items(), 1):
             workflow_index_map[idx] = name
             workflow_list += f"\n{idx}. **{name}**:\n"
             for step in steps:
@@ -93,8 +199,11 @@ def select_workflow_with_llm(
             {"role": "user", "content": prompt}
         ]
         
-        response = model.invoke(llm_messages, **model_config)
-        response_content = response.content.strip()
+        response = model.chat.completions.create(
+            messages=llm_messages,
+            **model_config
+        )
+        response_content = response.choices[0].message.content.strip()
         
         logger.debug(f"WorkflowSelector: LLM响应内容: {response_content[:200]}...")
         
@@ -115,7 +224,7 @@ def select_workflow_with_llm(
                 
                 if has_matching and selected_workflow_index in workflow_index_map:
                     selected_workflow_name = workflow_index_map[selected_workflow_index]
-                    workflow_steps = available_workflows[selected_workflow_name]
+                    workflow_steps = normalized_workflows[selected_workflow_name]
                     
                     logger.info(f"WorkflowSelector: 选择工作流: {selected_workflow_name}")
                     return selected_workflow_name, workflow_steps
