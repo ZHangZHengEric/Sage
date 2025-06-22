@@ -28,7 +28,7 @@ from .planning_agent.planning_agent import PlanningAgent
 from .observation_agent.observation_agent import ObservationAgent
 from .direct_executor_agent.direct_executor_agent import DirectExecutorAgent
 from .task_decompose_agent.task_decompose_agent import TaskDecomposeAgent
-from .workflow_selector import select_workflow_with_llm, create_workflow_guidance
+from .workflow_selector import select_workflow_with_llm, create_workflow_guidance, WorkflowFormat
 from .session_manager import SessionManager, SessionStatus
 from agents.utils.logger import logger
 
@@ -121,7 +121,7 @@ class AgentController:
                    max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
                    deep_research: bool = True,
                    system_context: Optional[Dict[str, Any]] = None,
-                   available_workflows: Optional[Dict[str, List[str]]] = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   available_workflows: Optional[WorkflowFormat] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行智能体工作流并流式输出结果
         
@@ -134,7 +134,7 @@ class AgentController:
             max_loop_count: 最大循环次数
             deep_research: 是否进行深度研究（完整流程）
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
-            available_workflows: 可用的工作流模板字典 {name: [steps]}
+            available_workflows: 可用的工作流模板字典 (支持新旧格式)
             
         Yields:
             List[Dict[str, Any]]: 自上次yield以来的新消息字典列表，每个消息包含：
@@ -328,7 +328,7 @@ class AgentController:
 
     def _select_and_apply_workflow(self, 
                                    all_messages: List[Dict[str, Any]], 
-                                   available_workflows: Dict[str, List[str]], 
+                                   available_workflows: WorkflowFormat, 
                                    system_context: Dict[str, Any]) -> Dict[str, Any]:
         """
         选择并应用合适的工作流到系统上下文中
@@ -927,7 +927,7 @@ class AgentController:
             max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
             deep_research: bool = True,
             system_context: Optional[Dict[str, Any]] = None,
-            available_workflows: Optional[Dict[str, List[str]]] = None) -> Dict[str, Any]:
+            available_workflows: Optional[WorkflowFormat] = None) -> Dict[str, Any]:
         """
         执行智能体工作流（非流式版本）
         

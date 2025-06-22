@@ -35,6 +35,9 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     
     // 用于处理分块JSON的状态
     const [chunkBuffer, setChunkBuffer] = useState<Map<string, {chunks: string[], totalChunks: number, receivedChunks: number}>>(new Map());
+    
+    // 用于中断对话的AbortController
+    const [currentAbortController, setCurrentAbortController] = useState<AbortController | null>(null);
 
     // 处理分块JSON的函数
     const handleJsonChunk = (chunkData: any) => {
@@ -264,27 +267,102 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     }, [messages, isLoadingHistory, chatId, saveChat, useDeepThink, useMultiAgent, lastSavedMessageCount]);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    if (!inputValue.trim() && !isLoading) return; // 如果不是中断且没有输入内容，直接返回
 
-      // 添加用户消息
-      const userMessage = addUserMessage(inputValue.trim());
+    // 如果正在加载，中断当前请求
+    if (isLoading && currentAbortController) {
+      console.log('🛑 中断当前对话');
+      currentAbortController.abort();
+      setCurrentAbortController(null);
+      setIsLoading(false);
       
-      // 添加loading消息
-      const settings: ChatSettings = { useDeepThink, useMultiAgent };
-      addLoadingMessage(settings);
+      // 将中断的消息标记为完成
+      setMessages(prev => prev.map(msg => {
+        if (msg.type === 'loading') {
+          return {
+            ...msg,
+            type: 'assistant' as const,
+            content: msg.content + '\n\n[对话已被用户中断]',
+            displayContent: msg.displayContent + '\n\n[对话已被用户中断]',
+            endTime: new Date()
+          };
+        }
+        return msg;
+      }));
       
+      // 如果有新输入内容，继续发送新消息
+      if (!inputValue.trim()) {
+        return;
+      }
+    }
+
+    // 创建新的AbortController
+    const abortController = new AbortController();
+    setCurrentAbortController(abortController);
+
+    // 添加用户消息
+    const userMessage = addUserMessage(inputValue.trim());
+    
+    // 添加loading消息
+    const settings: ChatSettings = { useDeepThink, useMultiAgent };
+    addLoadingMessage(settings);
+    
     setInputValue('');
     setIsLoading(true);
 
     try {
-      // 构建规则偏好context
+      // 构建规则偏好和工作流context
       const enabledPreferences = state.rulePreferences.filter(pref => pref.enabled);
-      const systemContext = enabledPreferences.length > 0 ? {
-        rule_preferences: enabledPreferences.map(pref => ({
+      const enabledWorkflows = state.workflowTemplates.filter(workflow => workflow.enabled);
+      
+      // 转换工作流格式以匹配后端期望的格式
+      const availableWorkflows = enabledWorkflows.length > 0 ? 
+        enabledWorkflows.reduce((acc, workflow) => {
+          // 将嵌套对象格式的工作流步骤转换为字符串数组格式
+          const convertStepsToArray = (stepsObj: { [key: string]: any }): string[] => {
+            const stepArray: string[] = [];
+            
+            // 递归处理步骤，保持顺序
+            const processStep = (step: any, level: number = 0): void => {
+              const indent = '  '.repeat(level);
+              stepArray.push(`${indent}${step.name}: ${step.description}`);
+              
+              // 如果有子步骤，递归处理
+              if (step.substeps && Object.keys(step.substeps).length > 0) {
+                Object.values(step.substeps).forEach((substep: any) => {
+                  processStep(substep, level + 1);
+                });
+              }
+            };
+            
+            // 按order排序并处理所有根步骤
+            const rootSteps = Object.values(stepsObj).sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+            rootSteps.forEach((step: any) => {
+              processStep(step);
+            });
+            
+            return stepArray;
+          };
+          
+          const steps = convertStepsToArray(workflow.steps);
+          acc[workflow.name] = steps;
+          return acc;
+        }, {} as Record<string, string[]>) : null;
+
+      const systemContext: any = {};
+      
+      if (enabledPreferences.length > 0) {
+        systemContext.rule_preferences = enabledPreferences.map(pref => ({
           name: pref.name,
           content: pref.content
-        }))
-      } : null;
+        }));
+      }
+      
+      if (availableWorkflows) {
+        systemContext.available_workflows = availableWorkflows;
+      }
+      
+      const finalSystemContext = Object.keys(systemContext).length > 0 ? systemContext : null;
 
       // 构建请求数据
       const requestData = {
@@ -314,7 +392,7 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         use_deepthink: useDeepThink,
         use_multi_agent: useMultiAgent,
         session_id: sessionId,
-        system_context: systemContext
+        system_context: finalSystemContext
       };
 
         console.log('🌐 发起Fetch请求:', '/api/chat-stream');
@@ -324,6 +402,7 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestData),
+        signal: abortController.signal, // 添加中断信号
       });
 
         console.log('📡 收到响应:', response.status, response.statusText);
@@ -501,9 +580,21 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       }
 
     } catch (error) {
-        console.error('❌ 发送消息失败:', error);
+      console.error('❌ 发送消息失败:', error);
       setIsLoading(false);
-        addErrorMessage(`连接错误: ${error}`);
+      setCurrentAbortController(null);
+      
+      // 检查是否是用户主动中断
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('✅ 用户主动中断对话');
+        // 不显示错误消息，因为这是用户主动行为
+        return;
+      }
+      
+      addErrorMessage(`连接错误: ${error}`);
+    } finally {
+      // 确保清理AbortController
+      setCurrentAbortController(null);
     }
   };
 
