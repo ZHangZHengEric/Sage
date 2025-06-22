@@ -229,6 +229,8 @@ Experience Sage through our cutting-edge web application featuring a modern Reac
 **Features:**
 - 🤖 **Multi-Agent Collaboration** - Visual workflow with decomposition, planning, execution, observation, and summary
 - 🧠 **Deep Thinking Mode** - Expandable thought bubbles showing agent reasoning process
+- 🔄 **Custom Workflow Management** - Create, edit, and manage custom workflows with visual mind-map editor
+- ⚡ **Response Interruption** - Stop AI responses at any time with graceful cancellation handling
 - 🚀 **FastAPI Backend** - High-performance async API server with streaming support
 - ⚛️ **React Frontend** - Modern responsive UI with Ant Design components
 - 📡 **Real-time Communication** - WebSocket + SSE dual support for live updates
@@ -251,7 +253,17 @@ npm install
 npm run dev
 ```
 
-Access the application at `http://localhost:8080`. For detailed setup instructions, see the [FastAPI React Demo README](examples/fastapi_react_demo/README.md).
+**🎯 Try the Live Demo:** Experience all features immediately at [**Live Demo →**](http://36.133.44.114:20040/)
+
+**Demo Features:**
+- 💬 **Interactive Chat Interface** - Chat with AI agents using custom workflows
+- 🔄 **Workflow Configuration** - Create and customize workflows with visual editor
+- ⚡ **Response Interruption** - Click stop button to interrupt AI responses at any time
+- 💡 **Rule Preferences** - Configure AI behavior with custom rules and preferences
+- 🛠️ **System Configuration** - Adjust model settings, temperature, and other parameters
+- 📊 **Real-time Monitoring** - Watch token usage and execution progress in real-time
+
+Access the local application at `http://localhost:8080`. For detailed setup instructions, see the [FastAPI React Demo README](examples/fastapi_react_demo/README.md).
 
 ### 💻 Command Line Usage
 
@@ -307,12 +319,14 @@ print("Execution Time:", result['execution_time'])
 - **Summary Agent**: Comprehensive result synthesis with structured output and actionable insights
 
 ### 🔄 **Custom Workflow Engine**
-- **Predefined Workflow Templates**: Ready-to-use workflow configurations for common scenarios (research, analysis, content creation, problem-solving)
+- **Visual Workflow Editor**: Interactive drag-and-drop interface for creating custom workflows with mind-map visualization
+- **Predefined Templates**: Ready-to-use workflows for research reports, product development, content creation, and more
+- **Smart Step Management**: Hierarchical workflow structure with main steps and sub-steps for complex task organization
+- **Real-time Preview**: Live visualization of workflow structure with automatic layout and connection rendering
 - **Workflow Stability**: Deterministic execution paths with consistent results for production environments
-- **Scenario-Specific Optimization**: Fine-tuned agent behaviors and tool selections for specific use cases
-- **Workflow Customization**: Define custom agent sequences, skip unnecessary steps, and configure parallel execution
-- **Template Management**: Save, load, and share workflow templates across teams and projects
-- **Fixed-Scenario Reliability**: Enhanced stability and predictability for recurring tasks and standardized processes
+- **Template Sharing**: Export/import workflow configurations and share across teams and projects
+- **Zoom & Pan Support**: Navigate large workflows with mouse wheel zoom and drag-to-pan functionality
+- **Auto-fit Display**: Intelligent viewport adjustment to show all workflow nodes at optimal scale
 
 ### 💡 **Rule Preferences System**
 - **Personalized AI Behavior**: Configure AI assistant behavior with custom rules and preferences
@@ -606,13 +620,100 @@ update_settings(
 controller = AgentController.from_config("production.yaml")
 ```
 
+## 🎯 Key Features Spotlight
+
+### 🔄 Custom Workflow Management
+
+Create, edit, and visualize custom workflows with our interactive mind-map editor:
+
+```python
+# Use custom workflows in your application
+from agents.agent.workflow_selector import select_workflow_with_llm
+
+# Automatically select appropriate workflow based on user query
+selected_workflow = select_workflow_with_llm(
+    user_query="I need to analyze market trends and create a report",
+    available_workflows=[
+        {
+            "name": "Research Report Workflow",
+            "steps": [
+                {"name": "Define Research Topic", "substeps": ["Identify core questions", "Set research scope"]},
+                {"name": "Develop Research Plan", "substeps": ["Determine methodology", "Design research tools"]},
+                {"name": "Collect Data", "substeps": ["Industry background research", "Policy analysis"]},
+                {"name": "Conduct Analysis", "substeps": ["Primary data collection", "Secondary data analysis"]},
+                {"name": "Write Report", "substeps": ["Draft findings", "Format conclusions"]}
+            ]
+        }
+    ]
+)
+
+# Execute with selected workflow
+result = controller.run(
+    messages,
+    tool_manager,
+    workflow=selected_workflow,
+    system_context={"workflow_mode": "structured"}
+)
+```
+
+**Visual Editor Features:**
+- 🎨 **Mind-map visualization** with hierarchical node layout
+- 🖱️ **Interactive editing** - click to edit nodes directly
+- 🔍 **Zoom & Pan** - navigate large workflows with mouse controls
+- 📐 **Auto-fit display** - intelligent viewport adjustment
+- 💾 **Template system** - save and reuse workflow configurations
+
+### ⚡ Response Interruption
+
+Stop AI responses at any time with graceful cancellation:
+
+```python
+import asyncio
+from agents.agent.agent_controller import AgentController
+
+# Streaming with interruption support
+async def interruptible_execution():
+    controller = AgentController(model, config)
+    task = None
+    
+    try:
+        # Start streaming execution
+        async for chunk in controller.run_stream_async(messages, tool_manager):
+            for message in chunk:
+                print(f"Agent: {message['show_content']}")
+                
+                # Check for interruption signal
+                if should_interrupt():
+                    if task:
+                        task.cancel()
+                    break
+                    
+    except asyncio.CancelledError:
+        print("✅ Response interrupted gracefully")
+        # Cleanup is handled automatically
+        
+    finally:
+        # Ensure proper resource cleanup
+        await controller.cleanup()
+
+# Web interface interruption (FastAPI + React)
+# Users can click the "Stop" button to interrupt responses
+```
+
+**Interruption Features:**
+- 🛑 **Immediate stopping** - responses halt within 1-2 seconds
+- 🧹 **Resource cleanup** - proper memory and connection management
+- 💾 **State preservation** - partial results are saved and accessible
+- 🔄 **Resumable execution** - continue from interruption point if needed
+
 ## 🔄 Recent Updates (v0.9)
 
 ### ✨ New Features
 - 🎯 **Task Decompose Agent**: New specialized agent for intelligent task breakdown and dependency management
 - 🔧 **Unified System Prompt Management**: Centralized system context handling with `system_context` parameter across all agents
 - 💡 **Rule Preferences System**: Personalized AI behavior configuration with custom rules, templates, and real-time management
-- 🔄 **Custom Workflow Engine**: Predefined workflow templates and custom workflow support for enhanced stability in fixed scenarios
+- 🔄 **Visual Workflow Editor**: Interactive mind-map style workflow creation with drag-and-drop functionality
+- ⚡ **Response Interruption**: Stop AI responses at any time with graceful cancellation and cleanup
 - 📊 **Enhanced Token Tracking**: Comprehensive usage statistics with detailed cost monitoring and optimization suggestions
 - 🛡️ **Robust Error Handling**: Advanced error recovery, retry mechanisms, and comprehensive exception handling
 - ⚡ **Performance Optimization**: 50% faster execution with improved resource management and parallel processing
@@ -622,7 +723,8 @@ controller = AgentController.from_config("production.yaml")
 - 🏗️ **Agent Architecture**: Added Task Decompose Agent to the workflow for better task breakdown
 - 💬 **System Context API**: New `system_context` parameter for unified runtime information management
 - 📝 **System Prompt Organization**: Centralized system prompt management with `SYSTEM_PREFIX_DEFAULT` constants
-- 🔄 **Workflow Engine**: Custom workflow support with template management and scenario-specific optimizations
+- 🔄 **Workflow Visualization**: Canvas-based workflow editor with high-resolution rendering and interactive controls
+- ⚡ **Interruption Handling**: Graceful termination of streaming responses with proper resource cleanup
 - 💾 **Memory Management**: Optimized memory usage for long-running tasks and large-scale deployments
 - 🌐 **Streaming Enhancement**: Improved real-time updates with better UI feedback and WebSocket reliability
 - 📊 **Token Analytics**: Comprehensive usage tracking with cost optimization suggestions and budget management
