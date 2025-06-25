@@ -34,8 +34,7 @@ class TaskAnalysisAgent(AgentBase):
 当前有以下的工具可以使用：
 {available_tools}
 
-当前你可访问的数据库或者知识库的ID是：
-{session_id}
+
 
 请按照以下步骤进行分析：
 首先，我需要理解用户的核心需求。从对话中可以提取哪些关键信息？用户真正想要实现的目标是什么？
@@ -75,13 +74,15 @@ class TaskAnalysisAgent(AgentBase):
             system_prefix: 系统前缀提示
         """
         super().__init__(model, model_config, system_prefix)
+        self.agent_name = "TaskAnalysisAgent"
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
         logger.info("TaskAnalysisAgent 初始化完成")
 
     def run_stream(self, 
-                   messages: List[Dict[str, Any]], 
+                   message_manager: Any,
+                   task_manager: Optional[Any] = None,
                    tool_manager: Optional[Any] = None,
-                   session_id: str = None,
+                   session_id: Optional[str] = None,
                    system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务分析
@@ -89,7 +90,8 @@ class TaskAnalysisAgent(AgentBase):
         分析用户输入并提取关键信息，实时返回分析结果。
         
         Args:
-            messages: 对话历史记录
+            message_manager: 消息管理器（必需）
+            task_manager: 任务管理器
             tool_manager: 可选的工具管理器
             session_id: 会话ID
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
@@ -100,18 +102,28 @@ class TaskAnalysisAgent(AgentBase):
         Raises:
             Exception: 当分析过程出现错误时抛出异常
         """
-        logger.info(f"TaskAnalysisAgent: 开始流式任务分析，消息数量: {len(messages)}")
+        if not message_manager:
+            raise ValueError("TaskAnalysisAgent: message_manager 是必需参数")
         
-        # 使用基类方法收集和记录流式输出
-        yield from self._collect_and_log_stream_output(
-            self._execute_analysis_stream_internal(messages, tool_manager, session_id, system_context)
-        )
+        # 从MessageManager获取优化后的消息
+        optimized_messages = message_manager.filter_messages_for_agent(self.__class__.__name__)
+        logger.info(f"TaskAnalysisAgent: 开始流式任务分析，获取到 {len(optimized_messages)} 条优化消息")
+        message_manager.log_print_messages(optimized_messages)
+        
+        # 使用基类方法收集和记录流式输出，并将结果添加到MessageManager
+        for chunk_batch in self._collect_and_log_stream_output(
+            self._execute_analysis_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
+        ):
+            # Agent自己负责将生成的消息添加到MessageManager
+            message_manager.add_messages(chunk_batch)
+            yield chunk_batch
 
     def _execute_analysis_stream_internal(self, 
                                         messages: List[Dict[str, Any]], 
                                         tool_manager: Optional[Any],
                                         session_id: str,
-                                        system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
+                                        system_context: Optional[Dict[str, Any]],
+                                        task_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部任务分析流式执行方法
         
@@ -221,6 +233,7 @@ class TaskAnalysisAgent(AgentBase):
         """
         logger.info("TaskAnalysisAgent: 开始执行流式任务分析")
         
+        # 为整个分析流程生成统一的message_id
         message_id = str(uuid.uuid4())
         
         # 发送初始思考提示
@@ -237,12 +250,13 @@ class TaskAnalysisAgent(AgentBase):
             system_context=context.get('system_context')  # 传递system_context作为补充信息
         )
         
-        # 使用基类的流式处理和token跟踪
-        yield from self._execute_streaming_with_token_tracking(
+        # 使用基类的流式处理和token跟踪，传递统一的message_id
+        yield from self._execute_streaming_with_token_tracking_with_message_id(
             prompt=prompt,
             step_name="task_analysis",
             system_message=system_message,
-            message_type='task_analysis_result'
+            message_type='task_analysis_result',
+            message_id=message_id  # 传递统一的message_id
         )
 
     def _handle_analysis_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:

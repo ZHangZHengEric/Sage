@@ -80,19 +80,22 @@ class PlanningAgent(AgentBase):
             system_prefix: 系统前缀提示
         """
         super().__init__(model, model_config, system_prefix)
+        self.agent_name = "PlanningAgent"
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("PlanningAgent 初始化完成")
 
     def run_stream(self, 
-                   messages: List[Dict[str, Any]], 
+                   message_manager: Any,
+                   task_manager: Optional[Any] = None,
                    tool_manager: Optional[Any] = None,
-                   session_id: str = None,
+                   session_id: Optional[str] = None,
                    system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行规划任务
         
         Args:
-            messages: 对话历史记录
+            message_manager: 消息管理器（必需）
+            task_manager: 任务管理器
             tool_manager: 工具管理器
             session_id: 会话ID
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
@@ -100,18 +103,26 @@ class PlanningAgent(AgentBase):
         Yields:
             List[Dict[str, Any]]: 流式输出的规划消息块
         """
-        logger.info("PlanningAgent: 开始流式规划任务")
+        if not message_manager:
+            raise ValueError("PlanningAgent: message_manager 是必需参数")
         
-        # 使用基类方法收集和记录流式输出
-        yield from self._collect_and_log_stream_output(
-            self._execute_planning_stream_internal(messages, tool_manager, session_id, system_context)
-        )
-
+        # 从MessageManager获取优化后的消息
+        optimized_messages = message_manager.filter_messages_for_agent(self.__class__.__name__)
+        logger.info(f"PlanningAgent: 开始流式规划任务，获取到 {len(optimized_messages)} 条优化消息")
+        
+        # 使用基类方法收集和记录流式输出，并将结果添加到MessageManager
+        for chunk_batch in self._collect_and_log_stream_output(
+            self._execute_planning_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
+        ):
+            # Agent自己负责将生成的消息添加到MessageManager
+            message_manager.add_messages(chunk_batch)
+            yield chunk_batch
     def _execute_planning_stream_internal(self, 
                                         messages: List[Dict[str, Any]], 
                                         tool_manager: Optional[Any],
                                         session_id: str,
-                                        system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
+                                        system_context: Optional[Dict[str, Any]],
+                                        task_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部规划流式执行方法
         

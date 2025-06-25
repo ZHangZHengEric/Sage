@@ -22,6 +22,7 @@ class TaskManager:
         self.tasks: Dict[str, TaskBase] = {}
         self.task_history: List[Dict[str, Any]] = []
         self.created_time = datetime.datetime.now().isoformat()
+        self.next_task_number = 1  # 用于生成顺序的task_id
 
     def add_task(self, task: TaskBase) -> str:
         """
@@ -33,13 +34,18 @@ class TaskManager:
         Returns:
             str: 任务ID
         """
-        # 确保任务有唯一ID
-        if not task.task_id:
-            task.task_id = f"task_{len(self.tasks) + 1}"
+        # 强制使用顺序编号作为task_id，覆盖TaskBase可能生成的UUID
+        task.task_id = str(self.next_task_number)
+        self.next_task_number += 1
         
-        # 检查ID冲突
-        if task.task_id in self.tasks:
-            task.task_id = f"{task.task_id}_{len(self.tasks)}"
+        # 检查ID冲突（理论上不会发生，但保险起见）
+        while task.task_id in self.tasks:
+            task.task_id = str(self.next_task_number)
+            self.next_task_number += 1
+        
+        # 更新title以反映新的task_id
+        if not task.title or task.title.startswith("Task "):
+            task.title = f"Task {task.task_id}"
         
         self.tasks[task.task_id] = task
         self._add_history_entry(task.task_id, 'added', {
@@ -109,6 +115,31 @@ class TaskManager:
             self._add_history_entry(task_id, 'updated', {
                 'changes': updated_fields
             })
+        
+        return True
+
+    def update_task_status(self, task_id: str, status) -> bool:
+        """
+        更新任务状态
+        
+        Args:
+            task_id: 任务ID
+            status: 新的任务状态（TaskStatus枚举）
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        if task_id not in self.tasks:
+            return False
+        
+        task = self.tasks[task_id]
+        old_status = task.status
+        task.status = status
+        
+        self._add_history_entry(task_id, 'status_updated', {
+            'old_status': old_status.value if hasattr(old_status, 'value') else str(old_status),
+            'new_status': status.value if hasattr(status, 'value') else str(status)
+        })
         
         return True
 
@@ -385,9 +416,16 @@ class TaskManager:
             'next_available_task': self.get_next_task().to_summary_dict() if self.get_next_task() else None
         }
 
-    def get_all_tasks(self) -> Dict[str, TaskBase]:
-        """获取所有任务"""
-        return self.tasks
+    def get_all_tasks(self) -> List[TaskBase]:
+        """
+        获取所有任务的列表（按task_id顺序排序）
+        
+        Returns:
+            List[TaskBase]: 任务对象列表，按task_id数字顺序排序
+        """
+        # 按task_id的数字值排序
+        sorted_tasks = sorted(self.tasks.values(), key=lambda task: int(task.task_id) if task.task_id.isdigit() else float('inf'))
+        return sorted_tasks
 
     def get_task_history(self) -> List[Dict[str, Any]]:
         """获取完整任务历史"""
@@ -416,15 +454,24 @@ class TaskManager:
         
         return cleared_count
 
-    def to_json(self) -> str:
-        """序列化为JSON字符串"""
-        data = {
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        将TaskManager转换为字典格式
+        
+        Returns:
+            Dict[str, Any]: 包含TaskManager状态的字典
+        """
+        return {
             'session_id': self.session_id,
             'created_time': self.created_time,
+            'next_task_number': self.next_task_number,
             'tasks': {task_id: task.to_dict() for task_id, task in self.tasks.items()},
             'task_history': self.task_history
         }
-        return json.dumps(data, ensure_ascii=False, indent=2)
+
+    def to_json(self) -> str:
+        """序列化为JSON字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
 
     def save_to_file(self, file_path: str) -> bool:
         """
@@ -450,6 +497,7 @@ class TaskManager:
         data = json.loads(json_str)
         manager = cls(session_id=data.get('session_id'))
         manager.created_time = data.get('created_time', manager.created_time)
+        manager.next_task_number = data.get('next_task_number', 1)
         manager.task_history = data.get('task_history', [])
         
         # 重建任务对象

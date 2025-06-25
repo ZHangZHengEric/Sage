@@ -47,9 +47,9 @@ class AgentController:
     DEFAULT_MESSAGE_LIMIT = 10000
     
     # 工作目录模板
-    WORKSPACE_TEMPLATE = "/tmp/sage/{session_id}"
+    WORKSPACE_TEMPLATE = "{workspace}/{session_id}"
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage"):
         """
         初始化智能体控制器
         
@@ -57,10 +57,12 @@ class AgentController:
             model: 语言模型实例
             model_config: 模型配置参数
             system_prefix: 系统前缀提示
+            workspace: 工作空间根目录，默认为 /tmp/sage
         """
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
+        self.workspace = workspace
         self._init_agents()
         
         # 会话状态管理器
@@ -77,6 +79,9 @@ class AgentController:
             'workflow_start_time': None,
             'workflow_end_time': None
         }
+        
+        # 消息和任务管理器（每个会话都会创建独立的实例）
+        self._session_managers = {}
         
         logger.info("AgentController: 智能体控制器初始化完成")
 
@@ -111,6 +116,37 @@ class AgentController:
         )
         
         logger.info("AgentController: 所有智能体初始化完成")
+
+    def _get_session_managers(self, session_id: str) -> tuple:
+        """
+        获取或创建会话的MessageManager和TaskManager
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            tuple: (message_manager, task_manager)
+        """
+        if session_id not in self._session_managers:
+            from agents.agent.message_manager import MessageManager
+            from agents.task.task_manager import TaskManager
+            
+            message_manager = MessageManager(
+                session_id=session_id,
+                max_token_limit=8000,
+                auto_merge_chunks=True
+            )
+            task_manager = TaskManager(session_id=session_id)
+            
+            self._session_managers[session_id] = {
+                'message_manager': message_manager,
+                'task_manager': task_manager
+            }
+            
+            logger.info(f"AgentController: 为会话 {session_id} 创建了新的MessageManager和TaskManager")
+        
+        managers = self._session_managers[session_id]
+        return managers['message_manager'], managers['task_manager']
 
     def run_stream(self, 
                    input_messages: List[Dict[str, Any]], 
@@ -157,7 +193,7 @@ class AgentController:
         try:
             # 准备会话和消息
             session_id = self._prepare_session_id(session_id)
-            all_messages = self._prepare_initial_messages(input_messages)
+            initial_messages = self._prepare_initial_messages(input_messages)
             
             # 创建会话并设置为运行状态
             self.session_manager.create_session(session_id)
@@ -166,20 +202,27 @@ class AgentController:
             # 设置执行上下文
             system_context = self._setup_system_context(session_id, system_context)
             
+            # 初始化MessageManager和TaskManager
+            message_manager, task_manager = self._get_session_managers(session_id)
+            # Controller负责将用户输入添加到MessageManager
+            message_manager.add_messages(initial_messages)
+            
             # 只有在多智能体协作模式下才进行工作流选择
             if available_workflows and deep_research:
                 system_context = self._select_and_apply_workflow(
-                    all_messages, available_workflows, system_context
+                    message_manager, available_workflows, system_context
                 )
                 if self._check_session_interrupt(session_id):
                     logger.info(f"AgentController: 工作流选择阶段被中断，会话ID: {session_id}")
-                    return 
+                    return
+            
             # 执行工作流
             if deep_research:
                 # 多智能体协作模式：执行完整工作流（分解->规划->执行->观察->总结）
                 # deep_thinking 独立控制是否执行任务分析
                 yield from self._execute_multi_agent_workflow(
-                    all_messages=all_messages,
+                    message_manager=message_manager,
+                    task_manager=task_manager,
                     tool_manager=tool_manager,
                     system_context=system_context,
                     session_id=session_id,
@@ -190,7 +233,8 @@ class AgentController:
             else:
                 # 直接执行模式：可选的任务分析 + 直接执行
                 yield from self._execute_simplified_workflow(
-                    all_messages=all_messages,
+                    message_manager=message_manager,
+                    task_manager=task_manager,
                     tool_manager=tool_manager,
                     system_context=system_context,
                     session_id=session_id,
@@ -216,9 +260,18 @@ class AgentController:
             self.overall_token_stats['workflow_end_time'] = time.time()
             self.print_comprehensive_token_stats()
             
+            # 保存会话状态到文件
+            try:
+                self._save_session_state(session_id)
+            except Exception as save_error:
+                logger.warning(f"AgentController: 保存会话状态 {session_id} 时出错: {save_error}")
+            
             # 清理会话，防止内存泄漏
             try:
                 self.session_manager.remove_session(session_id)
+                # 清理MessageManager和TaskManager
+                if session_id in self._session_managers:
+                    del self._session_managers[session_id]
                 logger.info(f"AgentController: 已清理会话 {session_id}")
             except Exception as cleanup_error:
                 logger.warning(f"AgentController: 清理会话 {session_id} 时出错: {cleanup_error}")
@@ -302,7 +355,7 @@ class AgentController:
         logger.debug("AgentController: 设置系统上下文")
         
         current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %A %H:%M:%S')
-        file_workspace = self.WORKSPACE_TEMPLATE.format(session_id=session_id)
+        file_workspace = self.WORKSPACE_TEMPLATE.format(workspace=self.workspace, session_id=session_id)
         
         # 创建工作目录
         if os.path.exists(file_workspace):
@@ -327,14 +380,14 @@ class AgentController:
         return system_context
 
     def _select_and_apply_workflow(self, 
-                                   all_messages: List[Dict[str, Any]], 
+                                   message_manager: Any, 
                                    available_workflows: WorkflowFormat, 
                                    system_context: Dict[str, Any]) -> Dict[str, Any]:
         """
         选择并应用合适的工作流到系统上下文中
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
             available_workflows: 可用的工作流模板
             system_context: 当前系统上下文
             
@@ -344,6 +397,9 @@ class AgentController:
         logger.info("AgentController: 开始工作流选择")
         
         try:
+            # 从MessageManager获取消息用于工作流选择
+            all_messages = message_manager.get_all_messages()
+            
             # 使用LLM选择工作流，传入完整的消息历史
             workflow_name, workflow_steps = select_workflow_with_llm(
                 model=self.model,
@@ -371,7 +427,8 @@ class AgentController:
         return system_context
 
     def _execute_multi_agent_workflow(self, 
-                                     all_messages: List[Dict[str, Any]],
+                                     message_manager: Any,
+                                     task_manager: Any,
                                      tool_manager: Optional[Any],
                                      system_context: Dict[str, Any],
                                      session_id: str,
@@ -382,7 +439,8 @@ class AgentController:
         执行完整的工作流
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
@@ -397,28 +455,29 @@ class AgentController:
         
         # 1. 任务分析阶段
         if deep_thinking:
-            all_messages = yield from self._execute_task_analysis_phase(
-                all_messages, tool_manager, system_context, session_id
+            yield from self._execute_task_analysis_phase(
+                message_manager, task_manager, tool_manager, system_context, session_id
             )
         
         # 2. 任务分解阶段
-        all_messages = yield from self._execute_task_decomposition_phase(
-            all_messages, tool_manager, system_context, session_id
+        yield from self._execute_task_decomposition_phase(
+            message_manager, task_manager, tool_manager, system_context, session_id
         )
         
         # 3. 规划-执行-观察循环
-        all_messages = yield from self._execute_main_loop(
-            all_messages, tool_manager, system_context, session_id, max_loop_count
+        yield from self._execute_main_loop(
+            message_manager, task_manager, tool_manager, system_context, session_id, max_loop_count
         )
         
         # 4. 任务总结阶段
         if summary:
-            all_messages = yield from self._execute_task_summary_phase(
-                all_messages, tool_manager, system_context, session_id
+            yield from self._execute_task_summary_phase(
+                message_manager, task_manager, tool_manager, system_context, session_id
             )
 
     def _execute_task_analysis_phase(self, 
-                                   all_messages: List[Dict[str, Any]],
+                                   message_manager: Any,
+                                   task_manager: Any,
                                    tool_manager: Optional[Any],
                                    system_context: Dict[str, Any],
                                    session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -426,16 +485,14 @@ class AgentController:
         执行任务分析阶段
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
             List[Dict[str, Any]]: 任务分析输出的消息块
-            
-        Returns:
-            List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始任务分析阶段")
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "任务分析")
@@ -443,29 +500,29 @@ class AgentController:
         # 检查中断
         if self._check_session_interrupt(session_id):
             logger.info(f"AgentController: 任务分析阶段被中断，会话ID: {session_id}")
-            return all_messages
+            return
         
         analysis_chunks = []
         for chunk in self.task_analysis_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 任务分析阶段在块处理中被中断，会话ID: {session_id}")
-                return all_messages
+                return
             
             analysis_chunks.append(chunk)
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 任务分析阶段完成，生成 {len(analysis_chunks)} 个块")
-        return all_messages
 
     def _execute_task_decomposition_phase(self, 
-                                        all_messages: List[Dict[str, Any]],
+                                        message_manager: Any,
+                                        task_manager: Any,
                                         tool_manager: Optional[Any],
                                         system_context: Dict[str, Any],
                                         session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -473,16 +530,14 @@ class AgentController:
         执行任务分解阶段
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
             List[Dict[str, Any]]: 任务分解输出的消息块
-            
-        Returns:
-            List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始任务分解阶段")
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "任务分解")
@@ -490,29 +545,29 @@ class AgentController:
         # 检查中断
         if self._check_session_interrupt(session_id):
             logger.info(f"AgentController: 任务分解阶段被中断，会话ID: {session_id}")
-            return all_messages
+            return
         
         decompose_chunks = []
         for chunk in self.task_decompose_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 任务分解阶段在块处理中被中断，会话ID: {session_id}")
-                return all_messages
+                return
             
             decompose_chunks.append(chunk)
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 任务分解阶段完成，生成 {len(decompose_chunks)} 个块")
-        return all_messages
 
     def _execute_main_loop(self, 
-                         all_messages: List[Dict[str, Any]],
+                         message_manager: Any,
+                         task_manager: Any,
                          tool_manager: Optional[Any],
                          system_context: Dict[str, Any],
                          session_id: str,
@@ -521,7 +576,8 @@ class AgentController:
         执行主要的规划-执行-观察循环
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
@@ -529,9 +585,6 @@ class AgentController:
             
         Yields:
             List[Dict[str, Any]]: 循环输出的消息块
-            
-        Returns:
-            List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始规划-执行-观察循环")
         
@@ -543,35 +596,35 @@ class AgentController:
             # 在每轮循环开始时检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 主循环第 {loop_count} 轮被中断，会话ID: {session_id}")
-                return all_messages
+                return
             
             if loop_count > max_loop_count:
                 logger.warning(f"AgentController: 达到最大循环次数 {max_loop_count}，停止工作流")
                 break
 
             # 规划阶段
-            all_messages = yield from self._execute_planning_phase(
-                all_messages, tool_manager, system_context, session_id
+            yield from self._execute_planning_phase(
+                message_manager, task_manager, tool_manager, system_context, session_id
             )
             
             # 执行阶段
-            all_messages = yield from self._execute_execution_phase(
-                all_messages, tool_manager, system_context, session_id
+            yield from self._execute_execution_phase(
+                message_manager, task_manager, tool_manager, system_context, session_id
             )
             
             # 观察阶段
-            all_messages, should_break = yield from self._execute_observation_phase(
-                all_messages, tool_manager, system_context, session_id
+            should_break = yield from self._execute_observation_phase(
+                message_manager, task_manager, tool_manager, system_context, session_id
             )
             
             if should_break:
                 break
         
         logger.info("AgentController: 规划-执行-观察循环完成")
-        return all_messages
 
     def _execute_planning_phase(self, 
-                              all_messages: List[Dict[str, Any]],
+                              message_manager: Any,
+                              task_manager: Any,
                               tool_manager: Optional[Any],
                               system_context: Dict[str, Any],
                               session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -579,16 +632,14 @@ class AgentController:
         执行规划阶段
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
             List[Dict[str, Any]]: 规划输出的消息块
-            
-        Returns:
-            List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始规划阶段")
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "规划")
@@ -596,29 +647,29 @@ class AgentController:
         # 检查中断
         if self._check_session_interrupt(session_id):
             logger.info(f"AgentController: 规划阶段被中断，会话ID: {session_id}")
-            return all_messages
+            return
         
         plan_chunks = []
         for chunk in self.planning_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 规划阶段在块处理中被中断，会话ID: {session_id}")
-                return all_messages
+                return
             
             plan_chunks.append(chunk)
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 规划阶段完成，生成 {len(plan_chunks)} 个块")
-        return all_messages
 
     def _execute_execution_phase(self, 
-                               all_messages: List[Dict[str, Any]],
+                               message_manager: Any,
+                               task_manager: Any,
                                tool_manager: Optional[Any],
                                system_context: Dict[str, Any],
                                session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -626,16 +677,14 @@ class AgentController:
         执行执行阶段
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
             List[Dict[str, Any]]: 执行输出的消息块
-            
-        Returns:
-            List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始执行阶段")
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "执行")
@@ -643,37 +692,38 @@ class AgentController:
         # 检查中断
         if self._check_session_interrupt(session_id):
             logger.info(f"AgentController: 执行阶段被中断，会话ID: {session_id}")
-            return all_messages
+            return
         
         exec_chunks = []
         for chunk in self.executor_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 执行阶段在块处理中被中断，会话ID: {session_id}")
-                return all_messages
+                return
             
             exec_chunks.append(chunk)
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 执行阶段完成，生成 {len(exec_chunks)} 个块")
-        return all_messages
 
     def _execute_observation_phase(self, 
-                                 all_messages: List[Dict[str, Any]],
+                                 message_manager: Any,
+                                 task_manager: Any,
                                  tool_manager: Optional[Any],
                                  system_context: Dict[str, Any],
-                                 session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                 session_id: str) -> Generator[bool, None, None]:
         """
         执行观察阶段
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
@@ -682,7 +732,7 @@ class AgentController:
             List[Dict[str, Any]]: 观察输出的消息块
             
         Returns:
-            Tuple[List[Dict[str, Any]], bool]: 更新后的消息列表和是否应该中断循环
+            bool: 是否应该中断循环
         """
         logger.info("AgentController: 开始观察阶段")
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "观察")
@@ -690,33 +740,34 @@ class AgentController:
         # 检查中断
         if self._check_session_interrupt(session_id):
             logger.info(f"AgentController: 观察阶段被中断，会话ID: {session_id}")
-            return all_messages, True  # 中断时也返回should_break=True
+            return True  # 中断时也返回should_break=True
         
         obs_chunks = []
         for chunk in self.observation_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 观察阶段在块处理中被中断，会话ID: {session_id}")
-                return all_messages, True  # 中断时也返回should_break=True
+                return True  # 中断时也返回should_break=True
             
             obs_chunks.append(chunk)
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 观察阶段完成，生成 {len(obs_chunks)} 个块")
         
         # 检查是否应该继续循环
-        should_break = self._check_loop_completion(all_messages)
+        should_break = self._check_loop_completion_from_manager(message_manager)
         
-        return all_messages, should_break
+        return should_break
 
     def _execute_task_summary_phase(self, 
-                                  all_messages: List[Dict[str, Any]],
+                                  message_manager: Any,
+                                  task_manager: Any,
                                   tool_manager: Optional[Any],
                                   system_context: Dict[str, Any],
                                   session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -724,16 +775,14 @@ class AgentController:
         执行任务总结阶段
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
             
         Yields:
             List[Dict[str, Any]]: 总结输出的消息块
-            
-        Returns:
-            List[Dict[str, Any]]: 更新后的消息列表
         """
         logger.info("AgentController: 开始任务总结阶段")
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "总结")
@@ -741,26 +790,25 @@ class AgentController:
         # 检查中断
         if self._check_session_interrupt(session_id):
             logger.info(f"AgentController: 任务总结阶段被中断，会话ID: {session_id}")
-            return all_messages
+            return
         
         summary_chunks = []
         for chunk in self.task_summary_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 任务总结阶段在块处理中被中断，会话ID: {session_id}")
-                return all_messages
+                return
             
             summary_chunks.append(chunk)
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info(f"AgentController: 任务总结阶段完成，生成 {len(summary_chunks)} 个块")
-        return all_messages
 
     def _execute_simplified_workflow(self, 
                                     all_messages: List[Dict[str, Any]],
@@ -822,18 +870,23 @@ class AgentController:
             logger.info(f"AgentController: 直接执行阶段被中断，会话ID: {session_id}")
             return
         
+        # 获取会话的MessageManager和TaskManager
+        message_manager, task_manager = self._get_session_managers(session_id)
+        # 先将现有消息添加到MessageManager
+        message_manager.add_messages(all_messages)
+        
         for chunk in self.direct_executor_agent.run_stream(
-            messages=all_messages, 
-            tool_manager=tool_manager, 
-            system_context=system_context, 
-            session_id=session_id
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context
         ):
             # 在每个块之间检查中断
             if self._check_session_interrupt(session_id):
                 logger.info(f"AgentController: 直接执行阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
-            all_messages = self.task_analysis_agent._merge_messages(all_messages, chunk)
             yield chunk
         
         logger.info("AgentController: 直接执行智能体完成")
@@ -868,6 +921,55 @@ class AgentController:
                     'show_content': obs_result.get('user_query', '') + '\n'
                 }
                 all_messages.append(clarify_msg)
+                return True
+                
+        except (json.JSONDecodeError, IndexError, KeyError) as e:
+            logger.warning(f"AgentController: 解析观察结果失败: {str(e)}，继续循环")
+            
+        return False
+
+    def _check_loop_completion_from_manager(self, message_manager: Any) -> bool:
+        """
+        从MessageManager检查循环是否应该完成
+        
+        Args:
+            message_manager: MessageManager实例
+            
+        Returns:
+            bool: 是否应该中断循环
+        """
+        logger.debug("AgentController: 从MessageManager检查循环完成条件")
+        
+        try:
+            all_messages = message_manager.get_all_messages()
+            if not all_messages:
+                return False
+            
+            # 查找最后一个观察结果
+            obs_messages = [msg for msg in all_messages if msg.get('type') == 'observation_result']
+            if not obs_messages:
+                return False
+            
+            last_obs_msg = obs_messages[-1]
+            obs_content = last_obs_msg['content'].replace('Observation: ', '')
+            obs_result = json.loads(obs_content)
+            
+            if obs_result.get('is_completed', False):
+                logger.info("AgentController: 观察阶段指示任务已完成")
+                return True
+                
+            if obs_result.get('needs_more_input', False):
+                logger.info("AgentController: 任务需要用户提供更多输入")
+                user_query = obs_result.get('user_query', '')
+                if user_query:
+                    clarify_msg = {
+                        'role': 'assistant',
+                        'content': user_query,
+                        'type': 'final_answer',
+                        'message_id': str(uuid.uuid4()),
+                        'show_content': user_query + '\n'
+                    }
+                    message_manager.add_messages([clarify_msg])
                 return True
                 
         except (json.JSONDecodeError, IndexError, KeyError) as e:
@@ -1481,3 +1583,65 @@ class AgentController:
         """
         session = self.session_manager.get_session(session_id)
         return session.get('current_phase') if session else None
+
+    def _save_session_state(self, session_id: str) -> None:
+        """
+        保存会话状态到文件
+        
+        Args:
+            session_id: 会话ID
+        """
+        import json
+        import os
+        
+        try:
+            if session_id not in self._session_managers:
+                logger.warning(f"AgentController: 会话 {session_id} 的管理器不存在，跳过保存")
+                return
+            
+            # 获取会话管理器
+            managers = self._session_managers[session_id]
+            message_manager = managers['message_manager']
+            task_manager = managers['task_manager']
+            
+            # 构建保存路径
+            workspace_dir = self.WORKSPACE_TEMPLATE.format(workspace=self.workspace, session_id=session_id)
+            os.makedirs(workspace_dir, exist_ok=True)
+            
+            # 保存MessageManager状态
+            message_file = os.path.join(workspace_dir, "message_manager.json")
+            if hasattr(message_manager, 'to_dict'):
+                message_data = message_manager.to_dict()
+            else:
+                # 如果没有to_dict方法，保存核心数据
+                message_data = {
+                    'session_id': message_manager.session_id,
+                    'messages': message_manager.get_all_messages(),
+                    'max_token_limit': getattr(message_manager, 'max_token_limit', None),
+                    'auto_merge_chunks': getattr(message_manager, 'auto_merge_chunks', None)
+                }
+            
+            with open(message_file, 'w', encoding='utf-8') as f:
+                json.dump(message_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"AgentController: 已保存MessageManager状态到 {message_file}")
+            
+            # 保存TaskManager状态
+            task_file = os.path.join(workspace_dir, "task_manager.json")
+            if hasattr(task_manager, 'to_dict'):
+                task_data = task_manager.to_dict()
+            else:
+                # 如果没有to_dict方法，保存核心数据
+                all_tasks = task_manager.get_all_tasks()
+                task_data = {
+                    'session_id': task_manager.session_id,
+                    'next_task_number': getattr(task_manager, 'next_task_number', 1),
+                    'tasks': [task.to_dict() if hasattr(task, 'to_dict') else str(task) for task in all_tasks]
+                }
+            
+            with open(task_file, 'w', encoding='utf-8') as f:
+                json.dump(task_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"AgentController: 已保存TaskManager状态到 {task_file}")
+            
+        except Exception as e:
+            logger.error(f"AgentController: 保存会话状态失败: {str(e)}")
+            raise

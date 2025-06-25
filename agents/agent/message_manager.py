@@ -76,8 +76,8 @@ class MessageManager:
         # 消息存储（只存储非system消息）
         self.messages: List[Dict[str, Any]] = []
         
-        # 待合并的消息块缓存
-        self.pending_chunks: Dict[str, List[Dict[str, Any]]] = {}
+        # 兼容性：保留pending_chunks属性（现在已不使用）
+        self.pending_chunks = {}
         
         # 统计信息
         self.stats = {
@@ -95,7 +95,7 @@ class MessageManager:
     
     def add_messages(self, messages: Union[Dict[str, Any], List[Dict[str, Any]]]) -> bool:
         """
-        添加消息（支持单个消息或消息列表，自动处理chunk合并）
+        添加消息（支持单个消息或消息列表，直接合并chunk到existing message）
         
         Args:
             messages: 消息数据（单个消息字典或消息列表）
@@ -120,37 +120,51 @@ class MessageManager:
             message_id = message.get('message_id')
             
             if message_id:
-                # 有message_id，作为chunk处理（流式消息）
-                chunk_data = deepcopy(message)
-                chunk_data['chunk_id'] = f"chunk_{uuid.uuid4().hex[:8]}"
-                chunk_data['timestamp'] = chunk_data.get('timestamp') or datetime.datetime.now().isoformat()
-                chunk_data['is_chunk'] = True
+                # 有message_id，查找是否已存在相同message_id的消息
+                existing_message = None
+                for i, existing_msg in enumerate(self.messages):
+                    if existing_msg.get('message_id') == message_id:
+                        existing_message = existing_msg
+                        break
                 
-                # 添加到pending chunks
-                if message_id not in self.pending_chunks:
-                    self.pending_chunks[message_id] = []
+                if existing_message:
+                    # 找到现有消息，合并内容
+                    if 'content' in message:
+                        existing_message['content'] = existing_message.get('content', '') + message['content']
+                    if 'show_content' in message:
+                        existing_message['show_content'] = existing_message.get('show_content', '') + message['show_content']
+                    
+                    # 更新其他字段（除了content、message_id）
+                    for key, value in message.items():
+                        if key not in ['content', 'show_content', 'message_id']:
+                            existing_message[key] = value
+                    
+                    existing_message['updated_at'] = datetime.datetime.now().isoformat()
+                    logger.debug(f"MessageManager: 合并chunk到现有消息 {message_id[:8]}...")
+                    
+                else:
+                    # 没有找到现有消息，创建新消息
+                    msg_data = deepcopy(message)
+                    msg_data['timestamp'] = msg_data.get('timestamp') or datetime.datetime.now().isoformat()
+                    msg_data['is_chunk'] = False
+                    
+                    self.messages.append(msg_data)
+                    self.stats['total_messages'] += 1
+                    logger.debug(f"MessageManager: 创建新消息 {message_id[:8]}...")
                 
-                self.pending_chunks[message_id].append(chunk_data)
                 self.stats['total_chunks'] += 1
                 
-                logger.debug(f"MessageManager: 添加消息块，消息ID: {message_id[:8]}...")
-                
-                # 自动合并检查
-                if self._try_auto_merge_message(message_id):
-                    logger.debug(f"MessageManager: 自动合并消息 {message_id[:8]}...")
-                
             else:
-                # 没有message_id，作为完整消息处理
+                # 没有message_id，作为完整独立消息处理
                 msg_data = deepcopy(message)
                 msg_data['message_id'] = str(uuid.uuid4())
                 msg_data['timestamp'] = msg_data.get('timestamp') or datetime.datetime.now().isoformat()
                 msg_data['is_chunk'] = False
                 
-                # 添加到消息列表
                 self.messages.append(msg_data)
                 self.stats['total_messages'] += 1
                 
-                logger.debug(f"MessageManager: 添加完整消息，ID: {msg_data['message_id'][:8]}...")
+                logger.debug(f"MessageManager: 添加独立消息，ID: {msg_data['message_id'][:8]}...")
             
             success_count += 1
             self.stats['last_updated'] = datetime.datetime.now().isoformat()
@@ -206,83 +220,218 @@ class MessageManager:
     
     def merge_message_chunks(self, message_id: str) -> Optional[Dict[str, Any]]:
         """
-        合并指定消息ID的所有chunks为完整消息
+        查找指定消息ID的消息（兼容旧API）
         
         Args:
             message_id: 消息ID
             
         Returns:
-            Optional[Dict[str, Any]]: 合并后的完整消息，失败时返回None
+            Optional[Dict[str, Any]]: 找到的消息，未找到时返回None
         """
-        if message_id not in self.pending_chunks:
-            logger.warning(f"MessageManager: 未找到消息ID {message_id[:8]}... 的chunks")
-            return None
-        
-        chunks = self.pending_chunks[message_id]
-        if not chunks:
-            return None
-        
-        # 使用merge方法合并
-        merged_messages = self.merge(chunks)
-        if not merged_messages:
-            return None
-        
-        merged_message = merged_messages[0]  # 应该只有一个合并后的消息
-        merged_message['chunk_count'] = len(chunks)
-        merged_message['timestamp'] = merged_message.get('timestamp') or datetime.datetime.now().isoformat()
-        
-        # 移除pending chunks并添加到messages
-        del self.pending_chunks[message_id]
-        self.messages.append(merged_message)
-        
-        self.stats['merged_messages'] += 1
-        self.stats['total_messages'] += 1
-        self.stats['last_updated'] = datetime.datetime.now().isoformat()
-        
-        logger.info(f"MessageManager: 成功合并消息 {message_id[:8]}...，包含 {len(chunks)} 个chunks")
-        
-        return merged_message
-    
+        return self.get_message_by_id(message_id)
+
     def merge_all_pending_chunks(self) -> List[Dict[str, Any]]:
         """
-        合并所有待处理的chunks
+        获取所有消息（兼容旧API，现在不需要合并）
         
         Returns:
-            List[Dict[str, Any]]: 合并后的消息列表
+            List[Dict[str, Any]]: 所有消息列表
         """
-        merged_messages = []
-        
-        for message_id in list(self.pending_chunks.keys()):
-            merged_msg = self.merge_message_chunks(message_id)
-            if merged_msg:
-                merged_messages.append(merged_msg)
-        
-        logger.info(f"MessageManager: 批量合并完成，共合并 {len(merged_messages)} 个消息")
-        
-        return merged_messages
+        logger.info(f"MessageManager: 返回所有消息，共 {len(self.messages)} 个消息")
+        return deepcopy(self.messages)
     
     def get_all_messages(self, include_pending_chunks: bool = False) -> List[Dict[str, Any]]:
         """
         获取所有消息
         
         Args:
-            include_pending_chunks: 是否包含待合并的chunks
+            include_pending_chunks: 是否包含待合并的chunks（向后兼容参数，现在无效）
             
         Returns:
             List[Dict[str, Any]]: 所有消息列表
         """
         result = deepcopy(self.messages)
         
-        if include_pending_chunks:
-            # 添加所有pending chunks
-            for message_id, chunks in self.pending_chunks.items():
-                result.extend(chunks)
-        
         # 按时间戳排序
         result.sort(key=lambda x: x.get('timestamp', ''))
         
         return result
     
+    def filter_messages_for_agent(self, agent_name: str) -> List[Dict[str, Any]]:
+        """
+        为特定Agent过滤和优化消息
+        
+        Args:
+            agent_name: Agent名称
+            
+        Returns:
+            List[Dict[str, Any]]: 优化后的消息列表
+        """
+        logger.debug(f"MessageManager: 为 {agent_name} 过滤消息，当前消息数量: {len(self.messages)}")
+        
+        # 根据Agent类型采用不同的过滤策略
+        if agent_name == "TaskDecomposeAgent":
+            return self._filter_for_task_decompose_agent()
+        elif agent_name == "PlanningAgent":
+            return self._filter_for_planning_agent()
+        elif agent_name == "ExecutorAgent":
+            return self._filter_for_executor_agent()
+        elif agent_name == "ObservationAgent":
+            return self._filter_for_observation_agent()
+        elif agent_name == "TaskSummaryAgent":
+            return self._filter_for_task_summary_agent()
+        elif agent_name == "TaskAnalysisAgent":
+            return self._filter_for_task_analysis_agent()
+        else:
+            # 默认策略
+            return self._filter_default_strategy()
+    
+    def _filter_for_task_decompose_agent(self) -> List[Dict[str, Any]]:
+        """TaskDecomposeAgent的消息过滤策略"""
+        # 任务分解主要需要用户输入和任务描述
+        important_messages = []
+        
+        for msg in self.messages:
+            role = msg.get('role', '')
+            msg_type = msg.get('type', '')
+            
+            # 保留用户消息和任务相关消息
+            if role == 'user':
+                important_messages.append(msg)
+            elif msg_type in ['task_analysis', 'error', 'final_answer']:
+                important_messages.append(msg)
+            # 保留最近几条assistant消息用于上下文
+            elif role == 'assistant' and len(important_messages) < 15:
+                important_messages.append(msg)
+        
+        # 限制消息数量
+        if len(important_messages) > 12:
+            important_messages = important_messages[-12:]
+        
+        logger.debug(f"MessageManager: TaskDecomposeAgent过滤完成，保留 {len(important_messages)} 条消息")
+        return important_messages
+    
+    def _filter_for_planning_agent(self) -> List[Dict[str, Any]]:
+        """PlanningAgent的消息过滤策略"""
+        # 规划需要任务分解结果和执行状态
+        important_messages = []
+        
+        for msg in self.messages:
+            role = msg.get('role', '')
+            msg_type = msg.get('type', '')
+            
+            if role == 'user':
+                important_messages.append(msg)
+            elif msg_type in ['task_decomposition', 'execution', 'observation', 'error']:
+                important_messages.append(msg)
+            elif role == 'assistant' and len(important_messages) < 20:
+                important_messages.append(msg)
+            elif role == 'tool':
+                important_messages.append(msg)
+        
+        if len(important_messages) > 15:
+            important_messages = important_messages[-15:]
+        
+        logger.debug(f"MessageManager: PlanningAgent过滤完成，保留 {len(important_messages)} 条消息")
+        return important_messages
+    
+    def _filter_for_executor_agent(self) -> List[Dict[str, Any]]:
+        """ExecutorAgent的消息过滤策略"""
+        # 执行需要规划结果和当前状态
+        important_messages = []
+        
+        for msg in self.messages:
+            role = msg.get('role', '')
+            msg_type = msg.get('type', '')
+            
+            if role == 'user':
+                important_messages.append(msg)
+            elif msg_type in ['planning', 'task_decomposition', 'tool_call', 'tool_response', 'error']:
+                important_messages.append(msg)
+            elif role == 'assistant' and len(important_messages) < 25:
+                important_messages.append(msg)
+            elif role == 'tool':
+                important_messages.append(msg)
+        
+        if len(important_messages) > 20:
+            important_messages = important_messages[-20:]
+        
+        logger.debug(f"MessageManager: ExecutorAgent过滤完成，保留 {len(important_messages)} 条消息")
+        return important_messages
+    
+    def _filter_for_observation_agent(self) -> List[Dict[str, Any]]:
+        """ObservationAgent的消息过滤策略"""
+        # 观察需要执行结果和状态变化
+        important_messages = []
+        
+        for msg in self.messages:
+            role = msg.get('role', '')
+            msg_type = msg.get('type', '')
+            
+            if role == 'user':
+                important_messages.append(msg)
+            elif msg_type in ['execution', 'tool_response', 'error', 'planning']:
+                important_messages.append(msg)
+            elif role == 'assistant' and len(important_messages) < 18:
+                important_messages.append(msg)
+            elif role == 'tool':
+                important_messages.append(msg)
+        if len(important_messages) > 15:
+            important_messages = important_messages[-15:]
+        
+        logger.debug(f"MessageManager: ObservationAgent过滤完成，保留 {len(important_messages)} 条消息")
+        return important_messages
+    
+    def _filter_for_task_summary_agent(self) -> List[Dict[str, Any]]:
+        """TaskSummaryAgent的消息过滤策略"""
+        # 总结需要完整的执行过程
+        important_messages = []
+        
+        for msg in self.messages:
+            role = msg.get('role', '')
+            msg_type = msg.get('type', '')
+            
+            if role == 'user':
+                important_messages.append(msg)
+            elif msg_type in ['task_decomposition', 'execution', 'observation', 'final_answer', 'error']:
+                important_messages.append(msg)
+            elif role == 'assistant' and len(important_messages) < 30:
+                important_messages.append(msg)
+            elif role == 'tool':
+                important_messages.append(msg)
+        if len(important_messages) > 25:
+            important_messages = important_messages[-25:]
+        
+        logger.debug(f"MessageManager: TaskSummaryAgent过滤完成，保留 {len(important_messages)} 条消息")
+        return important_messages
+    
+    def _filter_for_task_analysis_agent(self) -> List[Dict[str, Any]]:
+        """TaskAnalysisAgent的消息过滤策略"""
+        # 任务分析主要需要用户输入
+        important_messages = []
+        
+        for msg in self.messages:
+            role = msg.get('role', '')
+            msg_type = msg.get('type', '')
+            
+            if role == 'user':
+                important_messages.append(msg)
+            elif msg_type in ['error', 'summary']:
+                important_messages.append(msg)
+            elif role == 'assistant' and len(important_messages) < 10:
+                important_messages.append(msg)
+            elif role == 'tool':
+                important_messages.append(msg)
+        if len(important_messages) > 8:
+            important_messages = important_messages[-8:]
+        
+        logger.debug(f"MessageManager: TaskAnalysisAgent过滤完成，保留 {len(important_messages)} 条消息")
+        return important_messages
+    
+    def _filter_default_strategy(self) -> List[Dict[str, Any]]:
+        """默认消息过滤策略"""
+        return self.compress_messages(preserve_latest=10)
+
     def filter_messages(self, 
                        role_filter: Optional[List[str]] = None,
                        type_filter: Optional[List[str]] = None,
@@ -475,8 +624,6 @@ class MessageManager:
         current_stats.update({
             'session_id': self.session_id,
             'current_message_count': len(self.messages),
-            'pending_chunks_count': sum(len(chunks) for chunks in self.pending_chunks.values()),
-            'pending_messages_count': len(self.pending_chunks),
             'max_token_limit': self.max_token_limit,
             'compression_threshold': self.compression_threshold,
             'auto_merge_chunks': self.auto_merge_chunks
@@ -564,23 +711,15 @@ class MessageManager:
         return role in important_roles or msg_type in important_types
     
     def _try_auto_merge_message(self, message_id: str) -> bool:
-        """尝试自动合并消息"""
-        if message_id not in self.pending_chunks:
-            return False
+        """
+        兼容方法（现在不需要，因为消息直接合并）
         
-        chunks = self.pending_chunks[message_id]
-        
-        # 简单的自动合并策略：如果最后一个chunk包含结束标记
-        if chunks:
-            last_chunk = chunks[-1]
-            content = last_chunk.get('content', '')
+        Args:
+            message_id: 消息ID
             
-            # 检查是否有明显的结束标记
-            end_markers = ['\n\n', '。', '！', '？', '.', '!', '?']
-            if any(content.endswith(marker) for marker in end_markers):
-                self.merge_message_chunks(message_id)
-                return True
-        
+        Returns:
+            bool: 总是返回False，因为现在不需要自动合并
+        """
         return False
     
     def __len__(self) -> int:
@@ -594,3 +733,29 @@ class MessageManager:
     def __getitem__(self, index) -> Dict[str, Any]:
         """支持索引访问"""
         return self.messages[index] 
+    
+    def log_print_messages(self,messages:List[Dict[str, Any]]):
+        """搭建每个消息的role，前50个字符内容，以及消息的type等信息，在一行中，还要处理好tool_calls的情况下，不显示content ，而显示调用的工具"""
+        for msg in messages:
+            if msg.get('type') == 'tool_call':
+                logger.info(f"MessageManager: 消息ID: {msg.get('message_id', '')[:8]}... - 角色: {msg.get('role', 'unknown')} - 类型: {msg.get('type', 'unknown')} - 调用工具: {msg.get('tool_calls', '')[:50]}...")
+            elif msg.get('type') == 'handoff_agent':
+                logger.info(f"MessageManager: 消息ID: {msg.get('message_id', '')[:8]}... - 角色: {msg.get('role', 'unknown')} - 类型: {msg.get('type', 'unknown')} - 交接给: {msg.get('content', '')[:50]}...")
+            else:
+                logger.info(f"MessageManager: 消息ID: {msg.get('message_id', '')[:8]}... - 角色: {msg.get('role', 'unknown')} - 类型: {msg.get('type', 'unknown')} - 内容: {msg.get('content', '')[:50]}...")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        将MessageManager转换为字典格式
+        
+        Returns:
+            Dict[str, Any]: 包含MessageManager状态的字典
+        """
+        return {
+            'session_id': self.session_id,
+            'max_token_limit': self.max_token_limit,
+            'compression_threshold': self.compression_threshold,
+            'auto_merge_chunks': self.auto_merge_chunks,
+            'messages': deepcopy(self.messages),
+            'stats': deepcopy(self.stats)
+        }
