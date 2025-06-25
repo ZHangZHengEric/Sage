@@ -48,7 +48,7 @@ fastapi_react_demo/
 ### 一键启动（推荐）
 
 ```bash
-# 启动所有服务（API + FTP）
+# 启动所有服务（API + MinIO）
 cd examples/fastapi_react_demo
 ./start_services.sh
 ```
@@ -56,7 +56,8 @@ cd examples/fastapi_react_demo
 服务启动后：
 - 🌐 **API服务**: http://localhost:8000
 - 📚 **API文档**: http://localhost:8000/docs
-- 📂 **FTP服务**: ftp://sage:sage123@localhost:2121
+- 🗄️ **MinIO API**: http://localhost:20044
+- 🎛️ **MinIO控制台**: http://localhost:20045
 - 📁 **工作空间**: ./workspace
 
 ### 1. 配置文件设置
@@ -143,22 +144,25 @@ npm run dev
 
 - **本地工作空间**：`./workspace` 目录
 - **会话数据**：每个会话在 `workspace/{session_id}/` 下保存 MessageManager 和 TaskManager 状态
-- **FTP访问**：通过内置FTP服务器快速访问工作空间文件
+- **MinIO访问**：通过MinIO对象存储HTTP方式访问工作空间文件
+- **数据一致性**：本地workspace目录与MinIO存储完全同步，文件变化实时反映
 
-#### FTP服务器使用
+#### MinIO对象存储使用
 
 ```bash
-# FTP连接信息
-服务器：localhost
-端口：2121
-用户名：sage  
-密码：sage123
+# MinIO连接信息
+API端点：http://localhost:20044
+控制台：http://localhost:20045
+访问密钥：sage
+秘密密钥：sage123456
+存储桶：workspace
 ```
 
-**连接方式：**
-- **命令行**：`ftp sage:sage123@localhost:2121`
-- **文件管理器**：`ftp://sage:sage123@localhost:2121`
-- **FTP客户端**：FileZilla、WinSCP等
+**访问方式：**
+- **Web控制台**：`http://localhost:20045`（用户名: sage, 密码: sage123456）
+- **HTTP API**：`http://localhost:20044/workspace/`
+- **直接URL访问**：`http://localhost:20044/workspace/文件路径`
+- **SDK访问**：支持Python、JavaScript等多种语言
 
 ### 数学公式支持
 
@@ -202,14 +206,17 @@ workspace:
   root_path: "/app/workspace"    # 容器内工作空间路径
   host_path: "./workspace"       # 主机工作空间路径
 
-# FTP服务配置
-ftp:
-  enabled: true                  # 启用FTP服务
-  host: "0.0.0.0"               # FTP服务器地址
-  port: 2121                    # FTP端口
-  username: "sage"              # FTP用户名
-  password: "sage123"           # FTP密码
-  root_directory: "/app/workspace"  # FTP根目录
+# MinIO对象存储配置
+minio:
+enabled: true                 # 启用MinIO服务
+endpoint: "minio:9000"        # MinIO服务地址（容器内）
+external_endpoint: "localhost:20044"  # 外部访问地址
+access_key: "sage"            # 访问密钥
+secret_key: "sage123456"      # 秘密密钥
+bucket: "workspace"           # 存储桶名称
+region: "us-east-1"           # 区域设置
+secure: false                 # 是否使用HTTPS
+console_url: "http://localhost:20045"  # 控制台地址
   max_connections: 50           # 最大连接数
 
 # 工具配置
@@ -391,9 +398,21 @@ CMD ["python", "backend/main.py"]
 
 本项目采用 MIT 许可证。详见项目根目录 LICENSE 文件。
 
+## 📚 MinIO对象存储详细指南
+
+有关MinIO对象存储的详细使用方法，请参阅：[WORKSPACE_MINIO_GUIDE.md](./WORKSPACE_MINIO_GUIDE.md)
+
+包含内容：
+- 🗄️ MinIO Web控制台使用
+- 🔧 HTTP API调用方法  
+- 💻 Python/JavaScript SDK使用
+- 🛠️ 服务管理和故障排除
+- 📊 监控和日志查看
+
 ## 🆘 获取帮助
 
 如遇问题，请：
 1. 查看本README的故障排除部分
-2. 检查项目Issues
-3. 查看Sage框架主文档 
+2. 查看MinIO使用指南：[WORKSPACE_MINIO_GUIDE.md](./WORKSPACE_MINIO_GUIDE.md)
+3. 检查项目Issues
+4. 查看Sage框架主文档 

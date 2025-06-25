@@ -7,8 +7,7 @@ services:
       dockerfile: ./examples/fastapi_react_demo/backend/Dockerfile
     container_name: sage_backend
     ports:
-      - "40039:8000"  # API服务端口
-      - "40041:2121"  # FTP服务端口
+      - "20039:8000"  # API服务端口
     volumes:
       - /tmp/sage:/tmp/sage
       - ./workspace:/app/workspace  # 工作空间映射
@@ -18,6 +17,14 @@ services:
       - WORKSPACE_ROOT=/app/workspace
       - DOCKER_ENV=true
       - SAGE_CONFIG_FILE=/app/examples/fastapi_react_demo/backend/config.yaml
+      # MinIO环境变量
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=sage
+      - MINIO_SECRET_KEY=sage123456
+      - MINIO_BUCKET=workspace
+    depends_on:
+      minio:
+        condition: service_healthy
     restart: unless-stopped
 
   sage_frontend:
@@ -26,7 +33,7 @@ services:
       dockerfile: ./examples/fastapi_react_demo/frontend/Dockerfile
     container_name: sage_frontend
     ports:
-      - "40040:8080"
+      - "20040:8080"
     environment:
       - CHOKIDAR_USEPOLLING=true
     stdin_open: true
@@ -35,19 +42,27 @@ services:
       - sage_backend
     restart: unless-stopped
 
-  # FTP服务（可选，独立运行）
-  sage_ftp:
-    image: stilliard/pure-ftpd:hardened
-    container_name: sage_ftp
+  # MinIO对象存储服务
+  minio:
+    image: minio/minio:latest
+    container_name: sage_minio
     ports:
-      - "40042:21"      # FTP控制端口
-      - "30000-30009:30000-30009"  # FTP数据端口范围
+      - "20044:9000"      # MinIO API端点
+      - "20045:9001"      # MinIO控制台端口
     volumes:
-      - ./workspace:/home/ftpusers/sage  # FTP根目录
-      - ./ftp-config:/etc/pure-ftpd     # FTP配置目录
+      # 关键改动：workspace目录作为MinIO的主要数据源
+      # MinIO将workspace目录作为一个bucket直接暴露
+      - ./workspace:/data/workspace  # 本地workspace映射为MinIO的workspace bucket
+      - ./minio-data:/data/.minio    # MinIO元数据和配置
     environment:
-      - PUBLICHOST=localhost
-      - FTP_USER_NAME=sage
-      - FTP_USER_PASS=sage123
-      - FTP_USER_HOME=/home/ftpusers/sage
+      - MINIO_ROOT_USER=sage
+      - MINIO_ROOT_PASSWORD=sage123456
+      - MINIO_DOMAIN=localhost
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
