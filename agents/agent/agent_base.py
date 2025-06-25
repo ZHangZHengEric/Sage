@@ -351,6 +351,73 @@ class AgentBase(ABC):
             show_content="\n",
             message_type=message_type
         )
+
+    def _execute_streaming_with_token_tracking_with_message_id(self, 
+                                             prompt: str, 
+                                             step_name: str,
+                                             system_message: Optional[Dict[str, Any]] = None,
+                                             message_type: str = 'assistant',
+                                             session_id: Optional[str] = None,
+                                             message_id: str = None) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行流式处理并跟踪token使用（支持传入message_id）
+        
+        Args:
+            prompt: 用户提示
+            step_name: 步骤名称（用于token统计）
+            system_message: 可选的系统消息
+            message_type: 消息类型
+            session_id: 会话ID
+            message_id: 指定的消息ID，如果为None则自动生成
+            
+        Yields:
+            List[Dict[str, Any]]: 流式输出的消息块
+        """
+        logger.info(f"{self.__class__.__name__}: 开始执行流式{step_name}")
+        
+        if message_id is None:
+            message_id = str(uuid.uuid4())
+        
+        # 准备消息
+        if system_message:
+            messages = [system_message, {"role": "user", "content": prompt}]
+        else:
+            messages = [{"role": "user", "content": prompt}]
+        
+        # 执行流式处理
+        chunk_count = 0
+        start_time = time.time()
+        
+        # 收集所有chunks以便跟踪token使用
+        chunks = []
+        for chunk in self._call_llm_streaming(messages):
+            chunks.append(chunk)
+            if len(chunk.choices) ==0:
+                continue
+            if chunk.choices[0].delta.content:
+                delta_content = chunk.choices[0].delta.content
+                chunk_count += 1
+                
+                # 传递usage信息到消息块
+                yield self._create_message_chunk(
+                    content=delta_content,
+                    message_id=message_id,
+                    show_content=delta_content,
+                    message_type=message_type
+                )
+        
+        # 跟踪token使用情况
+        self._track_streaming_token_usage(chunks, step_name, start_time)
+        
+        logger.info(f"{self.__class__.__name__}: 流式{step_name}完成，共生成 {chunk_count} 个文本块")
+        
+        # 发送结束标记（也包含最终的usage信息）
+        yield self._create_message_chunk(
+            content="",
+            message_id=message_id,
+            show_content="\n",
+            message_type=message_type
+        )
     
     def prepare_unified_system_message(self,
                                      session_id: Optional[str] = None,

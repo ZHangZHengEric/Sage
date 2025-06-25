@@ -30,6 +30,9 @@ docstring_parser>=0.16
 chardet>=5.0.0
 aiofiles>=0.8.0
 
+# FTP服务器
+pyftpdlib>=1.5.7
+
 # 其他工具
 python-multipart>=0.0.6 
 pdfplumber

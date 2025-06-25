@@ -73,24 +73,22 @@ class TaskDecomposeAgent(AgentBase):
         logger.info("TaskDecomposeAgent 初始化完成")
     
     def run_stream(self, 
-                   messages: List[Dict[str, Any]], 
-                   tool_manager: Optional[Any] = None,
-                   session_id: str = None,
-                   system_context: Optional[Dict[str, Any]] = None,
+                   message_manager: Any,
                    task_manager: Optional[Any] = None,
-                   message_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   tool_manager: Optional[Any] = None,
+                   session_id: Optional[str] = None,
+                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务分解
         
         将复杂任务分解为清晰可执行的子任务并实时返回分解结果。
         
         Args:
-            messages: 对话历史记录
+            message_manager: 消息管理器（必需）
+            task_manager: 任务管理器，用于管理分解出的子任务
             tool_manager: 可选的工具管理器
             session_id: 会话ID
             system_context: 系统上下文
-            task_manager: 任务管理器，用于管理分解出的子任务
-            message_manager: 消息管理器，用于优化消息传递
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分解消息块
@@ -98,22 +96,27 @@ class TaskDecomposeAgent(AgentBase):
         Raises:
             Exception: 当分解过程出现错误时抛出异常
         """
-        logger.info("TaskDecomposeAgent: 开始流式任务分解")
+        if not message_manager:
+            raise ValueError("TaskDecomposeAgent: message_manager 是必需参数")
         
-        # 优化消息输入（如果有MessageManager）
-        optimized_messages = messages
-        if message_manager:
-            optimized_messages = message_manager.filter_messages_for_agent(
-                messages, self.__class__.__name__, task_manager
-            )
-            logger.info(f"TaskDecomposeAgent: 消息优化完成，从 {len(messages)} 减少到 {len(optimized_messages)}")
+        # 从MessageManager获取优化后的消息
+        optimized_messages = message_manager.filter_messages_for_agent(self.__class__.__name__)
+        logger.info(f"TaskDecomposeAgent: 开始流式任务分解，获取到 {len(optimized_messages)} 条优化消息")
+        message_manager.log_print_messages(optimized_messages)
         
-        # 使用基类方法收集和记录流式输出
-        yield from self._collect_and_log_stream_output(
+        # 使用基类方法收集和记录流式输出，并将结果添加到MessageManager
+        for chunk_batch in self._collect_and_log_stream_output(
             self._execute_decompose_stream_internal(
                 optimized_messages, tool_manager, session_id, system_context, task_manager
             )
-        )
+        ):
+            # Agent自己负责将生成的消息添加到MessageManager
+            message_manager.add_messages(chunk_batch)
+            yield chunk_batch
+        logger.info(f"TaskDecomposeAgent: 流式任务分解完成，并且将结果添加到TaskManager")
+        logger.info(f'TaskDecomposeAgent: 共生成 {len(task_manager.get_all_tasks())} 个子任务，分别是：')
+        for task in task_manager.get_all_tasks():
+            logger.info(f'TaskDecomposeAgent: 任务ID: {task.task_id} - 任务描述: {task.description}')
 
     def _execute_decompose_stream_internal(self, 
                                          messages: List[Dict[str, Any]], 

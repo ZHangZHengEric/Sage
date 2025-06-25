@@ -40,3 +40,18 @@ agents:
 logging:
   level: "info"
   format: "detailed" 
+
+# 工作空间配置 - Docker环境
+workspace:
+  root_path: "/app/workspace"      # 容器内的工作空间路径
+  host_path: "./workspace"         # 主机上的工作空间路径（相对于项目根目录）
+
+# FTP服务配置 - Docker环境
+ftp:
+  enabled: true
+  host: "0.0.0.0"
+  port: 2121
+  username: "sage"
+  password: "sage123"
+  root_directory: "/app/workspace"  # FTP根目录指向workspace（容器内路径）
+  max_connections: 50
