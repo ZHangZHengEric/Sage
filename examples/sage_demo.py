@@ -121,7 +121,7 @@ class ComponentManager:
                 "max_tokens": self.settings.model.max_tokens
             }
             
-            controller = AgentController(self._model, model_config)
+            controller = AgentController(self._model, model_config,workspace="/Users/zhangzheng/zavixai/Sage/examples")
             
             # 注册代码智能体
             try:

@@ -7,11 +7,18 @@ services:
       dockerfile: ./examples/fastapi_react_demo/backend/Dockerfile
     container_name: sage_backend
     ports:
-      - "20039:8000"
+      - "40039:8000"  # API服务端口
+      - "40041:2121"  # FTP服务端口
     volumes:
       - /tmp/sage:/tmp/sage
+      - ./workspace:/app/workspace  # 工作空间映射
+      - ./logs:/app/logs            # 日志映射
     environment:
       - PYTHONUNBUFFERED=1
+      - WORKSPACE_ROOT=/app/workspace
+      - DOCKER_ENV=true
+      - SAGE_CONFIG_FILE=/app/examples/fastapi_react_demo/backend/config.yaml
+    restart: unless-stopped
 
   sage_frontend:
     build:
@@ -19,10 +26,28 @@ services:
       dockerfile: ./examples/fastapi_react_demo/frontend/Dockerfile
     container_name: sage_frontend
     ports:
-      - "20040:8080"
+      - "40040:8080"
     environment:
       - CHOKIDAR_USEPOLLING=true
     stdin_open: true
     tty: true
     depends_on:
       - sage_backend
+    restart: unless-stopped
+
+  # FTP服务（可选，独立运行）
+  sage_ftp:
+    image: stilliard/pure-ftpd:hardened
+    container_name: sage_ftp
+    ports:
+      - "40042:21"      # FTP控制端口
+      - "30000-30009:30000-30009"  # FTP数据端口范围
+    volumes:
+      - ./workspace:/home/ftpusers/sage  # FTP根目录
+      - ./ftp-config:/etc/pure-ftpd     # FTP配置目录
+    environment:
+      - PUBLICHOST=localhost
+      - FTP_USER_NAME=sage
+      - FTP_USER_PASS=sage123
+      - FTP_USER_HOME=/home/ftpusers/sage
+    restart: unless-stopped

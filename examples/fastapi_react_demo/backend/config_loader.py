@@ -30,10 +30,31 @@ class ServerConfig:
 
 
 @dataclass
+class WorkspaceConfig:
+    """工作空间配置"""
+    root_path: str = "/app/workspace"
+    host_path: str = "./workspace"
+
+
+@dataclass
+class FtpConfig:
+    """FTP服务配置"""
+    enabled: bool = True
+    host: str = "0.0.0.0"
+    port: int = 2121
+    username: str = "sage"
+    password: str = "sage123"
+    root_directory: str = "/app/workspace"
+    max_connections: int = 50
+
+
+@dataclass
 class AppConfig:
     """应用配置"""
     model: ModelConfig
     server: ServerConfig
+    workspace: WorkspaceConfig
+    ftp: FtpConfig
     
     def __post_init__(self):
         # 验证必填字段
@@ -50,15 +71,31 @@ class ConfigLoader:
     
     def _find_config_file(self) -> Optional[str]:
         """查找配置文件"""
+        # 检查环境变量指定的配置文件
+        env_config = os.getenv('SAGE_CONFIG_FILE')
+        if env_config and Path(env_config).exists():
+            return env_config
+            
+        # 检查是否在Docker环境中
+        is_docker = os.getenv('DOCKER_ENV') == 'true' or os.path.exists('/.dockerenv')
+        
         # 按优先级查找配置文件
-        possible_paths = [
-            "config.yaml",
-            "config.yml", 
-            "backend/config.yaml",
-            "backend/config.yml",
-            os.path.expanduser("~/.sage/config.yaml"),
-            "/etc/sage/config.yaml"
-        ]
+        if is_docker:
+            possible_paths = [
+                "config.docker.yaml",  # Docker专用配置
+                "config.yaml",
+                "/app/config.yaml",
+                "/etc/sage/config.yaml"
+            ]
+        else:
+            possible_paths = [
+                "config.yaml",
+                "config.yml", 
+                "backend/config.yaml",
+                "backend/config.yml",
+                os.path.expanduser("~/.sage/config.yaml"),
+                "/etc/sage/config.yaml"
+            ]
         
         for path in possible_paths:
             if Path(path).exists():
@@ -135,7 +172,31 @@ class ConfigLoader:
             log_level=server_data.get('log_level', 'info')
         )
         
-        return AppConfig(model=model_config, server=server_config)
+        # 工作空间配置
+        workspace_data = self._config_data.get('workspace', {})
+        workspace_config = WorkspaceConfig(
+            root_path=workspace_data.get('root_path', '/app/workspace'),
+            host_path=workspace_data.get('host_path', './workspace')
+        )
+        
+        # FTP配置
+        ftp_data = self._config_data.get('ftp', {})
+        ftp_config = FtpConfig(
+            enabled=ftp_data.get('enabled', True),
+            host=ftp_data.get('host', '0.0.0.0'),
+            port=ftp_data.get('port', 2121),
+            username=ftp_data.get('username', 'sage'),
+            password=ftp_data.get('password', 'sage123'),
+            root_directory=ftp_data.get('root_directory', '/app/workspace'),
+            max_connections=ftp_data.get('max_connections', 50)
+        )
+        
+        return AppConfig(
+            model=model_config, 
+            server=server_config,
+            workspace=workspace_config,
+            ftp=ftp_config
+        )
     
     def save_config(self, config: AppConfig):
         """保存配置到文件"""
@@ -155,6 +216,19 @@ class ConfigLoader:
                 'port': config.server.port,
                 'reload': config.server.reload,
                 'log_level': config.server.log_level
+            },
+            'workspace': {
+                'root_path': config.workspace.root_path,
+                'host_path': config.workspace.host_path
+            },
+            'ftp': {
+                'enabled': config.ftp.enabled,
+                'host': config.ftp.host,
+                'port': config.ftp.port,
+                'username': config.ftp.username,
+                'password': config.ftp.password,
+                'root_directory': config.ftp.root_directory,
+                'max_connections': config.ftp.max_connections
             }
         }
         
