@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Sage FastAPI + React Demo 服务启动脚本
-# 同时启动API服务器和FTP服务器
+# 同时启动API服务器和MinIO对象存储服务
 
 set -e
 
@@ -22,7 +22,14 @@ fi
 
 # 创建必要的目录
 echo "📁 创建工作目录..."
-mkdir -p workspace logs ftp-config
+mkdir -p workspace logs minio-data
+
+# 由于新的配置让MinIO直接使用workspace目录，
+# 我们可以清理旧的minio-data目录（如果需要的话）
+if [ -d "minio-data" ] && [ -z "$(ls -A minio-data 2>/dev/null)" ]; then
+    echo "  清理空的minio-data目录..."
+    rmdir minio-data 2>/dev/null || true
+fi
 
 # 安装依赖
 echo "📦 检查并安装依赖..."
@@ -33,10 +40,15 @@ fi
 # 设置环境变量
 export WORKSPACE_ROOT="$(pwd)/workspace"
 export PYTHONPATH="$(pwd)/../../:$PYTHONPATH"
+export MINIO_ENDPOINT="localhost:20044"
+export MINIO_ACCESS_KEY="sage"
+export MINIO_SECRET_KEY="sage123456"
+export MINIO_BUCKET="workspace"
 
 echo "🔧 配置信息:"
 echo "  工作空间: $WORKSPACE_ROOT"
 echo "  配置文件: $(pwd)/backend/config.yaml"
+echo "  MinIO端点: $MINIO_ENDPOINT"
 
 # 启动API服务器
 echo "🌐 启动API服务器..."
@@ -48,8 +60,13 @@ cd ..
 echo "✅ 服务已启动:"
 echo "  🌐 API服务: http://localhost:8000"
 echo "  📚 API文档: http://localhost:8000/docs" 
-echo "  📂 FTP服务: ftp://sage:sage123@localhost:2121"
+echo "  🗄️  MinIO API: http://localhost:20044"
+echo "  🎛️  MinIO控制台: http://localhost:20045"
 echo "  📁 工作空间: $WORKSPACE_ROOT"
+echo ""
+echo "MinIO访问凭据:"
+echo "  用户名: sage"
+echo "  密码: sage123456"
 echo ""
 echo "按 Ctrl+C 停止所有服务"
 
