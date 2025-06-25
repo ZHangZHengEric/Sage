@@ -31,23 +31,27 @@ class ExecutorAgent(AgentBase):
     """
 
     # 任务执行提示模板常量
-    TASK_EXECUTION_PROMPT_TEMPLATE = """Do the following subtask:{next_subtask_description}.
-the expected output is:{next_expected_output}
+    TASK_EXECUTION_PROMPT_TEMPLATE = """请执行以下任务：{next_subtask_description}
 
+期望输出：{next_expected_output}
+
+请直接开始执行任务，不需要列出工具清单或其他前置说明。"""
+
+    # 系统提示模板常量
+    SYSTEM_PREFIX_DEFAULT = """你是个任务执行助手，你需要根据最新的任务描述和要求，来执行任务。
+    
 注意以下的任务执行规则，不要使用工具集合之外的工具，否则会报错：
 1. 如果不需要使用工具，直接返回中文内容。你的文字输出都要是markdown格式。
 2. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
 3. 调用工具时，不要在其他的输出文字,你一次只能执行一个任务。
 4. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
-在工具集合包含file_write函数工具，要求如下：
+
+如果在工具集合包含file_write函数工具，要求如下：
 5. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
 6. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
 7. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
 8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
 """
-
-    # 系统提示模板常量
-    SYSTEM_PREFIX_DEFAULT = """你是个任务执行助手，你需要根据任务描述，执行任务。"""
     
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         """
@@ -63,15 +67,17 @@ the expected output is:{next_expected_output}
         logger.info("ExecutorAgent 初始化完成")
 
     def run_stream(self, 
-                   messages: List[Dict[str, Any]], 
+                   message_manager: Any,
+                   task_manager: Optional[Any] = None,
                    tool_manager: Optional[Any] = None,
-                   session_id: str = None,
+                   session_id: Optional[str] = None,
                    system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务
         
         Args:
-            messages: 对话历史记录
+            message_manager: 消息管理器（必需）
+            task_manager: 任务管理器
             tool_manager: 工具管理器
             session_id: 会话ID
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
@@ -79,18 +85,27 @@ the expected output is:{next_expected_output}
         Yields:
             List[Dict[str, Any]]: 流式输出的消息块
         """
-        logger.info("ExecutorAgent: 开始流式任务执行")
+        if not message_manager:
+            raise ValueError("ExecutorAgent: message_manager 是必需参数")
         
-        # 使用基类方法收集和记录流式输出
-        yield from self._collect_and_log_stream_output(
-            self._execute_stream_internal(messages, tool_manager, session_id, system_context)
-        )
+        # 从MessageManager获取优化后的消息
+        optimized_messages = message_manager.filter_messages_for_agent(self.__class__.__name__)
+        logger.info(f"ExecutorAgent: 开始流式任务执行，获取到 {len(optimized_messages)} 条优化消息")
+        
+        # 使用基类方法收集和记录流式输出，并将结果添加到MessageManager
+        for chunk_batch in self._collect_and_log_stream_output(
+            self._execute_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
+        ):
+            # Agent自己负责将生成的消息添加到MessageManager
+            message_manager.add_messages(chunk_batch)
+            yield chunk_batch
 
     def _execute_stream_internal(self, 
-                               messages: List[Dict[str, Any]],
+                               messages: List[Dict[str, Any]], 
                                tool_manager: Optional[Any],
                                session_id: str,
-                               system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
+                               system_context: Optional[Dict[str, Any]],
+                               task_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部流式执行方法
         
@@ -120,7 +135,7 @@ the expected output is:{next_expected_output}
                 subtask_info=subtask_info,
                 execution_context=execution_context
             )
-            
+            # logger.info(f"ExecutorAgent: 执行消息: {execution_messages}")
             # 发送任务执行提示
             yield from self._send_task_execution_prompt(subtask_info)
             
@@ -339,6 +354,7 @@ the expected output is:{next_expected_output}
         # 准备工具
         tools_json = self._prepare_tools(tool_manager, subtask_info)
         
+        logger.info(f'ExecutorAgent: clean_messages: {clean_messages}')
         # 调用LLM
         response = self._call_llm_with_tools(clean_messages, tools_json)
         

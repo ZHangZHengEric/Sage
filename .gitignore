@@ -1,6 +1,8 @@
 mcp_servers/run_all_mcp_server.sh
 mcp_server/hub/*
 mcp_servers/standard_search/*
+*/workspace/*
+tests/
 examples/fastapi_react_demo/backend/config.yaml
 examples/fastapi_react_demo/frontend/node_modules/
 .DS_Store

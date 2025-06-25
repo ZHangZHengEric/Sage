@@ -38,6 +38,9 @@ from openai import OpenAI
 # 导入新的配置加载器
 from config_loader import get_app_config, save_app_config, ModelConfig
 
+# 导入FTP服务器
+from ftp_server import start_ftp_server, stop_ftp_server, is_ftp_running
+
 
 # Pydantic模型定义
 class ChatMessage(BaseModel):
@@ -75,6 +78,9 @@ class SystemStatus(BaseModel):
     tools_count: int
     active_sessions: int
     version: str = "0.8"
+    ftp_enabled: bool = False
+    ftp_running: bool = False
+    workspace_path: str = ""
 
 # 全局变量
 tool_manager: Optional[ToolManager] = None
@@ -206,9 +212,22 @@ async def initialize_system():
             }
             code_agent = CodeAgent(model, model_config)
             tool_manager.register_tool(code_agent.to_tool())
-            controller = AgentController(model, model_config)
+            
+            # 使用配置文件中的workspace路径
+            workspace_path = app_config.workspace.root_path
+            controller = AgentController(model, model_config, workspace=workspace_path)
             logger.info(f"✅ 智能体控制器初始化完成 (使用配置文件)")
             print(f"✅ 系统已就绪，模型: {app_config.model.model_name}")
+            print(f"📁 工作空间: {workspace_path}")
+            
+            # 启动FTP服务器
+            try:
+                if start_ftp_server():
+                    print(f"📂 FTP服务已启动: ftp://{app_config.ftp.username}@localhost:{app_config.ftp.port}")
+                else:
+                    print("⚠️  FTP服务启动失败")
+            except Exception as ftp_error:
+                print(f"⚠️  FTP服务启动错误: {ftp_error}")
             
             # 同步到Sage框架的配置系统
             settings = get_settings()
@@ -232,9 +251,12 @@ async def initialize_system():
                     "max_tokens": settings.model.max_tokens
                 }
                 
-                controller = AgentController(model, model_config)
+                # 使用默认workspace路径
+                workspace_path = os.getenv('WORKSPACE_ROOT', '/tmp/sage')
+                controller = AgentController(model, model_config, workspace=workspace_path)
                 logger.info("✅ 智能体控制器初始化完成 (使用Sage配置)")
                 print(f"✅ 系统已就绪，模型: {settings.model.model_name}")
+                print(f"📁 工作空间: {workspace_path}")
             else:
                 print("⚠️  未配置API密钥，需要通过Web界面配置或在config.yaml中设置")
                 print("💡 提示：编辑 backend/config.yaml 文件，设置您的API密钥")
@@ -249,6 +271,12 @@ async def cleanup_system():
     """清理系统资源"""
     global active_sessions
     try:
+        # 停止FTP服务器
+        try:
+            stop_ftp_server()
+        except Exception as ftp_error:
+            logger.warning(f"FTP服务器停止失败: {ftp_error}")
+        
         # 清理活跃会话
         for session_id in list(active_sessions.keys()):
             if tool_manager:
@@ -303,11 +331,16 @@ async def get_system_status(response: Response):
     add_cors_headers(response)
     try:
         tools_count = len(tool_manager.list_tools()) if tool_manager else 0
+        app_config = get_app_config()
+        
         return SystemStatus(
             status="running",
             agents_count=7,  # Sage框架的智能体数量
             tools_count=tools_count,
-            active_sessions=len(active_sessions)
+            active_sessions=len(active_sessions),
+            ftp_enabled=app_config.ftp.enabled,
+            ftp_running=is_ftp_running(),
+            workspace_path=app_config.workspace.root_path
         )
     except Exception as e:
         logger.error(f"获取系统状态失败: {e}")
@@ -351,7 +384,10 @@ async def configure_system(config: ConfigRequest, response: Response):
             "max_tokens": config.max_tokens
         }
         
-        controller = AgentController(model, model_config)
+        # 从配置文件或环境变量获取workspace路径
+        app_config = get_app_config()
+        workspace_path = app_config.workspace.root_path if app_config else os.getenv('WORKSPACE_ROOT', '/tmp/sage')
+        controller = AgentController(model, model_config, workspace=workspace_path)
         
         logger.info(f"系统配置更新成功: {config.model_name}")
         print(f"🔄 配置已更新并保存: {config.model_name}")

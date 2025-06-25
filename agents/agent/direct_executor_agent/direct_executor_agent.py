@@ -79,9 +79,10 @@ class DirectExecutorAgent(AgentBase):
         logger.info("DirectExecutorAgent 初始化完成")
 
     def run_stream(self, 
-                   messages: List[Dict[str, Any]], 
+                   message_manager: Any,
+                   task_manager: Optional[Any] = None,
                    tool_manager: Optional[Any] = None,
-                   session_id: str = None,
+                   session_id: Optional[str] = None,
                    system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行直接任务处理
@@ -89,7 +90,8 @@ class DirectExecutorAgent(AgentBase):
         直接处理用户输入的任务，不进行复杂的分解和规划，适用于简单任务。
         
         Args:
-            messages: 对话历史记录
+            message_manager: 消息管理器
+            task_manager: 任务管理器
             tool_manager: 用于执行工具的工具管理器
             session_id: 会话ID
             system_context: 系统上下文
@@ -102,14 +104,20 @@ class DirectExecutorAgent(AgentBase):
         """
         logger.info(f"DirectExecutorAgent: 开始流式直接执行，会话ID: {session_id}")
         
-        if not messages:
-            logger.warning("DirectExecutorAgent: 未提供消息，返回空列表")
-            return
+        if not message_manager:
+            raise ValueError("DirectExecutorAgent: message_manager 是必需参数")
         
-        # 使用基类方法收集和记录流式输出
-        yield from self._collect_and_log_stream_output(
-            self._execute_direct_stream_internal(messages, tool_manager, session_id, system_context)
-        )
+        # 从MessageManager获取优化后的消息
+        optimized_messages = message_manager.filter_messages_for_agent(self.__class__.__name__)
+        logger.info(f"DirectExecutorAgent: 开始流式直接执行，获取到 {len(optimized_messages)} 条优化消息")
+        
+        # 使用基类方法收集和记录流式输出，并将结果添加到MessageManager
+        for chunk_batch in self._collect_and_log_stream_output(
+            self._execute_direct_stream_internal(optimized_messages, tool_manager, session_id, system_context)
+        ):
+            # Agent自己负责将生成的消息添加到MessageManager
+            message_manager.add_messages(chunk_batch)
+            yield chunk_batch
 
     def _execute_direct_stream_internal(self, 
                                       messages: List[Dict[str, Any]], 
