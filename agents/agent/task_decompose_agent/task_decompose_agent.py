@@ -11,12 +11,14 @@ TaskDecomposeAgent 重构版本
 import json
 import uuid
 import re
+import json
 import datetime
 import traceback
 import time
 from typing import List, Dict, Any, Optional, Generator
 
 from agents.agent.agent_base import AgentBase
+from agents.task.task_base import TaskBase
 from agents.utils.logger import logger
 
 
@@ -66,6 +68,7 @@ class TaskDecomposeAgent(AgentBase):
             system_prefix: 系统前缀提示
         """
         super().__init__(model, model_config, system_prefix)
+        self.agent_name = "TaskDecomposeAgent"
         self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
         logger.info("TaskDecomposeAgent 初始化完成")
     
@@ -73,7 +76,9 @@ class TaskDecomposeAgent(AgentBase):
                    messages: List[Dict[str, Any]], 
                    tool_manager: Optional[Any] = None,
                    session_id: str = None,
-                   system_context: Optional[Dict[str, Any]] = None) -> Generator[List[Dict[str, Any]], None, None]:
+                   system_context: Optional[Dict[str, Any]] = None,
+                   task_manager: Optional[Any] = None,
+                   message_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         流式执行任务分解
         
@@ -84,6 +89,8 @@ class TaskDecomposeAgent(AgentBase):
             tool_manager: 可选的工具管理器
             session_id: 会话ID
             system_context: 系统上下文
+            task_manager: 任务管理器，用于管理分解出的子任务
+            message_manager: 消息管理器，用于优化消息传递
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分解消息块
@@ -93,16 +100,27 @@ class TaskDecomposeAgent(AgentBase):
         """
         logger.info("TaskDecomposeAgent: 开始流式任务分解")
         
+        # 优化消息输入（如果有MessageManager）
+        optimized_messages = messages
+        if message_manager:
+            optimized_messages = message_manager.filter_messages_for_agent(
+                messages, self.__class__.__name__, task_manager
+            )
+            logger.info(f"TaskDecomposeAgent: 消息优化完成，从 {len(messages)} 减少到 {len(optimized_messages)}")
+        
         # 使用基类方法收集和记录流式输出
         yield from self._collect_and_log_stream_output(
-            self._execute_decompose_stream_internal(messages, tool_manager, session_id, system_context)
+            self._execute_decompose_stream_internal(
+                optimized_messages, tool_manager, session_id, system_context, task_manager
+            )
         )
 
     def _execute_decompose_stream_internal(self, 
                                          messages: List[Dict[str, Any]], 
                                          tool_manager: Optional[Any],
                                          session_id: str,
-                                         system_context: Optional[Dict[str, Any]]) -> Generator[List[Dict[str, Any]], None, None]:
+                                         system_context: Optional[Dict[str, Any]],
+                                         task_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         内部任务分解流式执行方法
         
@@ -111,6 +129,7 @@ class TaskDecomposeAgent(AgentBase):
             tool_manager: 可选的工具管理器
             session_id: 会话ID
             system_context: 系统上下文
+            task_manager: 任务管理器
             
         Yields:
             List[Dict[str, Any]]: 流式输出的任务分解消息块
@@ -127,7 +146,7 @@ class TaskDecomposeAgent(AgentBase):
             prompt = self._generate_decomposition_prompt(decomposition_context)
             
             # 执行流式任务分解
-            yield from self._execute_streaming_decomposition(decomposition_context)
+            yield from self._execute_streaming_decomposition(decomposition_context, task_manager)
             
         except Exception as e:
             logger.error(f"TaskDecomposeAgent: 任务分解过程中发生异常: {str(e)}")
@@ -188,12 +207,14 @@ class TaskDecomposeAgent(AgentBase):
         return prompt
 
     def _execute_streaming_decomposition(self, 
-                                        decomposition_context: Dict[str, Any]) -> Generator[List[Dict[str, Any]], None, None]:
+                                        decomposition_context: Dict[str, Any],
+                                        task_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         执行流式任务分解
         
         Args:
             decomposition_context: 分解上下文
+            task_manager: 任务管理器，用于存储分解结果
             
         Yields:
             List[Dict[str, Any]]: 流式输出的消息块
@@ -236,7 +257,6 @@ class TaskDecomposeAgent(AgentBase):
                     
                     full_response += delta_content_char
                     chunk_count += 1
-                    show_delta_content = ''
                     if delta_content_type == 'unknown':
                         unknown_content = delta_content_all
                         continue
@@ -266,7 +286,7 @@ class TaskDecomposeAgent(AgentBase):
         logger.info(f"TaskDecomposeAgent: 流式分解完成，共生成 {chunk_count} 个文本块")
         
         # 处理最终结果
-        yield from self._finalize_decomposition_result(full_response, message_id)
+        yield from self._finalize_decomposition_result(full_response, message_id, task_manager)
 
     def _prepare_llm_messages(self, 
                             system_message: Dict[str, Any], 
@@ -292,13 +312,15 @@ class TaskDecomposeAgent(AgentBase):
 
     def _finalize_decomposition_result(self, 
                                      full_response: str, 
-                                     message_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                                     message_id: str,
+                                     task_manager: Optional[Any] = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
         完成任务分解并返回最终结果
         
         Args:
             full_response: 完整的响应内容
             message_id: 消息ID
+            task_manager: 任务管理器，用于存储分解结果
             
         Yields:
             List[Dict[str, Any]]: 最终任务分解结果消息块
@@ -310,7 +332,31 @@ class TaskDecomposeAgent(AgentBase):
             tasks = self._convert_xlm_to_json(full_response)
             logger.info(f"TaskDecomposeAgent: 成功分解为 {len(tasks)} 个子任务")
             
-            # 返回最终结果
+            # 如果有TaskManager，将子任务存储到任务管理器中
+            if task_manager:
+                logger.info("TaskDecomposeAgent: 将分解的子任务存储到TaskManager")
+                task_objects = []
+                
+                for i, task_data in enumerate(tasks):
+                    # 创建TaskBase对象
+                    task_obj = TaskBase(
+                        description=task_data.get('description', ''),
+                        task_type='subtask',
+                        status='pending',
+                        priority=i,  # 按分解顺序设置优先级
+                        assigned_to='ExecutorAgent'
+                    )
+                    task_objects.append(task_obj)
+                
+                # 批量添加任务到TaskManager
+                task_ids = task_manager.add_tasks_batch(task_objects)
+                logger.info(f"TaskDecomposeAgent: 成功将 {len(task_ids)} 个子任务添加到TaskManager")
+                
+                # 将任务ID添加到原始任务数据中（用于后续引用）
+                for task_data, task_id in zip(tasks, task_ids):
+                    task_data['task_id'] = task_id
+            
+            # 返回最终结果（保持原有流式输出格式）
             result_content = '任务拆解规划：\n' + json.dumps({"tasks": tasks}, ensure_ascii=False)
             
             result_message = {
