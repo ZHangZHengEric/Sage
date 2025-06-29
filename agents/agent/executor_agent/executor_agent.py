@@ -31,11 +31,11 @@ class ExecutorAgent(AgentBase):
     """
 
     # 任务执行提示模板常量
-    TASK_EXECUTION_PROMPT_TEMPLATE = """请执行以下任务：{next_subtask_description}
+    TASK_EXECUTION_PROMPT_TEMPLATE = """请执行以下需求或者任务：{next_subtask_description}
 
 期望输出：{next_expected_output}
 
-请直接开始执行任务，不需要列出工具清单或其他前置说明。"""
+请直接开始执行任务，观察历史对话，不要做重复性的工作。"""
 
     # 系统提示模板常量
     SYSTEM_PREFIX_DEFAULT = """你是个任务执行助手，你需要根据最新的任务描述和要求，来执行任务。
@@ -43,7 +43,7 @@ class ExecutorAgent(AgentBase):
 注意以下的任务执行规则，不要使用工具集合之外的工具，否则会报错：
 1. 如果不需要使用工具，直接返回中文内容。你的文字输出都要是markdown格式。
 2. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
-3. 调用工具时，不要在其他的输出文字,你一次只能执行一个任务。
+3. 调用工具时，不要在其他的输出文字，尽可能调用不互相依赖的全部工具。
 4. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
 
 如果在工具集合包含file_write函数工具，要求如下：
@@ -97,7 +97,7 @@ class ExecutorAgent(AgentBase):
             self._execute_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
         ):
             # Agent自己负责将生成的消息添加到MessageManager
-            message_manager.add_messages(chunk_batch)
+            message_manager.add_messages(chunk_batch, agent_name="ExecutorAgent")
             yield chunk_batch
 
     def _execute_stream_internal(self, 
@@ -167,8 +167,6 @@ class ExecutorAgent(AgentBase):
         Returns:
             Dict[str, Any]: 包含执行所需信息的上下文字典
         """
-        logger.debug("ExecutorAgent: 准备执行上下文")
-        
         # 提取相关消息
         task_description_messages = self._extract_task_description_messages(messages)
         completed_actions_messages = self._extract_completed_actions_messages(messages)
@@ -197,43 +195,36 @@ class ExecutorAgent(AgentBase):
             messages: 消息列表
             
         Returns:
-            Dict[str, Any]: 解析后的子任务信息
+            Dict[str, Any]: 包含子任务描述、期望输出和所需工具的字典
             
         Raises:
-            json.JSONDecodeError: 当无法解析子任务消息时抛出
+            json.JSONDecodeError: 当JSON解析失败时抛出
         """
-        logger.debug("ExecutorAgent: 解析子任务信息")
-        
         try:
-            last_subtask_message = self._get_last_sub_task(messages)
-            if not last_subtask_message:
+            # 查找最新的planning_result类型消息
+            last_subtask_message = None
+            for message in reversed(messages):
+                if message.get('type') == 'planning_result':
+                    last_subtask_message = message
+                    break
+            
+            if last_subtask_message is None:
                 raise ValueError("未找到planning_result类型的消息")
             
             # 解析子任务内容
             content = last_subtask_message['content']
-            logger.warning(f"ExecutorAgent: 📋 原始子任务content: {repr(content)[:200]}...")
             
             if content.startswith('Planning: '):
                 content = content[len('Planning: '):]
-                logger.warning(f"ExecutorAgent: 🔄 移除'Planning: '前缀后的content: {repr(content)[:200]}...")
             
             # 清理content内容
             cleaned_content = content.strip('```json\\n').strip('```')
-            logger.warning(f"ExecutorAgent: 🧹 清理markdown标记后的content: {repr(cleaned_content)[:200]}...")
             
             # 尝试解析JSON
-            logger.warning(f"ExecutorAgent: 🔍 准备解析JSON，内容长度: {len(cleaned_content)}")
             try:
                 subtask_dict = json.loads(cleaned_content)
-                logger.warning(f"ExecutorAgent: ✅ JSON解析成功，keys: {list(subtask_dict.keys())}")
             except json.JSONDecodeError as json_err:
-                logger.error(f"ExecutorAgent: ❌ JSON解析失败!")
-                logger.error(f"ExecutorAgent: 错误详情: {str(json_err)}")
-                logger.error(f"ExecutorAgent: 错误位置: 第{json_err.lineno}行，第{json_err.colno}列")
-                logger.error(f"ExecutorAgent: 完整content内容: {repr(cleaned_content)}")
-                logger.error(f"ExecutorAgent: content字节长度: {len(cleaned_content.encode('utf-8'))}")
-                logger.error(f"ExecutorAgent: content前50字符: {repr(cleaned_content[:50])}")
-                logger.error(f"ExecutorAgent: content后50字符: {repr(cleaned_content[-50:])}")
+                logger.error(f"ExecutorAgent: JSON解析失败: {str(json_err)}")
                 raise json_err
             
             subtask_info = {
@@ -243,16 +234,11 @@ class ExecutorAgent(AgentBase):
             }
             
             logger.info(f"ExecutorAgent: 解析子任务成功 - {subtask_info['description']}")
-            logger.debug(f"ExecutorAgent: 需要的工具: {subtask_info['required_tools']}")
             
             return subtask_info
             
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error(f"ExecutorAgent: ❌ 解析子任务失败: {str(e)}")
-            logger.error(f"ExecutorAgent: 异常类型: {type(e).__name__}")
-            if hasattr(e, '__traceback__'):
-                import traceback
-                logger.error(f"ExecutorAgent: 完整堆栈跟踪:\n{traceback.format_exc()}")
+            logger.error(f"ExecutorAgent: 解析子任务失败: {str(e)}")
             raise json.JSONDecodeError("Failed to parse subtask message as JSON", doc=str(e), pos=0)
 
     def _prepare_execution_messages(self, 
@@ -270,8 +256,6 @@ class ExecutorAgent(AgentBase):
         Returns:
             List[Dict[str, Any]]: 准备好的执行消息列表
         """
-        logger.debug("ExecutorAgent: 准备执行消息")
-        
         # 准备系统消息
         system_message = self.prepare_unified_system_message(
             session_id=execution_context.get('session_id'),
@@ -298,7 +282,6 @@ class ExecutorAgent(AgentBase):
         
         messages_input.append(request_message)
         
-        logger.debug(f"ExecutorAgent: 准备了 {len(messages_input)} 条执行消息")
         return messages_input
 
     def _send_task_execution_prompt(self, subtask_info: Dict[str, Any]) -> Generator[List[Dict[str, Any]], None, None]:
@@ -311,8 +294,6 @@ class ExecutorAgent(AgentBase):
         Yields:
             List[Dict[str, Any]]: 任务执行提示消息块
         """
-        logger.debug("ExecutorAgent: 发送任务执行提示")
-        
         task_prompt = self.TASK_EXECUTION_PROMPT_TEMPLATE.format(
             next_subtask_description=subtask_info['description'],
             next_expected_output=subtask_info['expected_output']
@@ -349,14 +330,12 @@ class ExecutorAgent(AgentBase):
         
         # 清理消息格式
         clean_messages = self.clean_messages(execution_messages)
-        logger.debug(f"ExecutorAgent: 准备了 {len(clean_messages)} 条清理后的消息")
         
         # 准备工具
         tools_json = self._prepare_tools(tool_manager, subtask_info)
         
-        logger.info(f'ExecutorAgent: clean_messages: {clean_messages}')
         # 调用LLM
-        response = self._call_llm_with_tools(clean_messages, tools_json)
+        response = self._call_llm_with_tools(clean_messages, tools_json, session_id)
         
         # 处理流式响应
         yield from self._process_streaming_response(
@@ -379,8 +358,6 @@ class ExecutorAgent(AgentBase):
         Returns:
             List[Dict[str, Any]]: 工具配置列表
         """
-        logger.debug("ExecutorAgent: 准备工具列表")
-        
         if not tool_manager:
             logger.warning("ExecutorAgent: 未提供工具管理器")
             return []
@@ -405,25 +382,30 @@ class ExecutorAgent(AgentBase):
 
     def _call_llm_with_tools(self, 
                            messages: List[Dict[str, Any]], 
-                           tools_json: List[Dict[str, Any]]):
+                           tools_json: List[Dict[str, Any]],
+                           session_id: Optional[str] = None):
         """
         调用LLM并支持工具调用
         
         Args:
             messages: 消息列表
             tools_json: 工具配置列表
+            session_id: 会话ID（用于LLM请求记录）
             
         Returns:
             Generator: LLM流式响应
         """
-        logger.debug("ExecutorAgent: 调用LLM进行工具辅助执行")
+        # 准备模型配置，包含工具
+        model_config_with_tools = {**self.model_config}
+        if tools_json:
+            model_config_with_tools["tools"] = tools_json
         
-        return self.model.chat.completions.create(
-            tools=tools_json if tools_json else None,
+        # 使用基类的流式调用方法来确保LLM请求被记录
+        return self._call_llm_streaming(
             messages=messages,
-            stream=True,
-            stream_options={"include_usage": True},
-            **self.model_config
+            session_id=session_id,
+            step_name="tool_execution",
+            model_config_override=model_config_with_tools
         )
 
     def _process_streaming_response(self, 
@@ -443,51 +425,55 @@ class ExecutorAgent(AgentBase):
         Yields:
             List[Dict[str, Any]]: 处理后的响应消息块
         """
-        logger.debug("ExecutorAgent: 处理流式响应")
+        logger.info("ExecutorAgent: 开始处理流式响应")
         
         tool_calls = {}
         unused_tool_content_message_id = str(uuid.uuid4())
         last_tool_call_id = None
-        
-        # 收集所有chunks用于token跟踪
-        start_time = time.time()
-        chunks = []
+        text_content_length = 0
         
         # 处理流式响应
         for chunk in response:
-            chunks.append(chunk)
-            if len(chunk.choices) ==0:
+            if len(chunk.choices) == 0:
                 continue
+                
             if chunk.choices[0].delta.tool_calls:
-                yield from self._handle_tool_calls_chunk(
-                    chunk=chunk,
-                    tool_calls=tool_calls,
-                    last_tool_call_id=last_tool_call_id
-                )
-                # 更新last_tool_call_id
+                # 先更新last_tool_call_id，再传递给_handle_tool_calls_chunk
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-                        
+                
+                try:
+                    self._handle_tool_calls_chunk(
+                        chunk=chunk,
+                        tool_calls=tool_calls,
+                        last_tool_call_id=last_tool_call_id
+                    )
+                except Exception as e:
+                    logger.error(f"ExecutorAgent: 调用_handle_tool_calls_chunk时发生异常: {str(e)}")
+                    import traceback
+                    logger.error(f"ExecutorAgent: 异常堆栈: {traceback.format_exc()}")
+            
             elif chunk.choices[0].delta.content:
                 if tool_calls:
                     # 有工具调用时停止收集文本内容
-                    logger.debug(f"ExecutorAgent: 检测到 {len(tool_calls)} 个工具调用，停止收集文本内容")
+                    logger.info(f"ExecutorAgent: 检测到工具调用，停止收集文本内容")
                     break
+                
+                content = chunk.choices[0].delta.content
+                text_content_length += len(content)
                 
                 # 使用基类的消息创建函数
                 yield self._create_message_chunk(
-                    content=chunk.choices[0].delta.content,
+                    content=content,
                     message_id=unused_tool_content_message_id,
-                    show_content=chunk.choices[0].delta.content,
+                    show_content=content,
                     message_type='do_subtask_result'
                 )
         
-        # 跟踪token使用
-        self._track_streaming_token_usage(chunks, "tool_execution", start_time)
-        
         # 处理工具调用或发送结束消息
         if tool_calls:
+            logger.info(f"ExecutorAgent: 开始执行 {len(tool_calls)} 个工具调用")
             yield from self._execute_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
@@ -496,6 +482,7 @@ class ExecutorAgent(AgentBase):
             )
         else:
             # 发送结束消息（使用基类函数）
+            logger.info(f"ExecutorAgent: 无工具调用，发送结束消息")
             yield self._create_message_chunk(
                 content='',
                 message_id=unused_tool_content_message_id,
@@ -506,124 +493,131 @@ class ExecutorAgent(AgentBase):
     def _handle_tool_calls_chunk(self, 
                                chunk,
                                tool_calls: Dict[str, Any],
-                               last_tool_call_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+                               last_tool_call_id: str) -> None:
         """
         处理工具调用数据块
         
         Args:
             chunk: LLM响应块
-            tool_calls: 工具调用字典
+            tool_calls: 工具调用字典（会被修改）
             last_tool_call_id: 最后的工具调用ID
-            
-        Yields:
-            List[Dict[str, Any]]: 处理结果（通常为空）
         """
         for tool_call in chunk.choices[0].delta.tool_calls:
             if tool_call.id and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id                            
-                
+                last_tool_call_id = tool_call.id
+                            
             if last_tool_call_id not in tool_calls:
-                logger.debug(f"ExecutorAgent: 检测到新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
+                logger.info(f"ExecutorAgent: 检测到新工具调用: {getattr(tool_call.function, 'name', 'None')}")
                 tool_calls[last_tool_call_id] = {
                     'id': last_tool_call_id,
                                 'type': tool_call.type,
                                 'function': {
-                                    'name': tool_call.function.name,
-                                    'arguments': tool_call.function.arguments
+                                    'name': getattr(tool_call.function, 'name', ''),
+                                    'arguments': getattr(tool_call.function, 'arguments', '')
                                 }
                             }
             else:
-                if tool_call.function.name:
+                if hasattr(tool_call.function, 'name') and tool_call.function.name:
                     tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
-                if tool_call.function.arguments:
+                if hasattr(tool_call.function, 'arguments') and tool_call.function.arguments:
                     tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
         
-        # 通常不需要yield任何内容
-        return
-        yield []
-
     def _execute_tool_calls(self, 
                           tool_calls: Dict[str, Any],
                           tool_manager: Optional[Any],
                           execution_messages: List[Dict[str, Any]],
                           session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
         """
-        执行工具调用
+        执行工具调用（逐个工具调用模式）
         
         Args:
             tool_calls: 工具调用字典
             tool_manager: 工具管理器
-            execution_messages: 执行消息列表
+            execution_messages: 执行消息列表（会被修改以包含工具调用和响应）
             session_id: 会话ID
             
         Yields:
             List[Dict[str, Any]]: 工具执行结果消息块
         """
-        logger.info(f"ExecutorAgent: 执行 {len(tool_calls)} 个工具调用")
+        logger.info(f"ExecutorAgent: 逐个执行 {len(tool_calls)} 个工具调用")
         
+        # 逐个执行每个工具调用
         for tool_call_id, tool_call in tool_calls.items():
             tool_name = tool_call['function']['name']
-            logger.info(f"ExecutorAgent: 执行工具 {tool_name}")
             
             try:
-                # 检查工具是否存在
+                logger.info(f"ExecutorAgent: 执行工具 {tool_name}")
+                
+                # 1. 创建单个工具调用消息
+                single_tool_call_message = {
+                    'role': 'assistant',
+                    'tool_calls': [tool_call],  # 只包含当前工具调用
+                    'message_id': str(uuid.uuid4()),
+                    'type': 'tool_call',
+                }
+                
+                # 2. 添加工具调用消息到执行消息列表
+                execution_messages.append(single_tool_call_message)
+                
+                # 3. 为前端显示生成工具调用消息（包含show_content）
+                display_tool_call_message = deepcopy(single_tool_call_message)
+                formatted_params = self._format_tool_parameters(tool_call['function']['arguments'])
+                display_tool_call_message['show_content'] = f"🔧 **调用工具：{tool_name}**\n\n{formatted_params}\n"
+                
+                # 4. yield显示消息给前端
+                yield [display_tool_call_message]
+                
+                # 5. 获取工具
                 tool = tool_manager.get_tool(tool_name) if tool_manager else None
                 if not tool:
-                    logger.error(f"ExecutorAgent: 工具 {tool_name} 未找到")
+                    logger.error(f"ExecutorAgent: 工具 {tool_name} 不存在")
+                    yield from self._handle_tool_error(tool_call_id, tool_name, 
+                                                     Exception(f"工具 {tool_name} 不存在"))
+                    
+                    # 添加错误响应到execution_messages
+                    error_response_message = {
+                        'role': 'tool',
+                        'content': f"工具执行错误: 工具 {tool_name} 不存在",
+                        'tool_call_id': tool_call_id,
+                        'message_id': str(uuid.uuid4()),
+                        'type': 'tool_error'
+                    }
+                    execution_messages.append(error_response_message)
                     continue
                 
-                # 处理Agent工具
+                # 6. 处理Agent工具
                 if isinstance(tool, AgentToolSpec):
-                    yield [{
+                    handoff_message = {
                         'role': 'assistant',
                         'content': f"该任务交接给了{tool.name}，进行执行",
                         'show_content': f"该任务交接给了{tool.name}，进行执行",
                         'message_id': str(uuid.uuid4()),
                         'type': 'handoff_agent',
-                    }]
+                    }
+                    yield [handoff_message]
+                    
+                    # Agent工具不需要添加tool响应消息到execution_messages
+                    # 因为Agent的输出会通过其他方式处理
+                    
                 else:
-                    # 格式化工具参数显示
-                    formatted_params = self._format_tool_parameters(tool_call['function']['arguments'])
+                    # 7. 执行普通工具
+                    arguments = json.loads(tool_call['function']['arguments'])
+                    tool_response = tool_manager.run_tool(
+                        tool_name,
+                        messages=execution_messages,
+                        session_id=session_id,
+                        **arguments
+                    )
                     
-                    yield [{
-                            'role': 'assistant',
-                        'tool_calls': [{
-                            'id': tool_call['id'],
-                            'type': tool_call['type'],
-                            'function': {
-                                'name': tool_call['function']['name'],
-                                'arguments': tool_call['function']['arguments']
-                            }
-                        }],
-                        'type': 'tool_call',
-                        'message_id': str(uuid.uuid4()),
-                        'show_content': f"🔧 **调用工具：{tool_name}**\n\n{formatted_params}\n"
-                    }]
-                
-                # 解析并执行工具
-                arguments = json.loads(tool_call['function']['arguments'])
-                tool_response = tool_manager.run_tool(
-                    tool_name,
-                    messages=execution_messages,
-                    session_id=session_id,
-                    **arguments
-                )
-                
-                # 检查是否为流式响应（AgentToolSpec）
-                if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
-                    # 检查是否为专业agent工具
-                    tool_spec = tool_manager.get_tool(tool_name) if tool_manager else None
-                    is_agent_tool = isinstance(tool_spec, AgentToolSpec)
-                    
-                    # 处理流式响应
-                    logger.debug(f"ExecutorAgent: 收到流式工具响应，工具类型: {'专业Agent' if is_agent_tool else '普通工具'}")
-                    try:
-                        for chunk in tool_response:
-                            if is_agent_tool:
-                                # 专业agent工具：直接返回原始结果，不做任何处理
-                                yield chunk
-                            else:
-                                # 普通工具：添加必要的元数据
+                    # 8. 处理工具响应
+                    if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
+                        # 流式响应
+                        
+                        # 收集所有响应内容，最后一起添加到execution_messages
+                        all_response_content = []
+                        
+                        try:
+                            for chunk in tool_response:
                                 if isinstance(chunk, list):
                                     # 为每个消息添加tool_call_id
                                     for message in chunk:
@@ -634,6 +628,8 @@ class ExecutorAgent(AgentBase):
                                             if 'type' not in message:
                                                 message['type'] = 'tool_call_result'
                                     yield chunk
+                                    # 收集内容用于添加到execution_messages
+                                    all_response_content.extend(chunk)
                                 else:
                                     # 单个消息
                                     if isinstance(chunk, dict):
@@ -643,20 +639,74 @@ class ExecutorAgent(AgentBase):
                                         if 'type' not in chunk:
                                             chunk['type'] = 'tool_call_result'
                                     yield [chunk]
-                    except Exception as e:
-                        logger.error(f"ExecutorAgent: 处理流式工具响应时发生错误: {str(e)}")
-                        yield from self._handle_tool_error(tool_call_id, tool_name, e)
-                else:
-                    # 处理非流式响应
-                    logger.debug("ExecutorAgent: 收到非流式工具响应，正在处理")
-                    logger.info(f"ExecutorAgent: 工具响应 {tool_response}")
-                    
-                    processed_response = self.process_tool_response(tool_response, tool_call_id)
-                    yield processed_response
+                                    # 收集内容用于添加到execution_messages
+                                    all_response_content.append(chunk)
+                        except Exception as e:
+                            logger.error(f"ExecutorAgent: 处理流式工具响应时发生错误: {str(e)}")
+                            yield from self._handle_tool_error(tool_call_id, tool_name, e)
+                            
+                            # 添加错误响应到execution_messages
+                            error_response_message = {
+                                'role': 'tool',
+                                'content': f"工具执行错误: {str(e)}",
+                                'tool_call_id': tool_call_id,
+                                'message_id': str(uuid.uuid4()),
+                                'type': 'tool_error'
+                            }
+                            execution_messages.append(error_response_message)
+                            continue
+                        
+                        # 9. 创建工具响应消息并添加到execution_messages
+                        if all_response_content:
+                            # 合并所有响应内容
+                            combined_content = ""
+                            for content in all_response_content:
+                                if isinstance(content, dict) and 'content' in content:
+                                    combined_content += content['content'] + "\n"
+                                elif isinstance(content, str):
+                                    combined_content += content + "\n"
+                            
+                            tool_response_message = {
+                                'role': 'tool',
+                                'content': combined_content.strip(),
+                                'tool_call_id': tool_call_id,
+                                'message_id': str(uuid.uuid4()),
+                                'type': 'tool_response'
+                            }
+                            execution_messages.append(tool_response_message)
+                    else:
+                        # 非流式响应
+                        logger.info(f"ExecutorAgent: 工具响应 {tool_response}")
+                        
+                        processed_response = self.process_tool_response(tool_response, tool_call_id)
+                        yield processed_response
+                        
+                        # 添加工具响应消息到execution_messages
+                        tool_response_message = {
+                            'role': 'tool',
+                            'content': str(tool_response),
+                            'tool_call_id': tool_call_id,
+                            'message_id': str(uuid.uuid4()),
+                            'type': 'tool_response',
+                            'show_content': str(tool_response)
+                        }
+                        execution_messages.append(tool_response_message)
                 
             except Exception as e:
                 logger.error(f"ExecutorAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
                 yield from self._handle_tool_error(tool_call_id, tool_name, e)
+                    
+                    # 即使出错也要添加错误响应到execution_messages
+                error_response_message = {
+                    'role': 'tool',
+                    'content': f"工具执行错误: {str(e)}",
+                    'tool_call_id': tool_call_id,
+                    'message_id': str(uuid.uuid4()),
+                    'type': 'tool_error'
+                }
+                execution_messages.append(error_response_message)
+        
+        logger.info(f"ExecutorAgent: 完成所有工具调用，执行消息总数: {len(execution_messages)}")
 
     def _handle_execution_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -713,8 +763,6 @@ class ExecutorAgent(AgentBase):
         Returns:
             List[Dict[str, Any]]: 处理后的结果消息
         """
-        logger.debug(f"ExecutorAgent: 处理工具响应，工具调用ID: {tool_call_id}")
-        
         try:
             tool_response_dict = json.loads(tool_response)
             
@@ -740,7 +788,6 @@ class ExecutorAgent(AgentBase):
                     'show_content': '\n' + tool_response + '\n'
                 }]
             
-            logger.debug("ExecutorAgent: 工具响应处理成功")
             return result
             
         except json.JSONDecodeError:

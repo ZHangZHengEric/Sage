@@ -537,6 +537,130 @@ class TaskManager:
         }
         self.task_history.append(entry)
 
+    def get_status_description(self) -> str:
+        """
+        获取任务管理器的简化状态描述字符串
+        
+        Returns:
+            str: 格式化的状态描述字符串，包含所有任务的基本信息
+        """
+        try:
+            # 获取所有任务
+            all_tasks = self.get_all_tasks()
+            if not all_tasks:
+                return "任务管理器中暂无任务"
+            
+            # 构建简化的状态描述
+            status_lines = [f"任务管理器包含 {len(all_tasks)} 个任务："]
+            
+            for task in all_tasks:
+                status_info = f"- 任务ID: {task.task_id}, 描述: {task.description}, 状态: {task.status.value}"
+                status_lines.append(status_info)
+            
+            return "\n".join(status_lines)
+            
+        except Exception as e:
+            return f"任务管理器状态获取失败: {str(e)}"
+
+    def get_compact_status_description(self) -> str:
+        """
+        获取任务管理器的紧凑状态描述字符串（用于简短展示）
+        
+        Returns:
+            str: 紧凑格式的状态描述字符串
+        """
+        try:
+            all_tasks = self.get_all_tasks()
+            if not all_tasks:
+                return "暂无任务"
+            
+            stats = self.get_progress_stats()
+            
+            # 构建紧凑描述
+            status_info = f"任务总数: {stats['total_tasks']} | "
+            status_info += f"已完成: {stats['completed_tasks']} | "
+            status_info += f"进行中: {stats['in_progress_tasks']} | "
+            status_info += f"待执行: {stats['pending_tasks']}"
+            
+            if stats['failed_tasks'] > 0:
+                status_info += f" | 失败: {stats['failed_tasks']}"
+            
+            status_info += f" | 完成率: {stats['completion_rate']:.1f}%"
+            
+            # 添加当前活动任务信息
+            in_progress_tasks = self.get_tasks_by_status('in_progress')
+            if in_progress_tasks:
+                current_task = in_progress_tasks[0]  # 假设只有一个任务在执行
+                status_info += f" | 当前执行: {current_task.task_id}"
+            
+            return status_info
+            
+        except Exception as e:
+            return f"状态获取失败: {str(e)}"
+
+    def get_task_status_by_id(self, task_id: str) -> str:
+        """
+        获取指定任务的详细状态描述
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            str: 任务的详细状态描述
+        """
+        task = self.get_task(task_id)
+        if not task:
+            return f"任务ID {task_id} 不存在"
+        
+        try:
+            status_info = f"任务 {task.task_id} 详细信息：\n"
+            status_info += f"- 标题: {task.title}\n"
+            status_info += f"- 描述: {task.description}\n"
+            status_info += f"- 状态: {task.status.value}\n"
+            status_info += f"- 优先级: {task.priority.value}\n"
+            status_info += f"- 类型: {task.type}\n"
+            
+            if task.dependencies:
+                status_info += f"- 依赖任务: {', '.join(task.dependencies)}\n"
+            
+            if task.assigned_to:
+                status_info += f"- 执行者: {task.assigned_to}\n"
+            
+            if task.estimated_duration:
+                status_info += f"- 预计时长: {task.estimated_duration}秒\n"
+            
+            # 时间信息
+            status_info += f"- 创建时间: {task.created_time}\n"
+            if task.start_time:
+                status_info += f"- 开始时间: {task.start_time}\n"
+            if task.end_time:
+                status_info += f"- 结束时间: {task.end_time}\n"
+                duration = task.get_execution_duration()
+                if duration:
+                    status_info += f"- 执行耗时: {duration:.2f}秒\n"
+            
+            # 执行详情
+            if task.execution_details:
+                details = task.execution_details
+                if details.get('tool_calls'):
+                    status_info += f"- 工具调用次数: {len(details['tool_calls'])}\n"
+                if details.get('output_files'):
+                    status_info += f"- 生成文件数: {len(details['output_files'])}\n"
+                if details.get('errors'):
+                    status_info += f"- 错误数: {len(details['errors'])}\n"
+                if details.get('warnings'):
+                    status_info += f"- 警告数: {len(details['warnings'])}\n"
+            
+            # 结果信息
+            if task.result:
+                result_type = type(task.result).__name__
+                status_info += f"- 执行结果类型: {result_type}\n"
+            
+            return status_info.rstrip()
+            
+        except Exception as e:
+            return f"获取任务 {task_id} 状态失败: {str(e)}"
+
     def __repr__(self) -> str:
         """字符串表示"""
         stats = self.get_progress_stats()

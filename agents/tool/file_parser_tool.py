@@ -146,14 +146,85 @@ class TextProcessor:
     
     @staticmethod
     def clean_text(text: str) -> str:
-        """清理文本内容"""
+        """清理文本内容 - 优化版本：特别针对网页内容"""
         if not text:
             return ""
         
-        # 移除多余的空白字符
+        import re
+        
+        # 移除常见的网页无关内容
+        patterns_to_remove = [
+            # 广告和推广内容
+            r'广告|advertisement|sponsored|推广|赞助',
+            # 导航和菜单
+            r'首页|首页|home|导航|menu|导航栏|navbar',
+            # 页脚信息
+            r'版权所有|copyright|©|all rights reserved|隐私政策|privacy policy|使用条款|terms of use',
+            # 社交媒体链接
+            r'关注我们|follow us|facebook|twitter|instagram|linkedin|weibo|微信|微博',
+            # 订阅和注册
+            r'订阅|subscribe|注册|register|登录|login|sign up|sign in',
+            # 搜索框
+            r'搜索|search|查找|find',
+            # 面包屑导航
+            r'您的位置|当前位置|breadcrumb|面包屑',
+            # 返回顶部
+            r'返回顶部|back to top|回到顶部',
+            # 分享按钮
+            r'分享|share|转发|转发给朋友',
+            # 评论相关
+            r'评论|comment|留言|发表评论|write a comment',
+            # 相关推荐
+            r'相关推荐|related|推荐阅读|recommended|你可能还喜欢|you may also like',
+            # 热门标签
+            r'热门标签|popular tags|标签|tags',
+            # 分页
+            r'上一页|下一页|previous|next|第\d+页|page \d+',
+            # 加载更多
+            r'加载更多|load more|查看更多|view more',
+            # 时间戳
+            r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}',  # 精确时间戳
+            r'\d{4}年\d{1,2}月\d{1,2}日',  # 中文日期
+            r'\d{1,2}/\d{1,2}/\d{4}',  # 英文日期
+            # 阅读量、点赞数等
+            r'阅读\s*\d+|views?\s*\d+|点赞\s*\d+|likes?\s*\d+|评论\s*\d+|comments?\s*\d+',
+            # 作者信息（保留作者名但移除其他信息）
+            r'作者[：:]\s*[^\n]*\n',  # 作者行
+            r'by\s+[^\n]*\n',  # 英文作者行
+            # 来源信息
+            r'来源[：:]\s*[^\n]*\n',  # 来源行
+            r'source[：:]\s*[^\n]*\n',  # 英文来源行
+        ]
+        
+        # 应用移除模式
+        for pattern in patterns_to_remove:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+        
+        # 清理HTML标签残留
+        text = re.sub(r'<[^>]+>', '', text)  # 移除HTML标签
+        
+        # 清理多余的空白字符
         text = re.sub(r'\n\s*\n', '\n\n', text)  # 多个连续换行符合并为双换行
         text = re.sub(r'[ \t]+', ' ', text)      # 多个连续空格合并为单个空格
+        text = re.sub(r'\n +', '\n', text)       # 行首空格
+        text = re.sub(r' +\n', '\n', text)       # 行尾空格
+        
+        # 清理空行
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+        
+        # 清理重复的标点符号
+        text = re.sub(r'[。！？，；：]{2,}', lambda m: m.group()[0], text)  # 中文标点
+        text = re.sub(r'[.!?,;:]{2,}', lambda m: m.group()[0], text)       # 英文标点
+        
+        # 清理行首行尾空白
         text = text.strip()
+        
+        # 如果清理后内容过短，返回原始文本（避免过度清理）
+        if len(text.strip()) < 50:
+            # 只做基本的空白清理
+            text = re.sub(r'\n\s*\n', '\n\n', text)
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = text.strip()
         
         return text
     
@@ -679,12 +750,45 @@ class WebParser:
     
     @staticmethod
     def _html_to_text(html_content: str) -> str:
-        """HTML转文本"""
+        """HTML转文本 - 优化版本：保留纯文字和超链接，忽略图片"""
         h = html2text.HTML2Text()
-        h.ignore_links = False
-        h.ignore_images = False
+        h.ignore_links = False  # 保留超链接
+        h.ignore_images = True  # 忽略图片
+        h.ignore_emphasis = False  # 保留强调格式（粗体、斜体等）
         h.body_width = 0  # 不限制行宽
-        return h.handle(html_content)
+        h.unicode_snob = True  # 使用Unicode字符
+        h.escape_snob = True  # 转义特殊字符
+        h.skip_internal_links = False  # 不跳过内部链接
+        h.inline_links = True  # 使用内联链接格式
+        h.protect_links = True  # 保护链接不被破坏
+        h.mark_code = True  # 标记代码块
+        
+        # 转换HTML为文本
+        text = h.handle(html_content)
+        
+        # 后处理：清理多余的空白和格式化
+        import re
+        
+        # 清理多余的换行符
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # 清理图片相关的残留文本（即使ignore_images=True，有时仍会有残留）
+        text = re.sub(r'!\[.*?\]\(.*?\)', '', text)  # 移除markdown图片语法
+        text = re.sub(r'<img[^>]*>', '', text)  # 移除HTML img标签
+        text = re.sub(r'图片|image|img', '', text, flags=re.IGNORECASE)  # 移除图片相关文字
+        
+        # 清理多余的空白字符
+        text = re.sub(r'[ \t]+', ' ', text)  # 多个空格合并为一个
+        text = re.sub(r'\n +', '\n', text)  # 行首空格
+        text = re.sub(r' +\n', '\n', text)  # 行尾空格
+        
+        # 清理空行
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+        
+        # 确保文本开头和结尾没有多余空白
+        text = text.strip()
+        
+        return text
 
 class PlainTextParser:
     """纯文本解析器"""

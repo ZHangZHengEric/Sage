@@ -111,7 +111,7 @@ class TaskDecomposeAgent(AgentBase):
             )
         ):
             # Agent自己负责将生成的消息添加到MessageManager
-            message_manager.add_messages(chunk_batch)
+            message_manager.add_messages(chunk_batch, agent_name="TaskDecomposeAgent")
             yield chunk_batch
         logger.info(f"TaskDecomposeAgent: 流式任务分解完成，并且将结果添加到TaskManager")
         logger.info(f'TaskDecomposeAgent: 共生成 {len(task_manager.get_all_tasks())} 个子任务，分别是：')
@@ -144,10 +144,7 @@ class TaskDecomposeAgent(AgentBase):
                 session_id=session_id,
                 system_context=system_context
             )
-            
-            # 生成分解提示
-            prompt = self._generate_decomposition_prompt(decomposition_context)
-            
+                        
             # 执行流式任务分解
             yield from self._execute_streaming_decomposition(decomposition_context, task_manager)
             
@@ -179,12 +176,25 @@ class TaskDecomposeAgent(AgentBase):
         
         logger.debug(f"TaskDecomposeAgent: 提取任务描述，消息数量: {len(task_description_messages)}")
         
+        # 生成任务分解提示
+        prompt = self._generate_decomposition_prompt({
+            'task_description': task_description_str
+        })
+        
+        # 准备系统消息
+        system_message = self.prepare_unified_system_message(
+            session_id=session_id,
+            system_context=system_context
+        )
+        
         decomposition_context = {
             'task_description': task_description_str,
             'current_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'file_workspace': '无' if system_context is None else system_context.get('file_workspace', '无'),
             'session_id': session_id,
-            'system_context': system_context
+            'system_context': system_context,
+            'system_message': system_message,
+            'prompt': prompt
         }
         
         logger.info("TaskDecomposeAgent: 任务分解上下文准备完成")
@@ -216,7 +226,7 @@ class TaskDecomposeAgent(AgentBase):
         执行流式任务分解
         
         Args:
-            decomposition_context: 分解上下文
+            decomposition_context: 分解上下文，包含系统消息、提示等信息
             task_manager: 任务管理器，用于存储分解结果
             
         Yields:
@@ -224,30 +234,28 @@ class TaskDecomposeAgent(AgentBase):
         """
         logger.info("TaskDecomposeAgent: 开始执行流式任务分解")
         
-        # 准备系统消息
-        system_message = self.prepare_unified_system_message(
-            session_id=decomposition_context.get('session_id'),
-            system_context=decomposition_context.get('system_context')
-        )
-        prompt = self._generate_decomposition_prompt(decomposition_context)
+        # 从上下文中提取必要信息
+        system_message = decomposition_context['system_message']
+        prompt = decomposition_context['prompt']
+        session_id = decomposition_context.get('session_id')
         
-        # 准备LLM输入
+        # 准备LLM输入消息
         messages = self._prepare_llm_messages(system_message, prompt)
         
-        # 使用基类的流式处理和token跟踪
+        # 为整个分解流程生成统一的message_id
         message_id = str(uuid.uuid4())
-        chunk_count = 0
-        full_response = ""
         
-        # 收集流式响应内容
-        start_time = time.time()
+        # 初始化状态
+        full_response = ''
         chunks = []
+        chunk_count = 0
+        start_time = time.time()
         
         # 状态管理
         unknown_content = ''
         last_tag_type = 'tag'
         
-        for chunk in self._call_llm_streaming(messages):
+        for chunk in self._call_llm_streaming(messages, session_id=session_id, step_name="task_decompose"):
             chunks.append(chunk)
             if len(chunk.choices) == 0:
                 continue
@@ -268,14 +276,14 @@ class TaskDecomposeAgent(AgentBase):
                         if delta_content_type == 'task_item':
                             if last_tag_type != 'task_item':
                                 yield self._create_message_chunk(
-                                    content=delta_content_char,
+                                    content='',
                                     message_id=message_id,
                                     show_content='\n- ',
                                     message_type='task_decomposition'
                                 )
                             
                             yield self._create_message_chunk(
-                                content=delta_content_char,
+                                content='',
                                 message_id=message_id,
                                 show_content=delta_content_all,
                                 message_type='task_decomposition'
