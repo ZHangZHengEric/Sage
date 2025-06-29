@@ -325,7 +325,49 @@ html, body {
 
 /* 历史对话项悬停效果 */
 .chat-history-item:hover .chat-item-more-btn {
+  opacity: 1;
+}
+
+/* 删除按钮悬停效果 */
+.chat-history-item:hover .chat-item-delete-btn {
   opacity: 1 !important;
 }
 
-/* 深度思考气泡脉冲动画 */ 
+.chat-item-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #dc2626 !important;
+}
+
+/* Markdown 换行显示样式 */
+.markdown-content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.markdown-content p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.markdown-content br {
+  display: block;
+  content: "";
+  margin: 4px 0;
+}
+
+/* 确保消息气泡中的换行正确显示 */
+.message-bubble .markdown-content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.message-bubble .markdown-content p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.message-bubble .markdown-content br {
+  display: block;
+  content: "";
+  margin: 4px 0;
+} 

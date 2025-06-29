@@ -38,8 +38,7 @@ from openai import OpenAI
 # 导入新的配置加载器
 from config_loader import get_app_config, save_app_config, ModelConfig
 
-# 导入FTP服务器
-from ftp_server import start_ftp_server, stop_ftp_server, is_ftp_running
+# FTP服务器已移除
 
 
 # Pydantic模型定义
@@ -78,8 +77,6 @@ class SystemStatus(BaseModel):
     tools_count: int
     active_sessions: int
     version: str = "0.8"
-    ftp_enabled: bool = False
-    ftp_running: bool = False
     workspace_path: str = ""
 
 # 全局变量
@@ -220,14 +217,7 @@ async def initialize_system():
             print(f"✅ 系统已就绪，模型: {app_config.model.model_name}")
             print(f"📁 工作空间: {workspace_path}")
             
-            # 启动FTP服务器
-            try:
-                if start_ftp_server():
-                    print(f"📂 FTP服务已启动: ftp://{app_config.ftp.username}@localhost:{app_config.ftp.port}")
-                else:
-                    print("⚠️  FTP服务启动失败")
-            except Exception as ftp_error:
-                print(f"⚠️  FTP服务启动错误: {ftp_error}")
+            # FTP服务器已移除，使用AList文件服务
             
             # 同步到Sage框架的配置系统
             settings = get_settings()
@@ -271,11 +261,7 @@ async def cleanup_system():
     """清理系统资源"""
     global active_sessions
     try:
-        # 停止FTP服务器
-        try:
-            stop_ftp_server()
-        except Exception as ftp_error:
-            logger.warning(f"FTP服务器停止失败: {ftp_error}")
+        # FTP服务器已移除
         
         # 清理活跃会话
         for session_id in list(active_sessions.keys()):
@@ -338,8 +324,6 @@ async def get_system_status(response: Response):
             agents_count=7,  # Sage框架的智能体数量
             tools_count=tools_count,
             active_sessions=len(active_sessions),
-            ftp_enabled=app_config.ftp.enabled,
-            ftp_running=is_ftp_running(),
             workspace_path=app_config.workspace.root_path
         )
     except Exception as e:
@@ -519,21 +503,11 @@ async def chat_stream(request: ChatRequest):
                 summary=True,
                 deep_research=request.use_multi_agent,
                 system_context=system_context,
-                available_workflows=available_workflows
+                available_workflows=available_workflows,
+                max_loop_count=20,
             ):
                 # 处理消息块
                 for msg in chunk:
-                    # 添加详细的工具消息日志
-                    if msg.get('role') == 'tool':
-                        print(f"🔧 [TOOL MESSAGE] 完整消息结构:")
-                        print(f"   role: {msg.get('role')}")
-                        print(f"   content: {msg.get('content', '')[:200]}...")
-                        print(f"   show_content: {msg.get('show_content', '')[:200]}...")
-                        print(f"   type: {msg.get('type')}")
-                        print(f"   tool_calls: {msg.get('tool_calls')}")
-                        print(f"   所有字段: {list(msg.keys())}")
-                        print("=" * 50)
-                    
                     # 安全处理content和show_content，避免JSON转义问题
                     content = msg.get('content', '')
                     show_content = msg.get('show_content', '')
@@ -816,6 +790,14 @@ async def cleanup_session(session_id: str):
             if tool_manager:
                 await tool_manager.cleanup_session(session_id)
             del active_sessions[session_id]
+            
+            # 清理LLM请求记录器
+            try:
+                from agents.utils.llm_request_logger import cleanup_logger
+                cleanup_logger(session_id)
+            except Exception as e:
+                logger.warning(f"清理LLM记录器失败: {e}")
+            
             logger.info(f"会话 {session_id} 已清理")
         return {"status": "success", "message": f"会话 {session_id} 已清理"}
     except Exception as e:
@@ -829,6 +811,73 @@ async def options_handler(rest_of_path: str, response: Response):
     add_cors_headers(response)
     return {"message": "OK"}
 
+
+@app.get("/api/sessions/{session_id}/llm-summary")
+async def get_session_llm_summary(session_id: str):
+    """获取会话的LLM请求摘要（极简版本）"""
+    try:
+        from agents.utils.llm_request_logger import get_llm_logger
+        llm_logger = get_llm_logger(session_id)
+        files = llm_logger.list_request_files()
+        
+        # 按智能体类型统计
+        agent_stats = {}
+        for file_info in files:
+            agent_name = file_info.get('agent_name', 'Unknown')
+            if agent_name not in agent_stats:
+                agent_stats[agent_name] = 0
+            agent_stats[agent_name] += 1
+        
+        # 极简的摘要信息
+        summary = {
+            "session_id": session_id,
+            "total_requests": len(files),
+            "agent_stats": agent_stats,
+            "request_files": [f["filename"] for f in files]
+        }
+        return {"status": "success", "data": summary}
+    except Exception as e:
+        logger.error(f"获取会话LLM摘要失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/sessions/{session_id}/llm-requests")
+async def get_session_llm_requests(session_id: str):
+    """获取会话的所有LLM请求文件列表"""
+    try:
+        from agents.utils.llm_request_logger import get_llm_logger
+        llm_logger = get_llm_logger(session_id)
+        files = llm_logger.list_request_files()
+        return {"status": "success", "data": files}
+    except Exception as e:
+        logger.error(f"获取会话LLM请求列表失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/sessions/{session_id}/llm-requests/{filename}")
+async def get_llm_request_detail(session_id: str, filename: str):
+    """获取特定LLM请求的详细信息
+    
+    Args:
+        session_id: 会话ID
+        filename: 文件名 (例如: PlanningAgent_session_0001_1234567890.json)
+    """
+    try:
+        from agents.utils.llm_request_logger import get_llm_logger
+        from pathlib import Path
+        import json
+        
+        llm_logger = get_llm_logger(session_id)
+        file_path = llm_logger.requests_dir / filename
+        
+        if not file_path.exists():
+            return {"status": "error", "message": f"文件不存在: {filename}"}
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        return {"status": "success", "data": data}
+    except Exception as e:
+        logger.error(f"获取LLM请求详情失败: {e}")
+        return {"status": "error", "message": str(e)}
 
 # 静态文件服务（用于React构建文件）
 static_path = Path(__file__).parent / "static"
