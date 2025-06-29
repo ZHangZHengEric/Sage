@@ -1815,6 +1815,7 @@ class AgentController:
             workspace_dir: 工作空间目录
         """
         try:
+            from agents.utils.llm_request_logger import get_llm_logger
             llm_logger = get_llm_logger(session_id)
             request_files = llm_logger.list_request_files()
             

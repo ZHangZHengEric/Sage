@@ -37,14 +37,14 @@ class PlanningAgent(AgentBase):
 ## 任务管理器状态
 {task_manager_status}
 
-## 已完成动作
+## 近期完成工作
 {completed_actions}
 
 ## 可用工具
 {available_tools_str}
 
 ## 规划规则
-1. 根据我们的当前任务以及已完成动作，为了达到逐步完成任务管理器的未完成子任务或者完整的任务，清晰描述接下来要执行的具体的任务名称。
+1. 根据我们的当前任务以及近期完成工作，为了达到逐步完成任务管理器的未完成子任务或者完整的任务，清晰描述接下来要执行的具体的任务名称。
 2. 确保接下来的任务可执行且可衡量
 3. 优先使用现有工具
 4. 设定明确的成功标准
@@ -441,21 +441,68 @@ class PlanningAgent(AgentBase):
 
     def _extract_completed_actions(self, messages: List[Dict[str, Any]]) -> str:
         """
-        从消息中提取已完成的操作
+        从消息中提取最近完成的工作
         
         Args:
             messages: 消息列表
             
         Returns:
-            str: 已完成操作的字符串
+            str: 最近完成工作的字符串
         """
-        logger.debug(f"PlanningAgent: 处理 {len(messages)} 条消息以提取已完成操作")
+        logger.debug(f"PlanningAgent: 处理 {len(messages)} 条消息以提取最近完成工作")
         
-        completed_actions_messages = self._extract_completed_actions_messages(messages)
-        result = self.convert_messages_to_str(completed_actions_messages)
+        # 使用新的方法提取最近完成工作
+        recent_messages = self._extract_recent_completed_actions(messages)
+        result = self.convert_messages_to_str(recent_messages)
         
-        logger.debug(f"PlanningAgent: 生成已完成操作，长度: {len(result)}")
+        logger.debug(f"PlanningAgent: 生成最近完成工作，长度: {len(result)}")
         return result
+
+    def _extract_recent_completed_actions(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        提取最近一次stage_summary之后的所有消息
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 最近完成工作的消息列表
+        """
+        logger.info(f"PlanningAgent: 从 {len(messages)} 条消息中提取最近完成工作")
+        
+        recent_messages = []
+        found_last_stage_summary = False
+        
+        # 从最新的消息开始向前查找
+        for index, msg in enumerate(reversed(messages)):
+            # 检查是否是stage_summary类型的消息
+            if msg.get('type') == 'stage_summary':
+                
+                # 找到最近一次stage_summary消息，提取该消息之后的所有消息
+                # index是从0开始的，所以len(messages) - index - 1是stage_summary消息的位置
+                # 我们需要从stage_summary消息的下一条消息开始提取
+                start_index = len(messages) - index
+                recent_messages = messages[start_index:]
+                found_last_stage_summary = True
+                logger.info(f"PlanningAgent: 找到最近一次stage_summary消息，提取之后 {len(recent_messages)} 条消息")
+                break
+        
+        # 如果没有找到stage_summary类型的消息，则提取所有消息
+        if not found_last_stage_summary:
+            recent_messages = messages
+            logger.info(f"PlanningAgent: 未找到stage_summary类型消息，提取全部 {len(recent_messages)} 条消息")
+        
+        # 过滤掉task_decomposition类型的消息
+        filtered_messages = []
+        for msg in recent_messages:
+            msg_type = msg.get('type', 'normal')
+            if msg_type != 'task_decomposition':
+                filtered_messages.append(msg)
+            else:
+                logger.debug(f"PlanningAgent: 过滤掉task_decomposition消息")
+        
+        logger.info(f"PlanningAgent: 最终提取 {len(filtered_messages)} 条最近完成工作消息")
+        return filtered_messages
 
     def run(self, 
             messages: List[Dict[str, Any]], 

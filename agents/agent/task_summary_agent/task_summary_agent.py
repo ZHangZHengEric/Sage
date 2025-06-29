@@ -27,22 +27,22 @@ class TaskSummaryAgent(AgentBase):
     """
 
     # 任务总结提示模板常量
-    SUMMARY_PROMPT_TEMPLATE = """根据以下任务和执行历史，用自然语言提供清晰完整的回答。
+    SUMMARY_PROMPT_TEMPLATE = """根据以下任务和TaskManager状态及执行结果，用自然语言提供清晰完整的回答。
 可以使用markdown格式组织内容。
 
 任务: 
 {task_description}
 
-执行历史:
-{completed_actions}
+TaskManager状态及执行结果:
+{task_manager_status_and_results}
 
 你的回答应该:
 1. 直接回答原始任务。
-2. 使用清晰详细的语言，但要保证回答的完整性和准确性，保留执行过程中的关键结果。
-3. 如果原始任务的执行过程中，有保存文件并且上传到云端的操作，那么在回答中也应该包含文件的云端地址引用，方便用户下载。
-4. 不要引用没有出现在执行历史中的文件。
+2. 使用清晰详细的语言，但要保证回答的完整性和准确性，保留任务执行过程中的关键结果。
+3. 如果任务执行过程中生成了文档，那么在回答中应该包含文档的地址引用，方便用户下载。
+4. 对于生成的文档，不仅要提供文档地址，还要提供文档内的关键内容摘要。
 5. 图表直接使用markdown进行显示。
-6. 不是为了总结执行过程，而是以执行过程的信息为基础，生成一个针对用户任务的完美回答。
+6. 不是为了总结执行过程，而是以TaskManager中的任务执行结果为基础，生成一个针对用户任务的完美回答。
 """
 
     # 系统提示模板常量
@@ -118,7 +118,8 @@ class TaskSummaryAgent(AgentBase):
             summary_context = self._prepare_summary_context(
                 messages=messages,
                 session_id=session_id,
-                system_context=system_context
+                system_context=system_context,
+                task_manager=task_manager
             )
             
             # 生成总结提示
@@ -135,7 +136,8 @@ class TaskSummaryAgent(AgentBase):
     def _prepare_summary_context(self, 
                                 messages: List[Dict[str, Any]],
                                 session_id: str,
-                                system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                                system_context: Optional[Dict[str, Any]],
+                                task_manager: Optional[Any] = None) -> Dict[str, Any]:
         """
         准备任务总结所需的上下文信息
         
@@ -143,6 +145,7 @@ class TaskSummaryAgent(AgentBase):
             messages: 对话消息列表
             session_id: 会话ID
             system_context: 运行时系统上下文字典，用于自定义推理时的变化信息
+            task_manager: 任务管理器
             
         Returns:
             Dict[str, Any]: 包含总结所需信息的上下文字典
@@ -153,9 +156,9 @@ class TaskSummaryAgent(AgentBase):
         task_description = self._extract_task_description(messages)
         logger.debug(f"TaskSummaryAgent: 提取任务描述，长度: {len(task_description)}")
         
-        # 提取完成的操作
-        completed_actions = self._extract_completed_actions(messages)
-        logger.debug(f"TaskSummaryAgent: 提取完成操作，长度: {len(completed_actions)}")
+        # 获取TaskManager状态（包含执行结果）
+        task_manager_status_and_results = self._extract_task_manager_status(task_manager)
+        logger.debug(f"TaskSummaryAgent: 提取TaskManager状态及结果，长度: {len(task_manager_status_and_results)}")
         
         # 获取上下文信息
         current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -163,11 +166,12 @@ class TaskSummaryAgent(AgentBase):
         
         summary_context = {
             'task_description': task_description,
-            'completed_actions': completed_actions,
+            'task_manager_status_and_results': task_manager_status_and_results,
             'current_time': current_time,
             'file_workspace': file_workspace,
             'session_id': session_id,
-            'system_context': system_context
+            'system_context': system_context,
+            'task_manager': task_manager
         }
         
         logger.info("TaskSummaryAgent: 任务总结上下文准备完成")
@@ -178,19 +182,17 @@ class TaskSummaryAgent(AgentBase):
         生成任务总结提示
         
         Args:
-            context: 总结上下文信息
+            context: 包含总结所需信息的上下文字典
             
         Returns:
-            str: 格式化后的总结提示
+            str: 格式化的总结提示
         """
-        logger.debug("TaskSummaryAgent: 生成任务总结提示")
-        
         prompt = self.SUMMARY_PROMPT_TEMPLATE.format(
             task_description=context['task_description'],
-            completed_actions=context['completed_actions']
+            task_manager_status_and_results=context['task_manager_status_and_results']
         )
         
-        logger.debug("TaskSummaryAgent: 总结提示生成完成")
+        logger.debug(f"TaskSummaryAgent: 生成总结提示，长度: {len(prompt)}")
         return prompt
 
     def _execute_streaming_summary(self, 
@@ -275,6 +277,137 @@ class TaskSummaryAgent(AgentBase):
         logger.debug(f"TaskSummaryAgent: 生成完成操作，长度: {len(result)}")
         return result
 
+    def _extract_task_manager_status(self, task_manager: Optional[Any]) -> str:
+        """
+        提取TaskManager状态，包括任务执行结果
+        
+        Args:
+            task_manager: 任务管理器实例
+            
+        Returns:
+            str: TaskManager状态的JSON字符串
+        """
+        if not task_manager:
+            return "无TaskManager实例"
+        
+        try:
+            # 获取所有任务的状态
+            all_tasks = task_manager.get_all_tasks()
+            if not all_tasks:
+                return "无任务数据"
+            
+            # 格式化任务状态，包含执行结果
+            status_info = {
+                "total_tasks": len(all_tasks),
+                "tasks": []
+            }
+            
+            # get_all_tasks返回的是List[TaskBase]，直接遍历TaskBase对象
+            for task in all_tasks:
+                task_status = {
+                    "task_id": task.task_id,
+                    "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
+                    "description": task.description,
+                    "result_documents": task.execution_summary.get("result_documents", []) if task.execution_summary else [],
+                    "result_summary": task.execution_summary.get("result_summary", "") if task.execution_summary else "",
+                    "execution_summary": task.execution_summary or {}
+                }
+                
+                # 读取文档内容
+                if task_status["result_documents"]:
+                    task_status["document_contents"] = self._read_document_contents(task_status["result_documents"])
+                
+                status_info["tasks"].append(task_status)
+            
+            return json.dumps(status_info, ensure_ascii=False, indent=2)
+            
+        except Exception as e:
+            logger.error(f"TaskSummaryAgent: 提取TaskManager状态时发生错误: {str(e)}")
+            return f"提取TaskManager状态失败: {str(e)}"
+
+    def _read_document_contents(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        读取文档内容
+        
+        Args:
+            documents: 文档信息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 包含文档内容的列表
+        """
+        import os
+        
+        document_contents = []
+        
+        for doc in documents:
+            doc_path = doc.get("path", "")
+            doc_type = doc.get("type", "")
+            doc_name = doc.get("name", "")
+            
+            doc_content = {
+                "path": doc_path,
+                "type": doc_type,
+                "name": doc_name,
+                "content": ""
+            }
+            
+            # 尝试读取文档内容
+            if doc_path and os.path.exists(doc_path):
+                try:
+                    with open(doc_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        doc_content["content"] = content
+                        logger.debug(f"TaskSummaryAgent: 成功读取文档 {doc_path}")
+                except Exception as e:
+                    logger.warning(f"TaskSummaryAgent: 读取文档 {doc_path} 失败: {str(e)}")
+                    doc_content["content"] = f"文档读取失败: {str(e)}"
+            else:
+                doc_content["content"] = "文档路径不存在"
+            
+            document_contents.append(doc_content)
+        
+        return document_contents
+
+    def _extract_generated_documents(self, task_completion_results: str) -> List[Dict[str, Any]]:
+        """
+        从任务完成结果中提取生成的文档信息
+        
+        Args:
+            task_completion_results: 任务完成结果的JSON字符串
+            
+        Returns:
+            List[Dict[str, Any]]: 生成的文档信息列表
+        """
+        try:
+            if not task_completion_results or task_completion_results == "无TaskManager实例" or task_completion_results == "无任务数据":
+                return []
+            
+            results_data = json.loads(task_completion_results)
+            generated_docs = []
+            
+            # 从已完成任务中提取文档
+            for task in results_data.get("completed_tasks", []):
+                task_id = task.get("task_id", "")
+                result_docs = task.get("result_documents", [])
+                result_summary = task.get("result_summary", "")
+                
+                for doc in result_docs:
+                    doc_info = {
+                        "task_id": task_id,
+                        "document_path": doc.get("path", ""),
+                        "document_type": doc.get("type", ""),
+                        "document_name": doc.get("name", ""),
+                        "task_summary": result_summary
+                    }
+                    generated_docs.append(doc_info)
+            
+            logger.debug(f"TaskSummaryAgent: 提取到 {len(generated_docs)} 个生成文档")
+            return generated_docs
+            
+        except Exception as e:
+            logger.error(f"TaskSummaryAgent: 提取生成文档时发生错误: {str(e)}")
+            return []
+
     def run(self, 
             messages: List[Dict[str, Any]], 
             tool_manager: Optional[Any] = None,
@@ -301,4 +434,3 @@ class TaskSummaryAgent(AgentBase):
             session_id=session_id,
             system_context=system_context
         )
-        

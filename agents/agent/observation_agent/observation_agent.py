@@ -30,7 +30,7 @@ class ObservationAgent(AgentBase):
     # 分析提示模板常量
     ANALYSIS_PROMPT_TEMPLATE = """# 任务执行分析指南
 
-## 当前任务
+## 当前用户任务
 {task_description}
 
 ## 任务管理器状态（未更新的状态，需要本次分析去更新）
@@ -49,11 +49,11 @@ class ObservationAgent(AgentBase):
 3. 评估任务整体完成百分比，范围0-100
 4. 根据近期完成动作详情，判断哪些任务已经完成，不要仅仅依赖任务管理器状态
 
-## 任务完成判断规则
-1. **基于执行结果判断**：仔细分析近期完成动作详情，如果某个任务的核心要求已经通过执行动作完成，即使任务管理器状态显示为pending，也应该标记为已完成
-2. **任务内容匹配**：将执行结果与任务描述进行匹配，如果执行结果已经覆盖了任务的核心要求，则认为任务完成
-3. **数据完整性**：如果任务要求收集特定信息，且执行结果显示已经收集到这些信息，则认为任务完成
-4. **不要过度保守**：如果执行结果显示已经完成了任务的核心目标，不要因为任务管理器状态而犹豫标记为完成
+## 子任务完成判断规则
+1. **基于执行结果判断**：仔细分析近期完成动作详情，如果某个子任务的核心要求已经通过执行动作完成，即使任务管理器状态显示为pending，也应该标记为已完成
+2. **子任务内容匹配**：将执行结果与子任务描述进行匹配，如果执行结果已经覆盖了子任务的核心要求，则认为子任务完成
+3. **数据完整性**：如果子任务要求收集特定信息，且执行结果显示已经收集到这些信息，则认为子任务完成
+4. **不要过度保守**：如果执行结果显示已经完成了子任务的核心目标，不要因为任务管理器状态而犹豫标记为完成
 
 ## 特殊规则
 1. 上一步完成了数据搜索，后续还需要对搜索结果进行进一步的理解和处理，不能认为是任务完成
@@ -61,6 +61,7 @@ class ObservationAgent(AgentBase):
 3. 只输出以下格式的XML，不要输出其他内容，不要输出```
 4. 任务状态更新基于实际执行结果，不要随意标记为完成
 5. 尽可能减少用户输入，不要打扰用户，按照你对事情的完整理解，尽可能全面的完成事情
+6. 针对确定了无法完成的子任务，不要再次尝试
 
 ## 输出格式
 ```
@@ -74,13 +75,13 @@ class ObservationAgent(AgentBase):
 分析近期完成动作详情的执行情况进行总结，指导接下来的方向要详细一些，一段话不要有换行
 </analysis>
 <completed_task_ids>
-已完成的任务ID列表，格式：["1", "2"]，通过近期完成动作详情以及任务管理器状态，判定已完成的任务ID列表
+已完成的子任务ID列表，格式：["1", "2"]，通过近期完成动作详情以及任务管理器状态，判定已完成的子任务ID列表
 </completed_task_ids>
 <pending_task_ids>
-未完成的任务ID列表，格式：["3", "4"]，通过近期完成动作详情以及任务管理器状态，判定未完成的任务ID列表
+未完成的子任务ID列表，格式：["3", "4"]，通过近期完成动作详情以及任务管理器状态，判定未完成的子任务ID列表
 </pending_task_ids>
 <failed_task_ids>
-无法完成的任务ID列表，格式：["5"]，通过近期完成动作详情以及任务管理器状态，判定无法完成的任务ID列表
+无法完成的子任务ID列表，格式：["5"]，通过近期完成动作详情以及任务管理器状态，经过3次尝试执行后，判定无法完成的子任务ID列表
 </failed_task_ids>
 ```"""
 
@@ -636,7 +637,7 @@ class ObservationAgent(AgentBase):
 
     def _extract_recent_execution_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        提取上一次ObservationAgent执行之后的所有消息
+        提取上一次ObservationAgent执行之后的所有消息（包括ObservationAgent消息本身）
         
         Args:
             messages: 消息列表
@@ -652,14 +653,15 @@ class ObservationAgent(AgentBase):
         # 从最新的消息开始向前查找
         for index, msg in enumerate(reversed(messages)):
             # 检查是否是ObservationAgent的消息
-            if msg.get('type') == 'observation_result' :
+            if msg.get('type') == 'observation_result':
                 
-                # 找到上一次ObservationAgent的消息，提取之后的所有消息
+                # 找到上一次ObservationAgent的消息，提取该消息及之后的所有消息
                 # index是从0开始的，所以len(messages) - index - 1是ObservationAgent消息的位置
-                # 我们需要从ObservationAgent消息的下一条消息开始提取
-                recent_messages = messages[-index:]
+                # 我们需要包含ObservationAgent消息本身
+                start_index = len(messages) - index - 1
+                recent_messages = messages[start_index:]
                 found_last_observation = True
-                logger.info(f"ObservationAgent: 找到上一次ObservationAgent消息，提取之后 {len(recent_messages)} 条消息")
+                logger.info(f"ObservationAgent: 找到上一次ObservationAgent消息，提取该消息及之后 {len(recent_messages)} 条消息")
                 break
         
         # 如果没有找到上一次ObservationAgent的消息，则提取所有消息
