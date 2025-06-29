@@ -262,8 +262,11 @@ class ExecutorAgent(AgentBase):
             system_context=execution_context.get('system_context')
         )
         
+        # 使用新的方法提取最近消息
+        recent_messages = self._extract_recent_messages(messages)
+        
         # 深拷贝消息
-        messages_input = deepcopy(messages)
+        messages_input = deepcopy(recent_messages)
         messages_input = [system_message] + messages_input
         
         # 添加任务执行提示
@@ -905,3 +908,58 @@ class ExecutorAgent(AgentBase):
         except Exception as e:
             logger.warning(f"ExecutorAgent: 格式化工具参数时发生错误: {str(e)}")
             return "📝 **参数**: 解析失败"
+
+    def _extract_recent_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        提取最近一次stage_summary之后的所有消息，并保留user消息
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 最近消息列表
+        """
+        logger.info(f"ExecutorAgent: 从 {len(messages)} 条消息中提取最近消息")
+        
+        recent_messages = []
+        found_last_stage_summary = False
+        
+        # 从最新的消息开始向前查找
+        for index, msg in enumerate(reversed(messages)):
+            # 检查是否是stage_summary类型的消息
+            if msg.get('type') == 'stage_summary':
+                
+                # 找到最近一次stage_summary消息，提取该消息之后的所有消息
+                # index是从0开始的，所以len(messages) - index - 1是stage_summary消息的位置
+                # 我们需要从stage_summary消息的下一条消息开始提取
+                start_index = len(messages) - index
+                recent_messages = messages[start_index:]
+                found_last_stage_summary = True
+                logger.info(f"ExecutorAgent: 找到最近一次stage_summary消息，提取之后 {len(recent_messages)} 条消息")
+                break
+        
+        # 如果没有找到stage_summary类型的消息，则提取所有消息
+        if not found_last_stage_summary:
+            recent_messages = messages
+            logger.info(f"ExecutorAgent: 未找到stage_summary类型消息，提取全部 {len(recent_messages)} 条消息")
+        
+        # 确保包含user消息
+        user_messages = [msg for msg in messages if msg.get('role') == 'user']
+        if user_messages:
+            # 将user消息添加到recent_messages的开头，避免重复
+            for user_msg in user_messages:
+                if user_msg not in recent_messages:
+                    recent_messages.insert(0, user_msg)
+            logger.info(f"ExecutorAgent: 添加了 {len(user_messages)} 条user消息")
+        
+        # 过滤掉task_decomposition类型的消息
+        filtered_messages = []
+        for msg in recent_messages:
+            msg_type = msg.get('type', 'normal')
+            if msg_type != 'task_decomposition':
+                filtered_messages.append(msg)
+            else:
+                logger.debug(f"ExecutorAgent: 过滤掉task_decomposition消息")
+        
+        logger.info(f"ExecutorAgent: 最终提取 {len(filtered_messages)} 条最近消息")
+        return filtered_messages
