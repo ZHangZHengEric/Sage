@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   sage_backend:
     build:
@@ -10,21 +8,21 @@ services:
       - "20039:8000"  # API服务端口
     volumes:
       - /tmp/sage:/tmp/sage
-      - ./workspace:/app/workspace  # 工作空间映射
+      - /srv/sage_demo_workspace:/app/workspace  # 工作空间映射
       - ./logs:/app/logs            # 日志映射
     environment:
       - PYTHONUNBUFFERED=1
       - WORKSPACE_ROOT=/app/workspace
       - DOCKER_ENV=true
       - SAGE_CONFIG_FILE=/app/examples/fastapi_react_demo/backend/config.yaml
-      # MinIO环境变量
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=sage
-      - MINIO_SECRET_KEY=sage123456
-      - MINIO_BUCKET=workspace
+      # AList 环境变量
+      - ALIST_ENDPOINT=sage_alist:5244
+      - ALIST_USERNAME=admin
+      - ALIST_PASSWORD=sage123456
+      - WORKSPACE_PATH=/app/workspace
     depends_on:
-      minio:
-        condition: service_healthy
+      sage_alist:
+        condition: service_started
     restart: unless-stopped
 
   sage_frontend:
@@ -42,27 +40,32 @@ services:
       - sage_backend
     restart: unless-stopped
 
-  # MinIO对象存储服务
-  minio:
-    image: minio/minio:latest
-    container_name: sage_minio
+  # AList 文件服务
+  sage_alist:
+    image: docker.m.daocloud.io/xhofe/alist:latest
+    container_name: sage_alist
     ports:
-      - "20044:9000"      # MinIO API端点
-      - "20045:9001"      # MinIO控制台端口
+      - "20045:5244"      # AList Web 界面端口
     volumes:
-      # 关键改动：workspace目录作为MinIO的主要数据源
-      # MinIO将workspace目录作为一个bucket直接暴露
-      - ./workspace:/data/workspace  # 本地workspace映射为MinIO的workspace bucket
-      - ./minio-data:/data/.minio    # MinIO元数据和配置
+      - /srv/sage_demo_workspace:/opt/alist/data/workspace  # 工作空间直接映射
+      - ./alist-data:/opt/alist/data    # AList 配置和数据
     environment:
-      - MINIO_ROOT_USER=sage
-      - MINIO_ROOT_PASSWORD=sage123456
-      - MINIO_DOMAIN=localhost
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 5
-      start_period: 30s
+      - PUID=0
+      - PGID=0
+      - UMASK=022
     restart: unless-stopped
+    command: |
+      sh -c "
+        # 确保数据目录存在
+        mkdir -p /opt/alist/data
+        
+        # 首次启动设置密码（检查数据库是否存在）
+        if [ ! -f /opt/alist/data/data.db ]; then
+          echo '设置管理员密码...'
+          /opt/alist/alist admin set sage123456 --data /opt/alist/data
+        fi
+        
+        # 启动AList服务
+        echo '启动AList服务...'
+        /opt/alist/alist server --data /opt/alist/data
+      "

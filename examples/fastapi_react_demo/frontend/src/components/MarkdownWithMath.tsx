@@ -121,7 +121,7 @@ const MarkdownWithMath: React.FC<MarkdownWithMathProps> = ({ children, className
                     </SyntaxHighlighter>
                   );
                 },
-                p: ({ children }) => <span>{children}</span>
+                p: ({ children }) => <p style={{ margin: '8px 0', lineHeight: '1.6' }}>{children}</p>
               }}
             >
               {beforeMatch}
@@ -188,7 +188,7 @@ const MarkdownWithMath: React.FC<MarkdownWithMathProps> = ({ children, className
                   </SyntaxHighlighter>
                 );
               },
-              p: ({ children }) => <span>{children}</span>
+              p: ({ children }) => <p style={{ margin: '8px 0', lineHeight: '1.6' }}>{children}</p>
             }}
           >
             {remainingText}

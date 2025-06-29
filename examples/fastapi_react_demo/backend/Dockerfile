@@ -7,7 +7,10 @@ RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 WORKDIR /app/examples/fastapi_react_demo/backend
 
+# 给启动脚本添加执行权限
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+CMD ["./start.sh"]
 

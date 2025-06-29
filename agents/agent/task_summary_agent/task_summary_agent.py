@@ -92,7 +92,7 @@ class TaskSummaryAgent(AgentBase):
             self._execute_summary_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
         ):
             # Agent自己负责将生成的消息添加到MessageManager
-            message_manager.add_messages(chunk_batch)
+            message_manager.add_messages(chunk_batch, agent_name="TaskSummaryAgent")
             yield chunk_batch
 
     def _execute_summary_stream_internal(self, 
@@ -214,12 +214,13 @@ class TaskSummaryAgent(AgentBase):
             system_context=summary_context.get('system_context')
         )
         
-        # 使用基类的流式处理和token跟踪
+        # 使用基类的流式处理和token跟踪，传递session_id参数
         yield from self._execute_streaming_with_token_tracking(
             prompt=prompt,
             step_name="task_summary",
             system_message=system_message,
-            message_type='final_answer'
+            message_type='final_answer',
+            session_id=summary_context.get('session_id')
         )
 
     def _handle_summary_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:

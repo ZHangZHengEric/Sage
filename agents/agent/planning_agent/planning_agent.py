@@ -31,8 +31,11 @@ class PlanningAgent(AgentBase):
     # 任务规划提示模板常量
     PLANNING_PROMPT_TEMPLATE = """# 任务规划指南
 
-## 当前任务
+## 完整任务描述
 {task_description}
+
+## 任务管理器状态
+{task_manager_status}
 
 ## 已完成动作
 {completed_actions}
@@ -41,14 +44,13 @@ class PlanningAgent(AgentBase):
 {available_tools_str}
 
 ## 规划规则
-1. 将复杂任务分解为清晰的接下来要执行的第一个子任务
-2. 确保子任务可执行且可衡量
-3. 考虑子任务之间的依赖关系
-4. 优先使用现有工具
-5. 设定明确的成功标准
-6. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
-7. description中不要包含工具的真实名称
-8. required_tools至少包含5个可能需要的工具的名称，最多10个。
+1. 根据我们的当前任务以及已完成动作，为了达到逐步完成任务管理器的未完成子任务或者完整的任务，清晰描述接下来要执行的具体的任务名称。
+2. 确保接下来的任务可执行且可衡量
+3. 优先使用现有工具
+4. 设定明确的成功标准
+5. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
+6. description中不要包含工具的真实名称
+7. required_tools至少包含5个可能需要的工具的名称，最多10个。
 
 ## 输出格式
 ```
@@ -115,7 +117,7 @@ class PlanningAgent(AgentBase):
             self._execute_planning_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
         ):
             # Agent自己负责将生成的消息添加到MessageManager
-            message_manager.add_messages(chunk_batch)
+            message_manager.add_messages(chunk_batch, agent_name="PlanningAgent")
             yield chunk_batch
     def _execute_planning_stream_internal(self, 
                                         messages: List[Dict[str, Any]], 
@@ -141,7 +143,8 @@ class PlanningAgent(AgentBase):
                 messages=messages,
                 tool_manager=tool_manager,
                 session_id=session_id,
-                system_context=system_context
+                system_context=system_context,
+                task_manager=task_manager
             )
             
             # 生成规划提示
@@ -159,7 +162,8 @@ class PlanningAgent(AgentBase):
                                 messages: List[Dict[str, Any]],
                                 tool_manager: Optional[Any],
                                 session_id: str,
-                                system_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                                system_context: Optional[Dict[str, Any]],
+                                task_manager: Optional[Any] = None) -> Dict[str, Any]:
         """
         准备任务规划所需的上下文信息
         
@@ -185,7 +189,12 @@ class PlanningAgent(AgentBase):
         # 获取可用工具
         available_tools = tool_manager.list_tools_simplified() if tool_manager else []
         logger.debug(f"PlanningAgent: 可用工具数量: {len(available_tools)}")
-        available_tools_str = json.dumps(available_tools, ensure_ascii=False, indent=2) if available_tools else '无可用工具'
+        # 只取工具的名称
+        available_tools_str = json.dumps([tool['name'] for tool in available_tools], ensure_ascii=False, indent=2) if available_tools else '无可用工具'
+        
+        # 获取任务管理器状态
+        task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
+        logger.debug(f"PlanningAgent: 任务管理器状态: {task_manager_status}")
         
         # 获取上下文信息
         current_time = system_context.get('current_datatime_str', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) if system_context else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -196,6 +205,7 @@ class PlanningAgent(AgentBase):
         planning_context = {
             'task_description': task_description,
             'completed_actions': completed_actions,
+            'task_manager_status': task_manager_status,
             'available_tools_str': available_tools_str,
             'current_time': current_time,
             'file_workspace': file_workspace,
@@ -221,7 +231,8 @@ class PlanningAgent(AgentBase):
         prompt = self.PLANNING_PROMPT_TEMPLATE.format(
             task_description=context['task_description'],
             completed_actions=context['completed_actions'],
-            available_tools_str=context['available_tools_str']
+            available_tools_str=context['available_tools_str'],
+            task_manager_status=context['task_manager_status']
         )
         
         logger.debug("PlanningAgent: 规划提示生成完成")
@@ -249,21 +260,20 @@ class PlanningAgent(AgentBase):
         # 生成规划提示
         prompt = self._generate_planning_prompt(planning_context)
         
-        # 使用基类的流式处理和token跟踪
+        # 准备消息
+        messages = [system_message, {"role": "user", "content": prompt}]
+        
+        # 执行流式处理
         message_id = str(uuid.uuid4())
         chunk_count = 0
-        all_content = ""
-        
-        # 收集流式响应内容
         start_time = time.time()
+        all_content = ""
+        unknown_content = ""
+        last_tag_type = None
+        
+        # 收集所有chunks以便跟踪token使用
         chunks = []
-        
-        # 状态管理
-        unknown_content = ''
-        last_tag_type = 'tag'
-        
-        messages = [system_message, {"role": "user", "content": prompt}]
-        for chunk in self._call_llm_streaming(messages):
+        for chunk in self._call_llm_streaming(messages, session_id=planning_context.get('session_id'), step_name="planning"):
             chunks.append(chunk)
             if len(chunk.choices) == 0:
                 continue
@@ -276,7 +286,7 @@ class PlanningAgent(AgentBase):
                     tag_type = self._judge_delta_content_type(delta_content_all, all_content, ['next_step_description','required_tools','expected_output','success_criteria'])
                     all_content += delta_content_char
                     chunk_count += 1
-                    # print(f'delta_content: {delta_content}, tag_type: {tag_type}')
+                    
                     if tag_type == 'unknown':
                         unknown_content = delta_content_all
                         continue
@@ -299,13 +309,16 @@ class PlanningAgent(AgentBase):
                             )
                         last_tag_type = tag_type
         
-        # 跟踪token使用
+        # 跟踪token使用情况
         self._track_streaming_token_usage(chunks, "planning", start_time)
         
         logger.info(f"PlanningAgent: 流式规划完成，共生成 {chunk_count} 个文本块")
         
-        # 处理最终结果
-        yield from self._finalize_planning_result(all_content, message_id)
+        # 调用finalize方法处理最终结果
+        yield from self._finalize_planning_result(
+            all_content=all_content, 
+            message_id=message_id
+        )
 
     def _finalize_planning_result(self, 
                                 all_content: str, 

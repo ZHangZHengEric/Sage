@@ -35,7 +35,9 @@ class TaskBase:
                  start_time: Optional[str] = None,
                  end_time: Optional[str] = None,
                  assigned_to: Optional[str] = None,
-                 execution_details: Optional[Dict[str, Any]] = None):
+                 execution_details: Optional[Dict[str, Any]] = None,
+                 execution_summary: Optional[Dict[str, Any]] = None,
+                 summary_generated_at: Optional[str] = None):
         """
         初始化任务对象
         
@@ -54,6 +56,8 @@ class TaskBase:
             end_time: 完成时间
             assigned_to: 负责执行的Agent名称
             execution_details: 执行详情，包含工具调用、文件输出等
+            execution_summary: 任务执行总结
+            summary_generated_at: 总结生成时间
         """
         # 基础字段
         self.task_id = task_id or str(uuid.uuid4())
@@ -110,6 +114,13 @@ class TaskBase:
             'execution_log': [],       # 详细执行日志
             'metrics': {}              # 执行指标(耗时、token使用等)
         }
+        
+        # 执行总结字段
+        self.execution_summary = execution_summary or {
+            'result_documents': [],     # 执行过程中生成的文档路径列表
+            'result_summary': ''        # 详细的任务执行结果总结文字
+        }
+        self.summary_generated_at = summary_generated_at
 
     def start_execution(self, assigned_to: str = None) -> None:
         """开始执行任务"""
@@ -213,7 +224,9 @@ class TaskBase:
             'start_time': self.start_time,
             'end_time': self.end_time,
             'assigned_to': self.assigned_to,
-            'execution_details': self.execution_details
+            'execution_details': self.execution_details,
+            'execution_summary': self.execution_summary,
+            'summary_generated_at': self.summary_generated_at
         }
 
     def to_summary_dict(self) -> Dict[str, Any]:
@@ -236,6 +249,17 @@ class TaskBase:
                 'duration': self.get_execution_duration()
             }
         
+        # 添加执行总结信息
+        if self.execution_summary:
+            if isinstance(self.execution_summary, dict):
+                summary['has_execution_summary'] = bool(self.execution_summary.get('result_summary', '').strip())
+                summary['result_documents_count'] = len(self.execution_summary.get('result_documents', []))
+                summary['summary_generated_at'] = self.summary_generated_at
+            else:
+                summary['has_execution_summary'] = bool(str(self.execution_summary).strip())
+        else:
+            summary['has_execution_summary'] = False
+        
         return summary
 
     @classmethod
@@ -255,7 +279,9 @@ class TaskBase:
             start_time=data.get('start_time'),
             end_time=data.get('end_time'),
             assigned_to=data.get('assigned_to'),
-            execution_details=data.get('execution_details')
+            execution_details=data.get('execution_details'),
+            execution_summary=data.get('execution_summary'),
+            summary_generated_at=data.get('summary_generated_at')
         )
 
     def __repr__(self) -> str:

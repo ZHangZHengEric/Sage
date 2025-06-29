@@ -93,12 +93,13 @@ class MessageManager:
         
         logger.info(f"MessageManager: 初始化完成，会话ID: {self.session_id}")
     
-    def add_messages(self, messages: Union[Dict[str, Any], List[Dict[str, Any]]]) -> bool:
+    def add_messages(self, messages: Union[Dict[str, Any], List[Dict[str, Any]]], agent_name: Optional[str] = None) -> bool:
         """
         添加消息（支持单个消息或消息列表，直接合并chunk到existing message）
         
         Args:
             messages: 消息数据（单个消息字典或消息列表）
+            agent_name: 添加消息的agent名称，用于追踪消息来源
             
         Returns:
             bool: 是否添加成功
@@ -139,8 +140,12 @@ class MessageManager:
                         if key not in ['content', 'show_content', 'message_id']:
                             existing_message[key] = value
                     
+                    # 如果提供了agent_name，更新或添加agent信息
+                    if agent_name:
+                        existing_message['agent_name'] = agent_name
+                    
                     existing_message['updated_at'] = datetime.datetime.now().isoformat()
-                    logger.debug(f"MessageManager: 合并chunk到现有消息 {message_id[:8]}...")
+                    logger.debug(f"MessageManager: 合并chunk到现有消息 {message_id[:8]}... (Agent: {agent_name})")
                     
                 else:
                     # 没有找到现有消息，创建新消息
@@ -148,9 +153,13 @@ class MessageManager:
                     msg_data['timestamp'] = msg_data.get('timestamp') or datetime.datetime.now().isoformat()
                     msg_data['is_chunk'] = False
                     
+                    # 如果提供了agent_name，添加到消息中
+                    if agent_name:
+                        msg_data['agent_name'] = agent_name
+                    
                     self.messages.append(msg_data)
                     self.stats['total_messages'] += 1
-                    logger.debug(f"MessageManager: 创建新消息 {message_id[:8]}...")
+                    logger.debug(f"MessageManager: 创建新消息 {message_id[:8]}... (Agent: {agent_name})")
                 
                 self.stats['total_chunks'] += 1
                 
@@ -161,10 +170,14 @@ class MessageManager:
                 msg_data['timestamp'] = msg_data.get('timestamp') or datetime.datetime.now().isoformat()
                 msg_data['is_chunk'] = False
                 
+                # 如果提供了agent_name，添加到消息中
+                if agent_name:
+                    msg_data['agent_name'] = agent_name
+                
                 self.messages.append(msg_data)
                 self.stats['total_messages'] += 1
                 
-                logger.debug(f"MessageManager: 添加独立消息，ID: {msg_data['message_id'][:8]}...")
+                logger.debug(f"MessageManager: 添加独立消息，ID: {msg_data['message_id'][:8]}... (Agent: {agent_name})")
             
             success_count += 1
             self.stats['last_updated'] = datetime.datetime.now().isoformat()
@@ -288,145 +301,44 @@ class MessageManager:
     
     def _filter_for_task_decompose_agent(self) -> List[Dict[str, Any]]:
         """TaskDecomposeAgent的消息过滤策略"""
-        # 任务分解主要需要用户输入和任务描述
-        important_messages = []
-        
-        for msg in self.messages:
-            role = msg.get('role', '')
-            msg_type = msg.get('type', '')
-            
-            # 保留用户消息和任务相关消息
-            if role == 'user':
-                important_messages.append(msg)
-            elif msg_type in ['task_analysis', 'error', 'final_answer']:
-                important_messages.append(msg)
-            # 保留最近几条assistant消息用于上下文
-            elif role == 'assistant' and len(important_messages) < 15:
-                important_messages.append(msg)
-        
-        # 限制消息数量
-        if len(important_messages) > 12:
-            important_messages = important_messages[-12:]
-        
-        logger.debug(f"MessageManager: TaskDecomposeAgent过滤完成，保留 {len(important_messages)} 条消息")
-        return important_messages
+        # 临时取消过滤，返回所有消息用于调试
+        logger.debug(f"MessageManager: TaskDecomposeAgent临时取消过滤，返回所有 {len(self.messages)} 条消息")
+        return self.messages.copy()
     
     def _filter_for_planning_agent(self) -> List[Dict[str, Any]]:
         """PlanningAgent的消息过滤策略"""
-        # 规划需要任务分解结果和执行状态
-        important_messages = []
-        
-        for msg in self.messages:
-            role = msg.get('role', '')
-            msg_type = msg.get('type', '')
-            
-            if role == 'user':
-                important_messages.append(msg)
-            elif msg_type in ['task_decomposition', 'execution', 'observation', 'error']:
-                important_messages.append(msg)
-            elif role == 'assistant' and len(important_messages) < 20:
-                important_messages.append(msg)
-            elif role == 'tool':
-                important_messages.append(msg)
-        
-        if len(important_messages) > 15:
-            important_messages = important_messages[-15:]
-        
-        logger.debug(f"MessageManager: PlanningAgent过滤完成，保留 {len(important_messages)} 条消息")
-        return important_messages
+        # 临时取消过滤，返回所有消息用于调试
+        logger.debug(f"MessageManager: PlanningAgent临时取消过滤，返回所有 {len(self.messages)} 条消息")
+        return self.messages.copy()
     
     def _filter_for_executor_agent(self) -> List[Dict[str, Any]]:
         """ExecutorAgent的消息过滤策略"""
-        # 执行需要规划结果和当前状态
-        important_messages = []
-        
-        for msg in self.messages:
-            role = msg.get('role', '')
-            msg_type = msg.get('type', '')
-            
-            if role == 'user':
-                important_messages.append(msg)
-            elif msg_type in ['planning', 'task_decomposition', 'tool_call', 'tool_response', 'error']:
-                important_messages.append(msg)
-            elif role == 'assistant' and len(important_messages) < 25:
-                important_messages.append(msg)
-            elif role == 'tool':
-                important_messages.append(msg)
-        
-        if len(important_messages) > 20:
-            important_messages = important_messages[-20:]
-        
-        logger.debug(f"MessageManager: ExecutorAgent过滤完成，保留 {len(important_messages)} 条消息")
-        return important_messages
+        # 临时取消过滤，返回所有消息用于调试
+        logger.debug(f"MessageManager: ExecutorAgent临时取消过滤，返回所有 {len(self.messages)} 条消息")
+        return self.messages.copy()
     
     def _filter_for_observation_agent(self) -> List[Dict[str, Any]]:
         """ObservationAgent的消息过滤策略"""
-        # 观察需要执行结果和状态变化
-        important_messages = []
-        
-        for msg in self.messages:
-            role = msg.get('role', '')
-            msg_type = msg.get('type', '')
-            
-            if role == 'user':
-                important_messages.append(msg)
-            elif msg_type in ['execution', 'tool_response', 'error', 'planning']:
-                important_messages.append(msg)
-            elif role == 'assistant' and len(important_messages) < 18:
-                important_messages.append(msg)
-            elif role == 'tool':
-                important_messages.append(msg)
-        if len(important_messages) > 15:
-            important_messages = important_messages[-15:]
-        
-        logger.debug(f"MessageManager: ObservationAgent过滤完成，保留 {len(important_messages)} 条消息")
-        return important_messages
+        # 临时取消过滤，返回所有消息用于调试
+        logger.debug(f"MessageManager: ObservationAgent临时取消过滤，返回所有 {len(self.messages)} 条消息")
+        return self.messages.copy()
     
     def _filter_for_task_summary_agent(self) -> List[Dict[str, Any]]:
-        """TaskSummaryAgent的消息过滤策略"""
-        # 总结需要完整的执行过程
-        important_messages = []
-        
-        for msg in self.messages:
-            role = msg.get('role', '')
-            msg_type = msg.get('type', '')
-            
-            if role == 'user':
-                important_messages.append(msg)
-            elif msg_type in ['task_decomposition', 'execution', 'observation', 'final_answer', 'error']:
-                important_messages.append(msg)
-            elif role == 'assistant' and len(important_messages) < 30:
-                important_messages.append(msg)
-            elif role == 'tool':
-                important_messages.append(msg)
-        if len(important_messages) > 25:
-            important_messages = important_messages[-25:]
-        
-        logger.debug(f"MessageManager: TaskSummaryAgent过滤完成，保留 {len(important_messages)} 条消息")
-        return important_messages
+        """TaskSummaryAgent的消息过滤策"""
+        # 临时取消过滤，返回所有消息用于调试
+        logger.debug(f"MessageManager: TaskSummaryAgent临时取消过滤，返回所有 {len(self.messages)} 条消息")
+        return self.messages.copy()
     
     def _filter_for_task_analysis_agent(self) -> List[Dict[str, Any]]:
-        """TaskAnalysisAgent的消息过滤策略"""
-        # 任务分析主要需要用户输入
-        important_messages = []
-        
+        """TaskAnalysisAgent的消息过滤策略
+只保留message 中的user 以及 type 为 final_answer 的消息
+        """
+        filtered_messages = []
         for msg in self.messages:
-            role = msg.get('role', '')
-            msg_type = msg.get('type', '')
-            
-            if role == 'user':
-                important_messages.append(msg)
-            elif msg_type in ['error', 'summary']:
-                important_messages.append(msg)
-            elif role == 'assistant' and len(important_messages) < 10:
-                important_messages.append(msg)
-            elif role == 'tool':
-                important_messages.append(msg)
-        if len(important_messages) > 8:
-            important_messages = important_messages[-8:]
-        
-        logger.debug(f"MessageManager: TaskAnalysisAgent过滤完成，保留 {len(important_messages)} 条消息")
-        return important_messages
+            if msg.get('role') == 'user' or msg.get('type') == 'final_answer':
+                filtered_messages.append(msg)
+        logger.info(f"MessageManager: TaskAnalysisAgent过滤完成，保留 {len(filtered_messages)} 条消息")
+        return filtered_messages
     
     def _filter_default_strategy(self) -> List[Dict[str, Any]]:
         """默认消息过滤策略"""
@@ -759,3 +671,25 @@ class MessageManager:
             'messages': deepcopy(self.messages),
             'stats': deepcopy(self.stats)
         }
+
+    def get_latest_messages_by_agent(self, agent_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        获取特定agent的最新消息
+        
+        Args:
+            agent_name: agent名称
+            limit: 返回消息数量限制
+            
+        Returns:
+            List[Dict[str, Any]]: 该agent的最新消息列表
+        """
+        # 筛选出指定agent的消息
+        agent_messages = []
+        for msg in self.messages:
+            if msg.get('agent_name') == agent_name:
+                agent_messages.append(msg)
+        
+        # 按时间戳排序，取最新的limit条
+        agent_messages.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        return agent_messages[:limit]

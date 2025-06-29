@@ -15,6 +15,7 @@ import uuid
 import time
 from agents.utils.logger import logger
 from agents.tool.tool_base import AgentToolSpec
+from agents.utils.llm_request_logger import get_llm_logger
 import traceback
 
 
@@ -111,7 +112,8 @@ class AgentBase(ABC):
             }
             self.token_stats['step_details'].append(step_detail)
             
-            logger.info(f"{self.__class__.__name__}: {step_name} - 输入:{input_tokens}, 输出:{output_tokens}, 缓存:{cached_tokens}, 推理:{reasoning_tokens}, 总计:{total_tokens} tokens, 耗时:{execution_time:.2f}s")
+            # 简化日志输出，只显示关键信息
+            logger.debug(f"{self.__class__.__name__}: {step_name} - tokens: {total_tokens}, 耗时: {execution_time:.2f}s")
     
     def _track_streaming_token_usage(self, chunks, step_name: str, start_time: float = None):
         """
@@ -122,19 +124,14 @@ class AgentBase(ABC):
             step_name: 步骤名称
             start_time: 开始时间戳
         """
-        # 记录调试信息
-        logger.debug(f"{self.__class__.__name__}: 开始跟踪流式token使用，收到 {len(chunks)} 个chunks")
-        
         # 对于流式响应，只使用最后一个包含usage信息的chunk，避免重复统计
         final_usage_chunk = None
         for chunk in reversed(chunks):  # 从后往前找，使用最后的usage信息
             if hasattr(chunk, 'usage') and chunk.usage:
                 final_usage_chunk = chunk
-                logger.debug(f"{self.__class__.__name__}: 找到最终usage信息")
                 break
         
         if final_usage_chunk:
-            logger.debug(f"{self.__class__.__name__}: 使用最终chunk中的usage信息进行token跟踪")
             self._track_token_usage(final_usage_chunk, step_name, start_time)
         else:
             # 如果没有usage信息，记录一个空调用但计算execution_time
@@ -153,7 +150,7 @@ class AgentBase(ABC):
                 'note': f'No usage info in {len(chunks)} chunks'
             }
             self.token_stats['step_details'].append(step_detail)
-            logger.warning(f"{self.__class__.__name__}: {step_name} - 无法从 {len(chunks)} 个chunks中获取token使用信息，耗时:{execution_time:.2f}s")
+            logger.debug(f"{self.__class__.__name__}: {step_name} - 无usage信息，耗时: {execution_time:.2f}s")
     
     def get_token_stats(self) -> Dict[str, Any]:
         """
@@ -180,57 +177,116 @@ class AgentBase(ABC):
         logger.debug(f"{self.__class__.__name__}: Token统计已重置")
     
     def print_token_stats(self):
-        """打印当前agent的token使用统计"""
+        """打印当前agent的token使用统计（简化版本）"""
         stats = self.get_token_stats()
-        print(f"\n🤖 {stats['agent_name']} Token使用统计:")
-        print(f"  📞 调用次数: {stats['total_calls']}")
-        print(f"  📥 输入tokens: {stats['total_input_tokens']}")
-        print(f"  📤 输出tokens: {stats['total_output_tokens']}")
-        print(f"  🏃 缓存tokens: {stats['total_cached_tokens']}")
-        print(f"  🧠 推理tokens: {stats['total_reasoning_tokens']}")
-        print(f"  🔢 总计tokens: {stats['total_input_tokens'] + stats['total_output_tokens']}")
-        
-        if stats['step_details']:
-            print(f"  📋 详细步骤:")
-            for detail in stats['step_details']:
-                print(f"    • {detail['step']}: 输入{detail['input_tokens']}, 输出{detail['output_tokens']}, 总计{detail['total_tokens']} tokens, 耗时{detail['execution_time']}s")
+        logger.info(f"{stats['agent_name']} Token统计: 调用{stats['total_calls']}次, 总计{stats['total_input_tokens'] + stats['total_output_tokens']}tokens")
 
-    def _call_llm_streaming(self, messages: List[Dict[str, Any]]):
+    def _call_llm_streaming(self, messages: List[Dict[str, Any]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
         """
         通用的流式模型调用方法
         
         Args:
             messages: 输入消息列表
+            session_id: 会话ID（用于请求记录）
+            step_name: 步骤名称（用于请求记录）
+            model_config_override: 覆盖模型配置（用于工具调用等）
             
         Returns:
             Generator: 语言模型的流式响应
         """
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
         
-        return self.model.chat.completions.create(
+        # 确定最终的模型配置
+        final_config = {**self.model_config}
+        if model_config_override:
+            final_config.update(model_config_override)
+        
+        try:
+            # 在发起请求前记录
+            if session_id:
+                try:
+                    llm_logger = get_llm_logger(session_id)
+                    # 将messages转换为prompt字符串
+                    prompt_text = self.convert_messages_to_str(messages)
+                    llm_logger.log_request(
+                        agent_name=self.__class__.__name__,
+                        prompt=prompt_text,
+                        response="",  # 流式调用时response为空，后续会更新
+                        model=final_config.get("model", "gpt-4"),
+                        additional_info={
+                            "step_name": step_name,
+                            "model_config": final_config
+                        }
+                    )
+                except Exception as log_error:
+                    logger.error(f"{self.__class__.__name__}: 记录LLM请求日志失败: {log_error}")
+            
+            # 发起LLM请求
+            stream = self.model.chat.completions.create(
             messages=messages,
             stream=True,
             stream_options={"include_usage": True},
-            **self.model_config
+                **final_config
         )
+            
+            # 直接yield chunks，不再收集用于日志记录
+            for chunk in stream:
+                yield chunk
+                
+        except Exception as e:
+            logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}")
+            raise
     
-    def _call_llm_non_streaming(self, messages: List[Dict[str, Any]]):
+    def _call_llm_non_streaming(self, messages: List[Dict[str, Any]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
         """
         通用的非流式模型调用方法
         
         Args:
             messages: 输入消息列表
+            session_id: 会话ID（用于请求记录）
+            step_name: 步骤名称（用于请求记录）
+            model_config_override: 覆盖模型配置（用于工具调用等）
             
         Returns:
             模型响应对象
         """
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行非流式生成")
         
-        return self.model.chat.completions.create(
+        # 确定最终的模型配置
+        final_config = {**self.model_config}
+        if model_config_override:
+            final_config.update(model_config_override)
+        
+        try:
+            # 在发起请求前记录
+            if session_id:
+                try:
+                    llm_logger = get_llm_logger(session_id)
+                    # 将messages转换为prompt字符串
+                    prompt_text = self.convert_messages_to_str(messages)
+                    llm_logger.log_request(
+                        agent_name=self.__class__.__name__,
+                        prompt=prompt_text,
+                        response="",  # 非流式调用时response为空，后续会更新
+                        model=final_config.get("model", "gpt-4"),
+                        additional_info={
+                            "step_name": step_name,
+                            "model_config": final_config
+                        }
+                    )
+                except Exception as log_error:
+                    logger.error(f"{self.__class__.__name__}: 记录LLM请求日志失败: {log_error}")
+            
+            # 发起LLM请求
+            response = self.model.chat.completions.create(
             messages=messages,
             stream=False,
-            **self.model_config
+                **final_config
         )
+            return response
+        except Exception as e:
+            logger.error(f"{self.__class__.__name__}: LLM非流式调用失败: {e}")
+            raise
     
     def _create_message_chunk(self, 
                             content: str, 
@@ -323,7 +379,7 @@ class AgentBase(ABC):
         
         # 收集所有chunks以便跟踪token使用
         chunks = []
-        for chunk in self._call_llm_streaming(messages):
+        for chunk in self._call_llm_streaming(messages, session_id=session_id, step_name=step_name):
             chunks.append(chunk)
             if len(chunk.choices) ==0:
                 continue
@@ -390,7 +446,7 @@ class AgentBase(ABC):
         
         # 收集所有chunks以便跟踪token使用
         chunks = []
-        for chunk in self._call_llm_streaming(messages):
+        for chunk in self._call_llm_streaming(messages, session_id=session_id, step_name=step_name):
             chunks.append(chunk)
             if len(chunk.choices) ==0:
                 continue
@@ -450,31 +506,6 @@ class AgentBase(ABC):
             system_content += self._build_system_context_section(system_context)
         
         logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_content)}")
-        
-        # 4. 打印完整的系统提示信息（新增）
-        print("\n" + "="*100)
-        print(f"🤖 {self.__class__.__name__} - 系统提示消息")
-        print("="*100)
-        print(f"📋 Agent类型: {self.__class__.__name__}")
-        print(f"🆔 会话ID: {session_id if session_id else system_context.get('session_id', 'None') if system_context else 'None'}")
-        
-        if system_context:
-            print(f"🔧 System Context字段: {list(system_context.keys())}")
-            print(f"📊 System Context详情:")
-            for key, value in system_context.items():
-                if isinstance(value, str) and len(value) > 100:
-                    print(f"   • {key}: {value[:100]}... (长度: {len(value)})")
-                else:
-                    print(f"   • {key}: {value}")
-        else:
-            print("🔧 System Context: None")
-        
-        print(f"📏 完整系统消息长度: {len(system_content)} 字符")
-        print("📝 完整系统消息内容:")
-        print("-" * 50)
-        print(system_content)
-        print("-" * 50)
-        print("="*100 + "\n")
         
         return {
             'role': 'system',
@@ -609,89 +640,17 @@ class AgentBase(ABC):
         """
         agent_name = self.__class__.__name__
         
-        logger.info(f"🎯 {agent_name} 执行完成!")
-        logger.info(f"📊 {agent_name} 总共输出 {len(final_messages)} 条完整消息")
+        logger.info(f"🎯 {agent_name} 执行完成，输出 {len(final_messages)} 条消息")
         
+        # 只记录基本统计信息，不打印详细内容
         if final_messages:
-            logger.info(f"📋 {agent_name} 完整输出messages:")
+            message_types = {}
+            for msg in final_messages:
+                msg_type = msg.get('type', 'unknown')
+                message_types[msg_type] = message_types.get(msg_type, 0) + 1
             
-            for i, msg in enumerate(final_messages):
-                logger.info(f"  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                logger.info(f"  📝 消息 [{i+1}/{len(final_messages)}]:")
-                logger.info(f"    🔹 Role: {msg.get('role', 'unknown')}")
-                logger.info(f"    🔹 Type: {msg.get('type', 'unknown')}")
-                logger.info(f"    🔹 Message ID: {msg.get('message_id', 'none')}")
-                
-                # 处理tool_calls
-                if 'tool_calls' in msg and msg['tool_calls']:
-                    logger.info(f"    🔹 Tool Calls: {len(msg['tool_calls'])} 个")
-                    for j, tool_call in enumerate(msg['tool_calls']):
-                        logger.info(f"      🔧 Tool Call [{j+1}]:")
-                        logger.info(f"        • ID: {tool_call.get('id', 'none')}")
-                        logger.info(f"        • Function: {tool_call.get('function', {}).get('name', 'unknown')}")
-                        logger.info(f"        • Arguments: {tool_call.get('function', {}).get('arguments', 'none')}")
-                
-                # 处理tool_call_id
-                if 'tool_call_id' in msg:
-                    logger.info(f"    🔹 Tool Call ID: {msg['tool_call_id']}")
-                
-                # 显示完整的content内容
-                if msg.get('content'):
-                    content = str(msg['content'])
-                    # 优化日志：单行显示内容，超长则截断
-                    if len(content) <= 200:
-                        # 短内容：替换换行符并单行显示
-                        content_oneline = content.replace('\n', ' | ').replace('\r', ' ')
-                        logger.info(f"    📄 Content ({len(content)} 字符): {content_oneline}")
-                    else:
-                        # 长内容：显示前200字符并截断
-                        content_preview = content[:200].replace('\n', ' | ').replace('\r', ' ')
-                        logger.info(f"    📄 Content ({len(content)} 字符): {content_preview}... [截断显示]")
-                    
-                    # 如果内容包含多行，额外显示行数信息
-                    line_count = content.count('\n') + 1
-                    if line_count > 1:
-                        logger.info(f"    📄 Content详情: 共 {line_count} 行")
-                    
-                    # 如果是JSON格式，尝试简化显示
-                    if content.strip().startswith('{') and content.strip().endswith('}'):
-                        try:
-                            import json
-                            parsed = json.loads(content)
-                            # 显示JSON的关键信息
-                            if isinstance(parsed, dict):
-                                keys = list(parsed.keys())[:5]  # 显示前5个键
-                                logger.info(f"    📄 JSON结构: 包含字段 {keys}{'...' if len(parsed) > 5 else ''}")
-                        except:
-                            pass
-                
-                # 显示完整的show_content内容
-                if msg.get('show_content'):
-                    show_content = str(msg['show_content'])
-                    # 优化日志：单行显示内容，超长则截断
-                    if len(show_content) <= 200:
-                        # 短内容：替换换行符并单行显示
-                        show_oneline = show_content.replace('\n', ' | ').replace('\r', ' ')
-                        logger.info(f"    🎨 Show Content ({len(show_content)} 字符): {show_oneline}")
-                    else:
-                        # 长内容：显示前200字符并截断
-                        show_preview = show_content[:200].replace('\n', ' | ').replace('\r', ' ')
-                        logger.info(f"    🎨 Show Content ({len(show_content)} 字符): {show_preview}... [截断显示]")
-                    
-                    # 如果内容包含多行，额外显示行数信息
-                    line_count = show_content.count('\n') + 1
-                    if line_count > 1:
-                        logger.info(f"    🎨 Show Content详情: 共 {line_count} 行")
-                
-                # 显示其他重要字段
-                other_fields = {k: v for k, v in msg.items() 
-                              if k not in ['role', 'type', 'message_id', 'content', 'show_content', 'tool_calls', 'tool_call_id']}
-                if other_fields:
-                    logger.info(f"    🔹 其他字段: {other_fields}")
-        
-        logger.info(f"  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        logger.info(f"🏁 {agent_name} 执行流程结束")
-        logger.info("")  # 添加一个空行以便阅读
+            type_summary = ', '.join([f"{type_name}: {count}" for type_name, count in message_types.items()])
+            logger.debug(f"📊 {agent_name} 消息类型统计: {type_summary}")
 
     def to_tool(self) -> AgentToolSpec:
         """
@@ -750,7 +709,7 @@ class AgentBase(ABC):
 
     def _extract_completed_actions_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        从消息中提取已完成的操作
+        从消息中提取已完成的操作，只保留上一次user 消息之后除task_decomposition之外的消息
         
         Args:
             messages: 消息列表
@@ -758,24 +717,39 @@ class AgentBase(ABC):
         Returns:
             List[Dict[str, Any]]: 已完成操作的消息列表
         """
-        logger.debug(f"AgentBase: {self.__class__.__name__} 从 {len(messages)} 条消息中提取已完成操作")
+        logger.info(f"AgentBase: {self.__class__.__name__} 从 {len(messages)} 条消息中提取已完成操作")
+        
+        # 添加调试信息：打印前几条消息的基本信息
+        for i, msg in enumerate(messages[:5]):
+            logger.info(f"AgentBase: 消息 {i}: role={msg.get('role')}, type={msg.get('type')}, content长度={len(msg.get('content', ''))}")
         
         completed_actions_messages = []
         
         # 从最后一条用户消息开始提取
         for index, msg in enumerate(reversed(messages)):
             if msg['role'] == 'user':
-                completed_actions_messages.extend(messages[len(messages) - index:])
+                # 提取该用户消息之后的所有消息
+                completed_actions_messages.extend(messages[-index:])
                 break
+        logger.info(f'AgentBase: 在user消息之后提取了 {len(completed_actions_messages)} 条消息')
+        # 移除任务分解类型的消息，但保留其他重要类型的消息
+        filtered_messages = []
+        for msg in completed_actions_messages:
+            msg_type = msg.get('type', 'normal')
+            # 保留所有非task_decomposition类型的消息
+            if msg_type != 'task_decomposition':
+                filtered_messages.append(msg)
+            else:
+                logger.info(f"AgentBase: 过滤掉task_decomposition消息: {msg.get('content', '')[:50]}...")
         
-        # 移除任务分解类型的消息
-        completed_actions_messages = [
-            msg for msg in completed_actions_messages 
-            if msg.get('type') != 'task_decomposition'
-        ]
 
-        logger.debug(f"AgentBase: {self.__class__.__name__} 提取了 {len(completed_actions_messages)} 条已完成操作消息")
-        return completed_actions_messages
+        logger.info(f"AgentBase: {self.__class__.__name__} 提取了 {len(filtered_messages)} 条已完成操作消息")
+        
+        # 添加调试信息：打印提取的消息信息
+        for i, msg in enumerate(filtered_messages[:3]):
+            logger.info(f"AgentBase: 提取的消息 {i}: role={msg.get('role')}, type={msg.get('type')}, content长度={len(msg.get('content', ''))}")
+        
+        return filtered_messages
 
     def _extract_task_description_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -937,7 +911,7 @@ class AgentBase(ABC):
         Returns:
             str: 格式化后的消息字符串
         """
-        logger.debug(f"AgentBase: 将 {len(messages)} 条消息转换为字符串")
+        logger.info(f"AgentBase: 将 {len(messages)} 条消息转换为字符串")
         
         messages_str_list = []
         
@@ -953,7 +927,7 @@ class AgentBase(ABC):
                 messages_str_list.append(f"Tool: {msg['content']}")
         
         result = "\n".join(messages_str_list) or "None"
-        logger.debug(f"AgentBase: 转换后字符串长度: {len(result)}")
+        logger.info(f"AgentBase: 转换后字符串长度: {len(result)}")
         return result
     
     def _judge_delta_content_type(self, 

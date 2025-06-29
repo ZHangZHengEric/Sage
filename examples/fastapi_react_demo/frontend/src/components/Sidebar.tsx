@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Button, Dropdown, Modal } from 'antd';
+import { Layout, Menu, Button, Modal } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageOutlined,
@@ -9,7 +9,6 @@ import {
   PlusOutlined,
   HistoryOutlined,
   DeleteOutlined,
-  MoreOutlined,
   ExclamationCircleOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined
@@ -114,16 +113,6 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
       },
     });
   };
-
-  const getChatDropdownItems = (chatId: string) => [
-    {
-      key: 'delete',
-      label: '删除对话',
-      icon: <DeleteOutlined />,
-      danger: true,
-      onClick: (e: any) => handleDeleteChat(e.domEvent, chatId)
-    }
-  ];
 
   const formatDate = (date: Date): string => {
     const now = new Date();
@@ -273,7 +262,8 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
           <div style={{ 
             flex: 1, 
             overflowY: 'auto',
-            overflowX: 'hidden'
+            overflowX: 'hidden',
+            maxHeight: 'calc(100vh - 300px)' // 确保有最大高度限制
           }}>
             {history.length === 0 ? (
               <div style={{
@@ -301,7 +291,8 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'flex-start',
-                      gap: '8px'
+                      gap: '8px',
+                      position: 'relative'
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = '#f8fafc';
@@ -331,28 +322,30 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
                         {formatDate(chatItem.updatedAt)}
                       </div>
                     </div>
-                    <Dropdown
-                      menu={{ items: getChatDropdownItems(chatItem.id) }}
-                      trigger={['click']}
-                      placement="bottomRight"
-                    >
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<MoreOutlined />}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          color: '#9ca3af',
-                          width: '20px',
-                          height: '20px',
-                          padding: 0,
-                          minWidth: 'auto',
-                          opacity: 0,
-                          transition: 'opacity 0.2s ease'
-                        }}
-                        className="chat-item-more-btn"
-                      />
-                    </Dropdown>
+                    
+                    {/* 删除按钮 - 鼠标悬停时显示 */}
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => handleDeleteChat(e, chatItem.id)}
+                      style={{
+                        color: '#ef4444',
+                        width: '20px',
+                        height: '20px',
+                        padding: 0,
+                        minWidth: 'auto',
+                        opacity: 0,
+                        transition: 'opacity 0.2s ease',
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        border: 'none'
+                      }}
+                      className="chat-item-delete-btn"
+                    />
                   </div>
                 ))}
               </div>
