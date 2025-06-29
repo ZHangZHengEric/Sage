@@ -116,7 +116,7 @@ class DirectExecutorAgent(AgentBase):
             self._execute_direct_stream_internal(optimized_messages, tool_manager, session_id, system_context)
         ):
             # Agent自己负责将生成的消息添加到MessageManager
-            message_manager.add_messages(chunk_batch)
+            message_manager.add_messages(chunk_batch, agent_name="DirectExecutorAgent")
             yield chunk_batch
 
     def _execute_direct_stream_internal(self, 

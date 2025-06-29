@@ -28,6 +28,7 @@ from .planning_agent.planning_agent import PlanningAgent
 from .observation_agent.observation_agent import ObservationAgent
 from .direct_executor_agent.direct_executor_agent import DirectExecutorAgent
 from .task_decompose_agent.task_decompose_agent import TaskDecomposeAgent
+from .stage_summary_agent.stage_summary_agent import StageSummaryAgent
 from .workflow_selector import select_workflow_with_llm, create_workflow_guidance, WorkflowFormat
 from .session_manager import SessionManager, SessionStatus
 from agents.utils.logger import logger
@@ -45,9 +46,6 @@ class AgentController:
     # 默认配置常量
     DEFAULT_MAX_LOOP_COUNT = 10
     DEFAULT_MESSAGE_LIMIT = 10000
-    
-    # 工作目录模板
-    WORKSPACE_TEMPLATE = "{workspace}/{session_id}"
 
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage"):
         """
@@ -83,6 +81,9 @@ class AgentController:
         # 消息和任务管理器（每个会话都会创建独立的实例）
         self._session_managers = {}
         
+        # 任务状态跟踪（用于检测任务完成状态变化）
+        self._task_status_tracking = {}
+        
         logger.info("AgentController: 智能体控制器初始化完成")
 
     def _init_agents(self) -> None:
@@ -112,6 +113,9 @@ class AgentController:
             self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_decompose_agent = TaskDecomposeAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.stage_summary_agent = StageSummaryAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
         
@@ -204,15 +208,21 @@ class AgentController:
             
             # 初始化MessageManager和TaskManager
             message_manager, task_manager = self._get_session_managers(session_id)
+            
+            # 初始化LLM请求记录器
+            from agents.utils.llm_request_logger import init_llm_logger
+            # 使用system_context中的file_workspace作为workspace_root
+            llm_logger = init_llm_logger(session_id, workspace_root=system_context['file_workspace'])
+            
             # Controller负责将用户输入添加到MessageManager
-            message_manager.add_messages(initial_messages)
+            message_manager.add_messages(initial_messages, agent_name="AgentController")
             
             # 只有在多智能体协作模式下才进行工作流选择
             if available_workflows and deep_research:
                 system_context = self._select_and_apply_workflow(
                     message_manager, available_workflows, system_context
                 )
-                if self._check_session_interrupt(session_id):
+                if self.session_manager.is_interrupted(session_id):
                     logger.info(f"AgentController: 工作流选择阶段被中断，会话ID: {session_id}")
                     return
             
@@ -258,13 +268,19 @@ class AgentController:
         finally:
             # 记录工作流结束时间并打印统计
             self.overall_token_stats['workflow_end_time'] = time.time()
-            self.print_comprehensive_token_stats()
+            self.print_comprehensive_token_stats(self.overall_token_stats['workflow_end_time'] - self.overall_token_stats['workflow_start_time'])
             
             # 保存会话状态到文件
             try:
-                self._save_session_state(session_id)
+                self._save_session_state(session_id, system_context)
             except Exception as save_error:
                 logger.warning(f"AgentController: 保存会话状态 {session_id} 时出错: {save_error}")
+            
+            # 保存LLM请求记录到文件
+            try:
+                self._save_llm_request_logs(session_id)
+            except Exception as llm_save_error:
+                logger.warning(f"AgentController: 保存LLM请求记录 {session_id} 时出错: {llm_save_error}")
             
             # 清理会话，防止内存泄漏
             try:
@@ -272,6 +288,15 @@ class AgentController:
                 # 清理MessageManager和TaskManager
                 if session_id in self._session_managers:
                     del self._session_managers[session_id]
+                
+                # 清理LLM记录器实例
+                try:
+                    from agents.utils.llm_request_logger import cleanup_logger
+                    cleanup_logger(session_id)
+                    logger.debug(f"AgentController: 已清理LLM记录器 {session_id}")
+                except Exception as llm_cleanup_error:
+                    logger.warning(f"AgentController: 清理LLM记录器 {session_id} 时出错: {llm_cleanup_error}")
+                
                 logger.info(f"AgentController: 已清理会话 {session_id}")
             except Exception as cleanup_error:
                 logger.warning(f"AgentController: 清理会话 {session_id} 时出错: {cleanup_error}")
@@ -355,7 +380,10 @@ class AgentController:
         logger.debug("AgentController: 设置系统上下文")
         
         current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %A %H:%M:%S')
-        file_workspace = self.WORKSPACE_TEMPLATE.format(workspace=self.workspace, session_id=session_id)
+        # 使用时间+session_id格式组装路径
+        start_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        folder_name = f"{start_time}_{session_id}"
+        file_workspace = os.path.join(self.workspace, folder_name)
         
         # 创建工作目录
         if os.path.exists(file_workspace):
@@ -498,7 +526,7 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "任务分析")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 任务分析阶段被中断，会话ID: {session_id}")
             return
         
@@ -511,7 +539,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 任务分析阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
@@ -543,7 +571,7 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "任务分解")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 任务分解阶段被中断，会话ID: {session_id}")
             return
         
@@ -556,7 +584,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 任务分解阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
@@ -594,7 +622,7 @@ class AgentController:
             logger.info(f"AgentController: 开始第 {loop_count} 轮循环")
             
             # 在每轮循环开始时检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 主循环第 {loop_count} 轮被中断，会话ID: {session_id}")
                 return
             
@@ -645,7 +673,7 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "规划")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 规划阶段被中断，会话ID: {session_id}")
             return
         
@@ -658,7 +686,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 规划阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
@@ -690,7 +718,7 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "执行")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 执行阶段被中断，会话ID: {session_id}")
             return
         
@@ -703,7 +731,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 执行阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
@@ -711,13 +739,33 @@ class AgentController:
             yield chunk
         
         logger.info(f"AgentController: 执行阶段完成，生成 {len(exec_chunks)} 个块")
+        
+        # 通过message_manager获取ExecutorAgent的最新消息并简要展示
+        try:
+            # 获取ExecutorAgent的最新消息
+            executor_messages = message_manager.get_latest_messages_by_agent("ExecutorAgent", limit=10)
+            
+            if executor_messages:
+                logger.info(f"[ExecutorAgent本次输出] 共{len(executor_messages)}条消息:")
+                for i, msg in enumerate(executor_messages, 1):
+                    content = msg.get('content', '')
+                    msg_type = msg.get('type', 'unknown')
+                    if content and content.strip():
+                        # 显示前100字
+                        preview = content.strip()[:100]
+                        logger.info(f"  {i}. [{msg_type}] {preview}{'...' if len(content.strip()) > 100 else ''}")
+            else:
+                logger.info("[ExecutorAgent本次输出] 暂无消息")
+                
+        except Exception as e:
+            logger.warning(f"AgentController: 获取ExecutorAgent消息摘要失败: {str(e)}")
 
     def _execute_observation_phase(self, 
                                  message_manager: Any,
                                  task_manager: Any,
                                  tool_manager: Optional[Any],
                                  system_context: Dict[str, Any],
-                                 session_id: str) -> Generator[bool, None, None]:
+                                 session_id: str) -> Generator[List[Dict[str, Any]], None, bool]:
         """
         执行观察阶段
         
@@ -738,7 +786,7 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "观察")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 观察阶段被中断，会话ID: {session_id}")
             return True  # 中断时也返回should_break=True
         
@@ -751,7 +799,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 观察阶段在块处理中被中断，会话ID: {session_id}")
                 return True  # 中断时也返回should_break=True
             
@@ -759,6 +807,16 @@ class AgentController:
             yield chunk
         
         logger.info(f"AgentController: 观察阶段完成，生成 {len(obs_chunks)} 个块")
+        
+        # 检查任务完成状态变化并生成阶段总结
+        for summary_chunk in self._check_task_completion_and_summarize(
+            session_id=session_id,
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            system_context=system_context
+        ):
+            yield summary_chunk
         
         # 检查是否应该继续循环
         should_break = self._check_loop_completion_from_manager(message_manager)
@@ -788,7 +846,7 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "总结")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 任务总结阶段被中断，会话ID: {session_id}")
             return
         
@@ -801,7 +859,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 任务总结阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
@@ -866,14 +924,14 @@ class AgentController:
         self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "直接执行")
         
         # 检查中断
-        if self._check_session_interrupt(session_id):
+        if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 直接执行阶段被中断，会话ID: {session_id}")
             return
         
         # 获取会话的MessageManager和TaskManager
         message_manager, task_manager = self._get_session_managers(session_id)
         # 先将现有消息添加到MessageManager
-        message_manager.add_messages(all_messages)
+        message_manager.add_messages(all_messages, agent_name="DirectExecutorAgent")
         
         for chunk in self.direct_executor_agent.run_stream(
             message_manager=message_manager,
@@ -883,7 +941,7 @@ class AgentController:
             system_context=system_context
         ):
             # 在每个块之间检查中断
-            if self._check_session_interrupt(session_id):
+            if self.session_manager.is_interrupted(session_id):
                 logger.info(f"AgentController: 直接执行阶段在块处理中被中断，会话ID: {session_id}")
                 return
             
@@ -969,7 +1027,7 @@ class AgentController:
                         'message_id': str(uuid.uuid4()),
                         'show_content': user_query + '\n'
                     }
-                    message_manager.add_messages([clarify_msg])
+                    message_manager.add_messages([clarify_msg], agent_name="AgentController")
                 return True
                 
         except (json.JSONDecodeError, IndexError, KeyError) as e:
@@ -977,25 +1035,108 @@ class AgentController:
             
         return False
 
-    def _check_session_interrupt(self, session_id: str) -> bool:
+    def _check_task_completion_and_summarize(self, 
+                                           session_id: str,
+                                           message_manager: Any,
+                                           task_manager: Any,
+                                           tool_manager: Optional[Any],
+                                           system_context: Dict[str, Any]) -> Generator[List[Dict[str, Any]], None, None]:
         """
-        检查会话是否被中断
+        检查任务完成状态变化，如果从未完成变成完成，则调用StageSummaryAgent
         
         Args:
             session_id: 会话ID
+            message_manager: 消息管理器
+            task_manager: 任务管理器
+            tool_manager: 工具管理器
+            system_context: 系统上下文
             
-        Returns:
-            bool: 如果会话被中断返回True，否则返回False
+        Yields:
+            List[Dict[str, Any]]: StageSummaryAgent的输出消息
         """
+        if not task_manager:
+            return
+        
+        # 获取当前任务状态
+        current_tasks = task_manager.get_all_tasks()
+        current_completed_count = len([task for task in current_tasks if task.status.value == "completed"])
+        
+        # 获取之前的状态
+        previous_completed_count = self._task_status_tracking.get(session_id, 0)
+        
+        # 检查是否有新完成的任务
+        if current_completed_count > previous_completed_count:
+            logger.info(f"AgentController: 检测到任务状态变化，完成任务数从 {previous_completed_count} 增加到 {current_completed_count}")
+            
+            # 更新跟踪状态
+            self._task_status_tracking[session_id] = current_completed_count
+            
+            # 调用StageSummaryAgent生成任务执行总结
+            yield from self._execute_stage_summary_phase(
+                message_manager=message_manager,
+                task_manager=task_manager,
+                tool_manager=tool_manager,
+                system_context=system_context,
+                session_id=session_id
+            )
+        else:
+            # 初始化跟踪状态
+            if session_id not in self._task_status_tracking:
+                self._task_status_tracking[session_id] = current_completed_count
+
+    def _execute_stage_summary_phase(self, 
+                                   message_manager: Any,
+                                   task_manager: Any,
+                                   tool_manager: Optional[Any],
+                                   system_context: Dict[str, Any],
+                                   session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
+        """
+        执行阶段总结阶段
+        
+        Args:
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
+            tool_manager: 工具管理器
+            system_context: 执行上下文
+            session_id: 会话ID
+            
+        Yields:
+            List[Dict[str, Any]]: 阶段总结输出的消息块
+        """
+        logger.info("AgentController: 开始阶段总结阶段")
+        self.session_manager.update_session_status(session_id, SessionStatus.RUNNING, "阶段总结")
+        
+        # 检查中断
         if self.session_manager.is_interrupted(session_id):
-            interrupt_message = self.session_manager.get_interrupt_message(session_id)
-            logger.info(f"AgentController: 检测到会话 {session_id} 中断请求: {interrupt_message}")
-            # 更新会话状态为中断
-            self.session_manager.update_session_status(session_id, SessionStatus.INTERRUPTED)
-            return True
-        return False
-
-
+            logger.info(f"AgentController: 阶段总结阶段被中断，会话ID: {session_id}")
+            return
+        
+        # 准备阶段信息
+        stage_info = {
+            "stage_type": "task_completion",
+            "completed_tasks_count": len([task for task in task_manager.get_all_tasks() if task.status.value == "completed"]),
+            "total_tasks_count": len(task_manager.get_all_tasks()),
+            "session_id": session_id
+        }
+        
+        summary_chunks = []
+        for chunk in self.stage_summary_agent.run_stream(
+            message_manager=message_manager,
+            task_manager=task_manager,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            system_context=system_context,
+            stage_info=stage_info
+        ):
+            # 在每个块之间检查中断
+            if self.session_manager.is_interrupted(session_id):
+                logger.info(f"AgentController: 阶段总结阶段在块处理中被中断，会话ID: {session_id}")
+                return
+            
+            summary_chunks.append(chunk)
+            yield chunk
+        
+        logger.info(f"AgentController: 阶段总结阶段完成，生成 {len(summary_chunks)} 个块")
 
     def _handle_workflow_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
         """
@@ -1147,7 +1288,7 @@ class AgentController:
         finally:
             # 记录工作流结束时间并打印统计
             self.overall_token_stats['workflow_end_time'] = time.time()
-            self.print_comprehensive_token_stats()
+            self.print_comprehensive_token_stats(self.overall_token_stats['workflow_end_time'] - self.overall_token_stats['workflow_start_time'])
 
     def _execute_task_analysis_non_stream(self, 
                                         all_messages: List[Dict[str, Any]], 
@@ -1420,52 +1561,39 @@ class AgentController:
             'total_stats': total_stats
         }
     
-    def print_comprehensive_token_stats(self):
+    def print_comprehensive_token_stats(self, workflow_time: float):
         """
-        打印综合的token使用统计
+        打印所有Agent的综合Token使用统计（简化版本）
+        
+        Args:
+            workflow_time: 整个工作流的执行时间
         """
-        stats = self._collect_agent_stats()
-        total = stats['total_stats']
+        logger.info("📊 综合Token使用统计")
         
-        print("\n" + "="*80)
-        print("🚀 AgentController 综合Token使用统计")
-        print("="*80)
+        # 收集所有agent的统计信息
+        all_stats = []
+        for agent in [self.task_analysis_agent, self.planning_agent, self.executor_agent, self.observation_agent, self.task_summary_agent]:
+            if agent:
+                stats = agent.get_token_stats()
+                all_stats.append(stats)
         
-        # 总体统计
-        print(f"\n📊 总体统计:")
-        print(f"  📞 总调用次数: {total['total_calls']}")
-        print(f"  📥 总输入tokens: {total['total_input_tokens']:,}")
-        print(f"  📤 总输出tokens: {total['total_output_tokens']:,}")
-        print(f"  🏃 总缓存tokens: {total['total_cached_tokens']:,}")
-        print(f"  🧠 总推理tokens: {total['total_reasoning_tokens']:,}")
-        print(f"  🔢 总计tokens: {total['total_input_tokens'] + total['total_output_tokens']:,}")
+        # 计算总体统计
+        total = {
+            'total_calls': sum(stats['total_calls'] for stats in all_stats),
+            'total_input_tokens': sum(stats['total_input_tokens'] for stats in all_stats),
+            'total_output_tokens': sum(stats['total_output_tokens'] for stats in all_stats),
+            'total_cached_tokens': sum(stats['total_cached_tokens'] for stats in all_stats),
+            'total_reasoning_tokens': sum(stats['total_reasoning_tokens'] for stats in all_stats)
+        }
         
-        if self.overall_token_stats['workflow_start_time'] and self.overall_token_stats['workflow_end_time']:
-            workflow_time = self.overall_token_stats['workflow_end_time'] - self.overall_token_stats['workflow_start_time']
-            print(f"  ⏱️  工作流总耗时: {workflow_time:.2f}秒")
+        logger.info(f"总计: {total['total_calls']}次调用, {total['total_input_tokens'] + total['total_output_tokens']:,}tokens, 耗时{workflow_time:.1f}s")
         
-        # 各agent详细统计
-        print(f"\n🤖 各Agent详细统计:")
-        for agent_name, agent_stats in total['agents'].items():
-            if agent_stats['total_calls'] > 0:  # 只显示有调用的agent
-                print(f"\n  🔹 {agent_name}:")
-                print(f"    📞 调用: {agent_stats['total_calls']} 次")
-                print(f"    📥 输入: {agent_stats['total_input_tokens']:,} tokens")
-                print(f"    📤 输出: {agent_stats['total_output_tokens']:,} tokens")
-                if agent_stats['total_cached_tokens'] > 0:
-                    print(f"    🏃 缓存: {agent_stats['total_cached_tokens']:,} tokens")
-                if agent_stats['total_reasoning_tokens'] > 0:
-                    print(f"    🧠 推理: {agent_stats['total_reasoning_tokens']:,} tokens")
-                print(f"    🔢 小计: {agent_stats['total_input_tokens'] + agent_stats['total_output_tokens']:,} tokens")
-                
-                # 显示步骤详情
-                if agent_stats.get('step_details'):
-                    print(f"    📋 步骤详情:")
-                    for detail in agent_stats['step_details']:
-                        print(f"      • {detail['step']}: 输入{detail['input_tokens']}, 输出{detail['output_tokens']}, 耗时{detail['execution_time']}s")
-        
-        print("\n" + "="*80)
-        
+        # 简化的各Agent统计
+        for stats in all_stats:
+            if stats['total_calls'] > 0:
+                agent_total = stats['total_input_tokens'] + stats['total_output_tokens']
+                logger.info(f"  {stats['agent_name']}: {stats['total_calls']}次, {agent_total:,}tokens")
+
     def reset_all_token_stats(self):
         """
         重置所有agent的token统计
@@ -1584,12 +1712,13 @@ class AgentController:
         session = self.session_manager.get_session(session_id)
         return session.get('current_phase') if session else None
 
-    def _save_session_state(self, session_id: str) -> None:
+    def _save_session_state(self, session_id: str, system_context: Dict[str, Any]) -> None:
         """
         保存会话状态到文件
         
         Args:
             session_id: 会话ID
+            system_context: 系统上下文
         """
         import json
         import os
@@ -1604,8 +1733,8 @@ class AgentController:
             message_manager = managers['message_manager']
             task_manager = managers['task_manager']
             
-            # 构建保存路径
-            workspace_dir = self.WORKSPACE_TEMPLATE.format(workspace=self.workspace, session_id=session_id)
+            # 使用system_context中的file_workspace
+            workspace_dir = system_context['file_workspace']
             os.makedirs(workspace_dir, exist_ok=True)
             
             # 保存MessageManager状态
@@ -1645,3 +1774,64 @@ class AgentController:
         except Exception as e:
             logger.error(f"AgentController: 保存会话状态失败: {str(e)}")
             raise
+
+    def _save_llm_request_logs(self, session_id: str) -> None:
+        """
+        记录LLM请求完成情况（极简版本）
+        
+        Args:
+            session_id: 会话ID
+        """
+        logger.debug(f"AgentController: 检查LLM请求记录 {session_id}")
+        
+        try:
+            from agents.utils.llm_request_logger import get_llm_logger
+            
+            # 获取LLM记录器
+            llm_logger = get_llm_logger(session_id)
+            
+            # 获取请求文件列表
+            request_files = llm_logger.list_request_files()
+            
+            if len(request_files) > 0:
+                logger.info(f"AgentController: LLM请求记录完成 - 总计 {len(request_files)} 个请求")
+                
+                # 打印简化的摘要信息
+                self._print_llm_request_summary(session_id, self.workspace)
+                
+            else:
+                logger.info(f"AgentController: 会话 {session_id} 无LLM请求记录")
+                
+        except Exception as e:
+            logger.error(f"AgentController: 检查LLM请求记录 {session_id} 失败: {str(e)}")
+            # 不抛出异常，避免影响主流程
+
+    def _print_llm_request_summary(self, session_id: str, workspace_dir: str):
+        """
+        打印LLM请求记录摘要（简化版本）
+        
+        Args:
+            session_id: 会话ID
+            workspace_dir: 工作空间目录
+        """
+        try:
+            llm_logger = get_llm_logger(session_id)
+            request_files = llm_logger.list_request_files()
+            
+            if not request_files:
+                logger.debug("📊 LLM请求记录: 无记录")
+                return
+            
+            # 统计智能体请求数量
+            agent_stats = {}
+            for file_info in request_files:
+                agent_name = file_info['agent_name']
+                agent_stats[agent_name] = agent_stats.get(agent_name, 0) + 1
+            
+            logger.info(f"📊 LLM请求记录: {len(request_files)}个请求")
+            for agent_name, count in sorted(agent_stats.items()):
+                if count > 0:
+                    logger.debug(f"  • {agent_name}: {count}个请求")
+                    
+        except Exception as e:
+            logger.warning(f"📊 LLM请求记录统计失败: {str(e)}")

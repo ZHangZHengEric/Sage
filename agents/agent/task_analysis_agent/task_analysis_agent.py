@@ -115,7 +115,7 @@ class TaskAnalysisAgent(AgentBase):
             self._execute_analysis_stream_internal(optimized_messages, tool_manager, session_id, system_context, task_manager)
         ):
             # Agent自己负责将生成的消息添加到MessageManager
-            message_manager.add_messages(chunk_batch)
+            message_manager.add_messages(chunk_batch, agent_name="TaskAnalysisAgent")
             yield chunk_batch
 
     def _execute_analysis_stream_internal(self, 
@@ -182,6 +182,9 @@ class TaskAnalysisAgent(AgentBase):
         
         # 获取可用工具
         available_tools = tool_manager.list_tools_simplified() if tool_manager else []
+        # 只提取工具名称，不显示描述
+        tool_names = [tool['name'] for tool in available_tools]
+        available_tools_str = ", ".join(tool_names) if tool_names else "无可用工具"
         logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools)}")
         
         # 获取当前时间（从system_context或生成默认值）
@@ -189,7 +192,7 @@ class TaskAnalysisAgent(AgentBase):
         
         analysis_context = {
             'conversation': conversation,
-            'available_tools': available_tools,
+            'available_tools': available_tools_str,
             'current_datatime_str': current_datatime_str,
             'session_id': session_id,
             'system_context': system_context
@@ -235,7 +238,7 @@ class TaskAnalysisAgent(AgentBase):
         
         # 为整个分析流程生成统一的message_id
         message_id = str(uuid.uuid4())
-        
+                
         # 发送初始思考提示
         yield self._create_message_chunk(
             content="Thinking: ",
@@ -243,20 +246,21 @@ class TaskAnalysisAgent(AgentBase):
             show_content="",
             message_type='task_analysis_result'
         )
-        
+
         # 始终准备系统消息
         system_message = self.prepare_unified_system_message(
             session_id=context.get('session_id'),
-            system_context=context.get('system_context')  # 传递system_context作为补充信息
+            system_context=context.get('system_context')
         )
         
-        # 使用基类的流式处理和token跟踪，传递统一的message_id
+        # 使用基类的流式处理和token跟踪
         yield from self._execute_streaming_with_token_tracking_with_message_id(
             prompt=prompt,
             step_name="task_analysis",
             system_message=system_message,
             message_type='task_analysis_result',
-            message_id=message_id  # 传递统一的message_id
+            session_id=context.get('session_id'),
+            message_id=message_id
         )
 
     def _handle_analysis_error(self, error: Exception) -> Generator[List[Dict[str, Any]], None, None]:
