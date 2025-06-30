@@ -250,9 +250,10 @@ class DirectExecutorAgent(AgentBase):
             return []
         
         try:
-            # 获取可用工具
+            # 获取可用工具，只提取工具名称
             available_tools = tool_manager.list_tools_simplified()
-            available_tools_str = json.dumps(available_tools, ensure_ascii=False, indent=2) if available_tools else '无可用工具'
+            tool_names = [tool['name'] for tool in available_tools] if available_tools else []
+            available_tools_str = ", ".join(tool_names) if tool_names else '无可用工具'
             
             # 准备消息
             clean_messages = self._prepare_messages_for_tool_suggestion(messages_input)
@@ -320,30 +321,21 @@ class DirectExecutorAgent(AgentBase):
         
         messages_input = [{'role': 'user', 'content': prompt}]
         
-        # 跟踪token使用
-        start_time = time.time()
-        
-        # 使用流式调用
-        response = self.model.chat.completions.create(
+        # 使用基类的流式调用方法，自动处理LLM request日志
+        response = self._call_llm_streaming(
             messages=messages_input,
-            stream=True,
-            stream_options={"include_usage": True},
-            **self.model_config
+            session_id=None,  # 这里没有session_id，但基类会处理
+            step_name="tool_suggestion"
         )
         
         # 收集流式响应内容
-        chunks = []
         all_content = ""
         
         for chunk in response:
-            chunks.append(chunk)
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.content:
                 all_content += chunk.choices[0].delta.content
-        
-        # 跟踪token使用
-        self._track_streaming_token_usage(chunks, "tool_suggestion", start_time)
         
         try:
             result_clean = self._extract_json_from_markdown(all_content)
@@ -468,14 +460,17 @@ class DirectExecutorAgent(AgentBase):
         clean_message_input = self.clean_messages(messages_input)
         logger.info(f"DirectExecutorAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
         
-        # 调用LLM并开始token跟踪
-        start_time = time.time()
-        response = self.model.chat.completions.create(
-            tools=tools_json if len(tools_json) > 0 else None,
+        # 准备模型配置覆盖，包含工具信息
+        model_config_override = {}
+        if len(tools_json) > 0:
+            model_config_override['tools'] = tools_json
+        
+        # 使用基类的流式调用方法，自动处理LLM request日志
+        response = self._call_llm_streaming(
             messages=clean_message_input,
-            stream=True,
-            stream_options={"include_usage": True},
-            **self.model_config
+            session_id=session_id,
+            step_name="direct_execution",
+            model_config_override=model_config_override
         )
         
         # 处理流式响应并收集chunks用于token跟踪
@@ -490,7 +485,7 @@ class DirectExecutorAgent(AgentBase):
         )
         
         # 跟踪token使用
-        self._track_streaming_token_usage(chunks, "direct_execution", start_time)
+        self._track_streaming_token_usage(chunks, "direct_execution", time.time())
         
         return call_task_complete
 
