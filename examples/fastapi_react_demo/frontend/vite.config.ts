@@ -12,7 +12,11 @@ export default defineConfig({
       '/ws': {
         target: 'ws://sage_backend:8000',
         ws: true,
-      }
+      },
+      '/proxy-file': {
+        target: 'http://sage_backend:8000',
+        changeOrigin: true,
+      },
     }
   },
   build: {

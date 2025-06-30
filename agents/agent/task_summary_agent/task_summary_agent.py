@@ -150,15 +150,15 @@ TaskManager状态及执行结果:
         Returns:
             Dict[str, Any]: 包含总结所需信息的上下文字典
         """
-        logger.debug("TaskSummaryAgent: 准备任务总结上下文")
+        logger.info("TaskSummaryAgent: 准备任务总结上下文")
         
         # 提取任务描述
         task_description = self._extract_task_description(messages)
-        logger.debug(f"TaskSummaryAgent: 提取任务描述，长度: {len(task_description)}")
+        logger.info(f"TaskSummaryAgent: 提取任务描述，长度: {len(task_description)}")
         
         # 获取TaskManager状态（包含执行结果）
         task_manager_status_and_results = self._extract_task_manager_status(task_manager)
-        logger.debug(f"TaskSummaryAgent: 提取TaskManager状态及结果，长度: {len(task_manager_status_and_results)}")
+        logger.info(f"TaskSummaryAgent: 提取TaskManager状态及结果，长度: {len(task_manager_status_and_results)}")
         
         # 获取上下文信息
         current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -192,7 +192,7 @@ TaskManager状态及执行结果:
             task_manager_status_and_results=context['task_manager_status_and_results']
         )
         
-        logger.debug(f"TaskSummaryAgent: 生成总结提示，长度: {len(prompt)}")
+        logger.info(f"TaskSummaryAgent: 生成总结提示，长度: {len(prompt)}")
         return prompt
 
     def _execute_streaming_summary(self, 
@@ -251,12 +251,12 @@ TaskManager状态及执行结果:
         Returns:
             str: 任务描述字符串
         """
-        logger.debug(f"TaskSummaryAgent: 处理 {len(messages)} 条消息以提取任务描述")
+        logger.info(f"TaskSummaryAgent: 处理 {len(messages)} 条消息以提取任务描述")
         
         task_description_messages = self._extract_task_description_messages(messages)
         result = self.convert_messages_to_str(task_description_messages)
         
-        logger.debug(f"TaskSummaryAgent: 生成任务描述，长度: {len(result)}")
+        logger.info(f"TaskSummaryAgent: 生成任务描述，长度: {len(result)}")
         return result
 
     def _extract_completed_actions(self, messages: List[Dict[str, Any]]) -> str:
@@ -269,12 +269,12 @@ TaskManager状态及执行结果:
         Returns:
             str: 已完成操作的字符串
         """
-        logger.debug(f"TaskSummaryAgent: 处理 {len(messages)} 条消息以提取完成操作")
+        logger.info(f"TaskSummaryAgent: 处理 {len(messages)} 条消息以提取完成操作")
         
         completed_actions_messages = self._extract_completed_actions_messages(messages)
         result = self.convert_messages_to_str(completed_actions_messages)
         
-        logger.debug(f"TaskSummaryAgent: 生成完成操作，长度: {len(result)}")
+        logger.info(f"TaskSummaryAgent: 生成完成操作，长度: {len(result)}")
         return result
 
     def _extract_task_manager_status(self, task_manager: Optional[Any]) -> str:
@@ -288,12 +288,18 @@ TaskManager状态及执行结果:
             str: TaskManager状态的JSON字符串
         """
         if not task_manager:
+            logger.info("TaskSummaryAgent: TaskManager为空，返回默认信息")
             return "无TaskManager实例"
         
         try:
+            logger.info(f"TaskSummaryAgent: 开始提取TaskManager状态，task_manager类型: {type(task_manager)}")
+            
             # 获取所有任务的状态
             all_tasks = task_manager.get_all_tasks()
+            logger.info(f"TaskSummaryAgent: 获取到 {len(all_tasks)} 个任务")
+            
             if not all_tasks:
+                logger.info("TaskSummaryAgent: 无任务数据")
                 return "无任务数据"
             
             # 格式化任务状态，包含执行结果
@@ -303,34 +309,78 @@ TaskManager状态及执行结果:
             }
             
             # get_all_tasks返回的是List[TaskBase]，直接遍历TaskBase对象
-            for task in all_tasks:
+            for i, task in enumerate(all_tasks):
+                logger.info(f"TaskSummaryAgent: 处理第 {i+1} 个任务，task类型: {type(task)}")
+                logger.info(f"TaskSummaryAgent: 任务ID: {getattr(task, 'task_id', 'N/A')}")
+                logger.info(f"TaskSummaryAgent: 任务描述: {getattr(task, 'description', 'N/A')}")
+                
+                # 安全获取execution_summary
+                execution_summary = getattr(task, 'execution_summary', None)
+                logger.info(f"TaskSummaryAgent: execution_summary类型: {type(execution_summary)}")
+                logger.info(f"TaskSummaryAgent: execution_summary值: {execution_summary}")
+                
+                result_documents = []
+                result_summary = ""
+                
+                if isinstance(execution_summary, dict):
+                    logger.info("TaskSummaryAgent: execution_summary是字典类型")
+                    # 如果是字典，直接提取
+                    result_documents = execution_summary.get("result_documents", [])
+                    result_summary = execution_summary.get("result_summary", "")
+                elif isinstance(execution_summary, str) and execution_summary.strip():
+                    logger.info("TaskSummaryAgent: execution_summary是字符串类型，尝试解析JSON")
+                    # 如果是字符串，尝试解析为JSON
+                    try:
+                        parsed_summary = json.loads(execution_summary)
+                        if isinstance(parsed_summary, dict):
+                            result_documents = parsed_summary.get("result_documents", [])
+                            result_summary = parsed_summary.get("result_summary", "")
+                        else:
+                            result_summary = execution_summary
+                    except json.JSONDecodeError as e:
+                        logger.info(f"TaskSummaryAgent: JSON解析失败: {str(e)}")
+                        # 如果解析失败，当作普通字符串处理
+                        result_summary = execution_summary
+                elif execution_summary:
+                    logger.info(f"TaskSummaryAgent: execution_summary是其他类型: {type(execution_summary)}")
+                    # 其他类型，转换为字符串
+                    result_summary = str(execution_summary)
+                else:
+                    logger.info("TaskSummaryAgent: execution_summary为空或None")
+                
                 task_status = {
-                    "task_id": task.task_id,
-                    "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
-                    "description": task.description,
-                    "result_documents": task.execution_summary.get("result_documents", []) if task.execution_summary else [],
-                    "result_summary": task.execution_summary.get("result_summary", "") if task.execution_summary else "",
-                    "execution_summary": task.execution_summary or {}
+                    "task_id": getattr(task, 'task_id', 'N/A'),
+                    "status": getattr(task.status, 'value', str(getattr(task, 'status', 'N/A'))) if hasattr(task, 'status') else str(getattr(task, 'status', 'N/A')),
+                    "description": getattr(task, 'description', 'N/A'),
+                    "result_documents": result_documents,
+                    "result_summary": result_summary,
+                    "execution_summary": execution_summary if isinstance(execution_summary, dict) else {}
                 }
                 
                 # 读取文档内容
                 if task_status["result_documents"]:
+                    logger.info(f"TaskSummaryAgent: 读取 {len(task_status['result_documents'])} 个文档内容")
                     task_status["document_contents"] = self._read_document_contents(task_status["result_documents"])
                 
                 status_info["tasks"].append(task_status)
+                logger.info(f"TaskSummaryAgent: 第 {i+1} 个任务处理完成")
             
-            return json.dumps(status_info, ensure_ascii=False, indent=2)
+            result_json = json.dumps(status_info, ensure_ascii=False, indent=2)
+            logger.info(f"TaskSummaryAgent: TaskManager状态提取完成，JSON长度: {len(result_json)}")
+            return result_json
             
         except Exception as e:
+            import traceback
             logger.error(f"TaskSummaryAgent: 提取TaskManager状态时发生错误: {str(e)}")
+            logger.error(f"TaskSummaryAgent: 错误详情: {traceback.format_exc()}")
             return f"提取TaskManager状态失败: {str(e)}"
 
-    def _read_document_contents(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _read_document_contents(self, documents: List[Any]) -> List[Dict[str, Any]]:
         """
         读取文档内容
         
         Args:
-            documents: 文档信息列表
+            documents: 文档信息列表，可能是文件名列表或字典列表
             
         Returns:
             List[Dict[str, Any]]: 包含文档内容的列表
@@ -339,10 +389,26 @@ TaskManager状态及执行结果:
         
         document_contents = []
         
-        for doc in documents:
-            doc_path = doc.get("path", "")
-            doc_type = doc.get("type", "")
-            doc_name = doc.get("name", "")
+        for i, doc in enumerate(documents):
+            logger.info(f"TaskSummaryAgent: 处理第 {i+1} 个文档，doc类型: {type(doc)}")
+            logger.info(f"TaskSummaryAgent: doc值: {doc}")
+            
+            # 处理不同类型的doc
+            if isinstance(doc, dict):
+                # 如果是字典，提取路径信息
+                doc_path = doc.get("path", "")
+                doc_type = doc.get("type", "")
+                doc_name = doc.get("name", "")
+            elif isinstance(doc, str):
+                # 如果是字符串，直接作为文件路径
+                doc_path = doc
+                doc_type = "file"
+                doc_name = os.path.basename(doc) if doc else "unknown"
+            else:
+                logger.warning(f"TaskSummaryAgent: 未知的文档类型: {type(doc)}")
+                doc_path = str(doc)
+                doc_type = "unknown"
+                doc_name = "unknown"
             
             doc_content = {
                 "path": doc_path,
@@ -357,7 +423,7 @@ TaskManager状态及执行结果:
                     with open(doc_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                         doc_content["content"] = content
-                        logger.debug(f"TaskSummaryAgent: 成功读取文档 {doc_path}")
+                        logger.info(f"TaskSummaryAgent: 成功读取文档 {doc_path}")
                 except Exception as e:
                     logger.warning(f"TaskSummaryAgent: 读取文档 {doc_path} 失败: {str(e)}")
                     doc_content["content"] = f"文档读取失败: {str(e)}"
@@ -401,7 +467,7 @@ TaskManager状态及执行结果:
                     }
                     generated_docs.append(doc_info)
             
-            logger.debug(f"TaskSummaryAgent: 提取到 {len(generated_docs)} 个生成文档")
+            logger.info(f"TaskSummaryAgent: 提取到 {len(generated_docs)} 个生成文档")
             return generated_docs
             
         except Exception as e:

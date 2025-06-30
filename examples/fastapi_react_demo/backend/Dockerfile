@@ -2,8 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY . .
+COPY ./requirements.txt .
 RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+COPY . .
 
 WORKDIR /app/examples/fastapi_react_demo/backend
 
