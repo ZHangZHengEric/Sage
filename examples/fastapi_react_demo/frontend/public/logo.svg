@@ -1,0 +1,32 @@
+<svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg">
+    <style>
+        polygon, line {
+            fill: none;
+            stroke: black;
+            stroke-width: 8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+    </style>
+    <!-- White circular background -->
+    <circle cx="100" cy="90" r="95" fill="white" stroke="none"/>
+    
+    <!-- Outer hexagon -->
+    <polygon points="100,20 160,55 160,125 100,160 40,125 40,55"></polygon>
+
+    <!-- Internal custom split lines - manually adjustable -->
+    <line x1="100" y1="20" x2="40" y2="125"></line>
+    <!-- <line x1="40" y1="55" x2="160" y2="125" /> -->
+    <!-- <line x1="40" y1="125" x2="160" y2="55" /> -->
+
+    <line x1="100" y1="160" x2="160" y2="55"></line>
+    <line x1="130" y1="108" x2="160" y2="125"></line>
+    <line x1="68" y1="72" x2="40" y2="55"></line>
+    <line x1="130" y1="108" x2="40" y2="125"></line>
+    <line x1="68" y1="72" x2="160" y2="55"></line>
+    <line x1="100" y1="160" x2="75" y2="118"></line>
+    
+    <line x1="100" y1="65" x2="130" y2="108"></line>
+    <line x1="100" y1="65" x2="75" y2="118"></line>
+    <line x1="85" y1="95" x2="120" y2="95"></line>
+</svg> 
