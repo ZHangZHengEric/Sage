@@ -13,6 +13,7 @@ import uuid
 import asyncio
 import traceback
 import time
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
+import httpx
 
 # 添加项目路径
 project_root = Path(__file__).parent.parent.parent.parent
@@ -39,7 +41,6 @@ from openai import OpenAI
 from config_loader import get_app_config, save_app_config, ModelConfig
 
 # FTP服务器已移除
-
 
 # Pydantic模型定义
 class ChatMessage(BaseModel):
@@ -883,6 +884,53 @@ async def get_llm_request_detail(session_id: str, filename: str):
 static_path = Path(__file__).parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=static_path), name="static")
+
+
+@app.get("/proxy-file")
+async def proxy_file(request: Request):
+    file_url = request.query_params.get("url")
+    if not file_url:
+        return Response("URL parameter is required", status_code=400)
+
+    headers = {
+        'User-Agent': 'curl/7.81.0'  # 模拟 curl 的 User-Agent
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(file_url, timeout=30.0, headers=headers)
+            response.raise_for_status()
+
+            return Response(
+                content=response.content,
+                media_type=response.headers.get('content-type', 'text/plain')
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"代理请求失败 (HTTPStatusError): {e.response.status_code} for url: {e.request.url}")
+            logger.error(f"响应内容: {e.response.text}")
+            logger.error(traceback.format_exc())
+            return Response(f"HTTP error occurred: {e.response.status_code}\n{e.response.text}", status_code=e.response.status_code)
+        except httpx.RequestError as e:
+            logger.error(f"代理请求失败 (RequestError): {e.request.url!r}")
+            logger.error(traceback.format_exc())
+            return Response(f"An error occurred while requesting {e.request.url!r}:\n{str(e)}", status_code=500)
+        except Exception as e:
+            logger.error(f"代理请求发生未知错误")
+            logger.error(traceback.format_exc())
+            return Response(f"An unexpected error occurred: {str(e)}", status_code=500)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Echo: {data}")
+    except WebSocketDisconnect:
+        logger.info("WebSocket连接断开")
+    except Exception as e:
+        logger.error(f"WebSocket处理错误: {e}")
 
 
 if __name__ == "__main__":
