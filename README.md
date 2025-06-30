@@ -9,7 +9,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.1-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9.2-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -118,44 +118,26 @@
 ## 🏗️ Architecture Overview
 
 ```mermaid
-graph TD
-    A[🔍 User Input] --> B(📋 Task Analysis Agent)
-    B --> C{✅ Analysis Complete?}
-    C -->|Yes| D[🎯 Task Decompose Agent]
-    C -->|No| B
-    D --> E[📝 Planning Agent]
-    E --> F[⚡ Executor Agent]
-    F --> G[👁️ Observation Agent]
-    G --> H{🎪 Task Complete?}
-    H -->|Yes| I[📄 Summary Agent]
-    H -->|No| E
-    I --> J[🎉 Final Output]
-    
-    subgraph "🛠️ Tool Ecosystem"
-        F --> K[🔧 Tool Manager]
-        K -->|Local| L[📱 Built-in Tools]
-        K -->|Remote| M[🌐 MCP Servers]
-        M --> N[🔌 External APIs]
-        L --> O[📊 Results]
-        N --> O
-        O --> G
+graph LR
+    U[User Input] --> AC[Agent Controller]
+    AC --> WF
+    AC --> RM
+
+    subgraph WF[Workflow]
+        A[Analysis Agent] --> B[Planning Agent] --> C[Execution Agent] --> D[Observation Agent] --> E[Summary Agent]
+        D -- "if not complete" --> B
+        C -- uses --> X[🛠️ Tool System]
     end
-    
-    subgraph "📊 Token Tracking"
-        B --> P[💰 Usage Monitor]
-        D --> P
-        E --> P
-        F --> P
-        G --> P
-        I --> P
-        P --> Q[📈 Cost Analytics]
+    E --> R[Result Display]
+
+    subgraph RM["Resource & State Management"]
+        F[TaskManager]
+        G[MessageManager]
+        H[Workspace]
     end
-    
-    style A fill:#e1f5fe
-    style J fill:#e8f5e8
-    style K fill:#fff3e0
-    style P fill:#f3e5f5
 ```
+
+**Note:** _All workflow agents read/write state & context from Resource & State Management (right)._
 
 ## 🚀 Quick Start
 
@@ -374,41 +356,25 @@ Stop AI responses at any time with graceful cancellation and resource cleanup, w
 - 💾 **State preservation** - partial results are saved and accessible
 - 🔄 **Resumable execution** - continue from interruption point if needed
 
-## 🔄 Recent Updates (v0.9.1)
+## 🔄 Recent Updates (v0.9.2)
 
 ### ✨ New Features
-- 📨 **Message Manager**: Revolutionary message filtering and compression system reducing token usage by 30-70%
-- 📋 **Task Manager**: Comprehensive task lifecycle management with state persistence and dependency tracking
-- 🎯 **Agent Optimization**: All agents now integrate with MessageManager and TaskManager for maximum efficiency
-- 💾 **Session State Persistence**: Automatic saving and restoration of MessageManager and TaskManager states
-- 🔧 **Smart Message Filtering**: Agent-specific message filtering strategies for optimal context management
-- 📊 **Advanced Token Analytics**: Detailed compression statistics and optimization metrics tracking
-- ⚡ **Performance Boost**: Significant execution speed improvements through intelligent message optimization
-- 🧠 **Memory Management**: Session-isolated managers preventing memory leaks in long-running applications
+- **File Viewer**: Added a file viewer to the web UI, allowing users to view file contents in a side panel instead of downloading them.
+- **Dynamic Layout**: The web UI now features a dynamic layout that adjusts to show one or two side panels, optimizing screen real estate.
+- **Backend Proxy**: Implemented a backend proxy for file fetching to resolve mixed-content browser security issues.
+- **Enhanced Logging**: Added detailed logging to the backend proxy for easier debugging of server-side errors.
 
 ### 🔧 Technical Improvements
-- 📨 **MessageManager Integration**: All agents now use intelligent message filtering for token optimization
-- 📋 **TaskManager Integration**: Complete task state management across all workflow phases
-- 🏗️ **Session Management**: Session-isolated managers with automatic cleanup and state persistence
-- 💾 **State Persistence**: Automatic saving of MessageManager and TaskManager states to workspace files
-- 🔄 **Message Optimization**: Agent-specific filtering strategies reducing context size by up to 70%
-- 🧠 **Memory Efficiency**: Intelligent memory management preventing leaks in multi-session environments
-- ⚡ **Performance Optimization**: Significant speed improvements through smart message compression
-- 📊 **Enhanced Analytics**: Detailed optimization metrics and compression statistics tracking
+- **UI Responsiveness**: Improved the responsiveness of the side panels with smooth transitions.
+- **Error Handling**: Enhanced error handling in the `FileViewer` component to display clear error messages from the backend.
+- **Code Refactoring**: Refactored the `MarkdownWithMath` component to handle link clicks consistently, regardless of content.
 
 ### 🐛 Bug Fixes
-- Fixed message chunk merging strategy to use consistent message_id based approach
-- Resolved MessageManager system message filtering issues
-- Improved TaskManager task state synchronization
-- Enhanced session cleanup and memory management
-- Fixed token tracking accuracy in optimized message flows
-
-### 📋 API Changes
-- **MessageManager Integration**: All agents now require `message_manager` parameter in `run_stream()` methods
-- **TaskManager Integration**: Optional `task_manager` parameter added to all agent methods for state management
-- **Session Managers**: New `get_session_managers()` method in AgentController for accessing managers
-- **Token Statistics**: Enhanced `get_comprehensive_token_stats()` with optimization metrics
-- **Backward Compatibility**: All existing APIs remain fully compatible with automatic manager creation
+- **Syntax Error**: Fixed a critical syntax error in `executor_agent.py` that prevented the backend server from starting.
+- **User-Agent Simulation**: Resolved a `500 Internal Server Error` by simulating a `curl` User-Agent in backend `httpx` requests.
+- **Link Click Handler**: Corrected an issue where file link clicks were not being handled correctly in messages containing mathematical formulas.
+- **Backward Compatibility**: All existing APIs remain fully compatible with automatic manager creation.
+- **Framework Stability**: The core framework is now more stable and reliable.
 
 ## 📄 License
 

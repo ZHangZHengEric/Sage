@@ -224,7 +224,7 @@ class TextProcessor:
             # 只做基本的空白清理
             text = re.sub(r'\n\s*\n', '\n\n', text)
             text = re.sub(r'[ \t]+', ' ', text)
-            text = text.strip()
+        text = text.strip()
         
         return text
     

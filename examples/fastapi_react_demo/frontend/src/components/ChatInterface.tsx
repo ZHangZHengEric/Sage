@@ -7,6 +7,7 @@ import { useSystem } from '../context/SystemContext';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ToolDetailPanel from './ToolDetailPanel';
+import FileViewer from './FileViewer';
 import { ToolCallData } from '../types/toolCall';
 import { ChatHistoryItem } from '../hooks/useChatHistory';
 
@@ -38,6 +39,10 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     
     // 用于中断对话的AbortController
     const [currentAbortController, setCurrentAbortController] = useState<AbortController | null>(null);
+
+    // 文件查看器状态
+    const [fileViewerVisible, setFileViewerVisible] = useState(false);
+    const [selectedFile, setSelectedFile] = useState<{ url: string; name: string } | null>(null);
 
     // 处理分块JSON的函数
     const handleJsonChunk = (chunkData: any) => {
@@ -622,12 +627,47 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       
       setSelectedToolCall(toolCallData);
       setToolPanelVisible(true);
+
+      // 关闭文件查看器
+      setFileViewerVisible(false);
+      setSelectedFile(null);
     };
 
     const handleToolPanelClose = () => {
       setToolPanelVisible(false);
       setSelectedToolCall(null);
+    };
+
+    // 处理文件点击
+    const handleFileClick = (fileUrl: string, fileName: string) => {
+      setSelectedFile({ url: fileUrl, name: fileName });
+      setFileViewerVisible(true);
+      
+      // 关闭工具面板
+      setToolPanelVisible(false);
+      setSelectedToolCall(null);
+    };
+
+    // 关闭文件查看器
+    const handleFileViewerClose = () => {
+      setFileViewerVisible(false);
+      setSelectedFile(null);
+    };
+
+  const getLayoutWidths = () => {
+    const isToolPanelOpen = toolPanelVisible && selectedToolCall;
+    const isFileViewerOpen = fileViewerVisible && selectedFile;
+
+    if (isToolPanelOpen) {
+      return { main: '60%', panel: '40%' };
+    }
+    if (isFileViewerOpen) {
+      return { main: '60%', panel: '40%' };
+    }
+    return { main: '100%', panel: '0%' };
   };
+
+  const layout = getLayoutWidths();
 
   return (
     <div style={{ 
@@ -639,17 +679,19 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     }}>
       {/* 主聊天区域 */}
       <div style={{ 
-        width: toolPanelVisible ? '60%' : '100%',
+        width: layout.main,
+        flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        transition: 'all 0.3s ease'
+        transition: 'width 0.3s ease-in-out'
       }}>
         {/* 消息列表 */}
         <MessageList 
           messages={messages} 
           onExampleClick={handleExampleClick}
           onToolCallClick={handleToolCallClick}
+          onFileClick={handleFileClick}
           settings={{ useDeepThink, useMultiAgent }}
         />
 
@@ -666,12 +708,29 @@ const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         />
       </div>
       
-      {/* 工具详情侧边栏 */}
-      <ToolDetailPanel
-        visible={toolPanelVisible}
-        toolCall={selectedToolCall}
-        onClose={handleToolPanelClose}
-      />
+      {/* 右侧分屏容器 */}
+      {layout.panel !== '0%' && (
+        <div style={{ 
+          width: layout.panel,
+          flexShrink: 0,
+          transition: 'width 0.3s ease-in-out',
+          borderLeft: '1px solid #f0f0f0' 
+        }}>
+          {toolPanelVisible && (
+            <ToolDetailPanel
+              toolCall={selectedToolCall}
+              onClose={handleToolPanelClose}
+            />
+          )}
+          {fileViewerVisible && (
+            <FileViewer
+              fileUrl={selectedFile!.url}
+              fileName={selectedFile!.name}
+              onClose={handleFileViewerClose}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
   }
