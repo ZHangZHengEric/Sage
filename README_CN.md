@@ -143,18 +143,6 @@ graph LR
 
 ### **安装**
 
-#### 🚀 **快速安装（推荐）**
-
-```bash
-git clone https://github.com/ZHangZHengEric/Sage.git
-cd Sage
-
-# 运行自动化安装脚本
-./install_dependencies.sh
-```
-
-#### 📦 **手动安装**
-
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
