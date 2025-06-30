@@ -869,7 +869,8 @@ class AgentController:
         logger.info(f"AgentController: 任务总结阶段完成，生成 {len(summary_chunks)} 个块")
 
     def _execute_simplified_workflow(self, 
-                                    all_messages: List[Dict[str, Any]],
+                                    message_manager: Any,
+                                    task_manager: Any,
                                     tool_manager: Optional[Any],
                                     system_context: Dict[str, Any],
                                     session_id: str,
@@ -878,7 +879,8 @@ class AgentController:
         执行简化工作流（可选的任务分析 + 直接执行）
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
@@ -891,20 +893,22 @@ class AgentController:
         
         # 1. 任务分析阶段
         if deep_thinking:
-            all_messages = yield from self._execute_task_analysis_phase(
-                all_messages, tool_manager, system_context, session_id
+            yield from self._execute_task_analysis_phase(
+                message_manager, task_manager, tool_manager, system_context, session_id
             )
         
         # 2. 直接执行
         yield from self._execute_direct_workflow(
-            all_messages=all_messages,
+            message_manager=message_manager,
+            task_manager=task_manager,
             tool_manager=tool_manager,
             system_context=system_context,
             session_id=session_id
         )
 
     def _execute_direct_workflow(self, 
-                               all_messages: List[Dict[str, Any]],
+                               message_manager: Any,
+                               task_manager: Any,
                                tool_manager: Optional[Any],
                                system_context: Dict[str, Any],
                                session_id: str) -> Generator[List[Dict[str, Any]], None, None]:
@@ -912,7 +916,8 @@ class AgentController:
         执行直接工作流（使用直接执行智能体）
         
         Args:
-            all_messages: 所有消息列表
+            message_manager: MessageManager实例
+            task_manager: TaskManager实例
             tool_manager: 工具管理器
             system_context: 执行上下文
             session_id: 会话ID
@@ -927,11 +932,6 @@ class AgentController:
         if self.session_manager.is_interrupted(session_id):
             logger.info(f"AgentController: 直接执行阶段被中断，会话ID: {session_id}")
             return
-        
-        # 获取会话的MessageManager和TaskManager
-        message_manager, task_manager = self._get_session_managers(session_id)
-        # 先将现有消息添加到MessageManager
-        message_manager.add_messages(all_messages, agent_name="DirectExecutorAgent")
         
         for chunk in self.direct_executor_agent.run_stream(
             message_manager=message_manager,
