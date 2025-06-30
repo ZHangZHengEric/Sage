@@ -143,12 +143,15 @@ graph LR
 
 ### Installation
 
-#### 🚀 Quick Installation
-
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
-./install_dependencies.sh
+
+# Install core dependencies
+pip install -r requirements.txt
+
+# Install dependencies for the FastAPI React demo
+pip install -r examples/fastapi_react_demo/requirements.txt
 ```
 
 #### 🔧 Dependencies Overview
