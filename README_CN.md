@@ -9,7 +9,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前版本-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_版本-0.9.1-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_版本-0.9.2-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -118,44 +118,26 @@
 ## 🏗️ **架构概览**
 
 ```mermaid
-graph TD
-    A[🔍 用户输入] --> B(📋 任务分析智能体)
-    B --> C{✅ 分析完成?}
-    C -->|是| D[🎯 任务分解智能体]
-    C -->|否| B
-    D --> E[📝 规划智能体]
-    E --> F[⚡ 执行智能体]
-    F --> G[👁️ 观察智能体]
-    G --> H{🎪 任务完成?}
-    H -->|是| I[📄 总结智能体]
-    H -->|否| E
-    I --> J[🎉 最终输出]
-    
-    subgraph "🛠️ 工具生态系统"
-        F --> K[🔧 工具管理器]
-        K -->|本地| L[📱 内置工具]
-        K -->|远程| M[🌐 MCP服务器]
-        M --> N[🔌 外部API]
-        L --> O[📊 结果]
-        N --> O
-        O --> G
+graph LR
+    U[用户输入] --> AC[智能体控制器]
+    AC --> WF
+    AC --> RM
+
+    subgraph WF[工作流]
+        A[分析智能体] --> B[规划智能体] --> C[执行智能体] --> D[观察智能体] --> E[总结智能体]
+        D -- "未完成则循环" --> B
+        C -- 使用 --> X[🛠️ 工具系统]
     end
-    
-    subgraph "📊 令牌追踪"
-        B --> P[💰 使用监控]
-        D --> P
-        E --> P
-        F --> P
-        G --> P
-        I --> P
-        P --> Q[📈 成本分析]
+    E --> R[结果展示]
+
+    subgraph RM["资源与状态管理"]
+        F[任务管理器]
+        G[消息管理器]
+        H[工作区]
     end
-    
-    style A fill:#e1f5fe
-    style J fill:#e8f5e8
-    style K fill:#fff3e0
-    style P fill:#f3e5f5
 ```
+
+**说明：** _工作流各阶段均依赖右侧资源与状态管理（任务管理器、消息管理器、工作区）。_
 
 ## 🚀 **快速开始**
 
@@ -420,41 +402,25 @@ Sage 具备企业级特性，已为生产环境做好准备，支持配置管理
 - 💾 **状态保存** - 部分结果被保存并可访问
 - 🔄 **可恢复执行** - 如需要可从中断点继续
 
-## 🔄 **最新更新 (v0.9.1)**
+## 🔄 **最新更新 (v0.9.2)**
 
 ### ✨ **新功能**
-- 📨 **消息管理器**: 革命性的消息过滤和压缩系统，减少30-70%的token使用量
-- 📋 **任务管理器**: 全面的任务生命周期管理，支持状态持久化和依赖跟踪
-- 🎯 **智能体优化**: 所有智能体现已集成MessageManager和TaskManager以实现最大效率
-- 💾 **会话状态持久化**: 自动保存和恢复MessageManager和TaskManager状态
-- 🔧 **智能消息过滤**: 针对智能体的专用消息过滤策略，实现最优上下文管理
-- 📊 **高级Token分析**: 详细的压缩统计和优化指标追踪
-- ⚡ **性能提升**: 通过智能消息优化显著提升执行速度
-- 🧠 **内存管理**: 会话隔离管理器，防止长时间运行应用中的内存泄漏
+- **文件查看器**: 在Web界面中新增了文件查看器，用户现在可以在侧边栏直接查看文件内容，而无需下载。
+- **动态布局**: Web界面现在支持动态布局，可以根据需要显示一个或两个侧边栏，优化了屏幕空间利用率。
+- **后端代理**: 为解决浏览器混合内容安全问题，实现了用于文件获取的后端代理。
+- **增强日志记录**: 为后端代理添加了详细的日志记录，以便于调试服务器端错误。
 
 ### 🔧 **技术改进**
-- 📨 **MessageManager集成**: 所有智能体现使用智能消息过滤进行token优化
-- 📋 **TaskManager集成**: 跨所有工作流阶段的完整任务状态管理
-- 🏗️ **会话管理**: 会话隔离管理器，支持自动清理和状态持久化
-- 💾 **状态持久化**: 自动将MessageManager和TaskManager状态保存到工作空间文件
-- 🔄 **消息优化**: 针对智能体的过滤策略，减少多达70%的上下文大小
-- 🧠 **内存效率**: 智能内存管理，防止多会话环境中的泄漏
-- ⚡ **性能优化**: 通过智能消息压缩显著提升速度
-- 📊 **增强分析**: 详细的优化指标和压缩统计追踪
+- **UI响应性**: 提升了侧边栏的响应速度和平滑过渡效果。
+- **错误处理**: 优化了`FileViewer`组件的错误处理，可以清晰地显示来自后端的错误信息。
+- **代码重构**: 重构了`MarkdownWithMath`组件，以统一处理链接点击事件，无论内容如何。
 
 ### 🐛 **错误修复**
-- 修复消息块合并策略，使用一致的message_id基础方法
-- 解决MessageManager系统消息过滤问题
-- 改进TaskManager任务状态同步
-- 增强会话清理和内存管理
-- 修复优化消息流中的token追踪准确性
-
-### 📋 **API 变更**
-- **MessageManager集成**: 所有智能体的 `run_stream()` 方法现在需要 `message_manager` 参数
-- **TaskManager集成**: 为所有智能体方法添加可选的 `task_manager` 参数用于状态管理
-- **会话管理器**: AgentController中新增 `get_session_managers()` 方法用于访问管理器
-- **Token统计**: 增强的 `get_comprehensive_token_stats()` 包含优化指标
-- **向后兼容**: 所有现有API保持完全兼容，支持自动管理器创建
+- **语法错误**: 修复了`executor_agent.py`中一个导致后端服务器无法启动的关键语法错误。
+- **用户代理模拟**: 通过在后端`httpx`请求中模拟`curl`的User-Agent，解决了`500内部服务器错误`。
+- **链接点击处理**: 修正了在包含数学公式的消息中文件链接点击无法被正确处理的问题。
+- **向后兼容**: 所有现有API保持完全兼容，支持自动管理器创建。
+- **框架稳定性**: 核心框架现在更加稳定和可靠。
 
 ## 📄 **许可证**
 

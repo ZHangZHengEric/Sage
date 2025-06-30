@@ -8,13 +8,15 @@ import LoadingMessage from './LoadingMessage';
 import ToolCallBubble from './ToolCallBubble';
 import MarkdownWithMath from './MarkdownWithMath';
 import { Message, ToolCall } from '../types/chat';
+import { convertContainerPathsToAlistUrls } from '../utils/pathConverter';
 
 interface MessageBubbleProps {
   message: Message;
   onToolCallClick?: (toolCall: ToolCall) => void;
+  onFileClick?: (fileUrl: string, fileName: string) => void;
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick, onFileClick }) => {
   const isUser = message.role === 'user';
   const isError = message.type === 'error';
   
@@ -131,6 +133,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick 
       shouldShowBubble = message.type === 'loading' || displayContent !== '';
     }
     
+    // 转换容器路径为alist URL
+    displayContent = convertContainerPathsToAlistUrls(displayContent);
+    
     return { displayContent, shouldShowBubble };
   };
 
@@ -213,7 +218,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCallClick 
                   display: 'block', 
                   marginLeft: !isUser && getMessageTypeEmoji(message.type) ? '24px' : '0'
                 }}>
-                  <MarkdownWithMath>
+                  <MarkdownWithMath onFileClick={onFileClick}>
                     {displayContent}
                   </MarkdownWithMath>
                 </div>

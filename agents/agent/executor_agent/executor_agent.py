@@ -456,7 +456,7 @@ class ExecutorAgent(AgentBase):
                     logger.error(f"ExecutorAgent: 调用_handle_tool_calls_chunk时发生异常: {str(e)}")
                     import traceback
                     logger.error(f"ExecutorAgent: 异常堆栈: {traceback.format_exc()}")
-            
+                        
             elif chunk.choices[0].delta.content:
                 if tool_calls:
                     # 有工具调用时停止收集文本内容
@@ -507,8 +507,8 @@ class ExecutorAgent(AgentBase):
         """
         for tool_call in chunk.choices[0].delta.tool_calls:
             if tool_call.id and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id
-                            
+                last_tool_call_id = tool_call.id                            
+                
             if last_tool_call_id not in tool_calls:
                 logger.info(f"ExecutorAgent: 检测到新工具调用: {getattr(tool_call.function, 'name', 'None')}")
                 tool_calls[last_tool_call_id] = {
@@ -524,7 +524,7 @@ class ExecutorAgent(AgentBase):
                     tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
                 if hasattr(tool_call.function, 'arguments') and tool_call.function.arguments:
                     tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
-        
+
     def _execute_tool_calls(self, 
                           tool_calls: Dict[str, Any],
                           tool_manager: Optional[Any],
@@ -698,8 +698,8 @@ class ExecutorAgent(AgentBase):
             except Exception as e:
                 logger.error(f"ExecutorAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
                 yield from self._handle_tool_error(tool_call_id, tool_name, e)
-                    
-                    # 即使出错也要添加错误响应到execution_messages
+                
+                # 即使出错也要添加错误响应到execution_messages
                 error_response_message = {
                     'role': 'tool',
                     'content': f"工具执行错误: {str(e)}",

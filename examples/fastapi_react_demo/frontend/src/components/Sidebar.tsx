@@ -324,18 +324,18 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
                     </div>
                     
                     {/* 删除按钮 - 鼠标悬停时显示 */}
-                    <Button
-                      type="text"
-                      size="small"
+                      <Button
+                        type="text"
+                        size="small"
                       icon={<DeleteOutlined />}
                       onClick={(e) => handleDeleteChat(e, chatItem.id)}
-                      style={{
+                        style={{
                         color: '#ef4444',
-                        width: '20px',
-                        height: '20px',
-                        padding: 0,
-                        minWidth: 'auto',
-                        opacity: 0,
+                          width: '20px',
+                          height: '20px',
+                          padding: 0,
+                          minWidth: 'auto',
+                          opacity: 0,
                         transition: 'opacity 0.2s ease',
                         position: 'absolute',
                         right: '8px',
@@ -343,9 +343,9 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onChatSelect, onNewChat, o
                         transform: 'translateY(-50%)',
                         background: 'rgba(239, 68, 68, 0.1)',
                         border: 'none'
-                      }}
+                        }}
                       className="chat-item-delete-btn"
-                    />
+                      />
                   </div>
                 ))}
               </div>

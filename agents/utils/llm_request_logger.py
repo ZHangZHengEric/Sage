@@ -36,7 +36,7 @@ class LLMRequestLogger:
             self.workspace_dir = os.path.join(os.getcwd(), "sage_demo_workspace", session_id)
         else:
             self.workspace_dir = workspace_root
-        
+            
         # 创建LLM请求日志目录
         self.llm_requests_dir = os.path.join(self.workspace_dir, "llm_requests")
         os.makedirs(self.llm_requests_dir, exist_ok=True)

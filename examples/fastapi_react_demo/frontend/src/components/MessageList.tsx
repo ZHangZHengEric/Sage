@@ -11,6 +11,7 @@ interface MessageListProps {
   messages: Message[];
   onExampleClick: (example: string) => void;
   onToolCallClick?: (toolCall: ToolCall) => void;
+  onFileClick?: (fileUrl: string, fileName: string) => void;
   settings?: ChatSettings; // 添加设置信息
 }
 
@@ -20,7 +21,7 @@ interface MessageGroup {
   finalMessage?: Message;
 }
 
-const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onToolCallClick, settings }) => {
+const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onToolCallClick, onFileClick, settings }) => {
   // 对消息进行分组处理
   const groupMessages = (messages: Message[]): (Message | MessageGroup)[] => {
     const groups: (Message | MessageGroup)[] = [];
@@ -128,6 +129,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onT
           <MessageBubble 
             message={userMessage} 
             onToolCallClick={onToolCallClick}
+            onFileClick={onFileClick}
           />
           
           {/* Loading消息 - 显示在用户消息下方，思考过程外面 */}
@@ -136,6 +138,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onT
               <MessageBubble 
                 message={loadingMessage} 
                 onToolCallClick={onToolCallClick}
+                onFileClick={onFileClick}
               />
             </div>
           ))}
@@ -200,6 +203,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onT
                           <MessageBubble 
                             message={thinkMessage} 
                             onToolCallClick={onToolCallClick}
+                            onFileClick={onFileClick}
                           />
                         </div>
                       ))}
@@ -228,6 +232,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onT
             <MessageBubble 
               message={finalMessage} 
               onToolCallClick={onToolCallClick}
+              onFileClick={onFileClick}
             />
           )}
         </div>
@@ -239,6 +244,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, onExampleClick, onT
           key={group.id}
           message={group} 
           onToolCallClick={onToolCallClick}
+          onFileClick={onFileClick}
         />
       );
     }

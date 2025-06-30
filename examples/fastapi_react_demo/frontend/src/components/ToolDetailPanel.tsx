@@ -9,12 +9,11 @@ import ExecuteViewer from './ExecuteViewer';
 const { Title, Text, Paragraph } = Typography;
 
 interface ToolDetailPanelProps {
-  visible: boolean;
   toolCall: ToolCallData | null;
   onClose: () => void;
 }
 
-const ToolDetailPanel: React.FC<ToolDetailPanelProps> = ({ visible, toolCall, onClose }) => {
+const ToolDetailPanel: React.FC<ToolDetailPanelProps> = ({ toolCall, onClose }) => {
   // 添加状态来强制重新渲染
   const [refreshKey, setRefreshKey] = useState(0);
   
@@ -26,7 +25,7 @@ const ToolDetailPanel: React.FC<ToolDetailPanelProps> = ({ visible, toolCall, on
     }
   }, [toolCall]);
 
-  if (!visible || !toolCall) {
+  if (!toolCall) {
     return null;
   }
 
@@ -251,12 +250,12 @@ const ToolDetailPanel: React.FC<ToolDetailPanelProps> = ({ visible, toolCall, on
     <div 
       key={`tool-panel-${toolCall.id}-${refreshKey}`}
       style={{
-        width: visible ? '40%' : '0',
+        width: '100%',
         height: '100vh',
         background: '#ffffff',
         borderLeft: '1px solid #f0f0f0',
         boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
-        overflow: visible ? 'auto' : 'hidden',
+        overflow: 'hidden',
         transition: 'all 0.3s ease'
       }}>
       {/* 头部 */}

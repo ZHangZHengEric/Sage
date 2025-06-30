@@ -1815,24 +1815,72 @@ class AgentController:
             workspace_dir: 工作空间目录
         """
         try:
+            logger.info(f"AgentController: 开始打印LLM请求摘要，session_id: {session_id}")
+            
             from agents.utils.llm_request_logger import get_llm_logger
             llm_logger = get_llm_logger(session_id)
             request_files = llm_logger.list_request_files()
             
+            logger.info(f"AgentController: 获取到 {len(request_files)} 个请求文件")
+            logger.info(f"AgentController: request_files类型: {type(request_files)}")
+            if request_files:
+                logger.info(f"AgentController: 第一个文件信息: {request_files[0]}")
+                logger.info(f"AgentController: 第一个文件类型: {type(request_files[0])}")
+            
             if not request_files:
-                logger.debug("📊 LLM请求记录: 无记录")
+                logger.info("📊 LLM请求记录: 无记录")
                 return
             
             # 统计智能体请求数量
             agent_stats = {}
-            for file_info in request_files:
-                agent_name = file_info['agent_name']
+            for i, file_info in enumerate(request_files):
+                logger.info(f"AgentController: 处理第 {i+1} 个文件信息: {file_info}")
+                logger.info(f"AgentController: file_info类型: {type(file_info)}")
+                
+                if isinstance(file_info, dict):
+                    agent_name = file_info.get('agent_name', 'unknown')
+                elif isinstance(file_info, str):
+                    # 如果是文件路径字符串，读取JSON文件获取agent_name
+                    try:
+                        import json
+                        import os
+                        
+                        if os.path.exists(file_info):
+                            with open(file_info, 'r', encoding='utf-8') as f:
+                                file_data = json.load(f)
+                                agent_name = file_data.get('agent_name', 'unknown')
+                                logger.info(f"AgentController: 从JSON文件读取agent_name: {agent_name}")
+                        else:
+                            logger.warning(f"AgentController: 文件不存在: {file_info}")
+                            agent_name = 'unknown'
+                    except Exception as e:
+                        logger.warning(f"AgentController: 读取JSON文件失败: {str(e)}")
+                        # 如果读取失败，尝试从文件名提取
+                        import os
+                        filename = os.path.basename(file_info)
+                        logger.info(f"AgentController: 从文件名提取: {filename}")
+                        
+                        if '_' in filename:
+                            parts = filename.split('_')
+                            if len(parts) >= 3:
+                                agent_name = parts[2]  # TaskAnalysisAgent
+                            else:
+                                agent_name = 'unknown'
+                        else:
+                            agent_name = 'unknown'
+                else:
+                    logger.info(f"AgentController: file_info是其他类型: {type(file_info)}")
+                    agent_name = 'unknown'
+                
+                logger.info(f"AgentController: 最终提取的agent_name: {agent_name}")
                 agent_stats[agent_name] = agent_stats.get(agent_name, 0) + 1
             
             logger.info(f"📊 LLM请求记录: {len(request_files)}个请求")
             for agent_name, count in sorted(agent_stats.items()):
                 if count > 0:
-                    logger.debug(f"  • {agent_name}: {count}个请求")
+                    logger.info(f"  • {agent_name}: {count}个请求")
                     
         except Exception as e:
+            import traceback
             logger.warning(f"📊 LLM请求记录统计失败: {str(e)}")
+            logger.warning(f"📊 LLM请求记录统计失败详情: {traceback.format_exc()}")
