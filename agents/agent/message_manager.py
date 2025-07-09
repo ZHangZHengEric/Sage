@@ -145,7 +145,7 @@ class MessageManager:
                         existing_message['agent_name'] = agent_name
                     
                     existing_message['updated_at'] = datetime.datetime.now().isoformat()
-                    logger.debug(f"MessageManager: 合并chunk到现有消息 {message_id[:8]}... (Agent: {agent_name})")
+                    # logger.debug(f"MessageManager: 合并chunk到现有消息 {message_id[:8]}... (Agent: {agent_name})")
                     
                 else:
                     # 没有找到现有消息，创建新消息
