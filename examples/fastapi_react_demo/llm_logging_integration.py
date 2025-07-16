@@ -11,9 +11,9 @@ from pathlib import Path
 # 添加Sage路径
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from agents.utils.llm_request_logger import init_llm_logger, log_llm_request
-from agents.agent.planning_agent.planning_agent import PlanningAgent
-from agents.agent.observation_agent.observation_agent import ObservationAgent
+from sagents.utils.llm_request_logger import init_llm_logger, log_llm_request
+from sagents.agent.planning_agent.planning_agent import PlanningAgent
+from sagents.agent.observation_agent.observation_agent import ObservationAgent
 
 class LLMLoggingDemo:
     """LLM日志记录演示类"""

@@ -28,14 +28,17 @@ st.set_page_config(
 
 # 项目路径配置
 project_root = Path(os.path.realpath(__file__)).parent.parent
-sys.path.append(str(project_root))
+sys.path.insert(0, str(project_root))
 
-from agents.agent.agent_controller import AgentController
-from agents.professional_agents.code_agents import CodeAgent
-from agents.tool.tool_manager import ToolManager
-from agents.utils import logger
-from agents.config import get_settings, update_settings, Settings
-from agents.utils import (
+import sagents
+print("sagents loaded from:", sagents.__file__)
+
+from sagents.agent.agent_controller import AgentController
+from sagents.professional_agents.code_agents import CodeAgent
+from sagents.tool.tool_manager import ToolManager
+from sagents.utils import logger
+from sagents.config import get_settings, update_settings, Settings
+from sagents.utils import (
     SageException, 
     ToolExecutionError, 
     AgentTimeoutError,
@@ -442,6 +445,8 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
                 st.session_state.components_initialized = True
                 st.session_state.config_updated = True  # 标记配置已更新
             st.success("系统初始化完成！")
+            # 打印已注册工具，便于调试
+            print("已注册工具：", [t['name'] for t in tool_manager.list_tools_simplified()])
             # 初始化完成后重新运行，确保UI显示更新后的配置
             st.rerun()
         except SageException as e:
