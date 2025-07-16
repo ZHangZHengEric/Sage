@@ -30,11 +30,11 @@ import httpx
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(project_root))
 
-from agents.agent.agent_controller import AgentController
-from agents.tool.tool_manager import ToolManager
-from agents.professional_agents.code_agents import CodeAgent
-from agents.utils.logger import logger
-from agents.config import get_settings
+from sagents.agent.agent_controller import AgentController
+from sagents.tool.tool_manager import ToolManager
+from sagents.professional_agents.code_agents import CodeAgent
+from sagents.utils.logger import logger
+from sagents.config import get_settings
 from openai import OpenAI
 
 # 导入新的配置加载器
@@ -794,7 +794,7 @@ async def cleanup_session(session_id: str):
             
             # 清理LLM请求记录器
             try:
-                from agents.utils.llm_request_logger import cleanup_logger
+                from sagents.utils.llm_request_logger import cleanup_logger
                 cleanup_logger(session_id)
             except Exception as e:
                 logger.warning(f"清理LLM记录器失败: {e}")
@@ -817,7 +817,7 @@ async def options_handler(rest_of_path: str, response: Response):
 async def get_session_llm_summary(session_id: str):
     """获取会话的LLM请求摘要（极简版本）"""
     try:
-        from agents.utils.llm_request_logger import get_llm_logger
+        from sagents.utils.llm_request_logger import get_llm_logger
         llm_logger = get_llm_logger(session_id)
         files = llm_logger.list_request_files()
         
@@ -845,7 +845,7 @@ async def get_session_llm_summary(session_id: str):
 async def get_session_llm_requests(session_id: str):
     """获取会话的所有LLM请求文件列表"""
     try:
-        from agents.utils.llm_request_logger import get_llm_logger
+        from sagents.utils.llm_request_logger import get_llm_logger
         llm_logger = get_llm_logger(session_id)
         files = llm_logger.list_request_files()
         return {"status": "success", "data": files}
@@ -862,7 +862,7 @@ async def get_llm_request_detail(session_id: str, filename: str):
         filename: 文件名 (例如: PlanningAgent_session_0001_1234567890.json)
     """
     try:
-        from agents.utils.llm_request_logger import get_llm_logger
+        from sagents.utils.llm_request_logger import get_llm_logger
         from pathlib import Path
         import json
         

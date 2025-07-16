@@ -16,7 +16,7 @@ import uuid
 # 添加项目根目录到Python路径
 sys.path.insert(0, "/srv/Sage")
 
-from agents.utils.llm_request_logger import get_llm_logger, cleanup_logger
+from sagents.utils.llm_request_logger import get_llm_logger, cleanup_logger
 
 def test_all_agents_logging():
     """测试所有智能体的LLM请求记录"""
