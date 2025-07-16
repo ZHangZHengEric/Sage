@@ -36,10 +36,13 @@ class TaskSummaryAgent(AgentBase):
 TaskManager状态及执行结果:
 {task_manager_status_and_results}
 
+## 近期完成动作详情
+{execution_results}
+
 你的回答应该:
 1. 直接回答原始任务。
 2. 使用清晰详细的语言，但要保证回答的完整性和准确性，保留任务执行过程中的关键结果。
-3. 如果任务执行过程中生成了文档，那么在回答中应该包含文档的地址引用，方便用户下载。
+3. 如果任务执行过程中生成了文档，那么在回答中应该包含文档的地址引用，使用markdown的文件连接格式，方便用户下载。
 4. 对于生成的文档，不仅要提供文档地址，还要提供文档内的关键内容摘要。
 5. 图表直接使用markdown进行显示。
 6. 不是为了总结执行过程，而是以TaskManager中的任务执行结果为基础，生成一个针对用户任务的完美回答。
@@ -160,6 +163,10 @@ TaskManager状态及执行结果:
         task_manager_status_and_results = self._extract_task_manager_status(task_manager)
         logger.info(f"TaskSummaryAgent: 提取TaskManager状态及结果，长度: {len(task_manager_status_and_results)}")
         
+        # 提取执行结果
+        execution_results = self._extract_completed_actions(messages)
+        logger.info(f"TaskSummaryAgent: 提取执行结果，长度: {len(execution_results)}")
+        
         # 获取上下文信息
         current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         file_workspace = '无'
@@ -167,6 +174,7 @@ TaskManager状态及执行结果:
         summary_context = {
             'task_description': task_description,
             'task_manager_status_and_results': task_manager_status_and_results,
+            'execution_results': execution_results,
             'current_time': current_time,
             'file_workspace': file_workspace,
             'session_id': session_id,
@@ -189,7 +197,8 @@ TaskManager状态及执行结果:
         """
         prompt = self.SUMMARY_PROMPT_TEMPLATE.format(
             task_description=context['task_description'],
-            task_manager_status_and_results=context['task_manager_status_and_results']
+            task_manager_status_and_results=context['task_manager_status_and_results'],
+            execution_results=context['execution_results']
         )
         
         logger.info(f"TaskSummaryAgent: 生成总结提示，长度: {len(prompt)}")
