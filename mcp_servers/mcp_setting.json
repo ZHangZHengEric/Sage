@@ -1,18 +1,9 @@
 {
     "mcpServers": {
-        "fetch": {
-            "command": "uvx",
-            "args": [
-                "mcp-server-fetch"
-            ],
-            "env": {
-                "UV_INDEX_URL": "https://pypi.tuna.tsinghua.edu.cn/simple"
-            },
-            "disabled": false
-        },
-        "serper_web_search":{
-            "sse_url":"http://127.0.0.1:34011/sse",
-            "disabled": false
+        "sage_mcp_hub": {
+            "sse_url":"http://36.133.44.114:20042/sse",
+            "disabled": false,
+            "api_key": "sk-hub-0r4Y-8eAeRXeA-9TpQoxoHCDdLpY5VVG2mJHpuzaVvc"
         }
     }
 }
