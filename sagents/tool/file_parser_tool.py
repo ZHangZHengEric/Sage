@@ -368,38 +368,55 @@ class ExcelParser:
         
     @staticmethod
     def _read_excel_to_dict(file_path: str) -> Dict[str, List[List[str]]]:
-        """读取Excel文件到字典"""
-        workbook = load_workbook(file_path, data_only=True, read_only=True)
+        """读取Excel文件到字典，正确处理合并单元格"""
+        # 需要关闭read_only模式才能访问合并单元格信息
+        workbook = load_workbook(file_path, data_only=True, read_only=False)
         excel_data = {}
 
         for sheet_name in workbook.sheetnames:
             sheet = workbook[sheet_name]
-            sheet_data = []
-
-            # 读取数据
-            for row in sheet.iter_rows(values_only=True):
-                if row is None:
-                    continue
-                row_data = [
-                    str(cell).replace('\n', '\\n') if cell is not None else ''
-                    for cell in row
-                ]
-                sheet_data.append(row_data)
-                
-            if not sheet_data:
-                continue
-                
-            # 统一行长度
-            max_length = max(len(row) for row in sheet_data) if sheet_data else 0
-            for i, row in enumerate(sheet_data):
-                if len(row) < max_length:
-                    sheet_data[i] = row + [''] * (max_length - len(row))
             
-            # 清理空行和空列
-            sheet_data = ExcelParser._clean_empty_rows_cols(sheet_data)
+            # 创建合并单元格值映射
+            merged_cell_values = {}
+            for merged_range in sheet.merged_cells.ranges:
+                # 获取合并单元格左上角的值
+                top_left_cell = sheet.cell(merged_range.min_row, merged_range.min_col)
+                value = top_left_cell.value
+                
+                # 为合并范围内的所有单元格设置相同的值
+                for row in range(merged_range.min_row, merged_range.max_row + 1):
+                    for col in range(merged_range.min_col, merged_range.max_col + 1):
+                        merged_cell_values[(row, col)] = value
+            
+            # 读取数据，考虑合并单元格
+            sheet_data = []
+            max_row = sheet.max_row
+            max_col = sheet.max_column
+            
+            if max_row and max_col:
+                for row_idx in range(1, max_row + 1):
+                    row_data = []
+                    for col_idx in range(1, max_col + 1):
+                        # 检查是否是合并单元格
+                        if (row_idx, col_idx) in merged_cell_values:
+                            cell_value = merged_cell_values[(row_idx, col_idx)]
+                        else:
+                            cell = sheet.cell(row_idx, col_idx)
+                            cell_value = cell.value
+                        
+                        cell_str = str(cell_value).replace('\n', '\\n') if cell_value is not None else ''
+                        row_data.append(cell_str)
+                    
+                    sheet_data.append(row_data)
+                
+                if not sheet_data:
+                    continue
+                
+                # 清理空行和空列
+                sheet_data = ExcelParser._clean_empty_rows_cols(sheet_data)
 
-            if sheet_data:
-                excel_data[sheet_name] = sheet_data
+                if sheet_data:
+                    excel_data[sheet_name] = sheet_data
         
         workbook.close()
         return excel_data
