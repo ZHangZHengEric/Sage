@@ -226,15 +226,17 @@ class SAgent:
             yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_executor_agent, "任务执行")
             
             yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_observation_agent, "任务观察")
-
+            if session_context.status == SessionStatus.INTERRUPTED:
+                logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
+                return
             # 从message 中查看observation 信息
-            observation_dict = session_context.message_manager.get_latest_observation_message_dict()
             now_completed_tasks= session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
             if len(now_completed_tasks) > len(current_completed_tasks):
                 logger.info(f"SAgent: 检测到任务状态变化，完成任务数从 {len(current_completed_tasks)} 增加到 {len(now_completed_tasks)}")
                 yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_stage_summary_agent, "任务阶段总结")
                 current_completed_tasks = now_completed_tasks
-            
+
+            observation_dict = session_context.message_manager.get_latest_observation_message_dict()
             if observation_dict:
                 if observation_dict.get("is_completed",False) == True:
                     logger.info(f"SAgent: 规划-执行-观察循环完成，会话ID: {session_id}")
