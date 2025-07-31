@@ -140,7 +140,9 @@ class FileSystemTool(ToolBase):
         super().__init__()
         self.default_upload_url = "http://36.133.44.114:20034/askonce/api/v1/doc/upload"
         self.default_headers = {"User-Source": 'AskOnce_bakend'}
-
+        # 从环境变量获取前置路径
+        self.prefix_file_workspace = os.getenv("PREFIX_FILE_WORKSPACE")
+        print(f"prefix_file_workspace: {self.prefix_file_workspace}")
     @ToolBase.tool()
     def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = None, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
@@ -156,6 +158,9 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含文件内容和元信息
         """
+        # 处理前置路径
+        if self.prefix_file_workspace:
+            file_path = os.path.join(self.prefix_file_workspace, file_path)
         start_time = time.time()
         operation_id = hashlib.md5(f"read_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📖 file_read开始执行 [{operation_id}] - 文件: {file_path}")
@@ -206,12 +211,13 @@ class FileSystemTool(ToolBase):
             
             total_time = time.time() - start_time
             
+            # 返回结果处理掉前置路径
             return {
                 "status": "success",
                 "message": f"成功读取文件 (行 {start_line}-{end_line})",
                 "content": content,
                 "file_info": {
-                    "path": file_path,
+                    "path": file_path.replace(self.prefix_file_workspace, ""),
                     "total_lines": total_lines,
                     "read_lines": end_line - start_line,
                     "encoding": encoding,
@@ -234,7 +240,7 @@ class FileSystemTool(ToolBase):
 
     @ToolBase.tool()
     def file_write(self, file_path: str, content: str, mode: str = "overwrite", 
-                   encoding: str = "utf-8", auto_upload: bool = True) -> Dict[str, Any]:
+                   encoding: str = "utf-8") -> Dict[str, Any]:
         """智能文件写入工具
 
         Args:
@@ -247,6 +253,9 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 操作结果和文件信息
         """
+        # 处理前置路径
+        if self.prefix_file_workspace:
+            file_path = os.path.join(self.prefix_file_workspace, file_path)
         start_time = time.time()
         operation_id = hashlib.md5(f"write_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"✏️ file_write开始执行 [{operation_id}] - 文件: {file_path}")
@@ -295,7 +304,7 @@ class FileSystemTool(ToolBase):
                 "status": "success",
                 "message": f"文件写入成功 ({mode}模式)",
                 "file_info": {
-                    "path": file_path,
+                    "path": file_path.replace(self.prefix_file_workspace, ""),
                     "size_mb": file_info["size_mb"],
                     "encoding": encoding
                 },
@@ -310,17 +319,17 @@ class FileSystemTool(ToolBase):
             }
             
             # 自动上传到云端
-            if auto_upload:
-                try:
-                    upload_result = self.upload_file_to_cloud(file_path)
-                    if upload_result["status"] == "success":
-                        result["cloud_url"] = upload_result["url"]
-                        result["file_id"] = upload_result.get("file_id")
-                        result["message"] += "，已上传到云端"
-                    else:
-                        result["upload_error"] = upload_result["message"]
-                except Exception as e:
-                    result["upload_error"] = f"云端上传失败: {str(e)}"
+            # if auto_upload:
+            #     try:
+            #         upload_result = self.upload_file_to_cloud(file_path)
+            #         if upload_result["status"] == "success":
+            #             result["cloud_url"] = upload_result["url"]
+            #             result["file_id"] = upload_result.get("file_id")
+            #             result["message"] += "，已上传到云端"
+            #         else:
+            #             result["upload_error"] = upload_result["message"]
+            #     except Exception as e:
+            #         result["upload_error"] = f"云端上传失败: {str(e)}"
             
             total_time = time.time() - start_time
             result["execution_time"] = total_time
@@ -341,6 +350,9 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 上传结果，包含状态和文件URL
         """
+        # 处理前置路径
+        if self.prefix_file_workspace:
+            file_path = os.path.join(self.prefix_file_workspace, file_path)
         start_time = time.time()
         operation_id = hashlib.md5(f"upload_cloud_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"☁️ upload_file_to_cloud开始执行 [{operation_id}] - 文件: {file_path}")
@@ -475,7 +487,7 @@ class FileSystemTool(ToolBase):
             return {
                 "status": "success",
                 "message": "文件下载成功",
-                "file_path": file_path,
+                "file_path": file_path.replace(self.prefix_file_workspace, ""),
                 "file_name": file_name,
                 "file_size": saved_size,
                 "file_size_mb": content_size_mb,
@@ -503,6 +515,9 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 文件详细信息
         """
+        # 处理前置路径
+        if self.prefix_file_workspace:
+            file_path = os.path.join(self.prefix_file_workspace, file_path)
         try:
             # 安全验证
             validation = SecurityValidator.validate_path(file_path)
@@ -538,9 +553,9 @@ class FileSystemTool(ToolBase):
             return {"status": "error", "message": f"获取文件信息失败: {str(e)}"}
 
     @ToolBase.tool()
-    def search_and_replace(self, file_path: str, search_pattern: str, replacement: str, 
+    def replace_text_in_file(self, file_path: str, search_pattern: str, replacement: str, 
                           use_regex: bool = False, case_sensitive: bool = True) -> Dict[str, Any]:
-        """在文件中搜索并替换文本
+        """在文件中搜索某端文件并使用另一段文本替换该文本
 
         Args:
             file_path (str): 文件绝对路径
@@ -552,6 +567,9 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 替换结果统计
         """
+        # 处理前置路径
+        if self.prefix_file_workspace:
+            file_path = os.path.join(self.prefix_file_workspace, file_path)
         try:
             # 安全验证
             validation = SecurityValidator.validate_path(file_path)
