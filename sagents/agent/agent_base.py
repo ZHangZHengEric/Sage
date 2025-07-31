@@ -166,6 +166,7 @@ class AgentBase(ABC):
                     llm_response =  merge_stream_response_to_non_stream_response(all_chunks)
                 except:
                     print(all_chunks)
+                llm_response = None
                 session_context.add_llm_request(llm_request,llm_response)
 
     def prepare_unified_system_message(self,
