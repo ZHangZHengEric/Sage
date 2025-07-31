@@ -1,3 +1,4 @@
+from operator import imod
 from typing import Dict, Any, List, Callable, Optional, Type, Union
 from dataclasses import dataclass
 from mcp import StdioServerParameters
@@ -6,35 +7,7 @@ import inspect
 import json
 from functools import wraps
 from docstring_parser import parse,DocstringStyle
-
-@dataclass
-class SseServerParameters:
-    url: str
-    api_key: Optional[str] = None
-@dataclass
-class McpToolSpec:
-    name: str
-    description: str
-    func: Callable
-    parameters: Dict[str, Dict[str, Any]]  # Now includes description for each param
-    required: List[str]
-    server_name: str
-    server_params: Union[StdioServerParameters, SseServerParameters]
-@dataclass
-class ToolSpec:
-    name: str
-    description: str
-    func: Callable
-    parameters: Dict[str, Dict[str, Any]]  # Now includes description for each param
-    required: List[str]
-
-@dataclass
-class AgentToolSpec:
-    name: str
-    description: str
-    func: Callable
-    parameters: Dict[str, Dict[str, Any]]
-    required: List[str]
+from .tool_config import ToolSpec, AgentToolSpec, McpToolSpec, SseServerParameters, StreamableHttpServerParameters
 
 class ToolBase:
     _tools: Dict[str, ToolSpec] = {}  # Class-level registry
@@ -49,14 +22,13 @@ class ToolBase:
                 self.tools[name] = spec
                 if name not in self.__class__._tools:
                     self.__class__._tools[name] = spec
-                logger.info(f"Registered tool: {name} to {self.__class__.__name__}")
-                print(f"Registered tool: {name} to {self.__class__.__name__}")
+                logger.debug(f"Registered tool: {name} to {self.__class__.__name__}")
     
     @classmethod
     def tool(cls):
         """Decorator factory for registering tool methods"""
         def decorator(func):
-            logger.debug(f"Applying tool decorator to {func.__name__} in {cls.__name__}")
+            logger.info(f"Applying tool decorator to {func.__name__} in {cls.__name__}")
             # Parse full docstring using docstring_parser
             docstring_text = inspect.getdoc(func) or ""
             parsed_docstring = parse(docstring_text,style=DocstringStyle.GOOGLE)
@@ -94,18 +66,12 @@ class ToolBase:
                 # Get parameter description from parsed docstring
                 param_desc = ""
                 for doc_param in parsed_docstring.params:
-                    logger.debug(f"Checking param: {doc_param.arg_name} vs {name}")
-                    print(f"Checking param: {doc_param.arg_name} vs {name}")
                     if doc_param.arg_name == name:
                         param_desc = doc_param.description
-                        logger.debug(f"Found param description: {param_desc}")
-                        print(f"Found param description: {param_desc}")
                         break
                 
                 # Use docstring description if available, otherwise default
                 param_info["description"] = param_desc or f"The {name} parameter"
-                logger.debug(f"Final param description for {name}: {param_info['description']}")
-                print(f"Final param description for {name}: {param_info['description']}")
                 
                 if param.default == inspect.Parameter.empty:
                     required.append(name)
@@ -144,8 +110,7 @@ class ToolBase:
                     cls._tools = {}
                 cls._tools[tool_name] = spec
             
-            logger.info(f"Registered tool to toolbase: {tool_name}")
-            print(f"Registered tool to toolbase: {tool_name} ")
+            logger.debug(f"Registered tool to toolbase: {tool_name}")
             return wrapper
         return decorator
 
@@ -153,22 +118,6 @@ class ToolBase:
     def get_tools(cls) -> Dict[str, ToolSpec]:
         logger.debug(f"Getting tools for {cls.__name__}")
         return cls._tools
-
-    @classmethod
-    def get_openai_specs(cls) -> List[Dict[str, Any]]:
-        logger.debug(f"Getting OpenAI specs for {cls.__name__} with {len(cls._tools)} tools")
-        specs = []
-        for tool in cls._tools.values():
-            specs.append({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": tool.parameters,
-                    "required": tool.required
-                }
-            })
-        return specs
 
     def get_openai_tools(self) -> List[Dict[str, Any]]:
         """Get OpenAI-compatible tool specifications for this instance"""

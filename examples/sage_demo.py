@@ -36,6 +36,7 @@ print("sagents loaded from:", sagents.__file__)
 from sagents.agent.agent_controller import AgentController
 from sagents.professional_agents.code_agents import CodeAgent
 from sagents.tool.tool_manager import ToolManager
+from sagents.agent.message_manager import MessageManager
 from sagents.utils import logger
 from sagents.config import get_settings, update_settings, Settings
 from sagents.utils import (
@@ -199,10 +200,14 @@ class StreamingHandler:
                 summary=True,
                 deep_research=use_multi_agent
             ):
+                # 将message chunk类型的chunks 转化成字典
+                chunk = [msg.to_dict() for msg in chunk]
                 new_messages.extend(chunk)
                 self._update_display(messages, new_messages)
                 
         except Exception as e:
+            print(chunk)
+            logger.error(traceback.format_exc())
             error_info = handle_exception(e, {
                 'method': 'process_stream',
                 'session_id': session_id,
@@ -235,7 +240,7 @@ class StreamingHandler:
     
     def _update_display(self, base_messages: List[Dict], new_messages: List[Dict]):
         """更新显示内容"""
-        merged_messages = self.controller.task_analysis_agent._merge_messages(base_messages.copy(), new_messages)
+        merged_messages = MessageManager._merge_messages(base_messages.copy(), new_messages)
         display_messages = convert_messages_for_show(merged_messages)
         
         # 找到最新的助手消息
@@ -377,7 +382,7 @@ def generate_response(tool_manager: ToolManager, controller: AgentController):
     
     # 合并消息
     if new_messages:
-        merged_messages = controller.task_analysis_agent._merge_messages(
+        merged_messages = MessageManager._merge_messages(
             st.session_state.inference_conversation, new_messages
         )
         st.session_state.inference_conversation = merged_messages
