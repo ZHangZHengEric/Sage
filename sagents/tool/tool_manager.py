@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Type, Optional, Union
-from .tool_base import ToolBase, ToolSpec, McpToolSpec,SseServerParameters,AgentToolSpec
+from .tool_base import ToolBase
+from .tool_config import convert_spec_to_openai_format,ToolSpec, McpToolSpec,SseServerParameters,AgentToolSpec
 from sagents.utils.logger import logger
 import importlib
 import pkgutil
@@ -21,17 +22,7 @@ class ToolManager:
         """初始化工具管理器"""
         logger.info("Initializing ToolManager")
         
-        # 工具执行统计
-        self.execution_stats = {
-            'total_executions': 0,
-            'successful_executions': 0,
-            'failed_executions': 0,
-            'tools_called': {},
-            'error_types': {}
-        }
-        
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec]] = {}
-        self._mcp_sessions: Dict[str, Dict[str, Union[ClientSession]]] = {}  # {session_id: {server_name: session}}
         self._tool_instances: Dict[type, ToolBase] = {}  # 缓存工具实例
         
         if is_auto_discover:
@@ -55,21 +46,7 @@ class ToolManager:
         """异步初始化，用于测试环境"""
         logger.info("Asynchronously initializing ToolManager")
         await self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path)
-    async def cleanup_session(self, session_id: str):
-        """Clean up all sessions for a given session_id"""
-        logger.info(f"Cleaning up sessions for session_id: {session_id}")
-        if session_id in self._mcp_sessions:
-            for server_name, session in self._mcp_sessions[session_id].items():
-                try:
-                    logger.debug(f"Closing session for server: {server_name}")
-                    await session.close()
-                except Exception as e:
-                    logger.error(f"Error closing session for server {server_name}: {e}")
-                    print(f"Error closing session: {e}")
-            del self._mcp_sessions[session_id]
-            logger.info(f"Successfully cleaned up sessions for session_id: {session_id}")
-        else:
-            logger.debug(f"No sessions found for session_id: {session_id}")
+    
 
     async def register_mcp_server(self, server_name: str, config: dict):
         """Register an MCP server directly with configuration
@@ -139,8 +116,8 @@ class ToolManager:
                         logger.info(f"Found tool class: {obj.__name__}")
                         self.register_tool_class(obj)
             except ImportError as e:
-                traceback.print_exc()
-                logger.error(f"Error importing module {module_name}: {e}")
+                logger.error(f"Failed to import module {module_name}: {e}")
+                logger.error(traceback.format_exc())
                 continue
         logger.info(f"Auto-discovery completed with {len(self.tools)} total tools")
         # 将package_path 从sys.path 中移除
@@ -157,10 +134,9 @@ class ToolManager:
         
         if not instance_tools:
             logger.warning(f"No tools found in {tool_class.__name__}")
-            print(f"No tools found in {tool_class.__name__}")
             return False
         
-        print(f"\nRegistering tools to manager from {tool_class.__name__}:")
+        logger.info(f"\nRegistering tools to manager from {tool_class.__name__}:")
         registered = False
         for tool_name, tool_spec in instance_tools.items():
             # 修正工具规格中的__objclass__
@@ -176,12 +152,11 @@ class ToolManager:
         logger.debug(f"Registering tool: {tool_spec.name}")
         if tool_spec.name in self.tools:
             logger.warning(f"Tool already registered: {tool_spec.name}")
-            print(f"Tool already registered: {tool_spec.name}")
+
             return False
         
         self.tools[tool_spec.name] = tool_spec
         logger.info(f"Successfully registered tool: {tool_spec.name}")
-        print(f"Registered tool to manager: {tool_spec.name}")
         return True
 
     async def _discover_mcp_tools(self,mcp_setting_path: str = None):
@@ -189,20 +164,18 @@ class ToolManager:
         logger.info(f"Discovering MCP tools from settings file: {mcp_setting_path}")
         if os.path.exists(mcp_setting_path)==False:
             logger.warning(f"MCP setting file not found: {mcp_setting_path}")
-            print(f"MCP setting file not found: {mcp_setting_path}")
             return
         try:
             with open(mcp_setting_path) as f:
                 mcp_config = json.load(f)
                 logger.debug(f"Loaded MCP config with {len(mcp_config.get('mcpServers', {}))} servers")
-                print('mcp_config',mcp_config)
+                logger.debug(f"mcp_config: {mcp_config}")
             
             for server_name, config in mcp_config.get('mcpServers', {}).items():
                 logger.debug(f"Processing MCP server config for {server_name}")
-                print(f"Loading MCP server config for {server_name}: {config}")
+                logger.debug(f"Loading MCP server config for {server_name}: {config}")
                 if config.get('disabled', False):
                     logger.debug(f"Skipping disabled MCP server: {server_name}")
-                    print(f"Skipping disabled MCP server: {server_name}")
                     continue
                 
                 if 'sse_url' in config:
@@ -219,7 +192,6 @@ class ToolManager:
                     await self._register_mcp_tools_stdio(server_name, server_params)
         except Exception as e:
             logger.error(f"Error loading MCP config: {str(e)}")
-            print(f"Error loading MCP config: {e}")
 
     async def _register_mcp_tools_stdio(self, server_name: str, server_params: StdioServerParameters):
         """Register tools from stdio MCP server"""
@@ -228,12 +200,11 @@ class ToolManager:
             async with stdio_client(server_params) as (read, write):
                 async with ClientSession(read, write) as session:
                     logger.debug(f"Initializing session for stdio MCP server {server_name}")
-                    print(f"Initializing session for stdio MCP server {server_name}")
                     start_time = time.time()
                     await session.initialize()
                     elapsed = time.time() - start_time
                     logger.debug(f"Initialized session for stdio MCP server {server_name} in {elapsed:.2f} seconds")
-                    print(f"Initialized session for stdio MCP server {server_name} in {elapsed} seconds")
+
                     response = await session.list_tools()
                     tools = response.tools
                     logger.info(f"Received {len(tools)} tools from stdio MCP server {server_name}")
@@ -242,13 +213,11 @@ class ToolManager:
         except Exception as e:
             logger.error(f"Failed to connect to stdio MCP server {server_name}: {str(e)}")
             logger.error(traceback.format_exc())
-            print(traceback.format_exc())
-            print(f"Failed to connect to stdio MCP server {server_name}: {e}")
 
     async def _register_mcp_tools_sse(self, server_name: str, server_params: SseServerParameters):
         """Register tools from SSE MCP server"""
         logger.info(f"Registering tools from SSE MCP server: {server_name} at {server_params.url}")
-        print(f"Connecting to SSE MCP server {server_name} at {server_params.url}")
+
         try:
             headers= None
             if server_params.api_key:
@@ -260,12 +229,12 @@ class ToolManager:
             async with sse_client(server_params.url,headers=headers) as (read, write):
                 async with ClientSession(read, write) as session:
                     logger.debug(f"Initializing session for SSE MCP server {server_name}")
-                    print(f"Initializing session for SSE MCP server {server_name}")
+
                     start_time = time.time()
                     await session.initialize()
                     elapsed = time.time() - start_time
                     logger.debug(f"Session initialized in {elapsed:.2f} seconds")
-                    print(f"Session initialized in {elapsed:.2f} seconds")
+
                     response = await session.list_tools()
                     tools = response.tools
                     logger.info(f"Received {len(tools)} tools from SSE MCP server {server_name}")
@@ -273,7 +242,6 @@ class ToolManager:
                         await self._register_mcp_tool(server_name, tool, server_params)
         except Exception as e:
             logger.error(f"Failed to connect to SSE MCP server {server_name}: {str(e)}")
-            print(f"Failed to connect to SSE MCP server {server_name}: {e}")
 
     async def _register_mcp_tool(self, server_name: str, tool_info:Union[Tool, dict], 
                                server_params: Union[StdioServerParameters, SseServerParameters]):
@@ -282,10 +250,7 @@ class ToolManager:
             tool_info = tool_info.model_dump()
         if not isinstance(tool_info, dict):
             logger.warning(f"Invalid tool info type: {type(tool_info)}")
-            print(f"Invalid tool info type: {type(tool_info)}")        
         logger.debug(f"Registering MCP tool: {tool_info['name']} from server: {server_name}")
-        print(f"Tool info: {tool_info}")
-        print(f"Registering tool from MCP server: {tool_info['name']}")
         """Register a tool from MCP server"""
         if 'input_schema' in tool_info:
             input_schema = tool_info.get('input_schema', {})
@@ -309,10 +274,9 @@ class ToolManager:
         dir_path = Path(dir_path)
         if not dir_path.is_dir():
             logger.warning(f"Directory not found: {dir_path}")
-            print(f"Directory not found: {dir_path}")
             return False
             
-        print(f"\nScanning directory for tools: {dir_path}")
+        logger.info(f"\nScanning directory for tools: {dir_path}")
         tool_count = 0
             
         for py_file in dir_path.glob('*.py'):
@@ -322,7 +286,6 @@ class ToolManager:
                 
             module_name = py_file.stem
             logger.debug(f"Found tool module: {module_name}")
-            print(f"\nFound tool module: {module_name}")
             
             try:
                 spec = importlib.util.spec_from_file_location(module_name, py_file)
@@ -332,16 +295,16 @@ class ToolManager:
                 for name, obj in inspect.getmembers(module):
                     if inspect.isclass(obj) and issubclass(obj, ToolBase) and obj is not ToolBase:
                         logger.debug(f"Registering tool class: {name}")
-                        print(f"  Registering tool class: {name}")
+
                         if self.register_tool_class(obj):
                             tool_count = len(self.tools)
             except Exception as e:
                 logger.error(f"Error loading tool from {py_file}: {str(e)}")
-                print(f"Error loading tool from {py_file}: {e}")
+
                 continue
                 
         logger.info(f"Successfully registered {tool_count} tools from directory")
-        print(f"\nSuccessfully registered {tool_count} tools from directory")
+
         return tool_count > 0
 
     def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
@@ -383,12 +346,7 @@ class ToolManager:
             elif isinstance(tool, ToolSpec):
                 tool_type = "basic"
                 # 根据工具名称推断来源
-                if 'calculate' in tool.name.lower() or 'factorial' in tool.name.lower():
-                    source = "内置计算器"
-                elif 'database' in tool.name.lower() or 'sql' in tool.name.lower():
-                    source = "数据库工具"
-                else:
-                    source = "基础工具"
+                source = "基础工具"
             else:
                 tool_type = "unknown"
                 source = "未知来源"
@@ -406,18 +364,7 @@ class ToolManager:
     def get_openai_tools(self) -> List[Dict[str, Any]]:
         """Get tool specifications in OpenAI-compatible format"""
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
-        return [{
-            'type': 'function',
-            'function': {
-                'name': tool.name,
-                'description': tool.description,
-                'parameters': {
-                    'type': 'object',
-                    'properties': tool.parameters,
-                    'required': tool.required
-                }
-            }
-        } for tool in self.tools.values()]
+        return [convert_spec_to_openai_format(tool) for tool in self.tools.values()]
 
     def run_tool(self, tool_name: str, messages: list, session_id: str, **kwargs) -> Any:
         """Execute a tool by name with provided arguments"""
@@ -432,7 +379,7 @@ class ToolManager:
         if not tool:
             error_msg = f"Tool '{tool_name}' not found. Available: {list(self.tools.keys())}"
             logger.error(error_msg)
-            self._log_execution(tool_name, False, "TOOL_NOT_FOUND")
+
             return self._format_error_response(error_msg, tool_name, "TOOL_NOT_FOUND")
         
         logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
@@ -465,7 +412,6 @@ class ToolManager:
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
-                self._log_execution(tool_name, False, "UNKNOWN_TOOL_TYPE")
                 return self._format_error_response(error_msg, tool_name, "UNKNOWN_TOOL_TYPE")
             
             # Step 4: Validate Result (for non-streaming tools)
@@ -476,23 +422,16 @@ class ToolManager:
             is_valid, validation_msg = self._validate_json_response(final_result, tool_name)
             if not is_valid:
                 logger.error(f"Tool '{tool_name}' returned invalid JSON: {validation_msg}")
-                self._log_execution(tool_name, False, "INVALID_JSON")
                 return self._format_error_response(f"Invalid JSON response: {validation_msg}", 
                                                  tool_name, "INVALID_JSON")
             
-            self._log_execution(tool_name, True, execution_time=execution_time)
             return final_result
             
         except Exception as e:
             execution_time = time.time() - execution_start
             error_msg = f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"Exception details: {type(e).__name__}")
-            logger.debug(f"Full traceback: {traceback.format_exc()}")
-            
-            self._log_execution(tool_name, False, "EXECUTION_ERROR")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
-
 
 
     def _execute_agent_tool_streaming(self, tool: AgentToolSpec, messages: list, session_id: str):
@@ -542,7 +481,6 @@ class ToolManager:
             # 记录执行统计
             execution_time = time.time() - execution_start
             logger.info(f"Agent tool '{tool.name}' completed streaming in {execution_time:.2f}s")
-            self._log_execution(tool.name, True, execution_time=execution_time)
             
         except Exception as e:
             execution_time = time.time() - execution_start
@@ -551,7 +489,6 @@ class ToolManager:
             logger.error(f"Exception details: {type(e).__name__}")
             logger.debug(f"Full traceback: {traceback.format_exc()}")
             
-            self._log_execution(tool.name, False, "EXECUTION_ERROR")
             
             # 返回错误消息作为流
             error_response = {
@@ -618,17 +555,6 @@ class ToolManager:
             logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
             raise
 
-    def _execute_agent_tool(self, tool: AgentToolSpec, messages: list, session_id: str) -> str:
-        """Execute agent tool and format result"""
-        logger.debug(f"Executing agent tool: {tool.name}")
-        
-        try:
-            result = tool.func(messages=messages, session_id=session_id)
-            return json.dumps({"messages": result}, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"Agent tool execution failed: {tool.name} - {str(e)}")
-            raise
-
     def _format_error_response(self, error_msg: str, tool_name: str, error_type: str, 
                               exception_detail: str = None) -> str:
         """Format a consistent error response"""
@@ -649,9 +575,6 @@ class ToolManager:
         """Run an MCP tool asynchronously"""
         if not session_id:
             session_id = "default"
-        
-        if session_id not in self._mcp_sessions:
-            self._mcp_sessions[session_id] = {}
         
         server_name = tool.server_name
         logger.debug(f"MCP tool execution: {tool.name} on {server_name}")
@@ -715,62 +638,3 @@ class ToolManager:
             logger.error(f"Unexpected JSON validation error for '{tool_name}': {e}")
             return False, f"Validation error: {e}"
 
-    def get_execution_stats(self) -> dict:
-        """获取工具执行统计信息"""
-        total = max(1, self.execution_stats['total_executions'])
-        return {
-            **self.execution_stats,
-            'success_rate': (self.execution_stats['successful_executions'] / total) * 100,
-            'total_tools_registered': len(self.tools)
-        }
-
-    def _log_execution(self, tool_name: str, success: bool, error_type: str = None, execution_time: float = None):
-        """记录工具执行统计"""
-        self.execution_stats['total_executions'] += 1
-        
-        if tool_name not in self.execution_stats['tools_called']:
-            self.execution_stats['tools_called'][tool_name] = {'success': 0, 'failed': 0, 'avg_time': 0}
-            
-        if success:
-            self.execution_stats['successful_executions'] += 1
-            self.execution_stats['tools_called'][tool_name]['success'] += 1
-            if execution_time:
-                prev_avg = self.execution_stats['tools_called'][tool_name].get('avg_time', 0)
-                count = self.execution_stats['tools_called'][tool_name]['success']
-                self.execution_stats['tools_called'][tool_name]['avg_time'] = (prev_avg * (count - 1) + execution_time) / count
-        else:
-            self.execution_stats['failed_executions'] += 1
-            self.execution_stats['tools_called'][tool_name]['failed'] += 1
-            
-            if error_type:
-                self.execution_stats['error_types'][error_type] = self.execution_stats['error_types'].get(error_type, 0) + 1
-
-    def print_execution_summary(self):
-        """Print a summary of tool execution statistics"""
-        stats = self.get_execution_stats()
-        print("\n" + "="*50)
-        print("🔧 TOOL EXECUTION SUMMARY")
-        print("="*50)
-        print(f"Total executions: {stats['total_executions']}")
-        print(f"Success rate: {stats['success_rate']:.1f}%")
-        print(f"Total tools registered: {stats['total_tools_registered']}")
-        
-        if stats['error_types']:
-            print("\nError breakdown:")
-            for error_type, count in stats['error_types'].items():
-                print(f"  {error_type}: {count}")
-        
-        if stats['tools_called']:
-            print("\nMost used tools:")
-            sorted_tools = sorted(stats['tools_called'].items(), 
-                                key=lambda x: x[1]['success'] + x[1]['failed'], reverse=True)
-            for tool_name, tool_stats in sorted_tools[:5]:
-                total_calls = tool_stats['success'] + tool_stats['failed']
-                success_rate = (tool_stats['success'] / total_calls) * 100 if total_calls > 0 else 0
-                avg_time = tool_stats.get('avg_time', 0)
-                print(f"  {tool_name}: {total_calls} calls, {success_rate:.1f}% success, {avg_time:.2f}s avg")
-        print("="*50)
-
-    async def _run_mcp_tool(self, tool: McpToolSpec, session_id: str = None, **kwargs) -> CallToolResult:
-        """Run an MCP tool through its server connection (legacy compatibility)"""
-        return await self._run_mcp_tool_async(tool, session_id, **kwargs)
