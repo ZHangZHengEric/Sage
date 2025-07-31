@@ -69,7 +69,8 @@ class SessionContext:
 
     def add_and_update_system_context(self,new_system_context:Dict[str,Any]):
         """添加并更新系统上下文"""
-        self.system_context.update(new_system_context)
+        if new_system_context:
+            self.system_context.update(new_system_context)
 
     def add_llm_request(self, request: Dict[str, Any], response: Dict[str, Any]):
         """添加LLM请求"""
@@ -186,3 +187,19 @@ def delete_session_context(session_id: str):
     """删除会话上下文"""
     if session_id in _active_sessions:
         del _active_sessions[session_id]
+
+def list_active_sessions() -> List[Dict[str, Any]]:
+    """
+    列出所有活跃会话
+    
+    Returns:
+        List[Dict[str, Any]]: 会话信息列表
+    """
+    return [
+        {
+            "session_id": session_id,
+            "status": session.status.value,
+            "start_time": session.start_time,
+        }
+        for session_id, session in _active_sessions.items()
+    ]

@@ -22,7 +22,7 @@ from sagents.agent.task_summary_agent import TaskSummaryAgent
 from sagents.agent.task_stage_summary_agent import TaskStageSummaryAgent
 from sagents.agent.simple_react_agent import SimpleReactAgent
 from sagents.utils.logger import logger
-from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context
+from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context,list_active_sessions
 from sagents.context.messages.message import MessageChunk,MessageRole,MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.tasks.task_base import TaskBase, TaskStatus
@@ -326,3 +326,24 @@ class SAgent:
             message_id=message_id,
             show_content=error_message
         )]
+    def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
+        
+        session_context_ = get_session_context(session_id) 
+        if session_context_:
+            return session_context_.status
+        return None
+    
+    def list_active_sessions(self) -> List[Dict[str, Any]]:
+        
+        return list_active_sessions()
+    
+    def cleanup_session(self, session_id: str) -> bool:
+        
+        return delete_session_context(session_id)
+
+    def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
+        session_context_ = get_session_context(session_id=session_id)
+        if session_context_:
+            session_context_.status = SessionStatus.INTERRUPTED
+            return True
+        return False
