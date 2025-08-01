@@ -32,7 +32,7 @@ TaskManager状态及执行结果:
 2. 使用清晰详细的语言，但要保证回答的完整性和准确性，保留任务执行过程中的关键结果。
 3. 如果任务执行过程中生成了文档，那么在回答中应该包含文档的地址引用，使用markdown的文件连接格式，方便用户下载。
 4. 对于生成的文档，不仅要提供文档地址，还要提供文档内的关键内容摘要。
-5. 图表直接使用markdown进行显示。
+5. 图表直接使用```echarts ``` 的markdown代码块进行显示。
 6. 不是为了总结执行过程，而是以TaskManager中的任务执行结果为基础，生成一个针对用户任务的完美回答。
 """
         self.agent_name = "TaskSummaryAgent"
@@ -45,7 +45,7 @@ TaskManager状态及执行结果:
         task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
         task_description_messages_str = MessageManager.convert_messages_to_str(task_description_messages)
         
-        completed_actions_messages = message_manager.extract_after_last_stage_summary_messages()
+        completed_actions_messages = message_manager.get_all_execution_messages_after_last_user()
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
         
         task_manager_status_and_results = task_manager.get_all_tasks_summary()
