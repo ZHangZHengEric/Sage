@@ -146,7 +146,7 @@ class FileSystemTool(ToolBase):
     @ToolBase.tool()
     def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = None, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
-        """高级文件读取工具
+        """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
 
         Args:
             file_path (str): 文件绝对路径
@@ -430,6 +430,8 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 下载结果，包含保存的文件路径
         """
+        if self.prefix_file_workspace:
+            working_dir = os.path.join(self.prefix_file_workspace, working_dir)
         start_time = time.time()
         operation_id = hashlib.md5(f"download_{url}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📥 download_file_from_url开始执行 [{operation_id}] - URL: {url}")

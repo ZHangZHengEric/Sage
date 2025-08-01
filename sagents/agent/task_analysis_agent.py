@@ -124,7 +124,7 @@ class TaskAnalysisAgent(AgentBase):
                         show_content=llm_repsonse_chunk.choices[0].delta.content,
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
-            elif hasattr(llm_repsonse_chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
+            elif hasattr(llm_repsonse_chunk.choices[0].delta, 'reasoning_content') and llm_repsonse_chunk.choices[0].delta.reasoning_content is not None:
                 yield [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
                         content="",
