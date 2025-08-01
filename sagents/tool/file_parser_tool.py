@@ -841,14 +841,14 @@ class FileParserTool(ToolBase):
 
 
     @ToolBase.tool()
-    def extract_text_from_file(
+    def extract_text_from_non_text_file(
         self, 
         input_file_path: str, 
         start_index: int = 0, 
         max_length: int = 5000,
         include_metadata: bool = False
     ) -> Dict[str, Any]:
-        """从本地的各种格式的文件中提取方便阅读的markdown文本内容
+        """读取本地存储下的非文本文件，例如pdf，docx，doc，ppt，pptx，xlsx，xls等文件，返回Markdown的文本数据
 
         Args:
             input_file_path (str): 输入文件路径，本地的绝对路径

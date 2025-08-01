@@ -116,6 +116,13 @@ class AgentBase(ABC):
             # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
             serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls','tool_call_id']} for msg in serializable_messages]
             # print("serializable_messages:",serializable_messages)
+            # 确保所有的messages 中都包含role 和 content
+            for msg in serializable_messages:
+                if 'role' not in msg:
+                    msg['role'] = MessageRole.USER.value
+                if 'content' not in msg:
+                    msg['content'] = ''
+
 
             logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成，模型配置: {final_config}")
             stream = self.model.chat.completions.create(
@@ -123,7 +130,7 @@ class AgentBase(ABC):
                 stream=True,
                 stream_options={"include_usage": True},
                 **final_config
-            )   
+            )
             # 直接yield chunks，不再收集用于日志记录
             for chunk in stream:
                 # print(chunk)
