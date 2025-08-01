@@ -26,6 +26,7 @@ class MessageType(Enum):
     OBSERVATION = "observation"
     FINAL_ANSWER = "final_answer"
     SYSTEM = "system"
+    QUERY_SUGGEST = "query_suggest"
 
     # 工具相关
     TOOL_CALL = "tool_call"
