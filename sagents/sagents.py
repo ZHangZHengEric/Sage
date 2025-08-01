@@ -20,7 +20,9 @@ from sagents.agent.task_obversation_agent import TaskObservationAgent
 from sagents.agent.task_planning_agent import TaskPlanningAgent
 from sagents.agent.task_summary_agent import TaskSummaryAgent
 from sagents.agent.task_stage_summary_agent import TaskStageSummaryAgent
+from sagents.agent.workflow_select_agent import WorkflowSelectAgent
 from sagents.agent.simple_react_agent import SimpleReactAgent
+from sagents.agent.query_suggest_agent import QuerySuggestAgent
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context,list_active_sessions
 from sagents.context.messages.message import MessageChunk,MessageRole,MessageType
@@ -89,6 +91,12 @@ class SAgent:
         self.task_stage_summary_agent = TaskStageSummaryAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
+        self.workflow_select_agent = WorkflowSelectAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.query_suggest_agent = QuerySuggestAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
         logger.info("AgentController: 所有智能体初始化完成")
 
     def run_stream(self, 
@@ -134,15 +142,17 @@ class SAgent:
             # print(f"initial_messages: {initial_messages}")
             # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
             session_context.message_manager.add_messages(initial_messages, agent_name="SAgent")
-            # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
-            # # 只有在多智能体协作模式下才进行工作流选择
-            # if available_workflows and deep_research:
-            #     system_context = self._select_and_apply_workflow(
-            #         message_manager, available_workflows, system_context
-            #     )
-            #     if self.session_manager.is_interrupted(session_id):
-            #         logger.info(f"AgentController: 工作流选择阶段被中断，会话ID: {session_id}")
-            #         return
+
+            if len(available_workflows) >0:
+                for message_chunks in self._execute_agent_phase(
+                    session_context=session_context,
+                    tool_manager=tool_manager,
+                    session_id=session_id,
+                    agent=self.workflow_select_agent,
+                    phase_name="工作流选择"
+                ):
+                    session_context.message_manager.add_messages(message_chunks)
+                    yield message_chunks
             # 1. 任务分析阶段
             if deep_thinking:
                 for message_chunks in self._execute_agent_phase(
@@ -175,7 +185,17 @@ class SAgent:
                 ):
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
-            
+
+            for message_chunks in self._execute_agent_phase(
+                session_context=session_context,
+                tool_manager=tool_manager,
+                session_id=session_id,
+                agent=self.query_suggest_agent,
+                phase_name="查询建议"
+            ):
+                session_context.message_manager.add_messages(message_chunks)
+                yield message_chunks
+
             # 检查最终状态，如果不是中断状态则标记为完成
             if session_context.status != SessionStatus.INTERRUPTED:
                 session_context.status = SessionStatus.COMPLETED
