@@ -232,6 +232,19 @@ class MessageManager:
                 messages_after_last_user = []
             messages_after_last_user.append(msg)
         return messages_after_last_user
+    
+    def get_all_execution_messages_after_last_user(self) -> List[MessageChunk]:
+        messages_after_last_user = self.get_after_last_user_messages()
+        messages_after_last_execution = []
+        for msg in messages_after_last_user:
+            if msg.type in [MessageType.EXECUTION.value,
+                            MessageType.DO_SUBTASK.value,
+                            MessageType.DO_SUBTASK_RESULT.value,
+                            MessageType.TOOL_CALL.value,
+                            MessageType.TOOL_CALL_RESULT.value,
+                            MessageType.TOOL_RESPONSE ]:
+                messages_after_last_execution.append(msg)
+        return messages_after_last_execution
 
     def get_last_planning_message_dict(self) -> Optional[Dict[str, Any]]:
         for msg in reversed(self.messages):
