@@ -183,7 +183,7 @@ class WorkflowSelectAgent(AgentBase):
         all_content = ''
         for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
-                                             step_name="observation"):
+                                             step_name="workflow_select"):
             if len(llm_repsonse_chunk.choices) == 0:
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:
@@ -202,7 +202,7 @@ class WorkflowSelectAgent(AgentBase):
                 selected_workflow_index = result.get('selected_workflow_index', 0)
                 
                 logger.info(f"WorkflowSelector: LLM分析结果 - 匹配: {has_matching}, 工作流索引: {selected_workflow_index}")
-                
+                logger.info(f"WorkflowSelector: 工作流名称: {workflow_index_map[selected_workflow_index]}")
                 if has_matching and selected_workflow_index in workflow_index_map:
                     selected_workflow_name = workflow_index_map[selected_workflow_index]
                     workflow_steps = normalized_workflows[selected_workflow_name]
