@@ -138,11 +138,12 @@ class WorkflowSelectAgent(AgentBase):
 ```json
 {{
     "has_matching_workflow": true/false,
-    "selected_workflow_index": 1
+    "selected_workflow_index": 0
 }}
 ```
 
 请确保输出的JSON格式正确。如果没有合适的工作流，请设置has_matching_workflow为false。
+selected_workflow_index 从0 开始计数
 """
         self.agent_name = "WorkflowSelectAgent"
         self.agent_description = "工作流选择智能体，专门负责基于当前状态选择最合适的工作流"
@@ -191,19 +192,20 @@ class WorkflowSelectAgent(AgentBase):
 
         try:
             # 提取JSON部分
+            logger.debug(f"WorkflowSelector: 原始LLM响应: {all_content}")
             json_start = all_content.find('{')
             json_end = all_content.rfind('}') + 1
             
             if json_start >= 0 and json_end > json_start:
                 json_content = all_content[json_start:json_end]
                 result = json.loads(json_content)
-                
+                logger.debug(f"WorkflowSelector: 提取的JSON内容: {json_content}")
                 has_matching = result.get('has_matching_workflow', False)
                 selected_workflow_index = result.get('selected_workflow_index', 0)
                 
                 logger.info(f"WorkflowSelector: LLM分析结果 - 匹配: {has_matching}, 工作流索引: {selected_workflow_index}")
-                logger.info(f"WorkflowSelector: 工作流名称: {workflow_index_map[selected_workflow_index]}")
                 if has_matching and selected_workflow_index in workflow_index_map:
+                    logger.info(f"WorkflowSelector: 工作流名称: {workflow_index_map[selected_workflow_index]}")
                     selected_workflow_name = workflow_index_map[selected_workflow_index]
                     workflow_steps = normalized_workflows[selected_workflow_name]
                     logger.info(f"WorkflowSelector: 选择工作流: {selected_workflow_name}")
