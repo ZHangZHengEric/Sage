@@ -13,7 +13,7 @@ class TaskCompletionTool(ToolBase):
     @ToolBase.tool()
     def complete_task(self) -> Dict[str, Any]:
         """
-        当用户的请求或者任务完成时，调用此工具来标记任务完成状态。
+        当用户的请求或者任务完成时，或者当你对用户进行询问和澄清时，或者要等待用户的下一步输入时，要调用该工具来中断会话。
         
         Returns:
             Dict[str, Any]: 包含状态信息的字典
