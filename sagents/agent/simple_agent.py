@@ -445,6 +445,13 @@ class SimpleAgent(AgentBase):
             List[Dict[str, Any]]: 工具调用消息列表
         """
         # 格式化工具参数显示
+        if '```<｜tool▁call▁end｜><｜tool▁calls▁end｜>' in tool_call['function']['arguments']:
+            logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
+            tool_call['function']['arguments'] = tool_call['function']['arguments'].replace('```<｜tool▁call▁end｜><｜tool▁calls▁end｜>', '')
+        if '```<｜tool▁call▁end｜>{}' in tool_call['function']['arguments']:
+            logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
+            tool_call['function']['arguments'] = tool_call['function']['arguments'].replace('```<｜tool▁call▁end｜>{}', '')
+        # 格式化工具参数显示
         function_params = json.loads(tool_call['function']['arguments'])
         formatted_params = ''
         for param, value in function_params.items():
