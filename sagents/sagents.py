@@ -106,6 +106,7 @@ class SAgent:
         deep_thinking: bool = True, 
         max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
         multi_agent: bool = True,
+        more_suggest: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[List[Dict[str, Any]]] = None) -> Generator[List['MessageChunk'], None, None]:
         """
@@ -185,16 +186,17 @@ class SAgent:
                 ):
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
-
-            for message_chunks in self._execute_agent_phase(
-                session_context=session_context,
-                tool_manager=tool_manager,
-                session_id=session_id,
-                agent=self.query_suggest_agent,
-                phase_name="查询建议"
-            ):
-                session_context.message_manager.add_messages(message_chunks)
-                yield message_chunks
+                    
+            if more_suggest:
+                for message_chunks in self._execute_agent_phase(
+                    session_context=session_context,
+                    tool_manager=tool_manager,
+                    session_id=session_id,
+                    agent=self.query_suggest_agent,
+                    phase_name="查询建议"
+                ):
+                    session_context.message_manager.add_messages(message_chunks)
+                    yield message_chunks
 
             # 检查最终状态，如果不是中断状态则标记为完成
             if session_context.status != SessionStatus.INTERRUPTED:

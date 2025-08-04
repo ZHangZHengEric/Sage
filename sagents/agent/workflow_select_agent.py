@@ -132,7 +132,7 @@ class WorkflowSelectAgent(AgentBase):
 **任务要求：**
 1. 仔细分析对话历史中用户的核心需求和任务类型
 2. 对比各个工作流模板的适用场景
-3. 选择最匹配的工作流，或者判断没有合适的工作流
+3. 选择匹配的工作流，或者判断没有合适的工作流
 
 **输出格式（JSON）：**
 ```json
@@ -142,7 +142,8 @@ class WorkflowSelectAgent(AgentBase):
 }}
 ```
 
-请确保输出的JSON格式正确。如果没有合适的工作流，请设置has_matching_workflow为false。
+请确保输出的JSON格式正确。
+如果没有合适的工作流，请设置has_matching_workflow为false。
 selected_workflow_index 从0 开始计数
 """
         self.agent_name = "WorkflowSelectAgent"
