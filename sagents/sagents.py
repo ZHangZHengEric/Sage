@@ -12,6 +12,8 @@ import time
 import threading
 from typing import List, Dict, Any, Optional, Generator, Union
 from enum import Enum
+from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_proxy import ToolProxy
 from sagents.agent.simple_agent import SimpleAgent,AgentBase
 from sagents.agent.task_analysis_agent import TaskAnalysisAgent
 from sagents.agent.task_decompose_agent import TaskDecomposeAgent
@@ -101,14 +103,14 @@ class SAgent:
 
     def run_stream(self, 
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
-        tool_manager: Optional[Any] = None, 
+        tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
         session_id: Optional[str] = None, 
         deep_thinking: bool = True, 
         max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
         multi_agent: bool = True,
         more_suggest: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
-        available_workflows: Optional[List[Dict[str, Any]]] = None) -> Generator[List['MessageChunk'], None, None]:
+        available_workflows: Optional[Dict[str, Any]] = None) -> Generator[List['MessageChunk'], None, None]:
         """
         执行智能体任务的主流程
         
@@ -131,14 +133,15 @@ class SAgent:
             # 初始化该session 的context 管理器
             session_context = init_session_context(session_id, self.workspace)
             logger.info(f"开始流式工作流，会话ID: {session_id}")
+            
             if system_context:
-                logger.info(f"AgentController: 设置了system_context参数: {list(system_context.keys())}")
-            if available_workflows:
-                logger.info(f"AgentController: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
+                session_context.add_and_update_system_context(system_context)
+            if len(available_workflows.keys()) > 0:
+                logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                session_context.candidate_workflows = available_workflows
 
             session_context.status = SessionStatus.RUNNING
-            session_context.add_and_update_system_context(system_context)
-
             initial_messages = self._prepare_initial_messages(input_messages)
             # print(f"initial_messages: {initial_messages}")
             # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
