@@ -47,7 +47,7 @@ class SimpleAgent(AgentBase):
 1. 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要通过调用 complete_task 工具来结束会话或者触发等待用户的新的输入
 2. 一定要先执行用户的问题或者请求，即使用户问题不清楚，也要回答或者询问用户的意图后，再调用工具 complete_task 结束会话。
 3. 调用完工具后，一定要用文字描述工具调用的结果，不要直接结束任务。
-4. 当你对用户进行询问和澄清时，下一步要调用 complete_task 工具来结束会话，等待用户的新的输入。
+4. 当你对用户进行询问和澄清时，或者要等待用户的下一步输入时，要调用 complete_task 工具来结束会话。
 """
         # 最大循环次数常量
         self.max_loop_count = 10
@@ -445,12 +445,11 @@ class SimpleAgent(AgentBase):
             List[Dict[str, Any]]: 工具调用消息列表
         """
         # 格式化工具参数显示
-        if '```<｜tool▁call▁end｜><｜tool▁calls▁end｜>' in tool_call['function']['arguments']:
+        # 格式化工具参数显示
+        if '```<｜tool▁call▁end｜>' in tool_call['function']['arguments']:
             logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
-            tool_call['function']['arguments'] = tool_call['function']['arguments'].replace('```<｜tool▁call▁end｜><｜tool▁calls▁end｜>', '')
-        if '```<｜tool▁call▁end｜>{}' in tool_call['function']['arguments']:
-            logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
-            tool_call['function']['arguments'] = tool_call['function']['arguments'].replace('```<｜tool▁call▁end｜>{}', '')
+            # 去掉```<｜tool▁call▁end｜> 以及之后所有的字符
+            tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
         # 格式化工具参数显示
         function_params = json.loads(tool_call['function']['arguments'])
         formatted_params = ''
