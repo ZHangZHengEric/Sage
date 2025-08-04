@@ -286,6 +286,9 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         if '```<｜tool▁call▁end｜><｜tool▁calls▁end｜>' in tool_call['function']['arguments']:
             logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
             tool_call['function']['arguments'] = tool_call['function']['arguments'].replace('```<｜tool▁call▁end｜><｜tool▁calls▁end｜>', '')
+        if '```<｜tool▁call▁end｜>{}' in tool_call['function']['arguments']:
+            logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
+            tool_call['function']['arguments'] = tool_call['function']['arguments'].replace('```<｜tool▁call▁end｜>{}', '')
         function_params = json.loads(tool_call['function']['arguments'])
         formatted_params = ''
         for param, value in function_params.items():
