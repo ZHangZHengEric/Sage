@@ -33,6 +33,8 @@ class SessionContext:
         self.system_context = {}
         self.message_manager = MessageManager()
         self.task_manager = TaskManager(session_id=self.session_id)
+        self.candidate_workflows = []
+        self.selected_workflow = None
         self.init_more()
         
     def init_more(self):
