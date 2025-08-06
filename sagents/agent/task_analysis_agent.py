@@ -21,8 +21,6 @@ class TaskAnalysisAgent(AgentBase):
 当前有以下的工具可以使用：
 {available_tools}
 
-
-
 请按照以下步骤进行分析：
 首先，我需要理解用户的核心需求。从对话中可以提取哪些关键信息？用户真正想要实现的目标是什么？
 
@@ -51,27 +49,13 @@ class TaskAnalysisAgent(AgentBase):
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
         logger.info("TaskAnalysisAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: Optional[Any] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
                 # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        history_messages = message_manager.filter_messages(context_length_limited=10000,
-                                                          accept_message_type=[],
-                                                          recent_turns=10)
-        yield from self._execute_analysis_stream_internal(history_messages, tool_manager, session_id)
-
-    def _execute_analysis_stream_internal(self, messages: List[MessageChunk], tool_manager: ToolManager, session_id: str) -> Generator[List[MessageChunk], None, None]:
         logger.info("TaskAnalysisAgent: 开始执行流式任务分析")
-
-        # 只保留 最后一条 user 之后的消息
-        recent_message = []
-        for index in range(len(messages)-1,-1,-1):
-            if messages[index].role == MessageRole.USER.value:
-                recent_message = messages[index:]
-                break
-        
         # recent_message 中只保留 user 以及final answer
-        recent_message = [message for message in recent_message if message.role == MessageRole.USER.value or message.role == MessageRole.FINAL_ANSWER.value]
+        recent_message = message_manager.extract_all_user_and_final_answer_messages()
         recent_message_str = MessageManager.convert_messages_to_str(recent_message)
         
         available_tools = tool_manager.list_tools_simplified() if tool_manager else []
