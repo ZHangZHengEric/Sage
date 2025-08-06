@@ -18,8 +18,9 @@ class TaskObservationAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
         self.OBSERVATION_PROMPT_TEMPLATE = """# 任务执行分析指南
+通过用户的历史对话，来观察用户的需求或者任务
 
-## 当前用户任务
+## 用户历史对话
 {task_description}
 
 ## 任务管理器状态（未更新的状态，需要本次分析去更新）
@@ -38,6 +39,12 @@ class TaskObservationAgent(AgentBase):
 3. 评估任务整体完成百分比，范围0-100
 4. 根据近期完成动作详情，判断哪些任务已经完成，不要仅仅依赖任务管理器状态
 
+## completion_status设置为completed，即任务已完成，满足以下条件其中一个即可，与任务整体完成百分比不冲突：
+1. 当前已经执行的动作的结果，可以满足对于用户任务回复的数据支持。
+2. 当前在执行重复的动作，且动作的结果没有发生变化。
+3. 当前完成对用户任务的理解，需要等待用户进一步的反馈，以便进一步满足他们的需求。
+4. 当子任务全部完成时
+
 ## 子任务完成判断规则
 1. **基于执行结果判断**：仔细分析近期完成动作详情，如果某个子任务的核心要求已经通过执行动作完成，即使任务管理器状态显示为pending，也应该标记为已完成
 2. **子任务内容匹配**：将执行结果与子任务描述进行匹配，如果执行结果已经覆盖了子任务的核心要求，则认为子任务完成
@@ -54,25 +61,32 @@ class TaskObservationAgent(AgentBase):
 
 ## 输出格式
 ```
-<finish_percent>
-任务完成百分比，范围0-100，100表示任务彻底完成
-</finish_percent>
-<completion_status>
-任务完成状态：in_progress（进行中）、completed（已完成）、need_user_input（需要用户输入）、failed（失败）
-</completion_status>
 <analysis>
 分析近期完成动作详情的执行情况进行总结，指导接下来的方向要详细一些，一段话不要有换行
 </analysis>
+<finish_percent>
+40
+</finish_percent>
+<completion_status>
+in_progress
+</completion_status>
 <completed_task_ids>
-已完成的子任务ID列表，格式：["1", "2"]，通过近期完成动作详情以及任务管理器状态，判定已完成的子任务ID列表
+["1","2"]
 </completed_task_ids>
 <pending_task_ids>
-未完成的子任务ID列表，格式：["3", "4"]，通过近期完成动作详情以及任务管理器状态，判定未完成的子任务ID列表
+["3","4"]
 </pending_task_ids>
 <failed_task_ids>
-无法完成的子任务ID列表，格式：["5"]，通过近期完成动作详情以及任务管理器状态，经过3次尝试执行后，判定无法完成的子任务ID列表
+["5"]
 </failed_task_ids>
-```"""  
+```
+## 输出字段描述：
+finish_percent：子任务完成数量的百分比数字，格式：30，范围0-100，100表示所有的子任务都完成
+completion_status：任务完成状态，in_progress（进行中）、completed（已完成）、need_user_input（需要用户输入）、failed（失败）
+completed_task_ids：已完成的子任务ID列表，格式：["1", "2"]，通过近期完成动作详情以及任务管理器状态，判定已完成的子任务ID列表
+pending_task_ids：未完成的子任务ID列表，格式：["3", "4"]，通过近期完成动作详情以及任务管理器状态，判定未完成的子任务ID列表
+failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近期完成动作详情以及任务管理器状态，经过3次尝试执行后，判定无法完成的子任务ID列表
+"""  
         self.agent_name = "ObservationAgent"
         self.agent_description = "观测智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("TaskObservationAgent 初始化完成")
@@ -173,6 +187,7 @@ class TaskObservationAgent(AgentBase):
             
         except Exception as e:
             logger.error(f"ObservationAgent: 解析观察结果时发生错误: {str(e)}")
+            logger.error(f"ObservationAgent: 原始XML内容: {all_content}")
             yield [MessageChunk(
                 role=MessageRole.ASSISTANT.value,
                 content=f"任务观测失败: {str(e)}",
@@ -286,6 +301,10 @@ class TaskObservationAgent(AgentBase):
                     logger.warning(f"ObservationAgent: 更新任务 {task_id} 状态为失败时出错: {str(e)}")
             
             logger.info(f"ObservationAgent: 任务状态更新完成，完成任务: {completed_task_ids}，失败任务: {failed_task_ids}")
-            
+            # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
+            completed_tasks = task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
+            failed_tasks = task_manager.get_tasks_by_status(TaskStatus.FAILED)
+            if len(completed_tasks) + len(failed_tasks) == len(task_manager.get_all_tasks()):
+                observation_result['completion_status'] = 'completed'
         except Exception as e:
             logger.error(f"ObservationAgent: 更新TaskManager任务状态时发生错误: {str(e)}")

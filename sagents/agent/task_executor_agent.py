@@ -35,6 +35,7 @@ class TaskExecutorAgent(AgentBase):
 6. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
 7. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
 8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
+9. 针对生成较大的文档或者代码，先使用file_write 生成部分内容或者框架，在使用replace_text_in_file 进行更加详细内容的填充。
 """
         self.agent_name = "TaskExecutorAgent"
         self.agent_description = """
@@ -182,12 +183,12 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         # 获取所有工具
         tools_json = tool_manager.get_openai_tools()
         
-        # 根据建议的工具进行过滤
+        # 根据建议的工具进行过滤，同时移除掉complete_task 这个工具
         suggested_tools = subtask_info.get('required_tools', [])
         if suggested_tools:
             tools_suggest_json = [
                 tool for tool in tools_json 
-                if tool['function']['name'] in suggested_tools
+                if tool['function']['name'] in suggested_tools and tool['function']['name'] != 'complete_task'
             ]
             if tools_suggest_json:
                 tools_json = tools_suggest_json
@@ -257,7 +258,13 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             # 检查是否为complete_task
             if tool_name == 'complete_task':
                 logger.info("SimpleAgent: complete_task，停止执行")
-                yield ([], True)
+                yield [MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content='已经完成了满足用户的所有要求',
+                    message_id=content_response_message_id,
+                    show_content='已经完成了满足用户的所有要求',
+                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                )]
                 return
             
             # 发送工具调用消息
@@ -392,17 +399,18 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                                     )
                                     yield [message_chunk_]
                 except Exception as e:
-                    logger.error(f"SimpleAgent: 处理流式工具响应时发生错误: {str(e)}")
+                    logger.error(f"TaskExecutorAgent: 处理流式工具响应时发生错误: {str(e)}")
                     yield from self._handle_tool_error(tool_call['id'], tool_name, e)
             else:
                 # 处理非流式响应
-                logger.debug("SimpleAgent: 收到非流式工具响应，正在处理")
-                logger.info(f"SimpleAgent: 工具响应 {tool_response}")
+                logger.debug("TaskExecutorAgent: 收到非流式工具响应，正在处理")
+                logger.info(f"TaskExecutorAgent: 工具响应 {tool_response}")
                 processed_response = self.process_tool_response(tool_response, tool_call['id'])
                 yield processed_response
             
         except Exception as e:
-            logger.error(f"SimpleAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
+            logger.error(f"TaskExecutorAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
+            logger.error(f"TaskExecutorAgent: 执行工具 {tool_name} 时发生错误: {traceback.format_exc()}")
             yield from self._handle_tool_error(tool_call['id'], tool_name, e)
 
     def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> Generator[List[MessageChunk], None, None]:
