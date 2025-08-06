@@ -136,7 +136,7 @@ class ExecuteCommandTool(ToolBase):
     @ToolBase.tool()
     def execute_shell_command(self, command: str, workdir: Optional[str] = None, 
                              timeout: int = 30, env_vars: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-        """在指定目录执行Shell命令
+        """在指定目录执行Shell命令，后台执行请通过command 进行设置
 
         Args:
             command (str): 要执行的Shell命令

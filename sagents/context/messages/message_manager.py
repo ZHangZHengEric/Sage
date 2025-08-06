@@ -80,8 +80,12 @@ class MessageManager:
             messages = [messages]
         
         for message in messages:
-            if message.role == MessageRole.SYSTEM.value:
-                self.stats['system_messages_rejected'] += 1
+            try:
+                if message.role == MessageRole.SYSTEM.value:
+                    self.stats['system_messages_rejected'] += 1
+                    continue
+            except:
+                logger.error(f"MessageManager: 添加消息失败，消息内容: {message}")
                 continue
             
             self.messages = MessageManager.merge_new_message_old_messages(message,self.messages)
@@ -267,7 +271,11 @@ class MessageManager:
         for msg in reversed(self.messages):
             if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
                 obs_content = msg.content.replace('Observation: ', '')
-                obs_result = json.loads(obs_content)
+                try:
+                    obs_result = json.loads(obs_content)
+                except json.JSONDecodeError:
+                    logger.error(f"MessageManager: 解析观测消息失败，消息内容: {obs_content}")
+                    obs_result = {}
                 return obs_result
         return None
 

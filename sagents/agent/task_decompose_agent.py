@@ -16,17 +16,22 @@ class TaskDecomposeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
         self.DECOMPOSE_PROMPT_TEMPLATE = """# 任务分解指南
+通过用户的历史对话，来观察用户的需求或者任务
 
-## 用户需求
+## 用户历史对话
 {task_description}
+
+## 可用工具
+{available_tools_str}
 
 ## 分解要求
 1. 仅当任务复杂时才进行分解，如果任务本身非常简单，可以直接作为一个子任务，不要为了凑数量而强行拆分。
-2. 确保每个子任务都是原子性的，且尽量相互独立，避免人为拆分无实际意义的任务。
-3. 考虑任务之间的依赖关系，输出的列表必须是有序的，按照优先级从高到低排序，优先级相同的任务按照依赖关系排序。
-4. 输出格式必须严格遵守以下要求。
-5. 如果有任务Thinking的过程，子任务要与Thinking的处理逻辑一致。
-6. 子任务数量不要超过10个，较简单的子任务可以合并为一个子任务。
+2. 子任务的分解要考虑可用的工具的能力范围。
+3. 确保每个子任务都是原子性的，且尽量相互独立，避免人为拆分无实际意义的任务。
+4. 考虑任务之间的依赖关系，输出的列表必须是有序的，按照优先级从高到低排序，优先级相同的任务按照依赖关系排序。
+5. 输出格式必须严格遵守以下要求。
+6. 如果有任务Thinking的过程，子任务要与Thinking的处理逻辑一致。
+7. 子任务数量不要超过10个，较简单的子任务可以合并为一个子任务。
 
 ## 输出格式
 ```
@@ -47,8 +52,12 @@ class TaskDecomposeAgent(AgentBase):
         task_manager = session_context.task_manager
         task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
         recent_message_str = MessageManager.convert_messages_to_str(task_description_messages)
+        available_tools = tool_manager.list_tools_simplified() if tool_manager else []
+        available_tools_str = json.dumps([tool['name'] for tool in available_tools], ensure_ascii=False, indent=2) if available_tools else '无可用工具'
+
         prompt = self.DECOMPOSE_PROMPT_TEMPLATE.format(
-            task_description=recent_message_str
+            task_description=recent_message_str,
+            available_tools_str=available_tools_str
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id),
