@@ -21,7 +21,7 @@ from typing import Dict, Any, List, Optional, Union
 
 from .tool_base import ToolBase
 from sagents.utils.logger import logger
-
+import pandas as pd
 class FileSystemError(Exception):
     """文件系统异常"""
     pass
