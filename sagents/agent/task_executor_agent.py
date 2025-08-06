@@ -320,7 +320,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
                     
         if isinstance(function_params, dict):
-            tool_call['function']['arguments'] = json.dumps(function_params)
+            tool_call['function']['arguments'] = json.dumps(function_params,ensure_ascii=False)
             for param, value in function_params.items():
                 # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
                 if isinstance(value, str) and len(value) > 100:
