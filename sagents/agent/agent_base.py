@@ -12,7 +12,7 @@ from sagents.tool.tool_base import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import get_session_context, SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-import traceback
+import traceback,os
 from openai import OpenAI
 from openai.types.chat import ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import Choice,ChoiceDelta
@@ -220,7 +220,20 @@ class AgentBase(ABC):
                     # 其他类型直接转换为字符串
                     system_prefix += f"{key}: {str(value)}\n"
                     logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
-        
+
+            # 补充当前工作空间中的文件情况，工作空间的路径是 session_context.agent_workspace,需要把这个文件夹下的文件或者文件夹，有可能多层路径，给展示出来，类似tree 结构，只展示文件的相对路径
+            current_agent_workspace = session_context.agent_workspace
+            if current_agent_workspace:
+                system_prefix += f"\n当前工作空间 {session_context.system_context['file_workspace']} 的文件情况：\n"
+                for root, dirs, files in os.walk(current_agent_workspace):
+                    for file_item in files:
+                        system_prefix += f"{os.path.join(root, file_item).replace(current_agent_workspace, '').lstrip('/')}\n"
+                    for dir_item in dirs:
+                        system_prefix += f"{os.path.join(root, dir_item).replace(current_agent_workspace, '').lstrip('/')}/\n"
+                system_prefix += "\n"
+
+
+
         return MessageChunk(
             role=MessageRole.SYSTEM.value,
             content=system_prefix,

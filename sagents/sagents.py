@@ -351,7 +351,7 @@ class SAgent:
         """
         logger.error(f"SAgent: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
         
-        error_message = f"工作流执行失败: {str(error)},{traceback.format_exc()}"
+        error_message = f"工作流执行失败: {str(error)}"
         message_id = str(uuid.uuid4())
         
         yield [MessageChunk(

@@ -1,3 +1,4 @@
+from math import log
 import traceback
 from sagents.context.messages import message_manager
 from sagents.context.messages.message_manager import MessageManager
@@ -247,17 +248,17 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         Yields:
             tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
         """
-        logger.info(f"SimpleAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
-        logger.info(f"SimpleAgent: 工具调用: {tool_calls}")
+        logger.info(f"TaskExecutorAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
+        logger.info(f"TaskExecutorAgent: 工具调用: {tool_calls}")
         
         for tool_call_id, tool_call in tool_calls.items():
             tool_name = tool_call['function']['name']
-            logger.info(f"SimpleAgent: 执行工具 {tool_name}")
-            logger.info(f"SimpleAgent: 参数 {tool_call['function']['arguments']}")
+            logger.info(f"TaskExecutorAgent: 执行工具 {tool_name}")
+            logger.info(f"TaskExecutorAgent: 参数 {tool_call['function']['arguments']}")
             
             # 检查是否为complete_task
             if tool_name == 'complete_task':
-                logger.info("SimpleAgent: complete_task，停止执行")
+                logger.info("TaskExecutorAgent: complete_task，停止执行")
                 yield [MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content='已经完成了满足用户的所有要求',
@@ -291,18 +292,47 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         """
         # 格式化工具参数显示
         if '```<｜tool▁call▁end｜>' in tool_call['function']['arguments']:
-            logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
+            logger.debug(f"TaskExecutorAgent: 原始错误参数: {tool_call['function']['arguments']}")
             # 去掉```<｜tool▁call▁end｜> 以及之后所有的字符
             tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
-
-        function_params = json.loads(tool_call['function']['arguments'])
+        try:
+            function_params = json.loads(tool_call['function']['arguments'])
+        except json.JSONDecodeError:
+            try:
+                function_params = eval(tool_call['function']['arguments'])
+            except:
+                logger.error(f"TaskExecutorAgent: 第一次参数解析报错，再次进行参数解析失败")
+                logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
+                logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
+                logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
+                
         formatted_params = ''
-        for param, value in function_params.items():
-            # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
-            if isinstance(value, str) and len(value) > 100:
-                value = f'"{value[:30]}"'
-            formatted_params += f"{param} = {value}, "
-        formatted_params = formatted_params.rstrip(', ')
+        if isinstance(function_params, str):
+            try:
+                function_params = json.loads(function_params)
+            except json.JSONDecodeError:
+                try:
+                    function_params = eval(function_params)
+                except:
+                    logger.error(f"TaskExecutorAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
+                    logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
+                    logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
+                    logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
+                    
+        if isinstance(function_params, dict):
+            tool_call['function']['arguments'] = json.dumps(function_params)
+            for param, value in function_params.items():
+                # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
+                if isinstance(value, str) and len(value) > 100:
+                    value = f'"{value[:30]}"'
+                formatted_params += f"{param} = {value}, "
+            formatted_params = formatted_params.rstrip(', ')
+        else:
+            
+            logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
+            logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
+            logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
+            formatted_params = function_params
 
 
         tool_name = tool_call['function']['name']
