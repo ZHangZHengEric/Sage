@@ -59,7 +59,7 @@ class SAgent:
         self.workspace = workspace
         self._init_agents()
                 
-        logger.info("AgentController: 智能体控制器初始化完成")
+        logger.info("SAgent: 智能体控制器初始化完成")
 
     def _init_agents(self) -> None:
         """
@@ -67,7 +67,7 @@ class SAgent:
         
         使用共享的模型实例为所有智能体进行初始化。
         """
-        logger.debug("AgentController: 初始化各类智能体")
+        logger.debug("SAgent: 初始化各类智能体")
         
         self.simple_agent = SimpleAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
@@ -99,7 +99,7 @@ class SAgent:
         self.query_suggest_agent = QuerySuggestAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
-        logger.info("AgentController: 所有智能体初始化完成")
+        logger.info("SAgent: 所有智能体初始化完成")
 
     def run_stream(self, 
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
@@ -133,7 +133,7 @@ class SAgent:
             # 初始化该session 的context 管理器
             session_context = init_session_context(session_id, self.workspace)
             logger.info(f"开始流式工作流，会话ID: {session_id}")
-            
+
             if system_context:
                 logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
                 session_context.add_and_update_system_context(system_context)
@@ -168,6 +168,7 @@ class SAgent:
                 ):
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
+                    
             if multi_agent:
                 for message_chunks in self._execute_multi_agent_workflow(
                     session_context=session_context,
@@ -252,7 +253,7 @@ class SAgent:
             
             yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_observation_agent, "任务观察")
             if session_context.status == SessionStatus.INTERRUPTED:
-                logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
+                logger.info(f"SAgent: 规划-执行-观察循环第 {loop_count} 轮被中断，会话ID: {session_id}")
                 return
             # 从message 中查看observation 信息
             now_completed_tasks= session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
@@ -260,6 +261,13 @@ class SAgent:
                 logger.info(f"SAgent: 检测到任务状态变化，完成任务数从 {len(current_completed_tasks)} 增加到 {len(now_completed_tasks)}")
                 yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_stage_summary_agent, "任务阶段总结")
                 current_completed_tasks = now_completed_tasks
+
+            # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
+            completed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
+            failed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.FAILED)
+            if len(completed_tasks) + len(failed_tasks) == len(session_context.task_manager.get_all_tasks()):
+                logger.info(f"SAgent: 所有任务已完成，会话ID: {session_id}")
+                break
 
             observation_dict = session_context.message_manager.get_latest_observation_message_dict()
             if observation_dict:
@@ -317,7 +325,7 @@ class SAgent:
         Returns:
             List[MessageChunk]: 准备好的消息列表
         """
-        logger.debug("AgentController: 准备初始消息")
+        logger.debug("SAgent: 准备初始消息")
         # 先检查input_message 格式以及类型
         if not isinstance(input_messages, list):
             raise ValueError("input_messages 必须是列表类型")
@@ -328,7 +336,7 @@ class SAgent:
         # 对dict 的消息输入，转化成MessageChunk
         input_messages = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in input_messages]        
         # 清理过长的消息历史
-        logger.info(f"AgentController: 初始化消息数量: {len(input_messages)}")
+        logger.info(f"SAgent: 初始化消息数量: {len(input_messages)}")
         return input_messages
     
     def _handle_workflow_error(self, error: Exception) -> Generator[List[MessageChunk], None, None]:
@@ -341,7 +349,7 @@ class SAgent:
         Yields:
             List[MessageChunk]: 错误消息块
         """
-        logger.error(f"AgentController: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
+        logger.error(f"SAgent: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
         
         error_message = f"工作流执行失败: {str(error)}"
         message_id = str(uuid.uuid4())

@@ -85,6 +85,7 @@ class MessageChunk:
     # 扩展字段
     metadata: Optional[Dict[str, Any]] = None  # 额外的元数据
     error_info: Optional[Dict[str, Any]] = None # 错误信息
+    session_id: Optional[str] = None  # 会话ID
     
     # 其他兼容字段
     updated_at: Optional[str] = None  # 更新时间

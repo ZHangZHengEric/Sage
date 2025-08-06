@@ -161,7 +161,7 @@ selected_workflow_index 从0 开始计数
         
         workflow_list = ""
         workflow_index_map = {}  # 索引到名称的映射
-        for idx, (name, steps) in enumerate(normalized_workflows.items(), 1):
+        for idx, (name, steps) in enumerate(normalized_workflows.items(), 0):
             workflow_index_map[idx] = name
             workflow_list += f"\n{idx}. **{name}**:\n"
             for step in steps:
