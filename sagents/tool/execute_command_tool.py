@@ -128,7 +128,6 @@ class ExecuteCommandTool(ToolBase):
     def __init__(self):
         logger.debug("Initializing ExecuteCommandTool")
         # 先初始化必要的组件，再调用父类初始化
-        self.prefix_file_workspace = os.getenv("PREFIX_FILE_WORKSPACE")
         self.security_manager = SecurityManager(False)
         self.process_manager = ProcessManager()
         super().__init__()
@@ -147,9 +146,6 @@ class ExecuteCommandTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含执行结果的字典
         """
-        if workdir:
-            if self.prefix_file_workspace and self.prefix_file_workspace not in workdir:
-                workdir = os.path.join(self.prefix_file_workspace, workdir)
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
         logger.info(f"🖥️ execute_shell_command开始执行 [{process_id}] - command: {command[:100]}{'...' if len(command) > 100 else ''}")
@@ -299,9 +295,6 @@ class ExecuteCommandTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含执行结果的字典
         """
-        if workdir:
-            if self.prefix_file_workspace and self.prefix_file_workspace not in workdir:
-                workdir = os.path.join(self.prefix_file_workspace, workdir)
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
         logger.info(f"🐍 execute_python_code开始执行 [{process_id}] - 代码长度: {len(code)} 字符")
@@ -554,9 +547,6 @@ class ExecuteCommandTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含所有命令执行结果的字典
         """
-        if workdir:
-            if self.prefix_file_workspace and self.prefix_file_workspace not in workdir:
-                workdir = os.path.join(self.prefix_file_workspace, workdir)
         start_time = time.time()
         batch_id = hashlib.md5(f"batch_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📋 execute_batch_commands开始执行 [{batch_id}] - 命令数: {len(commands)}")
