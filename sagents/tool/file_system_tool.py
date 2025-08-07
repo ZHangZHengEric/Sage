@@ -540,7 +540,7 @@ class FileSystemTool(ToolBase):
             
             # 读取文件
             encoding = file_info.get("encoding", "utf-8")
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
                 original_content = f.read()
             
             # 执行搜索替换
@@ -557,7 +557,7 @@ class FileSystemTool(ToolBase):
                     new_content, replace_count = pattern.subn(replacement, original_content)
             
             # 写入修改后的内容
-            with open(file_path, 'w', encoding=encoding) as f:
+            with open(file_path, 'w', encoding=encoding, errors='ignore') as f:
                 f.write(new_content)
             
             return {
