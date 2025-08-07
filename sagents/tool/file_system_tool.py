@@ -140,9 +140,7 @@ class FileSystemTool(ToolBase):
         super().__init__()
         self.default_upload_url = "http://36.133.44.114:20034/askonce/api/v1/doc/upload"
         self.default_headers = {"User-Source": 'AskOnce_bakend'}
-        # 从环境变量获取前置路径
-        self.prefix_file_workspace = os.getenv("PREFIX_FILE_WORKSPACE")
-        print(f"prefix_file_workspace: {self.prefix_file_workspace}")
+
     @ToolBase.tool()
     def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = None, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
@@ -158,9 +156,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含文件内容和元信息
         """
-        # 处理前置路径
-        if self.prefix_file_workspace:
-            file_path = os.path.join(self.prefix_file_workspace, file_path)
+        
         start_time = time.time()
         operation_id = hashlib.md5(f"read_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📖 file_read开始执行 [{operation_id}] - 文件: {file_path}")
@@ -217,7 +213,7 @@ class FileSystemTool(ToolBase):
                 "message": f"成功读取文件 (行 {start_line}-{end_line})",
                 "content": content,
                 "file_info": {
-                    "path": file_path.replace(self.prefix_file_workspace, ""),
+                    "path": file_path,
                     "total_lines": total_lines,
                     "read_lines": end_line - start_line,
                     "encoding": encoding,
@@ -253,9 +249,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 操作结果和文件信息
         """
-        # 处理前置路径
-        if self.prefix_file_workspace:
-            file_path = os.path.join(self.prefix_file_workspace, file_path)
+        
         start_time = time.time()
         operation_id = hashlib.md5(f"write_{file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"✏️ file_write开始执行 [{operation_id}] - 文件: {file_path}")
@@ -304,7 +298,7 @@ class FileSystemTool(ToolBase):
                 "status": "success",
                 "message": f"文件写入成功 ({mode}模式)",
                 "file_info": {
-                    "path": file_path.replace(self.prefix_file_workspace, ""),
+                    "path": file_path,
                     "size_mb": file_info["size_mb"],
                     "encoding": encoding
                 },
@@ -350,9 +344,6 @@ class FileSystemTool(ToolBase):
     #     Returns:
     #         Dict[str, Any]: 上传结果，包含状态和文件URL
     #     """
-    #     # 处理前置路径
-    #     if self.prefix_file_workspace:
-    #         file_path = os.path.join(self.prefix_file_workspace, file_path)
     #     start_time = time.time()
     #     operation_id = hashlib.md5(f"upload_cloud_{file_path}_{time.time()}".encode()).hexdigest()[:8]
     #     logger.info(f"☁️ upload_file_to_cloud开始执行 [{operation_id}] - 文件: {file_path}")
@@ -430,8 +421,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 下载结果，包含保存的文件路径
         """
-        if self.prefix_file_workspace:
-            working_dir = os.path.join(self.prefix_file_workspace, working_dir)
+
         start_time = time.time()
         operation_id = hashlib.md5(f"download_{url}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📥 download_file_from_url开始执行 [{operation_id}] - URL: {url}")
@@ -489,7 +479,7 @@ class FileSystemTool(ToolBase):
             return {
                 "status": "success",
                 "message": "文件下载成功",
-                "file_path": file_path.replace(self.prefix_file_workspace, ""),
+                "file_path": file_path,
                 "file_name": file_name,
                 "file_size": saved_size,
                 "file_size_mb": content_size_mb,
@@ -522,9 +512,7 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 替换结果统计
         """
-        # 处理前置路径
-        if self.prefix_file_workspace:
-            file_path = os.path.join(self.prefix_file_workspace, file_path)
+        
         try:
             # 安全验证
             validation = SecurityValidator.validate_path(file_path)
@@ -587,10 +575,6 @@ class FileSystemTool(ToolBase):
         Returns:
             Dict[str, Any]: 转换结果
         """
-        # 处理前置路径
-        if self.prefix_file_workspace:
-            csv_file_path = os.path.join(self.prefix_file_workspace, csv_file_path)
-            excel_file_path = os.path.join(self.prefix_file_workspace, excel_file_path)
         
         # 检查文件是否存在
         if not os.path.exists(csv_file_path):
@@ -605,5 +589,5 @@ class FileSystemTool(ToolBase):
         return {
             "status": "success",
             "message": "CSV文件已成功转换为Excel文件",
-            "excel_file_path": excel_file_path.replace(self.prefix_file_workspace, "")
+            "excel_file_path": excel_file_path
         }

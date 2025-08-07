@@ -69,7 +69,7 @@ class ToolManager:
         if 'sse_url' in config:
             logger.debug(f"Registering SSE server {server_name} with URL: {config['sse_url']}")
             server_params = SseServerParameters(url=config['sse_url'])
-            await self._register_mcp_tools_sse(server_name, server_params)
+            success = await self._register_mcp_tools_sse(server_name, server_params)
         else:
             logger.debug(f"Registering stdio server {server_name} with command: {config['command']}")
             server_params = StdioServerParameters(
@@ -77,9 +77,9 @@ class ToolManager:
                 args=config.get('args', []),
                 env=config.get('env', None)
             )
-            await self._register_mcp_tools_stdio(server_name, server_params)
+            success = await self._register_mcp_tools_stdio(server_name, server_params)
         logger.info(f"Successfully registered MCP server: {server_name}")
-        return True
+        return success
 
     def _auto_discover_tools(self, path: str = None):
         """Auto-discover and register all tools in the tools package
@@ -181,7 +181,7 @@ class ToolManager:
                 if 'sse_url' in config:
                     logger.debug(f"Setting up SSE server: {server_name} at URL: {config['sse_url']}")
                     server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
-                    await self._register_mcp_tools_sse(server_name, server_params)
+                    success = await self._register_mcp_tools_sse(server_name, server_params)
                 else:
                     logger.debug(f"Setting up stdio server: {server_name} with command: {config['command']}")
                     server_params = StdioServerParameters(
@@ -189,9 +189,11 @@ class ToolManager:
                         args=config.get('args', []),
                         env=config.get('env', None)
                     )
-                    await self._register_mcp_tools_stdio(server_name, server_params)
+                    success = await self._register_mcp_tools_stdio(server_name, server_params)
         except Exception as e:
             logger.error(f"Error loading MCP config: {str(e)}")
+            return False
+        return success
 
     async def _register_mcp_tools_stdio(self, server_name: str, server_params: StdioServerParameters):
         """Register tools from stdio MCP server"""
@@ -213,6 +215,8 @@ class ToolManager:
         except Exception as e:
             logger.error(f"Failed to connect to stdio MCP server {server_name}: {str(e)}")
             logger.error(traceback.format_exc())
+            return False
+        return True
 
     async def _register_mcp_tools_sse(self, server_name: str, server_params: SseServerParameters):
         """Register tools from SSE MCP server"""
@@ -240,9 +244,11 @@ class ToolManager:
                     logger.info(f"Received {len(tools)} tools from SSE MCP server {server_name}")
                     for tool in tools:
                         await self._register_mcp_tool(server_name, tool, server_params)
+                    return True
         except Exception as e:
             logger.error(f"Failed to connect to SSE MCP server {server_name}: {str(e)}")
-
+            return False
+        
     async def _register_mcp_tool(self, server_name: str, tool_info:Union[Tool, dict], 
                                server_params: Union[StdioServerParameters, SseServerParameters]):
         
