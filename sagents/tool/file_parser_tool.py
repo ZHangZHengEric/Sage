@@ -837,7 +837,6 @@ class FileParserTool(ToolBase):
     def __init__(self):
         logger.debug("Initializing FileParserTool")
         super().__init__()
-        self.prefix_file_workspace = os.getenv("PREFIX_FILE_WORKSPACE")
 
 
     @ToolBase.tool()
@@ -859,9 +858,6 @@ class FileParserTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含提取文本和相关信息的字典
         """
-        # 处理前置路径
-        if self.prefix_file_workspace:
-            input_file_path = os.path.join(self.prefix_file_workspace, input_file_path)
         start_time = time.time()
         operation_id = hashlib.md5(f"extract_{input_file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📄 extract_text_from_file开始执行 [{operation_id}] - 文件: {input_file_path}")
@@ -878,7 +874,7 @@ class FileParserTool(ToolBase):
                 return {
                     "success": False,
                     "error": validation_result["error"],
-                    "file_path": input_file_path.replace(self.prefix_file_workspace, ""),
+                    "file_path": input_file_path,
                     "execution_time": error_time,
                     "operation_id": operation_id
                 }
@@ -950,7 +946,7 @@ class FileParserTool(ToolBase):
                     return {
                         "success": False,
                         "error": f"文件解析失败 - 主错误: {str(parse_error)}, 备用错误: {str(fallback_error)}",
-                        "file_path": input_file_path.replace(self.prefix_file_workspace, ""),
+                        "file_path": input_file_path,
                         "execution_time": error_time,
                         "operation_id": operation_id
                     }
@@ -971,7 +967,7 @@ class FileParserTool(ToolBase):
                 "success": True,
                 "text": truncated_text,
                 "file_info": {
-                    "file_path": input_file_path.replace(self.prefix_file_workspace, ""),
+                    "file_path": input_file_path,
                     "file_extension": file_extension,
                     "file_size_mb": round(file_size_mb, 2),
                     "mime_type": validation_result["mime_type"]
@@ -1002,7 +998,7 @@ class FileParserTool(ToolBase):
             return {
                 "success": False,
                 "error": str(e),
-                "file_path": input_file_path.replace(self.prefix_file_workspace, ""),
+                "file_path": input_file_path,
                 "execution_time": error_time,
                 "operation_id": operation_id
             }
@@ -1236,7 +1232,7 @@ class FileParserTool(ToolBase):
                     failed += 1
                     
                 results.append({
-                    "file_path": file_path.replace(self.prefix_file_workspace, ""),
+                    "file_path": file_path,
                     "result": result
                 })
                 

@@ -110,7 +110,7 @@ class SAgent:
         multi_agent: bool = True,
         more_suggest: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
-        available_workflows: Optional[Dict[str, Any]] = None) -> Generator[List['MessageChunk'], None, None]:
+        available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
         """
         执行智能体任务的主流程
         
@@ -137,26 +137,27 @@ class SAgent:
             if system_context:
                 logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
                 session_context.add_and_update_system_context(system_context)
-            if len(available_workflows.keys()) > 0:
-                logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                session_context.candidate_workflows = available_workflows
+            if available_workflows:
+                if len(available_workflows.keys()) > 0:
+                    logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                    session_context.candidate_workflows = available_workflows
 
             session_context.status = SessionStatus.RUNNING
             initial_messages = self._prepare_initial_messages(input_messages)
             # print(f"initial_messages: {initial_messages}")
             # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
             session_context.message_manager.add_messages(initial_messages, agent_name="SAgent")
-
-            if len(available_workflows) >0:
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.workflow_select_agent,
-                    phase_name="工作流选择"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
+            if available_workflows:
+                if len(available_workflows) >0:
+                    for message_chunks in self._execute_agent_phase(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        agent=self.workflow_select_agent,
+                        phase_name="工作流选择"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
             # 1. 任务分析阶段
             if deep_thinking:
                 for message_chunks in self._execute_agent_phase(
@@ -382,3 +383,11 @@ class SAgent:
             session_context_.status = SessionStatus.INTERRUPTED
             return True
         return False
+    
+    def get_tasks_status(self,session_id: str) -> Optional[Dict[str, Any]]:
+        session_context_ = get_session_context(session_id=session_id)
+        if session_context_:
+            return session_context_.task_manager.to_dict()
+        return None
+    
+

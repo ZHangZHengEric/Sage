@@ -65,9 +65,10 @@ class SessionContext:
         current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %A %H:%M:%S')
         self.system_context['current_time'] = current_time_str
         # file_workspace 去掉 workspace_root的绝对路径的 前置路径
-        self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
-        if self.system_context['file_workspace'].startswith('/'):
-            self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
+        # self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
+        self.system_context['file_workspace'] = self.agent_workspace
+        # if self.system_context['file_workspace'].startswith('/'):
+        #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
         self.system_context['session_id'] = self.session_id
         self.system_context['文件权限'] = "只允许在 "+self.system_context['file_workspace']+" 目录下操作文件"
 
