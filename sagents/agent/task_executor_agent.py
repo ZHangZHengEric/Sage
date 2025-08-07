@@ -295,6 +295,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             logger.debug(f"TaskExecutorAgent: 原始错误参数: {tool_call['function']['arguments']}")
             # 去掉```<｜tool▁call▁end｜> 以及之后所有的字符
             tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
+        function_params = tool_call['function']['arguments']
         try:
             function_params = json.loads(tool_call['function']['arguments'])
         except json.JSONDecodeError:
@@ -303,8 +304,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             except:
                 logger.error(f"TaskExecutorAgent: 第一次参数解析报错，再次进行参数解析失败")
                 logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
-                logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
-                logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
                 
         formatted_params = ''
         if isinstance(function_params, str):
@@ -328,12 +327,10 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 formatted_params += f"{param} = {value}, "
             formatted_params = formatted_params.rstrip(', ')
         else:
-            
             logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
             logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
             logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
             formatted_params = function_params
-
 
         tool_name = tool_call['function']['name']
         
