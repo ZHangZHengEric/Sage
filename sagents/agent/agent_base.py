@@ -172,7 +172,8 @@ class AgentBase(ABC):
                 try:
                     llm_response =  merge_stream_response_to_non_stream_response(all_chunks)
                 except:
-                    print(all_chunks)
+                    logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
+                    logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
                     llm_response = None
                 session_context.add_llm_request(llm_request,llm_response)
 
