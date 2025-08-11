@@ -519,7 +519,7 @@ class ToolManager:
                     # Handle list content (e.g., from text/plain results)
                     formatted_content = '\n'.join([item.get('text', str(item)) for item in content])
                 else:
-                    formatted_content = str(content)
+                    formatted_content = content
                 return json.dumps({"content": formatted_content}, ensure_ascii=False, indent=2)
             else:
                 return json.dumps(result, ensure_ascii=False, indent=2)
@@ -550,12 +550,12 @@ class ToolManager:
                 else:
                     result = tool.func(**kwargs)
             
-            # Format result
-            if isinstance(result, (dict, list)):
-                content = json.dumps(result, ensure_ascii=False, indent=2)
-                return json.dumps({"content": content}, ensure_ascii=False, indent=2)
-            else:
-                return json.dumps({"content": str(result)}, ensure_ascii=False, indent=2)
+            # Format result - 避免双重JSON序列化
+            # if isinstance(result, (dict, list)):
+            #     # 直接返回dict/list结果，不进行JSON字符串化
+            #     return json.dumps(result, ensure_ascii=False, indent=2)
+            # else:
+            return json.dumps({"content": result}, ensure_ascii=False, indent=2)
                 
         except Exception as e:
             logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
