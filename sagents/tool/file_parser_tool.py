@@ -17,7 +17,7 @@ import tarfile
 import re
 import chardet
 import traceback
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union,Tuple
 import pdfplumber
 import pypandoc
 from pptx import Presentation
@@ -347,21 +347,26 @@ class ExcelParser:
     """Excel解析器"""
     
     @staticmethod
-    def extract_text_from_xlsx(file_path: str) -> str:
+    def extract_text_from_xlsx(file_path: str) -> Tuple[str, Dict[str, Any]]:
         """从Excel提取文本并转换为Markdown"""
         try:
             excel_data = ExcelParser._read_excel_to_dict(file_path)
             markdown_tables = []
-            
+            metadata = {}
+            metadata['sheets'] = []
             for sheet_name, sheet_data in excel_data.items():
                 # 限制行数
-                if len(sheet_data) > 100:
-                    sheet_data = sheet_data[:100]
+                # if len(sheet_data) > 100:
+                #     sheet_data = sheet_data[:100]
                     
                 sheet_md = ExcelParser._sheet_data_to_markdown(sheet_data, sheet_name)
                 markdown_tables.append(sheet_md)
-            
-            return '\n\n'.join(markdown_tables)
+                metadata['sheets'].append(sheet_name)
+                metadata['sheet_' + sheet_name] = {
+                    'rows': len(sheet_data),
+                    'columns': len(sheet_data[0]) if sheet_data else 0
+                }
+            return '\n\n'.join(markdown_tables), metadata
             
         except Exception as e:
             raise FileParserError(f"Excel解析失败: {str(e)}")
@@ -845,7 +850,7 @@ class FileParserTool(ToolBase):
         input_file_path: str, 
         start_index: int = 0, 
         max_length: int = 5000,
-        include_metadata: bool = False
+        include_metadata: bool = True
     ) -> Dict[str, Any]:
         """读取本地存储下的非文本文件，例如pdf，docx，doc，ppt，pptx，xlsx，xls等文件，返回Markdown的文本数据
 
@@ -853,7 +858,7 @@ class FileParserTool(ToolBase):
             input_file_path (str): 输入文件路径，本地的绝对路径
             start_index (int): 开始提取的字符位置，默认0
             max_length (int): 最大提取长度，默认5000字符
-            include_metadata (bool): 是否包含文件元数据，默认False
+            include_metadata (bool): 是否包含文件元数据，默认True
 
         Returns:
             Dict[str, Any]: 包含提取文本和相关信息的字典
@@ -914,8 +919,9 @@ class FileParserTool(ToolBase):
                         
                 elif file_extension in ['.xlsx', '.xls']:
                     logger.debug(f"📈 使用Excel解析器")
-                    extracted_text = ExcelParser.extract_text_from_xlsx(input_file_path)
-                    
+                    extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(input_file_path)
+                    if include_metadata:
+                        metadata.update(excel_metadata)
                 elif file_extension in ['.html', '.htm']:
                     logger.debug(f"🌐 使用HTML解析器")
                     extracted_text = WebParser.extract_text_from_html(input_file_path)
@@ -973,11 +979,11 @@ class FileParserTool(ToolBase):
                     "mime_type": validation_result["mime_type"]
                 },
                 "text_info": {
-                    "original_length": len(extracted_text),
-                    "cleaned_length": len(cleaned_text),
+                    "original_length": len(cleaned_text),
                     "extracted_length": len(truncated_text),
+                    "remaining_length": len(cleaned_text) - (start_index + len(truncated_text)),
                     "start_index": start_index,
-                    "max_length": max_length,
+                    "end_index": start_index + len(truncated_text),
                     **text_stats
                 },
                 "execution_time": total_time,
@@ -987,7 +993,6 @@ class FileParserTool(ToolBase):
             if include_metadata and metadata:
                 result["metadata"] = metadata
                 logger.debug(f"📋 包含元数据: {len(metadata)} 项")
-            
             return result
             
         except Exception as e:
