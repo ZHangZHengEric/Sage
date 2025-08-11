@@ -857,7 +857,7 @@ class FileParserTool(ToolBase):
         Args:
             input_file_path (str): 输入文件路径，本地的绝对路径
             start_index (int): 开始提取的字符位置，默认0
-            max_length (int): 最大提取长度，默认5000字符
+            max_length (int): 单次最大提取长度，默认5000字符
             include_metadata (bool): 是否包含文件元数据，默认True
 
         Returns:
@@ -971,27 +971,23 @@ class FileParserTool(ToolBase):
             # 构建结果
             result = {
                 "success": True,
-                "text": truncated_text,
-                "file_info": {
-                    "file_path": input_file_path,
-                    "file_extension": file_extension,
-                    "file_size_mb": round(file_size_mb, 2),
-                    "mime_type": validation_result["mime_type"]
-                },
                 "text_info": {
-                    "original_length": len(cleaned_text),
-                    "extracted_length": len(truncated_text),
-                    "remaining_length": len(cleaned_text) - (start_index + len(truncated_text)),
-                    "start_index": start_index,
-                    "end_index": start_index + len(truncated_text),
-                    **text_stats
-                },
-                "execution_time": total_time,
-                "operation_id": operation_id
+                    "文本长度": len(cleaned_text),
+                    "本次读取的长度": len(truncated_text),
+                    "剩余未读取的长度": len(cleaned_text) - (start_index + len(truncated_text)),
+                    "本次读取文本的开始位置": start_index,
+                    "本次读取文本的结束位置": start_index + len(truncated_text),
+                }
             }
             
+            # 如果是全部文本，没有截断，key 使用text ，否则使用部分text
+            if start_index == 0 and max_length >= len(truncated_text):
+                result["本次读取的文本"] = truncated_text
+            else:
+                result["本次读取的部分文本"] = truncated_text
+
             if include_metadata and metadata:
-                result["metadata"] = metadata
+                result["文件的metadata"] = metadata
                 logger.debug(f"📋 包含元数据: {len(metadata)} 项")
             return result
             
@@ -1224,7 +1220,7 @@ class FileParserTool(ToolBase):
         
         for file_path in file_paths:
             try:
-                result = self.extract_text_from_file(
+                result = self.extract_text_from_non_text_file(
                     input_file_path=file_path,
                     start_index=0,
                     max_length=max_length,

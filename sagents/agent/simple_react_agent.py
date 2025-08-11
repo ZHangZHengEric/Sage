@@ -51,16 +51,20 @@ class SimpleReactAgent(AgentBase):
 
         self.agent_custom_system_prefix = """
 **基本要求**：
-1. 每次执行前，都要先进行评估规划，再去真正的回答问题或者执行任务。
+- 每次执行前，都要先进行评估规划，再去真正的回答问题或者执行任务。
 
 评估规划要求：
-如果还没有开始回答用户的问题，只给出接下来要做什么。
-如果已经完成了对于用户的问题的回答，则接下来要做的就是对于回答的完整总结。
-如果已经完成了对于问题的完整总结，请调用 complete_task 工具来结束会话。
-输出的形式为自然语言：当前***，接下来要做的是***。
+- 如果还没有开始回答用户的问题，只给出接下来要做什么。
+- 如果已经完成了对于用户的问题的回答，则接下来要做的就是对于回答的完整总结。
+- 如果已经完成了对于问题的完整总结，请调用 complete_task 工具来结束会话。
+- 输出的形式为自然语言：当前***，接下来要做的是***。
+- 不需要太多的字，但是要简洁明了，指导下一步的动作。
 """
-        self.guide_message_prompt = """
-开始评估规划：
+        self.plan_message_prompt = """
+接下来开始评估规划：
+"""     
+        self.execute_message_prompt = """
+进行执行
 """
         # 最大循环次数常量
         self.max_loop_count = 10
@@ -252,15 +256,15 @@ class SimpleReactAgent(AgentBase):
         
         all_new_response_chunks = []
         loop_count = 0
-        guide_message = MessageChunk(
+        plan_observe_message = MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content=self.guide_message_prompt,
+            content=self.plan_message_prompt,
             message_id=str(uuid.uuid4()),
             show_content='',
             message_type=MessageType.GUIDE.value
         )
-        yield [guide_message]
-        all_new_response_chunks.append(guide_message)
+        yield [plan_observe_message]
+        all_new_response_chunks.append(plan_observe_message)
 
         # complete_task_tool_json = [convert_spec_to_openai_format(tool_manager.get_tool('complete_task'))]
         complete_task_tool_json = []
@@ -298,7 +302,17 @@ class SimpleReactAgent(AgentBase):
             if self._should_stop_execution(all_new_response_chunks):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
+            
 
+            execution_message = MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content=self.execute_message_prompt,
+                message_id=str(uuid.uuid4()),
+                show_content='',
+                message_type=MessageType.GUIDE.value
+            )
+            yield [execution_message]
+            all_new_response_chunks.append(execution_message)
             # 合并消息
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
             
@@ -325,15 +339,15 @@ class SimpleReactAgent(AgentBase):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
 
-            guide_message = MessageChunk(
+            plan_observe_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content=self.guide_message_prompt,
+                content=self.plan_message_prompt,
                 message_id=str(uuid.uuid4()),
                 show_content='',
                 message_type=MessageType.GUIDE.value
             )
-            yield [guide_message]
-            all_new_response_chunks.append(guide_message)
+            yield [plan_observe_message]
+            all_new_response_chunks.append(plan_observe_message)
             
     def _call_llm_and_process_response(self,
         messages_input: List[MessageChunk],
