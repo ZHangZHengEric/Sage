@@ -49,22 +49,55 @@ class SimpleReactAgent(AgentBase):
 # 4. 调用完工具后，一定要用文字描述工具调用的结果，不要直接结束任务。
 # 5. 当你对用户进行询问和澄清时，下一步要调用 complete_task 工具来结束会话，等待用户的新的输入。
 
+#         self.agent_custom_system_prefix = """
+# **基本要求**：
+# - 每次执行前，都要先进行评估规划，再去真正的回答问题或者执行任务。
+# - 目的是有逻辑的完成用户的需求。
+# - 在执行规划好的任务时，只执行任务，不要做任何的评估和规划。
+# - 如果执行过程没有完成用户的要求，不要调用 complete_task。
+# - 用户看不到工具执行的结果，需要通过自然语言的总结告知用户。
+
+# 评估规划要求：
+# - 如果还没有开始回答用户的问题，只给出接下来要做什么。
+# - 如果已经执行的执行以及满足的用户的基本信息要求，则接下来要做的就是对于执行过程的详细总结。
+# - 如果已经完成了对于执行过程的详细总结，调用 complete_task 工具来结束会话，不用输出自然语言。
+# - 如果还需要执行其他的行为，例如未来调用其他的工具或者总结执行过程时，则需要输出自然语言，形式为：当前***，接下来要做的是***。这种情况下，不允许调用complete_task
+# - 不需要太多的字，但是要简洁明了，指导下一步的动作。
+
+# 总结要求：
+# - 对执行过程的总结，不是为了重复过程的内容，而是给用户符合要求和诉求一个完美的答案。
+# """
+#         self.plan_message_prompt = """
+# 接下来开始对已执行的行为进行评估规划，只进行评估规划或者调用会话结束工具，不要进行执行，如果有评估规划内容，不要结束会话：
+# """
+#         self.first_plan_message_prompt = """
+# 接下来开始对完成用户的需求进行评估规划，只进行评估规划或者调用会话结束工具，不要进行执行，如果有评估规划内容，不要结束会话：
+# """
+#         self.execute_message_prompt = """
+# 接下来执行上述规划的内容，直接执行，**禁止输出评估规划内容**，也不要调用会话结束工具：
+# """
         self.agent_custom_system_prefix = """
 **基本要求**：
 - 每次执行前，都要先进行评估规划，再去真正的回答问题或者执行任务。
-
-评估规划要求：
-- 如果还没有开始回答用户的问题，只给出接下来要做什么。
-- 如果已经完成了对于用户的问题的回答，则接下来要做的就是对于回答的完整总结。
-- 如果已经完成了对于问题的完整总结，请调用 complete_task 工具来结束会话。
-- 输出的形式为自然语言：当前***，接下来要做的是***。
-- 不需要太多的字，但是要简洁明了，指导下一步的动作。
+- 用户会在过程中引导你完成任务，你需要根据用户的引导，进行评估规划和执行。
+- 评估规划不需要太多的字，但是要简洁明了，指导下一步的动作。
+- 用户看不到工具执行的结果，需要通过自然语言的总结告知用户。
 """
         self.plan_message_prompt = """
-接下来开始评估规划：
-"""     
+判断当前是否已经完成了用户的需求。特别注意工具执行的结果需要总结才可以让用户看到，没有总结的话，不能认为已经完成了用户的需求。
+如果已经完成了用户的需求，调用会话结束工具结束会话。
+如果没有完成用户的需求，开始对已经执行的行为进行评估规划，输出的形式为：当前***，接下来要做的是***。
+
+"""
+        self.first_plan_message_prompt = """
+接下来开始对完成用户的需求进行评估规划，只进行评估规划，不要进行执行。
+"""
         self.execute_message_prompt = """
-进行执行
+接下来执行上述规划的内容，直接执行。
+不要做以下的行为：
+1. 最后对执行过程进行解释，例如：已完成用户需求，结束会话。
+2. 不要输出后续的建议规划，例如：接下来要做的是***。
+3. 不要调用会话结束工具。
 """
         # 最大循环次数常量
         self.max_loop_count = 10
@@ -191,7 +224,11 @@ class SimpleReactAgent(AgentBase):
             suggested_tools = self._get_tool_suggestions(prompt, session_id)
             
             # 添加complete_task工具
-            suggested_tools.append('complete_task')
+            # suggested_tools.append('complete_task')
+
+            # 移除complete_task工具
+            if 'complete_task' in suggested_tools:
+                suggested_tools.remove('complete_task')
             
             logger.info(f"SimpleAgent: 获取到建议工具: {suggested_tools}")
             return suggested_tools
@@ -257,8 +294,8 @@ class SimpleReactAgent(AgentBase):
         all_new_response_chunks = []
         loop_count = 0
         plan_observe_message = MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            content=self.plan_message_prompt,
+            role=MessageRole.USER.value,
+            content=self.first_plan_message_prompt,
             message_id=str(uuid.uuid4()),
             show_content='',
             message_type=MessageType.GUIDE.value
@@ -266,8 +303,8 @@ class SimpleReactAgent(AgentBase):
         yield [plan_observe_message]
         all_new_response_chunks.append(plan_observe_message)
 
-        # complete_task_tool_json = [convert_spec_to_openai_format(tool_manager.get_tool('complete_task'))]
-        complete_task_tool_json = []
+        complete_task_tool_json = [convert_spec_to_openai_format(tool_manager.get_tool('complete_task'))]
+        # complete_task_tool_json = []
         while True:
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
@@ -305,7 +342,7 @@ class SimpleReactAgent(AgentBase):
             
 
             execution_message = MessageChunk(
-                role=MessageRole.ASSISTANT.value,
+                role=MessageRole.USER.value,
                 content=self.execute_message_prompt,
                 message_id=str(uuid.uuid4()),
                 show_content='',
@@ -340,7 +377,7 @@ class SimpleReactAgent(AgentBase):
                 break
 
             plan_observe_message = MessageChunk(
-                role=MessageRole.ASSISTANT.value,
+                role=MessageRole.USER.value,
                 content=self.plan_message_prompt,
                 message_id=str(uuid.uuid4()),
                 show_content='',

@@ -87,7 +87,7 @@ class MessageManager:
             except:
                 logger.error(f"MessageManager: 添加消息失败，消息内容: {message}")
                 continue
-            
+
             self.messages = MessageManager.merge_new_message_old_messages(message,self.messages)
         self.stats['total_messages'] = len(self.messages)
         self.stats['total_chunks'] += len(messages)

@@ -4,6 +4,7 @@ import time
 import threading
 from typing import Dict, Any, Optional, List
 from enum import Enum
+from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.tasks.task_manager import TaskManager
 from sagents.utils.logger import logger
@@ -71,6 +72,15 @@ class SessionContext:
         #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
         self.system_context['session_id'] = self.session_id
         self.system_context['文件权限'] = "只允许在 "+self.system_context['file_workspace']+" 目录下操作文件"
+
+        # 如果有历史的messages.json，则加载messages.json
+        messages_path = os.path.join(self.session_workspace, "messages.json")
+        if os.path.exists(messages_path):
+            with open(messages_path, "r") as f:
+                messages = json.load(f)
+                for message_item in messages:
+                    self.message_manager.add_messages(MessageChunk(**message_item))
+                logger.info(f"已经成功加载{len(messages)}条历史消息")
 
     def add_and_update_system_context(self,new_system_context:Dict[str,Any]):
         """添加并更新系统上下文"""

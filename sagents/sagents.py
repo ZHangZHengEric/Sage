@@ -69,6 +69,9 @@ class SAgent:
         """
         logger.debug("SAgent: 初始化各类智能体")
         
+        # self.simple_agent = SimpleAgent(
+        #     self.model, self.model_config, system_prefix=self.system_prefix
+        # )
         self.simple_agent = SimpleAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
@@ -146,7 +149,12 @@ class SAgent:
             initial_messages = self._prepare_initial_messages(input_messages)
             # print(f"initial_messages: {initial_messages}")
             # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
-            session_context.message_manager.add_messages(initial_messages, agent_name="SAgent")
+
+            # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
+            for message in initial_messages:
+                if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
+                    session_context.message_manager.add_messages(message)
+
             if available_workflows:
                 if len(available_workflows) >0:
                     for message_chunks in self._execute_agent_phase(
