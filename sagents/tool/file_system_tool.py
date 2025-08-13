@@ -142,14 +142,14 @@ class FileSystemTool(ToolBase):
         self.default_headers = {"User-Source": 'AskOnce_bakend'}
 
     @ToolBase.tool()
-    def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = None, 
+    def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 20, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
         """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
 
         Args:
             file_path (str): 文件绝对路径
             start_line (int): 开始行号，默认0
-            end_line (int): 结束行号（不包含），None表示读取到末尾
+            end_line (int): 结束行号（不包含），默认20
             encoding (str): 文件编码，'auto'表示自动检测
             max_size_mb (float): 最大读取文件大小（MB），默认10MB
 
@@ -410,6 +410,121 @@ class FileSystemTool(ToolBase):
     #         logger.error(f"💥 上传异常 [{operation_id}] - 错误: {str(e)}")
     #         return {"status": "error", "message": f"上传失败: {str(e)}"}
 
+    @ToolBase.tool()
+    def search_content_in_file(self, file_path: str, keywords:list[str],return_search_item=5) -> Dict[str, Any]:
+        
+        """在文件中通过关键词匹配，搜索相关的内容的上下文内容
+        Args:
+            file_path (str): 要搜索的文件路径
+            keywords (list[str]): 要搜索的关键词列表
+            return_search_item (int, optional): 返回的搜索结果数量，默认5个. Defaults to 5.
+        Returns:
+            Dict[str, Any]: 搜索结果，包含匹配的内容和上下文
+        """
+        context_size = 800
+        return_search_item = int(return_search_item)
+        start_time = time.time()
+        operation_id = hashlib.md5(f"search_file_{file_path}_{time.time()}".encode()).hexdigest()[:8]
+        logger.info(f"🔍 search_content_in_file开始执行 [{operation_id}] - 文件: {file_path}")
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                return {"status": "error", "message": "文件不存在"}
+            
+            # 读取文件的全部内容
+            with open(file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+
+            # 存储搜索结果
+            search_results = []
+            file_content_lower = file_content.lower()
+            
+            # 找到所有关键词的匹配位置
+            keyword_positions = {}
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+                positions = []
+                start = 0
+                while True:
+                    pos = file_content_lower.find(keyword_lower, start)
+                    if pos == -1:
+                        break
+                    positions.append(pos)
+                    start = pos + 1
+                keyword_positions[keyword] = positions
+            
+            # 收集所有匹配位置并计算上下文
+            all_positions = []
+            for keyword, positions in keyword_positions.items():
+                for pos in positions:
+                    all_positions.append((pos, keyword))
+            
+            # 按位置排序
+            all_positions.sort()
+            
+            # 合并相近的匹配位置，避免重复的上下文
+            merged_results = []
+            for pos, keyword in all_positions:
+                # 计算上下文范围
+                start_char = max(0, pos - context_size // 2)
+                end_char = min(len(file_content), pos + context_size // 2)
+                
+                # 检查是否与已有结果重叠
+                overlapped = False
+                for existing in merged_results:
+                    if (start_char < existing['end_char'] and end_char > existing['start_char']):
+                        # 合并重叠区域
+                        existing['start_char'] = min(existing['start_char'], start_char)
+                        existing['end_char'] = max(existing['end_char'], end_char)
+                        if keyword not in existing['matched_keywords']:
+                            existing['matched_keywords'].append(keyword)
+                            existing['score'] += 1
+                        overlapped = True
+                        break
+                
+                if not overlapped:
+                    # 提取上下文内容
+                    context = file_content[start_char:end_char]
+                    merged_results.append({
+                        'score': 1,
+                        'matched_keywords': [keyword],
+                        'context': context.strip(),
+                        'start_char': start_char,
+                        'end_char': end_char,
+                        'match_position': pos
+                    })
+            
+            # 按分数降序排序，分数相同时按匹配位置升序
+            merged_results.sort(key=lambda x: (-x['score'], x['match_position']))
+            
+            # 限制返回结果数量
+            search_results = merged_results[:return_search_item]
+            
+            execution_time = time.time() - start_time
+            logger.info(f"✅ search_content_in_file执行完成 [{operation_id}] - 耗时: {execution_time:.2f}s, 找到 {len(search_results)} 个匹配项")
+            
+            return {
+                "status": "success",
+                "message": f"搜索完成，找到 {len(search_results)} 个匹配项",
+                "results": search_results,
+                "total_matches": len(search_results),
+                "keywords": keywords,
+                "execution_time": execution_time,
+                "operation_id": operation_id
+            }
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"搜索文件内容时发生错误: {str(e)}"
+            logger.error(f"❌ search_content_in_file执行失败 [{operation_id}] - {error_msg} - 耗时: {execution_time:.2f}s")
+            return {
+                "status": "error",
+                "message": error_msg,
+                "execution_time": execution_time,
+                "operation_id": operation_id
+            }
+
+    
     @ToolBase.tool()
     def download_file_from_url(self, url: str, working_dir: str) -> Dict[str, Any]:
         """从URL下载文件并保存到指定目录
