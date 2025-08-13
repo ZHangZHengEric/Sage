@@ -32,7 +32,7 @@ class SessionContext:
         self.end_time = None
         self.status = SessionStatus.IDLE
         self.system_context = {}
-        self.message_manager = MessageManager()
+        self.message_manager = MessageManager(session_id=self.session_id)
         self.task_manager = TaskManager(session_id=self.session_id)
         self.candidate_workflows = []
         self.selected_workflow = None
