@@ -1,6 +1,7 @@
 import traceback
 from pydantic import BaseModel
 from openai.types.chat import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall
+from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_message_tool_call import Function
 from openai.types.completion_usage import CompletionUsage
 def merge_stream_response_to_non_stream_response(chunks):
@@ -51,9 +52,9 @@ def merge_stream_response_to_non_stream_response(chunks):
         created=created_,
         model=model_,
         choices=[
-            {
-                "index": 0,
-                "message": ChatCompletionMessage(
+            Choice(
+                index=0,
+                message=ChatCompletionMessage(
                     role="assistant",
                     content=content or None,
                     tool_calls=[
@@ -70,8 +71,8 @@ def merge_stream_response_to_non_stream_response(chunks):
                     if tool_calls
                     else None,
                 ),
-                "finish_reason": finish_reason,
-            }
+                finish_reason=finish_reason,
+            )
         ],
         usage=usage,
     )
