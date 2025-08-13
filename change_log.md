@@ -1,5 +1,17 @@
 # Sagents 项目修复记录
 
+## 2025-01-25 16:50 - 优化文件内容搜索功能
+- **文件**: `sagents/tool/file_system_tool.py`
+- **优化**: 改进search_content_in_file函数，不再按行切分，直接在整个文件内容中搜索字符，移除行号和行内容返回
+- **特性**: 基于字符位置的精确搜索，智能合并重叠上下文，按匹配关键词数量和位置排序
+- **作者**: Eric ZZ
+
+## 2025-01-25 16:45 - 完成文件内容搜索功能实现
+- **文件**: `sagents/tool/file_system_tool.py`
+- **功能**: 完成search_content_in_file函数的实现，支持多关键词搜索、评分排序和上下文提取
+- **特性**: 按关键词匹配数量评分，支持自定义上下文大小和返回结果数量，包含详细的执行日志和错误处理
+- **作者**: Eric ZZ
+
 ## 2025-01-25 14:30 - 修复流式响应合并类型错误
 - **文件**: `sagents/utils/stream_format.py`
 - **问题**: ChatCompletion choices字段类型错误，导致 "Cannot instantiate typing.Union" 错误
