@@ -1,5 +1,11 @@
 # Sagents 项目修复记录
 
+## 2025-01-25 14:30 - 修复流式响应合并类型错误
+- **文件**: `sagents/utils/stream_format.py`
+- **问题**: ChatCompletion choices字段类型错误，导致 "Cannot instantiate typing.Union" 错误
+- **修复**: 导入Choice类型，将choices字段从字典改为Choice对象实例化，并将ChatCompletionMessageToolCall的type字段固定为"function"
+- **影响**: 修复了TaskExecutorAgent流式响应合并失败的问题
+
 ## 修复内容总结
 
 ### 1. 类型注解统一 (message_manager.py, executor_agent.py)

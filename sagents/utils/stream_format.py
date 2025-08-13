@@ -60,7 +60,7 @@ def merge_stream_response_to_non_stream_response(chunks):
                     tool_calls=[
                         ChatCompletionMessageToolCall(
                             id=tc["id"],
-                            type=tc["type"],
+                            type="function",
                             function=Function(
                                 name=tc["function"]["name"],
                                 arguments=tc["function"]["arguments"],
