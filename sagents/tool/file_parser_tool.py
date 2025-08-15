@@ -857,12 +857,14 @@ class FileParserTool(ToolBase):
         Args:
             input_file_path (str): 输入文件路径，本地的绝对路径
             start_index (int): 开始提取的字符位置，默认0
-            max_length (int): 单次最大提取长度，默认5000字符
+            max_length (int): 单次最大提取长度，默认5000字符，最大5000字符
             include_metadata (bool): 是否包含文件元数据，默认True
 
         Returns:
             Dict[str, Any]: 包含提取文本和相关信息的字典
         """
+        if max_length > 5000:
+            max_length = 5000
         start_time = time.time()
         operation_id = hashlib.md5(f"extract_{input_file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📄 extract_text_from_file开始执行 [{operation_id}] - 文件: {input_file_path}")
@@ -971,8 +973,8 @@ class FileParserTool(ToolBase):
             # 构建结果
             result = {
                 "success": True,
-                "text_info": {
-                    "文本长度": len(cleaned_text),
+                "文件的文本信息": {
+                    "文件全部的文本长度": len(cleaned_text),
                     "本次读取的长度": len(truncated_text),
                     "剩余未读取的长度": len(cleaned_text) - (start_index + len(truncated_text)),
                     "本次读取文本的开始位置": start_index,
