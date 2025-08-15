@@ -196,12 +196,39 @@ class MessageManager:
         Returns:
             提取后的消息列表
         """
+        # 提取逻辑是：
+        #   1. 提取user 以及该user 后面所有的 assistant消息
+        #   2. 查看assistant 的list，判断最后一个是不是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
+    
         user_and_final_answer_messages = []
+        
+        # 先分成 chat_list = [[user,assistant,assistan]]
+        chat_list = []
         for msg in self.messages:
             if msg.role == MessageRole.USER.value:
-                user_and_final_answer_messages.append(msg)
-            elif msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.FINAL_ANSWER.value:
-                user_and_final_answer_messages.append(msg)
+                chat_list.append([msg])
+            elif msg.role != MessageRole.USER.value:
+                chat_list[-1].append(msg)
+        
+        # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
+        for chat in chat_list:
+            user_and_final_answer_messages.append(chat[0])
+            if len(chat)>1:
+                if chat[-1].type == MessageType.FINAL_ANSWER.value:
+                    user_and_final_answer_messages.append(chat[-1])
+                else:
+                    for msg in reversed(chat):
+                        if msg.type == MessageType.DO_SUBTASK_RESULT.value:
+                            user_and_final_answer_messages.append(msg)
+                            break
+                if user_and_final_answer_messages[-1].role == MessageRole.USER.value:
+                    user_and_final_answer_messages.extend(chat[1:])
+        
+        # for msg in self.messages:
+        #     if msg.role == MessageRole.USER.value:
+        #         user_and_final_answer_messages.append(msg)
+        #     elif msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.FINAL_ANSWER.value:
+        #         user_and_final_answer_messages.append(msg)
         return user_and_final_answer_messages
     
     def extract_after_last_stage_summary_messages(self) -> List[MessageChunk]:
