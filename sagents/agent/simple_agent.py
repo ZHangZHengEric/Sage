@@ -43,6 +43,27 @@ class SimpleAgent(AgentBase):
 2. 返回所有可能用到的工具名称，对于不可能用到的工具，不要返回。
 3. 可能的工具最多返回7个。
 """
+        self.TASK_COMPLETE_PROMPT_TEMPLATE = """你要根据历史的对话以及用户的请求，判断是否已经完成了任务。
+
+## 任务完成判断规则
+1. 任务完成：
+  - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断任务完成。
+  - 当你认为对话过程中，发生了异常情况，导致任务无法继续执行时，需要判断任务完成。
+2. 任务未完成：
+  - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断任务未完成。
+  - 当完成工具调用，但未进行工具调用的结果文字描述时，需要判断任务未完成。因为用户看不到工具执行的结果。
+
+## 用户的对话历史以及新的请求的执行过程
+{messages}
+
+输出格式：
+```json
+{{
+    "task_complete": true,
+}}
+```
+"""
+
         self.agent_custom_system_prefix = """\n
 1. 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要通过调用 complete_task 工具来结束会话或者触发等待用户的新的输入
 2. 一定要先执行用户的问题或者请求，即使用户问题不清楚，也要回答或者询问用户的意图后，再调用工具 complete_task 结束会话。
@@ -64,9 +85,9 @@ class SimpleAgent(AgentBase):
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        history_messages = message_manager.filter_messages(context_length_limited=10000,
+        history_messages = message_manager.filter_messages(context_length_limited=60000,
                                                           accept_message_type=[],
-                                                          recent_turns=10)
+                                                          recent_turns=30)
         system_context = session_context.system_context
         # 调用内部方法，执行流式直接执行
         yield from self._execute_direct_stream_internal(history_messages, 
@@ -133,7 +154,36 @@ class SimpleAgent(AgentBase):
         
         return tools_json
 
-        
+    def _is_task_complete(self,
+                            messages_input: List[MessageChunk],
+                            session_id: str) -> bool:
+        clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+        prompt = self.TASK_COMPLETE_PROMPT_TEMPLATE.format(
+                session_id=session_id,
+                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+        )
+        messages_input = [{'role': 'user', 'content': prompt}]
+        # 使用基类的流式调用方法，自动处理LLM request日志
+        response = self._call_llm_streaming(
+            messages=messages_input,
+            session_id=session_id,  
+            step_name="task_complete_judge"
+        )
+        # 收集流式响应内容
+        all_content = ""
+        for chunk in response:
+            if len(chunk.choices) == 0:
+                continue
+            if chunk.choices[0].delta.content:
+                all_content += chunk.choices[0].delta.content
+        try:
+            result_clean = MessageChunk.extract_json_from_markdown(all_content)
+            result = json.loads(result_clean)
+            return result['task_complete']
+        except json.JSONDecodeError:
+            logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
+            return False
+
     def _get_suggested_tools(self, 
                            messages_input: List[MessageChunk],
                            tool_manager: ToolManager,
@@ -273,6 +323,11 @@ class SimpleAgent(AgentBase):
             # 检查是否应该停止
             if self._should_stop_execution(all_new_response_chunks):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
+                break
+            
+            # 检查任务是否完成
+            if self._is_task_complete(messages_input, session_id):
+                logger.info("SimpleAgent: 任务完成，终止执行")
                 break
             
     def _call_llm_and_process_response(self,
