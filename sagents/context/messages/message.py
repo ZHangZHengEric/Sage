@@ -96,9 +96,12 @@ class MessageChunk:
             self.timestamp = time.time()
         if self.chunk_id is None:
             self.chunk_id = str(uuid.uuid4())
-        if self.message_id is None:
+        if self.message_id is None :
             self.message_id = str(uuid.uuid4())
-        
+        if len(self.message_id) == 0:
+            self.message_id = str(uuid.uuid4())
+
+
         # 如果role 是user 类型，type 必须是normal
         if self.role == MessageRole.USER.value:
             self.type = MessageType.NORMAL.value
