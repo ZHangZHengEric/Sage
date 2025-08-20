@@ -33,20 +33,12 @@ sys.path.insert(0, str(project_root))
 import sagents
 print("sagents loaded from:", sagents.__file__)
 
-from sagents.agent.agent_controller import AgentController
-from sagents.professional_agents.code_agents import CodeAgent
+from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
-from sagents.agent.message_manager import MessageManager
-from sagents.utils import logger
-from sagents.config import get_settings, update_settings, Settings
-from sagents.utils import (
-    SageException, 
-    ToolExecutionError, 
-    AgentTimeoutError,
-    with_retry,
-    exponential_backoff,
-    handle_exception
-)
+from sagents.context.messages.message_manager import MessageManager
+from sagents.utils.logger import logger
+from openai import OpenAI
+
 
 
 class ComponentManager:
@@ -54,23 +46,25 @@ class ComponentManager:
     
     def __init__(self, api_key: str, model_name: str = None, base_url: str = None, 
                  tools_folders: List[str] = None, max_tokens: int = None, temperature: float = None):
-        # 获取已更新的全局配置
-        self.settings = get_settings()
-        
-        logger.debug(f"使用配置 - 模型: {self.settings.model.model_name}, 温度: {self.settings.model.temperature}")
-        
+        logger.debug(f"使用配置 - 模型: {model_name}, 温度: {temperature}")
+        self.api_key = api_key
+        self.model_name = model_name
+        self.base_url = base_url
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
         # 设置工具文件夹
         self.tools_folders = tools_folders or []
         
         # 初始化组件变量
         self._tool_manager: Optional[ToolManager] = None
-        self._controller: Optional[AgentController] = None
+        self._controller: Optional[SAgent] = None
         self._model: Optional[OpenAI] = None
         
-    def initialize(self) -> tuple[ToolManager, AgentController]:
+    def initialize(self) -> tuple[ToolManager, SAgent]:
         """初始化所有组件"""
         try:
-            logger.info(f"初始化组件，模型: {self.settings.model.model_name}")
+            logger.info(f"初始化组件，模型: {self.model_name}")
             
             # 初始化工具管理器
             self._tool_manager = self._init_tool_manager()
@@ -102,45 +96,34 @@ class ComponentManager:
         
         return tool_manager
     
-    @with_retry(exponential_backoff(max_attempts=3, base_delay=1.0, max_delay=5.0))
     def _init_model(self) -> OpenAI:
         """初始化模型"""
-        logger.debug(f"初始化模型，base_url: {self.settings.model.base_url}")
+        logger.debug(f"初始化模型，base_url: {self.base_url}")
         try:
             return OpenAI(
-                api_key=self.settings.model.api_key,
-                base_url=self.settings.model.base_url
+                api_key=self.api_key,
+                base_url=self.base_url
             )
         except Exception as e:
             logger.error(f"模型初始化失败: {str(e)}")
-            raise SageException(f"无法连接到 OpenAI API: {str(e)}")
+            raise 
     
-    @with_retry(exponential_backoff(max_attempts=2, base_delay=0.5, max_delay=2.0))
-    def _init_controller(self) -> AgentController:
+    def _init_controller(self) -> SAgent:
         """初始化控制器"""
         try:
             model_config = {
-                "model": self.settings.model.model_name,
-                "temperature": self.settings.model.temperature,
-                "max_tokens": self.settings.model.max_tokens
+                "model": self.model_name,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens
             }
             
-            controller = AgentController(self._model, model_config,workspace="/Users/zhangzheng/zavixai/Sage/examples")
-            
-            # 注册代码智能体
-            try:
-                code_agent = CodeAgent(self._model, model_config)
-                self._tool_manager.register_tool(code_agent.to_tool())
-                logger.debug("代码智能体注册成功")
-            except Exception as e:
-                logger.warning(f"代码智能体注册失败: {str(e)}")
-                # 不中断整个初始化过程，代码智能体是可选的
+            controller = SAgent(self._model, model_config,workspace="/Users/zhangzheng/zavixai/Sage/examples")
             
             return controller
             
         except Exception as e:
             logger.error(f"控制器初始化失败: {str(e)}")
-            raise SageException(f"无法初始化智能体控制器: {str(e)}")
+            raise 
 
 
 def convert_messages_for_show(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -175,7 +158,7 @@ def create_user_message(content: str) -> Dict[str, Any]:
 class StreamingHandler:
     """流式处理器 - 处理实时消息流"""
     
-    def __init__(self, controller: AgentController):
+    def __init__(self, controller: SAgent):
         self.controller = controller
         self._current_stream = None
         self._current_stream_id = None
@@ -197,42 +180,19 @@ class StreamingHandler:
                 tool_manager,
                 session_id=session_id,
                 deep_thinking=use_deepthink,
-                summary=True,
-                deep_research=use_multi_agent
+                multi_agent=use_multi_agent
             ):
                 # 将message chunk类型的chunks 转化成字典
-                chunk = [msg.to_dict() for msg in chunk]
-                new_messages.extend(chunk)
+                chunks_dict = [msg.to_dict() for msg in chunk]
+                new_messages.extend(chunks_dict)
                 self._update_display(messages, new_messages)
                 
         except Exception as e:
-            print(chunk)
-            logger.error(traceback.format_exc())
-            error_info = handle_exception(e, {
-                'method': 'process_stream',
-                'session_id': session_id,
-                'use_deepthink': use_deepthink,
-                'use_multi_agent': use_multi_agent,
-                'message_count': len(messages)
-            })
-            
-            logger.error(f"流式处理出错: {str(e)}")
-            
-            # 根据异常类型提供不同的错误消息
-            if isinstance(e, ToolExecutionError):
-                error_message = f"工具执行失败: {str(e)}"
-            elif isinstance(e, AgentTimeoutError):
-                error_message = f"智能体响应超时: {str(e)}"
-            elif isinstance(e, SageException):
-                error_message = f"系统错误: {str(e)}"
-            else:
-                error_message = f"抱歉，处理过程中出现意外错误: {str(e)}"
-            
+            logger.error(traceback.format_exc())            
             error_response = {
                 "role": "assistant",
-                "content": error_message,
+                "content": f"流式处理出错: {str(e)}",
                 "message_id": str(uuid.uuid4()),
-                "error_info": error_info
             }
             new_messages.append(error_response)
         
@@ -240,8 +200,9 @@ class StreamingHandler:
     
     def _update_display(self, base_messages: List[Dict], new_messages: List[Dict]):
         """更新显示内容"""
-        merged_messages = MessageManager._merge_messages(base_messages.copy(), new_messages)
-        display_messages = convert_messages_for_show(merged_messages)
+        merged_messages = MessageManager.merge_new_messages_to_old_messages(new_messages,base_messages.copy() )
+        merged_messages_dict = [msg.to_dict() for msg in merged_messages]
+        display_messages = convert_messages_for_show(merged_messages_dict)
         
         # 找到最新的助手消息
         latest_assistant_msg = None
@@ -264,30 +225,27 @@ class StreamingHandler:
                 self._current_stream.write(latest_assistant_msg['content'])
 
 
-def setup_ui():
+def setup_ui(config: Dict):
     """设置用户界面"""
     st.title("🧠 Sage Multi-Agent Framework")
     st.markdown("**智能多智能体协作平台**")
-    
-    # 获取全局配置
-    settings = get_settings()
-    
+        
     # 侧边栏设置
     with st.sidebar:
         st.header("⚙️ 设置")
         
         # 多智能体选项
         use_multi_agent = st.toggle('🤖 启用多智能体推理', 
-                                   value=True)
+                                   value=config.get('use_multi_agent', True))
         use_deepthink = st.toggle('🧠 启用深度思考', 
-                                 value=settings.agent.enable_deep_thinking)
+                                 value=config.get('use_deepthink', True))
         
         # 系统信息
         st.subheader("📊 系统信息")
-        st.info(f"**模型**: {settings.model.model_name}")
-        st.info(f"**温度**: {settings.model.temperature}")
-        st.info(f"**最大标记**: {settings.model.max_tokens}")
-        st.info(f"**环境**: {settings.environment}")
+        st.info(f"**模型**: {config.get('model_name', '未配置')}")
+        st.info(f"**温度**: {config.get('temperature', '未配置')}")
+        st.info(f"**最大标记**: {config.get('max_tokens', '未配置')}")
+        st.info(f"**环境**: {config.get('environment', '未配置')}")
         
         # 工具列表
         if st.session_state.get('tool_manager'):
@@ -342,7 +300,7 @@ def display_conversation_history():
                 st.write(msg['content'])
 
 
-def process_user_input(user_input: str, tool_manager: ToolManager, controller: AgentController):
+def process_user_input(user_input: str, tool_manager: ToolManager, controller: SAgent):
     """处理用户输入"""
     logger.info(f"处理用户输入: {user_input[:50]}{'...' if len(user_input) > 50 else ''}")
     
@@ -362,12 +320,13 @@ def process_user_input(user_input: str, tool_manager: ToolManager, controller: A
         try:
             generate_response(tool_manager, controller)
         except Exception as e:
+            logger.error(traceback.format_exc())
             logger.error(f"生成响应时出错: {str(e)}")
             with st.chat_message("assistant"):
                 st.error(f"抱歉，处理您的请求时出现了错误: {str(e)}")
 
 
-def generate_response(tool_manager: ToolManager, controller: AgentController):
+def generate_response(tool_manager: ToolManager, controller: SAgent):
     """生成智能体响应"""
     streaming_handler = StreamingHandler(controller)
     
@@ -382,51 +341,35 @@ def generate_response(tool_manager: ToolManager, controller: AgentController):
     
     # 合并消息
     if new_messages:
-        merged_messages = MessageManager._merge_messages(
-            st.session_state.inference_conversation, new_messages
+        merged_messages = MessageManager.merge_new_messages_to_old_messages(
+            new_messages,st.session_state.inference_conversation 
         )
-        st.session_state.inference_conversation = merged_messages
+        merged_messages_dict = [msg.to_dict() for msg in merged_messages]
+        st.session_state.inference_conversation = merged_messages_dict
         
         # 更新显示对话
-        display_messages = convert_messages_for_show(merged_messages)
+        display_messages = convert_messages_for_show(merged_messages_dict)
         st.session_state.conversation = display_messages
         
         logger.info("响应生成完成")
-
-
-def update_global_settings(api_key: str, model_name: str = None, base_url: str = None, 
-                          max_tokens: int = None, temperature: float = None):
-    """提前更新全局设置，确保UI能显示正确的配置信息"""
-    settings = get_settings()
-    
-    # 直接更新全局配置
-    if api_key:
-        settings.model.api_key = api_key
-    if model_name:
-        settings.model.model_name = model_name
-    if base_url:
-        settings.model.base_url = base_url
-    if max_tokens:
-        settings.model.max_tokens = max_tokens
-    if temperature is not None:
-        settings.model.temperature = temperature
-    
-    logger.debug(f"全局配置已更新 - 模型: {settings.model.model_name}, 温度: {settings.model.temperature}")
-
 
 def run_web_demo(api_key: str, model_name: str = None, base_url: str = None, 
                  tools_folders: List[str] = None, max_tokens: int = None, temperature: float = None):
     """运行 Streamlit web 界面"""
     logger.info("启动 Streamlit web 演示")
-    
-    # 提前更新全局设置，确保UI显示正确的配置
-    update_global_settings(api_key, model_name, base_url, max_tokens, temperature)
-    
+        
     # 初始化会话状态
     init_session_state()
-    
+    config = {
+        'api_key': api_key,
+        'model_name': model_name,
+        'base_url': base_url,
+        'tools_folders': tools_folders,
+        'max_tokens': max_tokens,
+        'temperature': temperature
+    }
     # 设置界面（此时能获取到正确的配置）
-    use_multi_agent, use_deepthink = setup_ui()
+    use_multi_agent, use_deepthink = setup_ui(config)
     
     # 存储设置到会话状态
     st.session_state.use_multi_agent = use_multi_agent
@@ -454,23 +397,9 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
             print("已注册工具：", [t['name'] for t in tool_manager.list_tools_simplified()])
             # 初始化完成后重新运行，确保UI显示更新后的配置
             st.rerun()
-        except SageException as e:
-            # 系统级异常，提供详细的错误信息和建议
-            st.error(f"系统初始化失败: {str(e)}")
-            error_info = handle_exception(e, {'component': 'system_initialization'})
-            
-            st.warning("**建议解决方案:**")
-            for suggestion in error_info.get('recovery_suggestions', []):
-                st.write(f"• {suggestion}")
-            
-            if 'API' in str(e):
-                st.info("💡 **提示**: 请检查您的 API key 是否正确，网络连接是否正常")
-            
-            st.stop()
         except Exception as e:
             # 其他异常
             st.error(f"系统初始化失败: {str(e)}")
-            error_info = handle_exception(e, {'component': 'system_initialization'})
             
             st.warning("**技术详情:**")
             st.code(traceback.format_exc())
@@ -547,21 +476,12 @@ def main():
             config['temperature']
         )
         
-    except SageException as e:
-        logger.error(f"应用启动失败: {str(e)}")
-        st.error(f"系统错误: {str(e)}")
-        error_info = handle_exception(e, {'component': 'main_application'})
-        
-        st.warning("**恢复建议:**")
-        for suggestion in error_info.get('recovery_suggestions', []):
-            st.write(f"• {suggestion}")
             
     except Exception as e:
         logger.error(f"应用启动失败: {str(e)}")
         logger.error(traceback.format_exc())
         
         st.error(f"应用启动失败: {str(e)}")
-        error_info = handle_exception(e, {'component': 'main_application'})
         
         with st.expander("🔍 查看技术详情", expanded=False):
             st.code(traceback.format_exc())

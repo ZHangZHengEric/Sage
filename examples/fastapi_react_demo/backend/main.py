@@ -6,6 +6,7 @@ Sage FastAPI + React Demo Backend
 支持从配置文件自动加载模型配置
 """
 
+from audioop import mul
 import os
 import sys
 import json
@@ -30,11 +31,10 @@ import httpx
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(project_root))
 
-from sagents.agent.agent_controller import AgentController
+from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
-from sagents.professional_agents.code_agents import CodeAgent
+from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.logger import logger
-from sagents.config import get_settings
 from openai import OpenAI
 
 # 导入新的配置加载器
@@ -49,6 +49,7 @@ class ChatMessage(BaseModel):
     message_id: str = None
     type: str = "normal"
     tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
 
 class ChatRequest(BaseModel):
     type: str = "chat"
@@ -82,7 +83,7 @@ class SystemStatus(BaseModel):
 
 # 全局变量
 tool_manager: Optional[ToolManager] = None
-controller: Optional[AgentController] = None
+controller: Optional[SAgent] = None
 active_sessions: Dict[str, Dict] = {}
 
 # 存储会话状态
@@ -208,50 +209,19 @@ async def initialize_system():
                 "temperature": app_config.model.temperature,
                 "max_tokens": app_config.model.max_tokens
             }
-            code_agent = CodeAgent(model, model_config)
-            tool_manager.register_tool(code_agent.to_tool())
             
             # 使用配置文件中的workspace路径
             workspace_path = app_config.workspace.root_path
-            controller = AgentController(model, model_config, workspace=workspace_path)
+            controller = SAgent(model, model_config, workspace=workspace_path)
             logger.info(f"✅ 智能体控制器初始化完成 (使用配置文件)")
             print(f"✅ 系统已就绪，模型: {app_config.model.model_name}")
             print(f"📁 工作空间: {workspace_path}")
             
             # FTP服务器已移除，使用AList文件服务
-            
-            # 同步到Sage框架的配置系统
-            settings = get_settings()
-            settings.model.api_key = app_config.model.api_key
-            settings.model.model_name = app_config.model.model_name
-            settings.model.base_url = app_config.model.base_url
-            settings.model.max_tokens = app_config.model.max_tokens
-            settings.model.temperature = app_config.model.temperature
         else:
-            # 如果配置文件没有API密钥，尝试从Sage框架配置加载
-            settings = get_settings()
-            if settings.model.api_key:
-                model = OpenAI(
-                    api_key=settings.model.api_key,
-                    base_url=settings.model.base_url
-                )
-                
-                model_config = {
-                    "model": settings.model.model_name,
-                    "temperature": settings.model.temperature,
-                    "max_tokens": settings.model.max_tokens
-                }
-                
-                # 使用默认workspace路径
-                workspace_path = os.getenv('WORKSPACE_ROOT', '/tmp/sage')
-                controller = AgentController(model, model_config, workspace=workspace_path)
-                logger.info("✅ 智能体控制器初始化完成 (使用Sage配置)")
-                print(f"✅ 系统已就绪，模型: {settings.model.model_name}")
-                print(f"📁 工作空间: {workspace_path}")
-            else:
-                print("⚠️  未配置API密钥，需要通过Web界面配置或在config.yaml中设置")
-                print("💡 提示：编辑 backend/config.yaml 文件，设置您的API密钥")
-        
+            print("⚠️  未配置API密钥，需要通过Web界面配置或在config.yaml中设置")
+            print("💡 提示：编辑 backend/config.yaml 文件，设置您的API密钥")
+    
     except Exception as e:
         logger.error(f"系统初始化失败: {e}")
         print(f"❌ 系统初始化失败: {e}")
@@ -338,14 +308,6 @@ async def configure_system(config: ConfigRequest, response: Response):
     add_cors_headers(response)
     global controller
     try:
-        # 获取当前设置并更新模型配置
-        settings = get_settings()
-        settings.model.api_key = config.api_key
-        settings.model.model_name = config.model_name
-        settings.model.base_url = config.base_url
-        settings.model.max_tokens = config.max_tokens
-        settings.model.temperature = config.temperature
-        
         # 同时更新配置文件
         app_config = get_app_config()
         app_config.model.api_key = config.api_key
@@ -372,7 +334,7 @@ async def configure_system(config: ConfigRequest, response: Response):
         # 从配置文件或环境变量获取workspace路径
         app_config = get_app_config()
         workspace_path = app_config.workspace.root_path if app_config else os.getenv('WORKSPACE_ROOT', '/tmp/sage')
-        controller = AgentController(model, model_config, workspace=workspace_path)
+        controller = SAgent(model, model_config, workspace=workspace_path)
         
         logger.info(f"系统配置更新成功: {config.model_name}")
         print(f"🔄 配置已更新并保存: {config.model_name}")
@@ -439,8 +401,7 @@ async def chat_endpoint(request: ChatRequest):
             tool_manager,
             session_id=request.session_id,
             deep_thinking=request.use_deepthink,
-            summary=True,
-            deep_research=request.use_multi_agent,
+            multi_agent=request.use_multi_agent,
             system_context=system_context,
             available_workflows=available_workflows
         )
@@ -501,17 +462,17 @@ async def chat_stream(request: ChatRequest):
                 tool_manager=tool_manager,
                 session_id=str(uuid.uuid4()),
                 deep_thinking=request.use_deepthink,
-                summary=True,
-                deep_research=request.use_multi_agent,
+                multi_agent=request.use_multi_agent,
                 system_context=system_context,
                 available_workflows=available_workflows,
                 max_loop_count=20,
             ):
                 # 处理消息块
                 for msg in chunk:
+                    msg_dict = msg.to_dict()
                     # 安全处理content和show_content，避免JSON转义问题
-                    content = msg.get('content', '')
-                    show_content = msg.get('show_content', '')
+                    content = msg_dict.get('content', '')
+                    show_content = msg_dict.get('show_content', '')
                     
                     # 清理show_content中的base64图片数据，避免JSON过大
                     if isinstance(show_content, str) and 'data:image' in show_content:
@@ -537,7 +498,7 @@ async def chat_stream(request: ChatRequest):
                             show_content = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', 'null', show_content)
                     
                     # 特殊处理工具调用结果，避免JSON嵌套问题
-                    if msg.get('role') == 'tool' and isinstance(content, str):
+                    if msg_dict.get('role') == 'tool' and isinstance(content, str):
                         try:
                             # 尝试解析content中的JSON数据
                             if content.strip().startswith('{'):
@@ -592,18 +553,18 @@ async def chat_stream(request: ChatRequest):
                     
                     data = {
                         'type': 'chat_chunk',
-                        'message_id': msg.get('message_id', message_id),
-                        'role': msg.get('role', 'assistant'),
+                        'message_id': msg_dict.get('message_id', message_id),
+                        'role': msg_dict.get('role', 'assistant'),
                         'content': content,
                         'show_content': show_content,
-                        'step_type': msg.get('type', ''),
-                        'agent_type': msg.get('role', '')
+                        'step_type': msg_dict.get('type', ''),
+                        'agent_type': msg_dict.get('role', '')
                     }
                     
                     # 处理工具调用信息
-                    if 'tool_calls' in msg and msg['tool_calls']:
+                    if 'tool_calls' in msg_dict and msg_dict['tool_calls']:
                         data['tool_calls'] = []
-                        for tool_call in msg['tool_calls']:
+                        for tool_call in msg_dict['tool_calls']:
                             tool_call_data = {
                                 'id': tool_call.get('id', ''),
                                 'name': tool_call.get('function', {}).get('name', ''),
