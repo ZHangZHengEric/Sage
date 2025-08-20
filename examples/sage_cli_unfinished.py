@@ -19,66 +19,37 @@ from typing import List, Dict, Any, Optional
 project_root = Path(os.path.realpath(__file__)).parent.parent
 sys.path.insert(0, str(project_root))
 
-import sagents
-from sagents.agent.agent_controller import AgentController
-from sagents.professional_agents.code_agents import CodeAgent
+from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
-from sagents.agent.message_manager import MessageManager
-from sagents.utils import logger
-from sagents.config import get_settings, update_settings
-from sagents.utils import (
-    SageException, 
-    ToolExecutionError, 
-    AgentTimeoutError,
-    with_retry,
-    exponential_backoff,
-    handle_exception
-)
+from sagents.context.messages.message_manager import MessageManager
+from sagents.utils.logger import logger
 from openai import OpenAI
-
-
-def update_global_settings(api_key: str, model_name: str = None, base_url: str = None, 
-                          max_tokens: int = None, temperature: float = None):
-    """提前更新全局设置"""
-    settings = get_settings()
-    
-    # 直接更新全局配置
-    if api_key:
-        settings.model.api_key = api_key
-    if model_name:
-        settings.model.model_name = model_name
-    if base_url:
-        settings.model.base_url = base_url
-    if max_tokens:
-        settings.model.max_tokens = max_tokens
-    if temperature is not None:
-        settings.model.temperature = temperature
-    
-    logger.debug(f"全局配置已更新 - 模型: {settings.model.model_name}, 温度: {settings.model.temperature}")
-
 
 class ComponentManager:
     """组件管理器 - 负责初始化和管理核心组件"""
     
     def __init__(self, api_key: str, model_name: str = None, base_url: str = None, 
                  tools_folders: List[str] = None, max_tokens: int = None, temperature: float = None):
-        # 获取已更新的全局配置
-        self.settings = get_settings()
         
-        logger.debug(f"使用配置 - 模型: {self.settings.model.model_name}, 温度: {self.settings.model.temperature}")
-        
+        logger.debug(f"使用配置 - 模型: {model_name}, 温度: {temperature}")
+        self.api_key = api_key
+        self.model_name = model_name
+        self.base_url = base_url
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
         # 设置工具文件夹
         self.tools_folders = tools_folders or []
         
         # 初始化组件变量
         self._tool_manager: Optional[ToolManager] = None
-        self._controller: Optional[AgentController] = None
+        self._controller: Optional[SAgent] = None
         self._model: Optional[OpenAI] = None
         
-    def initialize(self) -> tuple[ToolManager, AgentController]:
+    def initialize(self) -> tuple[ToolManager, SAgent]:
         """初始化所有组件"""
         try:
-            logger.info(f"初始化组件，模型: {self.settings.model.model_name}")
+            logger.info(f"初始化组件，模型: {self.model_name}")
             
             # 初始化工具管理器
             self._tool_manager = self._init_tool_manager()
@@ -110,45 +81,33 @@ class ComponentManager:
         
         return tool_manager
     
-    @with_retry(exponential_backoff(max_attempts=3, base_delay=1.0, max_delay=5.0))
     def _init_model(self) -> OpenAI:
         """初始化模型"""
-        logger.debug(f"初始化模型，base_url: {self.settings.model.base_url}")
+        logger.debug(f"初始化模型，base_url: {self.base_url}")
         try:
             return OpenAI(
-                api_key=self.settings.model.api_key,
-                base_url=self.settings.model.base_url
+                api_key=self.api_key,
+                base_url=self.base_url
             )
         except Exception as e:
             logger.error(f"模型初始化失败: {str(e)}")
-            raise SageException(f"无法连接到 OpenAI API: {str(e)}")
+            raise
     
-    @with_retry(exponential_backoff(max_attempts=2, base_delay=0.5, max_delay=2.0))
-    def _init_controller(self) -> AgentController:
+    def _init_controller(self) -> SAgent:
         """初始化控制器"""
         try:
             model_config = {
-                "model": self.settings.model.model_name,
-                "temperature": self.settings.model.temperature,
-                "max_tokens": self.settings.model.max_tokens
+                "model": self.model_name,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens
             }
             
-            controller = AgentController(self._model, model_config, workspace="/Users/zhangzheng/zavixai/Sage/examples")
-            
-            # 注册代码智能体
-            try:
-                code_agent = CodeAgent(self._model, model_config)
-                self._tool_manager.register_tool(code_agent.to_tool())
-                logger.debug("代码智能体注册成功")
-            except Exception as e:
-                logger.warning(f"代码智能体注册失败: {str(e)}")
-                # 不中断整个初始化过程，代码智能体是可选的
-            
+            controller = SAgent(self._model, model_config, workspace="/Users/zhangzheng/zavixai/Sage/examples")
             return controller
             
         except Exception as e:
             logger.error(f"控制器初始化失败: {str(e)}")
-            raise SageException(f"无法初始化智能体控制器: {str(e)}")
+            raise 
 
 
 def create_user_message(content: str) -> Dict[str, Any]:
@@ -164,7 +123,7 @@ def create_user_message(content: str) -> Dict[str, Any]:
 class CLIProcessor:
     """CLI处理器 - 处理命令行交互"""
     
-    def __init__(self, controller: AgentController, tool_manager: ToolManager):
+    def __init__(self, controller: SAgent, tool_manager: ToolManager):
         self.controller = controller
         self.tool_manager = tool_manager
         self.conversation = []
@@ -185,8 +144,7 @@ class CLIProcessor:
                 self.tool_manager,
                 session_id=None,
                 deep_thinking=use_deepthink,
-                summary=True,
-                deep_research=use_multi_agent
+                multi_agent=use_multi_agent
             ):
                 pass
                 # 将message chunk类型的chunks 转化成字典
@@ -206,19 +164,10 @@ class CLIProcessor:
             logger.error(f"处理查询时出错: {str(e)}")
             logger.error(traceback.format_exc())
             
-            # 根据异常类型提供不同的错误消息
-            if isinstance(e, ToolExecutionError):
-                error_message = f"工具执行失败: {str(e)}"
-            elif isinstance(e, AgentTimeoutError):
-                error_message = f"智能体响应超时: {str(e)}"
-            elif isinstance(e, SageException):
-                error_message = f"系统错误: {str(e)}"
-            else:
-                error_message = f"处理过程中出现意外错误: {str(e)}"
-            
+        
             error_response = {
                 "role": "assistant",
-                "content": error_message,
+                "content": f"处理查询时出错: {str(e)}",
                 "message_id": str(uuid.uuid4())
             }
             self.conversation.append(error_response)
@@ -279,15 +228,6 @@ def main():
         config = parse_arguments()
         logger.info(f"启动CLI工具，模型: {config['model_name']}")
         
-        # 提前更新全局设置
-        update_global_settings(
-            config['api_key'],
-            config['model_name'],
-            config['base_url'],
-            config['max_tokens'],
-            config['temperature']
-        )
-        
         # 初始化组件
         component_manager = ComponentManager(
             api_key=config['api_key'],
@@ -311,16 +251,10 @@ def main():
         )
         
         logger.info("CLI工具执行完成")
-        
-    except SageException as e:
-        logger.error(f"CLI工具执行失败: {str(e)}")
-        error_info = handle_exception(e, {'component': 'cli_application'})
-        
     except Exception as e:
         logger.error(f"CLI工具执行失败: {str(e)}")
         logger.error(traceback.format_exc())
-        error_info = handle_exception(e, {'component': 'cli_application'})
-
+    
 
 if __name__ == "__main__":
     main()
