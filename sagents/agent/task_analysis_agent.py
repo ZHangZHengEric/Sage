@@ -55,14 +55,19 @@ class TaskAnalysisAgent(AgentBase):
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info("TaskAnalysisAgent: 开始执行流式任务分析")
         # recent_message 中只保留 user 以及final answer
-        recent_message = message_manager.extract_all_user_and_final_answer_messages()
-        recent_message_str = MessageManager.convert_messages_to_str(recent_message)
+        if 'task_rewrite' in session_context.audit_status:
+            recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )])
+        else:
+            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
+            recent_message_str = MessageManager.convert_messages_to_str(recent_message)
         
-        available_tools = tool_manager.list_tools_simplified() if tool_manager else []
-        # 只提取工具名称，不显示描述
-        tool_names = [tool['name'] for tool in available_tools]
-        available_tools_str = ", ".join(tool_names) if tool_names else "无可用工具"
-        logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools)}")
+        available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
+        available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
+        logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools_name)}")
 
         
         prompt = self.ANALYSIS_PROMPT_TEMPLATE.format(
@@ -74,7 +79,7 @@ class TaskAnalysisAgent(AgentBase):
         message_id = str(uuid.uuid4())
         yield [MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content="Thinking: ",
+            content="任务分析：",
             message_id=message_id,
             show_content="",
             message_type=MessageType.TASK_ANALYSIS.value
@@ -90,17 +95,17 @@ class TaskAnalysisAgent(AgentBase):
                 message_type=MessageType.TASK_ANALYSIS.value
             )
         ]
-
+        all_analysis_chunks_content=  ''
         for llm_repsonse_chunk in self._call_llm_streaming(
             messages=llm_request_message,
             session_id=session_id,
             step_name="task_analysis",
         ):
-            # print(llm_repsonse_chunk)
             if len(llm_repsonse_chunk.choices) == 0:
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:
                 if len(llm_repsonse_chunk.choices[0].delta.content) > 0:
+                    all_analysis_chunks_content += llm_repsonse_chunk.choices[0].delta.content
                     yield [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
                         content=llm_repsonse_chunk.choices[0].delta.content,
@@ -113,7 +118,7 @@ class TaskAnalysisAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content="",
                         message_id=message_id,
-                        show_content=llm_repsonse_chunk.choices[0].delta.reasoning_content,
+                        show_content="",
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
-            
+        session_context.audit_status['task_analysis'] = all_analysis_chunks_content

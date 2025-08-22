@@ -49,9 +49,30 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
-        messages_after_last_user = message_manager.get_after_last_user_messages()
-        last_planning_message_dict = message_manager.get_last_planning_message_dict()
+        if 'task_rewrite' in session_context.audit_status:
+            rewrite_user = [MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )]
 
+            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3)
+            messages_after_last_user = rewrite_user + messages_after_last_user
+        else:
+
+            # 提取执行历史
+            messages_after_last_user = message_manager.get_after_last_user_messages()
+            # 只保留关键的执行消息
+            messages_after_last_user = [msg for msg in messages_after_last_user if msg.type in [MessageType.EXECUTION.value,
+                                                                                            MessageType.DO_SUBTASK.value,
+                                                                                            MessageType.DO_SUBTASK_RESULT.value,
+                                                                                            MessageType.TOOL_CALL.value,
+                                                                                            MessageType.TOOL_CALL_RESULT.value,
+                                                                                            MessageType.TOOL_RESPONSE.value,
+                                                                                            MessageType.NORMAL.value]]
+
+
+        last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
 
         prompt = self.TASK_EXECUTION_PROMPT_TEMPLATE.format(
             next_subtask_description=last_planning_message_dict['description'],
@@ -198,6 +219,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         logger.info(f"ExecutorAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
         
         return tools_json
+
     def _handle_tool_calls_chunk(self, 
                                chunk, 
                                tool_calls: Dict[str, Any], 
@@ -220,8 +242,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     'id': last_tool_call_id,
                     'type': tool_call.type,
                     'function': {
-                        'name': tool_call.function.name,
-                        'arguments': tool_call.function.arguments
+                        'name': tool_call.function.name or "",
+                        'arguments': tool_call.function.arguments if tool_call.function.arguments else ""
                     }
                 }
             else:

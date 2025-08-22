@@ -25,6 +25,7 @@ from sagents.agent.task_stage_summary_agent import TaskStageSummaryAgent
 from sagents.agent.workflow_select_agent import WorkflowSelectAgent
 from sagents.agent.simple_react_agent import SimpleReactAgent
 from sagents.agent.query_suggest_agent import QuerySuggestAgent
+from sagents.agent.task_rewrite_agent import TaskRewriteAgent
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context,list_active_sessions
 from sagents.context.messages.message import MessageChunk,MessageRole,MessageType
@@ -72,7 +73,7 @@ class SAgent:
         # self.simple_agent = SimpleAgent(
         #     self.model, self.model_config, system_prefix=self.system_prefix
         # )
-        self.simple_agent = SimpleAgent(
+        self.simple_agent = SimpleReactAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_analysis_agent = TaskAnalysisAgent(
@@ -100,6 +101,9 @@ class SAgent:
             self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.query_suggest_agent = QuerySuggestAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        self.task_rewrite_agent = TaskRewriteAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
         logger.info("SAgent: 所有智能体初始化完成")
@@ -140,6 +144,7 @@ class SAgent:
             if system_context:
                 logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
                 session_context.add_and_update_system_context(system_context)
+            
             if available_workflows:
                 if len(available_workflows.keys()) > 0:
                     logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
@@ -154,6 +159,19 @@ class SAgent:
             for message in initial_messages:
                 if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
                     session_context.message_manager.add_messages(message)
+
+            # 先检查历史对话的文本长度，如果超过一定5000token 则用一下rewrite
+            if session_context.message_manager.get_all_messages_content_length() > 5000:
+                for message_chunks in self._execute_agent_phase(
+                    session_context=session_context,
+                    tool_manager=tool_manager,
+                    session_id=session_id,
+                    agent=self.task_rewrite_agent,
+                    phase_name="任务重写"
+                ):
+                    session_context.message_manager.add_messages(message_chunks)
+                    yield message_chunks
+
 
             if available_workflows:
                 if len(available_workflows) >0:
@@ -210,7 +228,7 @@ class SAgent:
                 ):
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
-
+    
             # 检查最终状态，如果不是中断状态则标记为完成
             if session_context.status != SessionStatus.INTERRUPTED:
                 session_context.status = SessionStatus.COMPLETED
@@ -243,6 +261,7 @@ class SAgent:
                                      tool_manager: Optional[Any],
                                      session_id: str,
                                      max_loop_count: int) -> Generator[List[MessageChunk], None, None]:
+        # 执行任务分解
         yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_decompose_agent, "任务分解")
         current_completed_tasks= session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
         loop_count = 0
@@ -274,11 +293,18 @@ class SAgent:
             # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
             completed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
             failed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.FAILED)
+            # 判断是否需要继续执行
+
             if len(completed_tasks) + len(failed_tasks) == len(session_context.task_manager.get_all_tasks()):
                 logger.info(f"SAgent: 所有任务已完成，会话ID: {session_id}")
                 break
+            
+            if "all_observations" not in session_context.audit_status:
+                continue
+            if len(session_context.audit_status['all_observations']) == 0:
+                continue
 
-            observation_dict = session_context.message_manager.get_latest_observation_message_dict()
+            observation_dict = session_context.audit_status['all_observations'][-1]
             if observation_dict:
                 if observation_dict.get("is_completed",False) == True:
                     logger.info(f"SAgent: 规划-执行-观察循环完成，会话ID: {session_id}")
@@ -296,7 +322,8 @@ class SAgent:
                         )
                         yield [clarify_msg]
                     break
-            
+        
+        # 执行任务总结
         yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
 
     def _execute_agent_phase(self,
