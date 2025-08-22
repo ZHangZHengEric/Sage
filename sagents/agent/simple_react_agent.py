@@ -1,4 +1,6 @@
 import traceback
+
+from openai import NOT_GIVEN
 from sagents.context.messages import message_manager
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -84,13 +86,38 @@ class SimpleReactAgent(AgentBase):
 - 用户看不到工具执行的结果，需要通过自然语言的总结告知用户。
 """
         self.plan_message_prompt = """
-判断当前是否已经完成了用户的需求。特别注意工具执行的结果需要总结才可以让用户看到，没有总结的话，不能认为已经完成了用户的需求。
-如果已经完成了用户的需求，调用会话结束工具结束会话。
-如果没有完成用户的需求，开始对已经执行的行为进行评估规划，输出的形式为：当前***，接下来要做的是***。
-
+对已经执行的行为进行评估规划，不需要得到用户的确认，输出的形式为：当前***，接下来要做的是***。
+- 不要输出工具的真实的名称，而是输出工具的描述。
+- 不要做用户没有要求的任务。规划时只需要满足用户的请求，不要做过多额外的事情。
 """
+        self.TASK_COMPLETE_PROMPT_TEMPLATE = """你要根据历史的对话以及用户的请求，判断是否已经完成了任务。
+
+## 任务完成判断规则
+1. 任务完成：
+  - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断任务完成。
+  - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断任务完成。
+2. 任务未完成：
+  - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断任务未完成。
+  - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断任务未完成。因为用户看不到工具执行的结果。
+
+## 用户的对话历史以及新的请求的执行过程
+{messages}
+
+输出格式：
+```json
+{{
+    "task_complete": true,
+    "reason": "任务完成"
+}}
+
+reason尽可能简单，最多20个字符
+"""
+
         self.first_plan_message_prompt = """
-接下来开始对完成用户的需求进行评估规划，只进行评估规划，不要进行执行。
+接下来开始对完成用户的需求进行评估规划，只进行评估规划，不要进行执行，也不需要得到用户的确认。
+- 不要输出工具的真实的名称，而是输出工具的描述。
+- 评估规划时，要重点参考推荐工作流的指导。
+- 不要做用户没有要求的任务。规划时只需要满足用户的请求，不要做过多额外的事情。
 """
         self.execute_message_prompt = """
 接下来执行上述规划的内容，直接执行。
@@ -114,7 +141,7 @@ class SimpleReactAgent(AgentBase):
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        history_messages = message_manager.filter_messages(context_length_limited=10000,
+        history_messages = message_manager.filter_messages(context_length_limited=20000,
                                                           accept_message_type=[],
                                                           recent_turns=10)
         system_context = session_context.system_context
@@ -182,6 +209,42 @@ class SimpleReactAgent(AgentBase):
         logger.info(f"SimpleAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
         
         return tools_json
+
+    def _is_task_complete(self,
+                            messages_input: List[MessageChunk],
+                            session_id: str) -> bool:
+        # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
+        logger.info(f"messages_input[-1].role: {messages_input[-1].role}")
+        if messages_input[-1].role == 'tool':
+            return False
+        clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+        
+        
+        prompt = self.TASK_COMPLETE_PROMPT_TEMPLATE.format(
+                session_id=session_id,
+                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+        )
+        messages_input = [{'role': 'user', 'content': prompt}]
+        # 使用基类的流式调用方法，自动处理LLM request日志
+        response = self._call_llm_streaming(
+            messages=messages_input,
+            session_id=session_id,  
+            step_name="task_complete_judge"
+        )
+        # 收集流式响应内容
+        all_content = ""
+        for chunk in response:
+            if len(chunk.choices) == 0:
+                continue
+            if chunk.choices[0].delta.content:
+                all_content += chunk.choices[0].delta.content
+        try:
+            result_clean = MessageChunk.extract_json_from_markdown(all_content)
+            result = json.loads(result_clean)
+            return result['task_complete']
+        except json.JSONDecodeError:
+            logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
+            return False
 
         
     def _get_suggested_tools(self, 
@@ -303,8 +366,8 @@ class SimpleReactAgent(AgentBase):
         yield [plan_observe_message]
         all_new_response_chunks.append(plan_observe_message)
 
-        complete_task_tool_json = [convert_spec_to_openai_format(tool_manager.get_tool('complete_task'))]
-        # complete_task_tool_json = []
+        # complete_task_tool_json = [convert_spec_to_openai_format(tool_manager.get_tool('complete_task'))]
+        complete_task_tool_json = []
         while True:
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
@@ -324,7 +387,9 @@ class SimpleReactAgent(AgentBase):
                 messages_input=messages_input,
                 tools_json=complete_task_tool_json,
                 tool_manager=tool_manager,
-                session_id=session_id
+                session_id=session_id,
+                step_name="plan_observe",
+                tool_choice=None,
             ):
                 all_new_response_chunks.extend(deepcopy(chunks))
                 yield chunks
@@ -360,7 +425,8 @@ class SimpleReactAgent(AgentBase):
                 messages_input=messages_input,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
-                session_id=session_id
+                session_id=session_id,
+                step_name="direct_execution",
             ):
                 all_new_response_chunks.extend(deepcopy(chunks))
                 yield chunks
@@ -370,10 +436,16 @@ class SimpleReactAgent(AgentBase):
             
             if should_break:
                 break
-            
+
             # 检查是否应该停止
             if self._should_stop_execution(all_new_response_chunks):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
+                break
+
+            messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
+            is_task_complete = self._is_task_complete(messages_input, session_id)
+            if is_task_complete:
+                logger.info("SimpleAgent: 任务完成，终止执行")
                 break
 
             plan_observe_message = MessageChunk(
@@ -390,7 +462,9 @@ class SimpleReactAgent(AgentBase):
         messages_input: List[MessageChunk],
         tools_json: List[Dict[str, Any]],
         tool_manager: Optional[Any],
-        session_id: str
+        step_name : str,
+        session_id: str,
+        tool_choice: str = 'auto'
     ) -> Generator[tuple[List[MessageChunk], bool], None, None]:
 
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(messages_input)
@@ -400,11 +474,12 @@ class SimpleReactAgent(AgentBase):
         model_config_override = {}
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
+            model_config_override['tool_choice'] = tool_choice
 
         response = self._call_llm_streaming(
             messages=clean_message_input,
             session_id=session_id,
-            step_name="direct_execution",
+            step_name=step_name,
             model_config_override=model_config_override
         )
 

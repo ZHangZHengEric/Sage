@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Type, Optional, Union
 from .tool_base import ToolBase
-from .tool_config import convert_spec_to_openai_format,ToolSpec, McpToolSpec,SseServerParameters,AgentToolSpec
+from .tool_config import convert_spec_to_openai_format,ToolSpec, McpToolSpec,SseServerParameters,StreamableHttpServerParameters,AgentToolSpec
 from sagents.utils.logger import logger
 import importlib
 import pkgutil
@@ -11,6 +11,7 @@ import asyncio
 from mcp import StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession, Tool
 from mcp.types import CallToolResult
 import traceback
@@ -70,6 +71,10 @@ class ToolManager:
             logger.debug(f"Registering SSE server {server_name} with URL: {config['sse_url']}")
             server_params = SseServerParameters(url=config['sse_url'])
             success = await self._register_mcp_tools_sse(server_name, server_params)
+        elif 'url' in config or 'streamable_http_url' in config:
+            logger.debug(f"Registering streamable HTTP server {server_name} with URL: {config['url']}")
+            server_params = StreamableHttpServerParameters(url=config['url'])
+            success = await self._register_mcp_tools_streamable_http(server_name, server_params)
         else:
             logger.debug(f"Registering stdio server {server_name} with command: {config['command']}")
             server_params = StdioServerParameters(
@@ -182,6 +187,10 @@ class ToolManager:
                     logger.debug(f"Setting up SSE server: {server_name} at URL: {config['sse_url']}")
                     server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
                     success = await self._register_mcp_tools_sse(server_name, server_params)
+                elif 'url' in config or 'streamable_http_url' in config:
+                    logger.debug(f"Setting up streamable HTTP server: {server_name} at URL: {config['url']}")
+                    server_params = StreamableHttpServerParameters(url=config.get('url',config.get('streamable_http_url')))
+                    success = await self._register_mcp_tools_streamable_http(server_name, server_params)
                 else:
                     logger.debug(f"Setting up stdio server: {server_name} with command: {config['command']}")
                     server_params = StdioServerParameters(
@@ -217,6 +226,26 @@ class ToolManager:
             logger.error(traceback.format_exc())
             return False
         return True
+    async def _register_mcp_tools_streamable_http(self, server_name: str, server_params: StreamableHttpServerParameters):
+        """Register tools from streamable HTTP MCP server"""
+        logger.info(f"Registering tools from streamable HTTP MCP server: {server_name} at {server_params.url}")
+        try:
+            async with streamablehttp_client(server_params.url) as (read, write,_):
+                async with ClientSession(read, write) as session:
+                    logger.debug(f"Initializing session for streamable HTTP MCP server {server_name}")
+                    start_time = time.time()
+                    await session.initialize()
+                    elapsed = time.time() - start_time
+                    logger.debug(f"Initialized session for streamable HTTP MCP server {server_name} in {elapsed:.2f} seconds")
+                    response = await session.list_tools()
+                    tools = response.tools
+                    logger.info(f"Received {len(tools)} tools from streamable HTTP MCP server {server_name}")
+                    for tool in tools:
+                        await self._register_mcp_tool(server_name, tool, server_params)
+                    return True
+        except Exception as e:
+            logger.error(f"Failed to connect to streamable HTTP MCP server {server_name}: {str(e)}")
+            return False
 
     async def _register_mcp_tools_sse(self, server_name: str, server_params: SseServerParameters):
         """Register tools from SSE MCP server"""
@@ -335,6 +364,11 @@ class ToolManager:
             'name': tool.name,
             'description': tool.description
         } for tool in self.tools.values()]
+    
+    def list_all_tools_name(self) -> List[str]:
+        """List all available tools with name"""
+        logger.debug(f"Listing all {len(self.tools)} tools with name")
+        return [tool.name for tool in self.tools.values()]
 
     def list_tools_with_type(self) -> List[Dict[str, Any]]:
         """List all available tools with type and source information"""
@@ -403,10 +437,10 @@ class ToolManager:
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     try:
                         future = executor.submit(run_async_task)
-                        final_result = future.result(timeout=10)
+                        final_result = future.result(timeout=300)
                     except TimeoutError:
                         logger.error(f"MCP tool {tool.name} execution timed out")
-                        raise RuntimeError(f"MCP tool {tool.name} execution timed out after 10 seconds")
+                        raise RuntimeError(f"MCP tool {tool.name} execution timed out after 300 seconds")
                     except Exception as e:
                         logger.error(f"MCP tool {tool.name} execution failed: {str(e)}")
                         raise
@@ -588,6 +622,8 @@ class ToolManager:
         try:
             if isinstance(tool.server_params, SseServerParameters):
                 return await self._execute_sse_mcp_tool(tool, **kwargs)
+            elif isinstance(tool.server_params, StreamableHttpServerParameters):
+                return await self._execute_streamable_http_mcp_tool(tool, **kwargs)
             else:
                 return await self._execute_stdio_mcp_tool(tool, **kwargs)
         except Exception as e:
@@ -595,6 +631,21 @@ class ToolManager:
             logger.debug(f"MCP error details - Tool: {tool.name}, Server: {server_name}, Args: {kwargs}")
             raise
 
+    async def _execute_streamable_http_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
+        """Execute streamable HTTP MCP tool"""
+        headers = None
+        if tool.server_params.api_key:
+            headers = {
+                "Authorization": f"Bearer {tool.server_params.api_key}",
+                "Content-Type": "application/json"
+            }
+        async with streamablehttp_client(tool.server_params.url, headers=headers) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
+                return result.model_dump()
+
+    
     async def _execute_sse_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
         """Execute SSE MCP tool"""
         headers= None

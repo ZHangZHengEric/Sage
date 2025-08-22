@@ -21,7 +21,7 @@ class McpToolSpec:
     parameters: Dict[str, Dict[str, Any]]  # Now includes description for each param
     required: List[str]
     server_name: str
-    server_params: Union[StdioServerParameters, SseServerParameters]
+    server_params: Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]
     
 @dataclass
 class ToolSpec:
