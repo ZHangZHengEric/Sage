@@ -520,36 +520,38 @@ reason尽可能简单，最多20个字符
             tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
         # 格式化工具参数显示
         function_params = tool_call['function']['arguments']
-        try:
-            function_params = json.loads(tool_call['function']['arguments'])
-        except json.JSONDecodeError:
+        if len(tool_call['function']['arguments'])>0:
             try:
-                function_params = eval(tool_call['function']['arguments'])
-            except:
-                logger.error(f"SimpleAgent: 第一次参数解析报错，再次进行参数解析失败")
-                logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
-        
-        if isinstance(function_params, str):
-            try:
-                function_params = json.loads(function_params)
+                function_params = json.loads(tool_call['function']['arguments'])
             except json.JSONDecodeError:
                 try:
-                    function_params = eval(function_params)
+                    function_params = eval(tool_call['function']['arguments'])
                 except:
-                    logger.error(f"SimpleAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
+                    logger.error(f"SimpleAgent: 第一次参数解析报错，再次进行参数解析失败")
                     logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
-                    logger.error(f"SimpleAgent: 工具参数格式错误: {function_params}")
-                    logger.error(f"SimpleAgent: 工具参数类型: {type(function_params)}")
-        formatted_params = ''
-        if isinstance(function_params, dict):
-            tool_call['function']['arguments'] = json.dumps(function_params,ensure_ascii=False)
-            for param, value in function_params.items():
-                # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
-                if isinstance(value, str) and len(value) > 100:
-                    value = f'"{value[:30]}"'
-                formatted_params += f"{param} = {value}, "
-            formatted_params = formatted_params.rstrip(', ')
-
+            
+            if isinstance(function_params, str):
+                try:
+                    function_params = json.loads(function_params)
+                except json.JSONDecodeError:
+                    try:
+                        function_params = eval(function_params)
+                    except:
+                        logger.error(f"SimpleAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
+                        logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
+                        logger.error(f"SimpleAgent: 工具参数格式错误: {function_params}")
+                        logger.error(f"SimpleAgent: 工具参数类型: {type(function_params)}")
+            formatted_params = ''
+            if isinstance(function_params, dict):
+                tool_call['function']['arguments'] = json.dumps(function_params,ensure_ascii=False)
+                for param, value in function_params.items():
+                    # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
+                    if isinstance(value, str) and len(value) > 100:
+                        value = f'"{value[:30]}"'
+                    formatted_params += f"{param} = {value}, "
+                formatted_params = formatted_params.rstrip(', ')
+        else:
+            formatted_params = ""
 
         tool_name = tool_call['function']['name']
         
@@ -590,8 +592,10 @@ reason尽可能简单，最多20个字符
         tool_name = tool_call['function']['name']
         
         try:
-            # 解析并执行工具调用
-            arguments = json.loads(tool_call['function']['arguments'])
+            if len(tool_call['function']['arguments'])>0:
+                arguments = json.loads(tool_call['function']['arguments'])
+            else:
+                arguments = {}
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             tool_response = tool_manager.run_tool(
                 tool_name,
