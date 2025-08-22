@@ -4,7 +4,7 @@ from .calculation_tool import *
 from .execute_command_tool import *
 from .file_parser_tool import *
 from .file_system_tool import *
-from .task_completion_tool import *
+from .task_interruption_tool import *
 
 __all__ = [
     'ToolManager',
@@ -13,7 +13,7 @@ __all__ = [
     'McpToolSpec',
     'SseServerParameters',
     'Calculator',
-    'TaskCompletionTool',
+    'TaskInterruptionTool',
     'FileSystemTool',
     'ExecuteCommandTool',
     'FileParserTool'

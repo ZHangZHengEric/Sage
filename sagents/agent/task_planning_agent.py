@@ -1,4 +1,3 @@
-from math import log
 import traceback
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -63,14 +62,21 @@ class TaskPlanningAgent(AgentBase):
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
-        task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
-        task_description_messages_str = MessageManager.convert_messages_to_str(task_description_messages)
-
+        if 'task_rewrite' in session_context.audit_status:
+            task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )])
+        else:
+            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
+            task_description_messages_str = MessageManager.convert_messages_to_str(recent_message)
+        
         completed_actions_messages = message_manager.extract_after_last_stage_summary_messages()
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
 
-        available_tools = tool_manager.list_tools_simplified() if tool_manager else []
-        available_tools_str = json.dumps([tool['name'] for tool in available_tools], ensure_ascii=False, indent=2) if available_tools else '无可用工具'
+        available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
+        available_tools_str =", ".join(available_tools_name) if available_tools_name else "无可用工具"
 
         task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
 
@@ -131,22 +137,27 @@ class TaskPlanningAgent(AgentBase):
                             )]
                         last_tag_type = tag_type
         yield from self._finalize_planning_result(
+            session_context=session_context,
             all_content=all_content, 
             message_id=message_id
         )
     def _finalize_planning_result(self, 
+                                session_context: SessionContext,
                                 all_content: str, 
                                 message_id: str) -> Generator[List[MessageChunk], None, None]:
         logger.debug("PlanningAgent: 处理最终规划结果")
         
         try:
             response_json = self.convert_xlm_to_json(all_content)
+            if "all_plannings" not in session_context.audit_status:
+                session_context.audit_status['all_plannings'] = []
+            session_context.audit_status['all_plannings'].append(response_json)
             logger.info(f"PlanningAgent: 规划结果: {response_json}")
             logger.info("PlanningAgent: 规划完成")
             
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='Planning: ' + json.dumps(response_json, ensure_ascii=False),
+                content='下一步规划: ' + json.dumps(response_json, ensure_ascii=False),
                 message_id=message_id,
                 show_content='',
                 message_type=MessageType.PLANNING.value
@@ -162,6 +173,7 @@ class TaskPlanningAgent(AgentBase):
                 show_content=f"任务规划失败: {str(e)}",
                 message_type=MessageType.PLANNING.value
             )]
+
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
         logger.debug("PlanningAgent: 转换XML内容为JSON格式")
         logger.debug(f"PlanningAgent: XML内容: {xlm_content}")

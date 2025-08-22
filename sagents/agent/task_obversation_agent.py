@@ -52,18 +52,23 @@ class TaskObservationAgent(AgentBase):
 4. **不要过度保守**：如果执行结果显示已经完成了子任务的核心目标，不要因为任务管理器状态而犹豫标记为完成
 5. **灵活调整子任务**：如果执行过程中，发现子任务是不必要或者可以跳过的，则认为子任务完成
 
+## 子任务失败判断规则
+1. 当子任务执行失败，且失败次数超过2次时，认为子任务失败
+
 ## 特殊规则
 1. 上一步完成了数据搜索，后续还需要对搜索结果进行进一步的理解和处理，不能认为是任务完成
-2. analysis中不要带有工具的真实名称，以及任务的序号
+2. analysis中不要带有工具的真实名称，以及不要输出任务的序号，只需要输出任务的描述。
 3. 只输出以下格式的XML，不要输出其他内容，不要输出```
 4. 任务状态更新基于实际执行结果，不要随意标记为完成
 5. 尽可能减少用户输入，不要打扰用户，按照你对事情的完整理解，尽可能全面的完成事情
-6. 针对确定了无法完成的子任务，不要再次尝试
+6. 针对确定了无法完成或者失败的子任务，不要再次尝试，跳过该任务。
+7. analysis 部分不要超过100字。
+8. 如果基于当前的工具和能力，发现无法完成任务，将 finish_percent 设置为100，completion_status 设置为failed。
 
 ## 输出格式
 ```
 <analysis>
-分析近期完成动作详情的执行情况进行总结，指导接下来的方向要详细一些，一段话不要有换行
+分析近期完成动作详情的执行情况进行总结，指导接下来的方向要详细一些，一段话不要有换行。
 </analysis>
 <finish_percent>
 40
@@ -96,8 +101,15 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
-        task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
-        task_description_messages_str = MessageManager.convert_messages_to_str(task_description_messages)
+        if 'task_rewrite' in session_context.audit_status:
+            task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )])
+        else:
+            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
+            task_description_messages_str = MessageManager.convert_messages_to_str(recent_message)
 
         task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
 
@@ -159,18 +171,22 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
                             )]
                         last_tag_type = tag_type
         yield from self._finalize_observation_result(
+            session_context=session_context,
             all_content=all_content, 
             message_id=message_id,
             task_manager = task_manager
         )
-    def _finalize_observation_result(self,all_content:str,message_id:str,task_manager:TaskManager):
+    def _finalize_observation_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
         """
         最终化观测结果
         """
         try:
             response_json = self.convert_xlm_to_json(all_content)
             logger.info(f"ObservationAgent: 观察分析结果: {response_json}")
-            
+            if "all_observations" not in session_context.audit_status:
+                session_context.audit_status["all_observations"] = []
+            session_context.audit_status["all_observations"].append(response_json)
+
             # 更新TaskManager中的任务状态
             if task_manager:
                 self._update_task_manager_status(task_manager, response_json)
@@ -178,7 +194,7 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
             # 创建最终结果消息（不需要usage信息，因为这是转换过程）
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='Observation: ' + json.dumps(response_json, ensure_ascii=False),
+                content='执行评估: ' + json.dumps(response_json, ensure_ascii=False),
                 message_id=message_id,
                 show_content='\n',
                 message_type=MessageType.OBSERVATION.value
@@ -257,6 +273,7 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
         except Exception as e:
             logger.error(f"ObservationAgent: XML转JSON失败: {str(e)}")
             raise
+
     def _update_task_manager_status(self, task_manager: TaskManager, observation_result: Dict[str, Any]) -> None:
         try:
             # 获取任务状态信息

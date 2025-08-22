@@ -45,7 +45,8 @@ def merge_stream_response_to_non_stream_response(chunks):
             func = tool_calls[idx]["function"]
             func["name"] += tc.function.name or ""
             func["arguments"] += tc.function.arguments or ""
-
+    if finish_reason is None:
+        finish_reason = "stop"
     return ChatCompletion(
         id=id_,
         object="chat.completion",          # ← 关键修复

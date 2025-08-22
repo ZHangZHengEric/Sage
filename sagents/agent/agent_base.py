@@ -38,6 +38,7 @@ class AgentBase(ABC):
         self.model_config = model_config
         self.system_prefix = system_prefix
         self.agent_description = f"{self.__class__.__name__} agent"
+        self.agent_name = self.__class__.__name__
         
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}")
     
@@ -78,9 +79,31 @@ class AgentBase(ABC):
             List[MessageChunk]: 流式输出的消息块
         """
         pass
-
-
-
+    
+    def _remove_tool_call_without_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        移除assistant 是tool call 但是在messages中其他的role 为tool 的消息中没有对应的tool call id
+        
+        Args:
+            messages: 输入消息列表
+            
+        Returns:
+            List[Dict[str, Any]]: 移除了没有对应 tool_call_id 的tool call 消息
+        """
+        new_messages = []
+        all_tool_call_ids_from_tool = []
+        for msg in messages:
+            if msg.get('role') == MessageRole.TOOL.value and 'tool_call_id' in msg:
+                all_tool_call_ids_from_tool.append(msg['tool_call_id'])
+        for msg in messages:
+            if msg.get('role') == MessageRole.ASSISTANT.value and 'tool_calls' in msg:
+                tool_calls = msg['tool_calls']
+                # 如果tool_calls 里面的id 没有在其他的role 为tool 的消息中出现，就移除这个消息
+                if any(tool_call['id'] not in all_tool_call_ids_from_tool for tool_call in tool_calls):
+                    continue
+            new_messages.append(msg)
+        return new_messages
+    
     def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
         """
         通用的流式模型调用方法，有这个封装，主要是为了将
@@ -125,10 +148,18 @@ class AgentBase(ABC):
 
 
             logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成，模型配置: {final_config}")
+            
+            # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
+            serializable_messages = self._remove_tool_call_without_id(serializable_messages)
+            
             stream = self.model.chat.completions.create(
                 messages=serializable_messages,
                 stream=True,
                 stream_options={"include_usage": True},
+                extra_body={
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "enable_thinking":False,
+                },
                 **final_config
             )
             # 直接yield chunks，不再收集用于日志记录
@@ -207,7 +238,7 @@ class AgentBase(ABC):
             session_context = get_session_context(session_id)
             system_context_info = session_context.system_context
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
-            system_prefix += f"\n补充上下文信息：\n "
+            system_prefix += f"\n补充其他的信息：\n "
             for key, value in system_context_info.items():
                 if isinstance(value, dict):
                     # 如果值是字典，格式化显示
@@ -220,7 +251,7 @@ class AgentBase(ABC):
                 else:
                     # 其他类型直接转换为字符串
                     system_prefix += f"{key}: {str(value)}\n"
-                    # logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
+                    logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
 
             # 补充当前工作空间中的文件情况，工作空间的路径是 session_context.agent_workspace,需要把这个文件夹下的文件或者文件夹，有可能多层路径，给展示出来，类似tree 结构，只展示文件的相对路径
             current_agent_workspace = session_context.agent_workspace
@@ -240,6 +271,7 @@ class AgentBase(ABC):
             content=system_prefix,
             type=MessageType.SYSTEM.value
         )
+
     def _judge_delta_content_type(self, 
                                  delta_content: str, 
                                  all_tokens_str: str, 

@@ -48,10 +48,10 @@ class SimpleAgent(AgentBase):
 ## 任务完成判断规则
 1. 任务完成：
   - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断任务完成。
-  - 当你认为对话过程中，发生了异常情况，导致任务无法继续执行时，需要判断任务完成。
+  - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断任务完成。
 2. 任务未完成：
   - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断任务未完成。
-  - 当完成工具调用，但未进行工具调用的结果文字描述时，需要判断任务未完成。因为用户看不到工具执行的结果。
+  - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断任务未完成。因为用户看不到工具执行的结果。
 
 ## 用户的对话历史以及新的请求的执行过程
 {messages}
@@ -60,15 +60,21 @@ class SimpleAgent(AgentBase):
 ```json
 {{
     "task_complete": true,
+    "reason": "任务完成"
 }}
+
+reason尽可能简单，最多20个字符
 ```
 """
 
         self.agent_custom_system_prefix = """\n
 1. 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要通过调用 complete_task 工具来结束会话或者触发等待用户的新的输入
 2. 一定要先执行用户的问题或者请求，即使用户问题不清楚，也要回答或者询问用户的意图后，再调用工具 complete_task 结束会话。
-3. 调用完工具后，一定要用文字描述工具调用的结果，不要直接结束任务。
+3. 调用完工具后，一定要用面向用户的需求用自然语言描述工具调用的结果，不要直接结束任务。
 4. 当你对用户进行询问和澄清时，或者要等待用户的下一步输入时，要调用 complete_task 工具来结束会话。
+5. 在调用工具前需要解释一下为什么要调用工具，但是不要说出工具的真实名称或者ID信息等，而是用简单的语言描述工具的功能。
+6. 工具调用失败，请尝试2次后，如果仍然失败，请结束会话。
+7. 认真检查工具列表，确保工具名称正确，参数正确，不要调用不存在的工具。
 """
         # 最大循环次数常量
         self.max_loop_count = 10
@@ -85,9 +91,9 @@ class SimpleAgent(AgentBase):
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        history_messages = message_manager.filter_messages(context_length_limited=60000,
+        history_messages = message_manager.filter_messages(context_length_limited=30000,
                                                           accept_message_type=[],
-                                                          recent_turns=30)
+                                                          recent_turns=10)
         system_context = session_context.system_context
         # 调用内部方法，执行流式直接执行
         yield from self._execute_direct_stream_internal(history_messages, 
@@ -157,7 +163,13 @@ class SimpleAgent(AgentBase):
     def _is_task_complete(self,
                             messages_input: List[MessageChunk],
                             session_id: str) -> bool:
+        # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
+        logger.info(f"messages_input[-1].role: {messages_input[-1].role}")
+        if messages_input[-1].role == 'tool':
+            return False
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+        
+        
         prompt = self.TASK_COMPLETE_PROMPT_TEMPLATE.format(
                 session_id=session_id,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
@@ -325,6 +337,7 @@ class SimpleAgent(AgentBase):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
             
+            messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
             # 检查任务是否完成
             if self._is_task_complete(messages_input, session_id):
                 logger.info("SimpleAgent: 任务完成，终止执行")
@@ -435,8 +448,8 @@ class SimpleAgent(AgentBase):
                     'id': last_tool_call_id,
                     'type': tool_call.type,
                     'function': {
-                        'name': tool_call.function.name,
-                        'arguments': tool_call.function.arguments
+                        'name': tool_call.function.name or "",
+                        'arguments': tool_call.function.arguments if tool_call.function.arguments else ""
                     }
                 }
             else:
