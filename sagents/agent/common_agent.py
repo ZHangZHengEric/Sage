@@ -1,4 +1,3 @@
-from math import log
 import traceback
 from sagents.context.messages import message_manager
 from sagents.context.messages.message_manager import MessageManager
@@ -13,87 +12,33 @@ import json
 import uuid
 from copy import deepcopy
 
-class TaskExecutorAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+# 通用可自定义agent
+class CommonAgent(AgentBase):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "",tools_name:List[str]=[]):
         super().__init__(model, model_config, system_prefix)
-        self.TASK_EXECUTION_PROMPT_TEMPLATE = """请执行以下需求或者任务：{next_subtask_description}
-
-期望输出：{next_expected_output}
-
-请直接开始执行任务，观察历史对话，不要做重复性的工作。"""
-
-        self.agent_custom_system_prefix = """
-根据最新的任务描述和要求，来执行任务。
-    
-注意以下的任务执行规则，不要使用工具集合之外的工具，否则会报错：
-1. 如果不需要使用工具，直接返回中文内容。你的文字输出都要是markdown格式。
-2. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
-3. 调用工具时，不要在其他的输出文字，尽可能调用不互相依赖的全部工具。
-4. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
-
-如果在工具集合包含file_write函数工具，要求如下：
-5. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
-6. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
-7. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
-8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
-9. 针对生成较大的文档或者代码，先使用file_write 生成部分内容或者框架，在使用replace_text_in_file 进行更加详细内容的填充。
-"""
-        self.agent_name = "TaskExecutorAgent"
-        self.agent_description = """
-TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，来执行任务。
-"""     
-        logger.info("TaskExecutorAgent 初始化完成")
+        self.tools_name = tools_name
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
-        
+        """
+        运行智能体，返回消息流
+
+        Args:
+            session_context: 会话上下文
+            tool_manager: 工具管理器
+            session_id: 会话ID
+
+        Returns:
+            消息流
+        """
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
-
-        if 'task_rewrite' in session_context.audit_status:
-            rewrite_user = [MessageChunk(
-                role=MessageRole.USER.value,
-                content = session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
-            )]
-
-            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3)
-            messages_after_last_user = rewrite_user + messages_after_last_user
-        else:
-
-            # 提取执行历史
-            messages_after_last_user = message_manager.get_after_last_user_messages()
-            # 只保留关键的执行消息
-            messages_after_last_user = [msg for msg in messages_after_last_user if msg.type in [MessageType.EXECUTION.value,
-                                                                                            MessageType.DO_SUBTASK.value,
-                                                                                            MessageType.DO_SUBTASK_RESULT.value,
-                                                                                            MessageType.TOOL_CALL.value,
-                                                                                            MessageType.TOOL_CALL_RESULT.value,
-                                                                                            MessageType.TOOL_RESPONSE.value,
-                                                                                            MessageType.NORMAL.value]]
-
-
-        last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
-
-        prompt = self.TASK_EXECUTION_PROMPT_TEMPLATE.format(
-            next_subtask_description=last_planning_message_dict['description'],
-            next_expected_output=last_planning_message_dict['expected_output']
-        )
-        prompt_message_chunk = MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            type=MessageType.EXECUTION.value,
-            content=prompt,
-            message_id=str(uuid.uuid4()),
-            show_content=""
-        )
+        all_messages  = message_manager.messages
+        tools_json = tool_manager.get_openai_tools()
+        tools_json = [tools_json[tool_name] for tool_name in self.tools_name]
+        
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id)
         ]
-        llm_request_message.extend(messages_after_last_user)
-        llm_request_message.append(prompt_message_chunk)
-        yield [prompt_message_chunk]
-
-        tools_json = self._prepare_tools(tool_manager, last_planning_message_dict)
-        
+        llm_request_message.extend(all_messages)
         yield from self._call_llm_and_process_response(
             messages_input=llm_request_message,
             tools_json=tools_json,
@@ -101,7 +46,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             session_id=session_id
         )
 
-    
     def _call_llm_and_process_response(self,
         messages_input: List[MessageChunk],
         tools_json: List[Dict[str, Any]],
@@ -184,42 +128,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 message_type=MessageType.DO_SUBTASK_RESULT.value
             )]
             yield output_messages
-
-    def _prepare_tools(self, 
-                      tool_manager: Optional[ToolManager], 
-                      subtask_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        准备工具列表
-        
-        Args:
-            tool_manager: 工具管理器
-            subtask_info: 子任务信息
-            
-        Returns:
-            List[Dict[str, Any]]: 工具配置列表
-        """
-        if not tool_manager:
-            logger.warning("ExecutorAgent: 未提供工具管理器")
-            return []
-        
-        # 获取所有工具
-        tools_json = tool_manager.get_openai_tools()
-        
-        # 根据建议的工具进行过滤，同时移除掉complete_task 这个工具
-        suggested_tools = subtask_info.get('required_tools', [])
-        if suggested_tools:
-            tools_suggest_json = [
-                tool for tool in tools_json 
-                if tool['function']['name'] in suggested_tools and tool['function']['name'] != 'complete_task'
-            ]
-            if tools_suggest_json:
-                tools_json = tools_suggest_json
-
-        tool_names = [tool['function']['name'] for tool in tools_json]
-        logger.info(f"ExecutorAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
-        
-        return tools_json
-
     def _handle_tool_calls_chunk(self, 
                                chunk, 
                                tool_calls: Dict[str, Any], 

@@ -83,21 +83,33 @@ class TaskStageSummaryAgent(AgentBase):
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
-        task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
-        task_description_messages_str = MessageManager.convert_messages_to_str(task_description_messages)
-
+        # 提取任务描述
+        if 'task_rewrite' in session_context.audit_status:
+            task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )])
+        else:
+            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
+            task_description_messages_str = MessageManager.convert_messages_to_str(recent_message)
+        
+        # 提取任务管理器状态
         task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
 
+        # 提取执行历史
         execution_history_messages = message_manager.extract_after_last_stage_summary_messages()
         execution_history_messages_str = MessageManager.convert_messages_to_str(execution_history_messages)
 
+        # 提取未总结但已完成的任务
         unsummary_but_completed_tasks = task_manager.get_unsummary_but_completed_tasks()
         task_info = []
         for task_item in unsummary_but_completed_tasks:
             info = f"- 任务ID: {task_item.task_id}, 描述: {task_item.description}"
             task_info.append(info)
         tasks_to_summarize = "\n".join(task_info)
-
+        
+        # 提取生成的文档
         generated_documents = self._extract_generated_documents(execution_history_messages)
         
         prompt = self.TASK_STAGE_SUMMARY_PROMPT_TEMPLATE.format(
@@ -137,7 +149,7 @@ class TaskStageSummaryAgent(AgentBase):
         yield [MessageChunk(
             message_id=str(uuid.uuid4()),
             role=MessageRole.ASSISTANT.value,
-            content=json.dumps(summary_result,ensure_ascii=False),
+            content="阶段性任务总结："+json.dumps(summary_result,ensure_ascii=False),
             message_type=MessageType.STAGE_SUMMARY.value,
             show_content=""
         )]

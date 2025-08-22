@@ -65,6 +65,13 @@ class ToolProxy:
         all_tools = self.tool_manager.list_tools()
         return [tool for tool in all_tools if tool['name'] in self._available_tools]
     
+    def list_all_tools_name(self) -> List[str]:
+        """
+        获取所有工具名称（包括不可用工具）
+        """
+        all_tools_name =  self.tool_manager.list_all_tools_name()
+        return [tool_name for tool_name in all_tools_name if tool_name in self._available_tools]
+    
     def list_tools_with_type(self) -> List[Dict[str, Any]]:
         """
         获取带类型的工具列表（仅限可用工具）

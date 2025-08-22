@@ -19,6 +19,7 @@ class MessageType(Enum):
     """消息类型枚举 - 与项目实际使用保持一致"""
     # 基础类型
     NORMAL = "normal"
+    REWRITE = "rewrite"
     TASK_ANALYSIS = "task_analysis"
     TASK_DECOMPOSITION = "task_decomposition"
     PLANNING = "planning"

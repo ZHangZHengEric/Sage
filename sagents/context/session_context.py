@@ -4,6 +4,8 @@ import time
 import threading
 from typing import Dict, Any, Optional, List
 from enum import Enum
+
+from openai import responses
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.tasks.task_manager import TaskManager
@@ -22,20 +24,21 @@ class SessionStatus(Enum):
 
 class SessionContext:
     def __init__(self, session_id: str, workspace_root: str = None):
-        self.session_id = session_id
-        self.llm_requests_logs = []
-        self.workspace_root = workspace_root
-        self.session_workspace = None
-        self.agent_workspace = None
+        self.session_id = session_id      
+        self.llm_requests_logs = []           # 大模型的请求记录
+        self.workspace_root = workspace_root  # agent 的工作空间
+        self.session_workspace = None      # agent 该会话的工作空间，保存日志等信息
+        self.agent_workspace = None         # agent 该会话的工作空间，保存执行过程中产生的内容
         self.thread_id = threading.get_ident()
         self.start_time = time.time()
         self.end_time = None
         self.status = SessionStatus.IDLE
-        self.system_context = {}
+        self.system_context = {}       # 当前系统的环境变量
         self.message_manager = MessageManager()
         self.task_manager = TaskManager(session_id=self.session_id)
-        self.candidate_workflows = []
-        self.selected_workflow = None
+        self.candidate_workflows = []   # 当前系统可用的workflow
+        self.selected_workflow = None     # 当前选中的workflow
+        self.audit_status = {}  # 主要存储 agent 执行过程中保存的结构化信息
         self.init_more()
         
     def init_more(self):
@@ -95,10 +98,23 @@ class SessionContext:
             "timestamp": time.time(),
         })
     
+    def get_tokens_usage_info(self):
+        """获取tokens使用信息"""
+        tokens_info = {"total_info":{}, "per_step_info":[]}
+        for llm_request in self.llm_requests_logs:
+            response_dict = self._make_serializable(llm_request['response'])
+            if 'usage' in response_dict:
+                step_info = {"step_name": llm_request['request']['step_name'], "usage": response_dict['usage']}
+                tokens_info["per_step_info"].append(step_info)
+                for key, value in response_dict['usage'].items():
+                    if isinstance(value, int) or isinstance(value,float) :
+                        if key not in tokens_info["total_info"]:
+                            tokens_info["total_info"][key] = 0
+                        tokens_info["total_info"][key] += value
+        return tokens_info
     def save(self):
         """保存会话上下文"""
         # 先判断该会话的文件夹是否存在
-        
         if not os.path.exists(self.session_workspace):
             os.makedirs(self.session_workspace)
 
@@ -126,6 +142,8 @@ class SessionContext:
                     "timestamp": llm_request['timestamp']
                 }
                 json.dump(serializable_request, f,ensure_ascii=False, indent=4)
+        # 根据
+
         # 保存messages 到messages.json
         with open(os.path.join(self.session_workspace, "messages.json"), "w") as f:
             # 先将messages 转换为可序列化的格式
@@ -139,7 +157,17 @@ class SessionContext:
             json.dump(serializable_tasks, f,ensure_ascii=False, indent=4)
 
         # 保存其他的状态和变量,方便进行恢复
-        with open(os.path.join(self.session_workspace, "session_status.json"), "w") as f:
+        # 先查看有多少个 session_status_*.json 文件
+        existing_files = os.listdir(self.session_workspace)
+        max_index = -1
+        for file in existing_files:
+            if file.startswith("session_status_") and file.endswith(".json"):
+                index = int(file.split("_")[2].split(".")[0])
+                max_index = max(max_index, index)
+        # 从max_index + 1 开始
+        session_status_index = max_index + 1
+        # 保存到 session_status_index.json
+        with open(os.path.join(self.session_workspace, f"session_status_{session_status_index}.json"), "w") as f:
             json.dump({
                 "status": self.status.value,
                 "start_time": self.start_time,
@@ -149,6 +177,7 @@ class SessionContext:
                 "session_id": self.session_id,
                 "session_workspace": self.session_workspace,
                 "agent_workspace": self.agent_workspace,
+                "tokens_usage_info": self.get_tokens_usage_info(),
             }, f,ensure_ascii=False, indent=4)
 
     def _make_serializable(self, obj):

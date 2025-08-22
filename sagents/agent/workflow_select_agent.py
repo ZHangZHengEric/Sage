@@ -152,11 +152,17 @@ selected_workflow_index 从0 开始计数
 
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
-
-        task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
-        task_description_messages_str = MessageManager.convert_messages_to_str(task_description_messages)
-
+        
+        if 'task_rewrite' in session_context.audit_status:
+            recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )])
+        else:
+            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
+            recent_message_str = MessageManager.convert_messages_to_str(recent_message)
+        
         normalized_workflows = normalize_workflows(session_context.candidate_workflows)
         
         workflow_list = ""
@@ -168,7 +174,7 @@ selected_workflow_index 从0 开始计数
                 workflow_list += f"   - {step}\n"
 
         prompt = self.WORKFLOW_SELECT_PROMPT.format(
-            conversation_history=task_description_messages_str,
+            conversation_history=recent_message_str,
             workflow_list=workflow_list
         )
 
@@ -218,7 +224,7 @@ selected_workflow_index 从0 开始计数
 """
     
                     for i, step in enumerate(workflow_steps, 1):
-                        guidance += f"{step}\n"
+                        guidance += f"{i}. {step}\n"
     
                     guidance += """
 💡 **执行建议:**

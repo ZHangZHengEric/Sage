@@ -17,6 +17,7 @@ MessageManager 优化版消息管理器
 import json
 import datetime
 from math import log
+import traceback
 import uuid
 from typing import Dict, List, Optional, Any, Set, Union
 from copy import deepcopy
@@ -94,7 +95,7 @@ class MessageManager:
         self.stats['last_updated'] = datetime.datetime.now().isoformat()
         return True
     @staticmethod
-    def merge_new_messages_to_old_messages(new_messages: List[ Union[MessageChunk, Dict]],old_messages: List[Union[MessageChunk, Dict]]) -> List[MessageChunk]:
+    def merge_new_messages_to_old_messages(new_messages: List[MessageChunk],old_messages: List[MessageChunk]) -> List[MessageChunk]:
         """
         合并新消息列表和旧消息列表
         
@@ -102,11 +103,9 @@ class MessageManager:
             new_messages: 新消息列表
             old_messages: 旧消息列表
         """
-        new_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in new_messages]
-        old_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in old_messages]
-        for new_message in new_messages_chunks:
-            old_messages_chunks = MessageManager.merge_new_message_old_messages(new_message,old_messages_chunks)
-        return old_messages_chunks
+        for new_message in new_messages:
+            old_messages = MessageManager.merge_new_message_old_messages(new_message,old_messages)
+        return old_messages
     @staticmethod
     def merge_new_message_old_messages(new_message:MessageChunk,old_messages:List[MessageChunk])->List[MessageChunk]:
         """
@@ -178,22 +177,71 @@ class MessageManager:
         Returns:
             过滤后的消息列表
         """
-        
-        filtered_messages = deepcopy(self.messages)
-        # 过滤消息类型
-        if accept_message_type:
-            filtered_messages = [msg for msg in filtered_messages if msg.type in accept_message_type]
+        chat_list = []
+        for msg in self.messages:
+            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
+                chat_list.append([msg])
+            elif msg.role != MessageRole.USER.value:
+                chat_list[-1].append(msg)
         # 过滤最近轮数
         if recent_turns > 0:
-            filtered_messages = filtered_messages[-recent_turns:]
-        # 过滤上下文长度
-        if context_length_limited > 0:
-            filtered_messages = filtered_messages[-context_length_limited:]
+            chat_list = chat_list[-recent_turns:]
+        # 过滤消息类型
+        if accept_message_type:
+            chat_list = [chat for chat in chat_list if chat[0].type in accept_message_type]
+
+        # 上下文长度 计算 每个 chatlist 的item 的长度。倒序计算，直到超过上下文长度限制。
+        accept_chat_list = []
+        for chat in chat_list[::-1]:
+            context_length = sum([len(msg.content or '') for msg in chat])
+            if context_length <= context_length_limited:
+                accept_chat_list.append(chat)
+                context_length_limited -= context_length
+            else:
+                break
+        accept_chat_list = accept_chat_list[::-1]
+        accept_messages = []
+        for chat in accept_chat_list:
+            accept_messages.extend(chat)
+        
+        filtered_messages = deepcopy(accept_messages)
         return filtered_messages
 
-    def extract_all_user_and_final_answer_messages(self) -> List[MessageChunk]:
+    def extract_all_user_and_exec_messages(self,recent_turns:int=0) -> List[MessageChunk]:
+        user_and_exec_messages = []
+        
+        # 先分成 chat_list = [[user,assistant,assistan]]
+        chat_list = []
+        for msg in self.messages:
+            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
+                chat_list.append([msg])
+            elif msg.role != MessageRole.USER.value:
+                chat_list[-1].append(msg)
+        
+        # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
+        if recent_turns > 0:
+            chat_list = chat_list[-recent_turns:]
+        for chat in chat_list:
+            user_and_exec_messages.append(chat[0])
+
+            # 如果chat[1：]  有 FINAL_ANSWER，则只保留一个FINAL_ANSWER messages。
+            # 否则，将所有的type 为 do_subtask_result tool_call tool_call_result 都加入进来
+            if len(chat)>1:
+                for msg in chat[1:]:
+                    if msg.type in [MessageType.DO_SUBTASK_RESULT.value,
+                                    MessageType.TOOL_CALL.value,
+                                    MessageType.TOOL_CALL_RESULT.value,
+                                    MessageType.FINAL_ANSWER.value]:
+                        user_and_exec_messages.append(msg)
+        return user_and_exec_messages
+
+
+    def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
         """
-        提取所有用户消息和最终结果消息
+        提取最近的用户消息和最终结果消息
+        
+        Args:
+            recent_turns: 最近的对话轮数，0表示不限制
         
         Returns:
             提取后的消息列表
@@ -207,30 +255,28 @@ class MessageManager:
         # 先分成 chat_list = [[user,assistant,assistan]]
         chat_list = []
         for msg in self.messages:
-            if msg.role == MessageRole.USER.value:
+            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
                 chat_list.append([msg])
             elif msg.role != MessageRole.USER.value:
                 chat_list[-1].append(msg)
         
         # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
+        if recent_turns > 0:
+            chat_list = chat_list[-recent_turns:]
         for chat in chat_list:
             user_and_final_answer_messages.append(chat[0])
+
+            # 如果chat[1：]  有 FINAL_ANSWER，则只保留一个FINAL_ANSWER messages。
+            # 否则，将所有的type 为 do_subtask_result tool_call tool_call_result 都加入进来
             if len(chat)>1:
                 if chat[-1].type == MessageType.FINAL_ANSWER.value:
                     user_and_final_answer_messages.append(chat[-1])
                 else:
-                    for msg in reversed(chat):
-                        if msg.type == MessageType.DO_SUBTASK_RESULT.value:
+                    for msg in chat[1:]:
+                        if msg.type in [MessageType.DO_SUBTASK_RESULT.value,
+                                        MessageType.TOOL_CALL.value,
+                                        MessageType.TOOL_CALL_RESULT.value]:
                             user_and_final_answer_messages.append(msg)
-                            break
-                if user_and_final_answer_messages[-1].role == MessageRole.USER.value:
-                    user_and_final_answer_messages.extend(chat[1:])
-        
-        # for msg in self.messages:
-        #     if msg.role == MessageRole.USER.value:
-        #         user_and_final_answer_messages.append(msg)
-        #     elif msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.FINAL_ANSWER.value:
-        #         user_and_final_answer_messages.append(msg)
         return user_and_final_answer_messages
     
     def extract_after_last_stage_summary_messages(self) -> List[MessageChunk]:
@@ -266,6 +312,12 @@ class MessageManager:
             messages_after_last_user.append(msg)
         return messages_after_last_user
     
+    def get_last_user_message(self) -> MessageChunk:
+        for msg in self.messages[::-1]:
+            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
+                return msg
+        return None
+
     def get_all_execution_messages_after_last_user(self) -> List[MessageChunk]:
         messages_after_last_user = self.get_after_last_user_messages()
         messages_after_last_execution = []
@@ -279,34 +331,12 @@ class MessageManager:
                 messages_after_last_execution.append(msg)
         return messages_after_last_execution
 
-    def get_last_planning_message_dict(self) -> Optional[Dict[str, Any]]:
-        for msg in reversed(self.messages):
-            if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.PLANNING.value:
-                planning_content = msg.content.replace('Planning: ', '')
-                cleaned_content = planning_content.strip('```json\\n').strip('```')
-                planning_result = json.loads(cleaned_content)
-                subtask_info = {
-                    'description': planning_result['next_step']['description'],
-                    'expected_output': planning_result['next_step']['expected_output'],
-                    'required_tools': planning_result['next_step'].get('required_tools', [])
-                }
-                return subtask_info
-        return None
-
-
-
-    def get_latest_observation_message_dict(self) -> Optional[Dict[str, Any]]:
-        
-        for msg in reversed(self.messages):
-            if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
-                obs_content = msg.content.replace('Observation: ', '')
-                try:
-                    obs_result = json.loads(obs_content)
-                except json.JSONDecodeError:
-                    logger.error(f"MessageManager: 解析观测消息失败，消息内容: {obs_content}")
-                    obs_result = {}
-                return obs_result
-        return None
+    def get_all_messages_content_length(self):
+        total_length = 0
+        for msg in self.messages:
+            if msg.content:
+                total_length += len(msg.content)
+        return total_length
 
     @staticmethod
     def convert_messages_to_dict_for_request(messages: List[MessageChunk]) -> List[Dict[str, Any]]:

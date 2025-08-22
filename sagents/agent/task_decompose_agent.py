@@ -50,10 +50,19 @@ class TaskDecomposeAgent(AgentBase):
     def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
-        task_description_messages = message_manager.extract_all_user_and_final_answer_messages()
-        recent_message_str = MessageManager.convert_messages_to_str(task_description_messages)
-        available_tools = tool_manager.list_tools_simplified() if tool_manager else []
-        available_tools_str = json.dumps([tool['name'] for tool in available_tools], ensure_ascii=False, indent=2) if available_tools else '无可用工具'
+        
+        if 'task_rewrite' in session_context.audit_status:
+            recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
+                role=MessageRole.USER.value,
+                content = session_context.audit_status['task_rewrite'],
+                message_type=MessageType.NORMAL.value
+            )])
+        else:
+            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
+            recent_message_str = MessageManager.convert_messages_to_str(recent_message)        
+        
+        available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
+        available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
 
         prompt = self.DECOMPOSE_PROMPT_TEMPLATE.format(
             task_description=recent_message_str,
