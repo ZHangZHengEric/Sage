@@ -117,7 +117,7 @@ class ComponentManager:
                 "max_tokens": self.max_tokens
             }
             
-            controller = SAgent(self._model, model_config,workspace="/Users/zhangzheng/zavixai/Sage/examples")
+            controller = SAgent(self._model, model_config,workspace="workspace")
             
             return controller
             
