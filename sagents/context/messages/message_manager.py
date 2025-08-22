@@ -318,7 +318,7 @@ class MessageManager:
                 return msg
         return None
 
-    def get_all_execution_messages_after_last_user(self) -> List[MessageChunk]:
+    def get_all_execution_messages_after_last_user(self,recent_turns:int=0) -> List[MessageChunk]:
         messages_after_last_user = self.get_after_last_user_messages()
         messages_after_last_execution = []
         for msg in messages_after_last_user:
