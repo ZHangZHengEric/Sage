@@ -95,7 +95,7 @@ class MessageManager:
         self.stats['last_updated'] = datetime.datetime.now().isoformat()
         return True
     @staticmethod
-    def merge_new_messages_to_old_messages(new_messages: List[MessageChunk],old_messages: List[MessageChunk]) -> List[MessageChunk]:
+    def merge_new_messages_to_old_messages(new_messages: List[ Union[MessageChunk, Dict]],old_messages: List[Union[MessageChunk, Dict]]) -> List[MessageChunk]:
         """
         合并新消息列表和旧消息列表
         
@@ -103,9 +103,11 @@ class MessageManager:
             new_messages: 新消息列表
             old_messages: 旧消息列表
         """
-        for new_message in new_messages:
-            old_messages = MessageManager.merge_new_message_old_messages(new_message,old_messages)
-        return old_messages
+        new_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in new_messages]
+        old_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in old_messages]
+        for new_message in new_messages_chunks:
+            old_messages_chunks = MessageManager.merge_new_message_old_messages(new_message,old_messages_chunks)
+        return old_messages_chunks
     @staticmethod
     def merge_new_message_old_messages(new_message:MessageChunk,old_messages:List[MessageChunk])->List[MessageChunk]:
         """
