@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="sage",
-    version="0.9.2",
+    version="0.9.3",
     description="A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
@@ -45,4 +45,4 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-) 
+)

@@ -9,7 +9,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前版本-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_版本-0.9.2-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_版本-0.9.3-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -241,13 +241,20 @@ npm run dev
 
 ## 🎯 **核心功能**
 
-### 🤖 **多智能体协作 (v0.9.1)**
+### 🤖 **多智能体协作 (v0.9.3)**
 - **任务分析智能体**: 增强的深度理解，支持上下文感知和统一系统提示管理
 - **任务分解智能体**: 智能任务分解，支持依赖分析、并行执行规划和TaskManager集成
 - **规划智能体**: 战略性分解，支持依赖管理、最优工具选择和MessageManager优化
 - **执行智能体**: 智能工具执行，支持错误恢复、重试机制、并行处理和结果管理
 - **观察智能体**: 高级进度监控，支持完成检测、质量评估和TaskManager状态跟踪
 - **总结智能体**: 全面结果综合，支持结构化输出、可操作见解和执行历史分析
+- **任务重写智能体**: 智能任务重新表述和优化，提升执行效果
+- **任务阶段总结智能体**: 中间进度总结和里程碑跟踪
+- **查询建议智能体**: 智能查询增强和建议生成
+- **工作流选择智能体**: 智能工作流选择和优化
+- **简单智能体**: 轻量级智能体，用于基础任务和快速原型
+- **简单响应智能体**: 具有实时响应能力的响应式智能体
+- **通用智能体**: 用于标准操作的通用智能体
 - **消息管理器**: 智能消息过滤和压缩系统，为所有智能体提供token优化
 - **任务管理器**: 结构化任务生命周期管理，支持状态持久化和依赖跟踪
 
@@ -260,6 +267,22 @@ npm run dev
 - **模板共享**: 导出/导入工作流配置，支持团队和项目间共享
 - **缩放平移支持**: 使用鼠标滚轮缩放和拖拽平移功能浏览大型工作流
 - **自动适应显示**: 智能视口调整，以最佳比例显示所有工作流节点
+
+### 🎭 **自定义智能体开发**
+- **AgentBase 框架**: 创建自定义智能体的抽象基类，提供标准化接口
+- **智能体转工具**: 自动将智能体转换为工具格式，实现无缝集成
+- **流式支持**: 内置流式处理能力，支持实时智能体响应
+- **上下文管理**: 统一的会话上下文和系统消息处理
+- **插件架构**: 可扩展的自定义智能体实现插件系统
+- **智能体注册**: 从目录动态发现和注册智能体
+
+### 🔀 **智能体流程编排**
+- **顺序执行**: 使用 AgentFlow 定义自定义智能体执行序列
+- **会话管理**: 自动会话上下文初始化和清理
+- **工作流集成**: 支持智能体流程中的 available_workflows 参数
+- **错误恢复**: 强大的错误处理和会话状态保存
+- **中断支持**: 优雅处理工作流中断
+- **内存管理**: 自动清理防止内存泄漏
 
 ### 💡 **规则偏好系统**
 - **个性化AI行为**: 通过自定义规则和偏好配置AI助手行为
@@ -286,13 +309,23 @@ npm run dev
 - **会话集成**: 与AgentController无缝集成进行工作流管理
 - **结构化数据**: 包含元数据、时间和结果存储的丰富任务对象
 
+### 📁 **高级文件系统操作**
+- **智能内容搜索**: 多关键词搜索，支持上下文提取和相关性评分
+- **编码检测**: 国际文件的自动字符编码检测
+- **安全验证**: 路径遍历保护和危险文件检测
+- **元数据提取**: 全面的文件信息，包括大小、权限和时间戳
+- **范围读取**: 基于行的高效部分文件读取导航
+- **错误恢复**: 强大的错误处理和详细诊断信息
+
 ### 🛠️ **高级工具系统**
 - **插件架构**: 热重载工具开发，支持自动注册和版本管理
 - **MCP 服务器支持**: 与模型上下文协议服务器和远程 API 无缝集成，并为 SSE MCP 服务器连接添加了 API 密钥认证功能
+- **内置 MCP 服务器**: 预构建的文件操作、解析、命令执行和网络搜索服务器
 - **自动发现**: 从目录、模块和远程端点智能检测工具
 - **类型安全**: 全面的参数验证和模式强制以及运行时检查
 - **错误处理**: 强大的错误恢复、超时管理、重试策略和详细日志
 - **性能监控**: 工具执行时间追踪、瓶颈检测和优化建议
+- **安全功能**: 路径验证、危险文件检测和受保护目录访问控制
 
 ### 📊 **Token 使用和成本监控**
 - **实时追踪**: 监控所有智能体和操作的 token 消耗，集成MessageManager优化
@@ -354,6 +387,173 @@ Sage 包含全面的错误处理和恢复机制，支持自动重试、指数退
 
 与模型上下文协议服务器无缝集成，支持自动工具发现和远程API调用。
 
+### 🏗️ **内置 MCP 服务器**
+
+Sage 包含多个生产就绪的 MCP 服务器：
+
+#### 📁 **文件系统服务器**
+- **智能文件操作**: 高级文件读取，支持行范围和编码检测
+- **安全控制**: 路径验证、危险文件检测和受保护目录访问
+- **云集成**: 可选的云上传功能
+- **批处理**: 多文件操作和错误处理
+
+#### 📄 **文件解析服务器**
+- **多格式支持**: 20+ 种文件格式，包括 PDF、Word、Excel、PowerPoint、HTML 等
+- **智能提取**: 智能文本提取和元数据保存
+- **网页内容**: URL 解析和 HTML 内容提取
+- **批处理**: 多文件解析和性能优化
+
+#### ⚡ **命令执行服务器**
+- **安全执行**: 安全的命令执行和超时管理
+- **跨平台**: Windows、macOS 和 Linux 支持
+- **错误处理**: 全面的错误捕获和报告
+- **安全功能**: 命令验证和执行沙箱
+
+#### 🔍 **网络搜索服务器**
+- **Serper 集成**: 高质量的网络搜索结果
+- **内容提取**: 自动解析搜索结果内容
+- **速率限制**: 内置请求节流
+- **结果格式化**: 清洁、结构化的搜索输出
+
+### 🔧 **MCP 配置**
+
+Sage 支持三种 MCP 连接类型：
+
+#### 📡 **STDIO 连接**
+```json
+{
+  "mcpServers": {
+    "file_system": {
+      "command": "python",
+      "args": ["./mcp_servers/file_system/file_system.py"],
+      "connection_type": "stdio"
+    }
+  }
+}
+```
+
+#### 🌐 **SSE（服务器发送事件）连接**
+```json
+{
+  "mcpServers": {
+    "file_parser": {
+      "sse_url": "http://127.0.0.1:34001/sse",
+      "api_key": "your-api-key"
+    }
+  }
+}
+```
+
+#### ⚡ **流式 HTTP 连接**
+```json
+{
+  "mcpServers": {
+    "web_service": {
+      "streamable_http_url": "http://api.example.com/mcp",
+      "api_key": "your-api-key"
+    }
+  }
+}
+```
+
+### 🔗 **连接类型对比**
+
+| 连接类型 | 使用场景 | 优势 | 最适合 |
+|:---:|:---:|:---:|:---:|
+| **STDIO** | 本地进程 | 低延迟、安全 | 开发、本地工具 |
+| **SSE** | 远程服务器 | 实时流式传输 | 云服务、实时数据 |
+| **流式 HTTP** | Web API | HTTP 兼容性 | REST API、微服务 |
+
+### 🛡️ **安全功能**
+- **API 密钥认证**: 远程 MCP 服务器的安全访问控制
+- **连接验证**: 自动健康检查和连接监控
+- **错误恢复**: 强大的重连和故障转移机制
+- **速率限制**: 内置请求节流和配额管理
+
+## 🎭 **自定义智能体开发**
+
+### 🏗️ **创建自定义智能体**
+
+```python
+from sagents.agent.agent_base import AgentBase
+from sagents.context.session_context import SessionContext
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+
+class CustomResearchAgent(AgentBase):
+    """专门用于研究任务的自定义智能体"""
+    
+    def __init__(self, model, model_config):
+        super().__init__(model, model_config, system_prefix="研究智能体")
+        self.agent_description = "专门用于深度研究和分析的智能体"
+    
+    def run_stream(self, session_context: SessionContext, tool_manager=None, session_id=None):
+        """实现自定义智能体逻辑"""
+        # 访问对话历史
+        messages = session_context.message_manager.get_messages_for_llm()
+        
+        # 自定义研究逻辑
+        research_prompt = "对给定主题进行深入研究..."
+        
+        # 流式响应
+        for chunk in self._call_llm_streaming(
+            messages + [{"role": "user", "content": research_prompt}],
+            session_id=session_id,
+            step_name="research_analysis"
+        ):
+            yield [chunk]
+```
+
+### 🔀 **智能体流程编排**
+
+```python
+from sagents.agent_flow import AgentFlow
+from sagents.agent.task_analysis_agent import TaskAnalysisAgent
+from sagents.agent.task_planning_agent import PlanningAgent
+from sagents.agent.task_executor_agent import ExecutorAgent
+
+# 定义自定义智能体序列
+custom_agents = [
+    TaskAnalysisAgent(model, model_config),
+    CustomResearchAgent(model, model_config),
+    PlanningAgent(model, model_config),
+    ExecutorAgent(model, model_config)
+]
+
+# 创建智能体流程
+agent_flow = AgentFlow(custom_agents, workspace="./workspace")
+
+# 流式执行
+for message_chunks in agent_flow.run_stream(
+    input_messages=messages,
+    tool_manager=tool_manager,
+    session_id="custom-session",
+    system_context={
+        "project_type": "research",
+        "domain": "AI/ML"
+    }
+):
+    # 处理流式结果
+    for chunk in message_chunks:
+        print(f"{chunk.role}: {chunk.content}")
+```
+
+### 🛠️ **智能体转工具**
+
+```python
+# 将智能体转换为工具以在其他工作流中使用
+research_tool = CustomResearchAgent(model, model_config).to_tool()
+
+# 注册到工具管理器
+tool_manager.register_tool(research_tool)
+
+# 现在可作为工具在其他智能体工作流中使用
+result = tool_manager.run_tool(
+    "CustomResearchAgent",
+    messages=messages,
+    session_id=session_id
+)
+```
+
 ## 📚 **文档**
 
 - **[快速开始指南](docs/QUICK_START.md)** - 5 分钟内快速上手
@@ -390,25 +590,38 @@ Sage 具备企业级特性，已为生产环境做好准备，支持配置管理
 - 💾 **状态保存** - 部分结果被保存并可访问
 - 🔄 **可恢复执行** - 如需要可从中断点继续
 
-## 🔄 **最新更新 (v0.9.2)**
+## 🔄 **最新更新 (v0.9.3)**
 
 ### ✨ **新功能**
-- **文件查看器**: 在Web界面中新增了文件查看器，用户现在可以在侧边栏直接查看文件内容，而无需下载。
+- **高级文件搜索**: 增强的文件内容搜索，支持多关键词、上下文提取和相关性评分
+- **内置 MCP 服务器**: 四个生产就绪的 MCP 服务器，用于文件操作、解析、命令执行和网络搜索
+- **三重 MCP 连接支持**: STDIO、SSE 和流式 HTTP 连接类型，支持 API 密钥认证
+- **扩展智能体生态系统**: 13 个专业智能体，包括任务重写、查询建议、工作流选择等
+- **自定义智能体开发**: AgentBase 框架，用于创建具有标准化接口的专业智能体
+- **智能体流程编排**: 使用 AgentFlow 进行顺序智能体执行，支持自定义工作流设计
+- **智能体转工具**: 自动将智能体转换为工具，实现无缝集成
+- **安全增强**: 全面的安全验证，支持路径遍历保护和危险文件检测
+- **智能编码检测**: 国际文件支持的自动字符编码检测
+- **增强文件解析器**: 支持 20+ 种文件格式，包括 PDF、Word、Excel、PowerPoint 等
+- **命令执行服务器**: 安全的跨平台命令执行和超时管理
+- **网络搜索集成**: Serper 驱动的网络搜索，支持内容提取和速率限制
 - **动态布局**: Web界面现在支持动态布局，可以根据需要显示一个或两个侧边栏，优化了屏幕空间利用率。
 - **后端代理**: 为解决浏览器混合内容安全问题，实现了用于文件获取的后端代理。
 - **增强日志记录**: 为后端代理添加了详细的日志记录，以便于调试服务器端错误。
 
 ### 🔧 **技术改进**
-- **UI响应性**: 提升了侧边栏的响应速度和平滑过渡效果。
-- **错误处理**: 优化了`FileViewer`组件的错误处理，可以清晰地显示来自后端的错误信息。
-- **代码重构**: 重构了`MarkdownWithMath`组件，以统一处理链接点击事件，无论内容如何。
+- **性能优化**: 改进的文件读取，支持基于范围的操作和元数据缓存
+- **错误恢复**: 增强的错误处理，提供详细的诊断信息和恢复策略
+- **类型安全**: 全面的参数验证和模式强制
+- **内存管理**: 优化大文件操作的内存使用
+- **流式支持**: 长时间运行操作的实时流式处理能力
 
 ### 🐛 **错误修复**
-- **语法错误**: 修复了`executor_agent.py`中一个导致后端服务器无法启动的关键语法错误。
-- **用户代理模拟**: 通过在后端`httpx`请求中模拟`curl`的User-Agent，解决了`500内部服务器错误`。
-- **链接点击处理**: 修正了在包含数学公式的消息中文件链接点击无法被正确处理的问题。
-- **向后兼容**: 所有现有API保持完全兼容，支持自动管理器创建。
-- **框架稳定性**: 核心框架现在更加稳定和可靠。
+- **流式响应合并**: 修复了流式格式化中 ChatCompletion choices 字段类型错误
+- **消息管理器**: 解决了类型注解不一致和属性访问问题
+- **内容重复**: 修复了规划智能体流式处理中的内容重复问题
+- **会话管理**: 统一了所有智能体组件中的 session_id 访问模式
+- **框架稳定性**: 增强了整体系统可靠性和错误恢复
 
 ## 📄 **许可证**
 

@@ -9,7 +9,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.2-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9.3-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -210,13 +210,20 @@ Access the local application at `http://localhost:8080`. For detailed setup inst
 
 ## 🎯 Core Features
 
-### 🤖 **Multi-Agent Collaboration (v0.9.1)**
+### 🤖 **Multi-Agent Collaboration (v0.9.3)**
 - **Task Analysis Agent**: Enhanced deep understanding with context awareness and unified system prompt management
 - **Task Decompose Agent**: Intelligent task breakdown with dependency analysis, parallel execution planning, and TaskManager integration
 - **Planning Agent**: Strategic decomposition with dependency management, optimal tool selection, and MessageManager optimization
 - **Executor Agent**: Intelligent tool execution with error recovery, retry mechanisms, parallel processing, and result management
 - **Observation Agent**: Advanced progress monitoring with completion detection, quality assessment, and TaskManager state tracking
 - **Summary Agent**: Comprehensive result synthesis with structured output, actionable insights, and execution history analysis
+- **Task Rewrite Agent**: Intelligent task reformulation and optimization for better execution
+- **Task Stage Summary Agent**: Intermediate progress summarization and milestone tracking
+- **Query Suggest Agent**: Smart query enhancement and suggestion generation
+- **Workflow Select Agent**: Intelligent workflow selection and optimization
+- **Simple Agent**: Lightweight agent for basic tasks and rapid prototyping
+- **Simple React Agent**: Reactive agent with real-time response capabilities
+- **Common Agent**: General-purpose agent for standard operations
 - **Message Manager**: Smart message filtering and compression system for token optimization across all agents
 - **Task Manager**: Structured task lifecycle management with state persistence and dependency tracking
 
@@ -229,6 +236,22 @@ Access the local application at `http://localhost:8080`. For detailed setup inst
 - **Template Sharing**: Export/import workflow configurations and share across teams and projects
 - **Zoom & Pan Support**: Navigate large workflows with mouse wheel zoom and drag-to-pan functionality
 - **Auto-fit Display**: Intelligent viewport adjustment to show all workflow nodes at optimal scale
+
+### 🎭 **Custom Agent Development**
+- **AgentBase Framework**: Abstract base class for creating custom agents with standardized interfaces
+- **Agent-to-Tool Conversion**: Automatic conversion of agents to tool format for seamless integration
+- **Streaming Support**: Built-in streaming capabilities for real-time agent responses
+- **Context Management**: Unified session context and system message handling
+- **Plugin Architecture**: Extensible plugin system for custom agent implementations
+- **Agent Registration**: Dynamic agent discovery and registration from directories
+
+### 🔀 **Agent Flow Orchestration**
+- **Sequential Execution**: Define custom agent execution sequences with AgentFlow
+- **Session Management**: Automatic session context initialization and cleanup
+- **Workflow Integration**: Support for available_workflows parameter in agent flows
+- **Error Recovery**: Robust error handling with session state preservation
+- **Interruption Support**: Graceful handling of workflow interruptions
+- **Memory Management**: Automatic cleanup to prevent memory leaks
 
 ### 💡 **Rule Preferences System**
 - **Personalized AI Behavior**: Configure AI assistant behavior with custom rules and preferences
@@ -255,13 +278,23 @@ Access the local application at `http://localhost:8080`. For detailed setup inst
 - **Session Integration**: Seamless integration with AgentController for workflow management
 - **Structured Data**: Rich task objects with metadata, timing, and result storage
 
+### 📁 **Advanced File System Operations**
+- **Smart Content Search**: Multi-keyword search with context extraction and relevance scoring
+- **Encoding Detection**: Automatic character encoding detection for international files
+- **Security Validation**: Path traversal protection and dangerous file detection
+- **Metadata Extraction**: Comprehensive file information including size, permissions, and timestamps
+- **Range Reading**: Efficient partial file reading with line-based navigation
+- **Error Recovery**: Robust error handling with detailed diagnostic information
+
 ### 🛠️ **Advanced Tool System**
 - **Plugin Architecture**: Hot-reloadable tool development with automatic registration and versioning
-- **MCP Server Support: Seamless integration with Model Context Protocol servers and remote APIs, with added API key authentication for SSE MCP server connections
+- **MCP Server Support**: Seamless integration with Model Context Protocol servers and remote APIs, with added API key authentication for SSE MCP server connections
+- **Built-in MCP Servers**: Pre-built servers for file operations, parsing, command execution, and web search
 - **Auto-Discovery**: Intelligent tool detection from directories, modules, and remote endpoints
 - **Type Safety**: Comprehensive parameter validation with schema enforcement and runtime checks
 - **Error Handling**: Robust error recovery, timeout management, retry strategies, and detailed logging
 - **Performance Monitoring**: Tool execution time tracking, bottleneck detection, and optimization suggestions
+- **Security Features**: Path validation, dangerous file detection, and protected directory access control
 
 ### 📊 **Token Usage & Cost Monitoring**
 - **Real-time Tracking**: Monitor token consumption across all agents and operations with MessageManager optimization
@@ -323,6 +356,173 @@ Monitor and optimize your agent performance with detailed tracking, statistics a
 
 Seamlessly integrate with Model Context Protocol servers, supporting automatic tool discovery and remote API calls.
 
+### 🏗️ **Built-in MCP Servers**
+
+Sage includes several production-ready MCP servers:
+
+#### 📁 **File System Server**
+- **Smart File Operations**: Advanced file reading with line range support and encoding detection
+- **Security Controls**: Path validation, dangerous file detection, and protected directory access
+- **Cloud Integration**: Optional cloud upload capabilities
+- **Batch Processing**: Multi-file operations with error handling
+
+#### 📄 **File Parser Server**
+- **Multi-Format Support**: 20+ file formats including PDF, Word, Excel, PowerPoint, HTML, and more
+- **Intelligent Extraction**: Smart text extraction with metadata preservation
+- **Web Content**: URL parsing and HTML content extraction
+- **Batch Processing**: Multiple file parsing with performance optimization
+
+#### ⚡ **Command Execution Server**
+- **Secure Execution**: Safe command execution with timeout management
+- **Cross-Platform**: Windows, macOS, and Linux support
+- **Error Handling**: Comprehensive error capture and reporting
+- **Security Features**: Command validation and execution sandboxing
+
+#### 🔍 **Web Search Server**
+- **Serper Integration**: High-quality web search results
+- **Content Extraction**: Automatic content parsing from search results
+- **Rate Limiting**: Built-in request throttling
+- **Result Formatting**: Clean, structured search output
+
+### 🔧 **MCP Configuration**
+
+Sage supports three MCP connection types:
+
+#### 📡 **STDIO Connection**
+```json
+{
+  "mcpServers": {
+    "file_system": {
+      "command": "python",
+      "args": ["./mcp_servers/file_system/file_system.py"],
+      "connection_type": "stdio"
+    }
+  }
+}
+```
+
+#### 🌐 **SSE (Server-Sent Events) Connection**
+```json
+{
+  "mcpServers": {
+    "file_parser": {
+      "sse_url": "http://127.0.0.1:34001/sse",
+      "api_key": "your-api-key"
+    }
+  }
+}
+```
+
+#### ⚡ **Streamable HTTP Connection**
+```json
+{
+  "mcpServers": {
+    "web_service": {
+      "streamable_http_url": "http://api.example.com/mcp",
+      "api_key": "your-api-key"
+    }
+  }
+}
+```
+
+### 🔗 **Connection Type Comparison**
+
+| Connection Type | Use Case | Advantages | Best For |
+|:---:|:---:|:---:|:---:|
+| **STDIO** | Local processes | Low latency, secure | Development, local tools |
+| **SSE** | Remote servers | Real-time streaming | Cloud services, live data |
+| **Streamable HTTP** | Web APIs | HTTP compatibility | REST APIs, microservices |
+
+### 🛡️ **Security Features**
+- **API Key Authentication**: Secure access control for remote MCP servers
+- **Connection Validation**: Automatic health checks and connection monitoring
+- **Error Recovery**: Robust reconnection and failover mechanisms
+- **Rate Limiting**: Built-in request throttling and quota management
+
+## 🎭 Custom Agent Development
+
+### 🏗️ **Creating Custom Agents**
+
+```python
+from sagents.agent.agent_base import AgentBase
+from sagents.context.session_context import SessionContext
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+
+class CustomResearchAgent(AgentBase):
+    """Custom agent for specialized research tasks"""
+    
+    def __init__(self, model, model_config):
+        super().__init__(model, model_config, system_prefix="Research Agent")
+        self.agent_description = "Specialized agent for in-depth research and analysis"
+    
+    def run_stream(self, session_context: SessionContext, tool_manager=None, session_id=None):
+        """Implement custom agent logic"""
+        # Access conversation history
+        messages = session_context.message_manager.get_messages_for_llm()
+        
+        # Custom research logic here
+        research_prompt = "Conduct thorough research on the given topic..."
+        
+        # Stream responses
+        for chunk in self._call_llm_streaming(
+            messages + [{"role": "user", "content": research_prompt}],
+            session_id=session_id,
+            step_name="research_analysis"
+        ):
+            yield [chunk]
+```
+
+### 🔀 **Agent Flow Orchestration**
+
+```python
+from sagents.agent_flow import AgentFlow
+from sagents.agent.task_analysis_agent import TaskAnalysisAgent
+from sagents.agent.task_planning_agent import PlanningAgent
+from sagents.agent.task_executor_agent import ExecutorAgent
+
+# Define custom agent sequence
+custom_agents = [
+    TaskAnalysisAgent(model, model_config),
+    CustomResearchAgent(model, model_config),
+    PlanningAgent(model, model_config),
+    ExecutorAgent(model, model_config)
+]
+
+# Create agent flow
+agent_flow = AgentFlow(custom_agents, workspace="./workspace")
+
+# Execute with streaming
+for message_chunks in agent_flow.run_stream(
+    input_messages=messages,
+    tool_manager=tool_manager,
+    session_id="custom-session",
+    system_context={
+        "project_type": "research",
+        "domain": "AI/ML"
+    }
+):
+    # Process streaming results
+    for chunk in message_chunks:
+        print(f"{chunk.role}: {chunk.content}")
+```
+
+### 🛠️ **Agent-to-Tool Conversion**
+
+```python
+# Convert agent to tool for use in other workflows
+research_tool = CustomResearchAgent(model, model_config).to_tool()
+
+# Register with tool manager
+tool_manager.register_tool(research_tool)
+
+# Now available as a tool in other agent workflows
+result = tool_manager.run_tool(
+    "CustomResearchAgent",
+    messages=messages,
+    session_id=session_id
+)
+```
+
 ## 📚 Documentation
 
 - **[Quick Start Guide](docs/QUICK_START.md)** - Get up and running in 5 minutes
@@ -359,25 +559,35 @@ Stop AI responses at any time with graceful cancellation and resource cleanup, w
 - 💾 **State preservation** - partial results are saved and accessible
 - 🔄 **Resumable execution** - continue from interruption point if needed
 
-## 🔄 Recent Updates (v0.9.2)
+## 🔄 Recent Updates (v0.9.3)
 
 ### ✨ New Features
-- **File Viewer**: Added a file viewer to the web UI, allowing users to view file contents in a side panel instead of downloading them.
-- **Dynamic Layout**: The web UI now features a dynamic layout that adjusts to show one or two side panels, optimizing screen real estate.
-- **Backend Proxy**: Implemented a backend proxy for file fetching to resolve mixed-content browser security issues.
-- **Enhanced Logging**: Added detailed logging to the backend proxy for easier debugging of server-side errors.
+- **Advanced File Search**: Enhanced file content search with multi-keyword support, context extraction, and relevance scoring
+- **Built-in MCP Servers**: Four production-ready MCP servers for file operations, parsing, command execution, and web search
+- **Triple MCP Connection Support**: STDIO, SSE, and Streamable HTTP connection types with API key authentication
+- **Extended Agent Ecosystem**: 13 specialized agents including Task Rewrite, Query Suggest, Workflow Select, and more
+- **Custom Agent Development**: AgentBase framework for creating specialized agents with standardized interfaces
+- **Agent Flow Orchestration**: Sequential agent execution with AgentFlow for custom workflow design
+- **Agent-to-Tool Conversion**: Automatic conversion of agents to tools for seamless integration
+- **Security Enhancements**: Comprehensive security validation with path traversal protection and dangerous file detection
+- **Smart Encoding Detection**: Automatic character encoding detection for international file support
+- **Enhanced File Parser**: Support for 20+ file formats including PDF, Word, Excel, PowerPoint, and more
+- **Command Execution Server**: Secure cross-platform command execution with timeout management
+- **Web Search Integration**: Serper-powered web search with content extraction and rate limiting
 
 ### 🔧 Technical Improvements
-- **UI Responsiveness**: Improved the responsiveness of the side panels with smooth transitions.
-- **Error Handling**: Enhanced error handling in the `FileViewer` component to display clear error messages from the backend.
-- **Code Refactoring**: Refactored the `MarkdownWithMath` component to handle link clicks consistently, regardless of content.
+- **Performance Optimization**: Improved file reading with range-based operations and metadata caching
+- **Error Recovery**: Enhanced error handling with detailed diagnostic information and recovery strategies
+- **Type Safety**: Comprehensive parameter validation with schema enforcement
+- **Memory Management**: Optimized memory usage for large file operations
+- **Streaming Support**: Real-time streaming capabilities for long-running operations
 
 ### 🐛 Bug Fixes
-- **Syntax Error**: Fixed a critical syntax error in `executor_agent.py` that prevented the backend server from starting.
-- **User-Agent Simulation**: Resolved a `500 Internal Server Error` by simulating a `curl` User-Agent in backend `httpx` requests.
-- **Link Click Handler**: Corrected an issue where file link clicks were not being handled correctly in messages containing mathematical formulas.
-- **Backward Compatibility**: All existing APIs remain fully compatible with automatic manager creation.
-- **Framework Stability**: The core framework is now more stable and reliable.
+- **Stream Response Merging**: Fixed ChatCompletion choices field type errors in stream formatting
+- **Message Manager**: Resolved type annotation inconsistencies and attribute access issues
+- **Content Duplication**: Fixed content repetition issues in planning agent streaming
+- **Session Management**: Unified session_id access patterns across all agent components
+- **Framework Stability**: Enhanced overall system reliability and error recovery
 
 ## 📄 License
 
