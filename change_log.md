@@ -141,3 +141,9 @@
 - **问题**: `_execute_streaming_analysis` 方法中使用 `yield from` 直接传递消息，导致消息被 `_collect_and_log_stream_output` 重复处理
 - **修复**: 将 `yield from` 改为 `for...yield` 循环，确保消息流正确传递
 - **影响**: 解决 TaskAnalysisAgent 中消息重复显示的问题
+
+## 2024-07-30 - 版本更新至0.9.4
+- **文件**: `setup.py`, `README.md`, `README_CN.md`
+- **更新**: 将项目版本从0.9.3升级到0.9.4
+- **修改**: 更新setup.py中的版本号，同步更新英文和中文README文件中的版本徽章
+- **作者**: Eric ZZ
