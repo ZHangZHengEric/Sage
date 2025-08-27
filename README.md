@@ -1,7 +1,6 @@
 <div align="center">
 
 # 🌟 **Experience Sage's Power**
-### 🚀 [**Try Live Demo Now →**](http://36.133.44.114:20040/)
 
 ![logo](assets/logo.png)
 
@@ -204,7 +203,33 @@ Experience Sage through our cutting-edge web application featuring a modern Reac
 
 Access the local application at `http://localhost:8080`. For detailed setup instructions, see the [FastAPI React Demo README](examples/fastapi_react_demo/README.md).
 
-### 💻 Command Line Usage
+### 💻 **Command Line Usage**
+
+Sage provides a powerful command-line interface for interactive AI agent conversations:
+
+```bash
+# Basic usage
+python examples/sage_cli.py --api_key YOUR_API_KEY --model deepseek/deepseek-chat --base_url https://api.deepseek.com
+
+# With advanced options
+python examples/sage_cli.py \
+  --api_key YOUR_API_KEY \
+  --model deepseek/deepseek-chat \
+  --base_url https://api.deepseek.com \
+  --max_tokens 4096 \
+  --temperature 0.2 \
+  --workspace ./workspace
+```
+
+**CLI Features:**
+- 🤖 **Interactive Conversations**: Natural language chat with AI agents
+- 🔧 **Tool Integration**: Built-in MCP tools for file operations, web search, etc.
+- 🧠 **Deep Thinking Mode**: Optional detailed reasoning process
+- 👥 **Multi-Agent Support**: Complex task handling with agent collaboration
+- 🎨 **Beautiful Interface**: Colored message frames with different visual effects
+- ⚡ **Streaming Output**: Real-time AI responses for smooth interaction
+
+**📖 For detailed CLI usage, configuration, and examples, see [Examples README](examples/README.md)**
 
 
 
