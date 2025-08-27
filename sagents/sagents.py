@@ -73,7 +73,7 @@ class SAgent:
         # self.simple_agent = SimpleAgent(
         #     self.model, self.model_config, system_prefix=self.system_prefix
         # )
-        self.simple_agent = SimpleReactAgent(
+        self.simple_agent = SimpleAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_analysis_agent = TaskAnalysisAgent(
