@@ -28,13 +28,13 @@ class ToolManager:
         
         if is_auto_discover:
             self._auto_discover_tools()
-            self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
-            # 在测试环境中，我们不希望自动发现MCP工具
-            if not os.environ.get('TESTING'):
-                logger.debug("Not in testing environment, discovering MCP tools")
-                asyncio.run(self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path))
-            else:
-                logger.debug("In testing environment, skipping MCP tool discovery")
+            # self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
+            # # 在测试环境中，我们不希望自动发现MCP工具
+            # if not os.environ.get('TESTING'):
+            #     logger.debug("Not in testing environment, discovering MCP tools")
+            #     asyncio.run(self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path))
+            # else:
+            #     logger.debug("In testing environment, skipping MCP tool discovery")
 
     def discover_tools_from_path(self, path: str):
         """Discover and register tools from a custom path
