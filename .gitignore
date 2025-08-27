@@ -9,7 +9,8 @@ examples/fastapi_react_demo/frontend/node_modules/
 .DS_Store
 # Byte-compiled / optimized / DLL files
 */__pycache__/*
-*/logs/*
+logs/
+workspace/
 *.py[cod]
 *$py.class
 

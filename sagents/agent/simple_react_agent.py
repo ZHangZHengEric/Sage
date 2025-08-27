@@ -90,15 +90,16 @@ class SimpleReactAgent(AgentBase):
 - 不要输出工具的真实的名称，而是输出工具的描述。
 - 不要做用户没有要求的任务。规划时只需要满足用户的请求，不要做过多额外的事情。
 """
-        self.TASK_COMPLETE_PROMPT_TEMPLATE = """你要根据历史的对话以及用户的请求，判断是否已经完成了任务。
+        self.TASK_COMPLETE_PROMPT_TEMPLATE = """你要根据历史的对话以及用户的请求，判断是否需要中断执行任务。
 
-## 任务完成判断规则
-1. 任务完成：
-  - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断任务完成。
-  - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断任务完成。
-2. 任务未完成：
-  - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断任务未完成。
-  - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断任务未完成。因为用户看不到工具执行的结果。
+## 中断执行任务判断规则
+1. 中断执行任务：
+  - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断中断执行任务。
+  - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断中断执行任务。
+  - 当对话过程中，需要用户的确认或者输入时，需要判断中断执行任务。
+2. 继续执行任务：
+  - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断继续执行任务。
+  - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断继续执行任务。因为用户看不到工具执行的结果。
 
 ## 用户的对话历史以及新的请求的执行过程
 {messages}
@@ -106,11 +107,12 @@ class SimpleReactAgent(AgentBase):
 输出格式：
 ```json
 {{
-    "task_complete": true,
+    "task_interrupted": true,
     "reason": "任务完成"
 }}
 
 reason尽可能简单，最多20个字符
+```
 """
 
         self.first_plan_message_prompt = """
@@ -241,9 +243,9 @@ reason尽可能简单，最多20个字符
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            return result['task_complete']
+            return result['task_interrupted']
         except json.JSONDecodeError:
-            logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
+            logger.warning("SimpleAgent: 解析任务中断判断响应时JSON解码错误")
             return False
 
         
