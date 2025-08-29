@@ -26,6 +26,7 @@ from sagents.agent.workflow_select_agent import WorkflowSelectAgent
 from sagents.agent.simple_react_agent import SimpleReactAgent
 from sagents.agent.query_suggest_agent import QuerySuggestAgent
 from sagents.agent.task_rewrite_agent import TaskRewriteAgent
+from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context,list_active_sessions
 from sagents.context.messages.message import MessageChunk,MessageRole,MessageType
@@ -44,7 +45,7 @@ class SAgent:
     DEFAULT_MAX_LOOP_COUNT = 10
     DEFAULT_MESSAGE_LIMIT = 10000
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage"):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_root: str = None):
         """
         初始化智能体控制器
         
@@ -53,11 +54,13 @@ class SAgent:
             model_config: 模型配置参数
             system_prefix: 系统前缀提示
             workspace: 工作空间根目录，默认为 /tmp/sage
+            memory_root: 记忆存储根目录，默认为 workspace/user_memories
         """
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
         self.workspace = workspace
+        self.memory_root = memory_root  # 如果为None则不使用本地记忆工具
         self._init_agents()
                 
         logger.info("SAgent: 智能体控制器初始化完成")
@@ -106,12 +109,17 @@ class SAgent:
         self.task_rewrite_agent = TaskRewriteAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
+        self.memory_extraction_agent = MemoryExtractionAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
+        
         logger.info("SAgent: 所有智能体初始化完成")
 
     def run_stream(self, 
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
         session_id: Optional[str] = None, 
+        user_id: Optional[str] = None,
         deep_thinking: bool = True, 
         max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
         multi_agent: bool = True,
@@ -125,9 +133,11 @@ class SAgent:
             input_messages: 输入消息列表
             tool_manager: 工具管理器实例
             session_id: 会话ID
+            user_id: 用户ID
             deep_thinking: 是否开启深度思考
             max_loop_count: 最大循环次数
             multi_agent: 是否开启多智能体模式
+            more_suggest: 是否开启更多建议
             system_context: 系统上下文
             available_workflows: 可用工作流列表
         
@@ -138,7 +148,7 @@ class SAgent:
             # 初始化会话
             session_id = session_id or str(uuid.uuid4())
             # 初始化该session 的context 管理器
-            session_context = init_session_context(session_id, self.workspace)
+            session_context = init_session_context(session_id,user_id=user_id, workspace_root= self.workspace, memory_root= self.memory_root)
             logger.info(f"开始流式工作流，会话ID: {session_id}")
 
             if system_context:
@@ -152,6 +162,10 @@ class SAgent:
 
             session_context.status = SessionStatus.RUNNING
             initial_messages = self._prepare_initial_messages(input_messages)
+            
+            # 尝试初始化记忆
+            session_context.init_user_memory_manager(tool_manager)
+            
             # print(f"initial_messages: {initial_messages}")
             # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
 
@@ -160,17 +174,17 @@ class SAgent:
                 if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
                     session_context.message_manager.add_messages(message)
 
-            # 先检查历史对话的文本长度，如果超过一定5000token 则用一下rewrite
-            if session_context.message_manager.get_all_messages_content_length() > 5000:
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.task_rewrite_agent,
-                    phase_name="任务重写"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
+            # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite
+            # if session_context.message_manager.get_all_messages_content_length() > 30000:
+            #     for message_chunks in self._execute_agent_phase(
+            #         session_context=session_context,
+            #         tool_manager=tool_manager,
+            #         session_id=session_id,
+            #         agent=self.task_rewrite_agent,
+            #         phase_name="任务重写"
+            #     ):
+            #         session_context.message_manager.add_messages(message_chunks)
+            #         yield message_chunks
 
 
             if available_workflows:
@@ -228,7 +242,20 @@ class SAgent:
                 ):
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
-    
+
+            logger.debug(f"SAgent: 检查是否需要提取记忆")            
+            if session_context.user_memory_manager:
+                logger.debug(f"SAgent: 开始记忆提取")
+                for message_chunks in self._execute_agent_phase(
+                    session_context=session_context,
+                    tool_manager=tool_manager,
+                    session_id=session_id,
+                    agent=self.memory_extraction_agent,
+                    phase_name="记忆提取"
+                ):
+                    session_context.message_manager.add_messages(message_chunks)
+                    # yield message_chunks
+
             # 检查最终状态，如果不是中断状态则标记为完成
             if session_context.status != SessionStatus.INTERRUPTED:
                 session_context.status = SessionStatus.COMPLETED
@@ -238,7 +265,7 @@ class SAgent:
             
         except Exception as e:
             # 标记会话错误
-            logger.warning(f"traceback: {traceback.format_exc()}")
+            logger.error(f"traceback: {traceback.format_exc()}")
             session_context.status = SessionStatus.ERROR
             yield from self._handle_workflow_error(e)
         finally:
@@ -246,15 +273,15 @@ class SAgent:
             try:
                 session_context.save()
             except Exception as save_error:
-                logger.warning(f"traceback: {traceback.format_exc()}")
-                logger.warning(f"SAgent: 保存会话状态 {session_id} 时出错: {save_error}")
+                logger.error(f"traceback: {traceback.format_exc()}")
+                logger.error(f"SAgent: 保存会话状态 {session_id} 时出错: {save_error}")
             
             # 清理会话，防止内存泄漏
             try:
                 delete_session_context(session_id)
                 logger.info(f"SAgent: 已清理会话 {session_id}")
             except Exception as cleanup_error:
-                logger.warning(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
+                logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
 
     def _execute_multi_agent_workflow(self, 
                                      session_context: SessionContext,

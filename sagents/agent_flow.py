@@ -15,14 +15,16 @@ from typing import Dict, Any, Optional, Union
 from sagents.utils.logger import logger
 
 class AgentFlow:
-    def __init__(self, agent_list: List[AgentBase],workspace: str) -> None:
+    def __init__(self, agent_list: List[AgentBase], workspace: str, memory_root: str = None) -> None:
         self.agent_list = agent_list
         self.workspace = workspace
+        self.memory_root = memory_root  # 如果为None则不使用本地记忆工具
     
     def run_stream(self,         
                 input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
                 tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
                 session_id: Optional[str] = None, 
+                user_id: Optional[str] = None,
                 system_context: Optional[Dict[str, Any]] = None,
                 available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List[MessageChunk], None, None]:
         """
@@ -31,6 +33,7 @@ class AgentFlow:
             input_messages: 输入消息列表
             tool_manager: 工具管理器实例
             session_id: 会话ID
+            user_id: 用户ID
             system_context: 系统上下文
             available_workflows: 可用工作流列表
 
@@ -40,7 +43,7 @@ class AgentFlow:
         try:
             session_id = session_id or str(uuid.uuid4())
             # 初始化该session 的context 管理器
-            session_context = init_session_context(session_id, self.workspace)
+            session_context = init_session_context(session_id, user_id=user_id, workspace_root=self.workspace, memory_root=self.memory_root)
             if system_context:
                 logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
                 session_context.add_and_update_system_context(system_context)
@@ -52,6 +55,9 @@ class AgentFlow:
 
             session_context.status = SessionStatus.RUNNING
             initial_messages = self._prepare_initial_messages(input_messages)
+            
+            # 尝试初始化记忆
+            session_context.init_user_memory_manager(tool_manager)
 
             for message in initial_messages:
                 if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:

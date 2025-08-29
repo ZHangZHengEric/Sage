@@ -155,9 +155,9 @@ class MessageManager:
                 messages_str_list.append(f"User: {msg.content}")
             elif msg.role == 'assistant':
                 if msg.content is not None:
-                    messages_str_list.append(f"Assistant: {msg.content}")
+                    messages_str_list.append(f"AI: {msg.content}")
                 elif msg.tool_calls is not None:
-                    messages_str_list.append(f"Assistant: Tool calls: {msg.tool_calls}")
+                    messages_str_list.append(f"AI: Tool calls: {msg.tool_calls}")
             elif msg.role == 'tool':
                 messages_str_list.append(f"Tool: {msg.content}")
         
