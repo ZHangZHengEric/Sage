@@ -28,6 +28,7 @@ class MessageType(Enum):
     FINAL_ANSWER = "final_answer"
     SYSTEM = "system"
     QUERY_SUGGEST = "query_suggest"
+    MEMORY_EXTRACTION = "memory_extraction"
 
     # 工具相关
     TOOL_CALL = "tool_call"
