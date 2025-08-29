@@ -153,15 +153,48 @@ class ToolManager:
         return registered
 
     def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec]):
-        """Register a tool specification"""
-        logger.debug(f"Registering tool: {tool_spec.name}")
-        if tool_spec.name in self.tools:
-            logger.warning(f"Tool already registered: {tool_spec.name}")
-
-            return False
+        """Register a tool specification with priority-based replacement
         
+        Priority order (high to low):
+        1. McpToolSpec (MCP tools)
+        2. AgentToolSpec (Agent tools)
+        3. ToolSpec (Local tools)
+        """
+        logger.debug(f"Registering tool: {tool_spec.name}")
+        
+        if tool_spec.name in self.tools:
+            existing_tool = self.tools[tool_spec.name]
+            
+            # 定义优先级：MCP > Agent > Local
+            priority_order = {McpToolSpec: 3, AgentToolSpec: 2, ToolSpec: 1}
+            
+            existing_priority = priority_order.get(type(existing_tool), 0)
+            new_priority = priority_order.get(type(tool_spec), 0)
+            
+            if new_priority > existing_priority:
+                # 新工具优先级更高，替换现有工具
+                existing_type = type(existing_tool).__name__
+                new_type = type(tool_spec).__name__
+                logger.warning(f"Tool '{tool_spec.name}' already exists as {existing_type}, replacing with higher priority {new_type}")
+                
+                self.tools[tool_spec.name] = tool_spec
+                logger.info(f"Successfully replaced tool: {tool_spec.name} ({existing_type} -> {new_type})")
+                return True
+            elif new_priority == existing_priority:
+                # 相同优先级，保持现有工具
+                logger.warning(f"Tool '{tool_spec.name}' already registered with same priority, keeping existing tool")
+                return False
+            else:
+                # 新工具优先级更低，拒绝注册
+                existing_type = type(existing_tool).__name__
+                new_type = type(tool_spec).__name__
+                logger.warning(f"Tool '{tool_spec.name}' registration rejected: existing {existing_type} has higher priority than {new_type}")
+                return False
+        
+        # 工具不存在，直接注册
         self.tools[tool_spec.name] = tool_spec
-        logger.info(f"Successfully registered tool: {tool_spec.name}")
+        tool_type = type(tool_spec).__name__
+        logger.info(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
 
     async def _discover_mcp_tools(self,mcp_setting_path: str = None):
@@ -406,7 +439,7 @@ class ToolManager:
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
         return [convert_spec_to_openai_format(tool) for tool in self.tools.values()]
 
-    def run_tool(self, tool_name: str, messages: list, session_id: str, **kwargs) -> Any:
+    def run_tool(self, tool_name: str, messages: list=[], session_id: str="", **kwargs) -> Any:
         """Execute a tool by name with provided arguments"""
         execution_start = time.time()
         logger.info(f"Executing tool: {tool_name} (session: {session_id})")

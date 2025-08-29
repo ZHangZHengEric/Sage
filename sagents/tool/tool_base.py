@@ -25,9 +25,12 @@ class ToolBase:
                 logger.debug(f"Registered tool: {name} to {self.__class__.__name__}")
     
     @classmethod
-    def tool(cls):
-        """Decorator factory for registering tool methods"""
+    def tool(cls,disabled:bool=False):
+        """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法"""
         def decorator(func):
+            if disabled:
+                logger.info(f"Tool {func.__name__} is disabled, not registering")
+                return func
             logger.info(f"Applying tool decorator to {func.__name__} in {cls.__name__}")
             # Parse full docstring using docstring_parser
             docstring_text = inspect.getdoc(func) or ""

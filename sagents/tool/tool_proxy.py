@@ -86,12 +86,12 @@ class ToolProxy:
         self._check_tool_available(name)
         return self.tool_manager.get_tool(name)
     
-    def run_tool(self, name: str, **kwargs) -> Any:
+    def run_tool(self, tool_name: str, **kwargs) -> Any:
         """
         执行工具（仅限可用工具）
         """
-        self._check_tool_available(name)
-        return self.tool_manager.run_tool(name, **kwargs)
+        self._check_tool_available(tool_name)
+        return self.tool_manager.run_tool(tool_name, **kwargs)
 
 
 class ToolProxyFactory:

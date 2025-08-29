@@ -106,9 +106,9 @@ class QuerySuggestAgent(AgentBase):
                             )]
                         last_tag_type = delta_content_type
 
-        yield from self._finalize_query_suggest_result(full_response, message_id, task_manager)
+        yield from self._finalize_query_suggest_result(full_response, message_id)
 
-    def _finalize_query_suggest_result(self, full_response: str, message_id: str, task_manager: Optional[TaskManager] = None) -> Generator[List[MessageChunk], None, None]:
+    def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> Generator[List[MessageChunk], None, None]:
         logger.debug("QuerySuggestAgent: 处理最终查询建议结果")
         try:
             # 解析查询建议列表
