@@ -23,10 +23,27 @@ class SessionStatus(Enum):
     ERROR = "error"                  # 错误状态
 
 class SessionContext:
-    def __init__(self, session_id: str, workspace_root: str = None):
+    def __init__(self, session_id: str, user_id: str = None, workspace_root: str = None, memory_root: str = None):
         self.session_id = session_id      
+        self.user_id = user_id
         self.llm_requests_logs = []           # 大模型的请求记录
         self.workspace_root = workspace_root  # agent 的工作空间
+        
+        # 根据传入的memory_root参数设置环境变量
+        if memory_root is not None:
+            # 确保是绝对路径
+            memory_root = os.path.abspath(memory_root)
+            logger.info(f"初始化系统变量MEMORY_ROOT_PATH={memory_root}" )
+            os.environ['MEMORY_ROOT_PATH'] = memory_root
+            self.memory_root = memory_root
+            # 判断路径是否存在
+            if not os.path.exists(self.memory_root):
+                os.makedirs(self.memory_root)
+        else:
+            # 如果传入None，则移除环境变量（禁用本地记忆）
+            os.environ.pop('MEMORY_ROOT_PATH', None)
+            self.memory_root = None
+        
         self.session_workspace = None      # agent 该会话的工作空间，保存日志等信息
         self.agent_workspace = None         # agent 该会话的工作空间，保存执行过程中产生的内容
         self.thread_id = threading.get_ident()
@@ -39,7 +56,12 @@ class SessionContext:
         self.candidate_workflows = []   # 当前系统可用的workflow
         self.selected_workflow = None     # 当前选中的workflow
         self.audit_status = {}  # 主要存储 agent 执行过程中保存的结构化信息
+        
+        # 初始化UserMemoryManager
+        self.user_memory_manager = None
+        
         self.init_more()
+        
         
     def init_more(self):
         logger.info(f"SessionContext: 后初始化会话上下文，会话ID: {self.session_id}")
@@ -71,6 +93,8 @@ class SessionContext:
         # file_workspace 去掉 workspace_root的绝对路径的 前置路径
         # self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
         self.system_context['file_workspace'] = self.agent_workspace
+        if self.user_id:
+            self.system_context['user_id'] = self.user_id
         # if self.system_context['file_workspace'].startswith('/'):
         #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
         self.system_context['session_id'] = self.session_id
@@ -84,6 +108,92 @@ class SessionContext:
                 for message_item in messages:
                     self.message_manager.add_messages(MessageChunk(**message_item))
                 logger.info(f"已经成功加载{len(messages)}条历史消息")
+
+    def init_user_memory_manager(self,tool_manager=None):
+        """初始化用户记忆管理器
+        
+        Args:
+            tool_manager: 工具管理器实例
+        """
+        if self.user_id is None:
+            return
+        
+        # 初始化UserMemoryManager
+        if self.user_memory_manager is None:
+            try:
+                from sagents.context.user_memory import UserMemoryManager
+                self.user_memory_manager = UserMemoryManager(self.user_id, tool_manager)
+                logger.info(f"SessionContext: 初始化UserMemoryManager成功，用户ID: {self.user_id}")
+                if self.user_memory_manager.memory_disabled:
+                    logger.info(f"SessionContext: UserMemoryManager已禁用，用户ID: {self.user_id}")
+                    self.user_memory_manager = None
+                else:
+                    # user_memory_manager 初始化成功，需要在system context添加对于 记忆使用的说明和要求
+                    self.system_context['长期记忆的要求'] = self.user_memory_manager.get_user_memory_usage_description()
+                    # 自动查询系统级记忆并注入到system_context
+                    self._load_system_memories(tool_manager)
+
+            except Exception as e:
+                logger.error(f"SessionContext: 初始化UserMemoryManager失败: {e}")
+                self.user_memory_manager = None
+    
+    def _load_system_memories(self, tool_manager=None):
+        """加载系统级记忆并注入到system_context
+        
+        Args:
+            tool_manager: 工具管理器实例
+        """
+        if not self.user_id or not self.user_memory_manager:
+            return
+        
+        try:
+            # 通过UserMemoryManager获取系统级记忆
+            system_memories = self.user_memory_manager.get_system_memories(self.session_id)
+            
+            if system_memories:
+                # 格式化记忆内容并注入到system_context
+                formatted_context = self.user_memory_manager.format_system_memories_for_context(system_memories)
+                
+                if formatted_context:
+                    self.system_context['用户长期记忆'] = formatted_context
+                    logger.info(f"成功注入 {len(system_memories)} 种类型的系统级记忆到system_context")
+            else:
+                logger.info("未找到系统级记忆，跳过注入")
+                
+        except Exception as e:
+            logger.error(f"加载系统级记忆失败: {e}")
+    
+    def refresh_system_memories(self):
+        """刷新系统级记忆"""
+        if self.user_memory_manager:
+            self._load_system_memories()
+            logger.info("系统级记忆已刷新")
+    
+    def get_system_memories_summary(self) -> str:
+        """获取系统级记忆摘要
+        
+        Returns:
+            系统级记忆的摘要字符串
+        """
+        if not self.user_memory_manager:
+            return "记忆管理器未初始化"
+        
+        try:
+            system_memories = self.user_memory_manager.get_system_memories(self.session_id)
+            if system_memories:
+                summary = []
+                for memory_type, content in system_memories.items():
+                    lines = content.split('\n')
+                    summary.append(f"{memory_type}: {len(lines)} 条记忆")
+                return ", ".join(summary)
+            else:
+                return "无系统级记忆"
+        except Exception as e:
+            logger.error(f"获取系统级记忆摘要失败: {e}")
+            return "获取记忆摘要失败"
+    
+    # 注意：自动记忆提取功能已迁移到sagents层面
+    # 现在由sagents直接调用MemoryExtractionAgent来处理记忆提取和更新
 
     def add_and_update_system_context(self,new_system_context:Dict[str,Any]):
         """添加并更新系统上下文"""
@@ -106,11 +216,12 @@ class SessionContext:
             if 'usage' in response_dict:
                 step_info = {"step_name": llm_request['request']['step_name'], "usage": response_dict['usage']}
                 tokens_info["per_step_info"].append(step_info)
-                for key, value in response_dict['usage'].items():
-                    if isinstance(value, int) or isinstance(value,float) :
-                        if key not in tokens_info["total_info"]:
-                            tokens_info["total_info"][key] = 0
-                        tokens_info["total_info"][key] += value
+                if response_dict['usage']:
+                    for key, value in response_dict['usage'].items():
+                        if isinstance(value, int) or isinstance(value,float) :
+                            if key not in tokens_info["total_info"]:
+                                tokens_info["total_info"][key] = 0
+                            tokens_info["total_info"][key] += value
         return tokens_info
     def save(self):
         """保存会话上下文"""
@@ -221,10 +332,11 @@ def get_session_context(session_id: str) -> SessionContext:
         raise ValueError(f"Session {session_id} not found")
     return _active_sessions[session_id]
 
-def init_session_context(session_id: str, workspace_root: str = None) -> SessionContext:
+def init_session_context(session_id: str, user_id: str = None, workspace_root: str = None, memory_root: str = None) -> SessionContext:
+    """初始化会话上下文"""
     if session_id in _active_sessions:
         return _active_sessions[session_id]
-    _active_sessions[session_id] = SessionContext(session_id, workspace_root)
+    _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, memory_root)
     return _active_sessions[session_id]
 
 def delete_session_context(session_id: str):
