@@ -333,8 +333,35 @@ class OfficeParser:
                 shapes = sorted(slide.shapes, key=lambda x: (x.top, x.left))
                 
                 for shape in shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        slide_content.append(shape.text.strip())
+                    if hasattr(shape, "text_frame") and shape.text_frame:
+                        text_frame = shape.text_frame
+                        full_text = []
+                        for paragraph in text_frame.paragraphs:
+                            para_text = "".join([run.text for run in paragraph.runs])
+                            if para_text.strip():
+                                full_text.append(para_text.strip())
+                        if full_text:
+                            slide_content.append('\n'.join(full_text))
+                        else:
+                            logger.debug(f"Shape {shape.name} has text_frame but no text extracted from paragraphs.")
+                    elif hasattr(shape, "image"):
+                        logger.debug(f"Shape {shape.name} is an image.")
+                    elif shape.has_table:
+                        table = shape.table
+                        table_text = []
+                        for row in table.rows:
+                            row_text = []
+                            for cell in row.cells:
+                                if cell.text.strip():
+                                    row_text.append(cell.text.strip())
+                            if row_text:
+                                table_text.append(' | '.join(row_text))
+                        if table_text:
+                            slide_content.append('\n'.join(table_text))
+                        else:
+                            logger.debug(f"Shape {shape.name} is a table but no text extracted.")
+                    else:
+                        logger.debug(f"Shape {shape.name} is of type {shape.shape_type} and has no text attribute.")
                 
                 slides_text.append('\n'.join(slide_content))
             
