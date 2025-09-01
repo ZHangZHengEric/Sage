@@ -943,8 +943,40 @@ class FileParserTool(ToolBase):
                     if file_extension == '.pptx':
                         extracted_text = OfficeParser.extract_text_from_pptx(input_file_path)
                     else:
-                        # PPT需要额外的处理，这里简化处理
-                        extracted_text = "PPT文件暂不支持，请转换为PPTX格式"
+                        # PPT需要额外的处理，尝试使用LibreOffice转换为PPTX
+                        pptx_output_path = input_file_path + 'x'
+                        try:
+                            # 检查libreoffice是否安装
+                            subprocess.run(['libreoffice', '--version'], check=True, capture_output=True)
+                            logger.info(f"尝试使用LibreOffice将PPT转换为PPTX: {input_file_path} -> {pptx_output_path}")
+                            command = [
+                                'libreoffice',
+                                '--headless',
+                                '--convert-to', 'pptx',
+                                '--outdir', os.path.dirname(input_file_path),
+                                input_file_path
+                            ]
+                            result = subprocess.run(command, capture_output=True, text=True, check=True)
+                            logger.info(f"LibreOffice转换输出: {result.stdout}")
+                            logger.error(f"LibreOffice转换错误输出: {result.stderr}")
+
+                            if os.path.exists(pptx_output_path):
+                                extracted_text = OfficeParser.extract_text_from_pptx(pptx_output_path)
+                                logger.info(f"PPT成功转换为PPTX并提取内容: {pptx_output_path}")
+                                # 转换成功后删除临时生成的pptx文件
+                                os.remove(pptx_output_path)
+                            else:
+                                extracted_text = "PPT文件转换失败，无法生成PPTX文件。请手动转换为PPTX格式。"
+                                logger.error(f"PPT文件转换失败，未找到生成的PPTX文件: {pptx_output_path}")
+                        except FileNotFoundError:
+                            extracted_text = "LibreOffice未安装或不在PATH中，无法自动转换PPT文件。请安装LibreOffice或手动转换为PPTX格式。"
+                            logger.error("LibreOffice未安装或不在PATH中，无法自动转换PPT文件。")
+                        except subprocess.CalledProcessError as e:
+                            extracted_text = f"LibreOffice转换PPT文件时出错: {e.stderr}"
+                            logger.error(f"LibreOffice转换PPT文件时出错: {e.stderr}")
+                        except Exception as e:
+                            extracted_text = f"处理PPT文件时发生未知错误: {e}"
+                            logger.error(f"处理PPT文件时发生未知错误: {e}")
                         
                 elif file_extension in ['.xlsx', '.xls']:
                     logger.debug(f"📈 使用Excel解析器")
