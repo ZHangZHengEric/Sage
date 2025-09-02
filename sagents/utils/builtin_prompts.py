@@ -289,6 +289,10 @@ selected_workflow_index 从0 开始计数
     
     "memory_extraction_template": """请分析以下对话，提取值得长期记忆的系统级信息。
 
+<当前系统上下文>
+{system_context}
+</当前系统上下文>
+
 <对话历史>
 {formatted_conversation}
 </对话历史>
@@ -305,6 +309,8 @@ selected_workflow_index 从0 开始计数
 - 确保记忆内容准确、具体
 - 为每个记忆生成简洁明确的标识key
 - memory的 key 和 content 中的描述尽可能使用绝对值，例如时间"明天"，要转换成绝对日期。
+- 系统级记忆（preference/requirement/persona/constraint）必须要在用户的表达的内容中提取，不能在执行过程中提取。
+- 不需要提取当前系统上下文中提到的信息。
 
 <返回格式要求>
 请以JSON格式返回，格式如下：
@@ -312,7 +318,7 @@ selected_workflow_index 从0 开始计数
     "extracted_memories": [
         {{
             "key": "记忆的唯一标识",
-            "content": "记忆的具体内容",
+            "content": "记忆的具体内容，精确不要有遗漏的信息",
             "type": "记忆类型(preference/requirement/persona/constraint/context/project/workflow/experience/learning/skill/note/bookmark/pattern）",
             "tags": ["相关标签1", "相关标签2"],
             "source": "提取依据的对话片段"
@@ -365,9 +371,14 @@ selected_workflow_index 从0 开始计数
 {existing_memories}
 
 输出格式为Json的key的列表，例如：
+```json
 {{
-    "duplicate_keys": ["key1", "key2"]
+    "duplicate_keys": ["key1"]
 }}
+```
+输出要求描述：
+1. key1是要遗忘的记忆的key。
+2. 不要输出任何其他的内容或解释，只输出Json格式的内容。
 """,
     
     # ReAct模板

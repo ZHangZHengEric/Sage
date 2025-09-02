@@ -26,9 +26,9 @@ import uuid
 # 导入流式消息框工具
 from sagents.utils.streaming_message_box import StreamingMessageBox,display_items_in_columns
 
-def display_tools(console,tool_manager):
+def display_tools(console,tool_manager:Union[ToolManager,ToolProxy]):
     try:
-        if hasattr(tool_manager, 'get_available_tools'):
+        if hasattr(tool_manager, 'list_tools_simplified'):
             available_tools = tool_manager.list_tools_simplified()
         elif hasattr(tool_manager, 'tool_manager') and hasattr(tool_manager.tool_manager, 'list_tools_simplified'):
             available_tools = tool_manager.tool_manager.list_tools_simplified()
@@ -79,6 +79,7 @@ async def chat(agent: SAgent, tool_manager: Union[ToolManager,ToolProxy]):
             for chunks in agent.run_stream(input_messages=messages,
                                             tool_manager=tool_manager,
                                             session_id = session_id,
+                                            user_id = config['user_id'],
                                             deep_thinking =  config['use_deepthink'],
                                             multi_agent= config['use_multi_agent'],
                                             available_workflows=config['available_workflows'],
@@ -147,6 +148,10 @@ def parse_arguments() -> Dict[str, Any]:
                        help='模型名称')
     parser.add_argument('--base_url', required=True,
                        help='API base URL')
+    parser.add_argument('--user_id', type=str, default=None,
+                       help='用户ID')
+    parser.add_argument('--memory_root', type=str, default=None,
+                       help='记忆根目录')
     parser.add_argument('--tools_folders', nargs='+', default=[],
                        help='工具目录路径（多个路径用空格分隔）')
     parser.add_argument('--max_tokens', type=int, default=4096,
@@ -184,7 +189,7 @@ def parse_arguments() -> Dict[str, Any]:
     }
 }
 """)
-    parser.add_argument('--preset_running_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_config.json'),
+    parser.add_argument('--preset_running_agent_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_agent_config.json'),
                        help="""预设运行配置文件路径，文件内容为json格式，示例：
 {{
   "systemPrefix": "你是一个智能助手，你可以帮助用户解决问题",
@@ -220,28 +225,32 @@ def parse_arguments() -> Dict[str, Any]:
     args = parser.parse_args()
     
     # 读取预设运行配置文件
-    preset_running_config = {}
-    if os.path.exists(args.preset_running_config_path):
-        with open(args.preset_running_config_path, 'r', encoding='utf-8') as f:
-            preset_running_config = json.load(f)
+    preset_running_agent_config = {}
+    if os.path.exists(args.preset_running_agent_config_path):
+        with open(args.preset_running_agent_config_path, 'r', encoding='utf-8') as f:
+            logger.info(f"读取预设运行配置文件: {args.preset_running_agent_config_path}")
+            preset_running_agent_config = json.load(f)
+            logger.info(f"预设运行配置内容: {preset_running_agent_config}")
 
     # 合并命令行参数和配置文件内容，命令行参数优先
     config = {
         'api_key': args.api_key,
-        'model_name': args.model if args.model else preset_running_config.get('llmConfig', {}).get('model', ''),
+        'model_name': args.model if args.model else preset_running_agent_config.get('llmConfig', {}).get('model', ''),
         'base_url': args.base_url,
         'tools_folders': args.tools_folders,
-        'max_tokens': args.max_tokens if args.max_tokens else int(preset_running_config.get('llmConfig', {}).get('maxTokens', 4096)),
-        'temperature': args.temperature if args.temperature else float(preset_running_config.get('llmConfig', {}).get('temperature', 0.2)),
-        'use_deepthink': not args.no_deepthink if args.no_deepthink is not None else preset_running_config.get('deepThinking', False),
-        'use_multi_agent': not args.no_multi_agent if args.no_multi_agent is not None else preset_running_config.get('multiAgent', False),
+        'max_tokens': args.max_tokens if args.max_tokens else int(preset_running_agent_config.get('llmConfig', {}).get('maxTokens', 4096)),
+        'temperature': args.temperature if args.temperature else float(preset_running_agent_config.get('llmConfig', {}).get('temperature', 0.2)),
+        'use_deepthink': not args.no_deepthink if args.no_deepthink is not None else preset_running_agent_config.get('deepThinking', False),
+        'use_multi_agent': not args.no_multi_agent if args.no_multi_agent is not None else preset_running_agent_config.get('multiAgent', False),
         'workspace': args.workspace,
         'mcp_setting_path': args.mcp_setting_path,
-        'available_workflows': preset_running_config.get('available_workflows', {}),
-        'system_context': preset_running_config.get('system_context', {}),
-        'available_tools': preset_running_config.get('availableTools', []),
-        'system_prefix': preset_running_config.get('systemPrefix', ''),
-        'max_loop_count': preset_running_config.get('maxLoopCount', 10),
+        'available_workflows': preset_running_agent_config.get('availableWorkflows', {}),
+        'system_context': preset_running_agent_config.get('systemContext', {}),
+        'available_tools': preset_running_agent_config.get('availableTools', []),
+        'system_prefix': preset_running_agent_config.get('systemPrefix', ''),
+        'max_loop_count': preset_running_agent_config.get('maxLoopCount', 10),
+        'user_id': args.user_id,
+        'memory_root': args.memory_root,
     }
     logger.info(f"config: {config}")
     return config
@@ -275,7 +284,8 @@ if __name__ == '__main__':
                 "temperature": config['temperature']
             },
             system_prefix=config['system_prefix'],
-            workspace=config['workspace']
+            workspace=config['workspace'],
+            memory_root=config['memory_root'],
         )
 
         # 调用 chat 函数

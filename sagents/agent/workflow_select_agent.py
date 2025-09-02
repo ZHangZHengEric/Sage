@@ -160,8 +160,8 @@ selected_workflow_index 从0 开始计数
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
-            recent_message_str = MessageManager.convert_messages_to_str(recent_message)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            recent_message_str = MessageManager.convert_messages_to_str(history_messages)
         
         normalized_workflows = normalize_workflows(session_context.candidate_workflows)
         

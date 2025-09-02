@@ -45,7 +45,8 @@ class MemoryExtractionAgent(AgentBase):
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 现获取执行的提问和执行的历史
         message_manager = session_context.message_manager
-        conversation_messages = message_manager.extract_all_user_and_final_answer_messages(recent_turns=1)
+        conversation_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length,last_turn_user_only=False)
+        
         logger.debug(f"MemoryExtractionAgent: 从对话中提取记忆，对话历史: {conversation_messages}")
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         # 先提取对话中的记忆
@@ -93,9 +94,9 @@ class MemoryExtractionAgent(AgentBase):
                 self.prepare_unified_system_message(session_id=session_id),
                 MessageChunk(
                     role=MessageRole.USER.value,
-                    content=PromptManager().get('memory_deduplication_template').format(existing_memories=existing_memories),
+                    content=PromptManager().memory_deduplication_template.format(existing_memories=existing_memories),
                     message_id=str(uuid.uuid4()),
-                    show_content=PromptManager().get('memory_deduplication_template').format(existing_memories=existing_memories),
+                    show_content=PromptManager().memory_deduplication_template.format(existing_memories=existing_memories),
                     message_type=MessageType.MEMORY_EXTRACTION.value
                 )
             ]
@@ -137,7 +138,9 @@ class MemoryExtractionAgent(AgentBase):
             return []
         try:            
             # 构建记忆提取的prompt
-            extraction_prompt = PromptManager().get('memory_extraction_template').format(formatted_conversation=recent_message_str)
+            extraction_prompt = PromptManager().get('memory_extraction_template').format(
+                formatted_conversation=recent_message_str,
+                system_context=self.prepare_unified_system_message(session_id=session_id).content)
             
             llm_request_message = [
                 # self.prepare_unified_system_message(session_id=session_id),

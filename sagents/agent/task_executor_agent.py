@@ -45,32 +45,19 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         logger.info("TaskExecutorAgent 初始化完成")
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
-        
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
-
         if 'task_rewrite' in session_context.audit_status:
             rewrite_user = [MessageChunk(
                 role=MessageRole.USER.value,
                 content = session_context.audit_status['task_rewrite'],
                 message_type=MessageType.NORMAL.value
             )]
-
             messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3)
-            messages_after_last_user = rewrite_user + messages_after_last_user
+            history_messages = rewrite_user + messages_after_last_user
         else:
-
-            # 提取执行历史
-            messages_after_last_user = message_manager.get_after_last_user_messages()
-            # 只保留关键的执行消息
-            messages_after_last_user = [msg for msg in messages_after_last_user if msg.type in [MessageType.EXECUTION.value,
-                                                                                            MessageType.DO_SUBTASK.value,
-                                                                                            MessageType.DO_SUBTASK_RESULT.value,
-                                                                                            MessageType.TOOL_CALL.value,
-                                                                                            MessageType.TOOL_CALL_RESULT.value,
-                                                                                            MessageType.TOOL_RESPONSE.value,
-                                                                                            MessageType.NORMAL.value]]
-
+            history_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length)
+            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3)
+            history_messages.extend(messages_after_last_user)
 
         last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
 
@@ -88,7 +75,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id)
         ]
-        llm_request_message.extend(messages_after_last_user)
+        llm_request_message.extend(history_messages)
         llm_request_message.append(prompt_message_chunk)
         yield [prompt_message_chunk]
 
@@ -346,9 +333,10 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 tool_call['function']['arguments'] = json.dumps(function_params,ensure_ascii=False)
                 for param, value in function_params.items():
                     # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
+                    # 要对value进行转移，打印的时候，不会发生换行
                     if isinstance(value, str) and len(value) > 100:
                         value = f'"{value[:30]}"'
-                    formatted_params += f"{param} = {value}, "
+                    formatted_params += f"{param} = {json.dumps(value,ensure_ascii=False)}, "
                 formatted_params = formatted_params.rstrip(', ')
             else:
                 

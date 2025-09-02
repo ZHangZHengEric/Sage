@@ -209,77 +209,98 @@ class MessageManager:
         filtered_messages = deepcopy(accept_messages)
         return filtered_messages
 
-    def extract_all_user_and_exec_messages(self,recent_turns:int=0) -> List[MessageChunk]:
-        user_and_exec_messages = []
-        
-        # 先分成 chat_list = [[user,assistant,assistan]]
-        chat_list = []
-        for msg in self.messages:
-            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
-                chat_list.append([msg])
-            elif msg.role != MessageRole.USER.value:
-                chat_list[-1].append(msg)
-        
-        # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
-        if recent_turns > 0:
-            chat_list = chat_list[-recent_turns:]
-        for chat in chat_list:
-            user_and_exec_messages.append(chat[0])
-
-            # 如果chat[1：]  有 FINAL_ANSWER，则只保留一个FINAL_ANSWER messages。
-            # 否则，将所有的type 为 do_subtask_result tool_call tool_call_result 都加入进来
-            if len(chat)>1:
-                for msg in chat[1:]:
-                    if msg.type in [MessageType.DO_SUBTASK_RESULT.value,
-                                    MessageType.TOOL_CALL.value,
-                                    MessageType.TOOL_CALL_RESULT.value,
-                                    MessageType.FINAL_ANSWER.value]:
-                        user_and_exec_messages.append(msg)
-        return user_and_exec_messages
-
-
-    def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
+    def extract_all_context_messages(self,recent_turns:int=0,max_length = 20000,last_turn_user_only:bool=True) -> List[MessageChunk]:
         """
-        提取最近的用户消息和最终结果消息
+        提取所有有意义的上下文消息，包括用户消息和助手消息，最后一个消息对话，可选是否只提取用户消息，如果只提取用户消息，即是本次请求的上下文，否则带上本次执行已有内容
         
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
-        
+            max_length: 提取的最大长度，0表示不限制
+
         Returns:
             提取后的消息列表
         """
-        # 提取逻辑是：
-        #   1. 提取user 以及该user 后面所有的 assistant消息
-        #   2. 查看assistant 的list，判断最后一个是不是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
-    
-        user_and_final_answer_messages = []
-        
-        # 先分成 chat_list = [[user,assistant,assistan]]
+        all_context_messages = []
         chat_list = []
         for msg in self.messages:
             if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
                 chat_list.append([msg])
             elif msg.role != MessageRole.USER.value:
                 chat_list[-1].append(msg)
-        
-        # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
         if recent_turns > 0:
             chat_list = chat_list[-recent_turns:]
-        for chat in chat_list:
-            user_and_final_answer_messages.append(chat[0])
 
-            # 如果chat[1：]  有 FINAL_ANSWER，则只保留一个FINAL_ANSWER messages。
-            # 否则，将所有的type 为 do_subtask_result tool_call tool_call_result 都加入进来
-            if len(chat)>1:
-                if chat[-1].type == MessageType.FINAL_ANSWER.value:
-                    user_and_final_answer_messages.append(chat[-1])
-                else:
-                    for msg in chat[1:]:
-                        if msg.type in [MessageType.DO_SUBTASK_RESULT.value,
-                                        MessageType.TOOL_CALL.value,
-                                        MessageType.TOOL_CALL_RESULT.value]:
-                            user_and_final_answer_messages.append(msg)
-        return user_and_final_answer_messages
+        # 最后一个对话，只提取用户消息
+        if last_turn_user_only and len(chat_list) > 0:
+            last_chat = chat_list[-1]
+            all_context_messages.append(last_chat[0])
+            chat_list = chat_list[:-1]
+        # 合并消息
+        merged_length = 0
+        for chat in chat_list[::-1]:
+            merged_messages = []
+
+            merged_messages.append(chat[0])
+            merged_length += len(chat[0].content or '')
+            
+            if merged_length > max_length:
+                break
+            for msg in chat[1:]:
+                if msg.type in [MessageType.FINAL_ANSWER.value,
+                                MessageType.DO_SUBTASK_RESULT.value,
+                                MessageType.TOOL_CALL.value,
+                                MessageType.TOOL_CALL_RESULT.value]:
+                    merged_messages.append(msg)
+                    merged_length += len(msg.content or '')
+            if merged_length > max_length:
+                break
+            all_context_messages.extend(merged_messages[::-1])
+        return all_context_messages[::-1]
+    
+    # def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
+    #     """
+    #     提取最近的用户消息和最终结果消息
+        
+    #     Args:
+    #         recent_turns: 最近的对话轮数，0表示不限制
+    #         max_length: 提取的最大长度，0表示不限制
+
+    #     Returns:
+    #         提取后的消息列表
+    #     """
+    #     # 提取逻辑是：
+    #     #   1. 提取user 以及该user 后面所有的 assistant消息
+    #     #   2. 查看assistant 的list，判断最后一个是不是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
+    
+    #     user_and_final_answer_messages = []
+        
+    #     # 先分成 chat_list = [[user,assistant,assistan]]
+    #     chat_list = []
+    #     for msg in self.messages:
+    #         if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
+    #             chat_list.append([msg])
+    #         elif msg.role != MessageRole.USER.value:
+    #             chat_list[-1].append(msg)
+        
+    #     # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
+    #     if recent_turns > 0:
+    #         chat_list = chat_list[-recent_turns:]
+        
+    #     for chat in chat_list:
+    #         user_and_final_answer_messages.append(chat[0])
+
+    #         # 如果chat[1：]  有 FINAL_ANSWER，则只保留一个FINAL_ANSWER messages。
+    #         # 否则，将所有的type 为 do_subtask_result tool_call tool_call_result 都加入进来
+    #         if len(chat)>1:
+    #             if chat[-1].type == MessageType.FINAL_ANSWER.value:
+    #                 user_and_final_answer_messages.append(chat[-1])
+    #             else:
+    #                 for msg in chat[1:]:
+    #                     if msg.type in [MessageType.DO_SUBTASK_RESULT.value,
+    #                                     MessageType.TOOL_CALL.value,
+    #                                     MessageType.TOOL_CALL_RESULT.value]:
+    #                         user_and_final_answer_messages.append(msg)
+    #     return user_and_final_answer_messages
     
     def extract_after_last_stage_summary_messages(self) -> List[MessageChunk]:
         
@@ -325,11 +346,9 @@ class MessageManager:
         messages_after_last_execution = []
         for msg in messages_after_last_user:
             if msg.type in [MessageType.EXECUTION.value,
-                            MessageType.DO_SUBTASK.value,
                             MessageType.DO_SUBTASK_RESULT.value,
                             MessageType.TOOL_CALL.value,
-                            MessageType.TOOL_CALL_RESULT.value,
-                            MessageType.TOOL_RESPONSE ]:
+                            MessageType.TOOL_CALL_RESULT.value]:
                 messages_after_last_execution.append(msg)
         return messages_after_last_execution
 
