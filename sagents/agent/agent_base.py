@@ -37,6 +37,7 @@ class AgentBase(ABC):
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
+        self.max_history_context_length = 20000
         self.agent_description = f"{self.__class__.__name__} agent"
         self.agent_name = self.__class__.__name__
         
@@ -159,6 +160,7 @@ class AgentBase(ABC):
                 extra_body={
                     "chat_template_kwargs": {"enable_thinking": False},
                     "enable_thinking":False,
+                    "thinking":{'type':"disabled"}
                 },
                 **final_config
             )

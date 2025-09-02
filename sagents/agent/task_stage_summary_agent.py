@@ -91,8 +91,8 @@ class TaskStageSummaryAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
-            task_description_messages_str = MessageManager.convert_messages_to_str(recent_message)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
         
         # 提取任务管理器状态
         task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'

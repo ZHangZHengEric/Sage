@@ -174,6 +174,8 @@ class SAgent:
                 if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
                     session_context.message_manager.add_messages(message)
 
+            
+
             # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite
             # if session_context.message_manager.get_all_messages_content_length() > 30000:
             #     for message_chunks in self._execute_agent_phase(

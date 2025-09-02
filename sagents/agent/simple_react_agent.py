@@ -143,9 +143,8 @@ reason尽可能简单，最多20个字符
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        history_messages = message_manager.filter_messages(context_length_limited=20000,
-                                                          accept_message_type=[],
-                                                          recent_turns=10)
+        history_messages = message_manager.extract_all_context_messages(recent_turns=10,max_length=self.max_history_context_length,last_turn_user_only=False)
+
         system_context = session_context.system_context
         # 调用内部方法，执行流式直接执行
         yield from self._execute_direct_stream_internal(history_messages, 
@@ -219,7 +218,17 @@ reason尽可能简单，最多20个字符
         logger.info(f"messages_input[-1].role: {messages_input[-1].role}")
         if messages_input[-1].role == 'tool':
             return False
-        clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+
+        # 只提取最后一个user以及之后的messages
+        last_user_index = None
+        for i, message in enumerate(messages_input):
+            if message.role == 'user' and message.type == MessageType.NORMAL.value:
+                last_user_index = i
+        if last_user_index is not None:
+            messages_for_complete = messages_input[last_user_index:]
+        else:
+            messages_for_complete = messages_input
+        clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
         
         
         prompt = self.TASK_COMPLETE_PROMPT_TEMPLATE.format(
@@ -245,8 +254,9 @@ reason尽可能简单，最多20个字符
             result = json.loads(result_clean)
             return result['task_interrupted']
         except json.JSONDecodeError:
-            logger.warning("SimpleAgent: 解析任务中断判断响应时JSON解码错误")
+            logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
             return False
+
 
         
     def _get_suggested_tools(self, 
@@ -666,9 +676,10 @@ reason尽可能简单，最多20个字符
                 tool_call['function']['arguments'] = json.dumps(function_params,ensure_ascii=False)
                 for param, value in function_params.items():
                     # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
+                    # 要对value进行转移，打印的时候，不会发生换行
                     if isinstance(value, str) and len(value) > 100:
                         value = f'"{value[:30]}"'
-                    formatted_params += f"{param} = {value}, "
+                    formatted_params += f"{param} = {json.dumps(value,ensure_ascii=False)}, "
                 formatted_params = formatted_params.rstrip(', ')
         else:
             formatted_params = ""

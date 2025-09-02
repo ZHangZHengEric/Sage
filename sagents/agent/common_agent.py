@@ -31,7 +31,8 @@ class CommonAgent(AgentBase):
             消息流
         """
         message_manager = session_context.message_manager
-        all_messages  = message_manager.messages
+        all_messages = message_manager.extract_all_context_messages(recent_turns=10,max_length=self.max_history_context_length,last_turn_user_only=False)
+        # all_messages  = message_manager.messages
         tools_json = tool_manager.get_openai_tools()
         tools_json = [tools_json[tool_name] for tool_name in self.tools_name]
         

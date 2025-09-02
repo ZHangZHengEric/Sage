@@ -129,6 +129,36 @@ class PromptManager:
         """检查prompt是否存在"""
         return key in self.prompts
     
+    def __getattr__(self, key: str) -> str:
+        """支持通过属性方式访问prompt
+        
+        Args:
+            key: prompt的键名
+            
+        Returns:
+            prompt内容，如果不存在则抛出AttributeError
+        """
+        if key in self.prompts:
+            return self.prompts[key]
+        raise AttributeError(f"PromptManager has no prompt '{key}'")
+    
+    def __setattr__(self, key: str, value):
+        """支持通过属性方式设置prompt
+        
+        Args:
+            key: prompt的键名或实例属性名
+            value: prompt内容或属性值
+        """
+        # 如果是内部属性，使用默认行为
+        if key.startswith('_') or key in ['prompts']:
+            super().__setattr__(key, value)
+        else:
+            # 如果prompts已经初始化，则设置为prompt
+            if hasattr(self, 'prompts'):
+                self.prompts[key] = value
+            else:
+                super().__setattr__(key, value)
+    
     def save_user_prompt_config(self):
         """保存当前配置到用户配置文件"""
         user_config_path = self._get_user_config_path()
