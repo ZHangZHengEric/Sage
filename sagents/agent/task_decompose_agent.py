@@ -58,8 +58,8 @@ class TaskDecomposeAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
-            recent_message_str = MessageManager.convert_messages_to_str(recent_message)        
+            history_messages = message_manager.extract_all_context_messages(recent_turns=10,max_length=self.max_history_context_length)
+            recent_message_str = MessageManager.convert_messages_to_str(history_messages)        
         
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"

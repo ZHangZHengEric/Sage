@@ -23,7 +23,7 @@ class MessageType(Enum):
     TASK_ANALYSIS = "task_analysis"
     TASK_DECOMPOSITION = "task_decomposition"
     PLANNING = "planning"
-    EXECUTION = "execution"
+    EXECUTION = "execution"  # 执行阶段时assistant 的任务描述使用
     OBSERVATION = "observation"
     FINAL_ANSWER = "final_answer"
     SYSTEM = "system"
@@ -32,7 +32,6 @@ class MessageType(Enum):
 
     # 工具相关
     TOOL_CALL = "tool_call"
-    TOOL_RESPONSE = "tool_response"
     TOOL_CALL_RESULT = "tool_call_result"  # 兼容现有代码
     
     # 其他类型
@@ -45,7 +44,6 @@ class MessageType(Enum):
     HANDOFF_AGENT = "handoff_agent"
     STAGE_SUMMARY = "stage_summary"
     DO_SUBTASK_RESULT = "do_subtask_result"
-    DO_SUBTASK = "do_subtask"
 
 
 @dataclass
