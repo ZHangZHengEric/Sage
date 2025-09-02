@@ -51,8 +51,8 @@ class TaskRewriteAgent(AgentBase):
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
-        all_user_and_exec_messages = message_manager.extract_all_user_and_exec_messages(recent_turns=5)
-        dialogue_history = MessageManager.convert_messages_to_dict_for_request(all_user_and_exec_messages)
+        history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+        dialogue_history = MessageManager.convert_messages_to_dict_for_request(history_messages)
 
         last_user_message = message_manager.get_last_user_message()
         if last_user_message is None:

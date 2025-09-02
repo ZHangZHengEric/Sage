@@ -50,9 +50,9 @@ class QuerySuggestAgent(AgentBase):
 
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
-        task_description_messages = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
-        recent_message_str = MessageManager.convert_messages_to_str(task_description_messages)
+
+        conversation_messages = message_manager.extract_all_context_messages(recent_turns=2,max_length=self.max_history_context_length,last_turn_user_only=False)
+        recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         prompt = self.QUERY_SUGGEST_PROMPT.format(
             task_description=recent_message_str
         )

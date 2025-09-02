@@ -52,8 +52,8 @@ TaskManager状态及执行结果:
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            recent_message = message_manager.extract_all_user_and_final_answer_messages(recent_turns=3)
-            task_description_messages_str = MessageManager.convert_messages_to_str(recent_message)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         completed_actions_messages = message_manager.get_all_execution_messages_after_last_user()
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
