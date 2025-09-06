@@ -79,6 +79,12 @@ reason尽可能简单，最多20个字符
 8. 禁止输出”我将结束本次会话“这种显性表达，而是要根据对话，询问后续的问题或者需求。如果没有后续的问题或者需求，不输出其他额外的任何内容。
 9. 调用complete_task 工具前，不要解释或者描述要调用该工具的原因，直接调用。
 """
+        self.agent_custom_system_prefix = """\n# 其他执行的基本要求：
+1. 调用完工具后，一定要用面向用户的需求用自然语言描述工具调用的结果，不要直接结束任务。
+2. 在调用工具前需要解释一下为什么要调用工具，但是不要说出工具的真实名称或者ID信息等，而是用简单的语言描述工具的功能。
+3. 认真检查工具列表，确保工具名称正确，参数正确，不要调用不存在的工具。
+4. 禁止输出”我将结束本次会话“这种显性表达，而是要根据对话，询问后续的问题或者需求。如果没有后续的问题或者需求，不输出其他额外的任何内容。
+"""
         # 最大循环次数常量
         self.max_loop_count = 10
         self.agent_name = "SimpleAgent"
@@ -248,7 +254,10 @@ reason尽可能简单，最多20个字符
             suggested_tools = self._get_tool_suggestions(prompt, session_id)
             
             # 添加complete_task工具
-            suggested_tools.append('complete_task')
+            # suggested_tools.append('complete_task')
+            # 如果有complete_task 要去掉
+            if 'complete_task' in suggested_tools:
+                suggested_tools.remove('complete_task')
             
             logger.info(f"SimpleAgent: 获取到建议工具: {suggested_tools}")
             return suggested_tools
