@@ -9,6 +9,7 @@ from openai import responses
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.tasks.task_manager import TaskManager
+from sagents.context.workflows import WorkflowManager
 from sagents.utils.logger import logger
 import json
 import sys,os
@@ -55,8 +56,7 @@ class SessionContext:
         self.system_context = {}       # 当前系统的环境变量
         self.message_manager = MessageManager()
         self.task_manager = TaskManager(session_id=self.session_id)
-        self.candidate_workflows = []   # 当前系统可用的workflow
-        self.selected_workflow = None     # 当前选中的workflow
+        self.workflow_manager = WorkflowManager()  # 工作流管理器
         self.audit_status = {}  # 主要存储 agent 执行过程中保存的结构化信息
         
         # 初始化UserMemoryManager
@@ -94,7 +94,7 @@ class SessionContext:
         self.system_context['current_time(北京时间)'] = current_time_str
         # file_workspace 去掉 workspace_root的绝对路径的 前置路径
         # self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
-        self.system_context['file_workspace'] = self.agent_workspace
+        self.system_context['local_file_workspace'] = self.agent_workspace
         if self.user_id:
             self.system_context['user_id'] = self.user_id
         # if self.system_context['file_workspace'].startswith('/'):

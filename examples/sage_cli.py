@@ -107,7 +107,8 @@ async def chat(agent: SAgent, tool_manager: Union[ToolManager,ToolProxy]):
                             # 确保 show_content 是字符串，避免 'str' object has no attribute 'invalidation_hash' 错误
                             content_to_print = str(chunk.show_content)
                             # 使用改进的流式输出方法，显示增量的内容，content_to_print就是增量的内容
-                            current_message_box.add_content(content_to_print)
+                            for char in content_to_print:
+                                current_message_box.add_content(char)
             
             # 完成最后一个消息框
             if current_message_box is not None:
