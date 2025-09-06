@@ -158,7 +158,7 @@ class SAgent:
             if available_workflows:
                 if len(available_workflows.keys()) > 0:
                     logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                    session_context.candidate_workflows = available_workflows
+                    session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
             session_context.status = SessionStatus.RUNNING
             initial_messages = self._prepare_initial_messages(input_messages)
@@ -189,17 +189,21 @@ class SAgent:
             #         yield message_chunks
 
 
-            if available_workflows:
-                if len(available_workflows) >0:
+            # 检查WorkflowManager中是否有工作流
+            if session_context.workflow_manager.list_workflows():
+                if len(session_context.workflow_manager.list_workflows()) > 5:
                     for message_chunks in self._execute_agent_phase(
-                        session_context=session_context,
-                        tool_manager=tool_manager,
-                        session_id=session_id,
-                        agent=self.workflow_select_agent,
-                        phase_name="工作流选择"
-                    ):
-                        session_context.message_manager.add_messages(message_chunks)
-                        yield message_chunks
+                            session_context=session_context,
+                            tool_manager=tool_manager,
+                            session_id=session_id,
+                            agent=self.workflow_select_agent,
+                            phase_name="工作流选择"
+                        ):
+                            session_context.message_manager.add_messages(message_chunks)
+                            yield message_chunks
+                else:
+                    session_context.add_and_update_system_context({'workflow_guidance': session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())})
+
             # 1. 任务分析阶段
             if deep_thinking:
                 for message_chunks in self._execute_agent_phase(
