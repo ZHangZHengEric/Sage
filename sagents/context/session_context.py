@@ -94,7 +94,7 @@ class SessionContext:
         self.system_context['current_time(北京时间)'] = current_time_str
         # file_workspace 去掉 workspace_root的绝对路径的 前置路径
         # self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
-        self.system_context['local_file_workspace'] = self.agent_workspace
+        self.system_context['file_workspace'] = self.agent_workspace
         if self.user_id:
             self.system_context['user_id'] = self.user_id
         # if self.system_context['file_workspace'].startswith('/'):
