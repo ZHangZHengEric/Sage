@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from .tool_manager import ToolManager
 from sagents.utils.logger import logger
-
+from sagents.context.session_context import SessionContext
 
 class ToolProxy:
     """
@@ -86,12 +86,12 @@ class ToolProxy:
         self._check_tool_available(name)
         return self.tool_manager.get_tool(name)
     
-    def run_tool(self, tool_name: str, **kwargs) -> Any:
+    def run_tool(self, tool_name: str, session_context: SessionContext, **kwargs) -> Any:
         """
         执行工具（仅限可用工具）
         """
         self._check_tool_available(tool_name)
-        return self.tool_manager.run_tool(tool_name, **kwargs)
+        return self.tool_manager.run_tool(tool_name, session_context, **kwargs)
 
 
 class ToolProxyFactory:

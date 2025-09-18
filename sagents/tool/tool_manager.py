@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Type, Optional, Union
 from .tool_base import ToolBase
 from .tool_config import convert_spec_to_openai_format,ToolSpec, McpToolSpec,SseServerParameters,StreamableHttpServerParameters,AgentToolSpec
 from sagents.utils.logger import logger
+from sagents.context.session_context import SessionContext
 import importlib
 import pkgutil
 from pathlib import Path
@@ -439,7 +440,7 @@ class ToolManager:
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
         return [convert_spec_to_openai_format(tool) for tool in self.tools.values()]
 
-    def run_tool(self, tool_name: str, messages: list=[], session_id: str="", **kwargs) -> Any:
+    def run_tool(self, tool_name: str, session_context: SessionContext, session_id: str="", **kwargs) -> Any:
         """Execute a tool by name with provided arguments"""
         execution_start = time.time()
         logger.info(f"Executing tool: {tool_name} (session: {session_id})")
@@ -481,7 +482,7 @@ class ToolManager:
                 final_result = self._execute_standard_tool(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
                 # For AgentToolSpec, return a generator for streaming
-                return self._execute_agent_tool_streaming(tool, messages, session_id)
+                return self._execute_agent_tool_streaming(tool, session_context, session_id)
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
@@ -507,13 +508,13 @@ class ToolManager:
             return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
 
 
-    def _execute_agent_tool_streaming(self, tool: AgentToolSpec, messages: list, session_id: str):
+    def _execute_agent_tool_streaming(self, tool: AgentToolSpec, session_context: SessionContext, session_id: str):
         """
         执行AgentToolSpec并返回流式结果
         
         Args:
             tool: AgentToolSpec实例
-            messages: 消息列表
+            session_context: 会话上下文
             session_id: 会话ID
             
         Yields:
@@ -530,7 +531,7 @@ class ToolManager:
                 logger.debug(f"Using run_stream method for agent: {tool.name}")
                 # 使用流式方法
                 stream_generator = agent_instance.run_stream(
-                    messages=messages, 
+                    session_context=session_context, 
                     tool_manager=self,
                     session_id=session_id
                 )
@@ -542,7 +543,7 @@ class ToolManager:
             else:
                 logger.debug(f"Using non-streaming method for agent: {tool.name}")
                 # 回退到非流式方法
-                result = tool.func(messages=messages, session_id=session_id)
+                result = tool.func(session_context=session_context, session_id=session_id)
                 
                 # 将结果包装为流式格式
                 if isinstance(result, list):

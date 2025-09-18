@@ -155,8 +155,11 @@ class WorkflowManager:
 建议按以下步骤执行任务（可根据实际情况灵活调整）：
 
 """
-                for i, step in enumerate(workflow.steps, 1):
-                    workflow_guidance += f"{i}. {step}\n"
+                ordered_steps = workflow.get_ordered_steps()
+                for i, step in enumerate(ordered_steps, 0):
+                    print(step)
+                    print(type(step))
+                    workflow_guidance += f"{i}. {step.description}\n"
 
                 workflow_list += workflow_guidance
 

@@ -283,6 +283,9 @@ reason尽可能简单，最多20个字符
             # 获取可用工具，只提取工具名称
             available_tools = tool_manager.list_tools_simplified()
             tool_names = [tool['name'] for tool in available_tools] if available_tools else []
+            if len(tool_names) <= 10:
+                logger.info(f"SimpleAgent: 可用工具数量小于等于10个，直接返回所有工具: {tool_names}")
+                return tool_names
             available_tools_str = ", ".join(tool_names) if tool_names else '无可用工具'
             
             # 准备消息
@@ -429,7 +432,6 @@ reason尽可能简单，最多20个字符
             all_new_response_chunks.append(execution_message)
             # 合并消息
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
-            
             all_new_response_chunks = []
             # 调用LLM，进行执行
             should_break = False
@@ -455,6 +457,7 @@ reason尽可能简单，最多20个字符
                 break
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
+            all_new_response_chunks = []
             is_task_complete = self._is_task_complete(messages_input, session_id)
             if is_task_complete:
                 logger.info("SimpleAgent: 任务完成，终止执行")
@@ -732,7 +735,7 @@ reason尽可能简单，最多20个字符
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             tool_response = tool_manager.run_tool(
                 tool_name,
-                messages=messages_input,
+                session_context=get_session_context(session_id),
                 session_id=session_id,
                 **arguments
             )

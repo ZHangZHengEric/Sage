@@ -1,4 +1,5 @@
 import traceback
+from reagent.sagents.context import session_context
 from sagents.context.messages import message_manager
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -314,7 +315,7 @@ class CommonAgent(AgentBase):
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             tool_response = tool_manager.run_tool(
                 tool_name,
-                messages=messages_input,
+                session_context=get_session_context(session_id),
                 session_id=session_id,
                 **arguments
             )
