@@ -29,6 +29,7 @@ class MessageType(Enum):
     SYSTEM = "system"
     QUERY_SUGGEST = "query_suggest"
     MEMORY_EXTRACTION = "memory_extraction"
+    TASK_ROUTER = "task_router"
 
     # 工具相关
     TOOL_CALL = "tool_call"

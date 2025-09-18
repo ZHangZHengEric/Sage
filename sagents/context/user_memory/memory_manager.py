@@ -186,7 +186,7 @@ class UserMemoryManager:
             # 统一通过tool manager调用记忆工具
             return self.tool_manager.run_tool(
                 tool_name='remember_user_memory',
-                messages=[],
+                session_context=None,
                 session_id=session_id,
                 user_id=self.user_id,
                 memory_key=memory_key,
@@ -218,7 +218,7 @@ class UserMemoryManager:
             # 统一通过tool manager调用记忆工具
             result = self.tool_manager.run_tool(
                 tool_name='recall_user_memory',
-                messages=[],
+                session_context=None,
                 session_id=session_id,
                 user_id=self.user_id,
                 query=query,
@@ -281,7 +281,7 @@ class UserMemoryManager:
             # 统一通过tool manager调用记忆工具
             return self.tool_manager.run_tool(
                 tool_name='forget_user_memory',
-                messages=[],
+                session_context=None,
                 session_id=session_id,
                 user_id=self.user_id,
                 memory_key=memory_key
@@ -316,7 +316,7 @@ class UserMemoryManager:
                     # 使用工具管理器调用按类型查询记忆的方法
                     result = self.tool_manager.run_tool(
                         tool_name='recall_user_memory_by_type',
-                        messages=[],
+                        session_context=None,
                         session_id=effective_session_id,
                         user_id=self.user_id,
                         memory_type=memory_type,

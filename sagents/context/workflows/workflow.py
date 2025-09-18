@@ -128,7 +128,7 @@ class Workflow:
         if not isinstance(step, WorkflowStep):
             raise ValueError("Workflow.add_step: step必须是WorkflowStep实例")
         self.steps[step.id] = step
-        logger.debug(f"Workflow '{self.name}': 添加步骤 '{step.id}'")
+        logger.debug(f"Workflow '{self.name}': 添加步骤 '{step.id}', 步骤描述: {step.description}")
     
     def remove_step(self, step_id: str) -> bool:
         """移除步骤"""

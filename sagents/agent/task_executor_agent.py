@@ -397,7 +397,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             tool_response = tool_manager.run_tool(
                 tool_name,
-                messages=messages_input,
+                session_context=get_session_context(session_id),
                 session_id=session_id,
                 **arguments
             )

@@ -80,8 +80,8 @@ reason尽可能简单，最多20个字符
 9. 调用complete_task 工具前，不要解释或者描述要调用该工具的原因，直接调用。
 """
         self.agent_custom_system_prefix = """\n# 其他执行的基本要求：
-1. 调用完工具后，一定要用面向用户的需求用自然语言描述工具调用的结果，不要直接结束任务。
-2. 在调用工具前需要解释一下为什么要调用工具，但是不要说出工具的真实名称或者ID信息等，而是用简单的语言描述工具的功能。
+1. 当调用完工具后，一定要用面向用户的需求用自然语言描述工具调用的结果，不要直接结束任务。
+2. 如果需要调用工具，在调用工具前需要解释一下为什么要调用工具，但是不要说出工具的真实名称或者ID信息等，而是用简单的语言描述工具的功能。
 3. 认真检查工具列表，确保工具名称正确，参数正确，不要调用不存在的工具。
 4. 禁止输出”我将结束本次会话“这种显性表达，而是要根据对话，询问后续的问题或者需求。如果没有后续的问题或者需求，不输出其他额外的任何内容。
 """
@@ -237,7 +237,11 @@ reason尽可能简单，最多20个字符
         try:
             # 获取可用工具，只提取工具名称
             available_tools = tool_manager.list_tools_simplified()
+            
             tool_names = [tool['name'] for tool in available_tools] if available_tools else []
+            if len(tool_names) <= 10:
+                logger.info(f"SimpleAgent: 可用工具数量小于等于9个，直接返回所有工具: {tool_names}")
+                return tool_names
             available_tools_str = ", ".join(tool_names) if tool_names else '无可用工具'
             
             # 准备消息
@@ -333,7 +337,6 @@ reason尽可能简单，最多20个字符
             
             # 合并消息
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
-            
             all_new_response_chunks = []
             
             # 调用LLM
@@ -359,6 +362,7 @@ reason尽可能简单，最多20个字符
                 break
             
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
+            all_new_response_chunks = []
             # 检查任务是否完成
             if self._is_task_complete(messages_input, session_id):
                 logger.info("SimpleAgent: 任务完成，终止执行")
@@ -621,7 +625,7 @@ reason尽可能简单，最多20个字符
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             tool_response = tool_manager.run_tool(
                 tool_name,
-                messages=messages_input,
+                session_context=get_session_context(session_id),
                 session_id=session_id,
                 **arguments
             )

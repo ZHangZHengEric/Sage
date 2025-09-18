@@ -27,6 +27,7 @@ from sagents.agent.simple_react_agent import SimpleReactAgent
 from sagents.agent.query_suggest_agent import QuerySuggestAgent
 from sagents.agent.task_rewrite_agent import TaskRewriteAgent
 from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
+from sagents.agent.task_router_agent import TaskRouterAgent
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context,list_active_sessions
 from sagents.context.messages.message import MessageChunk,MessageRole,MessageType
@@ -112,6 +113,9 @@ class SAgent:
         self.memory_extraction_agent = MemoryExtractionAgent(
             self.model, self.model_config, system_prefix=self.system_prefix
         )
+        self.task_router_agent = TaskRouterAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix
+        )
         
         logger.info("SAgent: 所有智能体初始化完成")
 
@@ -120,9 +124,9 @@ class SAgent:
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
         session_id: Optional[str] = None, 
         user_id: Optional[str] = None,
-        deep_thinking: bool = True, 
+        deep_thinking: bool = None, 
         max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
-        multi_agent: bool = True,
+        multi_agent: bool = None,
         more_suggest: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
@@ -203,6 +207,25 @@ class SAgent:
                             yield message_chunks
                 else:
                     session_context.add_and_update_system_context({'workflow_guidance': session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())})
+            
+            # 当deep_thinking 或者 multi_agent 为None，其一为none时，调用task router
+            if deep_thinking is None or multi_agent is None:
+                for message_chunks in self._execute_agent_phase(
+                    session_context=session_context,
+                    tool_manager=tool_manager,
+                    session_id=session_id,
+                    agent=self.task_router_agent,
+                    phase_name="任务路由"
+                ):
+                    session_context.message_manager.add_messages(message_chunks)
+                    yield message_chunks
+
+            if deep_thinking is None:
+                deep_thinking = session_context.audit_status.get('deep_thinking', False)
+
+            if multi_agent is None:
+                router_agent = session_context.audit_status.get('router_agent', "单智能体")
+                multi_agent = router_agent != "单智能体"
 
             # 1. 任务分析阶段
             if deep_thinking:

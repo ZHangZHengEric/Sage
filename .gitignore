@@ -8,7 +8,7 @@ mcp_servers/mcp_setting.json
 examples/fastapi_react_demo/frontend/node_modules/
 .DS_Store
 # Byte-compiled / optimized / DLL files
-*/__pycache__/*
+__pycache__/
 logs/
 workspace/
 *.py[cod]
