@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.4-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9.5-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -235,18 +235,19 @@ python examples/sage_cli.py \
 
 ## 🎯 Core Features
 
-### 🤖 **Multi-Agent Collaboration (v0.9.3)**
+### 🤖 **Multi-Agent Collaboration (v0.9.5)**
 - **Task Analysis Agent**: Enhanced deep understanding with context awareness and unified system prompt management
 - **Task Decompose Agent**: Intelligent task breakdown with dependency analysis, parallel execution planning, and TaskManager integration
 - **Planning Agent**: Strategic decomposition with dependency management, optimal tool selection, and MessageManager optimization
 - **Executor Agent**: Intelligent tool execution with error recovery, retry mechanisms, parallel processing, and result management
 - **Observation Agent**: Advanced progress monitoring with completion detection, quality assessment, and TaskManager state tracking
 - **Summary Agent**: Comprehensive result synthesis with structured output, actionable insights, and execution history analysis
+- **Task Router Agent**: 🆕 Intelligent task routing system that automatically directs tasks to the most suitable agents based on task type and complexity
 - **Task Rewrite Agent**: Intelligent task reformulation and optimization for better execution
 - **Task Stage Summary Agent**: Intermediate progress summarization and milestone tracking
 - **Query Suggest Agent**: Smart query enhancement and suggestion generation
 - **Workflow Select Agent**: Intelligent workflow selection and optimization
-- **Simple Agent**: Lightweight agent for basic tasks and rapid prototyping
+- **Simple Agent**: Lightweight agent for basic tasks and rapid prototyping with optimized tool handling logic
 - **Simple React Agent**: Reactive agent with real-time response capabilities
 - **Common Agent**: General-purpose agent for standard operations
 - **Message Manager**: Smart message filtering and compression system for token optimization across all agents
@@ -584,34 +585,36 @@ Stop AI responses at any time with graceful cancellation and resource cleanup, w
 - 💾 **State preservation** - partial results are saved and accessible
 - 🔄 **Resumable execution** - continue from interruption point if needed
 
-## 🔄 Recent Updates (v0.9.3)
+## 🔄 Recent Updates (v0.9.5)
 
 ### ✨ New Features
+- **Task Router Agent**: 🆕 Intelligent task routing system that automatically directs tasks to the most suitable agents based on task type and complexity
+- **Unified Tool Interface**: Standardized tool calling interface using session_context instead of messages parameter for better consistency
+- **Enhanced Workflow Display**: Improved workflow step visualization with detailed step descriptions and progress indicators
+- **Optimized Simple Agent**: Enhanced tool handling logic that returns directly when tool count is minimal for better performance
+- **Simplified Configuration**: Updated .gitignore with streamlined __pycache__ configuration for cleaner project structure
 - **Advanced File Search**: Enhanced file content search with multi-keyword support, context extraction, and relevance scoring
 - **Built-in MCP Servers**: Four production-ready MCP servers for file operations, parsing, command execution, and web search
 - **Triple MCP Connection Support**: STDIO, SSE, and Streamable HTTP connection types with API key authentication
-- **Extended Agent Ecosystem**: 13 specialized agents including Task Rewrite, Query Suggest, Workflow Select, and more
+- **Extended Agent Ecosystem**: 14 specialized agents including Task Router, Task Rewrite, Query Suggest, Workflow Select, and more
 - **Custom Agent Development**: AgentBase framework for creating specialized agents with standardized interfaces
 - **Agent Flow Orchestration**: Sequential agent execution with AgentFlow for custom workflow design
 - **Agent-to-Tool Conversion**: Automatic conversion of agents to tools for seamless integration
-- **Security Enhancements**: Comprehensive security validation with path traversal protection and dangerous file detection
-- **Smart Encoding Detection**: Automatic character encoding detection for international file support
-- **Enhanced File Parser**: Support for 20+ file formats including PDF, Word, Excel, PowerPoint, and more
-- **Command Execution Server**: Secure cross-platform command execution with timeout management
-- **Web Search Integration**: Serper-powered web search with content extraction and rate limiting
 
 ### 🔧 Technical Improvements
+- **Interface Standardization**: Unified tool calling patterns across all agents for better maintainability
 - **Performance Optimization**: Improved file reading with range-based operations and metadata caching
 - **Error Recovery**: Enhanced error handling with detailed diagnostic information and recovery strategies
 - **Type Safety**: Comprehensive parameter validation with schema enforcement
 - **Memory Management**: Optimized memory usage for large file operations
 - **Streaming Support**: Real-time streaming capabilities for long-running operations
+- **Workflow Visualization**: Enhanced step display with descriptive information and better user experience
 
 ### 🐛 Bug Fixes
-- **Stream Response Merging**: Fixed ChatCompletion choices field type errors in stream formatting
-- **Message Manager**: Resolved type annotation inconsistencies and attribute access issues
-- **Content Duplication**: Fixed content repetition issues in planning agent streaming
-- **Session Management**: Unified session_id access patterns across all agent components
+- **Tool Interface Consistency**: Standardized tool calling interface across all agent types
+- **Workflow Step Display**: Improved step description rendering and progress tracking
+- **Simple Agent Optimization**: Fixed tool handling logic for scenarios with minimal tool requirements
+- **Configuration Management**: Streamlined project configuration and dependency management
 - **Framework Stability**: Enhanced overall system reliability and error recovery
 
 ## 📄 License
