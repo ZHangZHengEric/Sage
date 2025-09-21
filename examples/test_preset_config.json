@@ -1,0 +1,13 @@
+{
+    "systemPrefix": "You are a helpful AI assistant specialized in software development and debugging. You provide clear, concise, and accurate responses.",
+    "systemContext": {
+        "role": "software_developer",
+        "expertise": ["Python", "JavaScript", "debugging", "code_review"]
+    },
+    "availableWorkflows": {
+        "development": ["code_analysis", "bug_fixing", "optimization"],
+        "testing": ["unit_testing", "integration_testing"]
+    },
+    "availableTools": ["file_read", "file_write", "execute_python_code", "search_content_in_file"],
+    "maxLoopCount": 10
+}
