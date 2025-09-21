@@ -460,9 +460,23 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
 def run_web_demo(api_key: str, model_name: str = None, base_url: str = None, 
                  max_tokens: int = None, temperature: float = None,
                  workspace: str = None, memory_root: str = None, mcp_config: str = None,
-                 preset_running_config: str = None, logs_dir: str = None):
+                 preset_running_config: str = None, logs_dir: str = None, 
+                 host: str = None, port: int = None):
     """运行 Streamlit web 界面"""
     logger.info("启动 Streamlit web 演示")
+    
+    # 设置Streamlit服务器配置（通过环境变量）
+    if port:
+        os.environ['STREAMLIT_SERVER_PORT'] = str(port)
+        logger.info(f"设置Streamlit端口为: {port}")
+    if host:
+        os.environ['STREAMLIT_SERVER_ADDRESS'] = host
+        logger.info(f"设置Streamlit主机为: {host}")
+    
+    # 显示服务器信息
+    actual_host = host or '0.0.0.0'
+    actual_port = port or 8501
+    logger.info(f"Streamlit服务器将在 http://{actual_host}:{actual_port} 启动")
         
     # 初始化会话状态
     init_session_state()
@@ -616,7 +630,9 @@ def main():
             config['memory_root'],
             config['mcp_config'],
             config['preset_running_config'],
-            config['logs_dir']
+            config['logs_dir'],
+            config['host'],
+            config['port']
         )
         
             
