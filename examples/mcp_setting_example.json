@@ -1,0 +1,9 @@
+{
+    "mcpServers": {
+        "sage_mcp_hub": {
+            "sse_url":"http://sage_mcp_hub:20042/sse",
+            "disabled": false,
+            "api_key": "sk-hub-*****-hEZgIf9leyswgqPw8HI"
+        }
+    }
+}
