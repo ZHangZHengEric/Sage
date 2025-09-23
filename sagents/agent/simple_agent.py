@@ -21,8 +21,11 @@ class SimpleAgent(AgentBase):
     """
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.TOOL_SUGGESTION_PROMPT_TEMPLATE = """你是一个智能助手，你要根据用户的需求，为用户提供帮助，回答用户的问题或者满足用户的需求。
-你要根据历史的对话以及用户的请求，获取解决用户请求用到的所有可能的工具。
+        self.TOOL_SUGGESTION_PROMPT_TEMPLATE = """你是一个工具推荐专家，你的任务是根据用户的需求，为用户推荐合适的工具。
+你要根据历史的对话以及用户的请求，以及agent的配置，获取解决用户请求用到的所有可能的工具。
+
+## agent的配置要求
+{agent_config}
 
 ## 可用工具
 {available_tools_str}
@@ -45,14 +48,19 @@ class SimpleAgent(AgentBase):
 """
         self.TASK_COMPLETE_PROMPT_TEMPLATE = """你要根据历史的对话以及用户的请求，判断是否需要中断执行任务。
 
-## 中断执行任务判断规则
+## 是否中断执行任务判断规则
 1. 中断执行任务：
   - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断中断执行任务。
   - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断中断执行任务。
   - 当对话过程中，需要用户的确认或者输入时，需要判断中断执行任务。
+
 2. 继续执行任务：
   - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断继续执行任务。
   - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断继续执行任务。因为用户看不到工具执行的结果。
+  - 当对话中，Assistant AI 最后表达要继续做一些其他的事情或者继续分析其他的内容，例如出现（等待工具调用，请稍等，等待生成，接下来，我将调用）等表达时，则判断继续执行任务。
+
+## 输出内容一致对齐逻辑
+1. 如果reason 是等待工具调用，则task_interrupted是false
 
 ## 用户的对话历史以及新的请求的执行过程
 {messages}
@@ -60,12 +68,18 @@ class SimpleAgent(AgentBase):
 输出格式：
 ```json
 {{
-    "task_interrupted": true,
-    "reason": "任务完成"
+    "reason": "任务完成",
+    "task_interrupted": true
 }}
-
-reason尽可能简单，最多20个字符
 ```
+或者
+```json
+{{
+    "reason": "等待工具调用",
+    "task_interrupted": false
+}}
+```
+reason尽可能简单，最多20个字符
 """
 
         self.agent_custom_system_prefix = """\n
@@ -251,6 +265,7 @@ reason尽可能简单，最多20个字符
             prompt = self.TOOL_SUGGESTION_PROMPT_TEMPLATE.format(
                 session_id=session_id,
                 available_tools_str=available_tools_str,
+                agent_config=self.prepare_unified_system_message(session_id,custom_prefix=self.agent_custom_system_prefix).content,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
             
