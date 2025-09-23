@@ -12,6 +12,7 @@ import uuid
 import argparse
 import traceback
 import asyncio
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
@@ -438,7 +439,7 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
     new_messages = streaming_handler.process_stream(
         st.session_state.inference_conversation.copy(),
         tool_manager,
-        session_id=None,
+        session_id=time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime()) +'_'+str(uuid.uuid4())[:4],
         use_deepthink=st.session_state.get('use_deepthink', True),
         use_multi_agent=st.session_state.get('use_multi_agent', True)
     )
