@@ -30,6 +30,7 @@ class MessageType(Enum):
     QUERY_SUGGEST = "query_suggest"
     MEMORY_EXTRACTION = "memory_extraction"
     TASK_ROUTER = "task_router"
+    DO_SUBTASK_RESULT = "do_subtask_result"
 
     # 工具相关
     TOOL_CALL = "tool_call"
@@ -44,7 +45,6 @@ class MessageType(Enum):
     # 特殊类型
     HANDOFF_AGENT = "handoff_agent"
     STAGE_SUMMARY = "stage_summary"
-    DO_SUBTASK_RESULT = "do_subtask_result"
 
 
 @dataclass
