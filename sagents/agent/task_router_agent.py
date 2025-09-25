@@ -85,7 +85,7 @@ class TaskRouterAgent(AgentBase):
                     all_task_router_chunks_content += llm_repsonse_chunk.choices[0].delta.content
                     yield [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=llm_repsonse_chunk.choices[0].delta.content,
+                        content="",
                         message_id=message_id,
                         show_content="",
                         message_type=MessageType.TASK_ROUTER.value

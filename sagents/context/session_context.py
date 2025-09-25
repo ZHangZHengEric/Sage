@@ -90,8 +90,8 @@ class SessionContext:
                     self.end_time = session_status["end_time"]
                     self.system_context = session_status["system_context"]
 
-        current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d %A %H:%M:%S %z')
-        self.system_context['current_time(北京时间)'] = current_time_str
+        current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
+        self.system_context['current_time'] = current_time_str
         # file_workspace 去掉 workspace_root的绝对路径的 前置路径
         # self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
         self.system_context['file_workspace'] = self.agent_workspace
