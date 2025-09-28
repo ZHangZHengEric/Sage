@@ -159,7 +159,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
-                session_id=session_id
+                session_id=session_id,
             )
         else:
             # 发送换行消息（也包含usage信息）
@@ -271,7 +271,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 yield [MessageChunk(
                     role=MessageRole.ASSISTANT.value,
                     content='已经完成了满足用户的所有要求',
-                    message_id=content_response_message_id,
+                    message_id=str(uuid.uuid4()),
                     show_content='已经完成了满足用户的所有要求',
                     message_type=MessageType.DO_SUBTASK_RESULT.value
                 )]

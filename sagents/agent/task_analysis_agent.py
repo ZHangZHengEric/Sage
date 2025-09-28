@@ -44,6 +44,7 @@ class TaskAnalysisAgent(AgentBase):
         prompt = PromptManager().get('analysis_template').format(
             conversation=recent_message_str,
             available_tools=available_tools_str,
+            agent_description = self.system_prefix
         )
 
         # 为整个分析流程生成统一的message_id

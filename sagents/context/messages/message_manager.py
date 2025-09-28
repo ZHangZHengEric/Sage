@@ -249,6 +249,7 @@ class MessageManager:
                 if msg.type in [MessageType.FINAL_ANSWER.value,
                                 MessageType.DO_SUBTASK_RESULT.value,
                                 MessageType.TOOL_CALL.value,
+                                MessageType.TASK_ANALYSIS.value,
                                 MessageType.TOOL_CALL_RESULT.value]:
                     merged_messages.append(msg)
                     merged_length += len(msg.content or '')

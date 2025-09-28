@@ -1,5 +1,6 @@
 
 import traceback
+from sagents.utils.prompt_manager import PromptManager
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, Generator
@@ -17,8 +18,12 @@ from copy import deepcopy
 class TaskObservationAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
+        self.SYSTEM_PREFIX_FIXED = PromptManager().task_observation_system_prefix
         self.OBSERVATION_PROMPT_TEMPLATE = """# 任务执行分析指南
 通过用户的历史对话，来观察用户的需求或者任务
+
+## 智能体的描述和要求
+{agent_description}
 
 ## 用户历史对话
 {task_description}
@@ -120,7 +125,8 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
         prompt = self.OBSERVATION_PROMPT_TEMPLATE.format(
             task_description=task_description_messages_str,
             task_manager_status=task_manager_status,
-            execution_results=recent_execution_results_messages_str
+            execution_results=recent_execution_results_messages_str,
+            agent_description=self.system_prefix
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id),
