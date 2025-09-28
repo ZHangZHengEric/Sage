@@ -216,6 +216,7 @@ class MessageManager:
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
             max_length: 提取的最大长度，0表示不限制
+            last_turn_user_only: 是否只提取最后一个对话轮的用户消息，默认是True
 
         Returns:
             提取后的消息列表
@@ -342,7 +343,7 @@ class MessageManager:
                 return msg
         return None
 
-    def get_all_execution_messages_after_last_user(self,recent_turns:int=0) -> List[MessageChunk]:
+    def get_all_execution_messages_after_last_user(self,recent_turns:int=0,max_content_length:int=0) -> List[MessageChunk]:
         messages_after_last_user = self.get_after_last_user_messages()
         messages_after_last_execution = []
         for msg in messages_after_last_user:
@@ -351,6 +352,23 @@ class MessageManager:
                             MessageType.TOOL_CALL.value,
                             MessageType.TOOL_CALL_RESULT.value]:
                 messages_after_last_execution.append(msg)
+        if recent_turns > 0:
+            messages_after_last_execution = messages_after_last_execution[-recent_turns:]
+        
+        if max_content_length >0 :
+            # 截取从后往前的 n条消息，n条消息的content长度 < max_content_length ,但是n+1 消息，content长度 > max_content_length
+            # 则只保留 n条消息
+            new_messages_after_last_execution = []
+            total_length = 0
+            for msg in messages_after_last_execution[::-1]:
+                if msg.content:
+                    total_length += len(msg.content)
+                if total_length > max_content_length:
+                    break
+                new_messages_after_last_execution.append(msg)
+            
+            messages_after_last_execution = new_messages_after_last_execution[::-1]
+
         return messages_after_last_execution
 
     def get_all_messages_content_length(self):

@@ -57,7 +57,7 @@ TaskManager状态及执行结果:
             history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
-        completed_actions_messages = message_manager.get_all_execution_messages_after_last_user()
+        completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=self.max_history_context_length)
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
         
         task_manager_status_and_results = task_manager.get_all_tasks_summary()
