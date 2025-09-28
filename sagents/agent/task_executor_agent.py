@@ -52,11 +52,11 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 content = session_context.audit_status['task_rewrite'],
                 message_type=MessageType.NORMAL.value
             )]
-            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3)
+            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3,max_content_length=self.max_history_context_length)
             history_messages = rewrite_user + messages_after_last_user
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length)
-            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length,last_turn_user_only=True)
+            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3,max_content_length=self.max_history_context_length)
             history_messages.extend(messages_after_last_user)
 
         last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
