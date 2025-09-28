@@ -8,6 +8,8 @@ from sagents.context.messages.message import MessageChunk, MessageRole,MessageTy
 from sagents.context.session_context import SessionContext
 from sagents.context.tasks.task_base import TaskBase
 from sagents.context.tasks.task_manager import TaskManager
+from sagents.utils.prompt_manager import PromptManager
+
 import json
 import uuid,re
 from copy import deepcopy
@@ -15,7 +17,11 @@ from copy import deepcopy
 class TaskPlanningAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
+        self.SYSTEM_PREFIX_FIXED = PromptManager().task_planning_system_prefix
         self.PLANNING_PROMPT_TEMPLATE ="""# 任务规划指南
+
+## 智能体的描述和要求
+{agent_description}
 
 ## 完整任务描述
 {task_description}
@@ -84,7 +90,8 @@ class TaskPlanningAgent(AgentBase):
             task_description=task_description_messages_str,
             task_manager_status=task_manager_status,
             completed_actions=completed_actions_messages_str,
-            available_tools_str=available_tools_str
+            available_tools_str=available_tools_str,
+            agent_description=self.system_prefix
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id),

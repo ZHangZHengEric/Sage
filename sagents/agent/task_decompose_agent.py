@@ -8,6 +8,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole,MessageTy
 from sagents.context.session_context import SessionContext
 from sagents.context.tasks.task_base import TaskBase
 from sagents.context.tasks.task_manager import TaskManager
+from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid,re
 from copy import deepcopy
@@ -15,8 +16,12 @@ from copy import deepcopy
 class TaskDecomposeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
+        self.SYSTEM_PREFIX_FIXED = PromptManager().task_decompose_system_prefix
         self.DECOMPOSE_PROMPT_TEMPLATE = """# 任务分解指南
 通过用户的历史对话，来观察用户的需求或者任务
+
+## 智能体的描述和要求
+{agent_description}
 
 ## 用户历史对话
 {task_description}
@@ -66,7 +71,8 @@ class TaskDecomposeAgent(AgentBase):
 
         prompt = self.DECOMPOSE_PROMPT_TEMPLATE.format(
             task_description=recent_message_str,
-            available_tools_str=available_tools_str
+            available_tools_str=available_tools_str,
+            agent_description=self.system_prefix,
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id),
