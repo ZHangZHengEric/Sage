@@ -1258,71 +1258,7 @@ class FileParserTool(ToolBase):
         return suggestions
 
     @ToolBase.tool()
-    def batch_extract_text(
-        self,
-        file_paths: List[str],
-        max_length: int = 3000,
-        include_metadata: bool = False
-    ) -> Dict[str, Any]:
-        """批量提取多个文件的文本
 
-        Args:
-            file_paths (List[str]): 文件路径列表
-            max_length (int): 每个文件的最大提取长度，默认3000
-            include_metadata (bool): 是否包含元数据，默认False
-
-        Returns:
-            Dict[str, Any]: 批量处理结果
-        """
-        start_time = time.time()
-        results = []
-        successful = 0
-        failed = 0
-        
-        for file_path in file_paths:
-            try:
-                result = self.extract_text_from_non_text_file(
-                    input_file_path=file_path,
-                    start_index=0,
-                    max_length=max_length,
-                    include_metadata=include_metadata
-                )
-                
-                if result["success"]:
-                    successful += 1
-                else:
-                    failed += 1
-                    
-                results.append({
-                    "file_path": file_path,
-                    "result": result
-                })
-                
-            except Exception as e:
-                failed += 1
-                results.append({
-                    "file_path": file_path,
-                    "result": {
-                        "success": False,
-                        "error": f"处理失败: {str(e)}",
-                        "text": "",
-                        "execution_time": 0
-                    }
-                })
-        
-        processing_time = time.time() - start_time
-        
-        return {
-            "success": True,
-            "message": f"批量处理完成，成功{successful}个，失败{failed}个",
-            "summary": {
-                "total_files": len(file_paths),
-                "successful": successful,
-                "failed": failed,
-                "processing_time": round(processing_time, 2)
-            },
-            "results": results
-        }
 
     @ToolBase.tool()
     def get_supported_formats(self) -> Dict[str, Any]:

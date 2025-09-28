@@ -24,19 +24,21 @@ class WorkflowSelectAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.WORKFLOW_SELECT_PROMPT =  """
 你是一个工作流选择专家。请根据用户的对话历史，从提供的工作流模板中选择最合适的一个。
+## agent的描述和要求
+{agent_description}
 
-**对话历史：**
+## 对话历史
 {conversation_history}
 
-**可用的工作流模板：**
+## 可用的工作流模板
 {workflow_list}
 
-**任务要求：**
+## 任务要求
 1. 仔细分析对话历史中用户的核心需求和任务类型
 2. 对比各个工作流模板的适用场景
 3. 选择匹配的工作流，或者判断没有合适的工作流
 
-**输出格式（JSON）：**
+## 输出格式（JSON）
 ```json
 {{
     "has_matching_workflow": true/false,
@@ -70,7 +72,8 @@ selected_workflow_index 从0 开始计数
 
         prompt = self.WORKFLOW_SELECT_PROMPT.format(
             conversation_history=recent_message_str,
-            workflow_list=workflow_list
+            workflow_list=workflow_list,
+            agent_description=self.system_prefix,
         )
 
         llm_request_message = [

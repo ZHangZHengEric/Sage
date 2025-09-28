@@ -147,6 +147,30 @@
 - **2024-07-29 10:00 AM**：优化了图表轴显示范围的计算逻辑，新增 `calculate_axis_range` 方法，确保所有图表类型（柱状图、折线图、散点图等）的 X/Y 轴显示范围都能自动适配数据，并留有适当的缓冲区，提升图表可读性。支持数值型、时间型和类目型数据，并统一了轴配置的生成方式。
 - **2024-07-29 03:30 PM**：修复了 `file_parser_tool.py` 中PPT文件处理逻辑。现在当遇到 `.ppt` 文件时，系统会尝试调用 `libreoffice` 将其自动转换为 `.pptx` 格式，然后继续提取内容。此举增强了文件解析的兼容性，减少了手动转换的需要。如果 `libreoffice` 未安装或转换失败，将返回相应的错误提示。
 
+## 2025-09-21 21:11:00 - 修复sage_demo.py MCP工具发现功能
+
+**问题**: sage_demo.py中_init_tool_manager方法缺少MCP工具发现逻辑，导致MCP工具无法被正确注册
+
+**修复内容**:
+1. 将`_init_tool_manager`方法改为异步方法，添加完整的MCP工具发现流程
+2. 添加`_auto_discover_tools()`调用进行基础工具发现
+3. 添加`_discover_mcp_tools()`异步调用进行MCP工具发现
+4. 将`initialize`方法改为异步方法，使用`asyncio.run()`在Streamlit中调用
+5. 添加asyncio导入支持异步操作
+
+**测试结果**: MCP工具发现功能正常，成功注册23个工具，环境变量设置正确，应用启动正常
+
+## 2025-09-21 21:07:00 - 修复sage_demo.py参数未使用问题
+
+**问题**: sage_demo.py中mcp_config和preset_running_config参数未被使用
+
+**修复内容**:
+1. 在`_init_tool_manager`方法中添加mcp_config环境变量设置逻辑
+2. 在`__init__`方法中添加preset_running_config配置读取和system_prefix传递逻辑
+3. 在`_init_controller`方法中添加system_prefix和memory_root参数传递
+
+**测试结果**: 功能正常，参数解析和传递正确，与sage_server.py使用方式一致
+
 ## 2024-07-30 - 版本更新至0.9.4
 - **文件**: `setup.py`, `README.md`, `README_CN.md`
 - **更新**: 将项目版本从0.9.3升级到0.9.4
