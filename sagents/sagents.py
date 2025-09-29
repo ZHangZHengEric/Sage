@@ -125,6 +125,7 @@ class SAgent:
         max_loop_count: int = 10,
         multi_agent: bool = None,
         more_suggest: bool = False,
+        force_summary: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
         """
@@ -257,7 +258,10 @@ class SAgent:
                 ):
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
-                    
+
+                if force_summary:
+                    yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
+
             if more_suggest:
                 for message_chunks in self._execute_agent_phase(
                     session_context=session_context,
