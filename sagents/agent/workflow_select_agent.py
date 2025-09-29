@@ -20,8 +20,8 @@ from openai import OpenAI
 
 
 class WorkflowSelectAgent(AgentBase):
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.WORKFLOW_SELECT_PROMPT =  """
 你是一个工作流选择专家。请根据用户的对话历史，从提供的工作流模板中选择最合适的一个。
 ## agent的描述和要求

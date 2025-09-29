@@ -13,8 +13,8 @@ import uuid
 from copy import deepcopy
 
 class TaskAnalysisAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.SYSTEM_PREFIX_FIXED = PromptManager().task_analysis_system_prefix
         self.agent_name = "TaskAnalysisAgent"
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
@@ -33,7 +33,7 @@ class TaskAnalysisAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            recent_message = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            recent_message = message_manager.extract_all_context_messages(recent_turns=5,max_length=self.max_history_context_length)
             recent_message_str = MessageManager.convert_messages_to_str(recent_message)
         
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
