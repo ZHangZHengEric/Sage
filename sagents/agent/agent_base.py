@@ -42,7 +42,7 @@ class AgentBase(ABC):
         self.agent_name = self.__class__.__name__
         self.max_model_len = max_model_len
         self.max_model_input_len = self.max_model_len - self.model_config.get('max_tokens', 4096)
-        self.max_history_context_length = self.max_model_input_len // 3
+        self.max_history_context_length = int(self.max_model_input_len // 3)
 
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}")
     

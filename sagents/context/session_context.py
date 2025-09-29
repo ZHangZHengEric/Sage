@@ -100,7 +100,7 @@ class SessionContext:
         # if self.system_context['file_workspace'].startswith('/'):
         #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
         self.system_context['session_id'] = self.session_id
-        self.system_context['文件权限'] = "只允许在 "+self.system_context['file_workspace']+" 目录下操作文件"
+        self.system_context['文件权限'] = "只允许在 "+self.system_context['file_workspace']+" 目录下操作读写文件，并且使用绝对路径"
 
         # 如果有历史的messages.json，则加载messages.json
         messages_path = os.path.join(self.session_workspace, "messages.json")
