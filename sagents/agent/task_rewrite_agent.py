@@ -13,8 +13,8 @@ import uuid,re
 from copy import deepcopy
 
 class TaskRewriteAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.REWRITE_PROMPT_TEMPLATE ="""# 用户请求重写指南
 ## 任务描述
 根据用户的历史对话以及最新的请求，重写用户最新的请求，目的是在不阅读历史对话的情况下，通过阅读重写后的请求，也能准确的明确用户的意图。
