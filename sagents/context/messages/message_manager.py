@@ -354,9 +354,9 @@ class MessageManager:
                 if merged_length > max_length:
                     break
                 new_message_after_last_stage_summary.append(msg)
-
-            if new_message_after_last_stage_summary[-1].type == MessageType.TOOL_CALL_RESULT.value:
-                new_message_after_last_stage_summary = new_message_after_last_stage_summary[:-1]
+            if len(new_message_after_last_stage_summary) > 0:
+                if new_message_after_last_stage_summary[-1].type == MessageType.TOOL_CALL_RESULT.value:
+                    new_message_after_last_stage_summary = new_message_after_last_stage_summary[:-1]
             message_after_last_stage_summary = new_message_after_last_stage_summary[::-1]
         return message_after_last_stage_summary
 
