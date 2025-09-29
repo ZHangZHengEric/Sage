@@ -16,8 +16,8 @@ import uuid
 from copy import deepcopy
 
 class TaskObservationAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.SYSTEM_PREFIX_FIXED = PromptManager().task_observation_system_prefix
         self.OBSERVATION_PROMPT_TEMPLATE = """# 任务执行分析指南
 通过用户的历史对话，来观察用户的需求或者任务

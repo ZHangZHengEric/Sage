@@ -15,8 +15,8 @@ from copy import deepcopy
 import datetime
 
 class TaskStageSummaryAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.TASK_STAGE_SUMMARY_PROMPT_TEMPLATE = """# 任务执行总结生成指南
 
 ## 总任务描述
@@ -91,16 +91,12 @@ class TaskStageSummaryAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
         
         # 提取任务管理器状态
         task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
-
-        # 提取执行历史
-        execution_history_messages = message_manager.extract_after_last_stage_summary_messages()
-        execution_history_messages_str = MessageManager.convert_messages_to_str(execution_history_messages)
-
+        
         # 提取未总结但已完成的任务
         unsummary_but_completed_tasks = task_manager.get_unsummary_but_completed_tasks()
         task_info = []
@@ -109,8 +105,15 @@ class TaskStageSummaryAgent(AgentBase):
             task_info.append(info)
         tasks_to_summarize = "\n".join(task_info)
         
+
+        # 提取执行历史
+        execution_history_messages = message_manager.extract_after_last_stage_summary_messages()
+        execution_history_messages_str = MessageManager.convert_messages_to_str(execution_history_messages)
+
         # 提取生成的文档
         generated_documents = self._extract_generated_documents(execution_history_messages)
+
+        execution_history_messages_str = execution_history_messages_str[-(self.max_model_input_len-len(task_description_messages_str)-len(tasks_to_summarize)-len(task_manager_status)-len(generated_documents) )//2:]
         
         prompt = self.TASK_STAGE_SUMMARY_PROMPT_TEMPLATE.format(
             task_description=task_description_messages_str,

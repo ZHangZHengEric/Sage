@@ -14,8 +14,8 @@ from copy import deepcopy
 from openai import OpenAI
 
 class QuerySuggestAgent(AgentBase):
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.QUERY_SUGGEST_PROMPT = """
 # 建议生成指南
 你的任务是根据上述的对话，生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。

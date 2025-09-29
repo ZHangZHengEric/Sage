@@ -14,8 +14,8 @@ from copy import deepcopy
 from openai import OpenAI
 
 class TaskRouterAgent(AgentBase):
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.ROUTER_PROMPT_TEMPLATE = """
 你是一个任务路由智能体，你的任务是根据用户的任务描述，将任务路由到不同的智能体以及是否需要深度思考。不同的智能体与深度思考没有直接的关系，只是为了更好的完成任务。
 

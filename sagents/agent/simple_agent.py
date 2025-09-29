@@ -19,8 +19,8 @@ class SimpleAgent(AgentBase):
     负责无推理策略的直接任务执行，比ReAct策略更快速。
     适用于不需要推理或早期处理的任务。
     """
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.TOOL_SUGGESTION_PROMPT_TEMPLATE = """你是一个工具推荐专家，你的任务是根据用户的需求，为用户推荐合适的工具。
 你要根据历史的对话以及用户的请求，以及agent的配置，获取解决用户请求用到的所有可能的工具。
 
@@ -378,6 +378,13 @@ reason尽可能简单，最多20个字符
             
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
             all_new_response_chunks = []
+
+            if MessageManager.calculate_messages_token_length(messages_input) > self.max_model_input_len:
+                logger.warning(f"SimpleAgent: 消息长度超过 {self.max_model_input_len}，截断消息")
+                # 任务暂停，返回一个超长的错误消息块
+                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？",type=MessageType.ERROR.value)]
+                break
+            
             # 检查任务是否完成
             if self._is_task_complete(messages_input, session_id):
                 logger.info("SimpleAgent: 任务完成，终止执行")
