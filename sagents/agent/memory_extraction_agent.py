@@ -37,8 +37,8 @@ class MemoryExtractionAgent(AgentBase):
     3. 提供智能化的记忆管理建议
     """
     
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = ""):
-        super().__init__(model, model_config, system_prefix)
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
+        super().__init__(model, model_config, system_prefix, max_model_len)
         self.agent_name = "MemoryExtractionAgent"
         self.agent_description = "专门负责记忆提取和冲突处理的智能Agent"
     

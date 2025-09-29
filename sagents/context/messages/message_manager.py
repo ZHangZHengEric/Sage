@@ -108,6 +108,25 @@ class MessageManager:
         for new_message in new_messages_chunks:
             old_messages_chunks = MessageManager.merge_new_message_old_messages(new_message,old_messages_chunks)
         return old_messages_chunks
+
+    @staticmethod
+    def calculate_messages_token_length(messages: List[Union[MessageChunk,Dict]]) -> int:
+        """
+        计算消息列表的token长度, 只计算content字段
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            int: 消息列表的token长度
+        """
+        token_length = 0
+        for message in messages:
+            if isinstance(message, dict):
+                message = MessageChunk(**message)
+            token_length += len(message.content or '')
+        return token_length
+
     @staticmethod
     def merge_new_message_old_messages(new_message:MessageChunk,old_messages:List[MessageChunk])->List[MessageChunk]:
         """
@@ -304,8 +323,16 @@ class MessageManager:
     #                         user_and_final_answer_messages.append(msg)
     #     return user_and_final_answer_messages
     
-    def extract_after_last_stage_summary_messages(self) -> List[MessageChunk]:
+    def extract_after_last_stage_summary_messages(self,max_length:int=0) -> List[MessageChunk]:
+        """
+        提取最后一个阶段的总结消息之后的所有消息
         
+        Args:
+            max_length: 提取的最大长度，0表示不限制
+
+        Returns:
+            提取后的消息列表
+        """
         messages_after_last_user = []
         for msg in self.messages:
             if msg.role == MessageRole.USER.value:
@@ -318,6 +345,19 @@ class MessageManager:
                 message_after_last_stage_summary = []
             else:
                 message_after_last_stage_summary.append(msg)
+        if max_length > 0:
+            # 截取从后往前的 n 条消息，n条消息的content长度 < max_content_length ,但是n+1 消息，content长度 > max_content_length
+            merged_length = 0
+            new_message_after_last_stage_summary = []
+            for msg in message_after_last_stage_summary[::-1]:
+                merged_length += len(msg.content or '')
+                if merged_length > max_length:
+                    break
+                new_message_after_last_stage_summary.append(msg)
+
+            if new_message_after_last_stage_summary[-1].type == MessageType.TOOL_CALL_RESULT.value:
+                new_message_after_last_stage_summary = new_message_after_last_stage_summary[:-1]
+            message_after_last_stage_summary = new_message_after_last_stage_summary[::-1]
         return message_after_last_stage_summary
 
     def extract_after_last_observation_messages(self) -> List[MessageChunk]:

@@ -25,7 +25,7 @@ class AgentBase(ABC):
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = ""):
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = "", max_model_len: int = 64000):
         """
         初始化智能体基类
         
@@ -33,14 +33,17 @@ class AgentBase(ABC):
             model: 可执行的语言模型实例
             model_config: 模型配置参数
             system_prefix: 系统前缀提示
+            max_model_len: 模型最大上下文长度
         """
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
-        self.max_history_context_length = 20000
         self.agent_description = f"{self.__class__.__name__} agent"
         self.agent_name = self.__class__.__name__
-        
+        self.max_model_len = max_model_len
+        self.max_model_input_len = self.max_model_len - self.model_config.get('max_tokens', 4096)
+        self.max_history_context_length = self.max_model_input_len // 3
+
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}")
     
     def to_tool(self) -> AgentToolSpec:
@@ -269,8 +272,6 @@ class AgentBase(ABC):
                         for dir_item in dirs:
                             system_prefix += f"{os.path.join(root, dir_item).replace(current_agent_workspace, '').lstrip('/')}/\n"
                 system_prefix += "\n"
-
-
 
         return MessageChunk(
             role=MessageRole.SYSTEM.value,

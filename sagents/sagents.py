@@ -41,12 +41,7 @@ class SAgent:
     负责协调多个智能体协同工作，管理任务执行流程，
     包括任务分析、规划、执行、观察和总结等阶段。
     """
-
-    # 默认配置常量
-    DEFAULT_MAX_LOOP_COUNT = 10
-    DEFAULT_MESSAGE_LIMIT = 10000
-
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_root: str = None):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_root: str = None,max_model_len: int = 60000):
         """
         初始化智能体控制器
         
@@ -62,6 +57,8 @@ class SAgent:
         self.system_prefix = system_prefix
         self.workspace = workspace
         self.memory_root = memory_root  # 如果为None则不使用本地记忆工具
+        self.max_model_len = max_model_len
+
         self._init_agents()
                 
         logger.info("SAgent: 智能体控制器初始化完成")
@@ -78,43 +75,43 @@ class SAgent:
         #     self.model, self.model_config, system_prefix=self.system_prefix
         # )
         self.simple_agent = SimpleAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_analysis_agent = TaskAnalysisAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_decompose_agent = TaskDecomposeAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_executor_agent = TaskExecutorAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_observation_agent = TaskObservationAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_planning_agent = TaskPlanningAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_summary_agent = TaskSummaryAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_stage_summary_agent = TaskStageSummaryAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.workflow_select_agent = WorkflowSelectAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.query_suggest_agent = QuerySuggestAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_rewrite_agent = TaskRewriteAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.memory_extraction_agent = MemoryExtractionAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         self.task_router_agent = TaskRouterAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         
         logger.info("SAgent: 所有智能体初始化完成")
@@ -125,7 +122,7 @@ class SAgent:
         session_id: Optional[str] = None, 
         user_id: Optional[str] = None,
         deep_thinking: bool = None, 
-        max_loop_count: int = DEFAULT_MAX_LOOP_COUNT,
+        max_loop_count: int = 10,
         multi_agent: bool = None,
         more_suggest: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
