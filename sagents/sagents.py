@@ -14,7 +14,9 @@ from typing import List, Dict, Any, Optional, Generator, Union
 from enum import Enum
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
-from sagents.agent.simple_agent import SimpleAgent,AgentBase
+from sagents.agent.agent_base import AgentBase
+from sagents.agent.simple_agent import SimpleAgent
+# from sagents.agent.simple_agent_v2 import SimpleAgent
 from sagents.agent.task_analysis_agent import TaskAnalysisAgent
 from sagents.agent.task_decompose_agent import TaskDecomposeAgent
 from sagents.agent.task_executor_agent import TaskExecutorAgent
@@ -154,7 +156,7 @@ class SAgent:
             logger.info(f"开始流式工作流，会话ID: {session_id}")
 
             if system_context:
-                logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
+                logger.info(f"SAgent: 设置了system_context参数: {system_context}")
                 session_context.add_and_update_system_context(system_context)
             
             if available_workflows:
@@ -172,10 +174,11 @@ class SAgent:
             # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
 
             # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
+            logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
             for message in initial_messages:
                 if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
                     session_context.message_manager.add_messages(message)
-
+            logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
             
 
             # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite

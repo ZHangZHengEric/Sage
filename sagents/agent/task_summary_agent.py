@@ -59,7 +59,7 @@ TaskManager状态及执行结果:
 
         task_manager_status_and_results = task_manager.get_all_tasks_summary()
 
-        completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=(self.max_model_input_len-len(task_description_messages_str)-len(task_manager_status_and_results)))
+        completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(task_manager_status_and_results)))
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
         
 

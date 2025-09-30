@@ -114,8 +114,10 @@ reason尽可能简单，最多20个字符
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        history_messages = message_manager.extract_all_context_messages(recent_turns=10,max_length=self.max_history_context_length,last_turn_user_only=False)
-
+        logger.info(f"SimpleAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(message_manager.messages)}")
+        history_messages = message_manager.extract_all_context_messages(recent_turns=4,max_length=self.max_history_context_length,last_turn_user_only=False)
+        logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}')
+        logger.info(f'历史消息的content长度：{MessageManager.calculate_messages_token_length(history_messages)}')
         system_context = session_context.system_context
         # 调用内部方法，执行流式直接执行
         yield from self._execute_direct_stream_internal(history_messages, 
@@ -128,6 +130,7 @@ reason尽可能简单，最多20个字符
                                 tool_manager: ToolManager,
                                 session_id: str,
                                 system_context: Optional[Dict[str, Any]]) -> Generator[List[MessageChunk], None, None]:
+        logger.info(f"SimpleAgent: 输入的消息长度：{len(messages)}")
         # 获取后续可能使用到的工具建议
         suggested_tools = self._get_suggested_tools(messages, tool_manager, session_id)
         
