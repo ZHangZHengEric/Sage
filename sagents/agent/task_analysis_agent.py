@@ -94,3 +94,4 @@ class TaskAnalysisAgent(AgentBase):
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
         session_context.audit_status['task_analysis'] = all_analysis_chunks_content
+        logger.info(f"TaskAnalysisAgent: 任务分析完成，分析结果长度: {len(all_analysis_chunks_content)}")

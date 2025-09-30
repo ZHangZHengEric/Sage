@@ -42,9 +42,9 @@ class AgentBase(ABC):
         self.agent_name = self.__class__.__name__
         self.max_model_len = max_model_len
         self.max_model_input_len = self.max_model_len - self.model_config.get('max_tokens', 4096)
-        self.max_history_context_length = int(self.max_model_input_len // 3)
+        self.max_history_context_length = int(self.max_model_input_len // 2)
 
-        logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}")
+        logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大上下文长度: {self.max_model_len}, 最大输入长度: {self.max_model_input_len}, 最大历史上下文长度: {self.max_history_context_length}")
     
     def to_tool(self) -> AgentToolSpec:
         """
@@ -235,8 +235,8 @@ class AgentBase(ABC):
             else:
                 system_prefix += f"\n你是一个{self.__class__.__name__}智能体。"
             
-            if custom_prefix:
-                system_prefix += custom_prefix +'\n'
+        if custom_prefix:
+            system_prefix += custom_prefix +'\n'
         
         # 根据session_id获取session_context
         if session_id:
