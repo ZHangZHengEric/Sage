@@ -115,7 +115,7 @@ reason尽可能简单，最多20个字符
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info(f"SimpleAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(message_manager.messages)}")
-        history_messages = message_manager.extract_all_context_messages(recent_turns=4,max_length=self.max_history_context_length,last_turn_user_only=False)
+        history_messages = message_manager.extract_all_context_messages(recent_turns=10,max_length=self.max_history_context_length,last_turn_user_only=False)
         logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}')
         logger.info(f'历史消息的content长度：{MessageManager.calculate_messages_token_length(history_messages)}')
         system_context = session_context.system_context
@@ -141,9 +141,29 @@ reason尽可能简单，最多20个字符
         system_message = self.prepare_unified_system_message(session_id,custom_prefix=self.agent_custom_system_prefix)
         messages.insert(0, system_message)
 
+        # 区分开最后一个user 之前的消息，和最后一个user 之后的消息
+        last_user_index = None
+        for i, msg in enumerate(messages):
+            if msg.role == 'user':
+                last_user_index = i
+        
+        if last_user_index is None:
+            logger.warning("SimpleAgent: 未找到用户消息")
+            return
+        
+        # 提取最后一个user 之前的消息
+        pre_user_messages = messages[:last_user_index]
+        after_user_messages = messages[last_user_index:]
+
+        # 把pre_user_messages 转化成一条ASSistant消息
+        if len(pre_user_messages)>0:
+            pre_user_messages_assistant = MessageChunk(role='assistant', content="历史对话："+MessageManager.convert_messages_to_str(pre_user_messages))
+            new_messages = [pre_user_messages_assistant,system_message] + after_user_messages
+        else:
+            new_messages = [system_message] + after_user_messages
 
         yield from self._execute_loop(
-                messages_input=messages,
+                messages_input=new_messages,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
                 session_id=session_id

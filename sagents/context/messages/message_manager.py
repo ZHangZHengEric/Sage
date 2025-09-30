@@ -124,8 +124,33 @@ class MessageManager:
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk(**message)
-            token_length += len(message.content or '')
+            token_length += MessageManager.calculate_str_token_length(message.content or '')
         return token_length
+
+    @staticmethod
+    def calculate_str_token_length(content: str) -> int:
+        """
+        计算字符串的token长度, 只计算content字段。
+        一个中文等于0.6 个token，
+        一个英文等于0.25个token，
+        一个数字等于0.2 token
+        其他符号等于0.4 token
+        
+        Args:
+            content: 字符串内容
+            
+        Returns:
+            int: 字符串的token长度
+        """
+        token_length = 0
+        for char in content:
+            if char.isalpha():
+                token_length += 0.25
+            elif char.isdigit():
+                token_length += 0.2
+            else:
+                token_length += 0.6
+        return int(token_length)
 
     @staticmethod
     def merge_new_message_old_messages(new_message:MessageChunk,old_messages:List[MessageChunk])->List[MessageChunk]:
@@ -181,7 +206,7 @@ class MessageManager:
                 messages_str_list.append(f"Tool: {msg.content}")
         
         result = "\n".join(messages_str_list) or "None"
-        logger.info(f"AgentBase: 转换后字符串长度: {len(result)}")
+        logger.info(f"AgentBase: 转换后字符串长度: {MessageManager.calculate_str_token_length(result)}")
         return result
 
     def filter_messages(self,context_length_limited:int=10000,
@@ -214,7 +239,7 @@ class MessageManager:
         # 上下文长度 计算 每个 chatlist 的item 的长度。倒序计算，直到超过上下文长度限制。
         accept_chat_list = []
         for chat in chat_list[::-1]:
-            context_length = sum([len(msg.content or '') for msg in chat])
+            context_length = sum([MessageManager.calculate_str_token_length(msg.content or '') for msg in chat])
             if context_length <= context_length_limited:
                 accept_chat_list.append(chat)
                 context_length_limited -= context_length
@@ -240,13 +265,17 @@ class MessageManager:
         Returns:
             提取后的消息列表
         """
+        logger.info(f"MessageManager: 提取所有上下文消息，最近轮数：{recent_turns}，最大长度：{max_length}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}")
         all_context_messages = []
         chat_list = []
         for msg in self.messages:
             if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
                 chat_list.append([msg])
             elif msg.role != MessageRole.USER.value:
-                chat_list[-1].append(msg)
+                if len(chat_list) > 0:
+                    chat_list[-1].append(msg)
+                else:
+                    chat_list.append([msg])
         if recent_turns > 0:
             chat_list = chat_list[-recent_turns:]
 
@@ -261,9 +290,10 @@ class MessageManager:
             merged_messages = []
 
             merged_messages.append(chat[0])
-            merged_length += len(chat[0].content or '')
+            merged_length += MessageManager.calculate_str_token_length(chat[0].content or '')
             
             if merged_length > max_length:
+                logger.info(f"MessageManager: 合并消息长度超过最大长度，当前长度：{merged_length}，最大长度：{max_length}")
                 break
             for msg in chat[1:]:
                 if msg.type in [MessageType.FINAL_ANSWER.value,
@@ -272,9 +302,11 @@ class MessageManager:
                                 MessageType.TASK_ANALYSIS.value,
                                 MessageType.TOOL_CALL_RESULT.value]:
                     merged_messages.append(msg)
-                    merged_length += len(msg.content or '')
+                    merged_length += MessageManager.calculate_str_token_length(msg.content or '')
             if merged_length > max_length:
+                logger.info(f"MessageManager: 合并消息长度超过最大长度，当前长度：{merged_length}，最大长度：{max_length}")
                 break
+            logger.info(f"MessageManager: 合并消息长度，当前长度：{merged_length}，最大长度：{max_length}")
             all_context_messages.extend(merged_messages[::-1])
         return all_context_messages[::-1]
     
@@ -350,7 +382,7 @@ class MessageManager:
             merged_length = 0
             new_message_after_last_stage_summary = []
             for msg in message_after_last_stage_summary[::-1]:
-                merged_length += len(msg.content or '')
+                merged_length += MessageManager.calculate_str_token_length(msg.content or '')
                 if merged_length > max_length:
                     break
                 new_message_after_last_stage_summary.append(msg)
@@ -402,7 +434,7 @@ class MessageManager:
             total_length = 0
             for msg in messages_after_last_execution[::-1]:
                 if msg.content:
-                    total_length += len(msg.content)
+                    total_length += MessageManager.calculate_str_token_length(msg.content)
                 if total_length > max_content_length:
                     break
                 new_messages_after_last_execution.append(msg)
@@ -415,7 +447,7 @@ class MessageManager:
         total_length = 0
         for msg in self.messages:
             if msg.content:
-                total_length += len(msg.content)
+                total_length += MessageManager.calculate_str_token_length(msg.content)
         return total_length
 
     @staticmethod

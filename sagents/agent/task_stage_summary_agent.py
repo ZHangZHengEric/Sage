@@ -112,8 +112,8 @@ class TaskStageSummaryAgent(AgentBase):
 
         # 提取生成的文档
         generated_documents = self._extract_generated_documents(execution_history_messages)
-        logger.info(f"执行历史最大的长度:{int((self.max_model_input_len-len(task_description_messages_str)-len(tasks_to_summarize)-len(task_manager_status)-len(generated_documents) )//2)}")
-        execution_history_messages_str = execution_history_messages_str[-(int((self.max_model_input_len-len(task_description_messages_str)-len(tasks_to_summarize)-len(task_manager_status)-len(generated_documents) )//2)):]
+        logger.info(f"执行历史最大的长度:{int((self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(tasks_to_summarize)-MessageManager.calculate_str_token_length(task_manager_status)-MessageManager.calculate_str_token_length(generated_documents) )//2)}")
+        execution_history_messages_str = execution_history_messages_str[-(int((self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(tasks_to_summarize)-MessageManager.calculate_str_token_length(task_manager_status)-MessageManager.calculate_str_token_length(generated_documents) )//2)):]
         
         prompt = self.TASK_STAGE_SUMMARY_PROMPT_TEMPLATE.format(
             task_description=task_description_messages_str,
