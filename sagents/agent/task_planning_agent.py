@@ -80,7 +80,7 @@ class TaskPlanningAgent(AgentBase):
         
         task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
 
-        completed_actions_messages = message_manager.extract_after_last_stage_summary_messages(max_length=(self.max_model_input_len-self.max_history_context_length - len(task_manager_status))//2)
+        completed_actions_messages = message_manager.extract_after_last_stage_summary_messages(max_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str) - MessageManager.calculate_str_token_length(task_manager_status))//2)
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
