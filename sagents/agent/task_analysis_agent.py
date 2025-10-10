@@ -15,12 +15,15 @@ from copy import deepcopy
 class TaskAnalysisAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().task_analysis_system_prefix
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix')
         self.agent_name = "TaskAnalysisAgent"
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
         logger.info("TaskAnalysisAgent 初始化完成")
 
     def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取系统前缀，使用正确的语言
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix', language=session_context.get_language())
+        
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
@@ -41,7 +44,7 @@ class TaskAnalysisAgent(AgentBase):
         logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools_name)}")
 
         
-        prompt = PromptManager().get('analysis_template').format(
+        prompt = PromptManager().get_agent_prompt_auto('analysis_template', language=session_context.get_language()).format(
             conversation=recent_message_str,
             available_tools=available_tools_str,
             agent_description = self.system_prefix
@@ -49,9 +52,11 @@ class TaskAnalysisAgent(AgentBase):
 
         # 为整个分析流程生成统一的message_id
         message_id = str(uuid.uuid4())
+        # 获取多语言支持的任务分析提示文本
+        task_analysis_prompt = PromptManager().get_agent_prompt_auto('task_analysis_prompt', language=session_context.get_language())
         yield [MessageChunk(
             role=MessageRole.ASSISTANT.value,
-            content="任务分析：",
+            content=task_analysis_prompt,
             message_id=message_id,
             show_content="",
             message_type=MessageType.TASK_ANALYSIS.value

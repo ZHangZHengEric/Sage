@@ -8,42 +8,17 @@ from sagents.context.messages.message import MessageChunk, MessageRole,MessageTy
 from sagents.context.session_context import SessionContext
 from sagents.context.tasks.task_base import TaskBase
 from sagents.context.tasks.task_manager import TaskManager
+from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid,re
 from copy import deepcopy
 from openai import OpenAI
 
 class QuerySuggestAgent(AgentBase):
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
+    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = None, system_prefix: str = "", max_model_len: int = 64000):
+        if model_config is None:
+            model_config = {}
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.QUERY_SUGGEST_PROMPT = """
-# 建议生成指南
-你的任务是根据上述的对话，生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。
-
-## 用户对话
-{task_description}
-
-## 要求
-1. 建议的问题或者方向要与用户对话相关。
-2. 建议的问题或者方向要具有一定的深度，能够帮助用户解决问题。
-3. 建议的问题或者方向要具有一定的广度，能够帮助用户探索不同的角度。
-4. 只生成3条建议。
-5. 每条建议要简洁，不超过20个字符。
-6. 建议是站在用户的角度。
-
-## 输出格式
-```
-<suggest_item>
-用户可能会问的问题1或者可以深入探索的方向1
-</suggest_item>
-<suggest_item>
-用户可能会问的问题2或者可以深入探索的方向2
-</suggest_item>
-<suggest_item>
-用户可能会问的问题3或者可以深入探索的方向3
-</suggest_item>
-```
-"""
         self.agent_name = "QuerySuggestAgent"
         self.agent_description = "查询建议智能体，专门负责根据用户对话生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。"
         logger.info("QuerySuggestAgent 初始化完成")
@@ -53,7 +28,8 @@ class QuerySuggestAgent(AgentBase):
 
         conversation_messages = message_manager.extract_all_context_messages(recent_turns=2,max_length=self.max_history_context_length,last_turn_user_only=False)
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
-        prompt = self.QUERY_SUGGEST_PROMPT.format(
+        suggest_template = PromptManager().get_agent_prompt_auto('suggest_template', language=session_context.get_language())
+        prompt = suggest_template.format(
             task_description=recent_message_str
         )
         llm_request_message = [
@@ -69,6 +45,7 @@ class QuerySuggestAgent(AgentBase):
         message_id = str(uuid.uuid4())
         unknown_content = ''
         full_response = ''
+        last_tag_type = ''
         for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
                                              step_name="query_suggest"):
