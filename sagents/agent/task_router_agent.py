@@ -1,6 +1,7 @@
 import traceback
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
+from sagents.utils.prompt_manager import PromptManager
 from typing import Any, Dict, List, Optional, Generator
 from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
@@ -16,39 +17,6 @@ from openai import OpenAI
 class TaskRouterAgent(AgentBase):
     def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.ROUTER_PROMPT_TEMPLATE = """
-你是一个任务路由智能体，你的任务是根据用户的任务描述，将任务路由到不同的智能体以及是否需要深度思考。不同的智能体与深度思考没有直接的关系，只是为了更好的完成任务。
-
-选择智能体的规则：
-- 如果用户的任务描述需要复杂的计算或逻辑处理，比如需要调用至少两次外部工具（比如多次搜索信息），选择多智能体。
-- 如果用户的任务描述简单明了，比如只需要调用一次外部工具或者不调用外部工具，选择单智能体。
-- 当用户表达之前的任务执行的有问题时，选择多智能体。
-
-深度思考判断规则：
-- 当用户的任务表达简单清晰，不需要复杂的逻辑推理，则深度思考为false。
-- 当用户的任务表达复杂，需要复杂的逻辑推理，则深度思考为true。
-- 当用户的任务表达模糊不清晰，不确定是否需要复杂的逻辑推理，则深度思考为true。
-- 当用户表达之前的任务执行的有问题时，深度思考为true。
-
-当前的智能体列表：
-1. 多智能体
-2. 单智能体
-
-当前的工具列表：
-{tool_list}
-
-用户的任务描述：
-{task_desc}
-
-请根据用户的任务描述，路由到合适的智能体。
-
-输出格式为json，key为agent_name，value为智能体的名称，deep_think为是否需要深度思考
-示例：
-{{
-    "agent_name": "多智能体",
-    "deep_think": false
-}}
-"""
         self.agent_name = "TaskRouterAgent"
         self.agent_description = "任务路由智能体，专门负责根据用户的任务描述路由到合适的智能体"
         logger.info("TaskRouterAgent 初始化完成")
@@ -60,7 +28,8 @@ class TaskRouterAgent(AgentBase):
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
 
-        prompt = self.ROUTER_PROMPT_TEMPLATE.format(tool_list=available_tools_str, task_desc=task_desc)
+        router_template = PromptManager().get_agent_prompt_auto("router_template", language=session_context.get_language())
+        prompt = router_template.format(tool_list=available_tools_str, task_desc=task_desc)
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id),
             MessageChunk(

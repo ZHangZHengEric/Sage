@@ -31,6 +31,7 @@ from sagents.agent.task_rewrite_agent import TaskRewriteAgent
 from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
 from sagents.agent.task_router_agent import TaskRouterAgent
 from sagents.utils.logger import logger
+from sagents.utils.session_local import session_manager
 from sagents.context.session_context import SessionContext,init_session_context,SessionStatus,get_session_context,delete_session_context,list_active_sessions
 from sagents.context.messages.message import MessageChunk,MessageRole,MessageType
 from sagents.context.messages.message_manager import MessageManager
@@ -150,151 +151,168 @@ class SAgent:
         """
         try:
             # 初始化会话
-            session_id = session_id or str(uuid.uuid4())
             # 初始化该session 的context 管理器
+            session_id = session_id or str(uuid.uuid4())
             session_context = init_session_context(session_id,user_id=user_id, workspace_root= self.workspace, memory_root= self.memory_root)
-            logger.info(f"开始流式工作流，会话ID: {session_id}")
-
-            if system_context:
-                logger.info(f"SAgent: 设置了system_context参数: {system_context}")
-                session_context.add_and_update_system_context(system_context)
-            
-            if available_workflows:
-                if len(available_workflows.keys()) > 0:
-                    logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                    session_context.workflow_manager.load_workflows_from_dict(available_workflows)
-
-            session_context.status = SessionStatus.RUNNING
-            initial_messages = self._prepare_initial_messages(input_messages)
-            
-            # 尝试初始化记忆
-            session_context.init_user_memory_manager(tool_manager)
-            
-            # print(f"initial_messages: {initial_messages}")
-            # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
-
-            # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
-            logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
-            for message in initial_messages:
-                if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
-                    session_context.message_manager.add_messages(message)
-            logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
-            
-
-            # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite
-            # if session_context.message_manager.get_all_messages_content_length() > 30000:
-            #     for message_chunks in self._execute_agent_phase(
-            #         session_context=session_context,
-            #         tool_manager=tool_manager,
-            #         session_id=session_id,
-            #         agent=self.task_rewrite_agent,
-            #         phase_name="任务重写"
-            #     ):
-            #         session_context.message_manager.add_messages(message_chunks)
-            #         yield message_chunks
-
-
-            # 检查WorkflowManager中是否有工作流
-            if session_context.workflow_manager.list_workflows():
-                if len(session_context.workflow_manager.list_workflows()) > 5:
-                    for message_chunks in self._execute_agent_phase(
-                            session_context=session_context,
-                            tool_manager=tool_manager,
-                            session_id=session_id,
-                            agent=self.workflow_select_agent,
-                            phase_name="工作流选择"
-                        ):
-                            session_context.message_manager.add_messages(message_chunks)
-                            yield message_chunks
-                else:
-                    session_context.add_and_update_system_context({'workflow_guidance': session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())})
-            
-            # 当deep_thinking 或者 multi_agent 为None，其一为none时，调用task router
-            if deep_thinking is None or multi_agent is None:
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.task_router_agent,
-                    phase_name="任务路由"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
-
-            if deep_thinking is None:
-                deep_thinking = session_context.audit_status.get('deep_thinking', False)
-
-            if multi_agent is None:
-                router_agent = session_context.audit_status.get('router_agent', "单智能体")
-                multi_agent = router_agent != "单智能体"
-
-            # 1. 任务分析阶段
-            if deep_thinking:
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.task_analysis_agent,
-                    phase_name="任务分析"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
-                    
-            if multi_agent:
-                for message_chunks in self._execute_multi_agent_workflow(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
+            with session_manager.session_context(session_id):
+                logger.info(f"开始流式工作流，会话ID: {session_id}")
+                # 设置agent配置信息到SessionContext
+                session_context.set_agent_config(
+                    model=self.model,
+                    model_config=self.model_config,
+                    system_prefix=self.system_prefix,
+                    workspace=self.workspace,
+                    memory_root=self.memory_root,
+                    max_model_len=self.max_model_len,
+                    available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
+                    system_context=system_context or {},
+                    available_workflows=available_workflows or {},
+                    deep_thinking=deep_thinking,
+                    multi_agent=multi_agent,
+                    more_suggest=more_suggest,
                     max_loop_count=max_loop_count
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
-            else:
-                # 直接执行模式：可选的任务分析 + 直接执行
-                logger.info("SAgent: 开始简化工作流")                
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.simple_agent,
-                    phase_name="直接执行"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
+                )
 
-                if force_summary:
-                    yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
+                if system_context:
+                    logger.info(f"SAgent: 设置了system_context参数: {system_context}")
+                    session_context.add_and_update_system_context(system_context)
+                
+                if available_workflows:
+                    if len(available_workflows.keys()) > 0:
+                        logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                        session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
-            if more_suggest:
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.query_suggest_agent,
-                    phase_name="查询建议"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
+                session_context.status = SessionStatus.RUNNING
+                initial_messages = self._prepare_initial_messages(input_messages)
+                
+                # 尝试初始化记忆
+                session_context.init_user_memory_manager(tool_manager)
+                
+                # print(f"initial_messages: {initial_messages}")
+                # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
 
-            logger.debug(f"SAgent: 检查是否需要提取记忆")            
-            if session_context.user_memory_manager:
-                logger.debug(f"SAgent: 开始记忆提取")
-                for message_chunks in self._execute_agent_phase(
-                    session_context=session_context,
-                    tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=self.memory_extraction_agent,
-                    phase_name="记忆提取"
-                ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    # yield message_chunks
+                # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
+                logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                for message in initial_messages:
+                    if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
+                        session_context.message_manager.add_messages(message)
+                logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                
 
-            # 检查最终状态，如果不是中断状态则标记为完成
-            if session_context.status != SessionStatus.INTERRUPTED:
-                session_context.status = SessionStatus.COMPLETED
-                logger.info(f"SAgent: 流式工作流完成，会话ID: {session_id}")
-            else:
-                logger.info(f"SAgent: 流式工作流被中断，会话ID: {session_id}")
+                # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite
+                # if session_context.message_manager.get_all_messages_content_length() > 30000:
+                #     for message_chunks in self._execute_agent_phase(
+                #         session_context=session_context,
+                #         tool_manager=tool_manager,
+                #         session_id=session_id,
+                #         agent=self.task_rewrite_agent,
+                #         phase_name="任务重写"
+                #     ):
+                #         session_context.message_manager.add_messages(message_chunks)
+                #         yield message_chunks
+
+
+                # 检查WorkflowManager中是否有工作流
+                if session_context.workflow_manager.list_workflows():
+                    if len(session_context.workflow_manager.list_workflows()) > 5:
+                        for message_chunks in self._execute_agent_phase(
+                                session_context=session_context,
+                                tool_manager=tool_manager,
+                                session_id=session_id,
+                                agent=self.workflow_select_agent,
+                                phase_name="工作流选择"
+                            ):
+                                session_context.message_manager.add_messages(message_chunks)
+                                yield message_chunks
+                    else:
+                        session_context.add_and_update_system_context({'workflow_guidance': session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())})
+                
+                # 当deep_thinking 或者 multi_agent 为None，其一为none时，调用task router
+                if deep_thinking is None or multi_agent is None:
+                    for message_chunks in self._execute_agent_phase(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        agent=self.task_router_agent,
+                        phase_name="任务路由"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+
+                if deep_thinking is None:
+                    deep_thinking = session_context.audit_status.get('deep_thinking', False)
+
+                if multi_agent is None:
+                    router_agent = session_context.audit_status.get('router_agent', "单智能体")
+                    multi_agent = router_agent != "单智能体"
+
+                # 1. 任务分析阶段
+                if deep_thinking:
+                    for message_chunks in self._execute_agent_phase(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        agent=self.task_analysis_agent,
+                        phase_name="任务分析"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+                        
+                if multi_agent:
+                    for message_chunks in self._execute_multi_agent_workflow(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        max_loop_count=max_loop_count
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+                else:
+                    # 直接执行模式：可选的任务分析 + 直接执行
+                    logger.info("SAgent: 开始简化工作流")                
+                    for message_chunks in self._execute_agent_phase(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        agent=self.simple_agent,
+                        phase_name="直接执行"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+
+                    if force_summary:
+                        yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
+
+                if more_suggest:
+                    for message_chunks in self._execute_agent_phase(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        agent=self.query_suggest_agent,
+                        phase_name="查询建议"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+
+                logger.debug(f"SAgent: 检查是否需要提取记忆")            
+                if session_context.user_memory_manager:
+                    logger.debug(f"SAgent: 开始记忆提取")
+                    for message_chunks in self._execute_agent_phase(
+                        session_context=session_context,
+                        tool_manager=tool_manager,
+                        session_id=session_id,
+                        agent=self.memory_extraction_agent,
+                        phase_name="记忆提取"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        # yield message_chunks
+
+                # 检查最终状态，如果不是中断状态则标记为完成
+                if session_context.status != SessionStatus.INTERRUPTED:
+                    session_context.status = SessionStatus.COMPLETED
+                    logger.info(f"SAgent: 流式工作流完成，会话ID: {session_id}")
+                else:
+                    logger.info(f"SAgent: 流式工作流被中断，会话ID: {session_id}")
             
         except Exception as e:
             # 标记会话错误
@@ -303,6 +321,7 @@ class SAgent:
             yield from self._handle_workflow_error(e)
         finally:
             # 保存会话状态到文件
+            logger.info(f"run_stream finally save context info")
             try:
                 session_context.save()
             except Exception as save_error:
@@ -465,12 +484,26 @@ class SAgent:
         return None
     
     def list_active_sessions(self) -> List[Dict[str, Any]]:
-        
         return list_active_sessions()
     
     def cleanup_session(self, session_id: str) -> bool:
-        
         return delete_session_context(session_id)
+
+    def save_session(self, session_id: str) -> bool:
+        # 保存会话状态到文件
+        session_context_ = get_session_context(session_id=session_id)
+        if not session_context_:
+            logger.error(f"SAgent: 会话 {session_id} 不存在，无法保存")
+            return False
+        
+        try:
+            session_context_.save()
+        except Exception as save_error:
+            logger.error(f"traceback: {traceback.format_exc()}")
+            logger.error(f"SAgent: 保存会话状态 {session_id} 时出错: {save_error}")
+            return False
+        return True
+            
 
     def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
         session_context_ = get_session_context(session_id=session_id)

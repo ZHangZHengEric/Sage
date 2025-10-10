@@ -9,6 +9,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_base import AgentToolSpec
 from sagents.context.tasks.task_manager import TaskManager
 from sagents.context.tasks.task_base import TaskBase, TaskStatus
+from sagents.utils.prompt_manager import PromptManager
 import json,re
 import uuid
 from copy import deepcopy
@@ -17,69 +18,15 @@ import datetime
 class TaskStageSummaryAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.TASK_STAGE_SUMMARY_PROMPT_TEMPLATE = """# 任务执行总结生成指南
-
-## 总任务描述
-{task_description}
-
-## 需要总结的任务列表
-{tasks_to_summarize}
-
-## 任务管理器状态
-{task_manager_status}
-
-## 执行过程
-{execution_history}
-
-## 生成的文件文档
-{generated_documents}
-
-## 总结要求
-分析每个需要总结的任务的执行情况，为每个任务生成独立的执行总结。
-
-## 输出格式
-只输出以下格式的JSON，不要输出其他内容，不要输出```：
-
-{{
-  "task_summaries": [
-    {{
-      "task_id": "任务ID",
-      "result_documents": ["文档路径1", "文档路径2"],
-      "result_summary": "详细的任务执行结果总结报告"
-    }},
-    {{
-      "task_id": "任务ID",
-      "result_documents": ["文档路径1", "文档路径2"],
-      "result_summary": "详细的任务执行结果总结报告"
-    }}
-  ]
-}}
-
-## 说明
-1. task_summaries: 包含所有需要总结的任务的总结列表
-2. 每个任务总结包含：
-   - task_id: 必须与需要总结的任务列表中的task_id完全一致
-   - result_documents: 执行过程中通过file_write工具生成的实际文档路径列表，从生成的文件文档中提取对应任务的文档
-   - result_summary: 详细的任务执行结果（不要强调过程），要求关键结果必须包含，内容详实、结构清晰，不要仅仅是总结，要包含详细的数据结果，方便最后总结使用。
-3. result_summary要求：
-   - 内容详实：像写正式报告文档一样详细，内容越多越详细越好
-   - 结构清晰：使用段落和要点来组织内容，便于阅读和理解
-   - 数据具体：包含具体的数据、数字、比例等量化信息
-   - 分析深入：不仅描述事实，还要提供分析和洞察
-   - 语言专业：使用专业、准确的语言描述
-4. 总结要客观准确，突出关键成果和重要发现
-5. 每个任务的总结内容应该专门针对该任务，不要包含其他任务的信息
-6. task_id必须与需要总结的任务列表中的task_id完全匹配
-7. result_documents必须是从生成的文件文档中提取的实际文件路径
-8. result_summary的重点是对子任务的详细回答和关键成果，为后续整体任务总结提供丰富的基础信息
-"""
-
-        self.SYSTEM_PREFIX_FIXED = """你是一个智能AI助手，专门负责生成任务执行的阶段性总结。你需要客观分析执行情况，总结成果，并为用户提供清晰的进度汇报。"""
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix")
         self.agent_name = "StageSummaryAgent"
         self.agent_description = "任务执行阶段性总结智能体，专门负责生成任务执行的阶段性总结"
         logger.info("StageSummaryAgent 初始化完成")
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取带有正确语言的prompt
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
+        
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
@@ -115,7 +62,8 @@ class TaskStageSummaryAgent(AgentBase):
         logger.info(f"执行历史最大的长度:{int((self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(tasks_to_summarize)-MessageManager.calculate_str_token_length(task_manager_status)-MessageManager.calculate_str_token_length(generated_documents) )//2)}")
         execution_history_messages_str = execution_history_messages_str[-(int((self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(tasks_to_summarize)-MessageManager.calculate_str_token_length(task_manager_status)-MessageManager.calculate_str_token_length(generated_documents) )//2)):]
         
-        prompt = self.TASK_STAGE_SUMMARY_PROMPT_TEMPLATE.format(
+        task_stage_summary_template = PromptManager().get_agent_prompt_auto("task_stage_summary_template", language=session_context.get_language())
+        prompt = task_stage_summary_template.format(
             task_description=task_description_messages_str,
             tasks_to_summarize=tasks_to_summarize,
             task_manager_status=task_manager_status,

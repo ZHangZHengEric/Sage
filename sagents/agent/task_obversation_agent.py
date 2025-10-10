@@ -18,92 +18,15 @@ from copy import deepcopy
 class TaskObservationAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().task_observation_system_prefix
-        self.OBSERVATION_PROMPT_TEMPLATE = """# 任务执行分析指南
-通过用户的历史对话，来观察用户的需求或者任务
-
-## 智能体的描述和要求
-{agent_description}
-
-## 用户历史对话
-{task_description}
-
-## 任务管理器状态（未更新的状态，需要本次分析去更新）
-{task_manager_status}
-
-## 近期完成动作详情
-{execution_results}
-
-## 分析要求
-1. 评估当前执行是否满足任务要求
-2. 确定任务完成状态：
-   - in_progress: 任务正在进行中，需要继续执行
-   - completed: 任务已完成，无需进一步操作
-   - need_user_input: 需要用户输入才能继续
-   - failed: 任务执行失败，无法继续
-3. 评估任务整体完成百分比，范围0-100
-4. 根据近期完成动作详情，判断哪些任务已经完成，不要仅仅依赖任务管理器状态
-
-## completion_status设置为completed，即任务已完成，满足以下条件其中一个即可，与任务整体完成百分比不冲突：
-1. 当前已经执行的动作的结果，可以满足对于用户任务回复的数据支持。
-2. 当前在执行重复的动作，且动作的结果没有发生变化。
-3. 当前完成对用户任务的理解，需要等待用户进一步的反馈，以便进一步满足他们的需求。
-4. 当子任务全部完成时
-
-## 子任务完成判断规则
-1. **基于执行结果判断**：仔细分析近期完成动作详情，如果某个子任务的核心要求已经通过执行动作完成，即使任务管理器状态显示为pending，也应该标记为已完成
-2. **子任务内容匹配**：将执行结果与子任务描述进行匹配，如果执行结果已经覆盖了子任务的核心要求，则认为子任务完成
-3. **数据完整性**：如果子任务要求收集特定信息，且执行结果显示已经收集到这些信息，则认为子任务完成
-4. **不要过度保守**：如果执行结果显示已经完成了子任务的核心目标，不要因为任务管理器状态而犹豫标记为完成
-5. **灵活调整子任务**：如果执行过程中，发现子任务是不必要或者可以跳过的，则认为子任务完成
-
-## 子任务失败判断规则
-1. 当子任务执行失败，且失败次数**超过2次**时，认为子任务失败
-
-## 特殊规则
-1. 上一步完成了数据搜索，后续还需要对搜索结果进行进一步的理解和处理，不能认为是任务完成
-2. analysis中不要带有工具的真实名称，以及不要输出任务的序号，只需要输出任务的描述。
-3. 只输出以下格式的XML，不要输出其他内容，不要输出```
-4. 任务状态更新基于实际执行结果，不要随意标记为完成
-5. 尽可能减少用户输入，不要打扰用户，按照你对事情的完整理解，尽可能全面的完成事情
-6. 针对**多次**尝试确定了无法完成或者失败的子任务，不要再次尝试，跳过该任务。
-7. analysis 部分不要超过100字。
-8. 如果基于当前的工具和能力，发现无法完成任务，将 finish_percent 设置为100，completion_status 设置为failed。
-9. 对于一次没有成功的子任务，要积极尝试使用其他工具或者方法，以增加成功的机会。
-
-## 输出格式
-```
-<analysis>
-分析近期完成动作详情的执行情况进行总结，指导接下来的方向要详细一些，一段话不要有换行。
-</analysis>
-<finish_percent>
-40
-</finish_percent>
-<completion_status>
-in_progress
-</completion_status>
-<completed_task_ids>
-["1","2"]
-</completed_task_ids>
-<pending_task_ids>
-["3","4"]
-</pending_task_ids>
-<failed_task_ids>
-["5"]
-</failed_task_ids>
-```
-## 输出字段描述：
-finish_percent：子任务完成数量的百分比数字，格式：30，范围0-100，100表示所有的子任务都完成
-completion_status：任务完成状态，in_progress（进行中）、completed（已完成）、need_user_input（需要用户输入）、failed（失败）
-completed_task_ids：已完成的子任务ID列表，格式：["1", "2"]，通过近期完成动作详情以及任务管理器状态，判定已完成的子任务ID列表
-pending_task_ids：未完成的子任务ID列表，格式：["3", "4"]，通过近期完成动作详情以及任务管理器状态，判定未完成的子任务ID列表
-failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近期完成动作详情以及任务管理器状态，经过3次尝试执行后，判定无法完成的子任务ID列表
-"""  
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_observation_system_prefix')
         self.agent_name = "ObservationAgent"
         self.agent_description = "观测智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("TaskObservationAgent 初始化完成")
 
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取系统前缀，使用正确的语言
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_observation_system_prefix', language=session_context.get_language())
+        
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
@@ -122,7 +45,7 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
         recent_execution_results_messages = message_manager.extract_after_last_observation_messages()
         recent_execution_results_messages_str = MessageManager.convert_messages_to_str(recent_execution_results_messages)
 
-        prompt = self.OBSERVATION_PROMPT_TEMPLATE.format(
+        prompt = PromptManager().get_agent_prompt_auto('observation_template', language=session_context.get_language()).format(
             task_description=task_description_messages_str,
             task_manager_status=task_manager_status,
             execution_results=recent_execution_results_messages_str,
@@ -201,7 +124,7 @@ failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近�
             # 创建最终结果消息（不需要usage信息，因为这是转换过程）
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='执行评估: ' + json.dumps(response_json, ensure_ascii=False),
+                content=PromptManager().get_agent_prompt_auto('execution_evaluation_prompt', language=session_context.get_language()) + json.dumps(response_json, ensure_ascii=False),
                 message_id=message_id,
                 show_content='\n',
                 message_type=MessageType.OBSERVATION.value

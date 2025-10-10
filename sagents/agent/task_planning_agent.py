@@ -17,54 +17,15 @@ from copy import deepcopy
 class TaskPlanningAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().task_planning_system_prefix
-        self.PLANNING_PROMPT_TEMPLATE ="""# 任务规划指南
-
-## 智能体的描述和要求
-{agent_description}
-
-## 完整任务描述
-{task_description}
-
-## 任务管理器状态
-{task_manager_status}
-
-## 近期完成工作
-{completed_actions}
-
-## 可用工具
-{available_tools_str}
-
-## 规划规则
-1. 根据我们的当前任务以及近期完成工作，为了达到逐步完成任务管理器的未完成子任务或者完整的任务，清晰描述接下来要执行的具体的任务名称。
-2. 确保接下来的任务可执行且可衡量
-3. 优先使用现有工具
-4. 设定明确的成功标准
-5. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
-6. description中不要包含工具的真实名称
-7. required_tools至少包含5个可能需要的工具的名称，最多10个。
-
-## 输出格式
-```
-<next_step_description>
-子任务的清晰描述，一段话不要有换行
-</next_step_description>
-<required_tools>
-["tool1_name","tool2_name"]
-</required_tools>
-<expected_output>
-预期结果描述，一段话不要有换行
-</expected_output>
-<success_criteria>
-如何验证完成，一段话不要有换行
-</success_criteria>
-```
-"""
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_planning_system_prefix')
         self.agent_name = "PlanningAgent"
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("PlanningAgent 初始化完成")
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取系统前缀，使用正确的语言
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_planning_system_prefix', language=session_context.get_language())
+        
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
@@ -87,7 +48,7 @@ class TaskPlanningAgent(AgentBase):
         available_tools_str =", ".join(available_tools_name) if available_tools_name else "无可用工具"
 
 
-        prompt = self.PLANNING_PROMPT_TEMPLATE.format(
+        prompt = PromptManager().get_agent_prompt_auto('planning_template', language=session_context.get_language()).format(
             task_description=task_description_messages_str,
             task_manager_status=task_manager_status,
             completed_actions=completed_actions_messages_str,
@@ -165,7 +126,7 @@ class TaskPlanningAgent(AgentBase):
             
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='下一步规划: ' + json.dumps(response_json, ensure_ascii=False),
+                content=PromptManager().get_agent_prompt_auto('next_step_planning_prompt', language=session_context.get_language()) + json.dumps(response_json, ensure_ascii=False),
                 message_id=message_id,
                 show_content='',
                 message_type=MessageType.PLANNING.value
