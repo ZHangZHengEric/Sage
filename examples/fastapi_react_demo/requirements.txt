@@ -46,8 +46,6 @@ structlog==24.4.0
 # MinIO object storage client
 minio==7.2.12
 
-# Optional: Async MinIO operations
-aiomono==1.1.8
 
 # Utilities for file operations
 pathlib-abc==0.1.1
