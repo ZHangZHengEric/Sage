@@ -16,43 +16,14 @@ from copy import deepcopy
 class TaskDecomposeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().task_decompose_system_prefix
-        self.DECOMPOSE_PROMPT_TEMPLATE = """# 任务分解指南
-通过用户的历史对话，来观察用户的需求或者任务
-
-## 智能体的描述和要求
-{agent_description}
-
-## 用户历史对话
-{task_description}
-
-## 可用工具
-{available_tools_str}
-
-## 分解要求
-1. 仅当任务复杂时才进行分解，如果任务本身非常简单，可以直接作为一个子任务，不要为了凑数量而强行拆分。
-2. 子任务的分解要考虑可用的工具的能力范围。
-3. 确保每个子任务都是原子性的，且尽量相互独立，避免人为拆分无实际意义的任务。
-4. 考虑任务之间的依赖关系，输出的列表必须是有序的，按照优先级从高到低排序，优先级相同的任务按照依赖关系排序。
-5. 输出格式必须严格遵守以下要求。
-6. 如果有任务Thinking的过程，子任务要与Thinking的处理逻辑一致。
-7. 子任务数量不要超过10个，较简单的子任务可以合并为一个子任务。
-8. 子任务描述中不要直接说出工具的原始名称，使用工具描述来表达工具。
-## 输出格式
-```
-<task_item>
-子任务1描述
-</task_item>
-<task_item>
-子任务2描述
-</task_item>
-```
-"""
-        self.SYSTEM_PREFIX_FIXED = """你是一个任务分解者，你需要根据用户需求，将复杂任务分解为清晰可执行的子任务。"""
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix')
         self.agent_name = "TaskDecomposeAgent"
         self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
         logger.info("TaskDecomposeAgent 初始化完成")
     def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取系统前缀，使用正确的语言
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix', language=session_context.get_language())
+        
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
         
@@ -69,7 +40,7 @@ class TaskDecomposeAgent(AgentBase):
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
 
-        prompt = self.DECOMPOSE_PROMPT_TEMPLATE.format(
+        prompt = PromptManager().get_agent_prompt_auto('decompose_template', language=session_context.get_language()).format(
             task_description=recent_message_str,
             available_tools_str=available_tools_str,
             agent_description=self.system_prefix,
@@ -87,6 +58,7 @@ class TaskDecomposeAgent(AgentBase):
         message_id = str(uuid.uuid4())
         unknown_content = ''
         full_response = ''
+        last_tag_type = ''
         for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
                                              step_name="task_decompose"):
