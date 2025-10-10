@@ -11,6 +11,7 @@ from sagents.context.session_context import SessionContext,get_session_context
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_config import convert_spec_to_openai_format
 from sagents.tool.tool_base import AgentToolSpec
+from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid
 from copy import deepcopy
@@ -24,110 +25,12 @@ class SimpleReactAgent(AgentBase):
     """
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.TOOL_SUGGESTION_PROMPT_TEMPLATE = """你是一个智能助手，你要根据用户的需求，为用户提供帮助，回答用户的问题或者满足用户的需求。
-你要根据历史的对话以及用户的请求，获取解决用户请求用到的所有可能的工具。
-
-## 可用工具
-{available_tools_str}
-
-## 用户的对话历史以及新的请求
-{messages}
-
-输出格式：
-```json
-[
-    "工具名称1",
-    "工具名称2",
-    ...
-]
-```
-注意：
-1. 工具名称必须是可用工具中的名称。
-2. 返回所有可能用到的工具名称，尽可能返回对于完全不可能用到的工具，不要返回。
-3. 可能的工具最多返回7个。
-"""
-# 2. 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要通过调用 complete_task 工具来结束会话或者触发等待用户的新的输入
-# 3. 当用户问题不清楚，也要回答或者询问用户的意图后，再调用工具 complete_task 结束会话。
-# 4. 调用完工具后，一定要用文字描述工具调用的结果，不要直接结束任务。
-# 5. 当你对用户进行询问和澄清时，下一步要调用 complete_task 工具来结束会话，等待用户的新的输入。
-
-#         self.agent_custom_system_prefix = """
-# **基本要求**：
-# - 每次执行前，都要先进行评估规划，再去真正的回答问题或者执行任务。
-# - 目的是有逻辑的完成用户的需求。
-# - 在执行规划好的任务时，只执行任务，不要做任何的评估和规划。
-# - 如果执行过程没有完成用户的要求，不要调用 complete_task。
-# - 用户看不到工具执行的结果，需要通过自然语言的总结告知用户。
-
-# 评估规划要求：
-# - 如果还没有开始回答用户的问题，只给出接下来要做什么。
-# - 如果已经执行的执行以及满足的用户的基本信息要求，则接下来要做的就是对于执行过程的详细总结。
-# - 如果已经完成了对于执行过程的详细总结，调用 complete_task 工具来结束会话，不用输出自然语言。
-# - 如果还需要执行其他的行为，例如未来调用其他的工具或者总结执行过程时，则需要输出自然语言，形式为：当前***，接下来要做的是***。这种情况下，不允许调用complete_task
-# - 不需要太多的字，但是要简洁明了，指导下一步的动作。
-
-# 总结要求：
-# - 对执行过程的总结，不是为了重复过程的内容，而是给用户符合要求和诉求一个完美的答案。
-# """
-#         self.plan_message_prompt = """
-# 接下来开始对已执行的行为进行评估规划，只进行评估规划或者调用会话结束工具，不要进行执行，如果有评估规划内容，不要结束会话：
-# """
-#         self.first_plan_message_prompt = """
-# 接下来开始对完成用户的需求进行评估规划，只进行评估规划或者调用会话结束工具，不要进行执行，如果有评估规划内容，不要结束会话：
-# """
-#         self.execute_message_prompt = """
-# 接下来执行上述规划的内容，直接执行，**禁止输出评估规划内容**，也不要调用会话结束工具：
-# """
-        self.agent_custom_system_prefix = """
-**基本要求**：
-- 每次执行前，都要先进行评估规划，再去真正的回答问题或者执行任务。
-- 用户会在过程中引导你完成任务，你需要根据用户的引导，进行评估规划和执行。
-- 评估规划不需要太多的字，但是要简洁明了，指导下一步的动作。
-- 用户看不到工具执行的结果，需要通过自然语言的总结告知用户。
-"""
-        self.plan_message_prompt = """
-对已经执行的行为进行评估规划，不需要得到用户的确认，输出的形式为：当前***，接下来要做的是***。
-- 不要输出工具的真实的名称，而是输出工具的描述。
-- 不要做用户没有要求的任务。规划时只需要满足用户的请求，不要做过多额外的事情。
-"""
-        self.TASK_COMPLETE_PROMPT_TEMPLATE = """你要根据历史的对话以及用户的请求，判断是否需要中断执行任务。
-
-## 中断执行任务判断规则
-1. 中断执行任务：
-  - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断中断执行任务。
-  - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断中断执行任务。
-  - 当对话过程中，需要用户的确认或者输入时，需要判断中断执行任务。
-2. 继续执行任务：
-  - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断继续执行任务。
-  - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断继续执行任务。因为用户看不到工具执行的结果。
-
-## 用户的对话历史以及新的请求的执行过程
-{messages}
-
-输出格式：
-```json
-{{
-    "task_interrupted": true,
-    "reason": "任务完成"
-}}
-
-reason尽可能简单，最多20个字符
-```
-"""
-
-        self.first_plan_message_prompt = """
-接下来开始对完成用户的需求进行评估规划，只进行评估规划，不要进行执行，也不需要得到用户的确认。
-- 不要输出工具的真实的名称，而是输出工具的描述。
-- 评估规划时，要重点参考推荐工作流的指导。
-- 不要做用户没有要求的任务。规划时只需要满足用户的请求，不要做过多额外的事情。
-"""
-        self.execute_message_prompt = """
-接下来执行上述规划的内容，直接执行。
-不要做以下的行为：
-1. 最后对执行过程进行解释，例如：已完成用户需求，结束会话。
-2. 不要输出后续的建议规划，例如：接下来要做的是***。
-3. 不要调用会话结束工具。
-"""
+        
+        # 使用 PromptManager 获取 prompt 模板
+        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix')
+        self.plan_message_prompt = PromptManager().get_agent_prompt_auto('plan_message_prompt')
+        self.first_plan_message_prompt = PromptManager().get_agent_prompt_auto('first_plan_message_prompt')
+        self.execute_message_prompt = PromptManager().get_agent_prompt_auto('execute_message_prompt')
         # 最大循环次数常量
         self.max_loop_count = 10
         self.agent_name = "SimpleAgent"
@@ -140,11 +43,20 @@ reason尽可能简单，最多20个字符
                     session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         logger.info(f"SimpleAgent: 开始流式直接执行，会话ID: {session_id}")
 
+        # 重新获取所有prompt模板，使用正确的语言
+        language = session_context.get_language()
+        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix', language=language)
+        self.plan_message_prompt = PromptManager().get_agent_prompt_auto('plan_message_prompt', language=language)
+        self.first_plan_message_prompt = PromptManager().get_agent_prompt_auto('first_plan_message_prompt', language=language)
+        self.execute_message_prompt = PromptManager().get_agent_prompt_auto('execute_message_prompt', language=language)
+
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
         history_messages = message_manager.extract_all_context_messages(recent_turns=10,max_length=self.max_history_context_length,last_turn_user_only=False)
 
+        # 调用内部执行方法
+        yield from self._execute_direct_stream_internal(history_messages, tool_manager, session_id, session_context)
         system_context = session_context.system_context
         # 调用内部方法，执行流式直接执行
         yield from self._execute_direct_stream_internal(history_messages, 
@@ -156,24 +68,25 @@ reason尽可能简单，最多20个字符
                                 messages: List[MessageChunk], 
                                 tool_manager: ToolManager,
                                 session_id: str,
-                                system_context: Optional[Dict[str, Any]]) -> Generator[List[MessageChunk], None, None]:
-        # 获取后续可能使用到的工具建议
-        suggested_tools = self._get_suggested_tools(messages, tool_manager, session_id)
+                                session_context: SessionContext) -> Generator[List[MessageChunk], None, None]:
+        """
+        内部流式直接执行方法
+        """
+        logger.info(f"SimpleAgent: 开始内部流式直接执行，会话ID: {session_id}")
         
-        # 准备工具列表
+        # 检查任务是否已完成
+        if self._is_task_complete(messages, session_id, session_context):
+            logger.info(f"SimpleAgent: 任务已完成，会话ID: {session_id}")
+            return
+        
+        # 获取建议工具
+        suggested_tools = self._get_suggested_tools(messages, tool_manager, session_id, session_context)
+        
+        # 准备工具
         tools_json = self._prepare_tools(tool_manager, suggested_tools)
-
-        # 将system 加入到到messages中
-        system_message = self.prepare_unified_system_message(session_id,custom_prefix=self.agent_custom_system_prefix)
-        messages.insert(0, system_message)
-
-
-        yield from self._execute_loop(
-                messages_input=messages,
-                tools_json=tools_json,
-                tool_manager=tool_manager,
-                session_id=session_id
-            )
+        
+        # 执行循环
+        yield from self._execute_loop(messages, tools_json, tool_manager, session_id, session_context)
 
     def _prepare_tools(self, 
                       tool_manager: Optional[Any], 
@@ -213,7 +126,8 @@ reason尽可能简单，最多20个字符
 
     def _is_task_complete(self,
                             messages_input: List[MessageChunk],
-                            session_id: str) -> bool:
+                            session_id: str,
+                            session_context: SessionContext) -> bool:
         # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
         logger.info(f"messages_input[-1].role: {messages_input[-1].role}")
         if messages_input[-1].role == 'tool':
@@ -231,7 +145,8 @@ reason尽可能简单，最多20个字符
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
         
         
-        prompt = self.TASK_COMPLETE_PROMPT_TEMPLATE.format(
+        task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())
+        prompt = task_complete_template.format(
                 session_id=session_id,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
         )
@@ -262,7 +177,8 @@ reason尽可能简单，最多20个字符
     def _get_suggested_tools(self, 
                            messages_input: List[MessageChunk],
                            tool_manager: ToolManager,
-                           session_id: str) -> List[str]:
+                           session_id: str,
+                           session_context: SessionContext) -> List[str]:
         """
         基于用户输入和历史对话获取建议工具
         
@@ -270,6 +186,7 @@ reason尽可能简单，最多20个字符
             messages_input: 消息列表
             tool_manager: 工具管理器
             session_id: 会话ID
+            session_context: 会话上下文
             
         Returns:
             List[str]: 建议工具名称列表
@@ -292,7 +209,8 @@ reason尽可能简单，最多20个字符
             clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
             
             # 生成提示
-            prompt = self.TOOL_SUGGESTION_PROMPT_TEMPLATE.format(
+            tool_suggestion_template = PromptManager().get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
+            prompt = tool_suggestion_template.format(
                 session_id=session_id,
                 available_tools_str=available_tools_str,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
@@ -354,20 +272,16 @@ reason尽可能简单，最多20个字符
                      messages_input: List[MessageChunk],
                      tools_json: List[Dict[str, Any]],
                      tool_manager: Optional[ToolManager],
-                     session_id: str) -> Generator[List[MessageChunk], None, None]:
+                     session_id: str,
+                     session_context: SessionContext) -> Generator[List[MessageChunk], None, None]:
         """
         执行主循环
-        
-        Args:
-            messages_input: 输入消息列表
-            tools_json: 工具配置列表
-            tool_manager: 工具管理器
-            session_id: 会话ID
-            
-        Yields:
-            List[MessageChunk]: 执行结果消息块
         """
-        logger.info("SimpleAgent: 开始执行主循环")
+        logger.info(f"SimpleAgent: 开始执行循环，会话ID: {session_id}")
+        
+        # 将system 加入到到messages中
+        system_message = self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix)
+        messages_input.insert(0, system_message)
         
         all_new_response_chunks = []
         loop_count = 0
@@ -470,7 +384,7 @@ reason尽可能简单，最多20个字符
 
             messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks,messages_input)
             all_new_response_chunks = []
-            is_task_complete = self._is_task_complete(messages_input, session_id)
+            is_task_complete = self._is_task_complete(messages_input, session_id, session_context)
             if is_task_complete:
                 logger.info("SimpleAgent: 任务完成，终止执行")
                 break
@@ -659,10 +573,10 @@ reason尽可能简单，最多20个字符
             List[Dict[str, Any]]: 工具调用消息列表
         """
 
-        if '```<｜tool▁call▁end｜>' in tool_call['function']['arguments']:
+        if '```<｜tool call end｜>' in tool_call['function']['arguments']:
             logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
-            # 去掉```<｜tool▁call▁end｜> 以及之后所有的字符
-            tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
+            # 去掉```<｜tool call end｜> 以及之后所有的字符
+            tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool call end｜>')[0]
         # 格式化工具参数显示
         function_params = tool_call['function']['arguments']
         if len(tool_call['function']['arguments'])>0:

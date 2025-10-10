@@ -11,66 +11,37 @@ from sagents.tool.tool_base import AgentToolSpec
 from sagents.context.tasks.task_manager import TaskManager
 from sagents.context.tasks.task_base import TaskBase, TaskStatus
 from sagents.context.workflows import WorkflowManager
+from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid
 from copy import deepcopy
 from openai import OpenAI
 
-
-
-
 class WorkflowSelectAgent(AgentBase):
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
+    def __init__(self, model: Any, model_config: Dict[str, Any] = None, system_prefix: str = "", max_model_len: int = 64000):
+        if model_config is None:
+            model_config = {}
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.WORKFLOW_SELECT_PROMPT =  """
-你是一个工作流选择专家。请根据用户的对话历史，从提供的工作流模板中选择最合适的一个。
-## agent的描述和要求
-{agent_description}
-
-## 对话历史
-{conversation_history}
-
-## 可用的工作流模板
-{workflow_list}
-
-## 任务要求
-1. 仔细分析对话历史中用户的核心需求和任务类型
-2. 对比各个工作流模板的适用场景
-3. 选择匹配的工作流，或者判断没有合适的工作流
-
-## 输出格式（JSON）
-```json
-{{
-    "has_matching_workflow": true/false,
-    "selected_workflow_index": 0
-}}
-```
-
-请确保输出的JSON格式正确。本次输出只输出JSON字符串，不需要包含任何其他内容和解释。
-如果没有合适的工作流，请设置has_matching_workflow为false。
-selected_workflow_index 从0 开始计数
-"""
         self.agent_name = "WorkflowSelectAgent"
-        self.agent_description = "工作流选择智能体，专门负责基于当前状态选择最合适的工作流"
+        self.agent_description = "工作流选择智能体，专门负责根据用户需求选择最合适的工作流"
         logger.info("WorkflowSelectAgent 初始化完成")
 
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
         
+        # 提取最近的对话历史
         if 'task_rewrite' in session_context.audit_status:
-            recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
-                role=MessageRole.USER.value,
-                content = session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
-            )])
+            recent_message_str = session_context.audit_status['task_rewrite']
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length)
             recent_message_str = MessageManager.convert_messages_to_str(history_messages)
         
         # 使用WorkflowManager格式化工作流列表
         workflow_list = session_context.workflow_manager.format_workflow_list()
 
-        prompt = self.WORKFLOW_SELECT_PROMPT.format(
+        # 使用PromptManager获取模板，传入语言参数
+        workflow_select_template = PromptManager().get_agent_prompt_auto("workflow_select_template", language=session_context.get_language())
+        prompt = workflow_select_template.format(
             conversation_history=recent_message_str,
             workflow_list=workflow_list,
             agent_description=self.system_prefix,

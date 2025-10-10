@@ -39,10 +39,44 @@ class MemoryExtractionAgent(AgentBase):
     
     def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('memory_extraction_system_prefix')
         self.agent_name = "MemoryExtractionAgent"
         self.agent_description = "专门负责记忆提取和冲突处理的智能Agent"
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取系统前缀，使用正确的语言
+        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('memory_extraction_system_prefix', language=session_context.get_language())
+        
+        message_manager = session_context.message_manager
+        memory_manager = session_context.memory_manager
+
+        # 获取最近的对话历史
+        recent_messages = message_manager.extract_all_context_messages(recent_turns=5, max_length=self.max_history_context_length)
+        
+        # 提取记忆
+        extracted_memories = self.extract_memories_from_conversation(recent_messages, session_context)
+        
+        if extracted_memories:
+            # 去重处理
+            deduplicated_memories = self.deduplicate_memories(extracted_memories, memory_manager, session_context)
+            
+            # 存储记忆
+            for memory in deduplicated_memories:
+                memory_manager.add_memory(memory)
+            
+            # 返回提取结果
+            result_content = f"成功提取并存储了 {len(deduplicated_memories)} 条记忆"
+            yield [MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content=result_content,
+                message_type=MessageType.NORMAL.value
+            )]
+        else:
+            yield [MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content="未发现需要提取的新记忆",
+                message_type=MessageType.NORMAL.value
+            )]
         # 现获取执行的提问和执行的历史
         message_manager = session_context.message_manager
         conversation_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length,last_turn_user_only=False)
@@ -50,7 +84,7 @@ class MemoryExtractionAgent(AgentBase):
         logger.debug(f"MemoryExtractionAgent: 从对话中提取记忆，对话历史: {conversation_messages}")
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         # 先提取对话中的记忆
-        extracted_memories = self.extract_memories_from_conversation(recent_message_str, session_id)
+        extracted_memories = self.extract_memories_from_conversation(recent_message_str, session_id, session_context)
         # 将提取的记忆通过 session_context.user_memory_manager 存储起来
         for memory in extracted_memories:
             session_context.user_memory_manager.remember(
@@ -61,11 +95,11 @@ class MemoryExtractionAgent(AgentBase):
                 session_id=session_id
             )
         
-        # 在获取所有的系统性记忆，让模型判断是否要删除重复的旧的记忆
+        # 在现有的记忆中，判断是否要删除重复的旧的记忆
         existing_memories = session_context.user_memory_manager.get_system_memories(session_id)
 
         # 调用模型判断是否要删除重复的旧记忆
-        duplicate_keys = self._check_and_delete_duplicate_memories(existing_memories, session_id)
+        duplicate_keys = self._check_and_delete_duplicate_memories(existing_memories, session_id, session_context)
         # 删除重复的旧记忆
         for key in duplicate_keys:
             session_context.user_memory_manager.forget(memory_key=key, session_id=session_id)
@@ -84,7 +118,7 @@ class MemoryExtractionAgent(AgentBase):
         )]
 
     # 在现有的记忆中，判断是否要删除重复的旧的记忆
-    def _check_and_delete_duplicate_memories(self, existing_memories: List[Dict], session_id: str):
+    def _check_and_delete_duplicate_memories(self, existing_memories: List[Dict], session_id: str, session_context: SessionContext):
         """检查并删除重复的旧记忆"""
         if not existing_memories:
             return
@@ -94,9 +128,9 @@ class MemoryExtractionAgent(AgentBase):
                 self.prepare_unified_system_message(session_id=session_id),
                 MessageChunk(
                     role=MessageRole.USER.value,
-                    content=PromptManager().memory_deduplication_template.format(existing_memories=existing_memories),
+                    content=PromptManager().get_agent_prompt_auto('memory_deduplication_template', language=session_context.get_language()).format(existing_memories=existing_memories),
                     message_id=str(uuid.uuid4()),
-                    show_content=PromptManager().memory_deduplication_template.format(existing_memories=existing_memories),
+                    show_content=PromptManager().get_agent_prompt_auto('memory_deduplication_template', language=session_context.get_language()).format(existing_memories=existing_memories),
                     message_type=MessageType.MEMORY_EXTRACTION.value
                 )
             ]
@@ -124,11 +158,13 @@ class MemoryExtractionAgent(AgentBase):
             logger.error(f"MemoryExtractionAgent: 检查重复记忆失败: {traceback.format_exc()}")
             return []
 
-    def extract_memories_from_conversation(self, recent_message_str: str, session_id: str) -> List[Dict]:
+    def extract_memories_from_conversation(self, recent_message_str: str, session_id: str, session_context: SessionContext) -> List[Dict]:
         """从对话历史中提取潜在的系统级记忆
         
         Args:
             recent_message_str: 最近的对话消息字符串
+            session_id: 会话ID
+            session_context: 会话上下文
         
         Returns:
             提取的记忆列表
@@ -138,7 +174,7 @@ class MemoryExtractionAgent(AgentBase):
             return []
         try:            
             # 构建记忆提取的prompt
-            extraction_prompt = PromptManager().get('memory_extraction_template').format(
+            extraction_prompt = PromptManager().get_agent_prompt_auto('memory_extraction_template', language=session_context.get_language()).format(
                 formatted_conversation=recent_message_str,
                 system_context=self.prepare_unified_system_message(session_id=session_id).content)
             

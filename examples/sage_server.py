@@ -33,6 +33,8 @@ from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.logger import logger
+from sagents.utils.auto_gen_agent import AutoGenAgentFunc
+from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 from openai import OpenAI
 from sagents.context.session_context import SessionStatus,get_session_context
 
@@ -40,23 +42,89 @@ from sagents.context.session_context import SessionStatus,get_session_context
 import argparse
 
 parser = argparse.ArgumentParser(description="Sage Stream Service")
-parser.add_argument("--default_llm_api_key", required=True, help="默认LLM API Key")
-parser.add_argument("--default_llm_api_base_url", required=True, help="默认LLM API Base")
-parser.add_argument("--default_llm_model_name", required=True, help="默认LLM API Model")
+# 新格式参数（推荐使用）
+parser.add_argument("--default_llm_api_key", help="默认LLM API Key")
+parser.add_argument("--default_llm_api_base_url", help="默认LLM API Base")
+parser.add_argument("--default_llm_model_name", help="默认LLM API Model")
 parser.add_argument("--default_llm_max_tokens", default=4096, type=int, help="默认LLM API Max Tokens")
-parser.add_argument("--default_llm_temperature", default=0.3, type=float, help="默认LLM API Temperature")
+parser.add_argument("--default_llm_temperature", default=0.2, type=float, help="默认LLM API Temperature")
+parser.add_argument("--default_llm_max_model_len", default=54000, type=int, help="默认LLM 最大上下文")
+# 旧格式参数（向后兼容，已废弃）
+parser.add_argument("--llm_api_key", help="LLM API Key（已废弃，请使用--default_llm_api_key）")
+parser.add_argument("--llm_api_base_url", help="LLM API Base（已废弃，请使用--default_llm_api_base_url）")
+parser.add_argument("--llm_model_name", help="LLM API Model（已废弃，请使用--default_llm_model_name）")
+parser.add_argument("--llm_max_tokens", default=4096, type=int, help="LLM API Max Tokens（已废弃，请使用--default_llm_max_tokens）")
+parser.add_argument("--llm_temperature", default=0.2, type=float, help="LLM API Temperature（已废弃，请使用--default_llm_temperature）")
 parser.add_argument("--host", default="0.0.0.0", help="Server Host")
 parser.add_argument("--port", default=8001, type=int, help="Server Port")
 
 parser.add_argument("--mcp-config", default="mcp_setting.json", help="MCP配置文件路径")
-parser.add_argument("--workspace", default="sage_demo_workspace", help="工作空间目录")
+parser.add_argument("--workspace", default="agent_workspace", help="工作空间目录")
 parser.add_argument("--logs-dir", default="logs", help="日志目录")
 parser.add_argument("--preset_running_config", default="", help="预设配置，system_context，以及workflow，与接口中传过来的合并使用")
 parser.add_argument("--memory_root", default=None, help="记忆存储根目录（可选）")
 parser.add_argument("--daemon", action="store_true", help="以守护进程模式运行")
 parser.add_argument("--pid-file", default="sage_stream.pid", help="PID文件路径")
+parser.add_argument("--force_summary", action="store_true", help="是否强制总结")
 
 server_args = parser.parse_args()
+
+# 参数兼容性处理：支持新旧两种格式
+import warnings
+
+def handle_llm_args_compatibility(args):
+    """处理LLM参数的向后兼容性"""
+    # 检查是否使用了旧格式参数
+    if server_args.default_llm_max_model_len is None:
+        server_args.default_llm_max_model_len = 54000
+    elif server_args.default_llm_max_model_len < 8000:
+        server_args.default_llm_max_model_len = 54000
+    
+    old_args_used = []
+    
+    # 处理每个LLM参数 (新参数, 旧参数)
+    llm_params = [
+        ('default_llm_api_key', 'llm_api_key'),
+        ('default_llm_api_base_url', 'llm_api_base_url'), 
+        ('default_llm_model_name', 'llm_model_name'),
+        ('default_llm_max_tokens', 'llm_max_tokens'),
+        ('default_llm_temperature', 'llm_temperature')
+    ]
+    
+    for new_param, old_param in llm_params:
+        new_value = getattr(args, new_param, None)
+        old_value = getattr(args, old_param, None)
+        
+        if new_value is not None:
+            # 使用新格式参数
+            continue
+        elif old_value is not None:
+            # 使用旧格式参数，设置到新格式
+            setattr(args, new_param, old_value)
+            old_args_used.append(old_param)
+        elif new_param in ['default_llm_api_key', 'default_llm_api_base_url', 'default_llm_model_name']:
+            # 必需参数缺失
+            raise ValueError(f"必需参数缺失: 请提供 --{new_param} 或 --{old_param}")
+    
+    # 设置默认值
+    if args.default_llm_max_tokens is None:
+        args.default_llm_max_tokens = 4096
+    if args.default_llm_temperature is None:
+        args.default_llm_temperature = 0.3
+    
+    # 发出废弃警告
+    if old_args_used:
+        warnings.warn(
+            f"使用了已废弃的参数: {', '.join(old_args_used)}。"
+            f"请使用新格式参数: {', '.join(['--default_' + p.replace('llm_', '') for p in old_args_used])}",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        logger.warning(f"使用了已废弃的参数: {', '.join(old_args_used)}")
+
+# 处理参数兼容性
+handle_llm_args_compatibility(server_args)
+
 if server_args.workspace:
     server_args.workspace = os.path.abspath(server_args.workspace)
 os.environ['PREFIX_FILE_WORKSPACE'] = server_args.workspace if server_args.workspace.endswith('/') else server_args.workspace+'/'
@@ -101,7 +169,8 @@ class SageStreamService:
                         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
                         preset_running_config: Optional[Dict[str, Any]] = None,
                         workspace: Optional[str] = None,
-                        memory_root: Optional[str] = None):
+                        memory_root: Optional[str] = None,
+                        max_model_len: Optional[int] = None):
         """
         初始化服务
         
@@ -111,16 +180,91 @@ class SageStreamService:
             tool_manager: 工具管理器实例
         """
         self.preset_running_config = preset_running_config
-        self.preset_system_context = None
-        if 'system_context' in self.preset_running_config:
-            self.preset_system_context = self.preset_running_config['system_context']
-        self.preset_available_workflows =None
-        if 'available_workflows' in self.preset_running_config:
-            self.preset_available_workflows = self.preset_running_config['available_workflows']
+        # 设置system_prefix
         if "system_prefix" in self.preset_running_config:
             self.preset_system_prefix = self.preset_running_config['system_prefix']
+            logger.debug(f"使用预设system_prefix: {self.preset_system_prefix}")
+        elif "systemPrefix" in self.preset_running_config:
+            self.preset_system_prefix = self.preset_running_config['systemPrefix']
+            logger.debug(f"使用预设systemPrefix: {self.preset_system_prefix}")
         else:
-            self.preset_system_prefix = "You are a helpful AI assistant."
+            self.preset_system_prefix = None
+            logger.debug(f"未使用预设system_prefix")
+        
+        # 设置system_context
+        if "system_context" in self.preset_running_config:
+            self.preset_system_context = self.preset_running_config['system_context']
+            logger.debug(f"使用预设system_context")
+        elif "systemContext" in self.preset_running_config:
+            self.preset_system_context = self.preset_running_config['systemContext']
+            logger.debug(f"使用预设systemContext")
+        else:
+            self.preset_system_context = None
+            logger.debug(f"未使用预设system_context")
+        
+        # 设置available_workflows
+        if "available_workflows" in self.preset_running_config:
+            self.preset_available_workflows = self.preset_running_config['available_workflows']
+            logger.debug(f"使用预设available_workflows")
+        elif "availableWorkflows" in self.preset_running_config:
+            self.preset_available_workflows = self.preset_running_config['availableWorkflows']
+            logger.debug(f"使用预设availableWorkflows")
+        else:
+            self.preset_available_workflows = None
+            logger.debug(f"未使用预设available_workflows")
+        
+        # 设置available_tools
+        if "available_tools" in self.preset_running_config:
+            self.preset_available_tools = self.preset_running_config['available_tools']
+            logger.debug(f"使用预设available_tools")
+        elif "availableTools" in self.preset_running_config:
+            self.preset_available_tools = self.preset_running_config['availableTools']
+            logger.debug(f"使用预设availableTools")
+        else:
+            self.preset_available_tools = None
+            logger.debug(f"未使用预设available_tools")
+        
+        # 设置max_loop_count
+        if "max_loop_count" in self.preset_running_config:
+            self.preset_max_loop_count = self.preset_running_config['max_loop_count']
+            logger.debug(f"使用预设max_loop_count: {self.preset_max_loop_count}")
+        elif "maxLoopCount" in self.preset_running_config:
+            self.preset_max_loop_count = self.preset_running_config['maxLoopCount']
+            logger.debug(f"使用预设maxLoopCount: {self.preset_max_loop_count}")
+        else:
+            self.preset_max_loop_count = None
+            logger.debug(f"未使用预设max_loop_count")
+
+#         "deepThinking": false,
+#   "multiAgent": false,
+        # 设置deepThinking
+        if "deepThinking" in self.preset_running_config:
+            self.preset_deep_thinking = self.preset_running_config['deepThinking']
+            logger.debug(f"使用预设deepThinking: {self.preset_deep_thinking}")
+        elif "deepThinking" in self.preset_running_config:
+            self.preset_deep_thinking = self.preset_running_config['deepThinking']
+            logger.debug(f"使用预设deepThinking: {self.preset_deep_thinking}")
+        else:
+            self.preset_deep_thinking = None
+            logger.debug(f"未使用预设deepThinking")
+        # 设置multiAgent
+        if "multiAgent" in self.preset_running_config:
+            self.preset_multi_agent = self.preset_running_config['multiAgent']
+            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
+        elif "multiAgent" in self.preset_running_config:
+            self.preset_multi_agent = self.preset_running_config['multiAgent']
+            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
+        else:
+            self.preset_multi_agent = None
+            logger.debug(f"未使用预设multiAgent")
+
+        # 设置max_model_len
+        if max_model_len:
+            self.default_llm_max_model_len = max_model_len
+            logger.debug(f"使用预设max_model_len: {self.default_llm_max_model_len}")
+        else:
+            self.default_llm_max_model_len = 54000
+            logger.debug(f"未使用预设max_model_len")
 
         # workspace 有可能是相对路径
         if workspace:
@@ -132,15 +276,20 @@ class SageStreamService:
             model_config=model_config,
             system_prefix=self.preset_system_prefix,
             workspace=workspace if workspace.endswith('/') else workspace+'/',
-            memory_root=memory_root
+            memory_root=memory_root,
+            max_model_len=self.default_llm_max_model_len
         )
         self.tool_manager = tool_manager
+        if self.preset_available_tools:
+            if isinstance(self.tool_manager, ToolManager):
+                self.tool_manager = ToolProxy(self.tool_manager, self.preset_available_tools)    
         logger.info("SageStreamService 初始化完成")
     
     async def process_stream(self, messages, session_id=None, user_id=None, deep_thinking=None, 
                            max_loop_count=None, multi_agent=None,more_suggest=False,
                             system_context:Dict=None, 
-                           available_workflows: Dict=None):
+                           available_workflows: Dict=None,
+                           force_summary: bool=False):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
         logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, messages_count={len(messages)}")
@@ -182,12 +331,13 @@ class SageStreamService:
                 tool_manager=self.tool_manager,
                 session_id=session_id,
                 user_id=user_id,
-                deep_thinking=deep_thinking,
-                max_loop_count=max_loop_count,
-                multi_agent=multi_agent,
+                deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,
+                max_loop_count = max_loop_count if max_loop_count is not None else self.preset_max_loop_count ,
+                multi_agent=multi_agent if multi_agent is not None else self.preset_multi_agent,
                 more_suggest = more_suggest,
                 system_context=system_context,
-                available_workflows=available_workflows
+                available_workflows=available_workflows,
+                force_summary=force_summary
             )
             
             logger.info("✅ run_stream 调用成功，开始处理结果...")
@@ -286,6 +436,12 @@ class SageStreamService:
             
             logger.info(f"🏁 流式处理完成，总共处理了 {chunk_count} 个块")
                 
+        except GeneratorExit:
+            logger.warning(f"🔌 process_stream: 客户端断开连接，会话ID: {session_id}")
+            logger.warning(f"🔍 GeneratorExit 详情: 客户端在流式处理过程中断开了连接")
+            logger.warning(f"📋 GeneratorExit 堆栈跟踪: {traceback.format_exc()}")
+            # 重新抛出GeneratorExit，让上层处理
+            raise
         except Exception as e:
             logger.error(f"❌ 流式处理异常: {e}")
             logger.error(f"🔍 异常类型: {type(e).__name__}")
@@ -305,6 +461,10 @@ class SageStreamService:
         """中断指定会话"""
         return self.sage_controller.interrupt_session(session_id, message)
     
+    def save_session(self, session_id: str) -> bool:
+        """保存会话状态"""
+        return self.sage_controller.save_session(session_id)
+
     def get_session_status(self, session_id: str):
         """获取会话状态"""
         return self.sage_controller.get_session_status(session_id)
@@ -346,6 +506,8 @@ async def initialize_system(server_args):
     try:
         # 初始化模型客户端
         if server_args.default_llm_api_key:
+            logger.info(f"默认 API 密钥: {server_args.default_llm_api_key}...")
+            logger.info(f"默认 API 基础 URL: {server_args.default_llm_api_base_url}...")
             default_model_client = OpenAI(
                 api_key=server_args.default_llm_api_key,
                 base_url=server_args.default_llm_api_base_url
@@ -368,9 +530,9 @@ async def initialize_system(server_args):
         if default_model_client:
             # 从配置中构建模型配置字典
             model_config_dict = {
-                'model': server_args.default_llm_model_name,
-                'max_tokens': server_args.default_llm_max_tokens,
-                'temperature': server_args.default_llm_temperature
+            'model': server_args.default_llm_model_name,
+            'max_tokens': server_args.default_llm_max_tokens,
+            'temperature': server_args.default_llm_temperature
             }
 
             if server_args.preset_running_config:
@@ -388,7 +550,8 @@ async def initialize_system(server_args):
                 tool_manager=tool_manager,
                 preset_running_config=preset_running_config,
                 workspace=server_args.workspace,
-                memory_root=server_args.memory_root
+                memory_root=server_args.memory_root,
+                max_model_len=server_args.default_llm_max_model_len
             )
             logger.info("默认 SageStreamService 初始化成功")
         else:
@@ -448,12 +611,26 @@ class StreamRequest(BaseModel):
     deep_thinking: Optional[Union[bool, str]] = None
     max_loop_count: int = 10
     multi_agent: Optional[Union[bool, str]] = None
+    summary : bool =True  # 过时字段
+    deep_research: bool = True # 过时字段，与multi_agent一致
     more_suggest: bool = False
     system_context: Optional[Dict[str, Any]] = None
     available_workflows: Optional[Dict[str, List[str]]] = None
     llm_model_config: Optional[Dict[str, Any]] = None
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
+    
+    def __init__(self, **data):
+        # 处理字段兼容性
+        if 'deep_research' in data and 'multi_agent' not in data:
+            data['multi_agent'] = data['deep_research']
+            warnings.warn("deep_research字段已过时，请使用multi_agent", DeprecationWarning)
+        
+        if 'summary' in data:
+            warnings.warn("summary字段已过时，将被忽略", DeprecationWarning)
+            
+        super().__init__(**data)
+
 
 class ConfigRequest(BaseModel):
     api_key: str
@@ -478,6 +655,28 @@ class SystemStatus(BaseModel):
 
 class InterruptRequest(BaseModel):
     message: str = "用户请求中断"
+
+class AutoGenAgentRequest(BaseModel):
+    """自动生成Agent配置的请求模型"""
+    agent_description: str  # Agent描述
+
+class AutoGenAgentResponse(BaseModel):
+    """自动生成Agent响应"""
+    success: bool
+    message: str
+    agent_config: Optional[Dict[str, Any]] = None
+
+class SystemPromptOptimizeRequest(BaseModel):
+    """系统提示词优化请求"""
+    original_prompt: str  # 原始系统提示词
+    optimization_goal: Optional[str] = None  # 优化目标（可选）
+
+class SystemPromptOptimizeResponse(BaseModel):
+    """系统提示词优化响应"""
+    success: bool
+    message: str
+    optimized_prompt: Optional[str] = None  # 优化后的提示词
+    optimization_details: Optional[Dict[str, Any]] = None  # 优化详情
 
 
 @app.get("/api/health")
@@ -532,15 +731,27 @@ async def stream_chat(request: StreamRequest):
     # 取决于是否需要自定义模型以及 agent 的system prefix ，以及对tool 的工具是否有限制
     if request.llm_model_config or request.system_prefix or request.available_tools:
         # 根据model config 初始化新的模型客户端
+        logger.info(f"初始化新的模型客户端，模型配置api_key :{request.llm_model_config.get('api_key', server_args.default_llm_api_key)}")
+        logger.info(f"初始化新的模型客户端，模型配置base_url :{request.llm_model_config.get('base_url', server_args.default_llm_api_base_url)}")
+        logger.info(f"初始化新的模型客户端，模型配置model :{request.llm_model_config.get('model', server_args.default_llm_model_name)}")
         model_client = OpenAI(
             api_key=request.llm_model_config.get('api_key', server_args.default_llm_api_key),
             base_url=request.llm_model_config.get('base_url', server_args.default_llm_api_base_url),
         )
         llm_model_config = {
-            'model': request.llm_model_config.get('model', server_args.default_llm_model_name),
-            'max_tokens': int(request.llm_model_config.get('max_tokens', server_args.default_llm_max_tokens)),
-            'temperature': float(request.llm_model_config.get('temperature', server_args.default_llm_temperature))
+            'model': request.llm_model_config.get('model', server_args.default_llm_model_name)
         }
+        
+        # 只有在有有效的max_tokens值时才添加该键，避免None值导致错误
+        max_tokens_value = request.llm_model_config.get('max_tokens', server_args.default_llm_max_tokens)
+        max_model_len = request.llm_model_config.get('max_model_len', server_args.default_llm_max_model_len)
+        if max_tokens_value is not None:
+            llm_model_config['max_tokens'] = int(max_tokens_value)
+            
+        # 只有在有有效的temperature值时才添加该键，避免None值导致错误
+        temperature_value = request.llm_model_config.get('temperature', server_args.default_llm_temperature)
+        if temperature_value is not None:
+            llm_model_config['temperature'] = float(temperature_value)
         logger.info(f"初始化模型客户端，模型配置: {llm_model_config}")
 
         if request.available_tools:
@@ -565,7 +776,8 @@ async def stream_chat(request: StreamRequest):
                 "system_prefix": request.system_prefix
             },
             workspace=server_args.workspace,
-            memory_root=server_args.memory_root
+            memory_root=server_args.memory_root,
+            max_model_len=max_model_len
         )
         end_stream_service = time.time()
         logger.info(f"初始化流式服务耗时: {end_stream_service - start_stream_service} 秒")
@@ -585,7 +797,7 @@ async def stream_chat(request: StreamRequest):
             "is_default": True
         }
 
-    async def generate_stream():
+    async def generate_stream(stream_service):
         """生成SSE流"""
         try:
             # 直接转换消息格式，不进行内容调整
@@ -602,6 +814,11 @@ async def stream_chat(request: StreamRequest):
             
             # 打印请求体内容
             logger.info(f"请求体内容: {request}")
+            
+            # 添加流处理计数器和连接状态跟踪
+            stream_counter = 0
+            last_activity_time = time.time()
+            
             # 处理流式响应，传递所有参数
             async for result in stream_service.process_stream(
                 messages=messages, 
@@ -612,8 +829,19 @@ async def stream_chat(request: StreamRequest):
                 multi_agent=request.multi_agent,
                 more_suggest=request.more_suggest,
                 system_context=request.system_context,
-                available_workflows=request.available_workflows
+                available_workflows=request.available_workflows,
+                force_summary=server_args.force_summary
             ):
+                # 更新流处理计数器和活动时间
+                stream_counter += 1
+                current_time = time.time()
+                time_since_last = current_time - last_activity_time
+                last_activity_time = current_time
+                
+                # 每100个结果记录一次连接状态
+                if stream_counter % 100 == 0:
+                    logger.info(f"📊 流处理状态 - 会话: {session_id}, 计数: {stream_counter}, 间隔: {time_since_last:.3f}s")
+                
                 # 处理大JSON的分块传输
                 try:
                     json_str = json.dumps(result, ensure_ascii=False)
@@ -688,14 +916,28 @@ async def stream_chat(request: StreamRequest):
                     yield json.dumps(error_data, ensure_ascii=False) + "\n"
                     
                 await asyncio.sleep(0.01)  # 避免过快发送
-                
             # 发送流结束标记
             end_data = {
                 'type': 'stream_end',
                 'session_id': session_id,
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'total_stream_count': stream_counter
             }
+            total_duration = time.time() - (last_activity_time - time_since_last if 'time_since_last' in locals() else last_activity_time)
+            logger.info(f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s")
+            logger.info(f"✅ 流结束数据: {end_data}")
             yield json.dumps(end_data, ensure_ascii=False) + "\n"
+        
+        except GeneratorExit as ge:
+            import sys
+            disconnect_msg = f"🔌 [GENERATOR_EXIT] 客户端断开连接，生成器被关闭 - 会话ID: {session_id}, 时间: {time.time()}"
+            logger.error(disconnect_msg)
+            logger.error(f"🔍 [GENERATOR_EXIT] GeneratorExit详情: {type(ge).__name__} - {str(ge)}")
+            logger.error(f"📋 [GENERATOR_EXIT] 堆栈跟踪: {traceback.format_exc()}")
+            logger.error(f"📊 [GENERATOR_EXIT] 流处理统计: 已处理 {stream_counter if 'stream_counter' in locals() else 0} 个流结果")
+            # 强制刷新日志缓冲区
+            sys.stdout.flush()
+            sys.stderr.flush()
             
         except Exception as e:
             logger.error(f"流式处理异常: {e}")
@@ -707,12 +949,20 @@ async def stream_chat(request: StreamRequest):
             }
             yield json.dumps(error_data, ensure_ascii=False) + "\n"
         finally:
+            logger.info('server generate_stream finally save info and delete')
             # 清理会话资源
             if session_id in all_active_sessions_service_map:
+                stream_service = all_active_sessions_service_map[session_id]['stream_service']
+                if stream_service:
+                    if stream_service.save_session(session_id):
+                        logger.info(f"会话 {session_id} 状态已保存")
+                    else:
+                        logger.error(f"会话 {session_id} 保存失败，已经保存")
                 del all_active_sessions_service_map[session_id]
                 logger.info(f"会话 {session_id} 资源已清理")
+    
     return StreamingResponse(
-        generate_stream(),
+        generate_stream(stream_service),
         media_type="text/plain",
         headers={
             "Cache-Control": "no-cache",
@@ -921,6 +1171,74 @@ class MCPServerRequest(BaseModel):
     api_key: Optional[str] = None
     disabled: bool = False
 
+@app.post("/api/agent/auto-generate", response_model=AutoGenAgentResponse)
+async def auto_generate_agent(request: AutoGenAgentRequest):
+    """
+    自动生成Agent配置的API接口
+    
+    根据Agent描述和工具管理器自动生成Agent配置
+    """
+    start_time = time.time()
+    logger.info(f"开始处理Agent自动生成请求，描述长度: {len(request.agent_description)}")
+    
+    try:
+        # 使用服务器默认的LLM客户端
+        global default_model_client, tool_manager
+        
+        if default_model_client is None:
+            logger.error("默认LLM客户端未初始化")
+            return AutoGenAgentResponse(
+                success=False,
+                message="默认LLM客户端未初始化"
+            )
+        
+        if tool_manager is None:
+            logger.error("工具管理器未初始化")
+            return AutoGenAgentResponse(
+                success=False,
+                message="工具管理器未初始化"
+            )
+        
+        logger.info(f"使用模型: {server_args.default_llm_model_name}")
+        logger.info(f"可用工具数量: {len(tool_manager.tools)}")
+        
+        # 创建AutoGenAgentFunc实例
+        auto_gen_agent = AutoGenAgentFunc()
+        
+        # 生成Agent配置，使用服务器默认配置
+        logger.info("开始调用AutoGenAgentFunc生成配置")
+        agent_config = auto_gen_agent.generate_agent_config(
+            agent_description=request.agent_description,
+            tool_manager=tool_manager,
+            llm_client=default_model_client,
+            model=server_args.default_llm_model_name
+        )
+        
+        if agent_config is None:
+            logger.error("AutoGenAgentFunc返回None")
+            return AutoGenAgentResponse(
+                success=False,
+                message="生成Agent配置失败"
+            )
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"Agent配置生成成功，耗时: {elapsed_time:.2f}秒")
+        
+        return AutoGenAgentResponse(
+            success=True,
+            message="Agent配置生成成功",
+            agent_config=agent_config
+        )
+        
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"自动生成Agent配置失败，耗时: {elapsed_time:.2f}秒，错误: {str(e)}")
+        logger.error(traceback.format_exc())
+        return AutoGenAgentResponse(
+            success=False,
+            message=f"生成失败: {str(e)}"
+        )
+
 @app.post("/api/mcp/add")
 async def add_mcp_server(request: MCPServerRequest, response: Response):
     """添加MCP server到tool manager"""
@@ -984,6 +1302,53 @@ async def add_mcp_server(request: MCPServerRequest, response: Response):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"添加MCP server失败: {str(e)}")
 
+@app.post("/api/system-prompt/optimize", response_model=SystemPromptOptimizeResponse)
+async def optimize_system_prompt(request: SystemPromptOptimizeRequest, response: Response):
+    """优化系统提示词"""
+    try:
+        # 检查是否有默认的模型客户端
+        if not default_model_client:
+            add_cors_headers(response)
+            return SystemPromptOptimizeResponse(
+                success=False,
+                message="系统未配置默认LLM模型，无法进行提示词优化"
+            )
+        
+        # 创建SystemPromptOptimizer实例
+        optimizer = SystemPromptOptimizer()
+        
+        # 执行优化
+        result = await asyncio.to_thread(
+            optimizer.optimize_system_prompt,
+            request.original_prompt,
+            default_model_client,
+            server_args.default_llm_model_name,
+            request.optimization_goal
+        )
+        
+        # 提取优化后的提示词
+        optimized_prompt = result.get('optimized_prompt', '')
+        
+        add_cors_headers(response)
+        return SystemPromptOptimizeResponse(
+            success=True,
+            message="系统提示词优化成功",
+            optimized_prompt=optimized_prompt,
+            optimization_details={
+                "original_length": len(request.original_prompt),
+                "optimized_length": len(optimized_prompt),
+                "optimization_goal": request.optimization_goal
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"系统提示词优化失败: {str(e)}")
+        logger.error(traceback.format_exc())
+        add_cors_headers(response)
+        return SystemPromptOptimizeResponse(
+            success=False,
+            message=f"系统提示词优化失败: {str(e)}"
+        )
 
 
 # 主函数

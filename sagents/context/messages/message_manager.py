@@ -441,6 +441,10 @@ class MessageManager:
             
             messages_after_last_execution = new_messages_after_last_execution[::-1]
 
+        # 第一条不能是role 为tool 的消息
+        if messages_after_last_execution and messages_after_last_execution[0].role == MessageRole.TOOL.value:
+            messages_after_last_execution = messages_after_last_execution[1:]
+
         return messages_after_last_execution
 
     def get_all_messages_content_length(self):

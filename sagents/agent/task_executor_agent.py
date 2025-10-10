@@ -9,6 +9,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole,MessageTy
 from sagents.context.session_context import SessionContext,get_session_context
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_base import AgentToolSpec
+from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid
 from copy import deepcopy
@@ -16,28 +17,8 @@ from copy import deepcopy
 class TaskExecutorAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
         super().__init__(model, model_config, system_prefix, max_model_len)
-        self.TASK_EXECUTION_PROMPT_TEMPLATE = """请执行以下需求或者任务：{next_subtask_description}
-
-期望输出：{next_expected_output}
-
-请直接开始执行任务，观察历史对话，不要做重复性的工作。"""
-
-        self.agent_custom_system_prefix = """
-根据最新的任务描述和要求，来执行任务。
-    
-注意以下的任务执行规则，不要使用工具集合之外的工具，否则会报错：
-1. 如果不需要使用工具，直接返回中文内容。你的文字输出都要是markdown格式。
-2. 只能在工作目录下读写文件。如果用户没有提供文件路径，你应该在这个目录下创建一个新文件。
-3. 调用工具时，不要在其他的输出文字，尽可能调用不互相依赖的全部工具。
-4. 输出的文字中不要暴露你的工作目录，id信息以及你的工具名称。
-
-如果在工具集合包含file_write函数工具，要求如下：
-5. 如果是要生成计划、方案、内容创作，代码等大篇幅文字，请使用file_write函数工具将内容分多次保存到文件中，文件内容是函数的参数，格式使用markdown。
-6. 如果需要编写代码，请使用file_write函数工具，代码内容是函数的参数。
-7. 如果是输出报告或者总结，请使用file_write函数工具，报告内容是函数的参数，格式使用markdown。
-8. 如果使用file_write创建文件，一定要在工作目录下创建文件，要求文件路径是绝对路径。
-9. 针对生成较大的文档或者代码，先使用file_write 生成部分内容或者框架，在使用replace_text_in_file 进行更加详细内容的填充。
-"""
+        self.TASK_EXECUTION_PROMPT_TEMPLATE = PromptManager().get_agent_prompt_auto('task_execution_template')
+        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('task_executor_system_prefix')
         self.agent_name = "TaskExecutorAgent"
         self.agent_description = """
 TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，来执行任务。
@@ -45,6 +26,10 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         logger.info("TaskExecutorAgent 初始化完成")
     
     def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+        # 重新获取模板和系统前缀，使用正确的语言
+        self.TASK_EXECUTION_PROMPT_TEMPLATE = PromptManager().get_agent_prompt_auto('task_execution_template', language=session_context.get_language())
+        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('task_executor_system_prefix', language=session_context.get_language())
+        
         message_manager = session_context.message_manager
         if 'task_rewrite' in session_context.audit_status:
             rewrite_user = [MessageChunk(
@@ -52,11 +37,11 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 content = session_context.audit_status['task_rewrite'],
                 message_type=MessageType.NORMAL.value
             )]
-            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3,max_content_length=self.max_history_context_length)
+            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=10,max_content_length=self.max_history_context_length)
             history_messages = rewrite_user + messages_after_last_user
         else:
             history_messages = message_manager.extract_all_context_messages(recent_turns=1,max_length=self.max_history_context_length,last_turn_user_only=True)
-            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=3,max_content_length=self.max_history_context_length)
+            messages_after_last_user =  message_manager.get_all_execution_messages_after_last_user(recent_turns=12,max_content_length=self.max_history_context_length)
             history_messages.extend(messages_after_last_user)
 
         last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
@@ -300,10 +285,10 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             List[Dict[str, Any]]: 工具调用消息列表
         """
         # 格式化工具参数显示
-        if '```<｜tool▁call▁end｜>' in tool_call['function']['arguments']:
+        if '```<｜tool call end｜>' in tool_call['function']['arguments']:
             logger.debug(f"TaskExecutorAgent: 原始错误参数: {tool_call['function']['arguments']}")
-            # 去掉```<｜tool▁call▁end｜> 以及之后所有的字符
-            tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
+            # 去掉```<｜tool call end｜> 以及之后所有的字符
+            tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool call end｜>')[0]
         
         function_params = tool_call['function']['arguments']
         if len(tool_call['function']['arguments'])>0:
