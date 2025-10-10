@@ -27,3 +27,5 @@ python-pptx
 PyMuPDF
 tqdm
 unstructured
+
+streamlit==1.50.0
