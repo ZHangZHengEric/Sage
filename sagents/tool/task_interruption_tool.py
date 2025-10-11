@@ -29,7 +29,7 @@ class TaskInterruptionTool(ToolBase):
             "follow_up":follow_up
         }
 
-    @ToolBase.tool()
+    # @ToolBase.tool()
     def complete_task(self) -> Dict[str, Any]:
         """
         The complete_task tool is used to signal that the task has been successfully completed.
