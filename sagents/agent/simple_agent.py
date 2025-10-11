@@ -192,6 +192,8 @@ class SimpleAgent(AgentBase):
             tool_names = [tool['name'] for tool in available_tools] if available_tools else []
             if len(tool_names) <= 10:
                 logger.info(f"SimpleAgent: 可用工具数量小于等于9个，直接返回所有工具: {tool_names}")
+                if 'complete_task' in tool_names:
+                    tool_names.remove('complete_task')
                 return tool_names
             available_tools_str = ", ".join(tool_names) if tool_names else '无可用工具'
             
