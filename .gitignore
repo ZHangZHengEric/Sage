@@ -3,6 +3,7 @@ mcp_server/hub/*
 mcp_servers/standard_search/*
 */workspace/*
 tests/
+node_modules/
 examples/fastapi_react_demo/backend/config.yaml
 mcp_servers/mcp_setting.json
 examples/fastapi_react_demo/frontend/node_modules/
