@@ -1,0 +1,73 @@
+/* MessageTypeLabel 组件样式 */
+.message-type-label {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+  display: inline-block;
+  margin-bottom: 4px;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.2s ease;
+}
+
+/* 用户消息标签 */
+.message-type-label.user {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* AI助手消息标签 */
+.message-type-label.assistant {
+  background: rgba(79, 172, 254, 0.2);
+  color: rgba(79, 172, 254, 1);
+  border-color: rgba(79, 172, 254, 0.3);
+}
+
+/* 工具执行标签 */
+.message-type-label.tool_call,
+.message-type-label.tool_execution {
+  background: rgba(255, 193, 7, 0.2);
+  color: rgba(255, 193, 7, 1);
+  border-color: rgba(255, 193, 7, 0.3);
+}
+
+/* 错误消息标签 */
+.message-type-label.error {
+  background: rgba(255, 107, 107, 0.2);
+  color: rgba(255, 107, 107, 1);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+/* 系统消息标签 */
+.message-type-label.system {
+  background: rgba(168, 237, 234, 0.2);
+  color: rgba(168, 237, 234, 1);
+  border-color: rgba(168, 237, 234, 0.3);
+}
+
+/* 悬停效果 */
+.message-type-label:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .message-type-label {
+    font-size: 9px;
+    padding: 1px 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-type-label {
+    font-size: 8px;
+    padding: 1px 3px;
+  }
+}
