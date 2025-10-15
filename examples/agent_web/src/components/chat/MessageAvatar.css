@@ -1,0 +1,49 @@
+/* MessageAvatar 组件样式 */
+.message-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.message-avatar:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+}
+
+.avatar-emoji {
+  font-size: 18px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .message-avatar {
+    width: 36px;
+    height: 36px;
+  }
+  
+  .avatar-emoji {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+  }
+  
+  .avatar-emoji {
+    font-size: 14px;
+  }
+}
