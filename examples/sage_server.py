@@ -841,7 +841,7 @@ async def stream_chat(request: StreamRequest):
                 # 每100个结果记录一次连接状态
                 if stream_counter % 100 == 0:
                     logger.info(f"📊 流处理状态 - 会话: {session_id}, 计数: {stream_counter}, 间隔: {time_since_last:.3f}s")
-                
+
                 # 处理大JSON的分块传输
                 try:
                     json_str = json.dumps(result, ensure_ascii=False)
