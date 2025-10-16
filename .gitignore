@@ -184,5 +184,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+.vscode
+*.db
+agent_workspace
 .github
 .conda
