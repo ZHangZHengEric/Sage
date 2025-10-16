@@ -1,0 +1,19 @@
+{
+    "default": {
+        "name": "Default Assistant",
+        "systemPrefix": "你是一个智能助手，专门帮助用户解决各种问题。你具备强大的分析能力和丰富的知识储备。",
+        "systemContext": {
+            "role": "assistant",
+            "expertise": ["问题解决", "信息分析", "任务执行"],
+            "personality": "友好、专业、高效"
+        },
+        "deepThinking": false,
+        "multiAgent": false,
+        "maxLoopCount": 10,
+        "availableWorkflows": {
+            "general": ["问题分析", "解决方案生成", "结果验证"],
+            "technical": ["代码分析", "调试", "优化建议"]
+        },
+        "availableTools": ["file_read", "file_write", "search_content", "execute_command"]
+    }
+}
