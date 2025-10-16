@@ -17,9 +17,6 @@ RUN apt-get update && apt-get install -y \
 # 复制 requirements.txt 文件
 COPY . .
 
-# 复制 server相关文件
-COPY examples/sage_server.py .
-
 # 安装 Python 依赖
 RUN pip install  -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
@@ -30,4 +27,4 @@ RUN mkdir -p /app/agent_workspace /app/logs
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT [ "python", "sage_server.py" ]
+ENTRYPOINT [ "python", "examples/agent_server/server.py" ]
