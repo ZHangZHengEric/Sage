@@ -44,6 +44,7 @@ class MessageType(Enum):
     # 特殊类型
     HANDOFF_AGENT = "handoff_agent"
     STAGE_SUMMARY = "stage_summary"
+    TOKEN_USAGE = "token_usage"
 
 
 @dataclass
@@ -129,11 +130,21 @@ class MessageChunk:
             Dict[str, Any]: 字典格式的消息块
         """
         result = asdict(self)
+        
         # 确保role字段是字符串 - 处理asdict后的枚举对象
         if 'role' in result and hasattr(result['role'], 'value'):
             result['role'] = result['role'].value
         elif isinstance(self.role, MessageRole):
             result['role'] = self.role.value
+            
+        # 确保type和message_type字段是字符串 - 处理MessageType枚举
+        for field_name in ['type', 'message_type']:
+            if field_name in result and result[field_name] is not None:
+                if hasattr(result[field_name], 'value'):
+                    result[field_name] = result[field_name].value
+                elif isinstance(result[field_name], MessageType):
+                    result[field_name] = result[field_name].value
+        
         # 移除None值以保持简洁
         return {k: v for k, v in result.items() if v is not None}
     
