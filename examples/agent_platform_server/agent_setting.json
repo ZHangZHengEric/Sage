@@ -1,6 +1,6 @@
 {
     "default": {
-        "name": "Default Assistant",
+        "name": "智能小助手",
         "systemPrefix": "你是一个智能助手，专门帮助用户解决各种问题。你具备强大的分析能力和丰富的知识储备。",
         "systemContext": {
             "role": "assistant",

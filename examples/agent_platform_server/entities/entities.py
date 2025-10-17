@@ -98,6 +98,36 @@ class ExecToolRequest(BaseModel):
     tool_params: Dict[str, Any]
 
 
+# ============= 会话相关模型 =============
+
+class ConversationInfo(BaseModel):
+    """会话信息模型"""
+    session_id: str
+    user_id: str
+    agent_id: str
+    agent_name: str
+    title: str
+    message_count: int
+    created_at: str
+    updated_at: str
+
+class PaginatedResponse(BaseModel):
+    """分页响应模型"""
+    list: List[Any]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+
+class ConversationListRequest(BaseModel):
+    """会话列表查询请求"""
+    page: int = 1
+    page_size: int = 10
+    user_id: Optional[str] = None
+
+
 # ============= MCP相关模型 =============
 
 class MCPServerRequest(BaseModel):

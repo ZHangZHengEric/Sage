@@ -188,6 +188,17 @@ export const useChatStore = defineStore('chat', () => {
       throw err
     }
   }
+
+  // 分页加载对话列表
+  const loadConversationsPaginated = async (params = {}) => {
+    try {
+      const response = await chatAPI.getConversationsPaginated(params)
+      return response
+    } catch (err) {
+      console.error('Failed to load conversations paginated:', err)
+      throw err
+    }
+  }
   
   // 加载特定对话的消息
   const loadConversationMessages = async (conversationId) => {
@@ -326,6 +337,7 @@ export const useChatStore = defineStore('chat', () => {
     createSession,
     clearSession,
     loadConversations,
+    loadConversationsPaginated,
     loadConversationMessages,
     saveConversation,
     removeConversation,

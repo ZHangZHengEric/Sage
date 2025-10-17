@@ -20,9 +20,16 @@
             :value="agent.id"
           />
         </el-select>
+        <el-button 
+          type="text"
+          @click="showSettings = !showSettings"
+          :title="t('chat.settings')"
+        >
+          <Settings :size="16" />
+        </el-button>
+    
       </div>
     </div>
-    
     <div :class="['chat-container', { 'split-view': showToolDetails || showTaskStatus || showWorkspace || showSettings }]">
       <div class="chat-messages">
         <div v-if="!messages || messages.length === 0" class="empty-state">
@@ -77,14 +84,28 @@
         </div>
       </div>
       
-
+      <TaskStatusPanel
+        v-if="showTaskStatus"
+        :task-status="taskStatus"
+        :expanded-tasks="expandedTasks"
+        @toggle-task-expanded="toggleTaskExpanded"
+        @close="showTaskStatus = false"
+      />
+      
+      <WorkspacePanel
+        v-if="showWorkspace"
+        :workspace-files="workspaceFiles"
+        :workspace-path="workspacePath"
+        @download-file="downloadFile"
+        @close="showWorkspace = false"
+      />
       
       <ConfigPanel
         v-if="showSettings"
         :agents="agents"
         :selected-agent="selectedAgent"
         :config="config"
-        @agent-select="selectAgent"
+        @agent-select="handleAgentSelect"
         @config-change="updateConfig"
         @close="showSettings = false"
       />
@@ -99,469 +120,103 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, watch, onMounted, nextTick, defineExpose } from 'vue'
+import { ref, computed, onMounted, nextTick, watch, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Bot, Settings, List, Folder } from 'lucide-vue-next'
-import { useToolStore, useChatStore, useAppStore } from '../stores/index.js'
-import { chatAPI, agentAPI } from '../api/index.js'
-import { taskAPI } from '../api/index.js'
-import { zhCN, enUS } from '../utils/i18n.js'
-import MessageRenderer from '../components/chat/MessageRenderer.vue'
-import ConfigPanel from '../components/chat/ConfigPanel.vue'
-import MessageInput from '../components/chat/MessageInput.vue'
 
-// Stores
-const toolStore = useToolStore()
-const chatStore = useChatStore()
-const appStore = useAppStore()
+import MessageRenderer from '@/components/chat/MessageRenderer.vue'
+import MessageInput from '@/components/chat/MessageInput.vue'
+import ConfigPanel from '@/components/chat/ConfigPanel.vue'
+import TaskStatusPanel from '@/components/chat/TaskStatusPanel.vue'
+import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 
-// Props (保留selectedConversation用于兼容性)
-const props = defineProps({
-  selectedConversation: {
-    type: Object,
-    default: null
-  }
-})
+import { useMessages } from '@/composables/useMessages'
+import { useSession } from '@/composables/useSession'
+import { useChatAPI } from '@/composables/useChatAPI'
+import { useTaskManager } from '@/composables/useTaskManager'
+import { useLanguage } from '@/utils/language.js'
+import { getAgents } from '@/api'
 
-// Emits
-const emit = defineEmits(['add-conversation', 'update-conversation', 'clear-selected-conversation'])
-
-// 从store获取数据
-const tools = computed(() => toolStore.tools || [])
-
-// ===== Language Composable (内联) =====
-const translations = {
-  zhCN: zhCN,
-  enUS: enUS
-}
-
-const currentTranslation = computed(() => {
-  return translations[appStore.language] || translations.zhCN
-})
-
-const t = (key, params = {}) => {
-  const translation = currentTranslation.value
-  let text = translation[key] || key
-  
-  if (params && typeof params === 'object') {
-    Object.keys(params).forEach(param => {
-      const regex = new RegExp(`\\{${param}\\}`, 'g')
-      text = text.replace(regex, params[param])
-    })
-  }
-  
-  return text
-}
-
-// ===== Messages Composable (内联) =====
-const messages = ref([])
-const messageChunks = reactive({})
-const isLoading = ref(false)
-const inputMessage = ref('')
-const abortControllerRef = ref(null)
-
-const handleChunkMessage = (data) => {
-  console.log('🧩 处理消息块:', data)
-  
-  const messageId = data.message_id
-  if (!messageId) {
-    console.warn('消息块缺少message_id')
-    return
-  }
-
-  if (data.chunk_type === 'start') {
-    messageChunks[messageId] = {
-      chunks: [],
-      isComplete: false,
-      messageId: messageId
-    }
-    console.log(`🚀 开始收集消息块 ${messageId}`)
-  } else if (data.chunk_type === 'data') {
-    if (messageChunks[messageId]) {
-      messageChunks[messageId].chunks.push(data.content || '')
-      console.log(`📝 收集消息块数据 ${messageId}:`, data.content)
-    }
-  } else if (data.chunk_type === 'end') {
-    if (messageChunks[messageId]) {
-      const fullContent = messageChunks[messageId].chunks.join('')
-      console.log(`🔗 重组完整消息 ${messageId}:`, fullContent)
-      
-      try {
-        const messageData = JSON.parse(fullContent)
-        console.log(`✅ 成功解析消息 ${messageId}:`, messageData)
-        handleMessage(messageData)
-      } catch (error) {
-        console.error(`❌ 解析消息失败 ${messageId}:`, error, '原始内容:', fullContent)
-      }
-      
-      delete messageChunks[messageId]
-    }
-  }
-}
-
-const handleMessage = (data) => {
-  console.log('📨 处理消息:', data)
-  
-  if (!data.message_id) {
-    console.warn('消息缺少message_id')
-    return
-  }
-
-  const existingIndex = messages.value.findIndex(msg => msg.message_id === data.message_id)
-  
-  if (existingIndex !== -1) {
-    const existingMessage = messages.value[existingIndex]
-    
-    if (data.role === 'tool') {
-      messages.value[existingIndex] = { ...data }
-      console.log(`🔄 更新工具消息 ${data.message_id}`)
-    } else {
-      const updatedMessage = { ...existingMessage, ...data }
-      
-      if (data.content && existingMessage.content) {
-        updatedMessage.content = existingMessage.content + data.content
-      }
-      if (data.show_content && existingMessage.show_content) {
-        updatedMessage.show_content = existingMessage.show_content + data.show_content
-      }
-      
-      messages.value[existingIndex] = updatedMessage
-      console.log(`🔄 更新消息 ${data.message_id}`)
-    }
-  } else {
-    messages.value.push({ ...data })
-    console.log(`➕ 添加新消息 ${data.message_id}`)
-  }
-}
-
-const addUserMessage = (content) => {
-  const userMessage = {
-    message_id: `user_${Date.now()}`,
-    role: 'user',
-    content: content,
-    timestamp: new Date().toISOString()
-  }
-  messages.value.push(userMessage)
-  console.log('👤 添加用户消息:', userMessage)
-}
-
-const addErrorMessage = (error) => {
-  const errorMessage = {
-    message_id: `error_${Date.now()}`,
-    role: 'assistant',
-    content: `错误: ${error.message || error}`,
-    show_content: `错误: ${error.message || error}`,
-    timestamp: new Date().toISOString(),
-    isError: true
-  }
-  messages.value.push(errorMessage)
-  console.log('❌ 添加错误消息:', errorMessage)
-}
-
-const clearMessages = () => {
-  messages.value = []
-  Object.keys(messageChunks).forEach(key => {
-    delete messageChunks[key]
-  })
-  console.log('🗑️ 清空所有消息')
-}
-
-const setMessages = (newMessages) => {
-  messages.value = newMessages
-}
-
-const setIsLoading = (loading) => {
-  isLoading.value = loading
-}
-
-// ===== Session Composable (内联) =====
-const currentSessionId = ref(null)
-const selectedAgent = ref(null)
-const config = reactive({
-  deepThinking: true,
-  multiAgent: true,
-  moreSuggest: false,
-  maxLoopCount: 10
-})
-const userConfigOverrides = reactive({})
-
-const createSession = () => {
-  const sessionId = `session_${Date.now()}`
-  currentSessionId.value = sessionId
-  return sessionId
-}
-
-const clearSession = () => {
-  currentSessionId.value = null
-}
-
-const updateConfig = (newConfig) => {
-  console.log('🔧 updateConfig被调用，newConfig:', newConfig)
-  console.log('🔧 当前config状态:', config)
-  
-  Object.assign(config, newConfig)
-  console.log('🔧 更新后的config:', config)
-  
-  Object.assign(userConfigOverrides, newConfig)
-  console.log('🔧 更新后的userConfigOverrides:', userConfigOverrides)
-}
-
-const selectAgent = (agent, forceConfigUpdate = false) => {
-  const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
-  selectedAgent.value = agent
-  
-  if (agent && (isAgentChange || forceConfigUpdate)) {
-    Object.assign(config, {
-      deepThinking: userConfigOverrides.deepThinking !== undefined 
-        ? userConfigOverrides.deepThinking 
-        : agent.deepThinking,
-      multiAgent: userConfigOverrides.multiAgent !== undefined 
-        ? userConfigOverrides.multiAgent 
-        : agent.multiAgent,
-      moreSuggest: userConfigOverrides.moreSuggest !== undefined 
-        ? userConfigOverrides.moreSuggest 
-        : (agent.moreSuggest ?? false),
-      maxLoopCount: userConfigOverrides.maxLoopCount !== undefined 
-        ? userConfigOverrides.maxLoopCount 
-        : (agent.maxLoopCount ?? 10)
-    })
-  }
-}
-
-const loadSession = (sessionId) => {
-  currentSessionId.value = sessionId
-}
-
-const saveSession = (sessionId, data) => {
-  // 这里可以实现会话保存逻辑
-  console.log('💾 保存会话:', sessionId, data)
-}
-
-// ===== Task Manager Composable (内联) =====
-const taskStatus = ref(null)
-const workspaceFiles = ref([])
-const workspacePath = ref(null)
-const expandedTasks = reactive(new Set())
-const lastMessageId = ref(null)
-
-const fetchTaskStatus = async (sessionId) => {
-  if (!sessionId) return
-  
-  console.log('🔄 开始请求任务状态, sessionId:', sessionId)
-  
-  try {
-    const data = await taskAPI.getTaskStatus(sessionId)
-    console.log('📊 任务状态响应数据:', data)
-    const tasksObj = data.tasks_status?.tasks || {}
-    console.log('📊 任务对象:', tasksObj)
-    const tasks = Object.values(tasksObj)
-    console.log('📊 任务数组:', tasks)
-    tasks.forEach((task, index) => {
-      console.log(`📊 任务${index + 1}详细数据:`, task)
-      if (task.execution_summary) {
-        console.log(`📊 任务${index + 1} execution_summary:`, task.execution_summary)
-      }
-    })
-    taskStatus.value = tasks
-    console.log('✅ 任务状态请求成功, 任务数量:', tasks.length)
-  } catch (error) {
-    console.error('获取任务状态出错:', error)
-  }
-}
-
-const fetchWorkspaceFiles = async (sessionId) => {
-  if (!sessionId) return
-  
-  console.log('📁 开始请求工作空间文件, sessionId:', sessionId)
-  
-  try {
-    const data = await taskAPI.getWorkspaceFiles(sessionId)
-    console.log('📁 工作空间文件原始数据:', data)
-    console.log('📁 工作空间文件数组:', data.files)
-    workspaceFiles.value = data.files || []
-    workspacePath.value = data.agent_workspace
-    console.log('✅ 工作空间文件请求成功, 文件数量:', data.files?.length || 0)
-  } catch (error) {
-    console.error('获取工作空间文件出错:', error)
-  }
-}
-
-const downloadFile = async (filePath) => {
-  try {
-    const blob = await taskAPI.downloadFile(filePath, workspacePath.value)
-    
-    const blobUrl = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.style.display = 'none'
-    a.href = blobUrl
-    a.download = filePath.split('/').pop()
-    document.body.appendChild(a)
-    a.click()
-    window.URL.revokeObjectURL(blobUrl)
-    document.body.removeChild(a)
-  } catch (error) {
-    console.error('下载文件出错:', error)
-  }
-}
-
-// ===== Chat API Composable (内联) =====
-const abortController = ref(null)
-
-const sendMessage = async (
-  message,
-  sessionId,
-  config,
-  selectedAgent,
-  onChunkMessage,
-  onMessage
-) => {
-  try {
-    abortController.value = new AbortController()
-
-    const requestBody = {
-      message: message,
-      session_id: sessionId,
-      agent_config: {
-        deep_thinking: config.deepThinking,
-        multi_agent: config.multiAgent,
-        more_suggest: config.moreSuggest,
-        max_loop_count: config.maxLoopCount,
-        system_context: selectedAgent?.systemContext || '',
-        workflows: selectedAgent?.workflows || [],
-        llm_config: selectedAgent?.llmConfig || {},
-        system_prefix: selectedAgent?.systemPrefix || '',
-        available_tools: selectedAgent?.availableTools || []
-      }
-    }
-
-    console.log('🚀 发送消息请求:', requestBody)
-
-    const response = await chatAPI.sendMessageStream(requestBody, {
-      signal: abortController.value.signal
-    })
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const data = JSON.parse(line)
-            console.log('📨 收到流式数据:', data)
-            
-            if (data.type === 'chunk') {
-              onChunkMessage && onChunkMessage(data)
-            } else {
-              onMessage && onMessage(data)
-            }
-          } catch (parseError) {
-            console.error('解析JSON失败:', parseError, '原始数据:', line)
-          }
-        }
-      }
-    }
-
-    if (buffer.trim()) {
-      try {
-        const data = JSON.parse(buffer)
-        console.log('📨 收到最后的流式数据:', data)
-        
-        if (data.type === 'chunk') {
-          onChunkMessage && onChunkMessage(data)
-        } else {
-          onMessage && onMessage(data)
-        }
-      } catch (parseError) {
-        console.error('解析最后的JSON失败:', parseError, '原始数据:', buffer)
-      }
-    }
-
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      console.log('请求被中止')
-    } else {
-      console.error('发送消息失败:', error)
-      throw error
-    }
-  } finally {
-    abortController.value = null
-  }
-}
-
-const interruptSession = async (sessionId) => {
-  try {
-    await chatAPI.interruptSession(sessionId)
-    console.log('✅ 会话中断成功')
-  } catch (error) {
-    console.error('中断会话失败:', error)
-    throw error
-  }
-}
-
-// ===== Component State =====
-const selectedAgentId = computed({
-  get: () => selectedAgent.value?.id || '',
-  set: (value) => {
-    const agent = agents.value.find(a => a.id === value)
-    selectAgent(agent)
-  }
-})
-
+const { t } = useLanguage()
+// 状态管理
+const messagesEndRef = ref(null)
 const showSettings = ref(false)
 const showToolDetails = ref(false)
 const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
 const selectedToolExecution = ref(null)
-const messagesEndRef = ref(null)
+const agents = ref([])
+const expandedTasks = ref(new Set())
 
-// ===== Component Methods =====
-const handleAgentChange = (agentId) => {
-  const agent = agents.value.find(a => a.id === agentId)
-  selectAgent(agent)
-}
+// 自动保存相关
+const autoSaveTimer = ref(null)
+const AUTO_SAVE_INTERVAL = 30000 // 30秒自动保存
 
-const handleToolClick = (toolExecution) => {
-  selectedToolExecution.value = toolExecution
-  showToolDetails.value = true
-}
+// 使用 composables
+const { 
+  messages, 
+  isLoading, 
+  addUserMessage, 
+  updateLastMessage, 
+  clearMessages,
+  handleMessage,
+  handleChunkMessage
+} = useMessages()
 
-const handleStopGeneration = async () => {
-  console.log('🛑 停止生成请求')
-  
-  if (abortControllerRef.value) {
-    abortControllerRef.value.abort()
-    abortControllerRef.value = null
-    console.log('🛑 中止HTTP请求')
+const { 
+  currentSessionId: sessionId, 
+  selectedAgent, 
+  config, 
+  createSession, 
+  clearSession, 
+  updateConfig: updateSessionConfig,
+  selectAgent
+} = useSession(agents)
+
+const { 
+  sendMessage, 
+  stopGeneration 
+} = useChatAPI()
+
+const {
+  taskStatus,
+  workspaceFiles,
+  workspacePath,
+  fetchTaskStatus,
+  fetchWorkspaceFiles,
+  downloadFile: downloadWorkspaceFile
+} = useTaskManager()
+
+// 计算属性
+const currentSessionId = computed(() => sessionId.value)
+const selectedAgentId = computed(() => selectedAgent.value?.id)
+
+// 自动保存功能
+const startAutoSave = () => {
+  if (autoSaveTimer.value) {
+    clearInterval(autoSaveTimer.value)
   }
   
-  if (currentSessionId.value) {
-    try {
-      await interruptSession(currentSessionId.value)
-      console.log('🛑 后端会话中断成功')
-    } catch (error) {
-      console.error('🛑 后端会话中断失败:', error)
+  autoSaveTimer.value = setInterval(async () => {
+    if (currentSessionId.value && messages.value.length > 0) {
+      try {
+        // 自动保存逻辑 - 目前只是记录日志，实际保存可以根据需要实现
+        console.log('💾 自动保存触发，会话ID:', currentSessionId.value, '消息数量:', messages.value.length)
+      } catch (error) {
+        console.error('Auto-save failed:', error)
+      }
     }
+  }, AUTO_SAVE_INTERVAL)
+}
+
+const stopAutoSave = () => {
+  if (autoSaveTimer.value) {
+    clearInterval(autoSaveTimer.value)
+    autoSaveTimer.value = null
   }
-  
-  setIsLoading(false)
 }
 
-const formatToolResult = (result) => {
-  if (!result) return t('chat.noResult')
-  if (typeof result === 'string') return result
-  return JSON.stringify(result, null, 2)
-}
-
+// 方法
 const scrollToBottom = () => {
   nextTick(() => {
     if (messagesEndRef.value) {
@@ -570,163 +225,188 @@ const scrollToBottom = () => {
   })
 }
 
-const triggerAutoSave = () => {
-  if (currentSessionId.value && messages.value && messages.value.length > 0) {
-    const conversation = {
-      id: currentSessionId.value,
-      title: (messages.value && messages.value[0] && typeof messages.value[0]?.content === 'string' ? messages.value[0].content.substring(0, 50) : '新对话') || '新对话',
-      messages: messages.value || [],
-      timestamp: Date.now(),
-      agentId: selectedAgent.value?.id
-    }
-    
-    emit('update-conversation', conversation)
-    saveSession(currentSessionId.value, {
-      messages: messages.value || [],
-      agentId: selectedAgent.value?.id,
-      config: config
-    })
-  }
-}
-
-const handleSendMessage = async (messageText) => {
-  if (isLoading.value || !messageText.trim() || !selectedAgent.value) {
-    return
-  }
-
-  try {
-    setIsLoading(true)
-    
-    let sessionId = currentSessionId.value
-    if (!sessionId) {
-      sessionId = createSession()
-      console.log('🆕 创建新会话:', sessionId)
-    }
-
-    addUserMessage(messageText)
-    scrollToBottom()
-
-    console.log('📡 准备调用sendMessage API，参数:', {
-      messageLength: messageText.length,
-      sessionId,
-      agentName: selectedAgent.value.name,
-      configKeys: Object.keys(config || {})
-    })
-
-    await sendMessage(
-      messageText,
-      sessionId,
-      config,
-      selectedAgent.value,
-      (data) => {
-        console.log('🧩 ChatPage收到分块消息回调:', data.type, data.message_id)
-        handleChunkMessage(data)
-      },
-      (data) => {
-        console.log('📨 ChatPage收到普通消息回调:', data.type || data.message_type, data.message_id)
-        handleMessage(data)
-      }
-    )
-  } catch (error) {
-    console.error('❌ ChatPage发送消息异常:', error)
-    addErrorMessage(error)
-    setIsLoading(false)
-  }
-}
-
-const startNewConversation = () => {
-  if (currentSessionId.value && messages.value && messages.value.length > 0) {
-    triggerAutoSave()
-  }
-  
-  clearMessages()
-  const newSessionId = createSession()
-  console.log('🆕 开始新对话:', newSessionId)
-  
-  return newSessionId
-}
-
-// ===== Watchers =====
-watch(() => props.selectedConversation, (conversation) => {
-  if (conversation) {
-    console.log('📖 加载选中的对话:', conversation.id)
-    setMessages(conversation.messages || [])
-    loadSession(conversation.id)
-    
-    if (conversation.agentId) {
-    const agent = agents.value.find(a => a.id === conversation.agentId)
-    if (agent) {
-      selectAgent(agent)
-    }
-  }
-    
-    emit('clear-selected-conversation')
-    scrollToBottom()
-  }
-}, { immediate: true })
-
-watch(messages, () => {
-  scrollToBottom()
-  if (messages.value && messages.value.length > 0) {
-    triggerAutoSave()
-  }
-}, { deep: true })
-
-watch(isLoading, (newValue, oldValue) => {
-  if (oldValue && !newValue) {
-    triggerAutoSave()
-  }
-})
-
-// 从API获取数据
-const agents = ref([])
-const agentsLoading = ref(false)
-
-// 加载agents
 const loadAgents = async () => {
   try {
-    agentsLoading.value = true
-    const agentList = await agentAPI.getAgents()
-    agents.value = agentList || []
+    const response = await getAgents()
+    agents.value = response || []
   } catch (error) {
-    console.error('加载agents失败:', error)
-    agents.value = []
-  } finally {
-    agentsLoading.value = false
+    console.error('Failed to load agents:', error)
+    ElMessage.error(t('chat.loadAgentsError'))
   }
 }
 
-// 获取默认agent
-const getDefaultAgent = () => {
-  // 优先返回ID为'default'的agent
-  const defaultAgent = agents.value.find(agent => agent.id === 'default')
-  if (defaultAgent) {
-    return defaultAgent
+const handleAgentChange = async (agentId) => {
+  if (agentId !== selectedAgentId.value) {
+    const agent = agents.value.find(a => a.id === agentId)
+    if (agent) {
+      stopAutoSave()
+      selectAgent(agent)
+      await createSession(agentId)
+      clearMessages()
+      startAutoSave()
+      await refreshTaskData()
+    }
+  }
+}
+
+const handleAgentSelect = async (agent) => {
+  if (agent.id !== selectedAgentId.value) {
+    stopAutoSave()
+    selectAgent(agent)
+    await createSession(agent.id)
+    clearMessages()
+    startAutoSave()
+    await refreshTaskData()
+  }
+}
+
+const updateConfig = (newConfig) => {
+  updateSessionConfig(newConfig)
+}
+
+const handleSendMessage = async (content) => {
+  if (!content.trim() || isLoading.value || !selectedAgent.value) return;
+  
+  console.log('🚀 开始发送消息:', content.substring(0, 100) + (content.length > 100 ? '...' : ''));
+  
+  // 如果没有会话ID，创建新的会话ID
+  let sessionId = currentSessionId.value;
+  if (!sessionId) {
+    sessionId = await createSession(selectedAgent.value.id);
+    console.log('🆕 创建新会话ID:', sessionId);
   }
   
-  // 如果没有找到默认agent，返回第一个agent
-  return agents.value.length > 0 ? agents.value[0] : null
+  // 添加用户消息
+  const userMessage = addUserMessage(content);
+  console.log('👤 添加用户消息:', userMessage.message_id);
+
+  try {
+    // 添加配置状态日志
+    console.log('📤 Chat.vue发送消息时的config状态:', config.value);
+    console.log('📤 Chat.vue中config的类型:', typeof config.value);
+    console.log('📤 Chat.vue中config的属性:', Object.keys(config.value || {}));
+    
+    console.log('📡 准备调用sendMessage API，参数:', {
+      messageLength: content.length,
+      sessionId,
+      agentName: selectedAgent.value.name,
+      configKeys: Object.keys(config.value || {})
+    });
+
+    scrollToBottom()
+
+    // 使用新的发送消息API
+    await sendMessage({
+      message: content,
+      sessionId: sessionId,
+      selectedAgent: selectedAgent.value,
+      config: config.value,
+      abortControllerRef: null, // Vue版本可能不需要这个
+      onMessage: (data) => {
+        console.log('📨 Chat.vue收到普通消息回调:', data.type || data.message_type, data.message_id);
+        handleMessage(data);
+      },
+      onChunkMessage: (data) => {
+        console.log('🧩 Chat.vue收到分块消息回调:', data.type, data.message_id);
+        handleChunkMessage(data);
+      },
+
+      onComplete: async () => {
+        console.log('✅ Chat.vue消息请求完成');
+        scrollToBottom()
+      },
+      onError: (error) => {
+        console.error('❌ Chat.vue消息发送错误:', error);
+        ElMessage.error(t('chat.sendError'))
+      }
+    })
+  } catch (error) {
+    console.error('❌ Chat.vue发送消息异常:', error);
+    ElMessage.error(t('chat.sendError'))
+  }
 }
 
-// ===== Lifecycle =====
+const handleStopGeneration = () => {
+  stopGeneration()
+}
+
+const handleToolClick = (toolExecution) => {
+  selectedToolExecution.value = toolExecution
+  showToolDetails.value = true
+}
+
+const handleTaskStatusToggle = async () => {
+  showTaskStatus.value = !showTaskStatus.value
+  if (showTaskStatus.value) {
+    await refreshTaskData()
+  }
+}
+
+const handleWorkspaceToggle = async () => {
+  showWorkspace.value = !showWorkspace.value
+  if (showWorkspace.value) {
+    await refreshTaskData()
+  }
+}
+
+const toggleTaskExpanded = (taskId) => {
+  if (expandedTasks.value.has(taskId)) {
+    expandedTasks.value.delete(taskId)
+  } else {
+    expandedTasks.value.add(taskId)
+  }
+}
+
+const formatToolResult = (result) => {
+  if (typeof result === 'string') {
+    return result
+  }
+  return JSON.stringify(result, null, 2)
+}
+
+const downloadFile = async (filename) => {
+  try {
+    if (currentSessionId.value) {
+      await downloadWorkspaceFile(currentSessionId.value, filename)
+    }
+  } catch (error) {
+    console.error('Failed to download file:', error)
+    ElMessage.error(t('chat.downloadError'))
+  }
+}
+
+// 生命周期
 onMounted(async () => {
-  await createSession()
-  
   await loadAgents()
-  
-  if (agents.value && agents.value.length > 0 && !selectedAgent.value) {
-    const defaultAgent = getDefaultAgent()
-    if (defaultAgent) {
-      selectAgent(defaultAgent)
-    } else {
+  if (agents.value.length > 0) {
+    // 如果没有选中的agent，默认选择第一个
+    if (!selectedAgent.value) {
       selectAgent(agents.value[0])
+    }
+    // 如果没有当前会话，创建新会话
+    if (!currentSessionId.value) {
+      await createSession()
+      startAutoSave()
     }
   }
 })
 
-// ===== Expose =====
-defineExpose({
-  startNewConversation
+onUnmounted(() => {
+  stopAutoSave()
+})
+
+// 监听消息变化，自动滚动到底部
+watch(messages, () => {
+  scrollToBottom()
+}, { deep: true })
+
+// 监听会话变化，重新启动自动保存
+watch(currentSessionId, (newSessionId) => {
+  if (newSessionId) {
+    startAutoSave()
+  } else {
+    stopAutoSave()
+  }
 })
 </script>
 
