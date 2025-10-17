@@ -1,23 +1,6 @@
 <template>
   <div class="history-page">
-    <div class="page-header">
-      <div class="page-title">
-        <h2>{{ t('history.title') }}</h2>
-        <p>{{ t('history.subtitle') }}</p>
-      </div>
-      
-      <div class="history-stats">
-        <div class="stat-item">
-          <span class="stat-number">{{ conversationsCount }}</span>
-          <span class="stat-label">{{ t('history.totalConversations') }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number">{{ totalMessages }}</span>
-          <span class="stat-label">{{ t('history.totalMessages') }}</span>
-        </div>
-      </div>
-    </div>
-    
+
     <div class="history-controls">
       <div class="search-filter-row">
         <div class="search-box">
@@ -59,38 +42,27 @@
         </div>
         <div
           v-else
-          v-for="conversation in filteredConversations"
+          v-for="conversation in paginatedConversations"
           :key="conversation.id"
           :class="['conversation-card', { selected: selectedConversations.has(conversation.id) }]"
         >
           <div class="conversation-header">
-            <div class="conversation-select">
-              <el-checkbox
-                :model-value="selectedConversations.has(conversation.id)"
-                @change="handleSelectConversation(conversation.id)"
-                @click.stop
-              />
-            </div>
-            
+ 
             <div class="conversation-info" @click="$emit('select-conversation', conversation)">
               <div class="conversation-title-row">
                 <h3 class="conversation-title">{{ conversation.title }}</h3>
                 <div class="conversation-meta">
                   <span class="conversation-date">
                     <Calendar :size="12" />
-                    {{ formatDate(conversation.updatedAt) }}
+                    {{ formatDate(conversation.updated_at) }}
                   </span>
                   <span class="conversation-time">
                     <Clock :size="12" />
-                    {{ formatTime(conversation.updatedAt) }}
+                    {{ formatTime(conversation.updated_at) }}
                   </span>
                 </div>
               </div>
-              
-              <p class="conversation-preview">
-                {{ getConversationPreview(conversation.messages) }}
-              </p>
-              
+       
               <div class="conversation-stats">
                 <div class="stat-group">
                   <div class="stat-item-small">
@@ -104,7 +76,7 @@
                 </div>
                 
                 <div class="agent-info">
-                  <span class="agent-name">{{ getAgentName(conversation.agentId) }}</span>
+                  <span class="agent-name">{{ getAgentName(conversation.agent_id) }}</span>
                 </div>
               </div>
             </div>
@@ -138,7 +110,7 @@
       />
     </div>
     
-    <div v-if="filteredConversations.length === 0 && totalCount > 0" class="empty-state">
+    <div v-if="paginatedConversations.length === 0 && totalCount > 0" class="empty-state">
       <Filter :size="48" class="empty-icon" />
       <h3>{{ t('history.noMatchingConversations') }}</h3>
       <p>{{ t('history.noMatchingDesc') }}</p>
@@ -189,14 +161,10 @@ import { MessageCircle, Search, Trash2, Calendar, User, Bot, Clock, Filter, Shar
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useLanguage } from '../utils/language.js'
 import { exportToHTML } from '../utils/htmlExporter.js'
-import { useChatStore } from '../stores/index.js'
-import { agentAPI } from '../api/index.js'
+import { agentAPI, chatAPI } from '../api/index.js'
 
-// Stores
-const chatStore = useChatStore()
 
 // Get data from stores with null checks
-const conversations = computed(() => chatStore.conversations || [])
 const agents = ref([])
 
 // 加载agents
@@ -222,9 +190,15 @@ const loadConversationsPaginated = async () => {
       sort_by: sortBy.value
     }
     
-    const response = await chatStore.loadConversationsPaginated(params)
+    const response = await chatAPI.getConversationsPaginated(params)
     paginatedConversations.value = response.list || []
     totalCount.value = response.total || 0
+    // 循环加载messages
+    for (const conversation of paginatedConversations.value) {
+        // 调用后端接口获取conversation的messages
+        const response = await chatAPI.getConversationMessages(conversation.session_id)
+        conversation.messages = response.messages || []
+    }
   } catch (error) {
     console.error('加载对话列表失败:', error)
     ElMessage.error('加载对话列表失败')
@@ -247,9 +221,6 @@ const handlePageSizeChange = (size) => {
   currentPage.value = 1
   loadConversationsPaginated()
 }
-
-// Emits
-const emit = defineEmits(['delete-conversation', 'select-conversation'])
 
 // Composables
 const { t, language } = useLanguage()
@@ -275,12 +246,7 @@ const conversationsCount = computed(() => {
 })
 
 const totalMessages = computed(() => {
-  return paginatedConversations.value.reduce((sum, conv) => sum + (conv.messages?.length || 0), 0)
-})
-
-// 直接使用API返回的分页数据，不再进行本地过滤
-const filteredConversations = computed(() => {
-  return paginatedConversations.value
+  return paginatedConversations.value.reduce((sum, conv) => sum + (conv.message_count || 0), 0)
 })
 
 // Methods
@@ -314,22 +280,6 @@ const formatTime = (timestamp) => {
   })
 }
 
-const getConversationPreview = (messages) => {
-  if (!messages || messages.length === 0) {
-    return t('history.noMessages')
-  }
-  
-  const userMessages = messages.filter(msg => msg.role === 'user')
-  if (userMessages.length === 0) {
-    return t('history.noUserMessages')
-  }
-  
-  const firstUserMessage = userMessages[0].content || ''
-  return firstUserMessage.length > 100 
-    ? firstUserMessage.substring(0, 100) + '...' 
-    : firstUserMessage
-}
-
 const getMessageCount = (messages) => {
   if (!messages) return { user: 0, assistant: 0 }
   
@@ -345,76 +295,7 @@ const getAgentName = (agentId) => {
   return agent ? agent.name : '未知Agent'
 }
 
-const handleSelectConversation = (convId) => {
-  const newSelected = new Set(selectedConversations.value)
-  if (newSelected.has(convId)) {
-    newSelected.delete(convId)
-  } else {
-    newSelected.add(convId)
-  }
-  selectedConversations.value = newSelected
-}
-
-const handleDeleteSelected = async () => {
-  try {
-    await ElMessageBox.confirm(
-      t('history.deleteSelectedConfirm').replace('{count}', selectedConversations.value.size),
-      t('common.confirm'),
-      {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning'
-      }
-    )
-    
-    selectedConversations.value.forEach(convId => {
-      emit('delete-conversation', convId)
-    })
-    selectedConversations.value = new Set()
-  } catch {
-    // User cancelled
-  }
-}
-
-const handleDeleteAll = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要删除所有对话记录吗？此操作不可恢复。',
-      t('common.confirm'),
-      {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning'
-      }
-    )
-    
-    conversations.value.forEach(conv => {
-      emit('delete-conversation', conv.id)
-    })
-  } catch {
-    // User cancelled
-  }
-}
-
-const handleDeleteConversation = async (conversation) => {
-  try {
-    await ElMessageBox.confirm(
-      t('history.deleteConfirm'),
-      t('common.confirm'),
-      {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning'
-      }
-    )
-    
-    emit('delete-conversation', conversation.id)
-  } catch {
-    // User cancelled
-  }
-}
-
-const handleShareConversation = (conversation) => {
+const handleShareConversation = async (conversation) => {
   shareConversation.value = conversation
   showShareModal.value = true
 }
@@ -454,7 +335,7 @@ const formatMessageForExport = (messages) => {
 const getVisibleMessageCount = () => {
   if (!shareConversation.value?.messages) return 0
   return shareConversation.value.messages.filter(msg => 
-    msg.role === 'user' || (msg.role === 'assistant' && msg.show_content && msg.show_content !== '' && msg.show_content !== false)
+    msg.role === 'user' || (msg.role === 'assistant' && msg.message_type !== 'token_usage' && msg.show_content && msg.show_content !== '' && msg.show_content !== false)
   ).length
 }
 
@@ -576,7 +457,7 @@ onMounted(async () => {
 }
 
 .history-controls {
-  margin-bottom: 1.5rem;
+  padding: 20px;
 }
 
 .search-filter-row {
@@ -639,6 +520,8 @@ onMounted(async () => {
 
 .conversations-list {
   padding: 1rem;
+    overflow-y: auto;
+  max-height: calc(100vh - 120px);
 }
 
 .loading-state {
@@ -858,7 +741,6 @@ onMounted(async () => {
   padding: 1rem;
   background: var(--bg-secondary);
   border-radius: 8px;
-  border: 1px solid var(--border-color);
 }
 
 .pagination-container :deep(.el-pagination) {

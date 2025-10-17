@@ -7,13 +7,16 @@
       @new-chat="handleNewChat"
     />
     <main class="main-content">
-      <router-view />
+      <router-view 
+        @select-conversation="handleSelectConversation"
+        :selected-conversation="selectedConversation"
+      />
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
 import { useChatStore } from './stores'
@@ -21,6 +24,9 @@ import { useChatStore } from './stores'
 const router = useRouter()
 const route = useRoute()
 const chatStore = useChatStore()
+
+// 选中的conversation数据
+const selectedConversation = ref(null)
 
 // 从路由配置中创建页面ID到路由名称的映射
 const pageToRouteNameMap = {
@@ -57,7 +63,13 @@ const handlePageChange = (page) => {
 
 const handleNewChat = () => {
   chatStore.clearSession()
+  selectedConversation.value = null
   router.push('/agent/chat')
+}
+
+const handleSelectConversation = (conversation) => {
+  selectedConversation.value = conversation
+  router.push({ name: 'Chat' })
 }
 </script>
 
