@@ -31,6 +31,7 @@ export const zhCN = {
   'chat.toolResult': '执行结果',
   'chat.noResult': '暂无结果',
   'chat.untitledConversation': '未命名对话',
+  'chat.sendError': '发送消息失败',
   
   // Agent配置页面
   'agent.title': 'Agent配置',
@@ -392,6 +393,7 @@ export const enUS = {
   'chat.toolResult': 'Execution Result',
   'chat.noResult': 'No result yet',
   'chat.untitledConversation': 'Untitled Conversation',
+  'chat.sendError': 'Failed to send message',
   
   // Agent配置页面
   'agent.title': 'Agent Configuration',
