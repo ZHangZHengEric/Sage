@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 from sagents.utils.logger import logger
 
-from .models import MCPServer, AgentConfig
+from .models import MCPServer, AgentConfig, Conversation
 from entities.entities import SageHTTPException
 
 
@@ -53,6 +53,7 @@ class DatabaseManager:
                 cursor = self._connection.cursor()
                 MCPServer.create_table(cursor)
                 AgentConfig.create_table(cursor)
+                Conversation.create_table(cursor)
                 self._connection.commit()
                 
                 logger.info("数据库初始化完成")
@@ -357,3 +358,134 @@ class DatabaseManager:
                 logger.error(f"MCP服务器验证失败，已移除: {server.name}, 错误: {e}")
         
         logger.info(f"MCP服务器验证完成，移除了 {removed_count} 个不可用的服务器")
+    
+    # ============= 会话管理方法 =============
+    
+    async def save_conversation(self, user_id: str, session_id: str, agent_id: str, agent_name: str, 
+                               title: str, messages: List[Dict[str, Any]]) -> bool:
+        """保存会话"""
+        try:
+            async with self.get_cursor() as cursor:
+                conversation = Conversation(
+                    user_id=user_id,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    title=title,
+                    messages=messages
+                )
+                conversation.save(cursor)
+                logger.info(f"会话保存成功: {session_id}")
+                return True
+        except Exception as e:
+            logger.error(f"保存会话失败: {e}")
+            return False
+    
+    async def get_conversation(self, session_id: str) -> Optional[Conversation]:
+        """获取会话"""
+        try:
+            async with self.get_cursor() as cursor:
+                conversation = Conversation.get_by_session_id(cursor, session_id)
+                if conversation:
+                    logger.info(f"获取会话成功: {session_id}")
+                else:
+                    logger.info(f"会话不存在: {session_id}")
+                return conversation
+        except Exception as e:
+            logger.error(f"获取会话失败: {e}")
+            return None
+    
+    async def get_all_conversations(self) -> List[Conversation]:
+        """获取所有会话"""
+        try:
+            async with self.get_cursor() as cursor:
+                conversations = Conversation.get_all(cursor)
+                logger.info(f"获取所有会话成功，数量: {len(conversations)}")
+                return conversations
+        except Exception as e:
+            logger.error(f"获取所有会话失败: {e}")
+            return []
+    
+    async def get_conversations_paginated(self, page: int = 1, page_size: int = 10, 
+                                        user_id: Optional[str] = None, search: Optional[str] = None, 
+                                        agent_id: Optional[str] = None, sort_by: str = "date") -> tuple[List[Conversation], int]:
+        """分页获取会话列表
+        
+        Args:
+            page: 页码，从1开始
+            page_size: 每页数量
+            user_id: 可选的用户ID过滤
+            search: 可选的搜索关键词
+            agent_id: 可选的Agent ID过滤
+            sort_by: 排序方式 (date, title, messages)
+            
+        Returns:
+            tuple: (会话列表, 总数量)
+        """
+        try:
+            async with self.get_cursor() as cursor:
+                conversations, total_count = Conversation.get_paginated(cursor, page, page_size, user_id, search, agent_id, sort_by)
+                logger.info(f"分页获取会话成功，页码: {page}, 每页: {page_size}, 总数: {total_count}, 当前页数量: {len(conversations)}")
+                return conversations, total_count
+        except Exception as e:
+            logger.error(f"分页获取会话失败: {e}")
+            return [], 0
+    
+    async def get_conversations_by_agent(self, agent_id: str) -> List[Conversation]:
+        """根据Agent ID获取会话列表"""
+        try:
+            async with self.get_cursor() as cursor:
+                conversations = Conversation.get_by_agent_id(cursor, agent_id)
+                logger.info(f"获取Agent {agent_id} 的会话成功，数量: {len(conversations)}")
+                return conversations
+        except Exception as e:
+            logger.error(f"获取Agent会话失败: {e}")
+            return []
+    
+    async def delete_conversation(self, session_id: str) -> bool:
+        """删除会话"""
+        try:
+            async with self.get_cursor() as cursor:
+                success = Conversation.delete_by_session_id(cursor, session_id)
+                if success:
+                    logger.info(f"删除会话成功: {session_id}")
+                else:
+                    logger.warning(f"会话不存在或删除失败: {session_id}")
+                return success
+        except Exception as e:
+            logger.error(f"删除会话失败: {e}")
+            return False
+    
+    async def update_conversation_messages(self, session_id: str, messages: List[Dict[str, Any]]) -> bool:
+        """更新会话消息"""
+        try:
+            async with self.get_cursor() as cursor:
+                conversation = Conversation.get_by_session_id(cursor, session_id)
+                if conversation:
+                    conversation.messages = messages
+                    conversation.save(cursor)
+                    logger.info(f"更新会话消息成功: {session_id}")
+                    return True
+                else:
+                    logger.warning(f"会话不存在: {session_id}")
+                    return False
+        except Exception as e:
+            logger.error(f"更新会话消息失败: {e}")
+            return False
+    
+    async def add_message_to_conversation(self, session_id: str, message: Dict[str, Any]) -> bool:
+        """向会话添加消息"""
+        try:
+            async with self.get_cursor() as cursor:
+                conversation = Conversation.get_by_session_id(cursor, session_id)
+                if conversation:
+                    conversation.add_message(message)
+                    conversation.save(cursor)
+                    logger.info(f"向会话添加消息成功: {session_id}")
+                    return True
+                else:
+                    logger.warning(f"会话不存在: {session_id}")
+                    return False
+        except Exception as e:
+            logger.error(f"向会话添加消息失败: {e}")
+            return False
