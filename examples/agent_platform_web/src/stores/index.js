@@ -7,5 +7,3 @@ export default pinia
 
 // 导出所有store
 export { useAppStore } from './app'
-export { useChatStore } from './chat'
-export { useToolStore } from './tool'
