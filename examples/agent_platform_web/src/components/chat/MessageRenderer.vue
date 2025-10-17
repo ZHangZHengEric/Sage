@@ -14,22 +14,22 @@
 
     <!-- 用户消息 -->
     <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="message user">
-      <MessageAvatar messageType="user" role="user" />
+      <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       <div class="user-bubble">
-        <MessageTypeLabel messageType="user" role="user" />
+        <MessageTypeLabel :messageType="message.type || message.message_type" role="user" :type="message.type" />
         <div class="user-content">
           <ReactMarkdown
-            :content="formatMessageContent(message.show_content)"
+            :content="formatMessageContent(message.content)"
           />
         </div>
       </div>
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls" class="message assistant">
-      <MessageAvatar messageType="assistant" role="assistant" />
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="message assistant">
+      <MessageAvatar :messageType="message.type || message.message_type" role="assistant" />
       <div class="assistant-bubble">
-        <MessageTypeLabel messageType="assistant" role="assistant" />
+        <MessageTypeLabel :messageType="message.type || message.message_type" role="assistant" :type="message.type" />
         <div class="assistant-content">
           <ReactMarkdown
             :content="formatMessageContent(message.show_content)"
@@ -100,14 +100,6 @@
       </div>
     </div>
 
-    <!-- 默认消息 -->
-    <div v-else class="message">
-      <div class="message-content">
-        <ReactMarkdown
-          :content="formatMessageContent(message.show_content)"
-        />
-      </div>
-    </div>
   </div>
 </template>
 
@@ -141,38 +133,57 @@ const { t } = useLanguage()
 
 // 计算属性
 const shouldRenderMessage = computed(() => {
-  return message.role !== 'tool'
+  return props.message.role !== 'tool'
 })
 
 const isErrorMessage = computed(() => {
-  return message.type === 'error' || message.message_type === 'error'
+  return props.message.type === 'error' || props.message.message_type === 'error'
 })
 
 const hasToolCalls = computed(() => {
-  return message.tool_calls && Array.isArray(message.tool_calls) && message.tool_calls.length > 0
+  return props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
 })
 
 const isToolExecution = computed(() => {
-  return message.type === 'tool_call' || message.message_type === 'tool_call'
+  return props.message.type === 'tool_call' || props.message.message_type === 'tool_call'
 })
 
 const isToolCompleted = computed(() => {
-  return message.status === 'completed' || message.type === 'tool_call_result'
+  return props.message.status === 'completed' || props.message.type === 'tool_call_result'
 })
 
 // Markdown组件配置
 const markdownComponents = {
   code: ({ node, inline, className, children, ...props }) => {
     const match = /language-(\w+)/.exec(className || '')
+    const language = match ? match[1] : ''
     
-    // 检查是否是ECharts代码块
-    if (!inline && match && match[1] === 'echarts') {
+    // 处理 ECharts 代码块
+    if (!inline && (language === 'echarts' || language === 'echart')) {
       try {
-        const option = JSON.parse(String(children).replace(/\n$/, ''))
-        return h(ReactECharts, { option, style: { height: '400px' } })
+        const chartOption = JSON.parse(String(children).replace(/\n$/, ''))
+        return h('div', { class: 'echarts-container', style: { margin: '10px 0' } }, [
+          h(ReactECharts, { 
+            option: chartOption, 
+            style: { height: '400px', width: '100%' },
+            opts: { renderer: 'canvas' }
+          })
+        ])
       } catch (error) {
-        console.error('ECharts配置解析错误:', error)
-        return h('div', { class: 'echarts-error' }, '图表配置解析错误')
+        return h('div', { 
+          class: 'echarts-error',
+          style: { 
+            padding: '10px', 
+            backgroundColor: '#fee', 
+            border: '1px solid #fcc',
+            borderRadius: '4px',
+            color: '#c33'
+          }
+        }, [
+          h('strong', {}, 'ECharts 配置错误: '),
+          error.message,
+          h('pre', { style: { marginTop: '8px', fontSize: '12px' } }, String(children).replace(/\n$/, ''))
+        ])
       }
     }
     
