@@ -399,7 +399,10 @@ watch(() => props.agent, (newAgent) => {
     // 初始化系统上下文键值对
     const contextEntries = Object.entries(newAgent.systemContext || {})
     systemContextPairs.value = contextEntries.length > 0 
-      ? contextEntries.map(([key, value]) => ({ key, value })) 
+      ? contextEntries.map(([key, value]) => ({ 
+          key: typeof key === 'string' ? key : String(key || ''), 
+          value: typeof value === 'string' ? value : String(value || '') 
+        })) 
       : [{ key: '', value: '' }]
     
     // 初始化工作流键值对
@@ -533,7 +536,8 @@ const removeSystemContextPair = (index) => {
 }
 
 const updateSystemContextPair = (index, field, value) => {
-  systemContextPairs.value[index][field] = value
+  // 确保value是字符串类型
+  systemContextPairs.value[index][field] = typeof value === 'string' ? value : String(value || '')
 }
 
 // 工作流处理方法
@@ -602,8 +606,11 @@ const handleSave = async () => {
     // 从键值对构建系统上下文对象
     const systemContext = {}
     systemContextPairs.value.forEach(pair => {
-      if (pair.key.trim() && pair.value.trim()) {
-        systemContext[pair.key.trim()] = pair.value.trim()
+      // 确保key和value都是字符串类型
+      const key = typeof pair.key === 'string' ? pair.key.trim() : ''
+      const value = typeof pair.value === 'string' ? pair.value.trim() : ''
+      if (key && value) {
+        systemContext[key] = value
       }
     })
     
