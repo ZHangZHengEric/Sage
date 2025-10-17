@@ -1,6 +1,6 @@
 <template>
-  <div class="agent-config-page">
-    <div class="page-header">
+  <div  class="agent-config-page">
+    <div v-if="currentView === 'list'" class="page-header">
       <div class="page-title">
         <h2>{{ t('agent.title') }}</h2>
         <p>{{ t('agent.subtitle') }}</p>
@@ -16,21 +16,9 @@
         </el-button>
       </div>
     </div>
-    
-    <div v-if="loading" class="loading-container" v-loading="loading" element-loading-text="加载中...">
-      <div style="height: 200px;"></div>
-    </div>
-    
-    <div v-else-if="error" class="error-container">
-      <el-alert
-        :title="error"
-        type="error"
-        show-icon
-        :closable="false"
-      />
-    </div>
-    
-    <div v-else class="agents-grid">
+ 
+    <!-- 列表视图 -->
+    <div v-if="currentView === 'list'" class="agents-grid">
       <div v-for="agent in agents" :key="agent.id" class="agent-card">
         <div class="agent-header">
           <div class="agent-avatar">
@@ -71,15 +59,6 @@
         
         <div class="agent-actions">
           <el-button 
-            v-if="agent.id === 'default'"
-            type="default"
-            @click="handleViewAgent(agent)"
-          >
-            <Settings :size="16" />
-            {{ t('agent.view') }}
-          </el-button>
-          <el-button 
-            v-else
             type="default"
             @click="handleEditAgent(agent)"
           >
@@ -106,6 +85,24 @@
       </div>
     </div>
 
+    <!-- Agent编辑/创建视图 -->
+    <div v-else class="agent-edit-view">
+      <div class="view-header">
+        <h3 class="form-title">{{ currentView === 'edit' ? t('agent.editTitle') : t('agent.createTitle') }}</h3>
+        <el-button @click="handleBackToList" type="default">
+          ← {{ t('tools.backToList') }}
+        </el-button>
+      </div>
+
+      <AgentEditModal
+        :visible="currentView !== 'list'"
+        :agent="editingAgent"
+        :tools="tools"
+        @save="handleSaveAgent"
+        @update:visible="handleCloseEdit"
+      />
+    </div>
+
     <!-- Agent创建模态框 -->
     <AgentCreationModal
       :isOpen="showCreationModal"
@@ -113,14 +110,6 @@
       @create-blank="handleBlankConfig"
       @create-smart="handleSmartConfig"
       @close="showCreationModal = false"
-    />
-    
-    <!-- Agent编辑模态框 -->
-    <AgentEditModal
-      v-model:visible="showEditModal"
-      :agent="editingAgent"
-      :tools="tools"
-      @save="handleSaveAgent"
     />
   </div>
 </template>
@@ -141,7 +130,7 @@ const loading = ref(false)
 const error = ref(null)
 const tools = ref([])
 const showCreationModal = ref(false)
-const showEditModal = ref(false)
+const currentView = ref('list') // 'list', 'create', 'edit', 'view'
 const editingAgent = ref(null)
 
 // Composables
@@ -321,10 +310,9 @@ const handleImport = () => {
           availableWorkflows: importedConfig.availableWorkflows || {}
         }
         
-        // 打开编辑模态框并预填数据
+        // 切换到编辑视图并预填数据
         editingAgent.value = newAgent
-        showEditModal.value = true
-        ElMessage.success(t('agent.importDataLoaded'))
+        currentView.value = 'edit'
         
       } catch (error) {
         ElMessage.error(t('agent.importError'))
@@ -347,25 +335,35 @@ const handleCreateAgent = () => {
 
 const handleBlankConfig = () => {
   showCreationModal.value = false
-  // 打开编辑模态框创建新agent
+  // 切换到创建视图
   editingAgent.value = null
-  showEditModal.value = true
+  currentView.value = 'create'
 }
 
 const handleEditAgent = (agent) => {
   editingAgent.value = agent
-  showEditModal.value = true
+  currentView.value = 'edit'
 }
 
 const handleViewAgent = (agent) => {
   editingAgent.value = agent
-  showEditModal.value = true
+  currentView.value = 'view'
+}
+
+const handleBackToList = () => {
+  currentView.value = 'list'
+  editingAgent.value = null
+}
+
+const handleCloseEdit = () => {
+  currentView.value = 'list'
+  editingAgent.value = null
 }
 
 const handleSaveAgent = async (agentData) => {
   try {
     await saveAgent(agentData)
-    showEditModal.value = false
+    currentView.value = 'list'
     editingAgent.value = null
     
     if (agentData.id) {
@@ -592,6 +590,19 @@ const handleSmartConfig = async (description) => {
 .agent-actions .el-button {
   flex: 1;
   min-width: 0;
+}
+
+.agent-edit-view {
+  background: var(--bg-primary);
+}
+
+.view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-color);
 }
 
 @media (max-width: 768px) {
