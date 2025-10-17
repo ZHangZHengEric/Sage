@@ -215,7 +215,7 @@
                       <el-button
                         type="text"
                         size="small"
-                        @click="toggleWorkflowCollapse(index)"
+                        @click.stop="toggleWorkflowCollapse(index)"
                         style="margin-right: 8px;"
                       >
                         <el-icon style="font-weight: bold;">
@@ -259,8 +259,11 @@
                         <el-col :span="18">
                           <el-input
                             v-model="workflow.steps[stepIndex]"
+                            type="textarea"
                             :placeholder="`${t('agent.step')} ${stepIndex + 1}`"
                             @input="updateWorkflowStep(index, stepIndex, $event)"
+                            :autosize="{ minRows: 2, maxRows: 6 }"
+                            resize="vertical"
                           />
                         </el-col>
                         <el-col :span="4">
@@ -352,6 +355,7 @@ const workflowPairs = ref([{ key: '', steps: [''] }])
 const workflowCollapsed = ref([]) // 工作流收缩状态
 const workflowContainer = ref(null)
 const stepContainers = ref(new Map())
+const isInternalEdit = ref(false) // 标记是否为内部编辑
 
 // Sortable instances
 let workflowSortable = null
@@ -400,6 +404,11 @@ const rules = {
 
 // Watch for agent changes
 watch(() => props.agent, (newAgent) => {
+  // 如果是内部编辑导致的变化，跳过处理
+  if (isInternalEdit.value) {
+    return
+  }
+  
   if (newAgent) {
     formData.value = {
       ...defaultFormData(),
@@ -437,7 +446,7 @@ watch(() => props.agent, (newAgent) => {
   nextTick(() => {
     initializeDragAndDrop()
   })
-}, { immediate: true, deep: true })
+}, { immediate: true })
 
 // Watch for visibility changes
 watch(() => props.visible, (newVisible) => {
@@ -582,27 +591,40 @@ const removeWorkflowPair = (index) => {
 }
 
 const updateWorkflowPair = (index, field, value) => {
+  isInternalEdit.value = true
   workflowPairs.value[index][field] = value
+  nextTick(() => {
+    isInternalEdit.value = false
+  })
 }
 
 const addWorkflowStep = (workflowIndex) => {
+  isInternalEdit.value = true
   workflowPairs.value[workflowIndex].steps.push('')
   nextTick(() => {
     initializeDragAndDrop()
+    isInternalEdit.value = false
   })
 }
 
 const removeWorkflowStep = (workflowIndex, stepIndex) => {
   if (workflowPairs.value[workflowIndex].steps.length > 1) {
+    isInternalEdit.value = true
     workflowPairs.value[workflowIndex].steps.splice(stepIndex, 1)
     nextTick(() => {
       initializeDragAndDrop()
+      isInternalEdit.value = false
     })
   }
 }
 
 const updateWorkflowStep = (workflowIndex, stepIndex, value) => {
+  isInternalEdit.value = true
   workflowPairs.value[workflowIndex].steps[stepIndex] = value
+  // 使用 nextTick 确保在下一个事件循环中重置标志
+  nextTick(() => {
+    isInternalEdit.value = false
+  })
 }
 
 // 工作流收缩状态管理
@@ -896,5 +918,21 @@ defineExpose({
 .workflow-collapse-leave-from {
   opacity: 1;
   max-height: 1000px;
+}
+
+/* 工作流步骤textarea样式 */
+.workflow-steps .el-textarea__inner {
+  min-height: 60px;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.workflow-steps .el-textarea {
+  width: 100%;
+}
+
+.step-item .el-textarea__inner:focus {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
 }
 </style>
