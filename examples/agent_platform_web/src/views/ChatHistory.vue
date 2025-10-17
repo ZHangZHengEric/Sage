@@ -46,31 +46,19 @@
             <el-option :label="t('history.sortByMessages')" value="messages" />
           </el-select>
           
-          <el-button
-            v-if="conversationsCount > 0"
-            type="danger"
-            @click="handleDeleteAll"
-          >
-            <Trash2 :size="16" />
-            {{ t('history.clearAll') }}
-          </el-button>
+
         </div>
       </div>
-      
-      <div v-if="selectedConversations.size > 0" class="bulk-actions">
-        <span class="selected-count">
-          {{ t('history.selectedCount') }} {{ selectedConversations.size }} 个对话
-        </span>
-        <el-button type="danger" @click="handleDeleteSelected">
-          <Trash2 :size="16" />
-          {{ t('history.deleteSelected') }}
-        </el-button>
-      </div>
+
     </div>
     
     <div class="conversations-container">
       <div class="conversations-list">
+        <!-- 加载状态 -->
+        <div v-if="isLoading" class="loading-state">
+        </div>
         <div
+          v-else
           v-for="conversation in filteredConversations"
           :key="conversation.id"
           :class="['conversation-card', { selected: selectedConversations.has(conversation.id) }]"
@@ -130,33 +118,37 @@
               >
                 <Share :size="16" />
               </el-button>
-              <el-button
-                type="danger"
-                size="small"
-                @click.stop="handleDeleteConversation(conversation)"
-                :title="t('history.delete')"
-              >
-                <Trash2 :size="16" />
-              </el-button>
             </div>
           </div>
         </div>
       </div>
     </div>
     
-    <div v-if="filteredConversations.length === 0 && conversationsCount > 0" class="empty-state">
+    <!-- 分页组件 -->
+    <div v-if="totalCount > 0" class="pagination-container">
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :page-sizes="[5, 10, 20, 50]"
+        :total="totalCount"
+        :background="true"
+        layout="total, sizes, prev, pager, next, jumper"
+        @current-change="handlePageChange"
+        @size-change="handlePageSizeChange"
+      />
+    </div>
+    
+    <div v-if="filteredConversations.length === 0 && totalCount > 0" class="empty-state">
       <Filter :size="48" class="empty-icon" />
       <h3>{{ t('history.noMatchingConversations') }}</h3>
       <p>{{ t('history.noMatchingDesc') }}</p>
     </div>
     
-    <div v-if="conversationsCount === 0" class="empty-state">
+    <div v-if="totalCount === 0" class="empty-state">
       <MessageCircle :size="48" class="empty-icon" />
       <h3>{{ t('history.noConversations') }}</h3>
       <p>{{ t('history.noConversationsDesc') }}</p>
-      <el-button type="primary" @click="$emit('select-conversation', null)">
-        {{ t('history.startNewChat') }}
-      </el-button>
+
     </div>
     
     <!-- 分享模态框 -->
@@ -192,7 +184,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { MessageCircle, Search, Trash2, Calendar, User, Bot, Clock, Filter, Share } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useLanguage } from '../utils/language.js'
@@ -218,6 +210,44 @@ const loadAgents = async () => {
   }
 }
 
+// 分页加载对话列表
+const loadConversationsPaginated = async () => {
+  try {
+    isLoading.value = true
+    const params = {
+      page: currentPage.value,
+      page_size: pageSize.value,
+      search: searchTerm.value || undefined,
+      agent_id: filterAgent.value !== 'all' ? filterAgent.value : undefined,
+      sort_by: sortBy.value
+    }
+    
+    const response = await chatStore.loadConversationsPaginated(params)
+    paginatedConversations.value = response.list || []
+    totalCount.value = response.total || 0
+  } catch (error) {
+    console.error('加载对话列表失败:', error)
+    ElMessage.error('加载对话列表失败')
+    paginatedConversations.value = []
+    totalCount.value = 0
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 处理页码变化
+const handlePageChange = (page) => {
+  currentPage.value = page
+  loadConversationsPaginated()
+}
+
+// 处理每页大小变化
+const handlePageSizeChange = (size) => {
+  pageSize.value = size
+  currentPage.value = 1
+  loadConversationsPaginated()
+}
+
 // Emits
 const emit = defineEmits(['delete-conversation', 'select-conversation'])
 
@@ -232,35 +262,25 @@ const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
 const shareConversation = ref(null)
 
+// 分页相关状态
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalCount = ref(0)
+const paginatedConversations = ref([])
+const isLoading = ref(false)
+
 // Computed
 const conversationsCount = computed(() => {
-  return conversations.value?.length || 0
+  return totalCount.value || 0
 })
 
 const totalMessages = computed(() => {
-  return conversations.value.reduce((sum, conv) => sum + (conv.messages?.length || 0), 0)
+  return paginatedConversations.value.reduce((sum, conv) => sum + (conv.messages?.length || 0), 0)
 })
 
+// 直接使用API返回的分页数据，不再进行本地过滤
 const filteredConversations = computed(() => {
-  return conversations.value
-    .filter(conv => {
-      const matchesSearch = conv.title.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
-                           getConversationPreview(conv.messages).toLowerCase().includes(searchTerm.value.toLowerCase())
-      const matchesAgent = filterAgent.value === 'all' || conv.agentId === filterAgent.value
-      return matchesSearch && matchesAgent
-    })
-    .sort((a, b) => {
-      switch (sortBy.value) {
-        case 'date':
-          return new Date(b.updatedAt) - new Date(a.updatedAt)
-        case 'title':
-          return a.title.localeCompare(b.title)
-        case 'messages':
-          return (b.messages?.length || 0) - (a.messages?.length || 0)
-        default:
-          return 0
-      }
-    })
+  return paginatedConversations.value
 })
 
 // Methods
@@ -492,9 +512,16 @@ const handleExportToHTML = () => {
   ElMessage.success('HTML文件已导出')
 }
 
+// 监听搜索、过滤和排序条件的变化
+watch([searchTerm, filterAgent, sortBy], () => {
+  currentPage.value = 1 // 重置到第一页
+  loadConversationsPaginated()
+}, { deep: true })
+
 // 生命周期钩子
 onMounted(async () => {
   await loadAgents()
+  await loadConversationsPaginated()
 })
 </script>
 
@@ -608,10 +635,16 @@ onMounted(async () => {
 .conversations-container {
   background: var(--bg-secondary);
   border-radius: 8px;
-  border: 1px solid var(--border-color);
 }
 
 .conversations-list {
+  padding: 1rem;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   padding: 1rem;
 }
 
@@ -815,5 +848,51 @@ onMounted(async () => {
   .conversation-actions {
     flex-direction: row;
   }
+}
+
+/* 分页样式 */
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  margin: 2rem 0;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.pagination-container :deep(.el-pagination) {
+  --el-pagination-bg-color: transparent;
+  --el-pagination-text-color: var(--text-primary);
+  --el-pagination-border-radius: 6px;
+}
+
+.pagination-container :deep(.el-pagination .btn-prev),
+.pagination-container :deep(.el-pagination .btn-next) {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.pagination-container :deep(.el-pagination .btn-prev:hover),
+.pagination-container :deep(.el-pagination .btn-next:hover) {
+  background: var(--bg-hover);
+}
+
+.pagination-container :deep(.el-pagination .el-pager li) {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  margin: 0 2px;
+}
+
+.pagination-container :deep(.el-pagination .el-pager li:hover) {
+  background: var(--bg-hover);
+}
+
+.pagination-container :deep(.el-pagination .el-pager li.is-active) {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
 }
 </style>
