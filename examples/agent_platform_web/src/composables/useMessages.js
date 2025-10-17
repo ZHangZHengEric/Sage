@@ -98,7 +98,9 @@ export const useMessages = () => {
   const handleMessage = (messageData) => {
     const newMessages = [...messages.value];
     const messageId = messageData.message_id;
-    
+    if (messageData.type === "stream_end") {
+      return;
+    }
     // 查找是否已存在相同 message_id 的消息
     const existingIndex = newMessages.findIndex(
       msg => msg.message_id === messageId
@@ -131,7 +133,7 @@ export const useMessages = () => {
         timestamp: messageData.timestamp || Date.now()
       });
     }
-    
+    console.log('📝 处理消息:', newMessages);
     messages.value = newMessages;
   };
 
@@ -141,7 +143,7 @@ export const useMessages = () => {
       role: 'user',
       content: content.trim(),
       message_id: Date.now().toString(),
-      type: 'normal'
+      type: 'USER'
     };
     
     messages.value = [...messages.value, userMessage];
