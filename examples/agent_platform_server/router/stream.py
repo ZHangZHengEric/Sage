@@ -236,25 +236,16 @@ async def stream_chat(request: StreamRequest):
                     
                     # 如果是新消息，初始化并记录顺序
                     if message_id not in message_collector:
-                        message_collector[message_id] = {
-                            'role': result.get('role', 'assistant'),
-                            'content': '',
-                            'show_content': '',
-                            'message_id': message_id,
-                            'type': result.get('type', ''),
-                            'message_type': result.get('message_type', ''),
-                            'timestamp': result.get('timestamp', time.time()),
-                            'session_id': result.get('session_id', session_id),
-                            'metadata': result.get('metadata', {})
-                        }
+                        message_collector[message_id] = result
                         # 记录消息的原始顺序
                         message_order.append(message_id)
-                    
-                    # 合并content和show_content字段（追加）
-                    if result.get('content'):
-                        message_collector[message_id]['content'] += str(result['content'])
-                    if result.get('show_content'):
-                        message_collector[message_id]['show_content'] += str(result['show_content'])
+                    # 对于工具调用结果消息，完整替换而不是合并
+                    if result.get('role') != 'tool':
+                        # 合并content和show_content字段（追加）
+                        if result.get('content'):
+                            message_collector[message_id]['content'] += str(result['content'])
+                        if result.get('show_content'):
+                            message_collector[message_id]['show_content'] += str(result['show_content'])
                     
             
                 # 处理大JSON的分块传输
