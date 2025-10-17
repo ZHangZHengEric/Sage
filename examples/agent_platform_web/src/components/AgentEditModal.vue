@@ -1,11 +1,5 @@
 <template>
-  <el-dialog
-    v-model="dialogVisible"
-    :title="isEditing ? t('agent.editTitle') : t('agent.createTitle')"
-    width="800px"
-    :close-on-click-modal="false"
-    @close="handleClose"
-  >
+  <div class="agent-edit-container">
     <el-form
       ref="formRef"
       :model="formData"
@@ -13,298 +7,319 @@
       label-width="120px"
       label-position="left"
     >
-      <el-form-item :label="t('agent.name')" prop="name">
-        <el-input
-          v-model="formData.name"
-          :placeholder="t('agent.namePlaceholder')"
-          :disabled="formData.id === 'default'"
-        />
-      </el-form-item>
-      
-      <el-form-item :label="t('agent.description')" prop="description">
-        <el-input
-          v-model="formData.description"
-          type="textarea"
-          :rows="3"
-          :placeholder="t('agent.descriptionPlaceholder')"
-        />
-      </el-form-item>
-      
-      <el-form-item :label="t('agent.systemPrefix')" prop="systemPrefix">
-        <el-input
-          v-model="formData.systemPrefix"
-          type="textarea"
-          :rows="4"
-          :placeholder="t('agent.systemPrefixPlaceholder')"
-        />
-      </el-form-item>
-      
-      <el-row :gutter="20">
-        <el-col :span="8">
-          <el-form-item :label="t('agent.deepThinking')">
-            <el-select v-model="formData.deepThinking" :placeholder="t('agent.selectOption')">
-              <el-option :label="t('agent.auto')" :value="null" />
-              <el-option :label="t('agent.enabled')" :value="true" />
-              <el-option :label="t('agent.disabled')" :value="false" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item :label="t('agent.multiAgent')">
-            <el-select v-model="formData.multiAgent" :placeholder="t('agent.selectOption')">
-              <el-option :label="t('agent.auto')" :value="null" />
-              <el-option :label="t('agent.enabled')" :value="true" />
-              <el-option :label="t('agent.disabled')" :value="false" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item :label="t('agent.moreSuggest')">
-            <el-switch
-              v-model="formData.moreSuggest"
-              :active-text="t('agent.enabled')"
-              :inactive-text="t('agent.disabled')"
+      <div class="form-content">
+        <!-- 左侧：基本配置 -->
+        <div class="left-panel">
+          <el-form-item :label="t('agent.name')" prop="name">
+            <el-input
+              v-model="formData.name"
+              :placeholder="t('agent.namePlaceholder')"
+              :disabled="formData.id === 'default'"
             />
           </el-form-item>
-        </el-col>
-      </el-row>
-      
-      <el-form-item :label="t('agent.maxLoopCount')">
-        <el-input-number
-          v-model="formData.maxLoopCount"
-          :min="1"
-          :max="50"
-          :step="1"
-        />
-      </el-form-item>
-      
-      <!-- LLM 配置 -->
-      <el-divider content-position="left">{{ t('agent.llmConfig') }}</el-divider>
-      
-      <el-row :gutter="20">
-        <el-col :span="8">
+          
+          <el-form-item :label="t('agent.description')" prop="description">
+            <el-input
+              v-model="formData.description"
+              type="textarea"
+              :rows="3"
+              :placeholder="t('agent.descriptionPlaceholder')"
+            />
+          </el-form-item>
+          
+          <el-form-item :label="t('agent.systemPrefix')" prop="systemPrefix">
+            <el-input
+              v-model="formData.systemPrefix"
+              type="textarea"
+              :rows="4"
+              :placeholder="t('agent.systemPrefixPlaceholder')"
+            />
+          </el-form-item>
+          
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item :label="t('agent.deepThinking')">
+                <el-select v-model="formData.deepThinking" :placeholder="t('agent.selectOption')">
+                  <el-option :label="t('agent.auto')" :value="null" />
+                  <el-option :label="t('agent.enabled')" :value="true" />
+                  <el-option :label="t('agent.disabled')" :value="false" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item :label="t('agent.multiAgent')">
+                <el-select v-model="formData.multiAgent" :placeholder="t('agent.selectOption')">
+                  <el-option :label="t('agent.auto')" :value="null" />
+                  <el-option :label="t('agent.enabled')" :value="true" />
+                  <el-option :label="t('agent.disabled')" :value="false" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item :label="t('agent.moreSuggest')">
+                <el-switch
+                  v-model="formData.moreSuggest"
+                  :active-text="t('agent.enabled')"
+                  :inactive-text="t('agent.disabled')"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item :label="t('agent.maxLoopCount')">
+                <el-input-number
+                  v-model="formData.maxLoopCount"
+                  :min="1"
+                  :max="50"
+                  :step="1"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          
+          <!-- LLM 配置 -->
+          <el-divider content-position="left">{{ t('agent.llmConfig') }}</el-divider>
+          
+          <el-form-item :label="t('agent.apiKey')">
+            <el-input
+              v-model="formData.llmConfig.apiKey"
+              type="password"
+              :placeholder="t('agent.apiKeyPlaceholder')"
+              show-password
+            />
+          </el-form-item>
+          
+          <el-form-item :label="t('agent.baseUrl')">
+            <el-input
+              v-model="formData.llmConfig.baseUrl"
+              :placeholder="t('agent.baseUrlPlaceholder')"
+            />
+          </el-form-item>
+          
           <el-form-item :label="t('agent.model')">
             <el-input
               v-model="formData.llmConfig.model"
               :placeholder="t('agent.modelPlaceholder')"
             />
           </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item :label="t('agent.maxTokens')">
-            <el-input-number
-              v-model="formData.llmConfig.maxTokens"
-              :min="1"
-              :max="100000"
-              :step="1"
-              :placeholder="t('agent.maxTokensPlaceholder')"
-            />
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item :label="t('agent.temperature')">
-            <el-input-number
-              v-model="formData.llmConfig.temperature"
-              :min="0"
-              :max="2"
-              :step="0.1"
-              :precision="1"
-              :placeholder="t('agent.temperaturePlaceholder')"
-            />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      
-      <!-- 系统上下文 -->
-      <el-divider content-position="left">{{ t('agent.systemContext') }}</el-divider>
-      
-      <div class="context-editor">
-        <div 
-          v-for="(pair, index) in systemContextPairs" 
-          :key="index" 
-          class="context-pair"
-        >
-          <el-row :gutter="10" align="middle">
-            <el-col :span="10">
-              <el-input
-                v-model="pair.key"
-                :placeholder="t('agent.contextKey')"
-                @input="updateSystemContextPair(index, 'key', $event)"
+          <el-divider content-position="left">{{ t('agent.mcpConfig') }}</el-divider>
+          <el-form-item :label="t('agent.availableTools')">
+            <el-select
+              v-model="formData.availableTools"
+              multiple
+              :placeholder="t('agent.selectTools')"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="tool in props.tools"
+                :key="tool.name"
+                :label="tool.name"
+                :value="tool.name"
               />
-            </el-col>
-            <el-col :span="10">
-              <el-input
-                v-model="pair.value"
-                :placeholder="t('agent.contextValue')"
-                @input="updateSystemContextPair(index, 'value', $event)"
-              />
-            </el-col>
-            <el-col :span="4">
-              <el-button
-                type="danger"
-                size="small"
-                @click="removeSystemContextPair(index)"
-                :disabled="systemContextPairs.length === 1 && !pair.key && !pair.value"
-              >
-                {{ t('common.delete') }}
-              </el-button>
-            </el-col>
-          </el-row>
+            </el-select>
+          </el-form-item>
         </div>
-        <el-button
-          type="primary"
-          size="small"
-          @click="addSystemContextPair"
-          style="margin-top: 10px;"
-        >
-          {{ t('agent.addContext') }}
-        </el-button>
-      </div>
-      
-      <!-- 工作流 -->
-      <el-divider content-position="left">{{ t('agent.workflows') }}</el-divider>
-      
-      <div class="workflow-editor">
-        <div 
-          ref="workflowContainer"
-          class="workflow-container"
-        >
-          <div 
-            v-for="(workflow, index) in workflowPairs" 
-            :key="`workflow-${index}`" 
-            class="workflow-item"
-            :data-index="index"
-          >
-          <el-card shadow="never" style="margin-bottom: 10px;">
-            <template #header>
+        
+        <!-- 中间分隔线 -->
+        <div class="divider-line"></div>
+        
+        <!-- 右侧：系统上下文和工作流 -->
+        <div class="right-panel">
+          <!-- 系统上下文 -->
+          <el-divider content-position="left">{{ t('agent.systemContext') }}</el-divider>
+          
+          <div class="context-editor">
+            <div 
+              v-for="(pair, index) in systemContextPairs" 
+              :key="index" 
+              class="context-pair"
+            >
               <el-row :gutter="10" align="middle">
-                <el-col :span="2">
-                  <div class="drag-handle workflow-drag-handle">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="9" cy="12" r="1"/>
-                      <circle cx="9" cy="5" r="1"/>
-                      <circle cx="9" cy="19" r="1"/>
-                      <circle cx="15" cy="12" r="1"/>
-                      <circle cx="15" cy="5" r="1"/>
-                      <circle cx="15" cy="19" r="1"/>
-                    </svg>
-                  </div>
-                </el-col>
-                <el-col :span="16">
+                <el-col :span="10">
                   <el-input
-                    v-model="workflow.key"
-                    :placeholder="t('agent.workflowName')"
-                    @input="updateWorkflowPair(index, 'key', $event)"
+                    v-model="pair.key"
+                    :placeholder="t('agent.contextKey')"
+                    @input="updateSystemContextPair(index, 'key', $event)"
                   />
                 </el-col>
-                <el-col :span="6">
+                <el-col :span="10">
+                  <el-input
+                    v-model="pair.value"
+                    :placeholder="t('agent.contextValue')"
+                    @input="updateSystemContextPair(index, 'value', $event)"
+                  />
+                </el-col>
+                <el-col :span="4">
                   <el-button
                     type="danger"
                     size="small"
-                    @click="removeWorkflowPair(index)"
+                    @click="removeSystemContextPair(index)"
+                    :disabled="systemContextPairs.length === 1 && !pair.key && !pair.value"
                   >
-                    {{ t('common.delete') }}
+                                       <el-icon>
+                          <Delete />
+                        </el-icon>
                   </el-button>
                 </el-col>
               </el-row>
-            </template>
-            
-            <div class="workflow-steps">
+            </div>
+            <el-button
+              type="primary"
+              size="small"
+              @click="addSystemContextPair"
+              style="margin-top: 10px;"
+            >
+              {{ t('agent.addContext') }}
+            </el-button>
+          </div>
+          
+          <!-- 工作流 -->
+          <el-divider content-position="left">{{ t('agent.workflows') }}</el-divider>
+          
+          <div class="workflow-editor">
+            <div 
+              ref="workflowContainer"
+              class="workflow-container"
+            >
               <div 
-                class="steps-container" 
-                :ref="el => setStepContainer(el, index)"
+                v-for="(workflow, index) in workflowPairs" 
+                :key="`workflow-${index}`" 
+                class="workflow-item"
+                :data-index="index"
               >
-                <div
-                  v-for="(step, stepIndex) in workflow.steps" 
-                  :key="`step-${index}-${stepIndex}`"
-                  class="step-item"
-                  :data-step-index="stepIndex"
-                >
+              <el-card shadow="never" style="margin-bottom: 10px;">
+                <template #header>
                   <el-row :gutter="10" align="middle">
                     <el-col :span="2">
-                      <div class="drag-handle">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M9 3h2v2H9V3zm0 4h2v2H9V7zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm4-16h2v2h-2V3zm0 4h2v2h-2V7zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2z"/>
+                      <div class="drag-handle workflow-drag-handle">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <circle cx="9" cy="12" r="1"/>
+                          <circle cx="9" cy="5" r="1"/>
+                          <circle cx="9" cy="19" r="1"/>
+                          <circle cx="15" cy="12" r="1"/>
+                          <circle cx="15" cy="5" r="1"/>
+                          <circle cx="15" cy="19" r="1"/>
                         </svg>
                       </div>
                     </el-col>
-                    <el-col :span="18">
+                    <el-col :span="16">
                       <el-input
-                        v-model="workflow.steps[stepIndex]"
-                        :placeholder="`${t('agent.step')} ${stepIndex + 1}`"
-                        @input="updateWorkflowStep(index, stepIndex, $event)"
+                        v-model="workflow.key"
+                        :placeholder="t('agent.workflowName')"
+                        @input="updateWorkflowPair(index, 'key', $event)"
                       />
                     </el-col>
-                    <el-col :span="4">
+                    <el-col :span="6">
+                      <el-button
+                        type="text"
+                        size="small"
+                        @click="toggleWorkflowCollapse(index)"
+                        style="margin-right: 8px;"
+                      >
+                        <el-icon style="font-weight: bold;">
+                          <component :is="workflowCollapsed[index] ? 'ArrowDown' : 'ArrowUp'" />
+                        </el-icon>
+                      </el-button>
                       <el-button
                         type="danger"
                         size="small"
-                        @click="removeWorkflowStep(index, stepIndex)"
-                        :disabled="workflow.steps.length === 1"
+                        @click="removeWorkflowPair(index)"
+                        :title="t('common.delete')"
                       >
-                        {{ t('common.delete') }}
+                        <el-icon>
+                          <Delete />
+                        </el-icon>
                       </el-button>
                     </el-col>
                   </el-row>
+                </template>
+                
+                <transition name="workflow-collapse">
+                  <div class="workflow-steps" v-show="!workflowCollapsed[index]">
+                    <div 
+                      class="steps-container" 
+                      :ref="el => setStepContainer(el, index)"
+                    >
+                    <div
+                      v-for="(step, stepIndex) in workflow.steps" 
+                      :key="`step-${index}-${stepIndex}`"
+                      class="step-item"
+                      :data-step-index="stepIndex"
+                    >
+                      <el-row :gutter="10" align="middle">
+                        <el-col :span="2">
+                          <div class="drag-handle">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M9 3h2v2H9V3zm0 4h2v2H9V7zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm4-16h2v2h-2V3zm0 4h2v2h-2V7zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2z"/>
+                            </svg>
+                          </div>
+                        </el-col>
+                        <el-col :span="18">
+                          <el-input
+                            v-model="workflow.steps[stepIndex]"
+                            :placeholder="`${t('agent.step')} ${stepIndex + 1}`"
+                            @input="updateWorkflowStep(index, stepIndex, $event)"
+                          />
+                        </el-col>
+                        <el-col :span="4">
+                          <el-button
+                            type="danger"
+                            size="small"
+                            @click="removeWorkflowStep(index, stepIndex)"
+                            :disabled="workflow.steps.length === 1"
+                          >
+                                              <el-icon>
+                          <Delete />
+                        </el-icon>
+                          </el-button>
+                        </el-col>
+                      </el-row>
+                      </div>
                   </div>
+                    <el-button
+                      type="primary"
+                      size="small"
+                      @click="addWorkflowStep(index)"
+                      style="margin-top: 5px;"
+                    >
+                      {{ t('agent.addStep') }}
+                    </el-button>
+                  </div>
+                </transition>
+              </el-card>
               </div>
-              <el-button
-                type="primary"
-                size="small"
-                @click="addWorkflowStep(index)"
-                style="margin-top: 5px;"
-              >
-                {{ t('agent.addStep') }}
-              </el-button>
             </div>
-          </el-card>
+            <el-button
+              type="primary"
+              @click="addWorkflowPair"
+              style="margin-top: 10px;"
+            >
+              {{ t('agent.addWorkflow') }}
+            </el-button>
           </div>
         </div>
-        <el-button
-          type="primary"
-          @click="addWorkflowPair"
-          style="margin-top: 10px;"
-        >
-          {{ t('agent.addWorkflow') }}
-        </el-button>
       </div>
-      
-      <el-form-item :label="t('agent.availableTools')">
-        <el-select
-          v-model="formData.availableTools"
-          multiple
-          :placeholder="t('agent.selectTools')"
-          style="width: 100%"
-        >
-          <el-option
-            v-for="tool in props.tools"
-            :key="tool.name"
-            :label="tool.name"
-            :value="tool.name"
-          />
-        </el-select>
-      </el-form-item>
     </el-form>
     
-    <template #footer>
-      <div class="dialog-footer">
-        <el-button @click="handleClose">{{ t('common.cancel') }}</el-button>
-        <el-button
-          type="primary"
-          :loading="saving"
-          @click="handleSave"
-        >
-          {{ t('common.save') }}
-        </el-button>
-      </div>
-    </template>
-  </el-dialog>
+    <div class="form-footer">
+      <el-button @click="handleClose">{{ t('common.cancel') }}</el-button>
+      <el-button
+        type="primary"
+        :loading="saving"
+        @click="handleSave"
+      >
+        {{ t('common.save') }}
+      </el-button>
+    </div>
+  </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../utils/language.js'
-import { useToolStore } from '../stores/tool.js'
+import { ArrowDown, ArrowUp, Delete } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 
 // Props
@@ -328,13 +343,13 @@ const emit = defineEmits(['update:visible', 'save'])
 
 // Composables
 const { t } = useLanguage()
-const toolStore = useToolStore()
 
 // Refs
 const formRef = ref(null)
 const saving = ref(false)
 const systemContextPairs = ref([{ key: '', value: '' }])
 const workflowPairs = ref([{ key: '', steps: [''] }])
+const workflowCollapsed = ref([]) // 工作流收缩状态
 const workflowContainer = ref(null)
 const stepContainers = ref(new Map())
 
@@ -344,11 +359,6 @@ const stepSortables = new Map()
 
 // Computed
 const isEditing = computed(() => !!props.agent?.id)
-
-const dialogVisible = computed({
-  get: () => props.visible,
-  set: (value) => emit('update:visible', value)
-})
 
 
 
@@ -363,9 +373,9 @@ const defaultFormData = () => ({
   moreSuggest: false,
   maxLoopCount: 10,
   llmConfig: {
-    model: '',
-    maxTokens: '',
-    temperature: ''
+    apiKey: '',
+    baseUrl: '',
+    model: ''
   },
   availableTools: [],
   systemContext: {},
@@ -413,10 +423,14 @@ watch(() => props.agent, (newAgent) => {
           steps: Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(s => s) : [''])
         })) 
       : [{ key: '', steps: [''] }]
+    
+    // 初始化工作流收缩状态（默认全部展开）
+    workflowCollapsed.value = new Array(workflowPairs.value.length).fill(true)
   } else {
     formData.value = defaultFormData()
     systemContextPairs.value = [{ key: '', value: '' }]
     workflowPairs.value = [{ key: '', steps: [''] }]
+    workflowCollapsed.value = [false]
   }
   
   // 重新初始化拖拽功能
@@ -509,11 +523,8 @@ const destroyDragAndDrop = () => {
   stepSortables.clear()
 }
 
-// 在组件挂载时加载工具列表和初始化拖拽
-onMounted(async () => {
-  if (toolStore.tools.length === 0) {
-    await toolStore.loadTools()
-  }
+// 在组件挂载时初始化拖拽
+onMounted(() => {
   initializeDragAndDrop()
 })
 
@@ -543,6 +554,7 @@ const updateSystemContextPair = (index, field, value) => {
 // 工作流处理方法
 const addWorkflowPair = () => {
   workflowPairs.value.push({ key: '', steps: [''] })
+  workflowCollapsed.value.push(false) // 新工作流默认展开
   nextTick(() => {
     initializeDragAndDrop()
   })
@@ -558,8 +570,10 @@ const removeWorkflowPair = (index) => {
   const newPairs = workflowPairs.value.filter((_, i) => i !== index)
   if (newPairs.length === 0) {
     workflowPairs.value = [{ key: '', steps: [''] }]
+    workflowCollapsed.value = [false] // 重置收缩状态
   } else {
     workflowPairs.value = newPairs
+    workflowCollapsed.value.splice(index, 1) // 删除对应的收缩状态
   }
   
   nextTick(() => {
@@ -589,6 +603,27 @@ const removeWorkflowStep = (workflowIndex, stepIndex) => {
 
 const updateWorkflowStep = (workflowIndex, stepIndex, value) => {
   workflowPairs.value[workflowIndex].steps[stepIndex] = value
+}
+
+// 工作流收缩状态管理
+const toggleWorkflowCollapse = (index) => {
+  workflowCollapsed.value[index] = !workflowCollapsed.value[index]
+}
+
+const syncWorkflowCollapsedState = () => {
+  // 确保收缩状态数组与工作流数组长度一致
+  const currentLength = workflowPairs.value.length
+  const collapsedLength = workflowCollapsed.value.length
+  
+  if (collapsedLength < currentLength) {
+    // 添加新的收缩状态（默认展开）
+    for (let i = collapsedLength; i < currentLength; i++) {
+      workflowCollapsed.value.push(false)
+    }
+  } else if (collapsedLength > currentLength) {
+    // 移除多余的收缩状态
+    workflowCollapsed.value.splice(currentLength)
+  }
 }
 
 // Methods
@@ -656,10 +691,87 @@ defineExpose({
 </script>
 
 <style scoped>
-.dialog-footer {
+.agent-edit-container {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 24px;
+  margin: 20px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+}
+
+.form-content {
   display: flex;
-  justify-content: flex-end;
+  gap: 24px;
+  min-height: 500px;
+}
+
+.left-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.divider-line {
+  width: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--border-color) 0px,
+    var(--border-color) 8px,
+    transparent 8px,
+    transparent 16px
+  );
+  flex-shrink: 0;
+  margin: 0 12px;
+}
+
+.right-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-header {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.form-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.form-footer {
+  display: flex;
+  justify-content: center;
   gap: 12px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .form-content {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .divider-line {
+    width: 100%;
+    height: 2px;
+    background: repeating-linear-gradient(
+      to right,
+      var(--border-color) 0px,
+      var(--border-color) 8px,
+      transparent 8px,
+      transparent 16px
+    );
+    margin: 12px 0;
+  }
 }
 
 :deep(.el-form-item__label) {
@@ -763,5 +875,26 @@ defineExpose({
 .step-item:hover {
   border-color: #409eff;
   background-color: #f0f9ff;
+}
+
+/* 工作流收缩/展开动画 */
+.workflow-collapse-enter-active,
+.workflow-collapse-leave-active {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.workflow-collapse-enter-from,
+.workflow-collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.workflow-collapse-enter-to,
+.workflow-collapse-leave-from {
+  opacity: 1;
+  max-height: 1000px;
 }
 </style>
