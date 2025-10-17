@@ -45,7 +45,7 @@
             :messages="messages || []"
             :message-index="index"
             @download-file="downloadFile"
-            @tool-click="handleToolClick"
+            @toolClick="handleToolClick"
           />
           <div v-if="isLoading" class="loading-indicator">
             <div class="loading-dots">
@@ -71,15 +71,15 @@
         <div class="tool-details-content">
           <div class="tool-section">
             <h4>{{ t('chat.toolName') }}</h4>
-            <p>{{ selectedToolExecution.name }}</p>
+            <p>{{ selectedToolExecution.function.name }}</p>
           </div>
           <div class="tool-section">
             <h4>{{ t('chat.toolParams') }}</h4>
-            <pre class="tool-code">{{ JSON.stringify(selectedToolExecution.arguments, null, 2) }}</pre>
+            <pre class="tool-code">{{ JSON.stringify(selectedToolExecution.function.arguments, null, 2) }}</pre>
           </div>
           <div class="tool-section">
             <h4>{{ t('chat.toolResult') }}</h4>
-            <pre class="tool-code">{{ formatToolResult(selectedToolExecution.result) }}</pre>
+            <pre class="tool-code">{{ formatToolResult(toolResult) }}</pre>
           </div>
         </div>
       </div>
@@ -153,6 +153,8 @@ const showToolDetails = ref(false)
 const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
 const selectedToolExecution = ref(null)
+const toolResult = ref(null)
+
 const agents = ref([])
 const expandedTasks = ref(new Set())
 
@@ -324,8 +326,10 @@ const handleStopGeneration = () => {
   stopGeneration()
 }
 
-const handleToolClick = (toolExecution) => {
+const handleToolClick = (toolExecution, result) => {
+
   selectedToolExecution.value = toolExecution
+  toolResult.value = result
   showToolDetails.value = true
 }
 
