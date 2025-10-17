@@ -72,8 +72,9 @@ class ToolManager:
             server_params = SseServerParameters(url=config['sse_url'])
             success = await self._register_mcp_tools_sse(server_name, server_params)
         elif 'url' in config or 'streamable_http_url' in config:
-            logger.debug(f"Registering streamable HTTP server {server_name} with URL: {config['url']}")
-            server_params = StreamableHttpServerParameters(url=config['url'])
+            url = config.get('url', config.get('streamable_http_url'))
+            logger.debug(f"Registering streamable HTTP server {server_name} with URL: {url}")
+            server_params = StreamableHttpServerParameters(url=url)
             success = await self._register_mcp_tools_streamable_http(server_name, server_params)
         else:
             logger.debug(f"Registering stdio server {server_name} with command: {config['command']}")
