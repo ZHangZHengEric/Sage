@@ -253,3 +253,58 @@ async def get_conversations_paginated(
             detail="获取会话列表失败",
             error_detail=str(e)
         )
+
+
+@session_router.get("/api/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str):
+    """获取指定对话的所有消息"""
+    try:
+        # 获取数据库管理器
+        db_manager = global_vars.get_database_manager()
+        if not db_manager:
+            raise SageHTTPException(
+                status_code=500,
+                detail="数据库管理器未初始化",
+                error_detail="Database manager not initialized"
+            )
+        
+        # 获取会话信息
+        conversation = await db_manager.get_conversation(conversation_id)
+        if not conversation:
+            raise SageHTTPException(
+                status_code=404,
+                detail=f"会话 {conversation_id} 不存在",
+                error_detail=f"Conversation '{conversation_id}' not found"
+            )
+        
+        # 返回消息列表
+        messages = conversation.messages if isinstance(conversation.messages, list) else []
+        
+        return create_success_response(
+            data={
+                "conversation_id": conversation_id,
+                "messages": messages,
+                "message_count": len(messages),
+                "conversation_info": {
+                    "session_id": conversation.session_id,
+                    "user_id": conversation.user_id,
+                    "agent_id": conversation.agent_id,
+                    "agent_name": conversation.agent_name,
+                    "title": conversation.title,
+                    "created_at": conversation.created_at,
+                    "updated_at": conversation.updated_at
+                }
+            },
+            message=f"获取会话 {conversation_id} 消息成功"
+        )
+        
+    except SageHTTPException:
+        # 重新抛出已知的HTTP异常
+        raise
+    except Exception as e:
+        logger.error(f"获取会话消息失败: {e}")
+        raise SageHTTPException(
+            status_code=500,
+            detail="获取会话消息失败",
+            error_detail=str(e)
+        )
