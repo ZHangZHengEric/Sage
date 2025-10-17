@@ -1,18 +1,3 @@
 {
-    "mcpServers": {
-        "sage_mcp_hub": {
-            "sse_url": "http://sage_mcp_hub:20042/sse",
-            "disabled": false,
-            "api_key": "sk-hub-*****-hEZgIf9leyswgqPw8HI"
-        },
-        "streamable_http_server": {
-            "streamable_http_url": "http://sage_mcp_hub:20042/mcp",
-            "disabled": false,
-            "api_key": "sk-hub-*****-hEZgIf9leyswgqPw8HI"
-        },
-        "file_parser": {
-            "sse_url": "http://127.0.0.1:34001/sse",
-            "disabled": true
-        }
-    }
+
 }

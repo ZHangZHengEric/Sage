@@ -38,6 +38,11 @@ class StreamRequest(BaseModel):
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
 
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+
+
+
     def __init__(self, **data):
         super().__init__(**data)
         # 确保 messages 中的每个消息都有 role 和 content
@@ -65,6 +70,42 @@ async def stream_chat(request: StreamRequest):
         request.llm_model_config = {k: v for k, v in request.llm_model_config.items() if v is not None and v != ''}
 
     session_id = request.session_id or str(uuid.uuid4())
+    
+    # 初始化会话服务
+    db_manager = global_vars.get_database_manager()
+
+    # 检查会话是否存在
+    existing_conversation = await db_manager.get_conversation(session_id)
+    if not existing_conversation:
+        # 创建新会话
+        if request.messages and len(request.messages) > 0:
+            # 使用第一条用户消息的前50个字符作为标题
+            first_message = request.messages[0].content
+            if isinstance(first_message, str):
+                conversation_title = first_message[:50] + "..." if len(first_message) > 50 else first_message
+            elif isinstance(first_message, list) and len(first_message) > 0:
+                # 如果是多模态消息，尝试提取文本内容
+                for item in first_message:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_content = item.get('text', '')
+                        conversation_title = text_content[:50] + "..." if len(text_content) > 50 else text_content
+                        break
+        
+        await db_manager.save_conversation(
+            user_id=request.user_id or "default_user",
+            agent_id=request.agent_id or "default_agent",
+            agent_name=request.agent_name or "Sage Assistant",
+            messages=[msg.model_dump() for msg in request.messages],
+            session_id=session_id,
+            title=conversation_title
+        )
+        logger.info(f"创建新会话: {session_id}, 标题: {conversation_title}")
+    else:
+        # 更新现有会话的消息
+        new_messages = [msg.model_dump() for msg in request.messages]
+        await db_manager.update_conversation_messages(session_id, new_messages)
+        logger.info(f"更新现有会话: {session_id}")
+    
     # 判断是否要初始化新的 sage service 还是使用默认的
     # 取决于是否需要自定义模型以及 agent 的system prefix ，以及对tool 的工具是否有限制
     if request.llm_model_config or request.system_prefix or request.available_tools:
@@ -138,7 +179,7 @@ async def stream_chat(request: StreamRequest):
             'session_id': session_id,
             "is_default": True
         }
-
+    # 保存conversations记录
     async def generate_stream(stream_service):
         """生成SSE流"""
         try:
@@ -160,6 +201,10 @@ async def stream_chat(request: StreamRequest):
             # 添加流处理计数器和连接状态跟踪
             stream_counter = 0
             last_activity_time = time.time()
+            
+            # 初始化消息收集器，用于合并基于message_id的消息，保持顺序
+            message_collector = {}  # {message_id: merged_message}
+            message_order = []  # 保持消息的原始顺序
             
             # 处理流式响应，传递所有参数
             async for result in stream_service.process_stream(
@@ -184,6 +229,33 @@ async def stream_chat(request: StreamRequest):
                 if stream_counter % 100 == 0:
                     logger.info(f"📊 流处理状态 - 会话: {session_id}, 计数: {stream_counter}, 间隔: {time_since_last:.3f}s")
 
+                # 收集消息用于后续保存到数据库
+                if isinstance(result, dict) and result.get('message_id'):
+                    message_id = result['message_id']
+                    
+                    # 如果是新消息，初始化并记录顺序
+                    if message_id not in message_collector:
+                        message_collector[message_id] = {
+                            'role': result.get('role', 'assistant'),
+                            'content': '',
+                            'show_content': '',
+                            'message_id': message_id,
+                            'type': result.get('type', ''),
+                            'message_type': result.get('message_type', ''),
+                            'timestamp': result.get('timestamp', time.time()),
+                            'session_id': result.get('session_id', session_id),
+                            'metadata': result.get('metadata', {})
+                        }
+                        # 记录消息的原始顺序
+                        message_order.append(message_id)
+                    
+                    # 合并content和show_content字段（追加）
+                    if result.get('content'):
+                        message_collector[message_id]['content'] += str(result['content'])
+                    if result.get('show_content'):
+                        message_collector[message_id]['show_content'] += str(result['show_content'])
+                    
+            
                 # 处理大JSON的分块传输
                 try:
                     json_str = json.dumps(result, ensure_ascii=False)
@@ -258,6 +330,7 @@ async def stream_chat(request: StreamRequest):
                     yield json.dumps(error_data, ensure_ascii=False) + "\n"
                     
                 await asyncio.sleep(0.01)  # 避免过快发送
+            
             # 发送流结束标记
             end_data = {
                 'type': 'stream_end',
@@ -269,7 +342,18 @@ async def stream_chat(request: StreamRequest):
             logger.info(f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s")
             logger.info(f"✅ 流结束数据: {end_data}")
             yield json.dumps(end_data, ensure_ascii=False) + "\n"
-        
+            try:
+                # 按照原始顺序将合并的消息添加到现有conversation
+                for message_id in message_order:
+                    if message_id in message_collector:
+                        merged_message = message_collector[message_id]
+                        # 添加消息到conversation
+                        await db_manager.add_message_to_conversation(session_id, merged_message)
+                logger.info(f"成功按顺序保存 {len(message_collector)} 条消息到现有conversation {session_id}")
+            except Exception as e:
+                logger.error(f"保存消息到数据库失败: {e}")
+                logger.error(f"错误详情: {traceback.format_exc()}")
+                
         except GeneratorExit as ge:
             import sys
             disconnect_msg = f"🔌 [GENERATOR_EXIT] 客户端断开连接，生成器被关闭 - 会话ID: {session_id}, 时间: {time.time()}"
