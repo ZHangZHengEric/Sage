@@ -105,7 +105,6 @@
         :agents="agents"
         :selected-agent="selectedAgent"
         :config="config"
-        @agent-select="handleAgentSelect"
         @config-change="updateConfig"
         @close="showSettings = false"
       />
@@ -137,7 +136,16 @@ import { useTaskManager } from '@/composables/useTaskManager'
 import { useLanguage } from '@/utils/language.js'
 import { getAgents } from '@/api'
 
+// Props
+const props = defineProps({
+  selectedConversation: {
+    type: Object,
+    default: null
+  }
+})
+
 const { t } = useLanguage()
+
 // 状态管理
 const messagesEndRef = ref(null)
 const showSettings = ref(false)
@@ -164,7 +172,7 @@ const {
 } = useMessages()
 
 const { 
-  currentSessionId: sessionId, 
+  currentSessionId, 
   selectedAgent, 
   config, 
   createSession, 
@@ -188,33 +196,7 @@ const {
 } = useTaskManager()
 
 // 计算属性
-const currentSessionId = computed(() => sessionId.value)
 const selectedAgentId = computed(() => selectedAgent.value?.id)
-
-// 自动保存功能
-const startAutoSave = () => {
-  if (autoSaveTimer.value) {
-    clearInterval(autoSaveTimer.value)
-  }
-  
-  autoSaveTimer.value = setInterval(async () => {
-    if (currentSessionId.value && messages.value.length > 0) {
-      try {
-        // 自动保存逻辑 - 目前只是记录日志，实际保存可以根据需要实现
-        console.log('💾 自动保存触发，会话ID:', currentSessionId.value, '消息数量:', messages.value.length)
-      } catch (error) {
-        console.error('Auto-save failed:', error)
-      }
-    }
-  }, AUTO_SAVE_INTERVAL)
-}
-
-const stopAutoSave = () => {
-  if (autoSaveTimer.value) {
-    clearInterval(autoSaveTimer.value)
-    autoSaveTimer.value = null
-  }
-}
 
 // 方法
 const scrollToBottom = () => {
@@ -239,24 +221,45 @@ const handleAgentChange = async (agentId) => {
   if (agentId !== selectedAgentId.value) {
     const agent = agents.value.find(a => a.id === agentId)
     if (agent) {
-      stopAutoSave()
       selectAgent(agent)
       await createSession(agentId)
       clearMessages()
-      startAutoSave()
-      await refreshTaskData()
     }
   }
 }
 
-const handleAgentSelect = async (agent) => {
-  if (agent.id !== selectedAgentId.value) {
-    stopAutoSave()
-    selectAgent(agent)
-    await createSession(agent.id)
+
+// 加载conversation数据
+const loadConversationData = async (conversation) => {
+  try {
+    // 清除当前消息
     clearMessages()
-    startAutoSave()
-    await refreshTaskData()
+    
+    // 根据conversation中的agent_id选择对应的agent
+    if (conversation.agent_id && agents.value.length > 0) {
+      const agent = agents.value.find(a => a.id === conversation.agent_id)
+      if (agent) {
+        selectAgent(agent)
+      } else {
+        // 如果找不到对应的agent，使用第一个agent
+        selectAgent(agents.value[0])
+      }
+    }
+
+    // 加载消息
+    if (conversation.messages && conversation.messages.length > 0) {
+      messages.value = conversation.messages
+    }
+    currentSessionId.value = conversation.session_id || null
+    // 滚动到底部
+    nextTick(() => {
+      scrollToBottom()
+    })
+    
+
+  } catch (error) {
+    console.error('Failed to load conversation data:', error)
+    ElMessage.error(t('chat.loadConversationError'))
   }
 }
 
@@ -277,15 +280,10 @@ const handleSendMessage = async (content) => {
   }
   
   // 添加用户消息
-  const userMessage = addUserMessage(content);
-  console.log('👤 添加用户消息:', userMessage.message_id);
+  addUserMessage(content);
 
   try {
-    // 添加配置状态日志
-    console.log('📤 Chat.vue发送消息时的config状态:', config.value);
-    console.log('📤 Chat.vue中config的类型:', typeof config.value);
-    console.log('📤 Chat.vue中config的属性:', Object.keys(config.value || {}));
-    
+
     console.log('📡 准备调用sendMessage API，参数:', {
       messageLength: content.length,
       sessionId,
@@ -294,7 +292,6 @@ const handleSendMessage = async (content) => {
     });
 
     scrollToBottom()
-
     // 使用新的发送消息API
     await sendMessage({
       message: content,
@@ -303,16 +300,13 @@ const handleSendMessage = async (content) => {
       config: config.value,
       abortControllerRef: null, // Vue版本可能不需要这个
       onMessage: (data) => {
-        console.log('📨 Chat.vue收到普通消息回调:', data.type || data.message_type, data.message_id);
         handleMessage(data);
       },
       onChunkMessage: (data) => {
-        console.log('🧩 Chat.vue收到分块消息回调:', data.type, data.message_id);
         handleChunkMessage(data);
       },
 
       onComplete: async () => {
-        console.log('✅ Chat.vue消息请求完成');
         scrollToBottom()
       },
       onError: (error) => {
@@ -335,19 +329,6 @@ const handleToolClick = (toolExecution) => {
   showToolDetails.value = true
 }
 
-const handleTaskStatusToggle = async () => {
-  showTaskStatus.value = !showTaskStatus.value
-  if (showTaskStatus.value) {
-    await refreshTaskData()
-  }
-}
-
-const handleWorkspaceToggle = async () => {
-  showWorkspace.value = !showWorkspace.value
-  if (showWorkspace.value) {
-    await refreshTaskData()
-  }
-}
 
 const toggleTaskExpanded = (taskId) => {
   if (expandedTasks.value.has(taskId)) {
@@ -378,7 +359,11 @@ const downloadFile = async (filename) => {
 // 生命周期
 onMounted(async () => {
   await loadAgents()
-  if (agents.value.length > 0) {
+  
+  // 检查是否有传递的conversation数据
+  if (props.selectedConversation) {
+    await loadConversationData(props.selectedConversation)
+  } else if (agents.value.length > 0) {
     // 如果没有选中的agent，默认选择第一个
     if (!selectedAgent.value) {
       selectAgent(agents.value[0])
@@ -386,28 +371,24 @@ onMounted(async () => {
     // 如果没有当前会话，创建新会话
     if (!currentSessionId.value) {
       await createSession()
-      startAutoSave()
     }
   }
 })
 
-onUnmounted(() => {
-  stopAutoSave()
-})
+
+// 监听selectedConversation变化
+watch(() => props.selectedConversation, async (newConversation) => {
+  if (newConversation && agents.value.length > 0) {
+    await loadConversationData(newConversation)
+  }
+}, { immediate: false })
 
 // 监听消息变化，自动滚动到底部
 watch(messages, () => {
   scrollToBottom()
 }, { deep: true })
 
-// 监听会话变化，重新启动自动保存
-watch(currentSessionId, (newSessionId) => {
-  if (newSessionId) {
-    startAutoSave()
-  } else {
-    stopAutoSave()
-  }
-})
+
 </script>
 
 <style scoped>

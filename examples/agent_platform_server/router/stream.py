@@ -103,7 +103,8 @@ async def stream_chat(request: StreamRequest):
     else:
         # 更新现有会话的消息
         new_messages = [msg.model_dump() for msg in request.messages]
-        await db_manager.update_conversation_messages(session_id, new_messages)
+        for msg in new_messages:
+            await db_manager.add_message_to_conversation(session_id, msg)
         logger.info(f"更新现有会话: {session_id}")
     
     # 判断是否要初始化新的 sage service 还是使用默认的
