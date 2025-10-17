@@ -43,88 +43,78 @@ class SageStreamService:
         # 设置system_prefix
         if "system_prefix" in self.preset_running_config:
             self.preset_system_prefix = self.preset_running_config['system_prefix']
-            logger.debug(f"使用预设system_prefix: {self.preset_system_prefix}")
         elif "systemPrefix" in self.preset_running_config:
             self.preset_system_prefix = self.preset_running_config['systemPrefix']
-            logger.debug(f"使用预设systemPrefix: {self.preset_system_prefix}")
         else:
             self.preset_system_prefix = None
-            logger.debug(f"未使用预设system_prefix")
         
         # 设置system_context
         if "system_context" in self.preset_running_config:
             self.preset_system_context = self.preset_running_config['system_context']
-            logger.debug(f"使用预设system_context")
         elif "systemContext" in self.preset_running_config:
             self.preset_system_context = self.preset_running_config['systemContext']
-            logger.debug(f"使用预设systemContext")
         else:
             self.preset_system_context = None
-            logger.debug(f"未使用预设system_context")
         
         # 设置available_workflows
         if "available_workflows" in self.preset_running_config:
             self.preset_available_workflows = self.preset_running_config['available_workflows']
-            logger.debug(f"使用预设available_workflows")
         elif "availableWorkflows" in self.preset_running_config:
             self.preset_available_workflows = self.preset_running_config['availableWorkflows']
-            logger.debug(f"使用预设availableWorkflows")
         else:
             self.preset_available_workflows = None
-            logger.debug(f"未使用预设available_workflows")
         
         # 设置available_tools
         if "available_tools" in self.preset_running_config:
             self.preset_available_tools = self.preset_running_config['available_tools']
-            logger.debug(f"使用预设available_tools")
         elif "availableTools" in self.preset_running_config:
             self.preset_available_tools = self.preset_running_config['availableTools']
-            logger.debug(f"使用预设availableTools")
         else:
             self.preset_available_tools = None
-            logger.debug(f"未使用预设available_tools")
         
         # 设置max_loop_count
         if "max_loop_count" in self.preset_running_config:
             self.preset_max_loop_count = self.preset_running_config['max_loop_count']
-            logger.debug(f"使用预设max_loop_count: {self.preset_max_loop_count}")
         elif "maxLoopCount" in self.preset_running_config:
             self.preset_max_loop_count = self.preset_running_config['maxLoopCount']
-            logger.debug(f"使用预设maxLoopCount: {self.preset_max_loop_count}")
         else:
             self.preset_max_loop_count = None
-            logger.debug(f"未使用预设max_loop_count")
 
 #         "deepThinking": false,
 #   "multiAgent": false,
         # 设置deepThinking
         if "deepThinking" in self.preset_running_config:
             self.preset_deep_thinking = self.preset_running_config['deepThinking']
-            logger.debug(f"使用预设deepThinking: {self.preset_deep_thinking}")
         elif "deepThinking" in self.preset_running_config:
             self.preset_deep_thinking = self.preset_running_config['deepThinking']
-            logger.debug(f"使用预设deepThinking: {self.preset_deep_thinking}")
         else:
             self.preset_deep_thinking = None
-            logger.debug(f"未使用预设deepThinking")
         # 设置multiAgent
         if "multiAgent" in self.preset_running_config:
             self.preset_multi_agent = self.preset_running_config['multiAgent']
-            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
         elif "multiAgent" in self.preset_running_config:
             self.preset_multi_agent = self.preset_running_config['multiAgent']
-            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
         else:
             self.preset_multi_agent = None
-            logger.debug(f"未使用预设multiAgent")
 
         # 设置max_model_len
         if max_model_len:
             self.default_llm_max_model_len = max_model_len
-            logger.debug(f"使用预设max_model_len: {self.default_llm_max_model_len}")
         else:
             self.default_llm_max_model_len = 54000
-            logger.debug(f"未使用预设max_model_len")
+
+        # 统一打印汇总日志
+        summary = {
+            "system_prefix": self.preset_system_prefix,
+            "system_context": self.preset_system_context,
+            "available_workflows": self.preset_available_workflows,
+            "available_tools": self.preset_available_tools,
+            "max_loop_count": self.preset_max_loop_count,
+            "deepThinking": self.preset_deep_thinking,
+            "multiAgent": self.preset_multi_agent,
+            "max_model_len": self.default_llm_max_model_len,
+        }
+        logger.debug(f"预设配置汇总: {summary}")
 
         # workspace 有可能是相对路径
         if workspace:
@@ -143,7 +133,6 @@ class SageStreamService:
         if self.preset_available_tools:
             if isinstance(self.tool_manager, ToolManager):
                 self.tool_manager = ToolProxy(self.tool_manager, self.preset_available_tools)    
-        logger.info("SageStreamService 初始化完成")
     
     async def process_stream(self, messages, session_id=None, user_id=None, deep_thinking=None, 
                            max_loop_count=None, multi_agent=None,more_suggest=False,
