@@ -18,6 +18,7 @@ from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_config import ToolSpec, McpToolSpec, AgentToolSpec
 from sagents.utils.logger import logger
 
@@ -34,7 +35,7 @@ class AutoGenAgentFunc:
     def generate_agent_config(
         self, 
         agent_description: str, 
-        tool_manager: ToolManager,
+        tool_manager: Union[ToolManager, ToolProxy],
         llm_client,
         model: str = "gpt-3.5-turbo"
     ) -> Dict[str, Any]:
@@ -66,10 +67,16 @@ class AutoGenAgentFunc:
             if not basic_config:
                 raise Exception("生成基础配置失败")
             
-            # 选择合适的工具
-            selected_tools = self._select_tools(basic_config, available_tools, llm_client, model)
-            if selected_tools is None:
-                raise Exception("选择工具失败")
+            # 根据tool_manager类型决定是否需要选择工具
+            if isinstance(tool_manager, ToolProxy):
+                # 如果是ToolProxy，直接使用其包含的工具，不再进行选择
+                selected_tools = tool_manager.list_all_tools_name()
+                logger.info(f"使用ToolProxy中预选的工具: {selected_tools}")
+            else:
+                # 如果是ToolManager，进行工具选择
+                selected_tools = self._select_tools(basic_config, available_tools, llm_client, model)
+                if selected_tools is None:
+                    raise Exception("选择工具失败")
             
             # 生成工作流程
             workflows = self._generate_workflows(basic_config, selected_tools, llm_client, model)
@@ -87,25 +94,29 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             raise
     
-    def _get_tools_info(self, tool_manager: ToolManager) -> List[Dict[str, Any]]:
+    def _get_tools_info(self, tool_manager: Union[ToolManager, ToolProxy]) -> List[Dict[str, Any]]:
         """
-        从工具管理器获取所有工具的详细信息
+        从工具管理器或工具代理获取所有工具的详细信息
         
         Args:
-            tool_manager: 工具管理器实例
+            tool_manager: 工具管理器或工具代理实例
             
         Returns:
             工具信息列表
         """
         try:
+            # 使用统一的list_tools()方法获取工具信息
+            # ToolManager和ToolProxy都实现了这个方法
+            tools_list = tool_manager.list_tools()
+            
             tools_info = []
-            for tool_name, tool_spec in tool_manager.tools.items():
+            for tool_dict in tools_list:
                 tool_info = {
-                    "name": tool_spec.name,
-                    "description": tool_spec.description,
-                    "parameters": tool_spec.parameters,
-                    "required": tool_spec.required,
-                    "type": type(tool_spec).__name__
+                    "name": tool_dict.get("name", ""),
+                    "description": tool_dict.get("description", ""),
+                    "parameters": tool_dict.get("parameters", {}),
+                    "required": tool_dict.get("required", []),
+                    "type": tool_dict.get("type", "unknown")
                 }
                 tools_info.append(tool_info)
             
