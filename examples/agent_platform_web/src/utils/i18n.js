@@ -360,6 +360,10 @@ export const zhCN = {
   'workspace.noFiles': '暂无文件',
   'workspace.path': '路径:',
   'workspace.download': '下载文件',
+
+  // 错误提示
+  'error.title': '错误',
+  'error.unknown': '未知错误',
 };
 
 // 英文翻译
@@ -719,4 +723,7 @@ export const enUS = {
   'workspace.noFiles': 'No files',
   'workspace.path': 'Path:',
   'workspace.download': 'Download file',
+
+  'error.title': 'Error',
+  'error.unknown': 'Unknown Error',
 };
