@@ -111,69 +111,25 @@ async def initialize_tool_manager():
 
 async def initialize_system(args):
     """初始化系统"""
-    global default_stream_service, tool_manager, default_model_client, server_args, database_manager
+    global default_stream_service, tool_manager, server_args,default_model_client, database_manager
     
     # 设置服务器参数
     server_args = args
     
-    logger.info("正在初始化 Sage Stream Service...")
-    
-    # 初始化数据库管理器
-    try:
-        from database.database_manager import DatabaseManager
-        database_manager = DatabaseManager(
-            db_type=server_args.db_type,
-            db_path=server_args.db_path
-        )
-        await database_manager.initialize()
-        
-        # 如果是首次启动，从preset配置文件初始化数据库
-        await database_manager.initialize_from_preset_configs(
-            preset_mcp_config=server_args.preset_mcp_config,
-            preset_running_config=server_args.preset_running_config
-        )
-        
-        # 验证MCP服务器列表（需要在tool_manager初始化后进行）
-        # 这个验证将在tool_manager初始化后进行
-        
-        logger.info(f"数据库管理器初始化成功 (模式: {server_args.db_type})")
-    except Exception as e:
-        logger.error(f"数据库管理器初始化失败: {e}")
-        logger.error(traceback.format_exc())
-        database_manager = None
+    logger.info("正在初始化 Sage Platform Server...")
     
     try:
         # 初始化模型客户端
         if server_args.default_llm_api_key:
-            logger.info(f"默认 API 密钥: {server_args.default_llm_api_key}...")
-            logger.info(f"默认 API 基础 URL: {server_args.default_llm_api_base_url}...")
+            logger.debug(f"默认 API 密钥: {server_args.default_llm_api_key}...")
+            logger.debug(f"默认 API 基础 URL: {server_args.default_llm_api_base_url}...")
             default_model_client = OpenAI(
                 api_key=server_args.default_llm_api_key,
                 base_url=server_args.default_llm_api_base_url
             )
             default_model_client.model = server_args.default_llm_model_name
             logger.info(f"默认模型客户端初始化成功: {server_args.default_llm_model_name}")
-        else:
-            logger.warning("未配置默认 API 密钥，某些功能可能不可用")
-        
-        # 初始化工具管理器
-        try:
-            tool_manager = await initialize_tool_manager()
-            logger.info("工具管理器初始化成功")
-            
-            # 验证MCP服务器列表
-            if database_manager and tool_manager:
-                await database_manager.validate_and_cleanup_mcp_servers(tool_manager)
-        except Exception as e:
-            logger.warning(f"工具管理器初始化失败: {e}")
-            logger.error(traceback.format_exc())
-            tool_manager = None
-        
-        # 初始化流式服务
-        if default_model_client:
-            # 延迟导入避免循环依赖
             from handler import SageStreamService
-            
             # 从配置中构建模型配置字典
             model_config_dict = {
                 'model': server_args.default_llm_model_name,
@@ -181,14 +137,8 @@ async def initialize_system(args):
                 'temperature': server_args.default_llm_temperature
             }
 
-            if server_args.preset_running_config:
-                if os.path.exists(server_args.preset_running_config):
-                    with open(server_args.preset_running_config, 'r') as f:
-                        preset_running_config = json.load(f)
-                else:
-                    preset_running_config = {}
-            else:
-                preset_running_config = {}
+            # 读取预设运行配置（兼容单个与多个 agent）
+            preset_running_config = load_default_preset_running_config(server_args.preset_running_config)
 
             default_stream_service = SageStreamService(
                 model=default_model_client,
@@ -201,8 +151,25 @@ async def initialize_system(args):
             )
             logger.info("默认 SageStreamService 初始化成功")
         else:
-            logger.warning("模型客户端未配置，流式服务不可用")
-            
+            logger.warning("未配置默认 API 密钥，某些功能可能不可用")
+        # 初始化数据库
+        from database.database_manager import DatabaseManager
+        database_manager = DatabaseManager(
+            db_type=server_args.db_type,
+            db_path=server_args.db_path
+        )
+        await database_manager.initialize(
+            preset_mcp_config=server_args.preset_mcp_config,
+            preset_running_config=server_args.preset_running_config
+        )
+        logger.info(f"数据库管理器初始化成功 (模式: {server_args.db_type})")
+        # 初始化工具管理器
+        tool_manager = await initialize_tool_manager()
+        logger.info("工具管理器初始化成功")
+        # 验证MCP服务器列表
+        if database_manager and tool_manager:
+            await database_manager.validate_and_cleanup_mcp_servers(tool_manager)
+ 
     except Exception as e:
         logger.error(f"系统初始化失败: {e}")
         logger.error(traceback.format_exc())
@@ -210,22 +177,21 @@ async def initialize_system(args):
 
 def init_global_variables():
     """初始化全局变量"""
-    global default_stream_service, all_active_sessions_service_map, tool_manager, default_model_client, server_args, database_manager
+    global default_stream_service, all_active_sessions_service_map, tool_manager, server_args, database_manager
     
     # 重置所有全局变量
     default_stream_service = None
     all_active_sessions_service_map = {}
     tool_manager = None
-    default_model_client = None
     database_manager = None
     # server_args 通常在启动时设置，这里不重置
 
 
 async def cleanup_system():
     """清理系统资源"""
-    global default_stream_service, all_active_sessions_service_map, tool_manager, default_model_client, database_manager
+    global default_stream_service, all_active_sessions_service_map, tool_manager, server_args, default_model_client, database_manager
     
-    logger.info("正在清理系统资源...")
+    logger.debug("正在清理系统资源...")
     
     try:
         # 清理所有活跃会话
@@ -262,7 +228,7 @@ async def cleanup_system():
                 logger.error(f"数据库管理器清理失败: {e}")
             database_manager = None
         
-        logger.info("系统资源清理完成")
+        logger.debug("系统资源清理完成")
         
     except Exception as e:
         logger.error(f"系统清理失败: {e}")
@@ -271,7 +237,7 @@ async def cleanup_system():
 
 def cleanup_global_variables():
     """清理全局变量"""
-    global default_stream_service, all_active_sessions_service_map, tool_manager, default_model_client, database_manager
+    global default_stream_service, all_active_sessions_service_map, tool_manager, server_args, default_model_client, database_manager
     
     # 清理会话映射
     all_active_sessions_service_map.clear()
@@ -279,5 +245,31 @@ def cleanup_global_variables():
     # 清理其他变量
     default_stream_service = None
     tool_manager = None
-    default_model_client = None
     database_manager = None
+    default_model_client = None
+    server_args = None
+
+# 通用读取预设运行配置（兼容单个与多个 agent）
+def load_default_preset_running_config(config_path: Optional[str]) -> Dict[str, Any]:
+    try:
+        if not config_path:
+            return {}
+        if not os.path.exists(config_path):
+            logger.warning(f"预设Agent配置文件不存在: {config_path}")
+            return {}
+        with open(config_path, 'r') as f:
+            raw_config = json.load(f)
+        if isinstance(raw_config, dict):
+            if 'systemPrefix' in raw_config or 'systemContext' in raw_config:
+                # 旧格式（单个 agent）或已是默认结构
+                return raw_config
+            else:
+                # 新格式（多个 agents），取第一个有效的作为默认
+                for _, agent_cfg in raw_config.items():
+                    if isinstance(agent_cfg, dict):
+                        return agent_cfg
+        logger.warning("预设Agent配置格式不正确，使用空配置")
+        return {}
+    except Exception as e:
+        logger.error(f"读取预设Agent配置失败: {e}")
+        return {}
