@@ -31,7 +31,7 @@ export const useChatAPI = () => {
         agent_id: selectedAgent?.id || "default_agent",
         agent_name: selectedAgent?.name || "Sage Assistant",
         system_context: selectedAgent?.systemContext || {},
-        available_workflows: selectedAgent?.availableWorkflows || [],
+        available_workflows: selectedAgent?.availableWorkflows || {},
         llm_model_config: selectedAgent?.llmConfig || {
           model: '',
           maxTokens: 4096,
