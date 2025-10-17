@@ -37,15 +37,15 @@ class DatabaseManager:
             # 确保数据库目录存在
             os.makedirs(db_path, exist_ok=True)
             self.db_file = os.path.join(db_path, "agent_platform.db")
-            logger.info(f"使用文件数据库: {self.db_file}")
+            logger.debug(f"使用文件数据库: {self.db_file}")
         else:
             self.db_file = ":memory:"
-            logger.info("使用内存数据库")
+            logger.debug("使用内存数据库")
     
-    async def initialize(self):
-        """初始化数据库连接和表结构"""
-        async with self._lock:
-            try:
+    async def initialize(self, preset_mcp_config: Optional[str] = None, preset_running_config: Optional[str] = None):
+        """初始化数据库连接和表结构，并在提供预设配置时进行首次数据加载"""
+        try:
+            async with self._lock:
                 self._connection = sqlite3.connect(self.db_file, check_same_thread=False)
                 self._connection.row_factory = sqlite3.Row
                 
@@ -56,15 +56,22 @@ class DatabaseManager:
                 Conversation.create_table(cursor)
                 self._connection.commit()
                 
-                logger.info("数据库初始化完成")
-                
-            except Exception as e:
-                logger.error(f"数据库初始化失败: {e}")
-                raise SageHTTPException(
-                    status_code=500,
-                    detail="数据库初始化失败",
-                    error_detail=str(e)
+                logger.debug("数据库初始化完成")
+            
+            # 在锁外执行预设加载，避免死锁
+            if preset_mcp_config is not None or preset_running_config is not None:
+                await self.initialize_from_preset_configs(
+                    preset_mcp_config,
+                    preset_running_config
                 )
+            
+        except Exception as e:
+            logger.error(f"数据库初始化失败: {e}")
+            raise SageHTTPException(
+                status_code=500,
+                detail="数据库初始化失败",
+                error_detail=str(e)
+            )
     
     async def close(self):
         """关闭数据库连接"""
@@ -72,7 +79,6 @@ class DatabaseManager:
             if self._connection:
                 self._connection.close()
                 self._connection = None
-                logger.info("数据库连接已关闭")
     
     @asynccontextmanager
     async def get_cursor(self):
@@ -253,15 +259,13 @@ class DatabaseManager:
     
     async def initialize_from_preset_configs(self, preset_mcp_config: str, preset_running_config: str):
         """从预设配置文件初始化数据库"""
-        logger.info("开始从预设配置文件初始化数据库")
-        
         # 检查是否需要初始化
         if await self._should_initialize():
             await self._load_preset_mcp_config(preset_mcp_config)
             await self._load_preset_agent_config(preset_running_config)
-            logger.info("数据库初始化完成")
+            logger.debug("数据库预加载完成")
         else:
-            logger.info("数据库已存在数据，跳过初始化")
+            logger.debug("数据库已存在数据，跳过预加载")
     
     async def _should_initialize(self) -> bool:
         """检查是否需要初始化数据库"""
