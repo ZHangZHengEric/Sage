@@ -21,8 +21,6 @@ import uvicorn
 project_root = Path(os.path.realpath(__file__)).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-import sagents
-print("sagents loaded from:", sagents.__file__)
 
 from sagents.utils.logger import logger
 
