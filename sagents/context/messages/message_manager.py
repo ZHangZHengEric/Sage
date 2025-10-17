@@ -408,6 +408,12 @@ class MessageManager:
                 messages_after_last_user = []
             messages_after_last_user.append(msg)
         return messages_after_last_user
+
+    def get_last_observation_message(self) -> MessageChunk:
+        for msg in self.messages[::-1]:
+            if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
+                return msg
+        return None
     
     def get_last_user_message(self) -> MessageChunk:
         for msg in self.messages[::-1]:

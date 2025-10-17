@@ -652,7 +652,7 @@ class TaskManager:
         for i, doc in enumerate(documents):
             doc_content = {
                 "path":doc,
-                "content":FileSystemTool().file_read(doc)
+                "content":FileSystemTool().file_read(doc,end_line=100)
             }
             document_contents.append(doc_content)
         return document_contents
