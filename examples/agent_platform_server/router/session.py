@@ -2,14 +2,24 @@
 会话管理接口路由模块
 """
 import os
+import zipfile
+import tempfile
+import json
+import asyncio
+import math
+from pathlib import Path
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from sagents.utils.logger import logger
 from sagents.context.session_context import get_session_context
-from entities.entities import create_success_response, SageHTTPException
+from entities.entities import (
+    StandardResponse, ErrorResponse, SessionStatusData, FileWorkspaceData,
+    ConversationInfo, PaginatedResponse, ConversationListRequest,
+    create_success_response, create_error_response, SageHTTPException
+)
 import globals.variables as global_vars
 
 # 创建路由器
@@ -163,9 +173,83 @@ async def download_file(request: Request):
             error_detail=f"Path is not a file: {file_path}"
         )
     
-    # 返回文件内容
+    # 返回文件
     return FileResponse(
         path=full_file_path,
         filename=os.path.basename(file_path),
         media_type='application/octet-stream'
     )
+
+
+@session_router.get("/api/conversations")
+async def get_conversations_paginated(
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量，最大100"),
+    user_id: Optional[str] = Query(None, description="用户ID过滤"),
+    search: Optional[str] = Query(None, description="搜索关键词"),
+    agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
+    sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages")
+):
+    """分页获取会话列表"""
+    try:
+        # 获取数据库管理器
+        db_manager = global_vars.get_database_manager()
+        if not db_manager:
+            raise SageHTTPException(
+                status_code=500,
+                detail="数据库管理器未初始化",
+                error_detail="Database manager not initialized"
+            )
+        
+        # 分页查询会话
+        conversations, total_count = await db_manager.get_conversations_paginated(
+            page=page, 
+            page_size=page_size, 
+            user_id=user_id,
+            search=search,
+            agent_id=agent_id,
+            sort_by=sort_by or "date"
+        )
+        
+        # 转换为响应格式
+        conversation_items = []
+        for conv in conversations:
+            conversation_items.append(ConversationInfo(
+                session_id=conv.session_id,
+                user_id=conv.user_id,
+                agent_id=conv.agent_id,
+                agent_name=conv.agent_name,
+                title=conv.title,
+                message_count=conv.get_message_count(),
+                created_at=conv.created_at,
+                updated_at=conv.updated_at
+            ))
+        
+        # 计算分页信息
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 0
+        has_next = page < total_pages
+        has_prev = page > 1
+        
+        # 构建分页响应
+        paginated_data = PaginatedResponse(
+            list=conversation_items,
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_next=has_next,
+            has_prev=has_prev
+        )
+        
+        return create_success_response(
+            data=paginated_data.dict(),
+            message="获取会话列表成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"获取会话列表失败: {e}")
+        raise SageHTTPException(
+            status_code=500,
+            detail="获取会话列表失败",
+            error_detail=str(e)
+        )

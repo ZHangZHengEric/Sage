@@ -13,24 +13,6 @@ export const sendMessage = async (messageData) => {
   return await baseAPI.post('/api/chat/send', messageData)
 }
 
-/**
- * 发送流式消息
- * @param {Object} messageData - 消息数据
- * @param {Object} config - 请求配置
- * @returns {Promise<Response>}
- */
-export const sendMessageStream = (messageData, config = {}) => {
-  return baseAPI.postStream('/api/stream', messageData, config)
-}
-
-/**
- * 中断会话
- * @param {string} sessionId - 会话ID
- * @returns {Promise<Object>}
- */
-export const interruptSession = (sessionId) => {
-  return baseAPI.post(`/api/sessions/${sessionId}/interrupt`)
-}
 
 /**
  * 获取聊天历史
@@ -105,4 +87,28 @@ export const saveConversation = async (conversationData) => {
  */
 export const deleteConversation = async (conversationId) => {
   return await baseAPI.delete(`/api/conversations/${conversationId}`)
+}
+
+/**
+ * 分页获取对话列表
+ * @param {Object} params - 查询参数
+ * @param {number} params.page - 页码，从1开始
+ * @param {number} params.page_size - 每页大小
+ * @param {string} [params.user_id] - 用户ID（可选）
+ * @param {string} [params.search] - 搜索关键词（可选）
+ * @param {string} [params.agent_id] - Agent ID过滤（可选）
+ * @param {string} [params.sort_by] - 排序方式（可选）
+ * @returns {Promise<Object>} 分页对话列表响应
+ */
+export const getConversationsPaginated = async (params = {}) => {
+  const queryParams = new URLSearchParams()
+  if (params.page) queryParams.append('page', params.page)
+  if (params.page_size) queryParams.append('page_size', params.page_size)
+  if (params.user_id) queryParams.append('user_id', params.user_id)
+  if (params.search) queryParams.append('search', params.search)
+  if (params.agent_id) queryParams.append('agent_id', params.agent_id)
+  if (params.sort_by) queryParams.append('sort_by', params.sort_by)
+  
+  const url = `/api/conversations${queryParams.toString() ? '?' + queryParams.toString() : ''}`
+  return await baseAPI.get(url)
 }

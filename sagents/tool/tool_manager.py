@@ -203,7 +203,9 @@ class ToolManager:
         logger.info(f"Discovering MCP tools from settings file: {mcp_setting_path}")
         if os.path.exists(mcp_setting_path)==False:
             logger.warning(f"MCP setting file not found: {mcp_setting_path}")
-            return
+            return False
+        
+        success = True  # 初始化success变量
         try:
             with open(mcp_setting_path) as f:
                 mcp_config = json.load(f)
@@ -217,14 +219,16 @@ class ToolManager:
                     logger.debug(f"Skipping disabled MCP server: {server_name}")
                     continue
                 
+                server_success = False  # 当前服务器的注册结果
                 if 'sse_url' in config:
                     logger.debug(f"Setting up SSE server: {server_name} at URL: {config['sse_url']}")
                     server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
-                    success = await self._register_mcp_tools_sse(server_name, server_params)
+                    server_success = await self._register_mcp_tools_sse(server_name, server_params)
                 elif 'url' in config or 'streamable_http_url' in config:
-                    logger.debug(f"Setting up streamable HTTP server: {server_name} at URL: {config['url']}")
-                    server_params = StreamableHttpServerParameters(url=config.get('url',config.get('streamable_http_url')))
-                    success = await self._register_mcp_tools_streamable_http(server_name, server_params)
+                    url = config.get('url', config.get('streamable_http_url'))
+                    logger.debug(f"Setting up streamable HTTP server: {server_name} at URL: {url}")
+                    server_params = StreamableHttpServerParameters(url=url)
+                    server_success = await self._register_mcp_tools_streamable_http(server_name, server_params)
                 else:
                     logger.debug(f"Setting up stdio server: {server_name} with command: {config['command']}")
                     server_params = StdioServerParameters(
@@ -232,7 +236,10 @@ class ToolManager:
                         args=config.get('args', []),
                         env=config.get('env', None)
                     )
-                    success = await self._register_mcp_tools_stdio(server_name, server_params)
+                    server_success = await self._register_mcp_tools_stdio(server_name, server_params)
+                
+                # 累积结果：只有所有服务器都成功注册，整体才算成功
+                success = success and server_success
         except Exception as e:
             logger.error(f"Error loading MCP config: {str(e)}")
             return False
