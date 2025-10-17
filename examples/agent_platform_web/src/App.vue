@@ -3,7 +3,7 @@
     <Sidebar 
       :current-page="currentPage"
       @page-change="handlePageChange"
-      :conversation-count="conversations.length"
+      :conversation-count="0"
       @new-chat="handleNewChat"
     />
     <main class="main-content">
@@ -19,11 +19,9 @@
 import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
-import { useChatStore } from './stores'
 
 const router = useRouter()
 const route = useRoute()
-const chatStore = useChatStore()
 
 // 选中的conversation数据
 const selectedConversation = ref(null)
@@ -46,7 +44,6 @@ const currentPage = computed(() => {
   return 'chat'
 })
 
-const conversations = computed(() => chatStore.conversations)
 
 // 方法
 const handlePageChange = (page) => {
@@ -62,7 +59,6 @@ const handlePageChange = (page) => {
 }
 
 const handleNewChat = () => {
-  chatStore.clearSession()
   selectedConversation.value = null
   router.push('/agent/chat')
 }

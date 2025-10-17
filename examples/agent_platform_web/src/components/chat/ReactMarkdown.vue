@@ -145,6 +145,7 @@ const renderedContent = computed(() => {
   background: none;
   padding: 0;
   border-radius: 0;
+  color: #1a202c;
 }
 
 .markdown-content a {
