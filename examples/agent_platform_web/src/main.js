@@ -7,7 +7,7 @@ import App from './App.vue'
 
 // 导入路由和状态管理
 import router from './router'
-import pinia, { useAppStore, useChatStore, useToolStore } from './stores'
+import pinia, { useAppStore } from './stores'
 
 const app = createApp(App)
 
@@ -23,19 +23,10 @@ app.use(pinia)
 // 初始化应用状态
 const initializeApp = async () => {
   const appStore = useAppStore()
-  const chatStore = useChatStore()
-  const toolStore = useToolStore()
   
   try {
     // 初始化应用设置
     appStore.initialize()
-    
-    // 并行初始化各个store
-    await Promise.all([
-      chatStore.initialize(),
-      toolStore.initialize()
-    ])
-    
     console.log('Application initialized successfully')
   } catch (error) {
     console.error('Failed to initialize application:', error)
