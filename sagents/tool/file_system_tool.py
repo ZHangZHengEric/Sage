@@ -613,9 +613,9 @@ class FileSystemTool(ToolBase):
             return {"status": "error", "message": f"下载失败: {str(e)}"}
 
     @ToolBase.tool()
-    def replace_text_in_file(self, file_path: str, search_pattern: str, replacement: str, 
+    def update_file(self, file_path: str, search_pattern: str, replacement: str, 
                           use_regex: bool = False, case_sensitive: bool = True) -> Dict[str, Any]:
-        """在文件中搜索某端文件并使用另一段文本替换该文本
+        """更新文件中匹配的文本内容
 
         Args:
             file_path (str): 文件绝对路径
