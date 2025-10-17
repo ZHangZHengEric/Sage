@@ -16,7 +16,7 @@
     <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="message user">
       <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       <div class="user-bubble">
-        <MessageTypeLabel :messageType="message.type || message.message_type" role="user" :type="message.type" />
+        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" />
         <div class="user-content">
           <ReactMarkdown
             :content="formatMessageContent(message.content)"
@@ -27,9 +27,9 @@
 
     <!-- 助手消息 -->
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="message assistant">
-      <MessageAvatar :messageType="message.type || message.message_type" role="assistant" />
+      <MessageAvatar :messageType="message.message_type" role="assistant" />
       <div class="assistant-bubble">
-        <MessageTypeLabel :messageType="message.type || message.message_type" role="assistant" :type="message.type" />
+        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" />
         <div class="assistant-content">
           <ReactMarkdown
             :content="formatMessageContent(message.show_content)"

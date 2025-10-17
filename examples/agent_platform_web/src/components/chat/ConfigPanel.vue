@@ -2,23 +2,6 @@
   <div class="config-panel">
   
     <div class="config-content">
-      <!-- Agent选择 -->
-      <div class="config-section">
-        <label class="config-label">{{ t('config.selectAgent') }}</label>
-        <select 
-          :value="selectedAgent?.id || ''" 
-          @change="handleAgentChange"
-          class="agent-select"
-        >
-          <option 
-            v-for="agent in agents" 
-            :key="agent.id" 
-            :value="agent.id"
-          >
-            {{ agent.name }}
-          </option>
-        </select>
-      </div>
 
       <!-- 深度思考 -->
       <div class="config-section">
