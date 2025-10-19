@@ -28,4 +28,6 @@ PyMuPDF
 tqdm
 unstructured
 
+python-daemon
+
 streamlit==1.50.0

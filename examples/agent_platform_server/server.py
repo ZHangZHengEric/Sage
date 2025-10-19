@@ -220,7 +220,7 @@ def create_fastapi_app(args):
         error_response = create_error_response(
             code=exc.status_code,
             message=exc.detail,
-            error_detail=getattr(exc, 'error_detail', None)
+            error_detail=getattr(exc, 'error_detail', '')
         )
         return JSONResponse(
             status_code=exc.status_code,
