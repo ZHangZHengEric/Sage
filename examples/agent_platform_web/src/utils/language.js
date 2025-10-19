@@ -1,5 +1,5 @@
 import { computed } from 'vue'
-import { useAppStore } from '../stores/index.js'
+import { useAppStore } from '../stores/app.js'
 import { zhCN, enUS } from './i18n.js'
 
 // 翻译对象映射
