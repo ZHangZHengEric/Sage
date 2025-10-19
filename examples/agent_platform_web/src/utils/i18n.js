@@ -32,6 +32,9 @@ export const zhCN = {
   'chat.noResult': '暂无结果',
   'chat.untitledConversation': '未命名对话',
   'chat.sendError': '发送消息失败',
+  'chat.settings': '设置',
+  'chat.loadAgentsError': '加载Agent失败',
+  'chat.downloadError': '下载文件失败',
   
   // Agent配置页面
   'agent.title': 'Agent配置',
@@ -403,6 +406,9 @@ export const enUS = {
   'chat.noResult': 'No result yet',
   'chat.untitledConversation': 'Untitled Conversation',
   'chat.sendError': 'Failed to send message',
+  'chat.settings': 'Settings',
+  'chat.loadAgentsError': 'Failed to load agents',
+  'chat.downloadError': 'Failed to download file',
   
   // Agent配置页面
   'agent.title': 'Agent Configuration',
