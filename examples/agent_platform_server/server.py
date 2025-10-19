@@ -99,7 +99,7 @@ def create_argument_parser():
                        choices=["file", "memory"],
                        help="数据库类型：file（文件模式）或memory（内存模式） (环境变量: SAGE_DB_TYPE)")
     parser.add_argument("--db_path", 
-                       default=os.getenv("SAGE_DB_PATH", "./"), 
+                       default=os.getenv("SAGE_DB_PATH", "./data/"), 
                        help="数据库文件存储路径，仅在file模式下有效 (环境变量: SAGE_DB_PATH)")
     
     return parser
