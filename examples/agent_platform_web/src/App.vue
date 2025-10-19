@@ -1,6 +1,6 @@
 <template>
   <div class="app">
-    <Sidebar />
+    <Sidebar @new-chat="handleNewChat" />
     <el-main class="main-content">
       <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
     </el-main>
@@ -16,6 +16,10 @@ const router = useRouter()
 
 // 选中的conversation数据
 const selectedConversation = ref(null)
+
+const handleNewChat = () => {
+  selectedConversation.value = null
+}
 
 const handleSelectConversation = (conversation) => {
   selectedConversation.value = conversation

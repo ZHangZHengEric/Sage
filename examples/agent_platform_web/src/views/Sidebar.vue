@@ -23,10 +23,6 @@
     </nav>
 
     <div class="sidebar-footer">
-      <div class="status-indicator">
-        <div class="status-dot"></div>
-        <span class="status-text">{{ t('sidebar.online') }}</span>
-      </div>
       <button class="language-toggle" @click="toggleLanguage">
         <el-icon :size="16">
           <Globe />
@@ -110,6 +106,10 @@ const menuItems = computed(() => [
 
 // 方法
 const handleItemClick = (item) => {
+  if (item.id === 'chat') {
+    emit('new-chat')
+  }
+
   // 直接处理路由跳转
   const routeName = pageToRouteNameMap[item.id]
   if (routeName) {
