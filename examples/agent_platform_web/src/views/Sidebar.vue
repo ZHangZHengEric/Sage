@@ -10,14 +10,10 @@
         <h1 class="logo-text">Agent Platform</h1>
       </div>
     </div>
-    
+
     <nav class="sidebar-nav">
-      <button
-        v-for="item in menuItems"
-        :key="item.id"
-        :class="['nav-item', { active: currentPage === item.id }]"
-        @click="handleItemClick(item)"
-      >
+      <button v-for="item in menuItems" :key="item.id" :class="['nav-item', { active: currentPage === item.id }]"
+        @click="handleItemClick(item)">
         <el-icon :size="20" class="nav-icon">
           <component :is="item.icon" />
         </el-icon>
@@ -25,7 +21,7 @@
         <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
       </button>
     </nav>
-    
+
     <div class="sidebar-footer">
       <div class="status-indicator">
         <div class="status-dot"></div>
@@ -43,30 +39,43 @@
 
 <script setup>
 import { computed } from 'vue'
-import { 
-  ChatDotRound as MessageSquare, 
-  Setting as Settings, 
-  Tools as Wrench, 
-  Clock as History, 
+import { useRouter, useRoute } from 'vue-router'
+import {
+  ChatDotRound as MessageSquare,
+  Setting as Settings,
+  Tools as Wrench,
+  Clock as History,
   Plus,
   Connection as Globe
 } from '@element-plus/icons-vue'
 import { useLanguage } from '../utils/language.js'
 
-// Props
-const props = defineProps({
-  currentPage: {
-    type: String,
-    default: 'chat'
-  },
-  conversationCount: {
-    type: Number,
-    default: 0
-  }
+const router = useRouter()
+const route = useRoute()
+
+// 从路由配置中创建页面ID到路由名称的映射
+const pageToRouteNameMap = {
+  'chat': 'Chat',
+  'agents': 'AgentConfig',
+  'tools': 'Tools',
+  'history': 'History'
+}
+
+// 计算当前页面
+const currentPage = computed(() => {
+  const routeName = route.name
+  if (routeName === 'Chat') return 'chat'
+  if (routeName === 'AgentConfig') return 'agents'
+  if (routeName === 'Tools') return 'tools'
+  if (routeName === 'History') return 'history'
+  return 'chat'
 })
 
+// Props (移除 currentPage prop，因为现在内部计算)
+const props = defineProps({})
+
 // Emits
-const emit = defineEmits(['page-change', 'new-chat'])
+const emit = defineEmits(['new-chat'])
 
 // 语言相关
 const { t, language, toggleLanguage } = useLanguage()
@@ -95,16 +104,21 @@ const menuItems = computed(() => [
     id: 'history',
     label: t('sidebar.history'),
     icon: History,
-    badge: props.conversationCount > 0 ? props.conversationCount : null
+    badge: null
   }
 ])
 
 // 方法
 const handleItemClick = (item) => {
-  if (item.id === 'chat') {
-    emit('new-chat')
+  // 直接处理路由跳转
+  const routeName = pageToRouteNameMap[item.id]
+  if (routeName) {
+    // 通过路由名称跳转，这样会自动使用路由配置中的路径
+    router.push({ name: routeName })
+  } else {
+    // 如果没有找到对应的路由名称，回退到默认页面
+    router.push({ name: 'Chat' })
   }
-  emit('page-change', item.id)
 }
 </script>
 
@@ -313,15 +327,16 @@ const handleItemClick = (item) => {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
+
   50% {
     opacity: 0.7;
     transform: scale(1.1);
   }
 }
-
-
 </style>
