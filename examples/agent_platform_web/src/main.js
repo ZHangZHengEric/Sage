@@ -2,12 +2,15 @@ import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import './style.css'
+import './styles/style.css'
 import App from './App.vue'
 
 // 导入路由和状态管理
 import router from './router'
-import pinia, { useAppStore } from './stores'
+import { createPinia } from 'pinia'
+import { useAppStore } from './stores/app'
+
+const pinia = createPinia()
 
 const app = createApp(App)
 

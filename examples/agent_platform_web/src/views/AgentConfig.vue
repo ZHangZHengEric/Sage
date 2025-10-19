@@ -1,117 +1,92 @@
 <template>
-  <div  class="agent-config-page">
-    <div v-if="currentView === 'list'" class="page-header">
-      <div class="page-title">
-        <h2>{{ t('agent.title') }}</h2>
-        <p>{{ t('agent.subtitle') }}</p>
-      </div>
-      <div class="page-actions">
-        <el-button type="default" @click="handleImport">
-          <Upload :size="16" />
-          {{ t('agent.import') }}
-        </el-button>
-        <el-button type="primary" @click="handleCreateAgent">
-          <Plus :size="16" />
-          {{ t('agent.create') }}
-        </el-button>
-      </div>
-    </div>
- 
-    <!-- 列表视图 -->
-    <div v-if="currentView === 'list'" class="agents-grid">
-      <div v-for="agent in agents" :key="agent.id" class="agent-card">
-        <div class="agent-header">
-          <div class="agent-avatar">
-            <Bot :size="24" />
-          </div>
-          <div class="agent-info">
-            <h3 class="agent-name">{{ agent.name }}</h3>
-            <p class="agent-description">{{ agent.description }}</p>
-          </div>
-        </div>
-        
-        <div class="agent-config">
-          <div class="config-item">
-            <span class="config-label">{{ t('agent.model') }}:</span>
-            <span class="config-value">
-              {{ agent.llmConfig?.model || t('agent.defaultModel') }}
-            </span>
-          </div>
-          <div class="config-item">
-            <span class="config-label">{{ t('agent.deepThinking') }}:</span>
-            <span :class="['config-badge', getConfigBadgeClass(agent.deepThinking)]">
-              {{ getConfigBadgeText(agent.deepThinking) }}
-            </span>
-          </div>
-          <div class="config-item">
-            <span class="config-label">{{ t('agent.multiAgent') }}:</span>
-            <span :class="['config-badge', getConfigBadgeClass(agent.multiAgent)]">
-              {{ getConfigBadgeText(agent.multiAgent) }}
-            </span>
-          </div>
-          <div class="config-item">
-            <span class="config-label">{{ t('agent.availableTools') }}:</span>
-            <span class="config-value">
-              {{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}
-            </span>
-          </div>
-        </div>
-        
-        <div class="agent-actions">
-          <el-button 
-            type="default"
-            @click="handleEditAgent(agent)"
-          >
-            <Edit :size="16" />
-            {{ t('agent.edit') }}
-          </el-button>
-          <el-button 
-            type="default"
-            @click="handleExport(agent)"
-            :title="t('agent.export')"
-          >
-            <Download :size="16" />
-            {{ t('agent.export') }}
-          </el-button>
-          <el-button 
-            v-if="agent.id !== 'default'"
-            type="danger"
-            @click="handleDelete(agent)"
-          >
-            <Trash2 :size="16" />
-            {{ t('agent.delete') }}
-          </el-button>
-        </div>
-      </div>
+  <div v-if="currentView === 'list'" class="page-header">
+
+    <div class="page-actions">
+      <el-button type="default" @click="handleImport">
+        <Upload :size="16" />
+        {{ t('agent.import') }}
+      </el-button>
+      <el-button type="primary" @click="handleCreateAgent">
+        <Plus :size="16" />
+        {{ t('agent.create') }}
+      </el-button>
     </div>
 
-    <!-- Agent编辑/创建视图 -->
-    <div v-else class="agent-edit-view">
-      <div class="view-header">
-        <h3 class="form-title">{{ currentView === 'edit' ? t('agent.editTitle') : t('agent.createTitle') }}</h3>
-        <el-button @click="handleBackToList" type="default">
-          ← {{ t('tools.backToList') }}
-        </el-button>
-      </div>
-
-      <AgentEditModal
-        :visible="currentView !== 'list'"
-        :agent="editingAgent"
-        :tools="tools"
-        @save="handleSaveAgent"
-        @update:visible="handleCloseEdit"
-      />
-    </div>
-
-    <!-- Agent创建模态框 -->
-    <AgentCreationModal
-      :isOpen="showCreationModal"
-      :tools="tools"
-      @create-blank="handleBlankConfig"
-      @create-smart="handleSmartConfig"
-      @close="showCreationModal = false"
-    />
   </div>
+
+  <!-- 列表视图 -->
+  <div v-if="currentView === 'list'" class="agents-grid">
+    <div v-for="agent in agents" :key="agent.id" class="agent-card">
+      <div class="agent-header">
+        <div class="agent-avatar">
+          <Bot :size="24" />
+        </div>
+        <div class="agent-info">
+          <h3 class="agent-name">{{ agent.name }}</h3>
+          <p class="agent-description">{{ agent.description }}</p>
+        </div>
+      </div>
+
+      <div class="agent-config">
+        <div class="config-item">
+          <span class="config-label">{{ t('agent.model') }}:</span>
+          <span class="config-value">
+            {{ agent.llmConfig?.model || t('agent.defaultModel') }}
+          </span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">{{ t('agent.deepThinking') }}:</span>
+          <span :class="['config-badge', getConfigBadgeClass(agent.deepThinking)]">
+            {{ getConfigBadgeText(agent.deepThinking) }}
+          </span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">{{ t('agent.multiAgent') }}:</span>
+          <span :class="['config-badge', getConfigBadgeClass(agent.multiAgent)]">
+            {{ getConfigBadgeText(agent.multiAgent) }}
+          </span>
+        </div>
+        <div class="config-item">
+          <span class="config-label">{{ t('agent.availableTools') }}:</span>
+          <span class="config-value">
+            {{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}
+          </span>
+        </div>
+      </div>
+
+      <div class="agent-actions">
+        <el-button type="default" @click="handleEditAgent(agent)">
+          <Edit :size="16" />
+          {{ t('agent.edit') }}
+        </el-button>
+        <el-button type="default" @click="handleExport(agent)" :title="t('agent.export')">
+          <Download :size="16" />
+          {{ t('agent.export') }}
+        </el-button>
+        <el-button v-if="agent.id !== 'default'" type="danger" @click="handleDelete(agent)">
+          <Trash2 :size="16" />
+          {{ t('agent.delete') }}
+        </el-button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent编辑/创建视图 -->
+  <div v-else>
+    <div class="view-header">
+      <h3 class="form-title">{{ currentView === 'edit' ? t('agent.editTitle') : t('agent.createTitle') }}</h3>
+      <el-button @click="handleBackToList" type="default">
+        ← {{ t('tools.backToList') }}
+      </el-button>
+    </div>
+
+    <AgentEdit :visible="currentView !== 'list'" :agent="editingAgent" :tools="tools" @save="handleSaveAgent"
+      @update:visible="handleCloseEdit" />
+  </div>
+
+  <!-- Agent创建模态框 -->
+  <AgentCreationOption :isOpen="showCreationModal" :tools="tools" @create-blank="handleBlankConfig"
+    @create-smart="handleSmartConfig" @close="showCreationModal = false" />
 </template>
 
 <script setup>
@@ -120,9 +95,9 @@ import { Plus, Edit, Trash2, Bot, Settings, Download, Upload } from 'lucide-vue-
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useLanguage } from '../utils/language.js'
 import { agentAPI } from '../api/index.js'
-import AgentCreationModal from '../components/AgentCreationModal.vue'
-import AgentEditModal from '../components/AgentEditModal.vue'
-import { getTools} from '../api/modules/tool.js'
+import AgentCreationOption from '../components/AgentCreationOption.vue'
+import AgentEdit from '../components/AgentEdit.vue'
+import { getTools } from '../api/modules/tool.js'
 
 // State
 const agents = ref([])
@@ -216,7 +191,7 @@ const handleDelete = async (agent) => {
     ElMessage.warning(t('agent.defaultCannotDelete'))
     return
   }
-  
+
   try {
     await ElMessageBox.confirm(
       t('agent.deleteConfirm').replace('{name}', agent.name),
@@ -227,7 +202,7 @@ const handleDelete = async (agent) => {
         type: 'warning'
       }
     )
-    
+
     // 使用本地的removeAgent方法
     await removeAgent(agent.id)
     ElMessage.success(t('agent.deleteSuccess').replace('{name}', agent.name))
@@ -262,7 +237,7 @@ const handleExport = (agent) => {
   const dataStr = JSON.stringify(exportConfig, null, 2)
   const dataBlob = new Blob([dataStr], { type: 'application/json' })
   const url = URL.createObjectURL(dataBlob)
-  
+
   // 创建下载链接并触发下载
   const link = document.createElement('a')
   link.href = url
@@ -270,7 +245,7 @@ const handleExport = (agent) => {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
-  
+
   // 清理URL对象
   URL.revokeObjectURL(url)
 }
@@ -281,22 +256,22 @@ const handleImport = () => {
   input.type = 'file'
   input.accept = '.json'
   input.style.display = 'none'
-  
+
   input.onchange = (event) => {
     const file = event.target.files[0]
     if (!file) return
-    
+
     const reader = new FileReader()
     reader.onload = async (e) => {
       try {
         const importedConfig = JSON.parse(e.target.result)
-        
+
         // 验证必要字段
         if (!importedConfig.name) {
           ElMessage.error(t('agent.importMissingName'))
           return
         }
-        
+
         // 创建新的Agent配置
         const newAgent = {
           name: importedConfig.name + t('agent.importSuffix'),
@@ -309,20 +284,20 @@ const handleImport = () => {
           systemContext: importedConfig.systemContext || {},
           availableWorkflows: importedConfig.availableWorkflows || {}
         }
-        
+
         // 切换到编辑视图并预填数据
         editingAgent.value = newAgent
         currentView.value = 'edit'
-        
+
       } catch (error) {
         ElMessage.error(t('agent.importError'))
         console.error('Import error:', error)
       }
     }
-    
+
     reader.readAsText(file)
   }
-  
+
   // 添加到DOM并触发点击
   document.body.appendChild(input)
   input.click()
@@ -365,7 +340,7 @@ const handleSaveAgent = async (agentData) => {
     await saveAgent(agentData)
     currentView.value = 'list'
     editingAgent.value = null
-    
+
     if (agentData.id) {
       ElMessage.success(t('agent.updateSuccess').replace('{name}', agentData.name))
     } else {
@@ -380,17 +355,17 @@ const handleSaveAgent = async (agentData) => {
 const handleSmartConfig = async (description) => {
   const startTime = Date.now()
   console.log('🚀 开始智能配置生成，描述:', description)
-  
+
   try {
     console.log('📡 发送auto-generate请求...')
-    
+
     // 调用后端API生成Agent配置
     const result = await agentAPI.generateAgentConfig(description)
 
     const duration = Date.now() - startTime
     console.log(`📨 收到响应，耗时: ${duration}ms`)
     console.log('✅ 解析响应成功')
-    
+
     // 使用后端返回的agent_config
     const newAgent = {
       ...result
@@ -409,29 +384,23 @@ const handleSmartConfig = async (description) => {
       message: error.message,
       stack: error.stack
     })
-    
+
     // 处理超时错误
     if (error.name === 'AbortError') {
-      throw new Error(`请求超时（耗时${Math.round(duration/1000)}秒），Agent配置生成需要较长时间，请稍后重试`)
+      throw new Error(`请求超时（耗时${Math.round(duration / 1000)}秒），Agent配置生成需要较长时间，请稍后重试`)
     }
-    
+
     // 处理网络错误
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error(`网络连接错误（耗时${Math.round(duration/1000)}秒），请检查网络连接后重试`)
+      throw new Error(`网络连接错误（耗时${Math.round(duration / 1000)}秒），请检查网络连接后重试`)
     }
-    
+
     throw error // 重新抛出错误，让AgentCreationModal处理
   }
 }
 </script>
 
 <style scoped>
-.agent-config-page {
-  padding: 1.5rem;
-  background: var(--bg-primary);
-  min-height: 100vh;
-}
-
 .loading-container {
   display: flex;
   justify-content: center;
@@ -592,42 +561,38 @@ const handleSmartConfig = async (description) => {
   min-width: 0;
 }
 
-.agent-edit-view {
-  background: var(--bg-primary);
-}
+
 
 .view-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border-color);
+
 }
 
 @media (max-width: 768px) {
   .agent-config-page {
     padding: 1rem;
   }
-  
+
   .page-header {
     flex-direction: column;
     gap: 1rem;
     align-items: stretch;
   }
-  
+
   .page-actions {
     justify-content: flex-end;
   }
-  
+
   .agents-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .agent-actions {
     flex-direction: column;
   }
-  
+
   .agent-actions .el-button {
     flex: none;
   }
