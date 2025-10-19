@@ -187,3 +187,4 @@ cython_debug/
 .vscode
 *.db
 agent_workspace
+.conda
