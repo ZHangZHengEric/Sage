@@ -8,29 +8,17 @@
         </span>
       </div>
       <div class="chat-controls">
-        <el-select 
-          v-model="selectedAgentId"
-          class="agent-select"
-          @change="handleAgentChange"
-        >
-          <el-option
-            v-for="agent in (agents || [])"
-            :key="agent.id"
-            :label="agent.name"
-            :value="agent.id"
-          />
+        <el-select v-model="selectedAgentId" class="agent-select" @change="handleAgentChange">
+          <el-option v-for="agent in (agents || [])" :key="agent.id" :label="agent.name" :value="agent.id" />
         </el-select>
-        <el-button 
-          type="text"
-          @click="showSettings = !showSettings"
-          :title="t('chat.settings')"
-        >
+        <el-button type="text" @click="showSettings = !showSettings" :title="t('chat.settings')">
           <Settings :size="16" />
         </el-button>
-    
+
       </div>
     </div>
-    <div :class="['chat-container', { 'split-view': showToolDetails || showTaskStatus || showWorkspace || showSettings }]">
+    <div
+      :class="['chat-container', { 'split-view': showToolDetails || showTaskStatus || showWorkspace || showSettings }]">
       <div class="chat-messages">
         <div v-if="!messages || messages.length === 0" class="empty-state">
           <Bot :size="48" class="empty-icon" />
@@ -38,15 +26,9 @@
           <p>{{ t('chat.emptyDesc') }}</p>
         </div>
         <div v-else class="messages-list">
-          <MessageRenderer
-            v-for="(message, index) in (messages || [])"
-            :key="message.id || index"
-            :message="message"
-            :messages="messages || []"
-            :message-index="index"
-            @download-file="downloadFile"
-            @toolClick="handleToolClick"
-          />
+          <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
+            :messages="messages || []" :message-index="index" @download-file="downloadFile"
+            @toolClick="handleToolClick" />
           <div v-if="isLoading" class="loading-indicator">
             <div class="loading-dots">
               <span></span>
@@ -57,14 +39,11 @@
         </div>
         <div ref="messagesEndRef" />
       </div>
-      
+
       <div v-if="showToolDetails && selectedToolExecution" class="tool-details-panel">
         <div class="tool-details-header">
           <h3>{{ t('chat.toolDetails') }}</h3>
-          <el-button 
-            type="text"
-            @click="showToolDetails = false"
-          >
+          <el-button type="text" @click="showToolDetails = false">
             ×
           </el-button>
         </div>
@@ -83,38 +62,18 @@
           </div>
         </div>
       </div>
-      
-      <TaskStatusPanel
-        v-if="showTaskStatus"
-        :task-status="taskStatus"
-        :expanded-tasks="expandedTasks"
-        @toggle-task-expanded="toggleTaskExpanded"
-        @close="showTaskStatus = false"
-      />
-      
-      <WorkspacePanel
-        v-if="showWorkspace"
-        :workspace-files="workspaceFiles"
-        :workspace-path="workspacePath"
-        @download-file="downloadFile"
-        @close="showWorkspace = false"
-      />
-      
-      <ConfigPanel
-        v-if="showSettings"
-        :agents="agents"
-        :selected-agent="selectedAgent"
-        :config="config"
-        @config-change="updateConfig"
-        @close="showSettings = false"
-      />
+
+      <TaskStatusPanel v-if="showTaskStatus" :task-status="taskStatus" :expanded-tasks="expandedTasks"
+        @toggle-task-expanded="toggleTaskExpanded" @close="showTaskStatus = false" />
+
+      <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles" :workspace-path="workspacePath"
+        @download-file="downloadFile" @close="showWorkspace = false" />
+
+      <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
+        @config-change="updateConfig" @close="showSettings = false" />
     </div>
-    
-    <MessageInput
-      :is-loading="isLoading"
-      @send-message="handleSendMessage"
-      @stop-generation="handleStopGeneration"
-    />
+
+    <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="handleStopGeneration" />
   </div>
 </template>
 
@@ -163,29 +122,29 @@ const autoSaveTimer = ref(null)
 const AUTO_SAVE_INTERVAL = 30000 // 30秒自动保存
 
 // 使用 composables
-const { 
-  messages, 
-  isLoading, 
-  addUserMessage, 
-  updateLastMessage, 
+const {
+  messages,
+  isLoading,
+  addUserMessage,
+  updateLastMessage,
   clearMessages,
   handleMessage,
   handleChunkMessage
 } = useMessages()
 
-const { 
-  currentSessionId, 
-  selectedAgent, 
-  config, 
-  createSession, 
-  clearSession, 
+const {
+  currentSessionId,
+  selectedAgent,
+  config,
+  createSession,
+  clearSession,
   updateConfig: updateSessionConfig,
   selectAgent
 } = useSession(agents)
 
-const { 
-  sendMessage, 
-  stopGeneration 
+const {
+  sendMessage,
+  stopGeneration
 } = useChatAPI()
 
 const {
@@ -236,7 +195,7 @@ const loadConversationData = async (conversation) => {
   try {
     // 清除当前消息
     clearMessages()
-    
+
     // 根据conversation中的agent_id选择对应的agent
     if (conversation.agent_id && agents.value.length > 0) {
       const agent = agents.value.find(a => a.id === conversation.agent_id)
@@ -257,7 +216,7 @@ const loadConversationData = async (conversation) => {
     nextTick(() => {
       scrollToBottom()
     })
-    
+
 
   } catch (error) {
     console.error('Failed to load conversation data:', error)
@@ -271,16 +230,16 @@ const updateConfig = (newConfig) => {
 
 const handleSendMessage = async (content) => {
   if (!content.trim() || isLoading.value || !selectedAgent.value) return;
-  
+
   console.log('🚀 开始发送消息:', content.substring(0, 100) + (content.length > 100 ? '...' : ''));
-  
+
   // 如果没有会话ID，创建新的会话ID
   let sessionId = currentSessionId.value;
   if (!sessionId) {
     sessionId = await createSession(selectedAgent.value.id);
     console.log('🆕 创建新会话ID:', sessionId);
   }
-  
+
   // 添加用户消息
   addUserMessage(content);
 
@@ -363,7 +322,7 @@ const downloadFile = async (filename) => {
 // 生命周期
 onMounted(async () => {
   await loadAgents()
-  
+
   // 检查是否有传递的conversation数据
   if (props.selectedConversation) {
     await loadConversationData(props.selectedConversation)
@@ -520,13 +479,22 @@ watch(messages, () => {
   animation: loading-bounce 1.4s ease-in-out infinite both;
 }
 
-.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
-.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+.loading-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
 
 @keyframes loading-bounce {
-  0%, 80%, 100% {
+
+  0%,
+  80%,
+  100% {
     transform: scale(0);
   }
+
   40% {
     transform: scale(1);
   }
