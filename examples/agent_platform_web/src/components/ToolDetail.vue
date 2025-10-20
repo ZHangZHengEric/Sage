@@ -95,7 +95,7 @@
 <script setup>
 import { computed } from 'vue'
 import { ArrowLeft, Database, Code, Wrench, Globe, Cpu } from 'lucide-vue-next'
-import { useLanguage } from '../utils/language'
+import { useLanguage } from '../utils/i18n.js'
 
 // Props
 const props = defineProps({
