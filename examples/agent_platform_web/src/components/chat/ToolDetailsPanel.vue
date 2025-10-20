@@ -56,8 +56,8 @@ const formatToolResult = (result) => {
 <style scoped>
 .tool-details-panel {
   width: 400px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  background: #16213e;
+  border-left: 1px solid rgba(55, 53, 53, 0.1);
+  background: transparent;
   display: flex;
   flex-direction: column;
 }
@@ -67,7 +67,7 @@ const formatToolResult = (result) => {
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(55, 53, 53, 0.1);
 }
 
 .tool-details-header h3 {
@@ -90,12 +90,12 @@ const formatToolResult = (result) => {
   margin: 0 0 0.5rem 0;
   font-size: 0.875rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(0, 0, 0, 0.7);
 }
 
 .tool-code {
-  background: #0f1419;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(187, 181, 181, 0.1);
+  border: 1px solid rgba(97, 90, 90, 0.377);
   border-radius: 4px;
   padding: 0.75rem;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
