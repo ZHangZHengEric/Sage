@@ -1,14 +1,14 @@
 <template>
   <div class="history-page">
-    <div class="history-controls">
+    <div class="conversations-container">
       <div class="search-filter-row">
         <div class="search-box">
-          <Search :size="16" class="search-icon" />
           <el-input
             v-model="searchTerm"
             :placeholder="t('history.search')"
             class="search-input"
           />
+        <Search :size="16" class="search-icon" />
         </div>
         
         <div class="filter-controls">
@@ -31,10 +31,6 @@
 
         </div>
       </div>
-
-    </div>
-    
-    <div class="conversations-container">
       <div class="conversations-list">
         <!-- 加载状态 -->
         <div v-if="isLoading" class="loading-state">
@@ -46,7 +42,6 @@
           :class="['conversation-card', { selected: selectedConversations.has(conversation.id) }]"
         >
           <div class="conversation-header">
- 
             <div class="conversation-info" @click="$emit('select-conversation', conversation)">
               <div class="conversation-title-row">
                 <h3 class="conversation-title">{{ conversation.title }}</h3>
@@ -93,8 +88,7 @@
           </div>
         </div>
       </div>
-    </div>
-    
+          
     <!-- 分页组件 -->
     <div v-if="totalCount > 0" class="pagination-container">
       <el-pagination
@@ -108,18 +102,12 @@
         @size-change="handlePageSizeChange"
       />
     </div>
-    
-    <div v-if="paginatedConversations.length === 0 && totalCount > 0" class="empty-state">
-      <Filter :size="48" class="empty-icon" />
-      <h3>{{ t('history.noMatchingConversations') }}</h3>
-      <p>{{ t('history.noMatchingDesc') }}</p>
     </div>
-    
+
     <div v-if="totalCount === 0" class="empty-state">
       <MessageCircle :size="48" class="empty-icon" />
       <h3>{{ t('history.noConversations') }}</h3>
       <p>{{ t('history.noConversationsDesc') }}</p>
-
     </div>
     
     <!-- 分享模态框 -->
@@ -155,7 +143,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import { useLanguage } from '../utils/i18n.js'
@@ -165,6 +153,23 @@ import { chatAPI } from '../api/chat.js'
 
 // Get data from stores with null checks
 const agents = ref([])
+// Composables
+const { t, language } = useLanguage()
+
+// State
+const searchTerm = ref('')
+const filterAgent = ref('all')
+const sortBy = ref('date')
+const selectedConversations = ref(new Set())
+const showShareModal = ref(false)
+const shareConversation = ref(null)
+
+// 分页相关状态
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalCount = ref(0)
+const paginatedConversations = ref([])
+const isLoading = ref(false)
 
 // 加载agents
 const loadAgents = async () => {
@@ -172,7 +177,6 @@ const loadAgents = async () => {
     const agentList = await agentAPI.getAgents()
     agents.value = agentList || []
   } catch (error) {
-    console.error('加载agents失败:', error)
     agents.value = []
   }
 }
@@ -188,7 +192,6 @@ const loadConversationsPaginated = async () => {
       agent_id: filterAgent.value !== 'all' ? filterAgent.value : undefined,
       sort_by: sortBy.value
     }
-    
     const response = await chatAPI.getConversationsPaginated(params)
     paginatedConversations.value = response.list || []
     totalCount.value = response.total || 0
@@ -199,7 +202,6 @@ const loadConversationsPaginated = async () => {
         conversation.messages = response.messages || []
     }
   } catch (error) {
-    console.error('加载对话列表失败:', error)
     ElMessage.error('加载对话列表失败')
     paginatedConversations.value = []
     totalCount.value = 0
@@ -220,25 +222,6 @@ const handlePageSizeChange = (size) => {
   currentPage.value = 1
   loadConversationsPaginated()
 }
-
-// Composables
-const { t, language } = useLanguage()
-
-// State
-const searchTerm = ref('')
-const filterAgent = ref('all')
-const sortBy = ref('date')
-const selectedConversations = ref(new Set())
-const showShareModal = ref(false)
-const shareConversation = ref(null)
-
-// 分页相关状态
-const currentPage = ref(1)
-const pageSize = ref(10)
-const totalCount = ref(0)
-const paginatedConversations = ref([])
-const isLoading = ref(false)
-
 
 // Methods
 const formatDate = (timestamp) => {
@@ -369,55 +352,13 @@ onMounted(async () => {
 <style scoped>
 .history-page {
   padding: 1.5rem;
-  background: var(--bg-primary);
   min-height: 100vh;
+  background: transparent;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-}
-
-.page-title h2 {
-  margin: 0 0 0.5rem 0;
-  color: var(--text-primary);
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.page-title p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-.history-stats {
-  display: flex;
-  gap: 2rem;
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.stat-number {
-  display: block;
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--primary-color);
-}
-
-.stat-label {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.history-controls {
-  padding: 20px;
+.conversations-container {
+  background: transparent;
+  border-radius: 8px;
 }
 
 .search-filter-row {
@@ -435,10 +376,10 @@ onMounted(async () => {
 
 .search-icon {
   position: absolute;
-  left: 0.75rem;
+  left: 1rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-secondary);
+  color: rgba(0, 0, 0, 1);
   z-index: 1;
 }
 
@@ -462,21 +403,18 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  background: var(--warning-bg);
-  border: 1px solid var(--warning-color);
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid #ffc107;
   border-radius: 6px;
   margin-bottom: 1rem;
 }
 
 .selected-count {
-  color: var(--warning-color);
+  color: #ffc107;
   font-weight: 500;
 }
 
-.conversations-container {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-}
+
 
 .conversations-list {
   padding: 1rem;
@@ -492,21 +430,21 @@ onMounted(async () => {
 }
 
 .conversation-card {
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(159, 147, 147, 0.328);
   border-radius: 8px;
   margin-bottom: 1rem;
-  background: var(--bg-primary);
+  background: transparent;
   transition: all 0.2s ease;
 }
 
 .conversation-card:hover {
-  border-color: var(--primary-color);
+  border-color: #667eea;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .conversation-card.selected {
-  border-color: var(--primary-color);
-  background: var(--primary-bg);
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
 }
 
 .conversation-header {
@@ -537,7 +475,7 @@ onMounted(async () => {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1d1d1d;
   word-break: break-word;
 }
 
@@ -554,12 +492,12 @@ onMounted(async () => {
   align-items: center;
   gap: 0.25rem;
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: rgba(72, 65, 65, 0.7);
 }
 
 .conversation-preview {
   margin: 0 0 1rem 0;
-  color: var(--text-secondary);
+  color: rgba(100, 84, 84, 0.7);
   font-size: 0.875rem;
   line-height: 1.4;
   word-break: break-word;
@@ -581,7 +519,7 @@ onMounted(async () => {
   align-items: center;
   gap: 0.25rem;
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: rgba(82, 74, 74, 0.7);
 }
 
 .agent-info {
@@ -590,7 +528,7 @@ onMounted(async () => {
 
 .agent-name {
   font-size: 0.75rem;
-  color: var(--primary-color);
+  color: #667eea;
   font-weight: 500;
 }
 
@@ -608,7 +546,7 @@ onMounted(async () => {
   justify-content: center;
   text-align: center;
   padding: 3rem 2rem;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .empty-icon {
@@ -640,7 +578,7 @@ onMounted(async () => {
 .export-info {
   margin-top: 1rem;
   padding: 1rem;
-  background: var(--bg-tertiary);
+  background: transparent;
   border-radius: 6px;
   font-size: 0.875rem;
 }
@@ -649,92 +587,45 @@ onMounted(async () => {
   margin: 0.5rem 0;
 }
 
-@media (max-width: 768px) {
-  .history-page {
-    padding: 1rem;
-  }
-  
-  .page-header {
-    flex-direction: column;
-    gap: 1rem;
-    align-items: stretch;
-  }
-  
-  .history-stats {
-    justify-content: space-around;
-  }
-  
-  .search-filter-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .filter-controls {
-    justify-content: space-between;
-  }
-  
-  .conversation-title-row {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  
-  .conversation-meta {
-    justify-content: flex-start;
-  }
-  
-  .conversation-stats {
-    flex-direction: column;
-    gap: 0.5rem;
-    align-items: flex-start;
-  }
-  
-  .conversation-actions {
-    flex-direction: row;
-  }
-}
-
 /* 分页样式 */
 .pagination-container {
   display: flex;
   justify-content: center;
   margin: 2rem 0;
   padding: 1rem;
-  background: var(--bg-secondary);
   border-radius: 8px;
 }
 
 .pagination-container :deep(.el-pagination) {
   --el-pagination-bg-color: transparent;
-  --el-pagination-text-color: var(--text-primary);
   --el-pagination-border-radius: 6px;
 }
 
 .pagination-container :deep(.el-pagination .btn-prev),
 .pagination-container :deep(.el-pagination .btn-next) {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color:  #1a1a2e;
 }
 
 .pagination-container :deep(.el-pagination .btn-prev:hover),
 .pagination-container :deep(.el-pagination .btn-next:hover) {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .pagination-container :deep(.el-pagination .el-pager li) {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  background: #1a1a2e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
   margin: 0 2px;
 }
 
 .pagination-container :deep(.el-pagination .el-pager li:hover) {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .pagination-container :deep(.el-pagination .el-pager li.is-active) {
-  background: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
+  background: transparent;
+  color: #1a1a2e;
 }
 </style>
