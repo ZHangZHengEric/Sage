@@ -1,6 +1,5 @@
 <template>
-  <div class="message-input-container">
-    <form @submit="handleSubmit" class="message-form">
+  <form @submit="handleSubmit" class="message-form">
       <div class="input-wrapper">
         <textarea
           ref="textareaRef"
@@ -33,7 +32,6 @@
         </div>
       </div>
     </form>
-  </div>
 </template>
 
 <script setup>
@@ -92,14 +90,6 @@ const handleStop = () => {
 </script>
 
 <style scoped>
-.message-input-container {
-  padding: 16px;
-  background: white;
-  border-top: 1px solid #e1e5e9;
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-}
 
 .message-form {
   max-width: 800px;

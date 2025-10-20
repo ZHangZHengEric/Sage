@@ -231,7 +231,7 @@ defineExpose({
   margin: 0 0 16px 0;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .form-group {
@@ -246,7 +246,7 @@ defineExpose({
 .form-group label {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
   text-align: center;
 }
 
@@ -254,11 +254,11 @@ defineExpose({
 .form-select,
 .form-textarea {
   padding: 12px 16px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   font-size: 14px;
-  color: var(--text-primary);
-  background: var(--bg-primary);
+  color: #1f2937;
+  background: #ffffff;
   transition: all 0.2s ease;
   text-align: center;
 }
@@ -267,8 +267,8 @@ defineExpose({
 .form-select:focus,
 .form-textarea:focus {
   outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha);
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .form-textarea {
@@ -283,23 +283,23 @@ defineExpose({
   justify-content: center;
   margin: 32px auto 0;
   padding-top: 24px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid #e5e7eb;
 }
 
 .btn-secondary {
   padding: 12px 24px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: #ffffff;
+  color: #1f2937;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .btn-secondary:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+  border-color: #667eea;
+  color: #667eea;
 }
 
 .btn-primary {
@@ -309,7 +309,7 @@ defineExpose({
   padding: 12px 24px;
   border: none;
   border-radius: 8px;
-  background: var(--primary-color);
+  background: #667eea;
   color: white;
   font-size: 14px;
   font-weight: 600;
@@ -318,7 +318,7 @@ defineExpose({
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-color-hover);
+  background: #5a6fd8;
 }
 
 .btn-primary:disabled {
