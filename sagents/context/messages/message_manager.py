@@ -195,6 +195,8 @@ class MessageManager:
         messages_str_list = []
         
         for msg in messages:
+            if msg is None:
+                continue
             if msg.role == 'user':
                 messages_str_list.append(f"User: {msg.content}")
             elif msg.role == 'assistant':
