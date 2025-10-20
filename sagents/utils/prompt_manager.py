@@ -60,6 +60,7 @@ def _auto_import_prompt_modules():
                 if zh_prompts or en_prompts:
                     prompt_modules[f"{agent_identifier}_PROMPTS_ZH"] = zh_prompts
                     prompt_modules[f"{agent_identifier}_PROMPTS_EN"] = en_prompts
+                    logger.debug(f"成功导入prompt模块: {module_name} (agent: {agent_identifier}, zh: {len(zh_prompts)}, en: {len(en_prompts)})")
                 else:
                     # 兼容旧格式：查找模块中的PROMPTS变量
                     for attr_name in dir(module):
@@ -297,6 +298,7 @@ class PromptManager:
                     if class_name == 'PromptManager':
                         continue
                     # 直接返回类名，不进行格式转换
+                    logger.debug(f"自动获取到类名: {class_name}")
                     return class_name
                 
         except Exception as e:
