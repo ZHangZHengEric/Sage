@@ -19,9 +19,6 @@ import globals.variables as global_vars
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
 
 
-
-
-
 @mcp_router.post("/add")
 async def add_mcp_server(
     request: MCPServerRequest
@@ -235,4 +232,80 @@ async def toggle_mcp_server(
         },
         message=f"MCP服务器 '{server_name}' {status_text}成功"
     )
+
+
+@mcp_router.post("/{server_name}/refresh")
+async def refresh_mcp_server(
+    server_name: str
+):
+    """
+    刷新MCP服务器连接
+    
+    Args:
+        server_name: 服务器名称
+        
+    Returns:
+        StandardResponse: 包含操作结果的标准响应
+    """
+    logger.info(f"开始刷新MCP server: {server_name}")
+    
+    # 获取依赖
+    tm = global_vars.get_tool_manager()
+    db_manager = global_vars.get_database_manager()
+    
+    # 检查服务器是否存在
+    existing_server = await db_manager.get_mcp_server(server_name)
+    if not existing_server:
+        raise SageHTTPException(
+            status_code=404,
+            detail=f"MCP服务器 '{server_name}' 不存在",
+            error_detail=f"MCP服务器 '{server_name}' 不存在"
+        )
+    
+    # 获取服务器配置
+    server_config = existing_server.config
+    
+    # 如果服务器被禁用，不允许刷新
+    if server_config.get("disabled", False):
+        raise SageHTTPException(
+            status_code=400,
+            detail=f"MCP服务器 '{server_name}' 已被禁用，无法刷新",
+            error_detail="禁用的服务器无法刷新"
+        )
+    
+
+    # 重新注册MCP服务器
+    success = await tm.register_mcp_server(server_name, server_config)
+    
+    if success:
+        data = MCPServerData(
+            server_name=server_name,
+            status="refreshed"
+        )
+        
+        logger.info(f"MCP server {server_name} 刷新成功")
+        return await Response.succ(
+            data=data.model_dump(),
+            message=f"MCP服务器 '{server_name}' 刷新成功"
+        )
+    else:
+        # 刷新失败时，将服务器设置为禁用状态
+        logger.warning(f"MCP server {server_name} 刷新失败，将其设置为禁用状态")
+        
+        # 更新服务器配置为禁用状态
+        server_config["disabled"] = True
+        await db_manager.save_mcp_server(
+            name=server_name,
+            config=server_config
+        )
+        
+        data = MCPServerData(
+            server_name=server_name,
+            status="disabled_due_to_failure"
+        )
+        
+        return await Response.succ(
+            data=data.model_dump(),
+            message=f"MCP服务器 '{server_name}' 刷新失败，已自动禁用"
+        )
 
