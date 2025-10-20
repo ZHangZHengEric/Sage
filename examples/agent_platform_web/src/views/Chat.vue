@@ -17,7 +17,7 @@
           <h3>{{ t('chat.emptyTitle') }}</h3>
           <p>{{ t('chat.emptyDesc') }}</p>
         </div>
-        <div v-else class="messages-list">
+        <div v-else ref="messagesListRef" class="messages-list" @scroll="handleScroll">
           <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
             :messages="messages || []" :message-index="index" @download-file="downloadFile"
             @toolClick="handleToolClick" />
@@ -51,7 +51,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Bot, Settings } from 'lucide-vue-next'
 
@@ -79,12 +79,18 @@ const { t } = useLanguage()
 
 // 状态管理
 const messagesEndRef = ref(null)
+const messagesListRef = ref(null)
 const showSettings = ref(false)
 const showToolDetails = ref(false)
 const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
 const selectedToolExecution = ref(null)
 const toolResult = ref(null)
+
+// 滚动相关状态
+const isUserScrolling = ref(false)
+const shouldAutoScroll = ref(true)
+const scrollTimeout = ref(null)
 
 const agents = ref([])
 const expandedTasks = ref(new Set())
@@ -405,7 +411,7 @@ const clearMessages = () => {
 };
 
 // 停止生成
-const stopGeneration = async (currentSessionId) => {
+const stopGeneration = async () => {
   if (abortControllerRef.value) {
     console.log('Aborting request in stopGeneration');
     abortControllerRef.value.abort();
@@ -413,9 +419,9 @@ const stopGeneration = async (currentSessionId) => {
   }
 
   // 调用后端interrupt接口
-  if (currentSessionId) {
+  if (currentSessionId.value) {
     try {
-      await chatAPI.interruptSession(currentSessionId, '用户请求中断');
+      await chatAPI.interruptSession(currentSessionId.value, '用户请求中断');
       console.log('Session interrupted successfully');
     } catch (error) {
       console.error('Error interrupting session:', error);
@@ -427,13 +433,53 @@ const stopGeneration = async (currentSessionId) => {
 // 计算属性
 const selectedAgentId = computed(() => selectedAgent.value?.id)
 
-// 方法
-const scrollToBottom = () => {
+// 滚动相关方法
+const scrollToBottom = (force = false) => {
+  if (!shouldAutoScroll.value && !force) return
+  
   nextTick(() => {
-    if (messagesEndRef.value) {
-      messagesEndRef.value.scrollIntoView({ behavior: 'smooth' })
+    if (messagesListRef.value) {
+      messagesListRef.value.scrollTop = messagesListRef.value.scrollHeight
     }
   })
+}
+
+// 检查是否滚动到底部
+const isScrolledToBottom = () => {
+  if (!messagesListRef.value) return true
+  
+  const { scrollTop, scrollHeight, clientHeight } = messagesListRef.value
+  const threshold = 50 // 50px的容差
+  return scrollHeight - scrollTop - clientHeight <= threshold
+}
+
+// 处理用户滚动
+const handleScroll = () => {
+  if (!messagesListRef.value) return
+  
+  // 清除之前的超时
+  if (scrollTimeout.value) {
+    clearTimeout(scrollTimeout.value)
+  }
+  
+  // 标记用户正在滚动
+  isUserScrolling.value = true
+  
+  // 检查是否滚动到底部
+  const atBottom = isScrolledToBottom()
+  
+  if (atBottom) {
+    // 用户滚动到底部，恢复自动滚动
+    shouldAutoScroll.value = true
+  } else {
+    // 用户不在底部，禁用自动滚动
+    shouldAutoScroll.value = false
+  }
+  
+  // 设置超时，标记用户停止滚动
+  scrollTimeout.value = setTimeout(() => {
+    isUserScrolling.value = false
+  }, 150)
 }
 
 const loadAgents = async () => {
@@ -480,9 +526,10 @@ const loadConversationData = async (conversation) => {
       messages.value = conversation.messages
     }
     currentSessionId.value = conversation.session_id || null
-    // 滚动到底部
+    // 滚动到底部（强制滚动）
     nextTick(() => {
-      scrollToBottom()
+      shouldAutoScroll.value = true
+      scrollToBottom(true)
     })
 
 
@@ -517,6 +564,7 @@ const handleSendMessage = async (content) => {
       configKeys: Object.keys(config.value || {})
     });
     isLoading.value = true
+    shouldAutoScroll.value = true
     scrollToBottom()
     // 使用新的发送消息API
     await sendMessageApi({
@@ -524,7 +572,7 @@ const handleSendMessage = async (content) => {
       sessionId: sessionId,
       selectedAgent: selectedAgent.value,
       config: config.value,
-      abortControllerRef: null, // Vue版本可能不需要这个
+      abortControllerRef: abortControllerRef,
       onMessage: (data) => {
         handleMessage(data);
       },
@@ -703,6 +751,19 @@ onMounted(async () => {
       await createSession()
     }
   }
+  
+  // 初始化时滚动到底部
+  nextTick(() => {
+    shouldAutoScroll.value = true
+    scrollToBottom(true)
+  })
+})
+
+// 组件卸载时清理
+onUnmounted(() => {
+  if (scrollTimeout.value) {
+    clearTimeout(scrollTimeout.value)
+  }
 })
 
   // 监听agents变化，自动恢复选中的智能体
@@ -719,9 +780,12 @@ watch(() => props.selectedConversation, async (newConversation) => {
   }
 }, { immediate: false })
 
-// 监听消息变化，自动滚动到底部
+// 监听消息变化，智能滚动到底部
 watch(messages, () => {
-  scrollToBottom()
+  // 只有在应该自动滚动时才滚动
+  if (shouldAutoScroll.value) {
+    scrollToBottom()
+  }
 }, { deep: true })
 
 
