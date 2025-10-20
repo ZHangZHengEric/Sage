@@ -63,19 +63,22 @@ class ToolManager:
                 - For SSE server:
                     - sse_url: SSE server URL
         """
+        bool_registered = False
         logger.info(f"Registering MCP server: {server_name}")
         if config.get('disabled', False):
             logger.debug(f"Server {server_name} is disabled, skipping")
-            return False
+            return bool_registered
 
         if 'sse_url' in config:
             logger.debug(f"Registering SSE server {server_name} with URL: {config['sse_url']}")
             server_params = SseServerParameters(url=config['sse_url'])
-            success = await self._register_mcp_tools_sse(server_name, server_params)
+            bool_registered = await self._register_mcp_tools_sse(server_name, server_params)
         elif 'url' in config or 'streamable_http_url' in config:
-            logger.debug(f"Registering streamable HTTP server {server_name} with URL: {config['url']}")
-            server_params = StreamableHttpServerParameters(url=config['url'])
-            success = await self._register_mcp_tools_streamable_http(server_name, server_params)
+            # 处理streamable_http_url 或 url 配置
+            url = config.get('url', config.get('streamable_http_url'))
+            logger.debug(f"Registering streamable HTTP server {server_name} with URL: {url}")
+            server_params = StreamableHttpServerParameters(url=url)
+            bool_registered = await self._register_mcp_tools_streamable_http(server_name, server_params)
         else:
             logger.debug(f"Registering stdio server {server_name} with command: {config['command']}")
             server_params = StdioServerParameters(
@@ -83,9 +86,9 @@ class ToolManager:
                 args=config.get('args', []),
                 env=config.get('env', None)
             )
-            success = await self._register_mcp_tools_stdio(server_name, server_params)
+            bool_registered = await self._register_mcp_tools_stdio(server_name, server_params)
         logger.info(f"Successfully registered MCP server: {server_name}")
-        return success
+        return bool_registered
 
     def _auto_discover_tools(self, path: str = None):
         """Auto-discover and register all tools in the tools package
@@ -221,11 +224,13 @@ class ToolManager:
                 if 'sse_url' in config:
                     logger.debug(f"Setting up SSE server: {server_name} at URL: {config['sse_url']}")
                     server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
-                    success = await self._register_mcp_tools_sse(server_name, server_params)
+                    bool_registered = await self._register_mcp_tools_sse(server_name, server_params)
                 elif 'url' in config or 'streamable_http_url' in config:
-                    logger.debug(f"Setting up streamable HTTP server: {server_name} at URL: {config['url']}")
-                    server_params = StreamableHttpServerParameters(url=config.get('url',config.get('streamable_http_url')))
-                    success = await self._register_mcp_tools_streamable_http(server_name, server_params)
+                    # 处理streamable_http_url 或 url 配置
+                    url = config.get('url', config.get('streamable_http_url'))
+                    logger.debug(f"Registering streamable HTTP server {server_name} with URL: {url}")
+                    server_params = StreamableHttpServerParameters(url=url)
+                    bool_registered = await self._register_mcp_tools_streamable_http(server_name, server_params)
                 else:
                     logger.debug(f"Setting up stdio server: {server_name} with command: {config['command']}")
                     server_params = StdioServerParameters(
