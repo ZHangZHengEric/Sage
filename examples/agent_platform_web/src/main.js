@@ -2,7 +2,6 @@ import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import './styles/style.css'
 import App from './App.vue'
 
 // 导入路由和状态管理

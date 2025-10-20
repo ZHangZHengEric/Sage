@@ -1,6 +1,6 @@
 <template>
-  <div v-if="currentView === 'list'" class="page-header">
-
+ <div class="agent-config-page">
+    <div v-if="currentView === 'list'" class="page-header">
     <div class="page-actions">
       <el-button type="default" @click="handleImport">
         <Upload :size="16" />
@@ -87,6 +87,7 @@
   <!-- Agent创建模态框 -->
   <AgentCreationOption :isOpen="showCreationModal" :tools="tools" @create-blank="handleBlankConfig"
     @create-smart="handleSmartConfig" @close="showCreationModal = false" />
+ </div>
 </template>
 
 <script setup>
@@ -401,36 +402,18 @@ const handleSmartConfig = async (description) => {
 </script>
 
 <style scoped>
-.loading-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 200px;
-}
-
-.error-container {
-  margin: 20px 0;
+.agent-config-page {
+  padding: 1.5rem;
+  min-height: 100vh;
+  background: transparent;
 }
 
 .page-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  justify-content: flex-end;
   margin-bottom: 2rem;
 }
 
-.page-title h2 {
-  margin: 0 0 0.5rem 0;
-  color: var(--text-primary);
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.page-title p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
 
 .page-actions {
   display: flex;
@@ -443,12 +426,12 @@ const handleSmartConfig = async (description) => {
   gap: 1.5rem;
   border-radius: 12px;
   padding: 1.5rem;
-  background: var(--bg-secondary);
+  background: transparent;
 }
 
 .agent-card {
-  background: var(--bg-secondary);
-  border: 2px solid var(--border-color);
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   padding: 1.5rem;
   transition: all 0.2s ease;
@@ -456,7 +439,7 @@ const handleSmartConfig = async (description) => {
 }
 
 .agent-card:hover {
-  border-color: var(--primary-color);
+  border-color: #667eea;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   transform: translateY(-2px);
 }
@@ -471,7 +454,7 @@ const handleSmartConfig = async (description) => {
 .agent-avatar {
   width: 48px;
   height: 48px;
-  background: var(--primary-color);
+  background: #667eea;
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -489,13 +472,13 @@ const handleSmartConfig = async (description) => {
   margin: 0 0 0.5rem 0;
   font-size: 1.125rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
   word-break: break-word;
 }
 
 .agent-description {
   margin: 0;
-  color: var(--text-secondary);
+  color: #6b7280;
   font-size: 0.875rem;
   line-height: 1.4;
   word-break: break-word;
@@ -518,37 +501,15 @@ const handleSmartConfig = async (description) => {
 
 .config-label {
   font-size: 0.875rem;
-  color: var(--text-secondary);
+  color: #6b7280;
   font-weight: 500;
 }
 
 .config-value {
   font-size: 0.875rem;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
-.config-badge {
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
-.config-badge.auto {
-  background: var(--warning-bg);
-  color: var(--warning-color);
-}
-
-.config-badge.enabled {
-  background: var(--success-bg);
-  color: var(--success-color);
-}
-
-.config-badge.disabled {
-  background: var(--error-bg);
-  color: var(--error-color);
-}
 
 .agent-actions {
   display: flex;
@@ -570,31 +531,4 @@ const handleSmartConfig = async (description) => {
 
 }
 
-@media (max-width: 768px) {
-  .agent-config-page {
-    padding: 1rem;
-  }
-
-  .page-header {
-    flex-direction: column;
-    gap: 1rem;
-    align-items: stretch;
-  }
-
-  .page-actions {
-    justify-content: flex-end;
-  }
-
-  .agents-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .agent-actions {
-    flex-direction: column;
-  }
-
-  .agent-actions .el-button {
-    flex: none;
-  }
-}
 </style>

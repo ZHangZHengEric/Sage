@@ -216,7 +216,7 @@ const formatParameters = (parameters) => {
   margin: 0 0 8px 0;
   font-size: 24px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .detail-tool-type {
@@ -235,18 +235,18 @@ const formatParameters = (parameters) => {
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: #ffffff;
+  color: #1f2937;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .back-button:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+  border-color: #667eea;
+  color: #667eea;
 }
 
 .tool-detail-content {
@@ -266,12 +266,12 @@ const formatParameters = (parameters) => {
   margin: 0 0 16px 0;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .tool-section p {
   margin: 0;
-  color: var(--text-secondary);
+  color: #6b7280;
   line-height: 1.6;
 }
 
@@ -286,15 +286,15 @@ const formatParameters = (parameters) => {
   flex-direction: column;
   gap: 4px;
   padding: 16px;
-  background: var(--bg-secondary);
+  background: #ffffff;
   border-radius: 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
 }
 
 .info-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -302,44 +302,44 @@ const formatParameters = (parameters) => {
 .info-value {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .no-parameters {
-  color: var(--text-secondary);
+  color: #6b7280;
   font-style: italic;
   text-align: center;
   padding: 32px;
-  background: var(--bg-secondary);
+  background: #ffffff;
   border-radius: 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
 }
 
 .params-table-container {
   overflow-x: auto;
   border-radius: 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
 }
 
 .params-table {
   width: 100%;
   border-collapse: collapse;
-  background: var(--bg-primary);
+  background: #ffffff;
 }
 
 .params-table th {
-  background: var(--bg-secondary);
+  background: #ffffff;
   padding: 12px 16px;
   text-align: left;
   font-weight: 600;
   font-size: 14px;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-color);
+  color: #1f2937;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .params-table td {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid #e5e7eb;
   font-size: 14px;
   vertical-align: top;
 }
@@ -349,17 +349,17 @@ const formatParameters = (parameters) => {
 }
 
 .params-table tbody tr:hover {
-  background: var(--bg-hover);
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .params-table .param-name {
   font-family: monospace;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .params-table .param-type {
-  color: var(--text-secondary);
+  color: #6b7280;
   line-height: 1.5;
   max-width: 300px;
   word-wrap: break-word;
@@ -371,24 +371,24 @@ const formatParameters = (parameters) => {
 }
 
 .params-table .param-required .required-no {
-  color: var(--text-secondary);
+  color: #6b7280;
 }
 
 .params-table .param-description {
-  color: var(--text-secondary);
+  color: #6b7280;
   line-height: 1.5;
   max-width: 300px;
   word-wrap: break-word;
 }
 
 .config-display {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 16px;
   font-family: monospace;
   font-size: 12px;
-  color: var(--text-primary);
+  color: #1f2937;
   white-space: pre-wrap;
   overflow-x: auto;
   max-height: 400px;
