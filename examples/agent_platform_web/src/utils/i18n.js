@@ -22,7 +22,7 @@ export const zhCN = {
   'chat.selectAgent': '选择Agent',
   'chat.createAgent': '创建新Agent',
   'chat.emptyTitle': '开始新的对话',
-  'chat.emptyDesc': '选择一个AI助手，然后输入您的问题',
+  'chat.emptyDesc': '右上角选择一个AI助手，然后输入您的问题',
   'chat.taskManager': '任务管理器',
   'chat.workspace': '工作空间',
   'chat.toolDetails': '工具执行详情',

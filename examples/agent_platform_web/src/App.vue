@@ -1,9 +1,9 @@
 <template>
   <div class="app">
     <Sidebar @new-chat="handleNewChat" />
-    <el-main class="main-content">
+    <main class="main-content">
       <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
-    </el-main>
+    </main>
   </div>
 </template>
 
@@ -42,4 +42,5 @@ const handleSelectConversation = (conversation) => {
   flex: 1;
   overflow: hidden;
 }
+
 </style>
