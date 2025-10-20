@@ -369,7 +369,17 @@ class SimpleAgent(AgentBase):
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-            
+                
+                # yield 一个空的消息块以避免生成器卡住
+                output_messages = [MessageChunk(
+                    role='assistant',
+                    content="",
+                    message_id=content_response_message_id,
+                    show_content="",
+                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                )]
+                yield (output_messages, False)
+
             elif chunk.choices[0].delta.content:
                 if len(tool_calls) > 0:
                     logger.info(f"SimpleAgent: LLM响应包含 {len(tool_calls)} 个工具调用和内容，停止收集文本内容")
