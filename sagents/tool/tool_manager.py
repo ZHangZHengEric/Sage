@@ -199,11 +199,12 @@ class ToolManager:
         return True
 
     async def _discover_mcp_tools(self,mcp_setting_path: str = None):
+        bool_registered = False
         """Discover and register tools from MCP servers"""
         logger.info(f"Discovering MCP tools from settings file: {mcp_setting_path}")
         if os.path.exists(mcp_setting_path)==False:
             logger.warning(f"MCP setting file not found: {mcp_setting_path}")
-            return
+            return bool_registered
         try:
             with open(mcp_setting_path) as f:
                 mcp_config = json.load(f)
@@ -232,11 +233,11 @@ class ToolManager:
                         args=config.get('args', []),
                         env=config.get('env', None)
                     )
-                    success = await self._register_mcp_tools_stdio(server_name, server_params)
+                    bool_registered = await self._register_mcp_tools_stdio(server_name, server_params)
         except Exception as e:
             logger.error(f"Error loading MCP config: {str(e)}")
-            return False
-        return success
+            return bool_registered
+        return bool_registered
 
     async def _register_mcp_tools_stdio(self, server_name: str, server_params: StdioServerParameters):
         """Register tools from stdio MCP server"""
