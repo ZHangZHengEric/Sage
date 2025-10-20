@@ -15,7 +15,7 @@
           </el-form-item>
 
           <el-form-item :label="t('agent.systemPrefix')" prop="systemPrefix">
-            <el-input v-model="formData.systemPrefix" type="textarea" :rows="4"
+            <el-input v-model="formData.systemPrefix" type="textarea" :rows="25"
               :placeholder="t('agent.systemPrefixPlaceholder')" />
           </el-form-item>
 
@@ -54,6 +54,14 @@
             </el-col>
           </el-row>
 
+          
+        </div>
+
+        <!-- 中间分隔线 -->
+        <div class="divider-line"></div>
+
+        <!-- 右侧：系统上下文和工作流 -->
+        <div class="right-panel">
           <!-- LLM 配置 -->
           <el-divider content-position="left">{{ t('agent.llmConfig') }}</el-divider>
 
@@ -76,13 +84,6 @@
               <el-option v-for="tool in props.tools" :key="tool.name" :label="tool.name" :value="tool.name" />
             </el-select>
           </el-form-item>
-        </div>
-
-        <!-- 中间分隔线 -->
-        <div class="divider-line"></div>
-
-        <!-- 右侧：系统上下文和工作流 -->
-        <div class="right-panel">
           <!-- 系统上下文 -->
           <el-divider content-position="left">{{ t('agent.systemContext') }}</el-divider>
 
@@ -607,8 +608,8 @@ defineExpose({
 
 <style scoped>
 .agent-edit-container {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 24px;
   margin: 20px 0;
@@ -631,8 +632,8 @@ defineExpose({
 .divider-line {
   width: 2px;
   background: repeating-linear-gradient(to bottom,
-      var(--border-color) 0px,
-      var(--border-color) 8px,
+      #e5e7eb 0px,
+      #e5e7eb 8px,
       transparent 8px,
       transparent 16px);
   flex-shrink: 0;
@@ -647,14 +648,14 @@ defineExpose({
 .form-header {
   margin-bottom: 24px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .form-title {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .form-footer {
@@ -663,7 +664,7 @@ defineExpose({
   gap: 12px;
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid #e5e7eb;
 }
 
 /* 响应式设计 */
@@ -677,8 +678,8 @@ defineExpose({
     width: 100%;
     height: 2px;
     background: repeating-linear-gradient(to right,
-        var(--border-color) 0px,
-        var(--border-color) 8px,
+        #e5e7eb 0px,
+        #e5e7eb 8px,
         transparent 8px,
         transparent 16px);
     margin: 12px 0;
@@ -687,7 +688,7 @@ defineExpose({
 
 :deep(.el-form-item__label) {
   font-weight: 500;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 :deep(.el-input__wrapper) {
