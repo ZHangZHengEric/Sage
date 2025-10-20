@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import ChatPage from '../views/Chat.vue'
 import AgentConfigPage from '../views/AgentConfig.vue'
-import ToolsPage from '../views/Tools.vue'
+import ToolsPage from '../views/Tool.vue'
 import HistoryPage from '../views/ChatHistory.vue'
+import McpsPage from '../views/Mcp.vue'
 
 const routes = [
   {
@@ -27,6 +28,14 @@ const routes = [
     component: ToolsPage,
     meta: {
       title: 'tools.title'
+    }
+  },  
+  {
+    path: '/agent/mcps',
+    name: 'Mcps',
+    component: McpsPage,
+    meta: {
+      title: 'mcps.title'
     }
   },
   {
