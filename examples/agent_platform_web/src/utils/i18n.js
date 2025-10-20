@@ -1,4 +1,50 @@
 // 国际化工具
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+
+export const useLanguageStore = defineStore('app', () => {
+  // 状态
+  const language = ref('zhCN') // 默认中文
+  
+  // 计算属性
+  const isZhCN = computed(() => language.value === 'zhCN')
+  const isEnUS = computed(() => language.value === 'enUS')
+  
+  // 方法
+  const setLanguage = (lang) => {
+    language.value = lang
+    // 保存到本地存储
+    localStorage.setItem('language', lang)
+  }
+  
+  const toggleLanguage = () => {
+    const newLang = language.value === 'zhCN' ? 'enUS' : 'zhCN'
+    setLanguage(newLang)
+  }
+  
+  // 初始化
+  const initialize = () => {
+    // 从本地存储恢复语言设置
+    const savedLanguage = localStorage.getItem('language')
+    if (savedLanguage && ['zhCN', 'enUS'].includes(savedLanguage)) {
+      language.value = savedLanguage
+    }
+  }
+  
+  return {
+    // 状态
+    language,
+    
+    // 计算属性
+    isZhCN,
+    isEnUS,
+    
+    // 方法
+    setLanguage,
+    toggleLanguage,
+    initialize
+  }
+})
 
 // 中文翻译
 export const zhCN = {
@@ -743,3 +789,59 @@ export const enUS = {
   'error.title': 'Error',
   'error.unknown': 'Unknown Error',
 };
+
+export function useLanguage() {
+const langStore = useLanguageStore()
+  
+  // 当前翻译对象
+  const currentTranslation = computed(() => {
+    return translations[langStore.language] || translations.zhCN
+  })
+  
+  // 翻译函数
+  const t = (key, params = {}) => {
+    const translation = currentTranslation.value
+    let text = translation[key] || key
+    
+    // 处理参数替换
+    if (params && typeof params === 'object') {
+      Object.keys(params).forEach(param => {
+        const regex = new RegExp(`\\{${param}\\}`, 'g')
+        text = text.replace(regex, params[param])
+      })
+    }
+    
+    return text
+  }
+
+  // 切换语言
+  const toggleLanguage = () => {
+    langStore.toggleLanguage()
+  }
+
+  // 设置语言
+  const setLanguage = (lang) => {
+    if (translations[lang]) {
+      langStore.setLanguage(lang)
+    }
+  }
+
+  return {
+    language: computed(() => langStore.language),
+    currentLanguage: computed(() => langStore.language),
+    t,
+    toggleLanguage,
+    setLanguage,
+    isZh: computed(() => langStore.isZhCN),
+    isEn: computed(() => langStore.isEnUS),
+    isZhCN: computed(() => langStore.isZhCN),
+    isEnUS: computed(() => langStore.isEnUS)
+  }
+}
+
+// 翻译对象映射
+const translations = {
+  zhCN: zhCN,
+  enUS: enUS
+}
+
