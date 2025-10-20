@@ -44,6 +44,7 @@ class AgentBase(ABC):
         self.max_model_input_len = self.max_model_len - self.model_config.get('max_tokens', 4096)
         self.max_history_context_length = int(self.max_model_input_len // 2)
 
+        logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大上下文长度: {self.max_model_len}, 最大输入长度: {self.max_model_input_len}, 最大历史上下文长度: {self.max_history_context_length}")
     
     def to_tool(self) -> AgentToolSpec:
         """
