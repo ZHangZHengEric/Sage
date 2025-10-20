@@ -56,5 +56,14 @@ export const toolAPI = {
    */
   addMcpServer: async (payload) => {
     return await baseAPI.post('/api/mcp/add', payload)
+  },
+
+  /**
+   * 刷新 MCP 服务器连接
+   * @param {string} serverName - 服务器名称
+   * @returns {Promise<Object>}
+   */
+  refreshMcpServer: async (serverName) => {
+    return await baseAPI.post(`/api/mcp/${serverName}/refresh`)
   }
 }
