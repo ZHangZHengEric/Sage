@@ -27,3 +27,5 @@ python-pptx
 PyMuPDF
 tqdm
 unstructured
+
+python-daemon

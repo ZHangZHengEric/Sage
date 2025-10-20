@@ -521,7 +521,7 @@ onMounted(async () => {
 .conversations-list {
   padding: 1rem;
     overflow-y: auto;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - 200px);
 }
 
 .loading-state {
