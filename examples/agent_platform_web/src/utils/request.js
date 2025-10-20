@@ -1,6 +1,6 @@
 // Cookie 处理已改为 js-cookie 库
 
-const apiPrefix =  '';  // 默认空字符串，如果没有设置前缀
+const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';  // 默认空字符串，如果没有设置前缀
 
 // API基础配置
 const CONFIG = {

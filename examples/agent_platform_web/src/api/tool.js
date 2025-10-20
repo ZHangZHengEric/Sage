@@ -14,42 +14,7 @@ export const toolAPI = {
     return await baseAPI.get('/api/tools')
   },
 
-  /**
-   * 根据ID获取工具详情
-   * @param {string} toolId - 工具ID
-   * @returns {Promise<Object>}
-   */
-  getToolDetail: async (toolId) => {
-    return await baseAPI.get(`/api/tools/${toolId}`)
-  },
 
-  /**
-   * 获取工具分类
-   * @returns {Promise<Array>}
-   */
-  getToolCategories: async () => {
-    return await baseAPI.get('/api/tools/categories')
-  },
-
-  /**
-   * 搜索工具
-   * @param {Object} searchParams - 搜索参数
-   * @param {string} searchParams.keyword - 关键词
-   * @param {string} searchParams.category - 分类
-   * @returns {Promise<Array>}
-   */
-  searchTools: async (searchParams) => {
-    return await baseAPI.get('/api/tools/search', searchParams)
-  },
-
-  /**
-   * 获取推荐工具
-   * @param {Object} params - 参数
-   * @returns {Promise<Array>}
-   */
-  getRecommendedTools: async (params = {}) => {
-    return await baseAPI.get('/api/tools/recommended', params)
-  },
 
   /**
    * 获取 MCP 服务器列表
