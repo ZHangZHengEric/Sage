@@ -78,7 +78,7 @@
 import { ref } from 'vue'
 import { X, Bot, Sparkles, FileText, Loader } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
-import { useLanguage } from '../utils/language.js'
+import { useLanguage } from '../utils/i18n.js'
 
 // Props
 const props = defineProps({
