@@ -105,7 +105,7 @@
 
 <script setup>
 import { computed, h } from 'vue'
-import { useLanguage } from '../../utils/language.js'
+import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MessageTypeLabel from './MessageTypeLabel.vue'
 import ReactMarkdown from './ReactMarkdown.vue'

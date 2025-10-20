@@ -102,7 +102,7 @@
 
 <script setup>
 import { computed, onMounted } from 'vue'
-import { useLanguage } from '../../utils/language.js'
+import { useLanguage } from '../../utils/i18n.js'
 
 const props = defineProps({
   taskStatus: {
