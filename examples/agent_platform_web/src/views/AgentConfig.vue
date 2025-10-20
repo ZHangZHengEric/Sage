@@ -435,7 +435,7 @@ const handleSmartConfig = async (description) => {
   border-radius: 8px;
   padding: 1.5rem;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.222);
 }
 
 .agent-card:hover {
@@ -524,6 +524,28 @@ const handleSmartConfig = async (description) => {
 
 
 
+.config-badge {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.config-badge.auto {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.config-badge.enabled {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.config-badge.disabled {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
 .view-header {
   display: flex;
   justify-content: space-between;
