@@ -1,82 +1,14 @@
 <template>
-  <!-- 列表视图的过滤器和内容 -->
-  <div v-if="viewMode === 'list'" class="list-content">
-    <div class="filter-tabs-row">
-      <div class="filter-tabs">
-        <button :class="['filter-tab', { active: activeTab === 'tools' }]"
-          @click="activeTab = 'tools', viewMode = 'list'">
-          {{ t('tools.Tools') }}
-        </button>
-        <button :class="['filter-tab', { active: activeTab === 'mcp' }]" @click="activeTab = 'mcp', viewMode = 'list'">
-          {{ t('tools.mcpServers') }}
-        </button>
-      </div>
-      <div class="search-box">
-        <Search :size="16" class="search-icon" />
-        <input type="text" class="input search-input"
-          :placeholder="activeTab === 'mcp' ? t('tools.searchMcp') : t('tools.search')" v-model="searchTerm" />
-      </div>
-
-      <div v-if="activeTab === 'mcp'" class="mcp-actions">
+<div class="mcp-page">
+      <!-- 列表视图的过滤器和内容 -->
+  <div v-if="viewMode === 'list'"  class="list-content">
+    <div  class="mcp-actions">
         <button class="btn-primary" @click="showAddMcpForm">
           <Plus :size="16" />
           {{ t('tools.addMcpServer') }}
         </button>
-      </div>
     </div>
-    <!-- 工具列表 -->
-    <div v-if="activeTab === 'tools'" class="tools-section">
-      <div v-if="groupedTools.length > 0" class="tools-groups">
-        <div v-for="(group, groupIndex) in groupedTools" :key="group.source" class="tool-group">
-          <!-- 分组标题 -->
-          <div class="group-header">
-            <h3 class="group-title">{{ getToolSourceLabel(group.source) }}</h3>
-            <span class="group-count">{{ group.tools.length }} {{ t('tools.count') }}</span>
-          </div>
-
-          <!-- 工具网格 -->
-          <div class="tools-grid">
-            <div v-for="tool in group.tools" :key="tool.name" class="tool-card" @click="openToolDetail(tool)">
-              <div class="tool-header">
-                <div class="tool-icon"
-                  :style="{ background: `linear-gradient(135deg, ${getToolTypeColor(tool.type)} 0%, ${getToolTypeColor(tool.type)}80 100%)` }">
-                  <component :is="getToolIcon(tool.type)" :size="20" />
-                </div>
-                <div class="tool-info">
-                  <h3 class="tool-name">{{ tool.name }}</h3>
-                  <p class="tool-description">
-                    {{ tool.description || t('tools.noDescription') }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="tool-meta">
-                <div class="meta-item">
-                  <span class="meta-label">{{ t('tools.source') }}:</span>
-                  <span class="meta-value">{{ getToolSourceLabel(tool.source) }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">{{ t('tools.params') }}:</span>
-                  <span class="meta-value">
-                    {{ formatParameters(tool.parameters).length }} {{ t('tools.count') }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="filteredTools.length === 0" class="empty-state">
-        <Wrench :size="48" class="empty-icon" />
-        <h3>{{ t('tools.noTools') }}</h3>
-        <p>{{ t('tools.noToolsDesc') }}</p>
-      </div>
-    </div>
-
-    <!-- MCP服务器列表 -->
-    <div v-if="activeTab === 'mcp'" class="mcp-section">
-      <div class="mcp-grid">
+    <div class="mcp-grid">
         <div v-for="server in filteredMcpServers" :key="server.name" class="mcp-card">
           <!-- 卡片头部 -->
           <div class="mcp-header">
@@ -96,7 +28,6 @@
               </p>
             </div>
           </div>
-
           <!-- 协议信息 -->
           <div class="mcp-protocol-section">
             <div class="protocol-badge" :class="server.protocol">
@@ -119,24 +50,24 @@
             </div>
           </div>
         </div>
-      </div>
     </div>
+    <div v-if="filteredMcpServers.length === 0" class="empty-state">
+        <Wrench :size="48" class="empty-icon" />
+        <h3>{{ t('tools.noMcpServers') }}</h3>
+        <p>{{ t('tools.noMcpServersDesc') }}</p>
+      </div>
   </div>
-
-  <!-- 工具详情视图 -->
-  <ToolDetail v-if="viewMode === 'detail' && selectedTool" :tool="selectedTool" @back="backToList" />
-
   <!-- MCP服务器添加视图 -->
   <McpServerAdd v-if="viewMode === 'add-mcp'" :loading="loading" @submit="handleMcpSubmit" @cancel="backToList"
     ref="mcpServerAddRef" />
+</div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus } from 'lucide-vue-next'
+import { Wrench,Code, Database,  Cpu, Plus } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
-import ToolDetail from '../components/ToolDetail.vue'
 import McpServerAdd from '../components/McpServerAdd.vue'
 
 // Composables
@@ -151,7 +82,6 @@ const mcpServers = ref([])
 const selectedTool = ref(null)
 const searchTerm = ref('')
 const filterType = ref('all')
-const activeTab = ref('tools')
 const viewMode = ref('list') // 'list', 'detail', 'add-mcp'
 const loading = ref(false)
 
@@ -262,49 +192,6 @@ const handleMcpSubmit = async (payload) => {
   }
 }
 
-const getToolTypeLabel = (type) => {
-  const typeKey = `tools.type.${type}`
-  return t(typeKey) !== typeKey ? t(typeKey) : type
-}
-
-const getToolSourceLabel = (source) => {
-  // 直接映射中文source到翻译key
-  const sourceMapping = {
-    '基础工具': 'tools.source.basic',
-    '内置工具': 'tools.source.builtin',
-    '系统工具': 'tools.source.system'
-  }
-
-  const translationKey = sourceMapping[source]
-  return translationKey ? t(translationKey) : source
-}
-
-const getToolIcon = (type) => {
-  switch (type) {
-    case 'basic':
-      return Code
-    case 'mcp':
-      return Database
-    case 'agent':
-      return Cpu
-    default:
-      return Wrench
-  }
-}
-
-const getToolTypeColor = (type) => {
-  switch (type) {
-    case 'basic':
-      return '#4facfe'
-    case 'mcp':
-      return '#667eea'
-    case 'agent':
-      return '#ff6b6b'
-    default:
-      return '#4ade80'
-  }
-}
-
 // 新增方法：获取简化的服务器描述
 const getSimpleDescription = (server) => {
   if (!server) return t('tools.noDescription')
@@ -345,25 +232,6 @@ const getProtocolIcon = (protocol) => {
   }
 }
 
-const formatParameters = (parameters) => {
-  if (!parameters || typeof parameters !== 'object') {
-    return []
-  }
-
-  return Object.entries(parameters).map(([key, value]) => {
-    return {
-      name: key,
-      type: value.type || 'unknown',
-      description: value.description || t('tools.noDescription'),
-      required: value.required || false
-    }
-  })
-}
-
-const openToolDetail = (tool) => {
-  selectedTool.value = tool
-  viewMode.value = 'detail'
-}
 
 const backToList = () => {
   viewMode.value = 'list'
@@ -378,93 +246,22 @@ onMounted(() => {
 </script>
 
 <style scoped>
+
+.mcp-page {
+  padding: 1.5rem;
+  min-height: 100vh;
+  background: transparent;
+}
 .list-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   max-height: calc(100vh - 120px);
+  background: white;
 }
 
-.tools-filters {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border-color);
-}
 
-.filter-tabs-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border-color);
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.filter-tabs {
-  display: flex;
-  gap: 8px;
-}
-
-.filter-tab {
-  padding: 8px 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.filter-tab:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-}
-
-.filter-tab.active {
-  background: var(--primary-color);
-  border-color: var(--primary-color);
-  color: white;
-}
-
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-  max-width: 400px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 12px;
-  color: var(--text-secondary);
-  z-index: 1;
-}
-
-.search-input {
-  width: 100%;
-  padding: 10px 12px 10px 40px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  transition: all 0.2s ease;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha);
-}
 
 .mcp-actions {
   display: flex;
@@ -478,7 +275,7 @@ onMounted(() => {
   padding: 10px 16px;
   border: none;
   border-radius: 8px;
-  background: var(--primary-color);
+  background: #667eea;
   color: white;
   font-size: 14px;
   font-weight: 600;
@@ -487,139 +284,10 @@ onMounted(() => {
 }
 
 .btn-primary:hover {
-  background: var(--primary-color-hover);
+  background: #5a6fd8;
 }
 
-.tools-section {
-  flex: 1;
-  overflow-y: auto;
-}
 
-.tools-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
-.tool-group {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 2px solid var(--border-color);
-}
-
-.group-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.group-count {
-  font-size: 14px;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  padding: 4px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
-}
-
-.tools-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 20px;
-}
-
-.tool-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 20px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.tool-card:hover {
-  border-color: var(--primary-color);
-  box-shadow: 0 4px 12px var(--shadow-color);
-  transform: translateY(-2px);
-}
-
-.tool-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.tool-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-
-.tool-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.tool-name {
-  margin: 0 0 8px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-  word-break: break-word;
-}
-
-.tool-description {
-  margin: 0;
-  font-size: 14px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.tool-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.meta-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-}
-
-.meta-label {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.meta-value {
-  color: var(--text-primary);
-  font-weight: 600;
-}
 
 .empty-state {
   display: flex;
@@ -628,7 +296,7 @@ onMounted(() => {
   justify-content: center;
   padding: 64px 32px;
   text-align: center;
-  color: var(--text-secondary);
+  color: rgba(0, 0, 0, 0.7);
 }
 
 .empty-icon {
@@ -648,11 +316,7 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-/* MCP 服务器样式 */
-.mcp-section {
-  flex: 1;
-  overflow-y: auto;
-}
+
 
 .mcp-grid {
   display: grid;
@@ -661,8 +325,8 @@ onMounted(() => {
 }
 
 .mcp-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 12px;
   padding: 20px;
   transition: all 0.2s ease;
@@ -672,8 +336,8 @@ onMounted(() => {
 }
 
 .mcp-card:hover {
-  border-color: var(--primary-color);
-  box-shadow: 0 4px 12px var(--shadow-color);
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
 }
 
@@ -727,7 +391,7 @@ onMounted(() => {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #333333;
   word-break: break-word;
 }
 
@@ -752,13 +416,13 @@ onMounted(() => {
 .status-text {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: rgba(0, 0, 0, 0.7);
 }
 
 .mcp-description {
   margin: 0;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: rgba(0, 0, 0, 0.7);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -771,7 +435,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .protocol-badge {
@@ -827,14 +491,38 @@ onMounted(() => {
 
 .connection-label {
   font-weight: 600;
-  color: var(--text-secondary);
+  color: rgba(0, 0, 0, 0.7);
   min-width: 40px;
 }
 
 .connection-url {
-  color: var(--text-primary);
+  color: #333333;
   font-family: monospace;
   word-break: break-all;
   flex: 1;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 32px;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.empty-state h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.7);
 }
 </style>
