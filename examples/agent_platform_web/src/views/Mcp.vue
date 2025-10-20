@@ -18,9 +18,19 @@
             <div class="mcp-info">
               <div class="mcp-title-row">
                 <h3 class="mcp-name">{{ server.name }}</h3>
-                <div class="mcp-status-indicator" :class="{ disabled: server.disabled }">
-                  <div class="status-dot"></div>
-                  <span class="status-text">{{ server.disabled ? t('tools.disabled') : t('tools.enabled') }}</span>
+                <div class="mcp-actions">
+                  <button 
+                    class="action-btn refresh-btn" 
+                    @click="handleRefreshMcp(server.name)"
+                    :disabled="loading"
+                    :title="t('tools.refresh')"
+                  >
+                    <RefreshCw :size="16" :class="{ 'spinning': refreshingServers.has(server.name) }" />
+                  </button>
+                  <div class="mcp-status-indicator" :class="{ disabled: server.disabled }">
+                    <div class="status-dot"></div>
+                    <span class="status-text">{{ server.disabled ? t('tools.disabled') : t('tools.enabled') }}</span>
+                  </div>
                 </div>
               </div>
               <p class="mcp-description">
@@ -36,11 +46,11 @@
             </div>
             <div class="protocol-details">
               <div v-if="server.streamable_http_url" class="connection-info">
-                <span class="connection-label">HTTP:</span>
+                <span class="connection-label">URL:</span>
                 <span class="connection-url">{{ server.streamable_http_url }}</span>
               </div>
               <div v-if="server.sse_url" class="connection-info">
-                <span class="connection-label">SSE:</span>
+                <span class="connection-label">URL:</span>
                 <span class="connection-url">{{ server.sse_url }}</span>
               </div>
               <div v-if="server.command" class="connection-info">
@@ -65,7 +75,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench,Code, Database,  Cpu, Plus } from 'lucide-vue-next'
+import { Wrench,Code, Database,  Cpu, Plus, RefreshCw } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
@@ -84,27 +94,7 @@ const searchTerm = ref('')
 const filterType = ref('all')
 const viewMode = ref('list') // 'list', 'detail', 'add-mcp'
 const loading = ref(false)
-
-// Computed
-const filteredTools = computed(() => {
-  let filtered = allTools.value
-
-  // 搜索过滤
-  if (searchTerm.value.trim()) {
-    const query = searchTerm.value.toLowerCase()
-    filtered = filtered.filter(tool =>
-      tool.name.toLowerCase().includes(query) ||
-      tool.description.toLowerCase().includes(query)
-    )
-  }
-
-  // 类型过滤
-  if (filterType.value !== 'all') {
-    filtered = filtered.filter(tool => tool.type === filterType.value)
-  }
-
-  return filtered
-})
+const refreshingServers = ref(new Set())
 
 const filteredMcpServers = computed(() => {
   if (!searchTerm.value.trim()) {
@@ -119,26 +109,6 @@ const filteredMcpServers = computed(() => {
   )
 })
 
-// 按来源分组的工具
-const groupedTools = computed(() => {
-  const groups = {}
-
-  filteredTools.value.forEach(tool => {
-    const source = tool.source || '未知来源'
-    if (!groups[source]) {
-      groups[source] = []
-    }
-    groups[source].push(tool)
-  })
-
-  // 按来源名称排序
-  const sortedGroups = Object.keys(groups).sort().map(source => ({
-    source,
-    tools: groups[source]
-  }))
-
-  return sortedGroups
-})
 
 // API Methods
 const loadBasicTools = async () => {
@@ -192,16 +162,39 @@ const handleMcpSubmit = async (payload) => {
   }
 }
 
+const handleRefreshMcp = async (serverName) => {
+  if (refreshingServers.value.has(serverName)) {
+    return // 防止重复刷新
+  }
+  
+  refreshingServers.value.add(serverName)
+  
+  try {
+    const response = await toolAPI.refreshMcpServer(serverName)
+    console.log(`MCP server ${serverName} refresh response:`, response)
+    
+    // 重新加载服务器列表以获取最新状态（包括可能被禁用的状态）
+    await loadMcpServers()
+    
+    // 根据响应状态显示不同的消息
+    if (response.data?.status === 'disabled_due_to_failure') {
+      console.warn(`MCP server ${serverName} was disabled due to refresh failure`)
+    } else {
+      console.log(`MCP server ${serverName} refreshed successfully`)
+    }
+  } catch (error) {
+    console.error(`Failed to refresh MCP server ${serverName}:`, error)
+    // 即使出错也重新加载列表，以防服务器状态已经改变
+    await loadMcpServers()
+  } finally {
+    refreshingServers.value.delete(serverName)
+  }
+}
+
 // 新增方法：获取简化的服务器描述
 const getSimpleDescription = (server) => {
   if (!server) return t('tools.noDescription')
-
-  if (server.description) {
-    return server.description
-  }
-
-  const protocol = server.protocol?.toUpperCase() || 'UNKNOWN'
-  return `${protocol} 协议的 MCP 服务器，提供工具和资源访问能力`
+  return server.description
 }
 
 // 新增方法：获取协议图标类名
@@ -319,6 +312,7 @@ onMounted(() => {
 
 
 .mcp-grid {
+  padding: 24px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: 20px;
@@ -385,6 +379,50 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 8px;
   gap: 12px;
+}
+
+.mcp-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.2);
+  transform: scale(1.05);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.refresh-btn .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .mcp-name {
