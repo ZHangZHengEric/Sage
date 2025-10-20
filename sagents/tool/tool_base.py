@@ -13,6 +13,7 @@ class ToolBase:
     _tools: Dict[str, ToolSpec] = {}  # Class-level registry
     
     def __init__(self):
+        logger.debug(f"Initializing {self.__class__.__name__}")
         self.tools = {}  # Instance-specific registry
         # Auto-register decorated methods
         for name, method in inspect.getmembers(self, inspect.ismethod):
@@ -21,6 +22,7 @@ class ToolBase:
                 self.tools[name] = spec
                 if name not in self.__class__._tools:
                     self.__class__._tools[name] = spec
+                logger.debug(f"Registered tool: {name} to {self.__class__.__name__}")
     
     @classmethod
     def tool(cls,disabled:bool=False):
@@ -29,6 +31,7 @@ class ToolBase:
             if disabled:
                 logger.info(f"Tool {func.__name__} is disabled, not registering")
                 return func
+            logger.info(f"Applying tool decorator to {func.__name__} in {cls.__name__}")
             # Parse full docstring using docstring_parser
             docstring_text = inspect.getdoc(func) or ""
             parsed_docstring = parse(docstring_text,style=DocstringStyle.GOOGLE)
@@ -110,6 +113,7 @@ class ToolBase:
                     cls._tools = {}
                 cls._tools[tool_name] = spec
             
+            logger.debug(f"Registered tool to toolbase: {tool_name}")
             return wrapper
         return decorator
 

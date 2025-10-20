@@ -3,13 +3,18 @@ import logging
 import inspect
 import sys
 import traceback
-from datetime import datetime
-from logging.handlers import RotatingFileHandler
+import glob
+import time
+import threading
+from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from typing import Dict, Optional
 
 class Logger:
     _instance = None
     _initialized = False
+    _cleanup_timer = None
+    _cleanup_interval = 24 * 60 * 60  # 24小时（秒）
     
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -32,27 +37,167 @@ class Logger:
         if self.logger.handlers:
             self.logger.handlers.clear()
             
-        # Console handler
+        # Console handler - 只显示INFO及以上级别
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG)
+        console_handler.setLevel(logging.INFO)
         console_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(session_id)s] - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
         console_handler.setFormatter(console_format)
         
-        # Global file handler (rotating) - 保留全局日志
-        log_file = os.path.join(log_dir, f'sage_{datetime.now().strftime("%Y%m%d")}.log')
-        file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
-        file_handler.setLevel(logging.DEBUG)
+        # 文件日志格式
         file_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(session_id)s] - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
-        file_handler.setFormatter(file_format)
         
-        # Add handlers
+        # 创建四个不同级别的文件日志处理器，按天分割
+        log_levels = [
+            ('debug', logging.DEBUG),
+            ('info', logging.INFO), 
+            ('warning', logging.WARNING),
+            ('error', logging.ERROR)
+        ]
+        
+        for level_name, level_value in log_levels:
+            # 使用TimedRotatingFileHandler按天分割日志，文件名包含当前日期
+            current_date = datetime.now().strftime("%Y%m%d")
+            log_file = os.path.join(log_dir, f'sage_{level_name}_{current_date}.log')
+            file_handler = TimedRotatingFileHandler(
+                log_file, 
+                when='midnight',  # 每天午夜分割
+                interval=1,       # 每1天
+                backupCount=30,   # 保留30天的日志
+                encoding='utf-8'
+            )
+            file_handler.setLevel(level_value)
+            file_handler.setFormatter(file_format)
+            
+            # 设置日志文件名后缀格式（用于轮转时的旧文件）
+            file_handler.suffix = "%Y%m%d"
+            
+            self.logger.addHandler(file_handler)
+        
+        # Add console handler
         self.logger.addHandler(console_handler)
-        self.logger.addHandler(file_handler)
         
         # Session-specific loggers cache
         self.session_loggers: Dict[str, logging.Logger] = {}
         
+        # 清理一个月前的日志文件
+        self._cleanup_old_logs()
+        
+        # 启动定期清理
+        self._start_periodic_cleanup()
+        
         Logger._initialized = True
+    
+    def _cleanup_old_logs(self):
+        """清理一个月前的日志文件"""
+        cleanup_start_time = datetime.now()
+        deleted_count = 0
+        total_size_deleted = 0
+        
+        try:
+            # 计算一个月前的日期
+            one_month_ago = datetime.now() - timedelta(days=30)
+            
+            # 查找所有日志文件（包括新格式和旧格式）
+            log_patterns = [
+                # 新格式：sage_level_YYYYMMDD.log
+                os.path.join(self.log_dir, 'sage_debug_*.log'),
+                os.path.join(self.log_dir, 'sage_info_*.log'),
+                os.path.join(self.log_dir, 'sage_warning_*.log'),
+                os.path.join(self.log_dir, 'sage_error_*.log'),
+                # 旧格式：sage_level.log.* 和 sage_YYYYMMDD.log
+                os.path.join(self.log_dir, 'sage_debug.log.*'),
+                os.path.join(self.log_dir, 'sage_info.log.*'),
+                os.path.join(self.log_dir, 'sage_warning.log.*'),
+                os.path.join(self.log_dir, 'sage_error.log.*'),
+                os.path.join(self.log_dir, 'sage_*.log.*'),  # 兼容旧格式
+                os.path.join(self.log_dir, 'sage_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log')  # 旧格式日期文件
+            ]
+            
+            # 收集所有匹配的文件，避免重复
+            all_log_files = set()
+            for pattern in log_patterns:
+                all_log_files.update(glob.glob(pattern))
+            
+            for log_file in all_log_files:
+                try:
+                    # 获取文件信息
+                    file_stat = os.stat(log_file)
+                    file_mtime = datetime.fromtimestamp(file_stat.st_mtime)
+                    file_size = file_stat.st_size
+                    
+                    # 如果文件超过一个月，删除它
+                    if file_mtime < one_month_ago:
+                        os.remove(log_file)
+                        deleted_count += 1
+                        total_size_deleted += file_size
+                        
+                        # 使用logger记录删除操作（避免循环调用）
+                        print(f"[LOG CLEANUP] Deleted old log file: {log_file} (size: {file_size} bytes, modified: {file_mtime.strftime('%Y-%m-%d %H:%M:%S')})")
+                        
+                except Exception as e:
+                    # 删除单个文件失败不影响整体功能
+                    print(f"[LOG CLEANUP] Failed to delete log file {log_file}: {e}")
+            
+            # 记录清理统计信息
+            cleanup_duration = (datetime.now() - cleanup_start_time).total_seconds()
+            if deleted_count > 0:
+                print(f"[LOG CLEANUP] Cleanup completed: {deleted_count} files deleted, {total_size_deleted} bytes freed, took {cleanup_duration:.2f}s")
+            else:
+                print(f"[LOG CLEANUP] Cleanup completed: No old files found to delete, took {cleanup_duration:.2f}s")
+                        
+        except Exception as e:
+            # 清理失败不影响logger的主要功能
+            print(f"[LOG CLEANUP] Failed to cleanup old logs: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _start_periodic_cleanup(self):
+        """启动定期清理任务"""
+        try:
+            # 如果已经有定时器在运行，先停止它
+            if self._cleanup_timer is not None:
+                self._cleanup_timer.cancel()
+            
+            # 创建新的定时器，24小时后执行清理
+            self._cleanup_timer = threading.Timer(self._cleanup_interval, self._periodic_cleanup_task)
+            self._cleanup_timer.daemon = True  # 设置为守护线程，主程序退出时自动结束
+            self._cleanup_timer.start()
+            
+            next_cleanup_time = datetime.now() + timedelta(seconds=self._cleanup_interval)
+            print(f"[LOG CLEANUP] Periodic cleanup scheduled, next run at: {next_cleanup_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+        except Exception as e:
+            print(f"[LOG CLEANUP] Failed to start periodic cleanup: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _periodic_cleanup_task(self):
+        """定期清理任务"""
+        try:
+            print(f"[LOG CLEANUP] Starting periodic cleanup task at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 执行清理
+            self._cleanup_old_logs()
+            
+            # 重新启动下一次定期清理
+            self._start_periodic_cleanup()
+            
+        except Exception as e:
+            print(f"[LOG CLEANUP] Periodic cleanup task failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # 即使失败也要重新启动定期清理
+            try:
+                self._start_periodic_cleanup()
+            except Exception as restart_error:
+                print(f"[LOG CLEANUP] Failed to restart periodic cleanup: {restart_error}")
+    
+    def stop_periodic_cleanup(self):
+        """停止定期清理（用于测试或手动控制）"""
+        if self._cleanup_timer is not None:
+            self._cleanup_timer.cancel()
+            self._cleanup_timer = None
     
     def _get_current_session_id(self) -> Optional[str]:
         """尝试获取当前session id"""
