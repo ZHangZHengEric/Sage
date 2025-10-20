@@ -19,6 +19,43 @@ export const exportToHTML = (conversation, visibleMessages) => {
   downloadHTML(htmlContent, conversation.title)
 }
 
+export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
+  
+  let markdown = `# ${conversation.title}\n\n`
+  markdown += `**导出时间**: ${new Date().toLocaleString()}\n`
+  markdown += `**Agent**: ${agentName}\n`
+  markdown += `**消息数量**: ${visibleMessages.length}\n\n`
+  markdown += '---\n\n'
+  
+  visibleMessages.forEach((message, index) => {
+    if (message.role === 'user') {
+      markdown += `## 用户 ${index + 1}\n\n${message.content}\n\n`
+    } else if (message.role === 'assistant') {
+      if (message.show_content) {
+        markdown += `## 助手 ${index + 1}\n\n${message.show_content}\n\n`
+      } else if (message.tool_calls) {
+        markdown += `## 助手 ${index + 1} (工具调用)\n\n`
+        message.tool_calls.forEach(tool => {
+          markdown += `**工具**: ${tool.function.name}\n`
+          markdown += `**参数**: \`\`\`json\n${JSON.stringify(tool.function.arguments, null, 2)}\n\`\`\`\n\n`
+        })
+      }
+    }
+  })
+  
+  // 下载文件
+  const blob = new Blob([markdown], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${conversation.title}_${new Date().toISOString().split('T')[0]}.md`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+
+}
+
 /**
  * 生成HTML内容
  * @param {Object} conversation - 对话记录对象

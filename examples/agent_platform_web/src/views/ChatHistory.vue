@@ -1,6 +1,5 @@
 <template>
   <div class="history-page">
-
     <div class="history-controls">
       <div class="search-filter-row">
         <div class="search-box">
@@ -135,7 +134,7 @@
           <el-button
             type="primary"
             class="export-btn"
-            @click="exportToMarkdown"
+            @click="handleExportToMarkdown"
           >
             {{ t('history.exportMarkdown') }}
           </el-button>
@@ -157,12 +156,12 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { MessageCircle, Search, Trash2, Calendar, User, Bot, Clock, Filter, Share } from 'lucide-vue-next'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { useLanguage } from '../utils/language.js'
-import { exportToHTML } from '../utils/htmlExporter.js'
-import { agentAPI, chatAPI } from '../api/index.js'
-
+import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share } from 'lucide-vue-next'
+import { ElMessage } from 'element-plus'
+import { useLanguage } from '../utils/i18n.js'
+import { exportToHTML, exportToMarkdown } from '../utils/exporter.js'
+import { agentAPI } from '../api/agent.js'
+import { chatAPI } from '../api/chat.js'
 
 // Get data from stores with null checks
 const agents = ref([])
@@ -240,14 +239,6 @@ const totalCount = ref(0)
 const paginatedConversations = ref([])
 const isLoading = ref(false)
 
-// Computed
-const conversationsCount = computed(() => {
-  return totalCount.value || 0
-})
-
-const totalMessages = computed(() => {
-  return paginatedConversations.value.reduce((sum, conv) => sum + (conv.message_count || 0), 0)
-})
 
 // Methods
 const formatDate = (timestamp) => {
@@ -339,44 +330,13 @@ const getVisibleMessageCount = () => {
   ).length
 }
 
-const exportToMarkdown = () => {
-  if (!shareConversation.value) return
-  
+const handleExportToMarkdown = () => {
+  if (!shareConversation.value) {
+    console.log('❌ shareConversation 为空，退出函数')
+    return
+  }
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
-  
-  let markdown = `# ${shareConversation.value.title}\n\n`
-  markdown += `**导出时间**: ${new Date().toLocaleString()}\n`
-  markdown += `**Agent**: ${getAgentName(shareConversation.value.agentId)}\n`
-  markdown += `**消息数量**: ${visibleMessages.length}\n\n`
-  markdown += '---\n\n'
-  
-  visibleMessages.forEach((message, index) => {
-    if (message.role === 'user') {
-      markdown += `## 用户 ${index + 1}\n\n${message.content}\n\n`
-    } else if (message.role === 'assistant') {
-      if (message.show_content) {
-        markdown += `## 助手 ${index + 1}\n\n${message.show_content}\n\n`
-      } else if (message.tool_calls) {
-        markdown += `## 助手 ${index + 1} (工具调用)\n\n`
-        message.tool_calls.forEach(tool => {
-          markdown += `**工具**: ${tool.function.name}\n`
-          markdown += `**参数**: \`\`\`json\n${JSON.stringify(tool.function.arguments, null, 2)}\n\`\`\`\n\n`
-        })
-      }
-    }
-  })
-  
-  // 下载文件
-  const blob = new Blob([markdown], { type: 'text/markdown' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${shareConversation.value.title}_${new Date().toISOString().split('T')[0]}.md`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-  
+  exportToMarkdown(shareConversation.value, getAgentName(shareConversation.value.agentId), visibleMessages)
   showShareModal.value = false
   ElMessage.success('Markdown文件已导出')
 }

@@ -185,7 +185,7 @@ export class BaseAPI {
         method: 'POST',
         headers: finalConfig.headers,
         credentials: finalConfig.credentials,
-        signal: controller,
+        signal: controller.signal,
         body: JSON.stringify(finalConfig.data)
       }
 
