@@ -1,12 +1,6 @@
 <template>
   <div class="chat-page">
     <div class="chat-header">
-      <div class="chat-title">
-        <h2>{{ t('chat.title') }}</h2>
-        <span v-if="selectedAgent" class="agent-name">
-          {{ t('chat.current') }}: {{ selectedAgent.name }}
-        </span>
-      </div>
       <div class="chat-controls">
         <el-select v-model="selectedAgentId" class="agent-select" @change="handleAgentChange">
           <el-option v-for="agent in (agents || [])" :key="agent.id" :label="agent.name" :value="agent.id" />
@@ -14,11 +8,9 @@
         <el-button type="text" @click="showSettings = !showSettings" :title="t('chat.settings')">
           <Settings :size="16" />
         </el-button>
-
       </div>
     </div>
-    <div
-      :class="['chat-container', { 'split-view': showToolDetails || showTaskStatus || showWorkspace || showSettings }]">
+    <div class="chat-container">
       <div class="chat-messages">
         <div v-if="!messages || messages.length === 0" class="empty-state">
           <Bot :size="48" class="empty-icon" />
@@ -40,28 +32,8 @@
         <div ref="messagesEndRef" />
       </div>
 
-      <div v-if="showToolDetails && selectedToolExecution" class="tool-details-panel">
-        <div class="tool-details-header">
-          <h3>{{ t('chat.toolDetails') }}</h3>
-          <el-button type="text" @click="showToolDetails = false">
-            ×
-          </el-button>
-        </div>
-        <div class="tool-details-content">
-          <div class="tool-section">
-            <h4>{{ t('chat.toolName') }}</h4>
-            <p>{{ selectedToolExecution.function.name }}</p>
-          </div>
-          <div class="tool-section">
-            <h4>{{ t('chat.toolParams') }}</h4>
-            <pre class="tool-code">{{ JSON.stringify(selectedToolExecution.function.arguments, null, 2) }}</pre>
-          </div>
-          <div class="tool-section">
-            <h4>{{ t('chat.toolResult') }}</h4>
-            <pre class="tool-code">{{ formatToolResult(toolResult) }}</pre>
-          </div>
-        </div>
-      </div>
+      <ToolDetailsPanel v-if="showToolDetails && selectedToolExecution" :tool-execution="selectedToolExecution"
+        :tool-result="toolResult" @close="showToolDetails = false" />
 
       <TaskStatusPanel v-if="showTaskStatus" :task-status="taskStatus" :expanded-tasks="expandedTasks"
         @toggle-task-expanded="toggleTaskExpanded" @close="showTaskStatus = false" />
@@ -72,8 +44,9 @@
       <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
         @config-change="updateConfig" @close="showSettings = false" />
     </div>
-
-    <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+    <div class="chat-input-container">
+        <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+    </div>
   </div>
 </template>
 
@@ -87,6 +60,7 @@ import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import TaskStatusPanel from '@/components/chat/TaskStatusPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
+import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
 
 import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
@@ -211,18 +185,6 @@ const toggleTaskExpanded = (taskId) => {
     lastMessageId.value = null;
   };
 
-  // 检查是否需要更新任务状态
-  const checkForUpdates = (messages, sessionId, reason = 'message_change') => {
-    if (messages.length > 0 && sessionId) {
-      const latestMessage = messages[messages.length - 1];
-      if (latestMessage.message_id && latestMessage.message_id !== lastMessageId.value) {
-        lastMessageId.value = latestMessage.message_id;
-        updateTaskAndWorkspace(sessionId, reason);
-      } else {
-        console.log('🔍 消息ID未变化，跳过任务状态更新');
-      }
-    }
-  };
 
   // 创建新会话
 const createSession = () => {
@@ -596,13 +558,6 @@ const handleToolClick = (toolExecution, result) => {
 }
 
 
-const formatToolResult = (result) => {
-  if (typeof result === 'string') {
-    return result
-  }
-  return JSON.stringify(result, null, 2)
-}
-
 const downloadFile = async (filename) => {
   try {
     if (currentSessionId.value) {
@@ -777,16 +732,14 @@ watch(messages, () => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--bg-primary);
 }
 
 .chat-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  border-bottom: 1px solid rgba(102, 96, 96, 0.207);
 }
 
 .chat-container {
@@ -795,21 +748,13 @@ watch(messages, () => {
   overflow: hidden;
 }
 
-.chat-container.split-view .chat-messages {
-  flex: 1;
-}
-
-.chat-title h2 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.agent-name {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  margin-left: 0.5rem;
+.chat-input-container {
+  padding: 16px;
+  background: white;
+  border-top: 1px solid #e1e5e9;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
 }
 
 .chat-controls {
@@ -821,23 +766,6 @@ watch(messages, () => {
 .agent-select {
   min-width: 150px;
 }
-
-:deep(.el-select) {
-  width: 100%;
-}
-
-:deep(.el-select .el-input) {
-  border-radius: 6px;
-}
-
-:deep(.el-select-dropdown) {
-  z-index: 9999 !important;
-}
-
-:deep(.el-popper) {
-  z-index: 9999 !important;
-}
-
 
 .chat-messages {
   flex: 1;
@@ -854,7 +782,7 @@ watch(messages, () => {
   justify-content: center;
   text-align: center;
   padding: 2rem;
-  color: var(--text-secondary);
+  color: rgba(25, 25, 25, 0.7);
 }
 
 .empty-icon {
@@ -894,7 +822,7 @@ watch(messages, () => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--primary-color);
+  background: #667eea;
   animation: loading-bounce 1.4s ease-in-out infinite both;
 }
 
@@ -904,70 +832,5 @@ watch(messages, () => {
 
 .loading-dots span:nth-child(2) {
   animation-delay: -0.16s;
-}
-
-@keyframes loading-bounce {
-
-  0%,
-  80%,
-  100% {
-    transform: scale(0);
-  }
-
-  40% {
-    transform: scale(1);
-  }
-}
-
-.tool-details-panel {
-  width: 400px;
-  border-left: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  display: flex;
-  flex-direction: column;
-}
-
-.tool-details-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.tool-details-header h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.tool-details-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-}
-
-.tool-section {
-  margin-bottom: 1.5rem;
-}
-
-.tool-section h4 {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.tool-code {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 0.75rem;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 </style>

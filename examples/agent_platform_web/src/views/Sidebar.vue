@@ -54,7 +54,8 @@ const pageToRouteNameMap = {
   'chat': 'Chat',
   'agents': 'AgentConfig',
   'tools': 'Tools',
-  'history': 'History'
+  'history': 'History',
+  'mcps': 'Mcps'
 }
 
 // 计算当前页面
@@ -64,6 +65,7 @@ const currentPage = computed(() => {
   if (routeName === 'AgentConfig') return 'agents'
   if (routeName === 'Tools') return 'tools'
   if (routeName === 'History') return 'history'
+  if (routeName === 'Mcps') return 'mcps'
   return 'chat'
 })
 
@@ -93,6 +95,12 @@ const menuItems = computed(() => [
   {
     id: 'tools',
     label: t('sidebar.tools'),
+    icon: Wrench,
+    badge: null
+  },
+  {
+    id: 'mcps',
+    label: t('sidebar.mcps'),
     icon: Wrench,
     badge: null
   },

@@ -56,6 +56,7 @@ export const zhCN = {
   'sidebar.online': '在线',
   'sidebar.offline': '离线',
   'sidebar.language': '语言',
+  'sidebar.mcps': 'MCP服务器',
   
   // 聊天页面
   'chat.title': '对话助手',
@@ -430,6 +431,7 @@ export const enUS = {
   'sidebar.online': 'Online',
   'sidebar.offline': 'Offline',
   'sidebar.language': 'Language',
+  'sidebar.mcps': 'MCP Servers',
   
   // 聊天页面
   'chat.title': 'Chat Assistant',

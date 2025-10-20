@@ -155,9 +155,9 @@ const handleClose = () => {
 }
 
 .agent-creation-modal {
-  background: var(--bg-primary);
+  background: #ffffff;
   border-radius: 16px;
-    background: rgb(250, 248, 248);
+  background: rgb(250, 248, 248);
 
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1);
   max-width: 600px;
@@ -175,7 +175,7 @@ const handleClose = () => {
   justify-content: space-between;
   align-items: center;
   padding: 24px 24px 0 24px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid #e5e7eb;
   padding-bottom: 16px;
   margin-bottom: 24px;
 }
@@ -184,13 +184,13 @@ const handleClose = () => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .close-btn {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: #6b7280;
   cursor: pointer;
   padding: 8px;
   border-radius: 8px;
@@ -201,8 +201,8 @@ const handleClose = () => {
 }
 
 .close-btn:hover:not(:disabled) {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: #ffffff;
+  color: #1f2937;
 }
 
 .close-btn:disabled {
@@ -222,8 +222,8 @@ const handleClose = () => {
 }
 
 .option-card {
-  background: var(--bg-secondary);
-  border: 2px solid var(--border-color);
+  background: #ffffff;
+  border: 2px solid #e5e7eb;
   border-radius: 12px;
   padding: 24px;
   text-align: center;
@@ -232,8 +232,8 @@ const handleClose = () => {
 }
 
 .option-card:hover {
-  border-color: var(--primary-color);
-  background: var(--primary-color-alpha);
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
   transform: translateY(-2px);
 }
 
@@ -243,22 +243,22 @@ const handleClose = () => {
   justify-content: center;
   width: 64px;
   height: 64px;
-  background: var(--primary-color-alpha);
+  background: rgba(102, 126, 234, 0.1);
   border-radius: 16px;
   margin: 0 auto 16px auto;
-  color: var(--primary-color);
+  color: #667eea;
 }
 
 .option-card h4 {
   margin: 0 0 8px 0;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .option-card p {
   margin: 0;
-  color: var(--text-secondary);
+  color: #6b7280;
   font-size: 14px;
   line-height: 1.5;
 }
@@ -274,10 +274,10 @@ const handleClose = () => {
   justify-content: center;
   width: 64px;
   height: 64px;
-  background: var(--primary-color-alpha);
+  background: rgba(102, 126, 234, 0.1);
   border-radius: 16px;
   margin: 0 auto 20px auto;
-  color: var(--primary-color);
+  color: #667eea;
 }
 
 .blank-config-section h4,
@@ -285,13 +285,13 @@ const handleClose = () => {
   margin: 0 0 12px 0;
   font-size: 20px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
 .blank-config-section p,
 .smart-config-section p {
   margin: 0 0 24px 0;
-  color: var(--text-secondary);
+  color: #6b7280;
   font-size: 16px;
   line-height: 1.5;
 }
@@ -305,19 +305,19 @@ const handleClose = () => {
   display: block;
   margin-bottom: 8px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: #1f2937;
   font-size: 14px;
 }
 
 .description-input textarea {
   width: 100%;
   padding: 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: #ffffff;
+  color: #1f2937;
   resize: vertical;
   min-height: 100px;
   transition: border-color 0.2s ease;
@@ -325,8 +325,8 @@ const handleClose = () => {
 
 .description-input textarea:focus {
   outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px var(--primary-color-alpha);
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .description-input textarea:disabled {
@@ -362,24 +362,24 @@ const handleClose = () => {
 }
 
 .btn-ghost {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
+  background: #ffffff;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--text-secondary);
+  background: #ffffff;
+  color: #1f2937;
+  border-color: #6b7280;
 }
 
 .btn-primary {
-  background: var(--primary-color);
+  background: #667eea;
   color: rgb(22, 21, 21);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-color-hover);
+  background: #5a6fd8;
   transform: translateY(-1px);
 }
 
