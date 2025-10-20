@@ -59,7 +59,7 @@
 </template>
 
 <script setup>
-import { useLanguage } from '../../utils/language.js'
+import { useLanguage } from '../../utils/i18n.js'
 import ThreeOptionSwitch from './ThreeOptionSwitch.vue'
 
 // Props

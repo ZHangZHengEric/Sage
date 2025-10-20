@@ -128,7 +128,7 @@
 <script setup>
 import { ref, reactive } from 'vue'
 import { Database, Code, Globe, Loader2 } from 'lucide-vue-next'
-import { useLanguage } from '../utils/language'
+import { useLanguage } from '../utils/i18n.js'
 
 // Props
 const props = defineProps({
