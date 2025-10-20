@@ -93,11 +93,11 @@
 import { ref, onMounted } from 'vue'
 import { Plus, Edit, Trash2, Bot, Settings, Download, Upload } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useLanguage } from '../utils/language.js'
-import { agentAPI } from '../api/index.js'
+import { useLanguage } from '../utils/i18n.js'
+import { agentAPI } from '../api/agent.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
-import { getTools } from '../api/modules/tool.js'
+import { toolAPI } from '../api/tool.js'
 
 // State
 const agents = ref([])
@@ -122,7 +122,7 @@ onMounted(async () => {
 const loadAvailableTools = async () => {
   try {
     loading.value = true
-    const response = await getTools()
+    const response = await toolAPI.getTools()
     console.log('Available Tools Response:', response)
     if (response.tools) {
       tools.value = response.tools
