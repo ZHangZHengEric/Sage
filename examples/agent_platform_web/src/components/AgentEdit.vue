@@ -214,7 +214,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { useLanguage } from '../utils/language.js'
+import { useLanguage } from '../utils/i18n.js'
 import { ArrowDown, ArrowUp, Delete } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
 

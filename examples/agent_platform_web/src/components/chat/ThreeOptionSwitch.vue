@@ -35,7 +35,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useLanguage } from '../../utils/language.js'
+import { useLanguage } from '../../utils/i18n.js'
 
 // Props
 const props = defineProps({

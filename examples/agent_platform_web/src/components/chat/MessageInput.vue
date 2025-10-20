@@ -38,7 +38,7 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
-import { useLanguage } from '../../utils/language.js'
+import { useLanguage } from '../../utils/i18n.js'
 
 const props = defineProps({
   isLoading: {

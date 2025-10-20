@@ -134,8 +134,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { Wrench, Search, Code, Database, Globe, Cpu, Plus } from 'lucide-vue-next'
-import { useLanguage } from '../utils/language'
-import { getTools, getMcpServers, addMcpServer } from '../api/modules/tool'
+import { useLanguage } from '../utils/i18n.js'
+import { toolAPI } from '../api/tool.js'
 import ToolDetail from '../components/ToolDetail.vue'
 import McpServerAdd from '../components/McpServerAdd.vue'
 
@@ -214,7 +214,7 @@ const groupedTools = computed(() => {
 const loadBasicTools = async () => {
   try {
     loading.value = true
-    const response = await getTools()
+    const response = await toolAPI.getTools()
     console.log('Basic Tools Response:', response)
     if (response.tools) {
       allTools.value = response.tools
@@ -229,7 +229,7 @@ const loadBasicTools = async () => {
 const loadMcpServers = async () => {
   try {
     loading.value = true
-    const response = await getMcpServers()
+    const response = await toolAPI.getMcpServers()
     if (response.servers) {
       mcpServers.value = response.servers
     }
@@ -252,7 +252,7 @@ const showAddMcpForm = () => {
 const handleMcpSubmit = async (payload) => {
   loading.value = true
   try {
-    await addMcpServer(payload)
+    await toolAPI.addMcpServer(payload)
     loadMcpServers() // 重新加载MCP服务器列表
     backToList()
   } catch (error) {

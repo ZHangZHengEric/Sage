@@ -8,7 +8,7 @@ import App from './App.vue'
 // 导入路由和状态管理
 import router from './router'
 import { createPinia } from 'pinia'
-import { useAppStore } from './stores/app'
+import { useLanguageStore } from './utils/i18n.js'
 
 const pinia = createPinia()
 
@@ -25,7 +25,7 @@ app.use(pinia)
 
 // 初始化应用状态
 const initializeApp = async () => {
-  const appStore = useAppStore()
+  const appStore = useLanguageStore()
   
   try {
     // 初始化应用设置

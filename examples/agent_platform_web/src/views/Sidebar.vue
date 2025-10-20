@@ -44,7 +44,7 @@ import {
   Plus,
   Connection as Globe
 } from '@element-plus/icons-vue'
-import { useLanguage } from '../utils/language.js'
+import { useLanguage } from '../utils/i18n.js'
 
 const router = useRouter()
 const route = useRoute()
