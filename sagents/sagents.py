@@ -117,13 +117,14 @@ class SAgent:
             self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
         
+        logger.info("SAgent: 所有智能体初始化完成")
 
     def run_stream(self, 
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
         session_id: Optional[str] = None, 
         user_id: Optional[str] = None,
-        deep_thinking: bool = None, 
+        deep_thinking: Optional[Union[bool, str]] = None, 
         max_loop_count: int = 10,
         multi_agent: bool = None,
         more_suggest: bool = False,
