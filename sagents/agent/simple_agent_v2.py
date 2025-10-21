@@ -451,7 +451,15 @@ reason尽可能简单，最多20个字符
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
-            
+                # yield 一个空的消息块以避免生成器卡住
+                output_messages = [MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="",
+                    message_id=content_response_message_id,
+                    show_content="",
+                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                )]
+                yield (output_messages, False)
             elif chunk.choices[0].delta.content:
                 if len(tool_calls) > 0:
                     logger.info(f"SimpleAgent: LLM响应包含 {len(tool_calls)} 个工具调用和内容，停止收集文本内容")
@@ -617,8 +625,8 @@ reason尽可能简单，最多20个字符
                 for param, value in function_params.items():
                     # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
                     # 要对value进行转移，打印的时候，不会发生换行
-                    if isinstance(value, str) and len(value) > 100:
-                        value = f'"{value[:30]}"'
+                    # if isinstance(value, str) and len(value) > 100:
+                    #     value = f'"{value[:30]}"'
                     formatted_params += f"{param} = {json.dumps(value,ensure_ascii=False)}, "
                 formatted_params = formatted_params.rstrip(', ')
         else:
