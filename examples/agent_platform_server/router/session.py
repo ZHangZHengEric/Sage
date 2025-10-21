@@ -214,13 +214,16 @@ async def get_conversations_paginated(
         # 转换为响应格式
         conversation_items = []
         for conv in conversations:
+            message_count = conv.get_message_count()
             conversation_items.append(ConversationInfo(
                 session_id=conv.session_id,
                 user_id=conv.user_id,
                 agent_id=conv.agent_id,
                 agent_name=conv.agent_name,
                 title=conv.title,
-                message_count=conv.get_message_count(),
+                message_count=message_count.get("user_count", 0) + message_count.get("agent_count", 0),
+                user_count=message_count.get("user_count", 0),
+                agent_count=message_count.get("agent_count", 0),
                 created_at=conv.created_at,
                 updated_at=conv.updated_at
             ))
