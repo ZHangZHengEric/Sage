@@ -81,9 +81,15 @@ class MessageManager:
             messages = [messages]
         
         for message in messages:
+            
             try:
+                # 过滤system消息
                 if message.role == MessageRole.SYSTEM.value:
                     self.stats['system_messages_rejected'] += 1
+                    continue
+                # 过滤 show_content 以及content 以及 tool_calls 都是空字符串或者None的消息
+                if not message.show_content and not message.content and not message.tool_calls:
+                    self.stats['filtered_messages'] += 1
                     continue
             except:
                 logger.error(f"MessageManager: 添加消息失败，消息内容: {message}")
