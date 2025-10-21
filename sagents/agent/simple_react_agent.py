@@ -294,6 +294,8 @@ class SimpleReactAgent(AgentBase):
         )
         yield [plan_observe_message]
         all_new_response_chunks.append(plan_observe_message)
+        # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
+        max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
 
         # complete_task_tool_json = [convert_spec_to_openai_format(tool_manager.get_tool('complete_task'))]
         complete_task_tool_json = []
@@ -301,8 +303,8 @@ class SimpleReactAgent(AgentBase):
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
             
-            if loop_count > self.max_loop_count:
-                logger.warning(f"SimpleAgent: 循环次数超过 {self.max_loop_count}，终止循环")
+            if loop_count > max_loop_count:
+                logger.warning(f"SimpleAgent: 循环次数超过 {max_loop_count}，终止循环")
                 break
             
             # 合并消息
