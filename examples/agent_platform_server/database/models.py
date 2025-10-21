@@ -400,7 +400,21 @@ class Conversation:
         self.title = title
         self.updated_at = datetime.now().isoformat()
     
-    def get_message_count(self) -> int:
-        """获取消息数量"""
-        return len(self.messages) if isinstance(self.messages, list) else 0
+    def get_message_count(self) -> Dict[str, int]:
+        """获取用户输入数量和agent回复数量"""
+        if not isinstance(self.messages, list):
+            return {"user_count": 0, "agent_count": 0}
+        
+        user_count = 0
+        agent_count = 0
+        
+        for message in self.messages:
+            if isinstance(message, dict) and 'role' in message:
+                role = message['role'].lower()
+                if role == 'user':
+                    user_count += 1
+                elif role in ['assistant', 'agent']:
+                    agent_count += 1
+        
+        return {"user_count": user_count, "agent_count": agent_count}
     
