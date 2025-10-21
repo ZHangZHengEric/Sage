@@ -131,6 +131,37 @@ class SAgent:
         force_summary: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
+        # 调用内部方法执行流式处理，对结果进行过滤
+        for message_chunks in self.run_stream_internal(
+            input_messages=input_messages,
+            tool_manager=tool_manager,
+            session_id=session_id,
+            user_id=user_id,
+            deep_thinking=deep_thinking,
+            max_loop_count=max_loop_count,
+            multi_agent=multi_agent,
+            more_suggest=more_suggest,
+            force_summary=force_summary,
+            system_context=system_context,
+            available_workflows=available_workflows,
+        ):
+            # 过滤掉空消息块
+            for message_chunk in message_chunks:
+                if message_chunk.content or message_chunk.show_content or message_chunk.tool_calls:
+                    yield [message_chunk]
+
+    def run_stream_internal(self, 
+        input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
+        tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
+        session_id: Optional[str] = None, 
+        user_id: Optional[str] = None,
+        deep_thinking: Optional[Union[bool, str]] = None, 
+        max_loop_count: int = 10,
+        multi_agent: bool = None,
+        more_suggest: bool = False,
+        force_summary: bool = False,
+        system_context: Optional[Dict[str, Any]] = None,
+        available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
         """
         执行智能体任务的主流程
         
