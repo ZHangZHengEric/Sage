@@ -35,7 +35,7 @@ class SimpleAgent(AgentBase):
                     tool_manager: Optional[Any] = None, 
                     session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         logger.info(f"SimpleAgent: 开始流式直接执行，会话ID: {session_id}")
-
+        
         # 重新获取agent_custom_system_prefix以支持动态语言切换
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix', language=session_context.get_language())
 
@@ -282,13 +282,15 @@ class SimpleAgent(AgentBase):
         
         all_new_response_chunks = []
         loop_count = 0
-        
+        # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
+        max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
+
         while True:
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
             
-            if loop_count > self.max_loop_count:
-                logger.warning(f"SimpleAgent: 循环次数超过 {self.max_loop_count}，终止循环")
+            if loop_count > max_loop_count:
+                logger.warning(f"SimpleAgent: 循环次数超过 {max_loop_count}，终止循环")
                 break
             
             # 合并消息
