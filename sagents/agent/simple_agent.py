@@ -372,7 +372,7 @@ class SimpleAgent(AgentBase):
                 
                 # yield 一个空的消息块以避免生成器卡住
                 output_messages = [MessageChunk(
-                    role='assistant',
+                    role=MessageRole.ASSISTANT.value,
                     content="",
                     message_id=content_response_message_id,
                     show_content="",
@@ -545,8 +545,8 @@ class SimpleAgent(AgentBase):
                 for param, value in function_params.items():
                     # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
                     # 要对value进行转移，打印的时候，不会发生换行
-                    if isinstance(value, str) and len(value) > 100:
-                        value = f'"{value[:30]}"'
+                    # if isinstance(value, str) and len(value) > 100:
+                    #     value = f'"{value[:30]}"'
                     formatted_params += f"{param} = {json.dumps(value,ensure_ascii=False)}, "
                 formatted_params = formatted_params.rstrip(', ')
         else:
