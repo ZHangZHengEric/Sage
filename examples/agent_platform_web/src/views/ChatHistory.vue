@@ -42,7 +42,7 @@
           :class="['conversation-card', { selected: selectedConversations.has(conversation.id) }]"
         >
           <div class="conversation-header">
-            <div class="conversation-info" @click="$emit('select-conversation', conversation)">
+            <div class="conversation-info" @click="handleSelectConversation(conversation)">
               <div class="conversation-title-row">
                 <h3 class="conversation-title">{{ conversation.title }}</h3>
                 <div class="conversation-meta">
@@ -61,11 +61,11 @@
                 <div class="stat-group">
                   <div class="stat-item-small">
                     <User :size="12" />
-                    <span>{{ getMessageCount(conversation.messages).user }}</span>
+                    <span>{{ conversation.user_count }}</span>
                   </div>
                   <div class="stat-item-small">
                     <Bot :size="12" />
-                    <span>{{ getMessageCount(conversation.messages).assistant }}</span>
+                    <span>{{ conversation.agent_count }}</span>
                   </div>
                 </div>
                 
@@ -151,6 +151,9 @@ import { exportToHTML, exportToMarkdown } from '../utils/exporter.js'
 import { agentAPI } from '../api/agent.js'
 import { chatAPI } from '../api/chat.js'
 
+// Define emits
+const emit = defineEmits(['select-conversation'])
+
 // Get data from stores with null checks
 const agents = ref([])
 // Composables
@@ -195,12 +198,6 @@ const loadConversationsPaginated = async () => {
     const response = await chatAPI.getConversationsPaginated(params)
     paginatedConversations.value = response.list || []
     totalCount.value = response.total || 0
-    // 循环加载messages
-    for (const conversation of paginatedConversations.value) {
-        // 调用后端接口获取conversation的messages
-        const response = await chatAPI.getConversationMessages(conversation.session_id)
-        conversation.messages = response.messages || []
-    }
   } catch (error) {
     ElMessage.error('加载对话列表失败')
     paginatedConversations.value = []
@@ -224,6 +221,13 @@ const handlePageSizeChange = (size) => {
 }
 
 // Methods
+const handleSelectConversation = (conversation) => {
+  chatAPI.getConversationMessages(conversation.session_id).then(response => {
+    conversation.messages = response.messages || []
+    emit('select-conversation', conversation)
+  })
+}
+
 const formatDate = (timestamp) => {
   const date = new Date(timestamp)
   const now = new Date()
@@ -254,15 +258,6 @@ const formatTime = (timestamp) => {
   })
 }
 
-const getMessageCount = (messages) => {
-  if (!messages) return { user: 0, assistant: 0 }
-  
-  return messages.reduce((count, msg) => {
-    if (msg.role === 'user') count.user++
-    else if (msg.role === 'assistant') count.assistant++
-    return count
-  }, { user: 0, assistant: 0 })
-}
 
 const getAgentName = (agentId) => {
   const agent = agents.value.find(a => a.id === agentId)
@@ -270,6 +265,9 @@ const getAgentName = (agentId) => {
 }
 
 const handleShareConversation = async (conversation) => {
+  // 调用后端接口获取conversation的messages
+  const response = await chatAPI.getConversationMessages(conversation.session_id)
+  conversation.messages = response.messages || []
   shareConversation.value = conversation
   showShareModal.value = true
 }
