@@ -74,39 +74,6 @@ async def stream_chat(request: StreamRequest):
     # 初始化会话服务
     db_manager = global_vars.get_database_manager()
 
-    # 检查会话是否存在
-    existing_conversation = await db_manager.get_conversation(session_id)
-    if not existing_conversation:
-        # 创建新会话
-        if request.messages and len(request.messages) > 0:
-            # 使用第一条用户消息的前50个字符作为标题
-            first_message = request.messages[0].content
-            if isinstance(first_message, str):
-                conversation_title = first_message[:50] + "..." if len(first_message) > 50 else first_message
-            elif isinstance(first_message, list) and len(first_message) > 0:
-                # 如果是多模态消息，尝试提取文本内容
-                for item in first_message:
-                    if isinstance(item, dict) and item.get('type') == 'text':
-                        text_content = item.get('text', '')
-                        conversation_title = text_content[:50] + "..." if len(text_content) > 50 else text_content
-                        break
-        
-        await db_manager.save_conversation(
-            user_id=request.user_id or "default_user",
-            agent_id=request.agent_id or "default_agent",
-            agent_name=request.agent_name or "Sage Assistant",
-            messages=[msg.model_dump() for msg in request.messages],
-            session_id=session_id,
-            title=conversation_title
-        )
-        logger.info(f"创建新会话: {session_id}, 标题: {conversation_title}")
-    else:
-        # 更新现有会话的消息
-        new_messages = [msg.model_dump() for msg in request.messages]
-        for msg in new_messages:
-            await db_manager.add_message_to_conversation(session_id, msg)
-        logger.info(f"更新现有会话: {session_id}")
-    
     # 判断是否要初始化新的 sage service 还是使用默认的
     # 取决于是否需要自定义模型以及 agent 的system prefix ，以及对tool 的工具是否有限制
     if request.llm_model_config or request.system_prefix or request.available_tools:
@@ -189,6 +156,9 @@ async def stream_chat(request: StreamRequest):
             for msg in request.messages:
                 # 保持原始消息的所有字段
                 message_dict = msg.model_dump()
+                # 先判断原消息是否存在message_id字段， 不存在则初始化一个
+                if 'message_id' not in message_dict or not message_dict['message_id']:
+                    message_dict['message_id'] = str(uuid.uuid4())  # 为每个消息生成唯一ID
                 # 如果有content 一定要转化成str
                 if message_dict.get('content'):
                     message_dict['content'] = str(message_dict['content'])
@@ -206,6 +176,12 @@ async def stream_chat(request: StreamRequest):
             # 初始化消息收集器，用于合并基于message_id的消息，保持顺序
             message_collector = {}  # {message_id: merged_message}
             message_order = []  # 保持消息的原始顺序
+            
+            # 将请求的messages添加到初始化中
+            for msg in messages:
+                msg_id = msg['message_id']
+                message_collector[msg_id] = msg
+                message_order.append(msg_id)
             
             # 处理流式响应，传递所有参数
             async for result in stream_service.process_stream(
@@ -334,6 +310,32 @@ async def stream_chat(request: StreamRequest):
             logger.info(f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s")
             logger.info(f"✅ 流结束数据: {end_data}")
             yield json.dumps(end_data, ensure_ascii=False) + "\n"
+                # 检查会话是否存在
+            existing_conversation = await db_manager.get_conversation(session_id)
+            if not existing_conversation:
+                # 创建新会话
+                if request.messages and len(request.messages) > 0:
+                    # 使用第一条用户消息的前50个字符作为标题
+                    first_message = request.messages[0].content
+                    if isinstance(first_message, str):
+                        conversation_title = first_message[:50] + "..." if len(first_message) > 50 else first_message
+                    elif isinstance(first_message, list) and len(first_message) > 0:
+                        # 如果是多模态消息，尝试提取文本内容
+                        for item in first_message:
+                            if isinstance(item, dict) and item.get('type') == 'text':
+                                text_content = item.get('text', '')
+                                conversation_title = text_content[:50] + "..." if len(text_content) > 50 else text_content
+                                break
+                
+                await db_manager.save_conversation(
+                    user_id=request.user_id or "default_user",
+                    agent_id=request.agent_id or "default_agent",
+                    agent_name=request.agent_name or "Sage Assistant",
+                    messages=[],
+                    session_id=session_id,
+                    title=conversation_title
+                )
+                logger.info(f"创建新会话: {session_id}, 标题: {conversation_title}")
             try:
                 # 按照原始顺序将合并的消息添加到现有conversation
                 for message_id in message_order:
