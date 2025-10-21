@@ -319,7 +319,7 @@ const handleExportToMarkdown = () => {
     return
   }
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
-  exportToMarkdown(shareConversation.value, getAgentName(shareConversation.value.agentId), visibleMessages)
+  exportToMarkdown(shareConversation.value, getAgentName(shareConversation.value.agent_id), visibleMessages)
   showShareModal.value = false
   ElMessage.success('Markdown文件已导出')
 }
