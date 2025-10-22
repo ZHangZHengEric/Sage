@@ -232,20 +232,47 @@ const updateConfig = (newConfig) => {
 
   // 从localStorage恢复选中的智能体
   const restoreSelectedAgent = (agentsList) => {
-    if (agentsList && agentsList.length > 0 && !selectedAgent.value) {
-      const savedAgentId = localStorage.getItem('selectedAgentId');
-      if (savedAgentId) {
-        const savedAgent = agentsList.find(agent => agent.id === savedAgentId);
-        if (savedAgent) {
-          selectAgent(savedAgent);
-        } else {
-          selectAgent(agentsList[0]);
-        }
+    console.log('🔍 尝试恢复选中的智能体，agents数量:', agentsList?.length || 0, '当前选中的agent:', selectedAgent.value?.id || 'none');
+    
+    if (!agentsList || agentsList.length === 0) {
+      console.warn('⚠️ agents列表为空，无法恢复选中的智能体');
+      return;
+    }
+
+    // 如果已经有选中的智能体，检查是否在当前列表中
+    if (selectedAgent.value) {
+      const currentAgentExists = agentsList.find(agent => agent.id === selectedAgent.value.id);
+      if (currentAgentExists) {
+        console.log('✅ 当前选中的智能体仍然存在，无需恢复');
+        return;
       } else {
-        selectAgent(agentsList[0]);
+        console.log('⚠️ 当前选中的智能体不在列表中，需要重新选择');
       }
     }
+
+    const savedAgentId = localStorage.getItem('selectedAgentId');
+    console.log('🔍 从localStorage获取保存的智能体ID:', savedAgentId);
+    
+    if (savedAgentId) {
+      const savedAgent = agentsList.find(agent => agent.id === savedAgentId);
+      if (savedAgent) {
+        console.log('✅ 找到保存的智能体，正在恢复:', savedAgent.name);
+        selectAgent(savedAgent);
+        return;
+      } else {
+        console.warn('⚠️ 保存的智能体不存在，选择第一个智能体');
+      }
+    } else {
+      console.log('ℹ️ 没有保存的智能体ID，选择第一个智能体');
+    }
+    
+    // 选择第一个智能体作为默认选择
+    if (agentsList[0]) {
+      console.log('🎯 选择默认智能体:', agentsList[0].name);
+      selectAgent(agentsList[0]);
+    }
   };
+
 
 
 // 处理分块消息合并
@@ -734,22 +761,25 @@ const sendMessageApi = async ({
   }
 };
 
+
 // 生命周期
 onMounted(async () => {
+  console.log('🚀 Chat组件已挂载，开始加载智能体列表');
   await loadAgents()
 
   // 检查是否有传递的conversation数据
   if (props.selectedConversation) {
+    console.log('📝 加载指定的会话数据');
     await loadConversationData(props.selectedConversation)
-  } else if (agents.value.length > 0) {
-    // 如果没有选中的agent，默认选择第一个
-    if (!selectedAgent.value) {
-      selectAgent(agents.value[0])
-    }
-    // 如果没有当前会话，创建新会话
-    if (!currentSessionId.value) {
-      await createSession()
-    }
+  } else {
+    // 智能体的选择由 watch 监听器处理，这里只需要等待
+    // 如果没有当前会话，创建新会话（延迟执行，等待智能体选择完成）
+    nextTick(async () => {
+      if (!currentSessionId.value && selectedAgent.value) {
+        console.log('🆕 创建新会话');
+        await createSession()
+      }
+    })
   }
   
   // 初始化时滚动到底部
@@ -767,11 +797,12 @@ onUnmounted(() => {
 })
 
   // 监听agents变化，自动恢复选中的智能体
-watch(() => agents, (newAgents) => {
-    if (newAgents) {
+watch(() => agents.value, (newAgents) => {
+    console.log('🔄 agents变化，当前agents数量:', newAgents?.length || 0);
+    if (newAgents && newAgents.length > 0) {
       restoreSelectedAgent(newAgents);
     }
-  }, { immediate: true });
+  });
 
 // 监听selectedConversation变化
 watch(() => props.selectedConversation, async (newConversation) => {
