@@ -215,13 +215,14 @@ async def stream_chat(request: StreamRequest):
                         message_collector[message_id] = result
                         # 记录消息的原始顺序
                         message_order.append(message_id)
-                    # 对于工具调用结果消息，完整替换而不是合并
-                    if result.get('role') != 'tool':
-                        # 合并content和show_content字段（追加）
-                        if result.get('content'):
-                            message_collector[message_id]['content'] += str(result['content'])
-                        if result.get('show_content'):
-                            message_collector[message_id]['show_content'] += str(result['show_content'])
+                    else:
+                        # 对于工具调用结果消息，完整替换而不是合并
+                        if result.get('role') != 'tool':
+                            # 合并content和show_content字段（追加）
+                            if result.get('content'):
+                                message_collector[message_id]['content'] += str(result['content'])
+                            if result.get('show_content'):
+                                message_collector[message_id]['show_content'] += str(result['show_content'])
                     
             
                 # 处理大JSON的分块传输
@@ -356,7 +357,6 @@ async def stream_chat(request: StreamRequest):
             logger.error(f"📋 [GENERATOR_EXIT] 堆栈跟踪: {traceback.format_exc()}")
             logger.error(f"📊 [GENERATOR_EXIT] 流处理统计: 已处理 {stream_counter if 'stream_counter' in locals() else 0} 个流结果")
             # 强制刷新日志缓冲区
-            sys.stdout.flush()
             sys.stderr.flush()
             
         except Exception as e:
