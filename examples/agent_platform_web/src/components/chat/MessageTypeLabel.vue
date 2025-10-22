@@ -28,32 +28,54 @@ const props = defineProps({
 
 // 根据消息类型、角色和工具名称确定标签文本
 const labelText = computed(() => {
-  // 如果有type字段，优先显示type内容
-  if (props.type) {
-    return props.type
-  }
-  
+  // 消息类型标签映射
+  const messageTypeLabels = new Map([
+    // 角色标签
+    ['user', '用户'],
+    ['system', '系统'],
+    // 消息类型标签
+    ['normal', '普通消息'],
+    ['task_analysis', '任务分析'],
+    ['task_decomposition', '任务拆解'],
+    ['planning', '规划'],
+    ['execution', '执行'],
+    ['observation', '观察'],
+    ['final_answer', '最终答案'],
+    ['thinking', ' 思考'],
+    ['tool_call', '工具调用'],
+    ['tool_response', '工具响应'],
+    ['tool_call_result', '工具结果'],
+    ['tool_execution', '工具执行'],
+    ['error', ' 错误'],
+    ['guide', '指导'],
+    ['handoff_agent', '智能体切换'],
+    ['stage_summary', '阶段总结'],
+    ['do_subtask', '子任务'],
+    ['do_subtask_result', '执行结果'],
+    ['rewrite', '重写'],
+    ['query_suggest', '查询建议'],
+    ['chunk', '数据块']
+  ])
+
+  // 根据角色优先处理
   if (props.role === 'user') {
-    return '用户'
+    return messageTypeLabels.get('user')
   }
   
   if (props.role === 'assistant') {
-    if (props.messageType === 'tool_call' || props.messageType === 'tool_execution') {
+    if (props.type === 'tool_call' || props.type === 'tool_execution') {
       return getToolLabel(props.toolName)
     }
-    return props.messageType || 'AI助手'
+    return messageTypeLabels.get(props.type) || 'AI助手'
   }
   
-  if (props.messageType === 'error') {
-    return '错误'
+  // 根据消息类型处理
+  if (messageTypeLabels.has(props.type)) {
+    return messageTypeLabels.get(props.type)
   }
   
-  if (props.messageType === 'system') {
-    return '系统'
-  }
-  
-  // 默认显示messageType或消息
-  return props.messageType || '消息'
+  // type
+  return props.type || '消息'
 })
 
 // 根据工具名称返回对应的标签
