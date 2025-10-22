@@ -42,9 +42,9 @@
     <!-- 工具调用按钮 -->
     <div v-else-if="hasToolCalls" class="message-container">
       <div class="message tool-calls">
-        <MessageAvatar messageType="tool_call" role="assistant" />
+        <MessageAvatar :messageType="message.message_type" role="assistant" />
         <div class="tool-calls-bubble">
-          <MessageTypeLabel messageType="tool_call" role="assistant" />
+        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" />
           <div class="tool-calls-content">
             <button
               v-for="(toolCall, index) in message.tool_calls"
@@ -61,41 +61,6 @@
               <div class="tool-call-arrow">→</div>
             </button>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 工具执行气泡 -->
-    <div v-else-if="isToolExecution" class="message tool-execution">
-      <MessageAvatar messageType="tool_execution" role="assistant" :toolName="message.tool_name" />
-      <div class="tool-execution-bubble">
-        <MessageTypeLabel 
-          messageType="tool_execution" 
-          role="assistant" 
-          :toolName="message.tool_name" 
-          :type="message.type" 
-        />
-        <div class="tool-header">
-          <span class="tool-name">{{ message.tool_name || '工具执行' }}</span>
-          <span :class="['tool-status', isToolCompleted ? 'completed' : 'running']">
-            {{ isToolCompleted ? '✓' : '⟳' }}
-          </span>
-        </div>
-        
-        <div v-if="message.show_content" class="tool-content">
-          <ReactMarkdown
-            :content="message.show_content"
-            :components="markdownComponents"
-          />
-        </div>
-        
-        <div v-if="message.file_path" class="tool-file">
-          <button 
-            @click="handleDownloadFile(message.file_path)"
-            class="download-button"
-          >
-            📁 下载文件: {{ getFileName(message.file_path) }}
-          </button>
         </div>
       </div>
     </div>
@@ -144,13 +109,6 @@ const hasToolCalls = computed(() => {
   return props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
 })
 
-const isToolExecution = computed(() => {
-  return props.message.type === 'tool_call' || props.message.message_type === 'tool_call'
-})
-
-const isToolCompleted = computed(() => {
-  return props.message.status === 'completed' || props.message.type === 'tool_call_result'
-})
 
 // Markdown组件配置
 const markdownComponents = {
