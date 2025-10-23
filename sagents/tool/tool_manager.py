@@ -449,8 +449,8 @@ class ToolManager:
     def run_tool(self, tool_name: str, session_context: SessionContext, session_id: str="", **kwargs) -> Any:
         """Execute a tool by name with provided arguments"""
         execution_start = time.time()
-        logger.info(f"Executing tool: {tool_name} (session: {session_id})")
-        logger.info(f"Tool arguments: {kwargs}")
+        logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
+        logger.debug(f"Tool arguments: {kwargs}")
         # Remove duplicate session_id from kwargs if present
         session_id = kwargs.pop('session_id', session_id)
         
@@ -496,7 +496,7 @@ class ToolManager:
             
             # Step 4: Validate Result (for non-streaming tools)
             execution_time = time.time() - execution_start
-            logger.info(f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s")
+            logger.debug(f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s")
             
             # Validate JSON format
             is_valid, validation_msg = self._validate_json_response(final_result, tool_name)
