@@ -18,12 +18,12 @@ task_decompose_system_prefix = {
 # 分解模板
 decompose_template = {
     "zh": """# 任务分解指南
-通过用户的历史对话，来观察用户的需求或者任务
+通过用户的历史对话，来观察用户最新的需求或者任务
 
 ## 智能体的描述和要求
 {agent_description}
 
-## 用户历史对话
+## 用户历史对话（按照时间顺序从最早到最新）
 {task_description}
 
 ## 可用工具
@@ -48,12 +48,12 @@ decompose_template = {
 </task_item>
 ```""",
     "en": """# Task Decomposition Guide
-Observe user needs or tasks through user's historical dialogue
+Observe user latest needs or tasks through user's historical dialogue
 
 ## Agent Description and Requirements
 {agent_description}
 
-## User Historical Dialogue
+## User Historical Dialogue (Ordered from Earliest to Latest)
 {task_description}
 
 ## Available Tools
