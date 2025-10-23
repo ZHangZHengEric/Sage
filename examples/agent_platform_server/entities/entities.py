@@ -108,6 +108,8 @@ class ConversationInfo(BaseModel):
     agent_name: str
     title: str
     message_count: int
+    user_count: int
+    agent_count: int
     created_at: str
     updated_at: str
 

@@ -485,7 +485,7 @@ class DatabaseManager:
                 if conversation:
                     conversation.add_message(message)
                     conversation.save(cursor)
-                    logger.info(f"向会话添加消息成功: {session_id}")
+                    logger.info(f"向会话添加消息成功, message_id: {message['message_id']}")
                     return True
                 else:
                     logger.warning(f"会话不存在: {session_id}")
