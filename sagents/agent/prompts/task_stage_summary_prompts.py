@@ -72,7 +72,9 @@ task_stage_summary_template = {
 5. 每个任务的总结内容应该专门针对该任务，不要包含其他任务的信息
 6. task_id必须与需要总结的任务列表中的task_id完全匹配
 7. result_documents必须是从生成的文件文档中提取的实际文件路径
-8. result_summary的重点是对子任务的详细回答和关键成果，为后续整体任务总结提供丰富的基础信息
+8. result_summary的重点是对子任务的详细回答和关键成果，为后续整体任务总结提供丰富的基础信息。
+9. **result_summary** 包含的内容必须来源于执行过程中的实际数据、数字、比例、时间等量化信息和内容，不能自己编造数据。
+10. result_summary 可以是任务执行结果不好或者失败的总结，不要为了总结而编造数据，要基于执行过程中的实际数据和结果。
 """,
     "en": """# Task Execution Summary Generation Guide
 
@@ -128,6 +130,8 @@ Only output JSON in the following format, do not output other content, do not ou
 5. Each task's summary content should be specifically for that task, not include information from other tasks
 6. task_id must exactly match the task_id in the tasks to summarize list
 7. result_documents must be actual file paths extracted from generated documents
-8. The focus of result_summary is detailed answers to subtasks and key achievements, providing rich basic information for subsequent overall task summary
+8. The focus of result_summary is detailed answers to subtasks and key achievements, providing rich basic information for subsequent overall task summary.
+9. **result_summary** must contain only actual data, numbers, ratios, times, and other quantitative information and content from the execution process, not invented data.
+10. result_summary can be a summary of task execution results that are bad or fail, not just a summary, but based on actual data and results from the execution process.
 """
 }
