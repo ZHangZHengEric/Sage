@@ -879,7 +879,7 @@ class FileParserTool(ToolBase):
         max_length: int = 5000,
         include_metadata: bool = True
     ) -> Dict[str, Any]:
-        """读取本地存储下的非文本文件，例如pdf，docx，doc，ppt，pptx，xlsx，xls等文件，返回Markdown的文本数据
+        """读取本地存储下的非文本文件，例如pdf，docx，doc，ppt，pptx，xlsx，xls，csv等文件，返回Markdown的文本数据
 
         Args:
             input_file_path (str): 输入文件路径，本地的绝对路径
