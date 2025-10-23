@@ -11,13 +11,13 @@ AGENT_IDENTIFIER = "TaskAnalysisAgent"
 
 # 任务分析Agent指令 - 新结构：以prompt名称为第一级，语言为第二级
 task_analysis_system_prefix = {
-    "zh": "你是一个任务分析智能体，代替其他的智能体，要以其他智能体的人称来输出，专门负责分析任务并将其分解为组件。请仔细理解用户需求，帮其他的agent来分析任务，提供清晰、自然的分析过程。",
-    "en": "You are a task analysis agent, representing other agents, and should output in the persona of other agents. You specialize in analyzing tasks and decomposing them into components. Please carefully understand user needs, help other agents analyze tasks, and provide clear, natural analysis processes."
+    "zh": "你是一个任务分析智能体，代替其他的智能体，要以其他智能体的人称来输出，专门负责分析任务并将其分解为组件。请仔细理解用户最新的需求，帮其他的agent来分析任务，提供清晰、自然的分析过程。",
+    "en": "You are a task analysis agent, representing other agents, and should output in the persona of other agents. You specialize in analyzing user latest needs or tasks and decomposing them into components. Please carefully understand user latest needs, help other agents analyze tasks, and provide clear, natural analysis processes."
 }
 
 analysis_template = {
     "zh": """请仔细分析以下对话，并以自然流畅的语言解释你的思考过程：
-对话记录：
+对话记录（按照时间顺序从最早到最新）：
 {conversation}
 
 智能体的描述和要求
@@ -27,7 +27,7 @@ analysis_template = {
 {available_tools}
 
 请按照以下步骤进行分析：
-首先，我需要站在用户的角度来理解用户的核心需求。从对话中可以提取哪些关键信息？用户真正想要实现的目标是什么？
+首先，我需要站在用户的角度来理解用户的最新的核心需求。从对话中可以提取哪些关键信息？用户真正想要实现的目标是什么？
 
 接下来，我会逐步分析这个任务。具体来说，需要考虑以下几个方面：
 - 任务的背景和上下文
@@ -52,7 +52,7 @@ analysis_template = {
 尽可能口语化详细化。不要说出工具的原始名称以及数据库或者知识库的ID。
 要注意符合语种的要求，如果要求用中文回答，那么输出的分析也必须用中文。如果要求用英文回答，那么输出的分析也必须用英文。""",
     "en": """Please carefully analyze the following dialogue and explain your thought process in natural, fluent language:
-Dialogue Record:
+Dialogue Record (Ordered from Earliest to Latest):
 {conversation}
 
 Agent Description and Requirements
@@ -62,7 +62,7 @@ The following tools are currently available:
 {available_tools}
 
 Please analyze according to the following steps:
-First, I need to understand the user's core needs from the user's perspective. What key information can be extracted from the dialogue? What is the user's real goal?
+First, I need to understand the user's latest core needs from the user's perspective. What key information can be extracted from the dialogue? What is the user's real goal?
 
 Next, I will analyze this task step by step. Specifically, I need to consider the following aspects:
 - Task background and context
