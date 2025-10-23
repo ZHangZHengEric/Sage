@@ -42,6 +42,7 @@ planning_template = {
 5. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
 6. description中不要包含工具的真实名称
 7. required_tools至少包含5个可能需要的工具的名称，最多10个。
+8. expected_output预期结果描述，不要要求太详细，只需要描述主要的结果即可。
 
 ## 输出格式
 ```
