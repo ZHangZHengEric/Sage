@@ -3,6 +3,8 @@
  * 用于将对话记录导出为HTML文件，支持Markdown渲染、表格和ECharts图表
  */
 
+import { getMessageLabel } from './messageLabels'
+
 /**
  * 导出对话记录为HTML文件
  * @param {Object} conversation - 对话记录对象
@@ -73,10 +75,16 @@ const generateHTMLContent = (conversation, visibleMessages) => {
   visibleMessages.forEach((message, index) => {
     if (message.role === 'user') {
       const content = renderMarkdown(message.content || '')
+        const assistantName = getMessageLabel({
+          role: message.role,
+          type: message.type,
+          toolName: message.toolName
+        })
       messagesHtml += `
         <div class="message user">
           <div class="avatar">👤</div>
           <div class="message-bubble">
+            <div class="message-info">${assistantName}</div>
             <div class="message-content">${content}</div>
           </div>
         </div>`
@@ -100,10 +108,16 @@ const generateHTMLContent = (conversation, visibleMessages) => {
       } else if (message.show_content) {
         // AI助手回复
         const content = renderMarkdown(message.show_content)
+        const assistantName = getMessageLabel({
+          role: message.role,
+          type: message.type,
+          toolName: message.toolName
+        })
         messagesHtml += `
           <div class="message assistant">
             <div class="avatar">🤖</div>
             <div class="message-bubble">
+              <div class="message-info">${assistantName}</div>
               <div class="message-content">${content}</div>
             </div>
           </div>`
@@ -188,7 +202,11 @@ const generateHTMLContent = (conversation, visibleMessages) => {
         .message.user {
             flex-direction: row-reverse;
         }
-        
+        .message-info {
+          background: transparent;
+          color: #666;
+        }
+
         .avatar {
             width: 40px;
             height: 40px;
