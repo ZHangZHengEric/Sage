@@ -268,6 +268,7 @@ def create_fastapi_app(args):
     app.include_router(router.stream_router)
     app.include_router(router.session_router)
     app.include_router(router.tool_router)
+    app.include_router(router.file_server_router)
     
     return app
 
