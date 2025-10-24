@@ -7,6 +7,7 @@ from .tool import tool_router
 from .agent import agent_router
 from .session import session_router
 from .stream import stream_router
+from .file_server import file_server_router
 
 # Export all routers for easy import
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "tool_router", 
     "agent_router",
     "session_router",
-    "stream_router"
+    "stream_router",
+    "file_server_router"
 ]
