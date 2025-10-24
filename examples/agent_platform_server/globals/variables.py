@@ -95,6 +95,22 @@ def set_database_manager(db_manager):
     database_manager = db_manager
 
 
+def get_workspace_path():
+    """获取工作空间路径"""
+    global server_args
+    if server_args:
+        return server_args.workspace
+    return None
+
+
+def get_logs_path():
+    """获取日志目录路径"""
+    global server_args
+    if server_args:
+        return server_args.logs_dir
+    return None
+
+
 async def initialize_tool_manager():
     """初始化工具管理器"""
     try:
