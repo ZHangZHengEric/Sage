@@ -55,9 +55,9 @@ class Logger:
         ]
         
         for level_name, level_value in log_levels:
-            # 使用TimedRotatingFileHandler按天分割日志，文件名包含当前日期
-            current_date = datetime.now().strftime("%Y%m%d")
-            log_file = os.path.join(log_dir, f'sage_{level_name}_{current_date}.log')
+            # 使用TimedRotatingFileHandler按天分割日志
+            # 基础文件名不包含日期，日期通过suffix添加
+            log_file = os.path.join(log_dir, f'sage_{level_name}.log')
             file_handler = TimedRotatingFileHandler(
                 log_file, 
                 when='midnight',  # 每天午夜分割
@@ -68,8 +68,20 @@ class Logger:
             file_handler.setLevel(level_value)
             file_handler.setFormatter(file_format)
             
-            # 设置日志文件名后缀格式（用于轮转时的旧文件）
-            file_handler.suffix = "%Y%m%d"
+            # 设置日志文件名后缀格式，轮转时会变成 sage_info.log._20241024 格式
+            # 但我们需要 sage_info_20241024.log 格式，所以需要自定义
+            file_handler.suffix = "_%Y%m%d"
+            # 设置namer函数来自定义轮转后的文件名格式
+            def custom_namer(default_name):
+                # default_name 格式: sage_info.log._20241024
+                # 我们要转换为: sage_info_20241024.log
+                if '._' in default_name:
+                    # 处理 sage_info.log._20241024 格式
+                    base_part, date_part = default_name.split('._')
+                    base_name = base_part.replace('.log', '')  # 移除 .log
+                    return f"{base_name}_{date_part}.log"
+                return default_name
+            file_handler.namer = custom_namer
             
             self.logger.addHandler(file_handler)
         
