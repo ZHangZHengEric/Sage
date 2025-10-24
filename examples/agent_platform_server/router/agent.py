@@ -30,7 +30,6 @@ async def get_agents():
     Returns:
         StandardResponse: 包含所有Agent配置的标准响应
     """
-    logger.info("获取所有Agent配置")
     # 获取数据库管理器
     db_manager = global_vars.get_database_manager()
     
