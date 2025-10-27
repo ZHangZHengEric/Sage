@@ -59,7 +59,7 @@
   gap: 8px;
 }
 
-.close-btn, .save-btn {
+.close-btn, .save-btn, .code-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -69,9 +69,20 @@
   transition: all 0.2s;
 }
 
-.close-btn:hover, .save-btn:hover {
+.close-btn:hover, .save-btn:hover, .code-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.code-btn {
+  padding: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.code-btn:hover {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
 }
 
 .save-btn:disabled {
@@ -767,7 +778,8 @@ input:checked + .slider:before {
   }
 }
 
-.modal-content {
+/* Agent edit panel specific modal styles */
+.agent-edit-panel .modal-content {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 20px;
@@ -779,6 +791,8 @@ input:checked + .slider:before {
   overflow: hidden;
   animation: modalSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
+  max-width: 600px;
+  width: 90%;
 }
 
 .modal-content::before {

@@ -1,3 +1,14 @@
+:root {
+  --background-color-primary: #1a1a2e;
+  --background-color-secondary: #252547;
+  --background-color-tertiary: #303050;
+  --text-color-primary: #ffffff;
+  --text-color-secondary: #a0a0c0;
+  --border-color: rgba(255,255,255,.15);
+  --primary-color: #1976d2;
+  --primary-color-rgb: 25,118,210;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -395,3 +406,12 @@ input:checked + .slider:before {
     transform: rotate(360deg);
   }
 }
+
+/* 移除以下多余样式
+#root > div > main > div > div.modal-overlay > div > div.modal-content > div {
+  background: var(--background-color-secondary);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+*/
