@@ -7,6 +7,7 @@ import AgentCreationModal from '../components/AgentCreationModal';
 const AgentConfigPage = ({ agents, onAddAgent, onUpdateAgent, onDeleteAgent, onOpenNewAgent, onOpenEditAgent, tools }) => {
   const { t } = useLanguage();
   const [showCreationModal, setShowCreationModal] = useState(false);
+  const [loading, setLoading] = useState(false);  // 控制加载状态
   
   const handleDelete = (agent) => {
     if (agent.id === 'default') {
@@ -128,11 +129,12 @@ const AgentConfigPage = ({ agents, onAddAgent, onUpdateAgent, onDeleteAgent, onO
     onOpenNewAgent();
   };
 
-  const handleSmartConfig = async (description) => {
-    const startTime = Date.now();
-    console.log('🚀 开始智能配置生成，描述:', description);
-    
+  const handleSmartConfig = async (description, selectedTools) => {
+    setLoading(true);
     try {
+      const startTime = Date.now();
+      console.log('🚀 开始智能配置生成，描述:', description, '工具:', selectedTools);
+      
       // 创建AbortController用于超时控制
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
@@ -142,6 +144,11 @@ const AgentConfigPage = ({ agents, onAddAgent, onUpdateAgent, onDeleteAgent, onO
 
       console.log('📡 发送auto-generate请求...');
       
+      const body = { agent_description: description };
+      if (selectedTools && selectedTools.length > 0) {
+        body.available_tools = selectedTools;
+      }
+
       // 调用后端API生成Agent配置
       const response = await fetch('/api/agent/auto-generate', {
         method: 'POST',
@@ -154,7 +161,7 @@ const AgentConfigPage = ({ agents, onAddAgent, onUpdateAgent, onDeleteAgent, onO
           'Accept': 'application/json',
           'User-Agent': 'AgentDevWeb/1.0'
         },
-        body: JSON.stringify({ agent_description: description }),
+        body: JSON.stringify(body),
         signal: controller.signal,
         // 明确设置不使用缓存
         cache: 'no-cache',
@@ -210,9 +217,27 @@ const AgentConfigPage = ({ agents, onAddAgent, onUpdateAgent, onDeleteAgent, onO
       }
       
       throw error; // 重新抛出错误，让AgentCreationModal处理
+    } finally {
+      // 无论成功还是失败，都要重置 loading 状态
+      setLoading(false);
     }
   };
-  
+
+  const handleCreateBlank = () => {
+    onOpenEditAgent({
+      id: `agent_${Date.now()}`,
+      name: 'New Agent',
+      description: '',
+      system_prompt: '',
+      tools: [],
+      llm_config: {
+        model: 'gpt-4',
+        temperature: 0.7,
+      },
+    });
+    setShowCreationModal(false);
+  };
+
   return (
     <div className="agent-config-page">
       <div className="page-header">
@@ -327,6 +352,7 @@ const AgentConfigPage = ({ agents, onAddAgent, onUpdateAgent, onDeleteAgent, onO
         onCreateBlank={handleBlankConfig}
         onCreateSmart={handleSmartConfig}
         tools={tools}
+        isGenerating={loading}
       />
     </div>
   );
