@@ -1,5 +1,154 @@
 # 变更日志
 
+## 2025-01-19 15:30 - 修复请求格式中agent_config字段不匹配问题
+**问题**: 前端代码示例和微信机器人demo中使用了agent_config字段，但后端StreamRequest模型不支持该字段
+**根本原因**: 前端代码示例(CodeModal.js)和微信机器人demo(wechat_bot_demo/app.py)使用了过时的请求格式
+**修复方案**: 
+- 修改CodeModal.js中的请求数据格式，将agent_config字段拆解为后端期望的独立字段
+- 更新所有代码示例(curl, Python, JavaScript, Go)使用正确的字段名称
+- 修改wechat_bot_demo/app.py中的send_message函数，将agent_config拆解为独立字段
+- 字段映射：agent_config -> deep_thinking, multi_agent, max_loop_count, system_prefix, system_context, available_workflows, llm_model_config, available_tools
+**修改文件**: CodeModal.js, wechat_bot_demo/app.py
+**测试结果**: 所有请求格式现在与后端StreamRequest模型完全匹配，避免了字段不匹配错误
+**作者**: Eric ZZ
+
+## 2025-10-20 09:46 - 修复CodeModal无法上下滚动的问题
+**问题**: CodeModal组件的modal-content设置了overflow: hidden，导致当内容超过85vh时无法滚动查看完整内容
+**解决方案**: 
+- 将.code-modal .modal-content的overflow属性从hidden改为overflow-y: auto
+- 添加max-height: calc(85vh - 80px)限制高度，减去header高度
+- 为modal-content添加滚动条样式，提升滚动体验
+**修改文件**: CodeModal.css
+**测试结果**: CodeModal现在可以正常上下滚动，用户可以查看完整的代码内容
+**作者**: Eric ZZ
+
+## 2025-10-20 09:43 - 重构modal宽度控制系统，解决全局500px限制问题
+**问题**: HistoryPage.css中的全局.modal-content样式设置了max-width: 500px，影响所有modal组件显示不一致
+**解决方案**: 
+- 将HistoryPage.css中的全局.modal-content样式改为.history-page .modal-content，限制作用域
+- 为CodeModal添加.code-modal .modal-content样式，设置max-width: 900px适应代码显示
+- 为AgentEditPanel添加.agent-edit-panel .modal-content样式，设置max-width: 600px
+- 为AgentConfigPage添加.agent-config-page .modal-content样式，设置max-width: 700px
+- AgentCreationModal已有max-width: none !important覆盖，无需修改
+**修改文件**: HistoryPage.css, CodeModal.css, AgentEditPanel.css, AgentConfigPage.css
+**测试结果**: 各modal组件现在有独立的宽度控制，显示效果更加一致和合理
+**作者**: Eric ZZ
+
+## 2025-10-15 16:30 - 修复 ChatPage.js 中的循环依赖问题
+**问题**: 页面无法加载，控制台报错 "Cannot access 'clearMessages' before initialization" 和 "Cannot access 'stopGeneration' before initialization"
+**根本原因**: 在 useMessages hook 调用之前就使用了 hook 返回的函数，导致循环依赖
+**修复方案**: 
+- 移动所有使用 useMessages 返回值的函数到 useMessages 调用之后
+- 将 startNewConversation 和 handleStopGeneration 函数移动到正确位置并用 useCallback 包装
+- 移动处理选中对话历史的 useEffect 到 useMessages 调用之后
+- 删除在 useMessages 调用之前定义的 saveCurrentConversation 和 triggerAutoSave 函数
+- 修复依赖数组中的 triggerAutoSave 引用
+**修改文件**: ChatPage.js
+**测试结果**: 页面现在可以正常加载，所有功能正常工作
+**作者**: Eric ZZ
+
+## 2025-10-15 14:25 - 验证新对话保存功能正常工作
+**问题报告**: 用户反馈在全新对话中输入"你好"后消息没有保存下来
+**验证过程**: 
+- 测试新对话中发送消息的保存功能，确认控制台日志显示完整保存流程
+- 检查localStorage数据，确认消息和tokenUsage都被正确保存到agent_platform_conversations键下
+- 验证保存触发时机：用户发送消息时立即触发保存，数据完整保存到本地存储
+- 确认数据结构完整：包含消息内容、tokenUsage统计、时间戳等所有必要信息
+**结论**: 保存功能正常工作，用户报告的问题可能是误解或临时现象，实际测试显示保存机制运行正常
+**修改文件**: 无需修改，功能正常
+**作者**: Eric ZZ
+
+## 2025-10-15 14:15 - 重构保存机制，移除基于状态变化的自动保存
+**问题**: 基于isLoading状态变化的保存机制在加载历史对话时误触发，导致不必要的保存操作和存储错误
+**重构方案**: 
+- 移除基于isLoading状态变化的useEffect自动保存逻辑
+- 改为在具体事件位置直接调用triggerAutoSave：用户发送消息时和后端响应完成时
+- 移除不再需要的lastRequestCompletedRef变量
+- 确保保存只在真正需要的时机触发，避免历史对话加载时的误触发
+- 测试确认：加载历史对话不再触发保存，发送新消息正常保存
+**修改文件**: ChatPage.js
+**作者**: Eric ZZ
+
+## 2025-10-15 13:40 - 修复历史对话加载触发保存问题
+**问题**: 点击历史对话时仍会触发保存操作，导致时间戳和tokenUsage发生变化
+**修复方案**: 
+- 修复 triggerAutoSave 函数在恢复历史对话时仍会执行保存的问题
+- 在 isRestoringHistory 为 true 时直接返回，阻止保存操作
+- 修复时间戳逻辑：createdAt 和 updatedAt 总是创建新时间戳
+- 修复 tokenUsage 逻辑：只有在非恢复历史对话时才保存 tokenUsage
+- 测试确认：点击历史对话不再触发保存，时间戳和 tokenUsage 不再变化
+**修改文件**: ChatPage.js
+**作者**: Eric ZZ
+
+## 2025-10-15 13:45 - 修复tokenUsage累加逻辑
+**问题**: 同一对话中多个请求的tokenUsage被覆盖而非累加，导致token统计不准确
+**修复方案**: 
+- 在App.js中添加accumulateTokenUsage函数，实现tokenUsage的累加逻辑
+- 修改updateConversation和addConversation函数，使用累加而非覆盖
+- 确保新对话时tokenUsage正确初始化为null
+- 通过单元测试验证累加逻辑正确性
+**修改文件**: App.js
+**作者**: Eric ZZ
+
+## 2025-10-15 13:28 - 修复点击对话记录后 token 信息丢失问题
+
+**问题描述：**
+点击对话记录中的条目进入对话页面后，保存的 token 消耗信息会丢失，无法在对话界面中显示。
+
+**问题根因：**
+1. ChatPage 在加载 selectedConversation 时，只恢复了 messages，没有恢复 tokenUsage 信息
+2. useMessages hook 没有暴露 setTokenUsage 方法供外部调用
+3. 在某些情况下 clearMessages 会清空 tokenUsage
+
+**修复方案：**
+1. 在 useMessages hook 中添加 setTokenUsage 到返回值
+2. 在 ChatPage 的 selectedConversation useEffect 中添加 tokenUsage 恢复逻辑
+3. 确保加载对话时正确恢复 tokenUsage 状态
+
+**修复时间：** 2025-10-15 13:28
+**修改文件：** useMessages.js, ChatPage.js
+**作者：** Eric ZZ
+
+## 2025-10-15 13:22 - 修复 HistoryPage 中 tokenUsage 显示问题
+
+**问题描述：**
+1. App.js 第130行出现 'conv is not defined' 错误
+2. HistoryPage 中对话的 tokenUsage 显示为 undefined，但点击进入对话内部可以看到 token 使用信息
+
+**问题根因：**
+1. App.js 中 updateConversation 函数使用了未定义的 conv 变量
+2. ChatPage 中 triggerAutoSave 和消息监听的 onAddConversation 调用时未包含 tokenUsage 信息
+
+**修复方案：**
+1. 修复 App.js 中变量名错误，将 conv 改为 conversation
+2. 在 ChatPage.js 的 triggerAutoSave 和消息监听中添加 tokenUsage 参数
+3. 确保对话保存时包含完整的 tokenUsage 信息
+
+**修复时间：** 2025-10-15 13:22
+**修改文件：** App.js, ChatPage.js
+**作者：** Eric ZZ
+
+## 2025-10-15 10:53 - 添加对话界面 Token 使用统计显示功能
+
+**功能描述：**
+在前端对话界面添加 Token 消耗信息显示组件，实时展示每次对话的 Token 使用情况。
+
+**实现内容：**
+1. 修改 useMessages.js 钩子，添加 tokenUsage 状态管理
+2. 在 handleMessage 方法中处理 stream_end 消息，提取 token_usage 信息
+3. 创建 TokenUsage 组件，美观展示输入、输出和总计 Token 数量
+4. 在 ChatPage.js 中集成 TokenUsage 组件到消息列表末尾
+5. 添加响应式 CSS 样式，支持移动端显示
+
+**修改文件：**
+- src/hooks/useMessages.js
+- src/components/chat/TokenUsage.js (新建)
+- src/components/chat/TokenUsage.css (新建)
+- src/pages/ChatPage.js
+
+**修改时间：** 2025-10-15 10:53
+**作者：** Eric ZZ
+
 ## 2025-01-25 19:42 - 修复系统上下文和工作流删除按钮显示问题
 
 **问题描述：**
@@ -578,6 +727,15 @@ Eric ZZ
 - 确认支持Markdown渲染和代码高亮功能正常
 
 **修改文件：** change_log.md
+**修改者：** Eric ZZ
+
+## 2025-06-11 15:10 - 修复 AgentCreationModal 变量未定义错误
+**功能描述：**
+- 修复 selectedType 未定义错误，统一使用 type 变量
+- 补全缺失的图标导入（FileText、Sparkles、Check、Loader）
+- 确保模态框能正常渲染并打开新建 Agent 弹窗
+
+**修改文件：** AgentCreationModal.js, change_log.md
 **修改者：** Eric ZZ
 
 ## 2025-01-17 16:20 - 修复HTML导出函数调用参数错误
