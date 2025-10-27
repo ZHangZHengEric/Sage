@@ -58,19 +58,60 @@ class StorageService {
   // 对话相关方法
   static getConversations() {
     try {
-      const conversations = localStorage.getItem(this.KEYS.CONVERSATIONS);
-      return conversations ? JSON.parse(conversations) : [];
+      console.log('🔍 StorageService: 开始从localStorage加载对话数据...');
+      const conversationsStr = localStorage.getItem(this.KEYS.CONVERSATIONS);
+      
+      if (!conversationsStr) {
+        console.log('📭 StorageService: localStorage中没有对话数据，返回空数组');
+        return [];
+      }
+      
+      const conversations = JSON.parse(conversationsStr);
+      console.log('📊 StorageService: 成功加载对话数据', {
+        conversationsCount: conversations.length,
+        conversations: conversations.map(conv => ({
+          id: conv.id,
+          sessionId: conv.sessionId,
+          title: conv.title,
+          hasTokenUsage: !!conv.tokenUsage,
+          tokenUsageType: typeof conv.tokenUsage,
+          tokenUsageKeys: conv.tokenUsage ? Object.keys(conv.tokenUsage) : null,
+          tokenUsage: conv.tokenUsage,
+          messagesCount: conv.messages?.length || 0,
+          createdAt: conv.createdAt,
+          updatedAt: conv.updatedAt
+        }))
+      });
+      
+      return conversations;
     } catch (error) {
-      console.error('Error loading conversations:', error);
+      console.error('❌ StorageService: 加载对话数据时出错:', error);
       return [];
     }
   }
 
   static saveConversations(conversations) {
     try {
+      console.log('💾 StorageService: 开始保存对话数据到localStorage...', {
+        conversationsCount: conversations.length,
+        conversations: conversations.map(conv => ({
+          id: conv.id,
+          sessionId: conv.sessionId,
+          title: conv.title,
+          hasTokenUsage: !!conv.tokenUsage,
+          tokenUsageType: typeof conv.tokenUsage,
+          tokenUsageKeys: conv.tokenUsage ? Object.keys(conv.tokenUsage) : null,
+          tokenUsage: conv.tokenUsage,
+          messagesCount: conv.messages?.length || 0,
+          createdAt: conv.createdAt,
+          updatedAt: conv.updatedAt
+        }))
+      });
+      
       localStorage.setItem(this.KEYS.CONVERSATIONS, JSON.stringify(conversations));
+      console.log('✅ StorageService: 对话数据保存成功');
     } catch (error) {
-      console.error('Error saving conversations:', error);
+      console.error('❌ StorageService: 保存对话数据时出错:', error);
     }
   }
 

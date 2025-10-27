@@ -200,8 +200,11 @@
   width: 95%;
 }
 
-.modal-content {
+/* Agent config page specific modal styles */
+.agent-config-page .modal-content {
   max-height: 60vh;
+  max-width: 700px;
+  width: 90%;
   overflow-y: auto;
   padding-right: 8px;
 }

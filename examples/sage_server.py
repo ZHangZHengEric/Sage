@@ -39,6 +39,8 @@ from openai import OpenAI
 from sagents.context.session_context import SessionStatus,get_session_context
 
 
+
+
 import argparse
 
 parser = argparse.ArgumentParser(description="Sage Stream Service")
@@ -61,11 +63,11 @@ parser.add_argument("--port", default=8001, type=int, help="Server Port")
 parser.add_argument("--mcp-config", default="mcp_setting.json", help="MCP配置文件路径")
 parser.add_argument("--workspace", default="agent_workspace", help="工作空间目录")
 parser.add_argument("--logs-dir", default="logs", help="日志目录")
-parser.add_argument("--preset_running_config", default="preset_running_config.json", help="预设配置，system_context，以及workflow，与接口中传过来的合并使用")
+parser.add_argument("--preset_running_config", default="", help="预设配置，system_context，以及workflow，与接口中传过来的合并使用")
 parser.add_argument("--memory_root", default=None, help="记忆存储根目录（可选）")
 parser.add_argument("--daemon", action="store_true", help="以守护进程模式运行")
 parser.add_argument("--pid-file", default="sage_stream.pid", help="PID文件路径")
-parser.add_argument("--force_summary", action="store_true", help="是否强制总结")
+
 
 server_args = parser.parse_args()
 
@@ -159,9 +161,8 @@ app.add_middleware(
 # 核心服务类
 class SageStreamService:
     """
-    Sage 流式服务类
-    
-    提供基于 Sage 框架的智能体流式服务功能
+    基于 Sage 框架的流式服务
+    提供智能体对话的流式处理能力
     """
     
     def __init__(self, model: Optional[OpenAI] = None, 
@@ -283,6 +284,9 @@ class SageStreamService:
         if self.preset_available_tools:
             if isinstance(self.tool_manager, ToolManager):
                 self.tool_manager = ToolProxy(self.tool_manager, self.preset_available_tools)    
+        
+
+        
         logger.info("SageStreamService 初始化完成")
     
     async def process_stream(self, messages, session_id=None, user_id=None, deep_thinking=None, 
@@ -456,6 +460,8 @@ class SageStreamService:
             }
             yield error_result
     
+
+    
     # 会话管理方法
     def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
         """中断指定会话"""
@@ -597,7 +603,7 @@ class ChatMessage(BaseModel):
     show_content: Optional[str] = None
     # 添加历史对话中可能存在的字段
     message_type: Optional[str] = None
-    timestamp: Optional[float] = None
+    timestamp: Optional[Union[float, str]] = None
     chunk_id: Optional[str] = None
     is_final: Optional[bool] = None
     is_chunk: Optional[bool] = None
@@ -614,6 +620,7 @@ class StreamRequest(BaseModel):
     summary : bool =True  # 过时字段
     deep_research: bool = True # 过时字段，与multi_agent一致
     more_suggest: bool = False
+    force_summary: bool = False
     system_context: Optional[Dict[str, Any]] = None
     available_workflows: Optional[Dict[str, List[str]]] = None
     llm_model_config: Optional[Dict[str, Any]] = None
@@ -630,6 +637,72 @@ class StreamRequest(BaseModel):
             warnings.warn("summary字段已过时，将被忽略", DeprecationWarning)
             
         super().__init__(**data)
+
+
+def get_local_ip() -> str:
+    """
+    获取本机的实际IP地址
+    """
+    import socket
+    try:
+        # 创建一个UDP socket连接到外部地址来获取本机IP
+        # 这里使用8.8.8.8作为目标，但实际不会发送数据
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            return local_ip
+    except Exception as e:
+        logger.warning(f"无法获取本机IP地址，使用localhost: {e}")
+        return "localhost"
+
+
+def generate_curl_command(request: StreamRequest, host: str = "localhost", port: int = 8001) -> str:
+    """
+    根据StreamRequest生成对应的curl命令
+    """
+    import json
+    
+    # 构建请求体
+    request_data = request.dict()
+    
+    # 构建curl命令
+    curl_command = f"""curl -X POST "http://{host}:{port}/api/stream" \\
+  -H "Content-Type: application/json" \\
+  -d '{json.dumps(request_data, ensure_ascii=False, indent=2)}'"""
+    
+    return curl_command
+
+
+def save_curl_command_to_session(curl_command: str, session_id: str, workspace_root: str):
+    """
+    将curl命令保存到指定session的工作空间文件夹中
+    """
+    import os
+    from datetime import datetime
+    
+    try:
+        # 构建session文件夹路径
+        session_folder = os.path.join(workspace_root, session_id)
+        
+        # 确保session文件夹存在
+        os.makedirs(session_folder, exist_ok=True)
+        
+        # 生成带时间戳的文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        curl_file_path = os.path.join(session_folder, f"curl_command_{timestamp}.txt")
+        
+        # 保存curl命令到文件
+        with open(curl_file_path, 'w', encoding='utf-8') as f:
+            f.write(curl_command)
+        
+        logger.info(f"Curl command saved to: {curl_file_path}")
+        return curl_file_path
+        
+    except Exception as e:
+        logger.error(f"Failed to save curl command: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 class ConfigRequest(BaseModel):
@@ -659,6 +732,7 @@ class InterruptRequest(BaseModel):
 class AutoGenAgentRequest(BaseModel):
     """自动生成Agent配置的请求模型"""
     agent_description: str  # Agent描述
+    available_tools: Optional[List[str]] = None  # 可选的工具名称列表，如果提供则只使用这些工具
 
 class AutoGenAgentResponse(BaseModel):
     """自动生成Agent响应"""
@@ -727,6 +801,18 @@ async def stream_chat(request: StreamRequest):
         request.llm_model_config = {k: v for k, v in request.llm_model_config.items() if v is not None and v != ''}
 
     session_id = request.session_id or str(uuid.uuid4())
+    
+    # 生成并保存curl命令到session文件夹
+    try:
+        # 如果host是0.0.0.0，则使用本机实际IP地址
+        actual_host = get_local_ip() if server_args.host == "0.0.0.0" else server_args.host
+        curl_command = generate_curl_command(request, actual_host, server_args.port)
+        save_curl_command_to_session(curl_command,session_id , server_args.workspace)
+        logger.info(f"已保存curl命令到session {session_id}")
+    except Exception as e:
+        logger.error(f"保存curl命令失败: {e}")
+        import traceback
+        traceback.print_exc()
     # 判断是否要初始化新的 sage service 还是使用默认的
     # 取决于是否需要自定义模型以及 agent 的system prefix ，以及对tool 的工具是否有限制
     if request.llm_model_config or request.system_prefix or request.available_tools:
@@ -830,7 +916,7 @@ async def stream_chat(request: StreamRequest):
                 more_suggest=request.more_suggest,
                 system_context=request.system_context,
                 available_workflows=request.available_workflows,
-                force_summary=server_args.force_summary
+                force_summary=request.force_summary
             ):
                 # 更新流处理计数器和活动时间
                 stream_counter += 1
@@ -841,7 +927,7 @@ async def stream_chat(request: StreamRequest):
                 # 每100个结果记录一次连接状态
                 if stream_counter % 100 == 0:
                     logger.info(f"📊 流处理状态 - 会话: {session_id}, 计数: {stream_counter}, 间隔: {time_since_last:.3f}s")
-
+                
                 # 处理大JSON的分块传输
                 try:
                     json_str = json.dumps(result, ensure_ascii=False)
@@ -923,6 +1009,8 @@ async def stream_chat(request: StreamRequest):
                 'timestamp': time.time(),
                 'total_stream_count': stream_counter
             }
+            # token_usage 现在通过特殊的 MessageChunk 在 run_stream 的 finally 块中返回
+            # 这里不再需要额外处理 token_usage
             total_duration = time.time() - (last_activity_time - time_since_last if 'time_since_last' in locals() else last_activity_time)
             logger.info(f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s")
             logger.info(f"✅ 流结束数据: {end_data}")
@@ -1205,11 +1293,21 @@ async def auto_generate_agent(request: AutoGenAgentRequest):
         # 创建AutoGenAgentFunc实例
         auto_gen_agent = AutoGenAgentFunc()
         
+        # 根据是否提供工具列表决定使用ToolManager还是ToolProxy
+        if request.available_tools:
+            logger.info(f"使用指定的工具列表: {request.available_tools}")
+            # 创建ToolProxy，只包含指定的工具
+            tool_proxy = ToolProxy(tool_manager, request.available_tools)
+            tool_manager_or_proxy = tool_proxy
+        else:
+            logger.info("使用完整的工具管理器")
+            tool_manager_or_proxy = tool_manager
+        
         # 生成Agent配置，使用服务器默认配置
         logger.info("开始调用AutoGenAgentFunc生成配置")
         agent_config = auto_gen_agent.generate_agent_config(
             agent_description=request.agent_description,
-            tool_manager=tool_manager,
+            tool_manager=tool_manager_or_proxy,
             llm_client=default_model_client,
             model=server_args.default_llm_model_name
         )

@@ -27,23 +27,9 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
   const [showToolDetails, setShowToolDetails] = useState(false);
   const messagesEndRef = useRef(null);
   const lastSavedMessageIdRef = useRef(null); // 跟踪上次保存的消息ID
-  const lastRequestCompletedRef = useRef(false); // 跟踪request_completed是否已触发
+
   
-  // 使用自定义hooks
-  const {
-    messages,
-    setMessages,
-    isLoading,
-    setIsLoading,
-    abortControllerRef,
-    handleChunkMessage,
-    handleMessage,
-    addUserMessage,
-    addErrorMessage,
-    clearMessages,
-    stopGeneration
-  } = useMessages();
-  
+  // 先定义 session hook 获取 currentSessionId
   const {
     currentSessionId,
     setCurrentSessionId,
@@ -56,9 +42,45 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
     restoreSelectedAgent
   } = useSession(agents);
 
+  // 添加标志来标识是否正在恢复历史对话
+  const [isRestoringHistory, setIsRestoringHistory] = useState(false);
+  
+  // 添加ref来防止重复执行恢复历史对话的逻辑
+  const lastSelectedConversationRef = useRef(null);
+
+  // Token 使用信息更新回调
+  const handleUpdateConversationTokenUsage = useCallback((tokenUsageData) => {
+    console.log('🔄 handleUpdateConversationTokenUsage 被调用', {
+      currentSessionId,
+      hasOnUpdateConversation: !!onUpdateConversation,
+      tokenUsageData: tokenUsageData,
+      isRestoringHistory: isRestoringHistory
+    });
+    
+    if (currentSessionId && onUpdateConversation && !isRestoringHistory) {
+      // 直接使用 currentSessionId 作为对话ID进行更新
+      // 因为在 addConversation 中，对话的 id 就是 sessionId
+      console.log('📊 更新对话的 tokenUsage（累加模式）', {
+        conversationId: currentSessionId,
+        totalTokens: tokenUsageData.total_info?.total_tokens
+      });
+      onUpdateConversation(currentSessionId, { tokenUsage: tokenUsageData }, true); // shouldAccumulate = true
+    } else if (isRestoringHistory) {
+      console.log('⏭️ 恢复历史对话中，跳过 tokenUsage 累加');
+    } else {
+      console.warn('⚠️ 无法更新 tokenUsage：缺少 sessionId 或 onUpdateConversation 回调');
+    }
+  }, [currentSessionId, onUpdateConversation, isRestoringHistory]);
+
+
+
+
+
+  // useMessages hook 将在 handleMessageChange 定义后调用
+
   // 监听config变化
   useEffect(() => {
-    console.log('🔄 ChatPage中config状态变化:', config);
+    // console.log('🔄 ChatPage中config状态变化:', config);
   }, [config]); 
   const {
     taskStatus,
@@ -84,6 +106,281 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
   };
 
 
+
+  // 这些回调将在useMessages之后重新定义
+
+  // 这个 useEffect 将在 useMessages 调用之后重新定义
+  
+  // 初始化时恢复选中的Agent
+  useEffect(() => {
+    if (agents.length > 0) {
+      restoreSelectedAgent(agents);
+    }
+  }, [agents, restoreSelectedAgent]);
+  
+
+  
+
+  
+
+  
+  // 使用 useRef 来存储消息变化回调，避免循环依赖
+  const messageChangeCallbackRef = useRef(null);
+  
+  // 使用自定义hooks
+  const {
+    messages,
+    setMessages,
+    isLoading,
+    setIsLoading,
+    tokenUsage,
+    setTokenUsage,
+    abortControllerRef,
+    handleChunkMessage,
+    handleMessage,
+    addUserMessage,
+    addErrorMessage,
+    clearMessages,
+    stopGeneration
+  } = useMessages(handleUpdateConversationTokenUsage, isRestoringHistory);
+  
+  // 开始新对话函数
+  const startNewConversation = useCallback(() => {
+    // 如果当前有会话ID和消息，保存到历史对话中
+    if (currentSessionId && messages.length > 0 && selectedAgent) {
+      // 获取第一条用户消息作为标题
+      const firstUserMessage = messages.find(msg => msg.role === 'user');
+      const title = firstUserMessage 
+        ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
+        : t('chat.untitledConversation');
+      
+      // 添加到对话记录
+      if (onAddConversation) {
+        const conversationData = {
+          id: currentSessionId,
+          title: title,
+          agentId: selectedAgent.id,
+          agentName: selectedAgent.name,
+          messages: messages,
+          sessionId: currentSessionId,
+          // 如果是恢复历史对话，保留原有时间戳；否则创建新时间戳
+          createdAt: isRestoringHistory && selectedConversation?.createdAt 
+            ? selectedConversation.createdAt 
+            : new Date().toISOString(),
+          updatedAt: isRestoringHistory && selectedConversation?.updatedAt 
+            ? selectedConversation.updatedAt 
+            : new Date().toISOString()
+        };
+        
+        // 总是保存 tokenUsage（如果存在的话）
+        if (tokenUsage) {
+          conversationData.tokenUsage = tokenUsage;
+          console.log('💾 开始新对话时保存 tokenUsage', {
+            totalTokens: tokenUsage.total_info?.total_tokens
+          });
+        }
+        
+        // 在恢复历史对话时不累加tokenUsage，避免重复计算
+        onAddConversation(conversationData, false, !isRestoringHistory);
+      }
+    }
+    
+    // 清空当前页面状态
+    clearMessages();
+    clearSession();
+    setShowToolDetails(false);
+    setSelectedToolExecution(null);
+    // 只有在有正在进行的请求时才中断
+    if (abortControllerRef.current && isLoading) {
+      console.log('Aborting request in startNewConversation');
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = null;
+  }, [currentSessionId, messages, selectedAgent, t, isRestoringHistory, selectedConversation, onAddConversation, tokenUsage, clearMessages, clearSession, setShowToolDetails, setSelectedToolExecution, abortControllerRef, isLoading]);
+   
+  // 停止生成处理函数
+  const handleStopGeneration = useCallback(() => {
+    stopGeneration(currentSessionId);
+  }, [stopGeneration, currentSessionId]);
+
+  // 处理选中的对话历史
+  useEffect(() => {
+    if (selectedConversation) {
+      // 检查是否是同一个对话，避免重复执行
+      const conversationKey = `${selectedConversation.id}_${selectedConversation.sessionId}`;
+      if (lastSelectedConversationRef.current === conversationKey) {
+        console.log('🔄 跳过重复的对话恢复:', conversationKey);
+        return;
+      }
+      
+      // 更新ref记录当前对话
+      lastSelectedConversationRef.current = conversationKey;
+      
+      // 立即设置恢复历史标志，并使用 flushSync 确保状态立即更新
+      setIsRestoringHistory(true);
+      
+      // 使用 setTimeout 确保 isRestoringHistory 状态已经更新
+      setTimeout(() => {
+        console.log('🔄 开始恢复历史对话，isRestoringHistory=true');
+        
+        // 设置选中的对话内容
+         const conversationMessages = selectedConversation.messages || [];
+         setMessages(conversationMessages);
+        
+        // 设置 lastSavedMessageIdRef 为最新消息的ID，避免触发重复保存
+        const latestMessageId = conversationMessages.length > 0 ? conversationMessages[conversationMessages.length - 1].message_id : null;
+        if (latestMessageId) {
+          lastSavedMessageIdRef.current = latestMessageId;
+        }
+        
+        // 恢复 tokenUsage - 直接设置，不使用函数形式避免累加
+        if (selectedConversation.tokenUsage) {
+          console.log('🔄 恢复对话的 tokenUsage:', selectedConversation.tokenUsage);
+          setTokenUsage(selectedConversation.tokenUsage);
+        } else {
+          console.log('⚠️ 选中的对话没有 tokenUsage 信息，重置为初始状态');
+          setTokenUsage({ total_info: {}, per_step_info: [] });
+        }
+        
+        // 设置会话ID
+        setCurrentSessionId(selectedConversation.sessionId);
+        
+        // 中断当前请求
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        
+        // 清空任务和工作空间
+        clearTaskAndWorkspace();
+        
+        // 设置对应的Agent
+        if (selectedConversation.agentId && agents) {
+          const agent = agents.find(a => a.id === selectedConversation.agentId);
+          if (agent) {
+            selectAgent(agent);
+          }
+        }
+        
+        // 不在这里重置 isRestoringHistory，而是在用户发送消息时重置
+      }, 50);
+    } else {
+      // 清理ref记录
+      lastSelectedConversationRef.current = null;
+      
+      if (!messages || messages.length === 0) {
+        clearSession();
+      }
+    }
+  }, [selectedConversation, agents, currentSessionId, clearTaskAndWorkspace, selectAgent, clearSession, messages, setMessages]);
+   
+  // 使用 useRef 来存储最新的 tokenUsage，避免 saveConversation 函数重新创建
+  const tokenUsageRef = useRef(tokenUsage);
+  tokenUsageRef.current = tokenUsage;
+  
+  // 添加保存状态跟踪，避免重复保存
+  const lastSavedMessagesCountRef = useRef(0);
+  const saveTimeoutRef = useRef(null);
+  
+  // 简单的保存函数
+  const saveConversation = useCallback(() => {
+    // 如果正在恢复历史对话，跳过保存
+    if (isRestoringHistory) {
+      console.log('🚫 正在恢复历史对话，跳过保存操作');
+      return;
+    }
+    
+    // 检查是否需要保存（消息数量是否有变化）
+    if (messages.length === lastSavedMessagesCountRef.current) {
+      console.log('⏭️ 消息数量未变化，跳过保存', {
+        currentCount: messages.length,
+        lastSavedCount: lastSavedMessagesCountRef.current
+      });
+      return;
+    }
+    
+    // 检查保存条件
+    if (currentSessionId && messages.length > 0 && selectedAgent && onAddConversation) {
+      console.log(`💾 保存对话, messages count: ${messages.length}`);
+      
+      const firstUserMessage = messages.find(msg => msg.role === 'user');
+      const title = firstUserMessage 
+        ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
+        : '未命名对话';
+      
+      const conversationData = {
+        id: currentSessionId,
+        title: title,
+        agentId: selectedAgent.id,
+        agentName: selectedAgent.name,
+        messages: messages,
+        sessionId: currentSessionId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      // 包含 tokenUsage，使用 ref 获取最新值
+      if (tokenUsageRef.current) {
+        conversationData.tokenUsage = tokenUsageRef.current;
+        console.log('💾 保存时包含 tokenUsage', {
+          totalTokens: tokenUsageRef.current.total_info?.total_tokens
+        });
+      }
+      
+      // 保存对话数据 - 使用覆盖模式而不是累加模式，避免重复累加tokenUsage
+      onAddConversation(conversationData, false, false);
+      
+      // 更新已保存的消息数量
+      lastSavedMessagesCountRef.current = messages.length;
+      console.log('💾 对话保存完成');
+    }
+  }, [currentSessionId, messages, selectedAgent, onAddConversation, isRestoringHistory]);
+  
+  // 监听messages变化，自动保存
+  useEffect(() => {
+    // 严格的保存条件检查：
+    // 1. 消息数量大于0
+    // 2. 不在恢复历史对话状态（发送消息时的加载状态不应阻止保存）
+    // 3. 有当前会话ID
+    // 4. 有选中的Agent
+    if (messages.length > 0 && 
+        !isRestoringHistory && 
+        currentSessionId && 
+        selectedAgent) {
+      
+      console.log('🔍 检查是否需要保存对话', {
+        messagesLength: messages.length,
+        isRestoringHistory,
+        currentSessionId,
+        hasSelectedAgent: !!selectedAgent
+      });
+      
+      // 清除之前的定时器
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      
+      // 延迟保存，避免频繁保存
+      saveTimeoutRef.current = setTimeout(() => {
+        console.log('⏰ 定时器触发，准备保存对话');
+        saveConversation();
+        saveTimeoutRef.current = null;
+      }, 1000); // 增加延迟时间到1秒
+      
+      return () => {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+          saveTimeoutRef.current = null;
+        }
+      };
+    } else {
+      console.log('🚫 跳过保存，条件不满足', {
+        messagesLength: messages.length,
+        isRestoringHistory,
+        currentSessionId,
+        hasSelectedAgent: !!selectedAgent
+      });
+    }
+  }, [messages, saveConversation, isRestoringHistory, currentSessionId, selectedAgent]);
 
   // 优化任务管理器按钮点击处理
   const handleTaskStatusToggle = useCallback(() => {
@@ -112,229 +409,6 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-  
-  // 处理选中的对话历史
-  useEffect(() => {
-    if (selectedConversation) {
-      // 设置选中的对话内容
-      setMessages(selectedConversation.messages || []);
-      const newSessionId = selectedConversation.sessionId || selectedConversation.id;
-      
-      // 只有当session id真正发生变化时才清空任务管理和文件管理器，并中断当前请求
-      if (newSessionId !== currentSessionId) {
-        // 只有在有正在进行的请求时才中断
-        if (abortControllerRef.current && isLoading) {
-          console.log('Aborting request in selectedConversation useEffect');
-          abortControllerRef.current.abort();
-        }
-        setCurrentSessionId(newSessionId);
-        // 清空任务状态和工作空间文件，等待新数据加载
-        clearTaskAndWorkspace();
-      }
-      
-      // 设置对应的Agent
-      const agent = agents.find(a => a.id === selectedConversation.agentId);
-      if (agent) {
-        selectAgent(agent);
-      }
-    } else if (!selectedConversation && currentSessionId && messages.length === 0) {
-      // 只有当没有选中对话、有会话ID且没有消息时，才清空会话状态
-      // 这避免了在用户发送新消息后清空消息的问题
-      console.log('Clearing session state when no conversation selected and no messages');
-      // 使用setTimeout避免与startNewConversation的清空逻辑冲突
-      setTimeout(() => {
-        clearSession();
-        clearMessages();
-        setShowToolDetails(false);
-        setSelectedToolExecution(null);
-        clearTaskAndWorkspace();
-      }, 10);
-    }
-  }, [selectedConversation, agents, currentSessionId, clearTaskAndWorkspace, selectAgent, clearSession, clearMessages]);
-  
-  // 初始化时恢复选中的Agent
-  useEffect(() => {
-    if (agents.length > 0) {
-      restoreSelectedAgent(agents);
-    }
-  }, [agents, restoreSelectedAgent]);
-  
-  const startNewConversation = () => {
-    // 如果当前有会话ID和消息，保存到历史对话中
-    if (currentSessionId && messages.length > 0 && selectedAgent) {
-      // 获取第一条用户消息作为标题
-      const firstUserMessage = messages.find(msg => msg.role === 'user');
-      const title = firstUserMessage 
-        ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
-        : t('chat.untitledConversation');
-      
-      // 添加到对话记录
-      if (onAddConversation) {
-        onAddConversation({
-          id: currentSessionId,
-          title: title,
-          agentId: selectedAgent.id,
-          agentName: selectedAgent.name,
-          messages: messages,
-          sessionId: currentSessionId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-      }
-    }
-    
-    // 清空当前页面状态
-    clearMessages();
-    clearSession();
-    setShowToolDetails(false);
-    setSelectedToolExecution(null);
-    // 只有在有正在进行的请求时才中断
-    if (abortControllerRef.current && isLoading) {
-      console.log('Aborting request in startNewConversation');
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = null;
-  };
-  
-  // 停止生成处理函数
-  const handleStopGeneration = useCallback(() => {
-    stopGeneration(currentSessionId);
-  }, [stopGeneration, currentSessionId]);
-  
-  // 保存当前会话状态
-  const saveCurrentConversation = useCallback(() => {
-    console.log('saveCurrentConversation called:', {
-      currentSessionId,
-      messagesLength: messages.length,
-      selectedAgent: selectedAgent?.name,
-      onAddConversation: !!onAddConversation
-    });
-    
-    if (currentSessionId && messages.length > 0 && selectedAgent && onAddConversation) {
-      // 获取第一条用户消息作为标题
-      const firstUserMessage = messages.find(msg => msg.role === 'user');
-      const title = firstUserMessage 
-        ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
-        : '未命名对话';
-      
-      console.log('Saving conversation with title:', title);
-      
-      // 添加对话记录
-      onAddConversation({
-        id: currentSessionId,
-        title: title,
-        agentId: selectedAgent.id,
-        agentName: selectedAgent.name,
-        messages: messages,
-        sessionId: currentSessionId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-      
-      console.log('Conversation saved successfully');
-    } else {
-      console.log('Conversation not saved - missing requirements');
-    }
-  }, [currentSessionId, messages, selectedAgent, onAddConversation]);
-  
-  // 自动保存函数 - 统一的保存逻辑
-  const triggerAutoSave = useCallback((reason = 'unknown', shouldUpdateTasks = true) => {
-    if (currentSessionId && messages.length > 0 && selectedAgent) {
-      console.log(`💾 Auto-save triggered by: ${reason}, messages count: ${messages.length}`);
-      
-      const firstUserMessage = messages.find(msg => msg.role === 'user');
-      const title = firstUserMessage 
-        ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
-        : '未命名对话';
-      
-      if (onAddConversation) {
-        onAddConversation({
-          id: currentSessionId,
-          title: title,
-          agentId: selectedAgent.id,
-          agentName: selectedAgent.name,
-          messages: messages,
-          sessionId: currentSessionId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-        console.log(`💾 Auto-save completed for reason: ${reason}`);
-        
-        // 只在需要时更新任务状态和工作空间文件
-        if (shouldUpdateTasks) {
-          console.log(`🔄 会话保存完成，同步更新任务状态和工作空间, 原因: ${reason}`);
-          checkForUpdates(messages, currentSessionId, `session_saved_${reason}`);
-        }
-      }
-    }
-  }, [currentSessionId, messages, selectedAgent, onAddConversation, checkForUpdates]);
-  
-  // 监听消息变化 - 只有当消息ID真正发生变化时才触发保存
-  useEffect(() => {
-    if (messages.length > 0 && currentSessionId && selectedAgent && onAddConversation) {
-      // 获取最新消息的ID用于日志
-      const latestMessage = messages[messages.length - 1];
-      const latestMessageId = latestMessage?.message_id || latestMessage?.id || 'no-id';
-      
-      console.log(`🔍 消息变化检测: 消息数量=${messages.length}, 最新消息ID=${latestMessageId}, 上次保存ID=${lastSavedMessageIdRef.current}, 会话ID=${currentSessionId}`);
-      
-      // 只有当消息ID真正发生变化时才保存
-      if (latestMessageId !== lastSavedMessageIdRef.current) {
-        console.log(`✅ 检测到新消息ID变化: ${lastSavedMessageIdRef.current} -> ${latestMessageId}，触发保存`);
-        
-        // 立即更新保存的消息ID，避免重复触发
-        lastSavedMessageIdRef.current = latestMessageId;
-        
-        // 延迟保存，确保消息完全更新
-        const saveTimer = setTimeout(() => {
-          console.log(`💾 Auto-save triggered by: message_id_change, messages count: ${messages.length}, latest message ID: ${latestMessageId}`);
-          
-          const firstUserMessage = messages.find(msg => msg.role === 'user');
-          const title = firstUserMessage 
-            ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
-            : '未命名对话';
-          
-          onAddConversation({
-            id: currentSessionId,
-            title: title,
-            agentId: selectedAgent.id,
-            agentName: selectedAgent.name,
-            messages: messages,
-            sessionId: currentSessionId,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          });
-          
-          console.log(`💾 Auto-save completed for reason: message_id_change, latest message ID: ${latestMessageId}`);
-          
-          // 单独检查任务状态更新
-          checkForUpdates(messages, currentSessionId, 'message_id_change');
-        }, 300);
-        
-        return () => clearTimeout(saveTimer);
-      } else {
-        console.log(`⏭️ 消息ID未变化，跳过保存: ${latestMessageId}`);
-      }
-    }
-  }, [messages.length, currentSessionId, selectedAgent?.id]); // 进一步优化依赖数组，移除onAddConversation避免频繁触发
-  
-  // 监听请求结束 - 只有当loading从true变为false时才触发保存
-  useEffect(() => {
-    if (isLoading) {
-      // 当开始加载时，重置标记
-      lastRequestCompletedRef.current = false;
-    } else if (!isLoading && messages.length > 0 && currentSessionId && !lastRequestCompletedRef.current) {
-      // 只有当loading从true变为false且未触发过时才保存
-      lastRequestCompletedRef.current = true;
-      // 延迟保存，确保状态完全更新
-      const saveTimer = setTimeout(() => {
-        console.log('🏁 请求完成，触发最终保存和任务状态更新');
-        triggerAutoSave('request_completed', true);
-      }, 500);
-      
-      return () => clearTimeout(saveTimer);
-    }
-  }, [isLoading, currentSessionId, messages.length]); // 移除triggerAutoSave依赖，避免重复触发
   
   // 处理工具点击
   const handleToolClick = useCallback((toolCall, toolResult) => {
@@ -374,6 +448,12 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
     
     console.log('🚀 开始发送消息:', messageText.substring(0, 100) + (messageText.length > 100 ? '...' : ''));
     
+    // 用户开始发送消息时，重置恢复历史状态
+    if (isRestoringHistory) {
+      console.log('🔄 用户发送消息，重置 isRestoringHistory=false');
+      setIsRestoringHistory(false);
+    }
+    
     // 如果没有会话ID，创建新的会话ID
     let sessionId = currentSessionId;
     if (!sessionId) {
@@ -381,16 +461,10 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
       console.log('🆕 创建新会话ID:', sessionId);
     }
     
-    // 添加用户消息
+    // 添加用户消息（会自动触发保存回调）
     const userMessage = addUserMessage(messageText);
     console.log('👤 添加用户消息:', userMessage.message_id);
     setIsLoading(true);
-    
-    // 立即触发保存 - 用户发送消息时
-    setTimeout(() => {
-      console.log('📤 用户发送消息，准备保存会话和更新任务状态');
-      triggerAutoSave('user_message_sent');
-    }, 100);
     
     try {
       // 添加配置状态日志
@@ -428,7 +502,11 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
         onComplete: () => {
           console.log('✅ ChatPage消息请求完成');
           setIsLoading(false);
-          // 请求完成时的保存将由useEffect监听isLoading变化自动触发
+          // 最终保存，确保所有消息和tokenUsage都已处理完成，并更新任务状态
+          setTimeout(() => {
+            console.log('🏁 后端响应完成，触发最终保存和任务状态更新');
+            saveConversation();
+          }, 500);
         }
       });
     } catch (error) {
@@ -436,7 +514,7 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
       addErrorMessage(error);
       setIsLoading(false);
     }
-  }, [sendMessage, isLoading, selectedAgent, currentSessionId, createSession, addUserMessage, setIsLoading, handleMessage, handleChunkMessage, addErrorMessage, triggerAutoSave, config]);
+  }, [sendMessage, isLoading, selectedAgent, currentSessionId, createSession, addUserMessage, setIsLoading, handleMessage, handleChunkMessage, addErrorMessage, config]);
   
   // 删除handleKeyPress，由MessageInput组件处理
   
@@ -506,6 +584,7 @@ const ChatPage = forwardRef(({ agents, onAddConversation, onUpdateConversation, 
                   onToolClick={handleToolClick}
                   messages={messages}
                   messageIndex={index}
+                  isRestoringHistory={isRestoringHistory}
                 />
               ))}
               {isLoading && (
