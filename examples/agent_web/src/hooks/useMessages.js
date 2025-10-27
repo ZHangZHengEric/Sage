@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
 
-export const useMessages = () => {
+export const useMessages = (onUpdateConversationTokenUsage, isRestoringHistory = false) => {
   const [messages, setMessages] = useState([]);
   const [messageChunks, setMessageChunks] = useState(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
+  const [tokenUsage, setTokenUsage] = useState(null);
   const abortControllerRef = useRef(null);
 
   // 处理分块消息合并
@@ -98,6 +99,59 @@ export const useMessages = () => {
 
   // 处理普通消息
   const handleMessage = useCallback((messageData) => {
+    // 处理 TOKEN_USAGE 消息类型
+    if (messageData.message_type === 'token_usage' && messageData.metadata?.token_usage) {
+      const tokenUsageData = messageData.metadata.token_usage;
+      
+      console.log('📊 useMessages: 收到 TOKEN_USAGE 消息', {
+        messageId: messageData.message_id,
+        sessionId: messageData.session_id,
+        totalTokens: tokenUsageData.total_info?.total_tokens,
+        stepCount: tokenUsageData.per_step_info?.length || 0,
+        timestamp: new Date().toISOString(),
+        isRestoringHistory
+      });
+      
+      // 在恢复历史对话时跳过tokenUsage更新，避免重复累加
+      if (!isRestoringHistory) {
+        // 累加tokenUsage而不是覆盖
+        setTokenUsage(prevTokenUsage => {
+          if (!prevTokenUsage) {
+            console.log('✅ useMessages: 初始化 tokenUsage 状态');
+            return tokenUsageData;
+          }
+          
+          // 累加token使用信息
+          const accumulatedTokenUsage = {
+            total_info: {
+              prompt_tokens: (prevTokenUsage.total_info?.prompt_tokens || 0) + (tokenUsageData.total_info?.prompt_tokens || 0),
+              completion_tokens: (prevTokenUsage.total_info?.completion_tokens || 0) + (tokenUsageData.total_info?.completion_tokens || 0),
+              total_tokens: (prevTokenUsage.total_info?.total_tokens || 0) + (tokenUsageData.total_info?.total_tokens || 0)
+            },
+            per_step_info: [
+              ...(prevTokenUsage.per_step_info || []),
+              ...(tokenUsageData.per_step_info || [])
+            ]
+          };
+          
+          console.log('✅ useMessages: 累加 tokenUsage 状态', {
+            previousTotal: prevTokenUsage.total_info?.total_tokens || 0,
+            newTotal: tokenUsageData.total_info?.total_tokens || 0,
+            accumulatedTotal: accumulatedTokenUsage.total_info.total_tokens
+          });
+          
+          return accumulatedTokenUsage;
+        });
+        
+        // 移除直接调用onUpdateConversationTokenUsage，避免重复保存
+        // tokenUsage的保存将由ChatPage的saveConversation统一处理
+       }
+      
+      // 让 TOKEN_USAGE 消息也显示在对话列表中
+      console.log('📝 useMessages: 将 TOKEN_USAGE 消息添加到对话列表');
+      // 不要 return，让消息继续处理并添加到消息列表中
+    }
+    
     setMessages(prevMessages => {
       const newMessages = [...prevMessages];
       const messageId = messageData.message_id;
@@ -106,6 +160,9 @@ export const useMessages = () => {
       const existingIndex = newMessages.findIndex(
         msg => msg.message_id === messageId
       );
+      
+      let isNewMessage = false;
+      let isMessageUpdated = false;
       
       if (existingIndex >= 0) {
         // 更新现有消息
@@ -117,15 +174,23 @@ export const useMessages = () => {
             ...messageData,
             timestamp: messageData.timestamp || Date.now()
           };
+          isMessageUpdated = true;
         } else {
           // 对于其他消息类型，合并show_content和content
-          newMessages[existingIndex] = {
-            ...existing,
-            ...messageData,
-            show_content: (existing.show_content || '') + (messageData.show_content || ''),
-            content: (existing.content || '') + (messageData.content || ''),
-            timestamp: messageData.timestamp || Date.now()
-          };
+          const newContent = (existing.content || '') + (messageData.content || '');
+          const newShowContent = (existing.show_content || '') + (messageData.show_content || '');
+          
+          // 检查内容是否真的有变化
+          if (newContent !== existing.content || newShowContent !== existing.show_content) {
+            newMessages[existingIndex] = {
+              ...existing,
+              ...messageData,
+              show_content: newShowContent,
+              content: newContent,
+              timestamp: messageData.timestamp || Date.now()
+            };
+            isMessageUpdated = true;
+          }
         }
       } else {
         // 添加新消息
@@ -133,11 +198,14 @@ export const useMessages = () => {
           ...messageData,
           timestamp: messageData.timestamp || Date.now()
         });
+        isNewMessage = true;
       }
+      
+      // 实时对话中的消息变化不再触发保存回调，由ChatPage的useEffect监听messages变化
       
       return newMessages;
     });
-  }, []);
+  }, [isRestoringHistory, onUpdateConversationTokenUsage]);
 
   // 添加用户消息
   const addUserMessage = useCallback((content) => {
@@ -149,6 +217,9 @@ export const useMessages = () => {
     };
     
     setMessages(prev => [...prev, userMessage]);
+    
+    // 用户消息添加不再触发保存回调，由ChatPage的useEffect监听messages变化
+    
     return userMessage;
   }, []);
 
@@ -169,6 +240,7 @@ export const useMessages = () => {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setMessageChunks(new Map());
+    setTokenUsage(null);
   }, []);
 
   // 停止生成
@@ -206,6 +278,8 @@ export const useMessages = () => {
     setIsLoading,
     inputMessage,
     setInputMessage,
+    tokenUsage,
+    setTokenUsage,
     abortControllerRef,
     handleChunkMessage,
     handleMessage,
