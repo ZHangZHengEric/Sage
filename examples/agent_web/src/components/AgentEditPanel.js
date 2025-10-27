@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Save, X, Plus, Search, ChevronDown, ChevronRight, ChevronLeft, Edit, ArrowRight, Zap } from 'lucide-react';
+import { Save, X, Plus, Search, ChevronDown, ChevronRight, ChevronLeft, Edit, ArrowRight, Zap, Code } from 'lucide-react';
 import './AgentEditPanel.css';
 import { useLanguage } from '../contexts/LanguageContext';
 import ThreeOptionSwitch from './ThreeOptionSwitch';
 import WorkflowEditModal from './WorkflowEditModal';
+import CodeModal from './CodeModal';
 
 const AgentEditPanel = ({ agent, tools, onSave, onBack }) => {
   const { t } = useLanguage();
@@ -55,6 +56,7 @@ const AgentEditPanel = ({ agent, tools, onSave, onBack }) => {
   const [optimizationGoal, setOptimizationGoal] = useState('');
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizedResult, setOptimizedResult] = useState('');
+  const [showCodeModal, setShowCodeModal] = useState(false);
 
   useEffect(() => {
     console.log('[DEBUG] useEffect - agent changed:', agent);
@@ -477,6 +479,15 @@ const AgentEditPanel = ({ agent, tools, onSave, onBack }) => {
           <span className="breadcrumb-current">{agent ? (isReadOnly ? t('agentEdit.viewAgent') : t('agentEdit.editAgent')) : t('agentEdit.newAgent')}</span>
         </div>
         <div className="header-actions">
+          {agent && formData.name.trim() && (
+            <button 
+              className="code-btn" 
+              onClick={() => setShowCodeModal(true)}
+              title="查看代码示例"
+            >
+              <Code size={20} />
+            </button>
+          )}
           {!isReadOnly && (
             <button 
               className={`save-btn ${isSaving ? 'saving' : ''} ${saveSuccess ? 'success' : ''}`} 
@@ -1046,6 +1057,13 @@ const AgentEditPanel = ({ agent, tools, onSave, onBack }) => {
         workflow={editingWorkflow}
         onSave={handleWorkflowSave}
         onClose={handleWorkflowModalClose}
+      />
+
+      {/* 代码示例弹窗 */}
+      <CodeModal
+        isOpen={showCodeModal}
+        agent={formData}
+        onClose={() => setShowCodeModal(false)}
       />
     </div>
   );

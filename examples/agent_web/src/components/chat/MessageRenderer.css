@@ -297,6 +297,18 @@
   gap: 8px;
 }
 
+/* Token使用信息消息样式 */
+.message.token-usage-message {
+  justify-content: center;
+  align-items: center;
+  margin: 16px 0;
+}
+
+.message.token-usage-message .token-usage {
+  margin: 0 auto;
+  max-width: 600px;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .message {
@@ -318,5 +330,9 @@
   .tool-header {
     margin-bottom: 6px;
     padding-bottom: 4px;
+  }
+  
+  .message.token-usage-message .token-usage {
+    max-width: 90%;
   }
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -6,11 +6,13 @@ import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ReactECharts from 'echarts-for-react';
 import MessageAvatar from './MessageAvatar';
 import MessageTypeLabel from './MessageTypeLabel';
+import TokenUsage from './TokenUsage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import './MessageRenderer.css';
 
-const MessageRenderer = ({ message, onDownloadFile, onToolClick, messages, messageIndex }) => {
+const MessageRenderer = ({ message, onDownloadFile, onToolClick, onTokenUsage, messages, messageIndex, isRestoringHistory }) => {
   const { t } = useLanguage();
+  const processedTokenUsageRef = useRef(new Set());
   
   // 参数验证
   if (!message) {
@@ -239,9 +241,67 @@ const MessageRenderer = ({ message, onDownloadFile, onToolClick, messages, messa
     return renderErrorMessage();
   }
   
+  // 处理 token 使用信息
+  if (message.type === 'token_usage' || message.message_type === 'token_usage') {
+    const tokenUsageData = message.metadata?.token_usage;
+    // console.log('🎯 MessageRenderer: 收到 token_usage 消息', {
+    //   messageId: message.message_id,
+    //   sessionId: message.session_id,
+    //   tokenUsageData: tokenUsageData,
+    //   timestamp: new Date().toISOString()
+    // });
+    
+    if (tokenUsageData) {
+      // console.log('✅ MessageRenderer: 渲染 TokenUsage 组件', {
+      //   totalTokens: tokenUsageData.total_info?.total_tokens,
+      //   stepCount: tokenUsageData.per_step_info?.length || 0
+      // });
+      
+      // 使用 useEffect 延迟调用回调函数，但只处理一次相同的消息
+        useEffect(() => {
+         // 如果当前正在恢复历史对话，则跳过 onTokenUsage 调用
+         if (isRestoringHistory) {
+           // console.log('🔄 MessageRenderer: 恢复历史对话中，跳过 onTokenUsage 调用');
+           return;
+         }
+         
+         if (onTokenUsage && tokenUsageData && message.session_id) {
+           const messageKey = `${message.message_id}_${message.session_id}`;
+           
+           // 检查是否已经处理过这个消息
+           if (processedTokenUsageRef.current.has(messageKey)) {
+             // console.log('⏭️ MessageRenderer: 跳过已处理的 token_usage 消息', { messageKey });
+             return;
+           }
+           
+           // console.log('🔄 MessageRenderer: 调用 onTokenUsage 回调函数', {
+           //   sessionId: message.session_id,
+           //   tokenUsageData,
+           //   messageKey
+           // });
+           
+           // 标记为已处理
+           processedTokenUsageRef.current.add(messageKey);
+           
+           // 调用回调函数
+           onTokenUsage(tokenUsageData, message.session_id);
+         }
+       }, [message.message_id, message.session_id, onTokenUsage, isRestoringHistory]);
+      
+      return (
+        <div className="message token-usage-message">
+          <TokenUsage tokenUsage={tokenUsageData} />
+        </div>
+      );
+    }
+    
+    console.warn('⚠️ MessageRenderer: token_usage 消息缺少 metadata.token_usage 数据');
+    return null;
+  }
+  
   if (message.role === 'user') {
-    if (message.message_type =='guide')
-      return 
+    if (message.message_type === 'guide')
+      return null;
     else
       return renderUserMessage();
   }
