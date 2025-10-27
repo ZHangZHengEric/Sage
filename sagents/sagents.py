@@ -147,7 +147,7 @@ class SAgent:
         ):
             # 过滤掉空消息块
             for message_chunk in message_chunks:
-                if message_chunk.content or message_chunk.show_content or message_chunk.tool_calls:
+                if message_chunk.content or message_chunk.show_content or message_chunk.tool_calls or message_chunk.type==MessageType.TOKEN_USAGE.value:
                     yield [message_chunk]
 
     def run_stream_internal(self, 
