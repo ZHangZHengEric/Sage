@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   server: {
     port: process.env.SAGE_DEV_WEB_SERVICE_PORT || env.SAGE_DEV_WEB_SERVICE_PORT || 23233,
     host: true,
-    allowedHosts: [process.env.AGENT_WEB_HOST || env.AGENT_WEB_HOST],
+    allowedHosts: [process.env.AGENT_WEB_HOST || env.AGENT_WEB_HOST || 'agentdev.rcrai.com'],
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET || env.VITE_API_TARGET || 'http://localhost:23232',

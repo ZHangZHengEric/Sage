@@ -313,6 +313,60 @@
   opacity: 0.7;
 }
 
+.token-usage-stat {
+  background: rgba(255, 193, 7, 0.1);
+  border-radius: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 193, 7, 0.2);
+}
+
+.token-usage-stat svg {
+  color: rgba(255, 193, 7, 0.8);
+}
+
+.token-usage-stat .token-count {
+  color: rgb(255, 193, 7);
+  font-weight: 600;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 11px;
+}
+
+.token-usage-detailed {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.token-usage-detailed .stat-item-small {
+  min-width: fit-content;
+}
+
+.token-usage-detailed .token-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  margin-right: 2px;
+}
+
+.token-usage-detailed .stat-item-small:nth-child(1) {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.token-usage-detailed .stat-item-small:nth-child(1) .token-count {
+  color: rgb(34, 197, 94);
+}
+
+.token-usage-detailed .stat-item-small:nth-child(2) {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.token-usage-detailed .stat-item-small:nth-child(2) .token-count {
+  color: rgb(59, 130, 246);
+}
+
 .agent-info {
   display: flex;
   align-items: center;
@@ -488,7 +542,8 @@
   z-index: 1000;
 }
 
-.modal-content {
+/* History page specific modal content styles */
+.history-page .modal-content {
   background: white;
   border-radius: 12px;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);

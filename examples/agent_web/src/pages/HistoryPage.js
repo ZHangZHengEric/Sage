@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { MessageCircle, Search, Trash2, Calendar, User, Bot, Clock, Filter, Share } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { MessageCircle, Search, Trash2, Calendar, User, Bot, Clock, Filter, Share, Zap } from 'lucide-react';
 import { exportToHTML } from '../utils/htmlExporter';
 import './HistoryPage.css';
 import { useLanguage } from '../contexts/LanguageContext';
+import StorageService from '../services/StorageService';
 
-const HistoryPage = ({ conversations, agents, onDeleteConversation, onSelectConversation }) => {
+const HistoryPage = React.memo(({ conversations, agents, onDeleteConversation, onSelectConversation }) => {
   const { t, language } = useLanguage();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAgent, setFilterAgent] = useState('all');
@@ -12,6 +13,17 @@ const HistoryPage = ({ conversations, agents, onDeleteConversation, onSelectConv
   const [selectedConversations, setSelectedConversations] = useState(new Set());
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareConversation, setShareConversation] = useState(null);
+  
+  // 添加防抖状态，防止重复点击
+  const [isProcessingClick, setIsProcessingClick] = useState(false);
+  
+  // 开发环境下的调试日志（StrictMode 下会重复执行，这是正常的）
+  if (process.env.NODE_ENV === 'development' && conversations) {
+    // console.log('📋 HistoryPage: 接收到的conversations数据', {
+    //   count: conversations?.length || 0,
+    //   conversations: conversations?.slice(0, 3) // 只显示前3个用于调试
+    // });
+  }
   
   const formatDate = (timestamp) => {
     const date = new Date(timestamp);
@@ -114,6 +126,48 @@ const HistoryPage = ({ conversations, agents, onDeleteConversation, onSelectConv
         onDeleteConversation(conv.id);
       });
     }
+  };
+  
+  // 处理对话选择，添加防抖逻辑
+  const handleConversationClick = (conversation, event) => {
+    // 防止事件冒泡
+    event.stopPropagation();
+    
+    // 防抖处理
+    if (isProcessingClick) {
+      console.log('🚫 HistoryPage: 正在处理点击，忽略重复点击');
+      return;
+    }
+    
+    setIsProcessingClick(true);
+    
+    // console.log('🔍 HistoryPage: 对话记录被点击', {
+    //   conversationId: conversation.id,
+    //   sessionId: conversation.sessionId,
+    //   messageCount: conversation.messages?.length || 0,
+    //   hasTokenUsage: !!conversation.tokenUsage
+    // });
+    
+    // 详细检查tokenUsage结构
+    if (conversation.tokenUsage) {
+      console.log('📊 HistoryPage: tokenUsage详细信息', {
+        totalInfo: conversation.tokenUsage.total_info,
+        perStepInfo: conversation.tokenUsage.per_step_info,
+        totalTokens: conversation.tokenUsage.total_info?.total_tokens,
+        inputTokens: conversation.tokenUsage.total_info?.input_tokens,
+        outputTokens: conversation.tokenUsage.total_info?.output_tokens
+      });
+    } else {
+      console.log('❌ HistoryPage: 该对话没有tokenUsage数据');
+    }
+    
+    // 调用选择对话的回调
+    onSelectConversation(conversation);
+    
+    // 重置防抖状态
+    setTimeout(() => {
+      setIsProcessingClick(false);
+    }, 500); // 500ms 防抖时间
   };
   
   const getAgentName = (agentId) => {
@@ -317,7 +371,7 @@ const HistoryPage = ({ conversations, agents, onDeleteConversation, onSelectConv
                   />
                 </div>
                 
-                <div className="conversation-info" onClick={() => onSelectConversation(conversation)}>
+                <div className="conversation-info" onClick={(e) => handleConversationClick(conversation, e)}>
                   <div className="conversation-title-row">
                     <h3 className="conversation-title">{conversation.title}</h3>
                     <div className="conversation-meta">
@@ -346,6 +400,29 @@ const HistoryPage = ({ conversations, agents, onDeleteConversation, onSelectConv
                         <Bot size={12} />
                         <span>{messageCount.assistant}</span>
                       </div>
+                      {conversation.tokenUsage && (
+                        <div className="token-usage-detailed">
+                          <div className="stat-item-small token-usage-stat">
+                            <span className="token-label">输入:</span>
+                            <span className="token-count">{(conversation.tokenUsage.total_info?.prompt_tokens || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="stat-item-small token-usage-stat">
+                            <span className="token-label">输出:</span>
+                            <span className="token-count">{(conversation.tokenUsage.total_info?.completion_tokens || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="stat-item-small token-usage-stat">
+                            <Zap size={12} />
+                            <span className="token-count">{(conversation.tokenUsage.total_info?.total_tokens || 0).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      )}
+                      {/* 调试信息 */}
+                      {console.log('🔍 HistoryPage: 对话记录', {
+                        conversationId: conversation.id,
+                        hasTokenUsage: !!conversation.tokenUsage,
+                        tokenUsage: conversation.tokenUsage,
+                        totalTokens: conversation.tokenUsage?.total_info?.total_tokens
+                      })}
                     </div>
                     
                     <div className="agent-info">
@@ -454,6 +531,29 @@ const HistoryPage = ({ conversations, agents, onDeleteConversation, onSelectConv
       )}
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  // 自定义比较函数，只有当 conversations 或 agents 真正发生变化时才重新渲染
+  const conversationsEqual = 
+    prevProps.conversations.length === nextProps.conversations.length &&
+    prevProps.conversations.every((conv, index) => {
+      const nextConv = nextProps.conversations[index];
+      return conv.id === nextConv.id && 
+             conv.updatedAt === nextConv.updatedAt &&
+             conv.title === nextConv.title &&
+             JSON.stringify(conv.tokenUsage) === JSON.stringify(nextConv.tokenUsage);
+    });
+  
+  const agentsEqual = 
+    prevProps.agents.length === nextProps.agents.length &&
+    prevProps.agents.every((agent, index) => 
+      agent.id === nextProps.agents[index]?.id
+    );
+  
+  const callbacksEqual = 
+    prevProps.onDeleteConversation === nextProps.onDeleteConversation &&
+    prevProps.onSelectConversation === nextProps.onSelectConversation;
+  
+  return conversationsEqual && agentsEqual && callbacksEqual;
+});
 
 export default HistoryPage;
