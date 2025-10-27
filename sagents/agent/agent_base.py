@@ -163,7 +163,8 @@ class AgentBase(ABC):
                 extra_body={
                     "chat_template_kwargs": {"enable_thinking": False},
                     "enable_thinking":False,
-                    "thinking":{'type':"disabled"}
+                    "thinking":{'type':"disabled"},
+                    "top_k":20
                 },
                 **final_config
             )
