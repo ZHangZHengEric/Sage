@@ -90,7 +90,7 @@ class AgentFlow:
             except Exception as cleanup_error:
                 logger.warning(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
     
-    def _execute_agent_phase(self,
+    async def _execute_agent_phase(self,
                              session_context: SessionContext,
                              tool_manager: Optional[Any],
                              session_id: str,

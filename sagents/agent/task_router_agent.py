@@ -20,7 +20,7 @@ class TaskRouterAgent(AgentBase):
         self.agent_name = "TaskRouterAgent"
         self.agent_description = "任务路由智能体，专门负责根据用户的任务描述路由到合适的智能体"
         logger.info("TaskRouterAgent 初始化完成")
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
         history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
         task_desc = MessageManager.convert_messages_to_dict_for_request(history_messages)

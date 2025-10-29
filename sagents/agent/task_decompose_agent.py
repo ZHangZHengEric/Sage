@@ -20,7 +20,7 @@ class TaskDecomposeAgent(AgentBase):
         self.agent_name = "TaskDecomposeAgent"
         self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
         logger.info("TaskDecomposeAgent 初始化完成")
-    def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix', language=session_context.get_language())
         
@@ -96,9 +96,10 @@ class TaskDecomposeAgent(AgentBase):
                             )]
                         last_tag_type = delta_content_type
 
-        yield from self._finalize_decomposition_result(full_response, message_id, task_manager)
+        async for chunk in self._finalize_decomposition_result(full_response, message_id, task_manager):
+            yield chunk
 
-    def _finalize_decomposition_result(self, 
+    async def _finalize_decomposition_result(self, 
                                      full_response: str, 
                                      message_id: str,
                                      task_manager: Optional[TaskManager] = None) -> Generator[List[MessageChunk], None, None]:

@@ -66,7 +66,7 @@ class AgentBase(ABC):
         return tool_spec
 
     @abstractmethod
-    def run_stream(self, 
+    async def run_stream(self, 
                    session_context: SessionContext, 
                    tool_manager: ToolManager = None,
                    session_id: str = None,
