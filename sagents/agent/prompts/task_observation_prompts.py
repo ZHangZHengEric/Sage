@@ -92,7 +92,7 @@ in_progress
 ```
 
 finish_percent：子任务完成数量的百分比数字，格式：30，范围0-100，100表示所有的子任务都完成
-completion_status：任务完成状态，in_progress（进行中）、completed（已完成）、need_user_input（需要用户输入）、failed（失败）
+completion_status：任务完成状态，in_progress（进行中）、completed（已完成）、need_user_input（需要用户输入）、failed（失败），只有当所有的pending_task_ids都为空时，或者finish_percent为100时，才可以设置为completed
 completed_task_ids：已完成的子任务ID列表，格式：["1", "2"]，通过近期完成动作详情以及任务管理器状态，判定已完成的子任务ID列表
 pending_task_ids：未完成的子任务ID列表，格式：["3", "4"]，通过近期完成动作详情以及任务管理器状态，判定未完成的子任务ID列表
 failed_task_ids：无法完成的子任务ID列表，格式：["5"]，通过近期完成动作详情以及任务管理器状态，经过3次尝试执行后，判定无法完成的子任务ID列表""",
