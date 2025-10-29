@@ -188,3 +188,5 @@ cython_debug/
 *.db
 agent_workspace
 .conda
+.idea
+.github

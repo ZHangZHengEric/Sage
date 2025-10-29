@@ -124,7 +124,7 @@ class SAgent:
         
         logger.info("SAgent: 所有智能体初始化完成")
 
-    def run_stream(self, 
+    async def run_stream(self, 
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
         session_id: Optional[str] = None, 
@@ -137,7 +137,7 @@ class SAgent:
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
         # 调用内部方法执行流式处理，对结果进行过滤
-        for message_chunks in self.run_stream_internal(
+        async for message_chunks in self.run_stream_internal(
             input_messages=input_messages,
             tool_manager=tool_manager,
             session_id=session_id,
@@ -155,7 +155,7 @@ class SAgent:
                 if message_chunk.content or message_chunk.show_content or message_chunk.tool_calls or message_chunk.type==MessageType.TOKEN_USAGE.value:
                     yield [message_chunk]
 
-    def run_stream_internal(self, 
+    async def run_stream_internal(self, 
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]], 
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
         session_id: Optional[str] = None, 
@@ -219,7 +219,7 @@ class SAgent:
                         session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
                 session_context.status = SessionStatus.RUNNING
-                initial_messages = self._prepare_initial_messages(input_messages)
+                initial_messages =  self._prepare_initial_messages(input_messages)
                 
                 # 尝试初始化记忆
                 session_context.init_user_memory_manager(tool_manager)
@@ -251,21 +251,22 @@ class SAgent:
                 # 检查WorkflowManager中是否有工作流
                 if session_context.workflow_manager.list_workflows():
                     if len(session_context.workflow_manager.list_workflows()) > 5:
-                        for message_chunks in self._execute_agent_phase(
+                        async for message_chunks in self._execute_agent_phase(
                                 session_context=session_context,
                                 tool_manager=tool_manager,
                                 session_id=session_id,
                                 agent=self.workflow_select_agent,
                                 phase_name="工作流选择"
                             ):
-                                session_context.message_manager.add_messages(message_chunks)
+                                if len(message_chunks) > 0:
+                                    session_context.message_manager.add_messages(message_chunks)
                                 yield message_chunks
                     else:
                         session_context.add_and_update_system_context({'workflow_guidance': session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())})
                 
                 # 当deep_thinking 或者 multi_agent 为None，其一为none时，调用task router
                 if deep_thinking is None or multi_agent is None:
-                    for message_chunks in self._execute_agent_phase(
+                    async for message_chunks in self._execute_agent_phase(
                         session_context=session_context,
                         tool_manager=tool_manager,
                         session_id=session_id,
@@ -284,7 +285,7 @@ class SAgent:
 
                 # 1. 任务分析阶段
                 if deep_thinking:
-                    for message_chunks in self._execute_agent_phase(
+                    async for message_chunks in self._execute_agent_phase(
                         session_context=session_context,
                         tool_manager=tool_manager,
                         session_id=session_id,
@@ -295,7 +296,7 @@ class SAgent:
                         yield message_chunks
                         
                 if multi_agent:
-                    for message_chunks in self._execute_multi_agent_workflow(
+                    async for message_chunks in self._execute_multi_agent_workflow(
                         session_context=session_context,
                         tool_manager=tool_manager,
                         session_id=session_id,
@@ -306,7 +307,7 @@ class SAgent:
                 else:
                     # 直接执行模式：可选的任务分析 + 直接执行
                     logger.info("SAgent: 开始简化工作流")                
-                    for message_chunks in self._execute_agent_phase(
+                    async for message_chunks in self._execute_agent_phase(
                         session_context=session_context,
                         tool_manager=tool_manager,
                         session_id=session_id,
@@ -317,10 +318,12 @@ class SAgent:
                         yield message_chunks
 
                     if force_summary:
-                        yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
+                        async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
+                            session_context.message_manager.add_messages(message_chunks)
+                            yield message_chunks
 
                 if more_suggest:
-                    for message_chunks in self._execute_agent_phase(
+                    async for message_chunks in self._execute_agent_phase(
                         session_context=session_context,
                         tool_manager=tool_manager,
                         session_id=session_id,
@@ -333,7 +336,7 @@ class SAgent:
                 logger.debug(f"SAgent: 检查是否需要提取记忆")            
                 if session_context.user_memory_manager:
                     logger.debug(f"SAgent: 开始记忆提取")
-                    for message_chunks in self._execute_agent_phase(
+                    async for message_chunks in self._execute_agent_phase(
                         session_context=session_context,
                         tool_manager=tool_manager,
                         session_id=session_id,
@@ -354,7 +357,9 @@ class SAgent:
             # 标记会话错误
             logger.error(f"traceback: {traceback.format_exc()}")
             session_context.status = SessionStatus.ERROR
-            yield from self._handle_workflow_error(e)
+            async for message_chunks in self._handle_workflow_error(e):
+                session_context.message_manager.add_messages(message_chunks)
+                yield message_chunks
         finally:
             # 保存会话状态到文件
             logger.info(f"run_stream finally save context info")
@@ -394,13 +399,14 @@ class SAgent:
             except Exception as cleanup_error:
                 logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
 
-    def _execute_multi_agent_workflow(self, 
+    async def _execute_multi_agent_workflow(self, 
                                      session_context: SessionContext,
                                      tool_manager: Optional[Any],
                                      session_id: str,
                                      max_loop_count: int) -> Generator[List[MessageChunk], None, None]:
         # 执行任务分解
-        yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_decompose_agent, "任务分解")
+        async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_decompose_agent, "任务分解"):
+            yield chunk
         current_completed_tasks= session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
         loop_count = 0
         while True:
@@ -413,14 +419,17 @@ class SAgent:
             if loop_count >= max_loop_count:
                 logger.info(f"SAgent: 主循环已达到最大轮数 {max_loop_count}，会话ID: {session_id}")
                 break
-            yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_planning_agent, "任务规划")
+            async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_planning_agent, "任务规划"):
+                yield chunk
             
-            yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_executor_agent, "任务执行")
+            async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_executor_agent, "任务执行"):
+                yield chunk
             
-            yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_observation_agent, "任务观察")
-
-            yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_completion_judge_agent, "任务完成判断")
-
+            async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_observation_agent, "任务观察"):
+                yield chunk
+                
+            async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_completion_judge_agent, "任务完成判断"):
+                yield chunk
             if session_context.status == SessionStatus.INTERRUPTED:
                 logger.info(f"SAgent: 规划-执行-观察循环第 {loop_count} 轮被中断，会话ID: {session_id}")
                 return
@@ -428,7 +437,8 @@ class SAgent:
             now_completed_tasks= session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
             if len(now_completed_tasks) > len(current_completed_tasks):
                 logger.info(f"SAgent: 检测到任务状态变化，完成任务数从 {len(current_completed_tasks)} 增加到 {len(now_completed_tasks)}")
-                yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_stage_summary_agent, "任务阶段总结")
+                async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_stage_summary_agent, "任务阶段总结"):
+                    yield chunk
                 current_completed_tasks = now_completed_tasks
 
             # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
@@ -445,9 +455,10 @@ class SAgent:
                 logger.info(f"SAgent: 规划-执行-观察循环完成，会话ID: {session_id}，完成状态: {session_context.audit_status['completion_status']}")
                 break
         # 执行任务总结
-        yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
+        async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
+            yield chunk
 
-    def _execute_agent_phase(self,
+    async def _execute_agent_phase(self,
                              session_context: SessionContext,
                              tool_manager: Optional[Any],
                              session_id: str,
@@ -459,7 +470,7 @@ class SAgent:
             logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
             return
         
-        for chunk in agent.run_stream(
+        async for chunk in agent.run_stream(
             session_context=session_context,
             tool_manager=tool_manager,
             session_id=session_id,
@@ -496,7 +507,7 @@ class SAgent:
         logger.info(f"SAgent: 初始化消息数量: {len(input_messages)}")
         return input_messages
     
-    def _handle_workflow_error(self, error: Exception) -> Generator[List[MessageChunk], None, None]:
+    async def _handle_workflow_error(self, error: Exception) -> Generator[List[MessageChunk], None, None]:
         """
         处理工作流执行错误
         

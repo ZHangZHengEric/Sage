@@ -21,7 +21,7 @@ class TaskRewriteAgent(AgentBase):
         self.agent_description = "任务请求重写智能体，专门负责重写用户的请求"
         logger.info("TaskRewriteAgent 初始化完成")
     
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt("TaskRewriteAgent", "task_rewrite_system_prefix", session_context.get_language(), "")
         
@@ -31,7 +31,8 @@ class TaskRewriteAgent(AgentBase):
 
         last_user_message = message_manager.get_last_user_message()
         if last_user_message is None:
-            return []
+            yield []
+            return
         latest_request = last_user_message.content
         
         rewrite_template = PromptManager().get_agent_prompt_auto("rewrite_template", language=session_context.get_language())
