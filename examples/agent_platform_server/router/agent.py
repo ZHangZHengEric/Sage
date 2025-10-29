@@ -194,7 +194,7 @@ async def delete_agent(
     )
 
 
-@agent_router.post("/agent/auto-generate")
+@agent_router.post("/auto-generate")
 async def auto_generate_agent(
     request: AutoGenAgentRequest
 ):
@@ -211,12 +211,16 @@ async def auto_generate_agent(
     model_client = global_vars.get_default_model_client()
     
     # 使用自动生成工具
-    auto_gen_func = AutoGenAgentFunc(model_client)
+    auto_gen_func = AutoGenAgentFunc()
     
     # 生成Agent配置
     agent_config = auto_gen_func.generate_agent_config(
-        description=request.agent_description,
+        agent_description=request.agent_description,
+        tool_manager=global_vars.get_tool_manager(),
+        llm_client=model_client,
+        model="qwen-plus",
     )
+    agent_config["id"] = ''
     
     if not agent_config:
         raise SageHTTPException(

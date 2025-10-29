@@ -468,7 +468,7 @@ async def chat_stream(request: ChatRequest):
                 max_loop_count=20,
             ):
                 # 处理消息块
-                for msg in chunk:
+                async for msg in chunk:
                     msg_dict = msg.to_dict()
                     # 安全处理content和show_content，避免JSON转义问题
                     content = msg_dict.get('content', '')

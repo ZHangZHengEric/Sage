@@ -311,3 +311,54 @@ async def get_conversation_messages(conversation_id: str):
             detail="获取会话消息失败",
             error_detail=str(e)
         )
+
+
+@session_router.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """删除指定对话"""
+    try:
+        # 获取数据库管理器
+        db_manager = global_vars.get_database_manager()
+        if not db_manager:
+            raise SageHTTPException(
+                status_code=500,
+                detail="数据库管理器未初始化",
+                error_detail="Database manager not initialized"
+            )
+        
+        # 检查会话是否存在
+        conversation = await db_manager.get_conversation(conversation_id)
+        if not conversation:
+            raise SageHTTPException(
+                status_code=404,
+                detail=f"会话 {conversation_id} 不存在",
+                error_detail=f"Conversation '{conversation_id}' not found"
+            )
+        
+        # 删除会话
+        success = await db_manager.delete_conversation(conversation_id)
+        
+        if success:
+            logger.info(f"会话 {conversation_id} 删除成功")
+            return create_success_response(
+                message=f"会话 {conversation_id} 已删除",
+                data={"conversation_id": conversation_id}
+            )
+        else:
+            raise SageHTTPException(
+                status_code=500,
+                detail=f"删除会话 {conversation_id} 失败",
+                error_detail=f"Failed to delete conversation '{conversation_id}'"
+            )
+        
+    except SageHTTPException:
+        # 重新抛出已知的HTTP异常
+        raise
+    except Exception as e:
+        logger.error(f"删除会话失败: {e}")
+        raise SageHTTPException(
+            status_code=500,
+            detail="删除会话失败",
+            error_detail=str(e)
+        )
+

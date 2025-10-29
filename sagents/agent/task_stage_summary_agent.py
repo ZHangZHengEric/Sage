@@ -23,7 +23,7 @@ class TaskStageSummaryAgent(AgentBase):
         self.agent_description = "任务执行阶段性总结智能体，专门负责生成任务执行的阶段性总结"
         logger.info("StageSummaryAgent 初始化完成")
     
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取带有正确语言的prompt
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
         

@@ -4,6 +4,7 @@ Sage流式服务处理器
 
 import os
 import json
+from re import A
 import uuid
 import asyncio
 import traceback
@@ -174,7 +175,7 @@ class SageStreamService:
         try:
             logger.info("🔄 准备调用 sage_controller.run_stream...")
             
-            # 直接调用同步的 run_stream 方法
+            # 直接调用异步的 run_stream 方法
             stream_result = self.sage_controller.run_stream(
                 input_messages=messages,
                 tool_manager=self.tool_manager,
@@ -189,11 +190,12 @@ class SageStreamService:
                 force_summary=force_summary
             )
             
+            
             logger.info("✅ run_stream 调用成功，开始处理结果...")
             
-            # 处理返回的生成器
+            # 处理返回的异步生成器
             chunk_count = 0
-            for chunk in stream_result:
+            async for chunk in stream_result:
                 chunk_count += 1
                 # logger.info(f"📦 处理第 {chunk_count} 个块，包含 {len(chunk)} 条消息")
                 
