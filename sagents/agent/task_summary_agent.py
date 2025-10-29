@@ -20,7 +20,7 @@ class TaskSummaryAgent(AgentBase):
         self.agent_description = "任务总结智能体，专门负责生成任务执行的总结报告"
         logger.info("TaskSummaryAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
         

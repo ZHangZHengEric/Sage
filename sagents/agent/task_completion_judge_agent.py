@@ -1,4 +1,5 @@
 
+from re import A
 import traceback
 from sagents.utils.prompt_manager import PromptManager
 from sagents.context.messages.message_manager import MessageManager
@@ -23,7 +24,7 @@ class TaskCompletionJudgeAgent(AgentBase):
         self.agent_description = "完成判断智能体，专门负责判断任务是否完成"
         logger.info("TaskCompletionJudgeAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_completion_judge_system_prefix', language=session_context.get_language())
         
@@ -73,12 +74,14 @@ class TaskCompletionJudgeAgent(AgentBase):
             if llm_repsonse_chunk.choices[0].delta.content:
                 delta_content = llm_repsonse_chunk.choices[0].delta.content
                 all_content += delta_content
-        yield from self._finalize_task_completion_judge_result(
+        for result in self._finalize_task_completion_judge_result(
             session_context=session_context,
             all_content=all_content, 
             message_id=message_id,
             task_manager = task_manager
-        )
+        ):
+            yield result
+        
     def _finalize_task_completion_judge_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
         """
         最终化任务完成判断结果
