@@ -26,7 +26,7 @@ class WorkflowSelectAgent(AgentBase):
         self.agent_description = "工作流选择智能体，专门负责根据用户需求选择最合适的工作流"
         logger.info("WorkflowSelectAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
         
         # 提取最近的对话历史

@@ -23,7 +23,7 @@ class QuerySuggestAgent(AgentBase):
         self.agent_description = "查询建议智能体，专门负责根据用户对话生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。"
         logger.info("QuerySuggestAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
 
         conversation_messages = message_manager.extract_all_context_messages(recent_turns=2,max_length=self.max_history_context_length,last_turn_user_only=False)
@@ -83,9 +83,10 @@ class QuerySuggestAgent(AgentBase):
                             )]
                         last_tag_type = delta_content_type
 
-        yield from self._finalize_query_suggest_result(full_response, message_id)
+        async for chunk in self._finalize_query_suggest_result(full_response, message_id):
+            yield chunk
 
-    def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> Generator[List[MessageChunk], None, None]:
+    async def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> Generator[List[MessageChunk], None, None]:
         logger.debug("QuerySuggestAgent: 处理最终查询建议结果")
         try:
             # 解析查询建议列表
@@ -109,6 +110,7 @@ class QuerySuggestAgent(AgentBase):
                 show_content="查询建议生成失败",
                 message_type=MessageType.QUERY_SUGGEST.value
             )]
+            
     def _convert_xlm_to_json(self, xml_str: str) -> List[str]:
         # 使用正则表达式提取 <suggest_item> 标签中的内容
         pattern = r'<suggest_item>(.*?)</suggest_item>'

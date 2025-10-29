@@ -22,7 +22,7 @@ class TaskPlanningAgent(AgentBase):
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("PlanningAgent 初始化完成")
     
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_planning_system_prefix', language=session_context.get_language())
         
@@ -105,12 +105,13 @@ class TaskPlanningAgent(AgentBase):
                                 message_type=MessageType.PLANNING.value
                             )]
                         last_tag_type = tag_type
-        yield from self._finalize_planning_result(
+        async for chunk in self._finalize_planning_result(
             session_context=session_context,
             all_content=all_content, 
             message_id=message_id
-        )
-    def _finalize_planning_result(self, 
+        ):
+            yield chunk
+    async def _finalize_planning_result(self, 
                                 session_context: SessionContext,
                                 all_content: str, 
                                 message_id: str) -> Generator[List[MessageChunk], None, None]:

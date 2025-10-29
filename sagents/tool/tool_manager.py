@@ -487,8 +487,21 @@ class ToolManager:
             elif isinstance(tool, ToolSpec):
                 final_result = self._execute_standard_tool(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
-                # For AgentToolSpec, return a generator for streaming
-                return self._execute_agent_tool_streaming(tool, session_context, session_id)
+                from concurrent.futures import ThreadPoolExecutor
+                
+                def run_async_task():
+                    return asyncio.run(self._execute_agent_tool_streaming_async(tool, session_context, session_id))
+                
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    try:
+                        future = executor.submit(run_async_task)
+                        final_result = future.result(timeout=300)
+                    except TimeoutError:
+                        logger.error(f"MCP tool {tool.name} execution timed out")
+                        raise RuntimeError(f"MCP tool {tool.name} execution timed out after 300 seconds")
+                    except Exception as e:
+                        logger.error(f"MCP tool {tool.name} execution failed: {str(e)}")
+                        raise
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
@@ -512,72 +525,6 @@ class ToolManager:
             error_msg = f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
-
-
-    def _execute_agent_tool_streaming(self, tool: AgentToolSpec, session_context: SessionContext, session_id: str):
-        """
-        执行AgentToolSpec并返回流式结果
-        
-        Args:
-            tool: AgentToolSpec实例
-            session_context: 会话上下文
-            session_id: 会话ID
-            
-        Yields:
-            流式返回的结果
-        """
-        logger.info(f"Executing agent tool with streaming: {tool.name}")
-        execution_start = time.time()
-        
-        try:
-            # 检查agent是否有run_stream方法
-            agent_instance = tool.func.__self__ if hasattr(tool.func, '__self__') else None
-            
-            if agent_instance and hasattr(agent_instance, 'run_stream'):
-                logger.debug(f"Using run_stream method for agent: {tool.name}")
-                # 使用流式方法
-                stream_generator = agent_instance.run_stream(
-                    session_context=session_context, 
-                    tool_manager=self,
-                    session_id=session_id
-                )
-                
-                # 流式返回结果
-                for chunk in stream_generator:
-                    yield chunk
-                    
-            else:
-                logger.debug(f"Using non-streaming method for agent: {tool.name}")
-                # 回退到非流式方法
-                result = tool.func(session_context=session_context, session_id=session_id)
-                
-                # 将结果包装为流式格式
-                if isinstance(result, list):
-                    for message in result:
-                        yield [message]
-                else:
-                    yield [{"role": "assistant", "content": str(result)}]
-            
-            # 记录执行统计
-            execution_time = time.time() - execution_start
-            logger.info(f"Agent tool '{tool.name}' completed streaming in {execution_time:.2f}s")
-            
-        except Exception as e:
-            execution_time = time.time() - execution_start
-            error_msg = f"Agent tool '{tool.name}' failed after {execution_time:.2f}s: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"Exception details: {type(e).__name__}")
-            logger.debug(f"Full traceback: {traceback.format_exc()}")
-            
-            
-            # 返回错误消息作为流
-            error_response = {
-                "role": "assistant",
-                "content": f"工具执行失败: {error_msg}",
-                "error": True,
-                "error_type": "EXECUTION_ERROR"
-            }
-            yield [error_response]
 
     async def _execute_mcp_tool(self, tool: McpToolSpec, session_id: str, **kwargs) -> str:
         """Execute MCP tool and format result"""
@@ -734,4 +681,207 @@ class ToolManager:
         except Exception as e:
             logger.error(f"Unexpected JSON validation error for '{tool_name}': {e}")
             return False, f"Validation error: {e}"
+
+    async def get_tool_async(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
+        """Get a tool by name (async version)"""
+        logger.debug(f"Getting tool by name: {name}")
+        return self.tools.get(name)
+
+    async def _format_error_response_async(self, error_msg: str, tool_name: str, error_type: str, 
+                              exception_detail: str = None) -> str:
+        """Format a consistent error response (async version)"""
+        error_response = {
+            "error": True,
+            "error_type": error_type,
+            "message": error_msg,
+            "tool_name": tool_name,
+            "timestamp": time.time()
+        }
+        
+        if exception_detail:
+            error_response["exception_detail"] = exception_detail
+            
+        return json.dumps(error_response, ensure_ascii=False, indent=2)
+
+    async def _execute_standard_tool_async(self, tool: ToolSpec, **kwargs) -> str:
+        """Execute standard tool and format result (async version)"""
+        logger.debug(f"Executing standard tool: {tool.name}")
+        
+        try:
+            # Execute the tool function
+            if hasattr(tool.func, '__self__'):
+                # Bound method
+                if asyncio.iscoroutinefunction(tool.func):
+                    result = await tool.func(**kwargs)
+                else:
+                    result = tool.func(**kwargs)
+            else:
+                # Unbound method - need to create instance
+                tool_class = getattr(tool.func, '__objclass__', None)
+                if tool_class:
+                    # 检查是否有预先创建的实例
+                    if hasattr(self, '_tool_instances') and tool_class in self._tool_instances:
+                        instance = self._tool_instances[tool_class]
+                    else:
+                        instance = tool_class()
+                    bound_method = tool.func.__get__(instance)
+                    if asyncio.iscoroutinefunction(bound_method):
+                        result = await bound_method(**kwargs)
+                    else:
+                        result = bound_method(**kwargs)
+                else:
+                    if asyncio.iscoroutinefunction(tool.func):
+                        result = await tool.func(**kwargs)
+                    else:
+                        result = tool.func(**kwargs)
+            
+            # Format result - 避免双重JSON序列化
+            return json.dumps({"content": result}, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
+            raise
+
+    async def _execute_agent_tool_streaming_async(self, tool: AgentToolSpec, session_context: SessionContext, session_id: str):
+        """
+        执行AgentToolSpec并返回流式结果 (async version)
+        
+        Args:
+            tool: AgentToolSpec实例
+            session_context: 会话上下文
+            session_id: 会话ID
+            
+        Yields:
+            流式返回的结果
+        """
+        logger.info(f"Executing agent tool with streaming: {tool.name}")
+        execution_start = time.time()
+        
+        try:
+            # 检查agent是否有run_stream方法
+            agent_instance = tool.func.__self__ if hasattr(tool.func, '__self__') else None
+            
+            if agent_instance and hasattr(agent_instance, 'run_stream'):
+                logger.debug(f"Using run_stream method for agent: {tool.name}")
+                # 使用流式方法
+                stream_generator = agent_instance.run_stream(
+                    session_context=session_context, 
+                    tool_manager=self,
+                    session_id=session_id
+                )
+                
+                # 流式返回结果
+                async for chunk in stream_generator:
+                    yield chunk
+                    
+            else:
+                logger.debug(f"Using non-streaming method for agent: {tool.name}")
+                # 回退到非流式方法
+                result = await tool.func(session_context=session_context, session_id=session_id)
+                
+                # 将结果包装为流式格式
+                if isinstance(result, list):
+                    for message in result:
+                        yield [message]
+                else:
+                    yield [{"role": "assistant", "content": str(result)}]
+            
+            # 记录执行统计
+            execution_time = time.time() - execution_start
+            logger.info(f"Agent tool '{tool.name}' completed streaming in {execution_time:.2f}s")
+            
+        except Exception as e:
+            execution_time = time.time() - execution_start
+            error_msg = f"Agent tool '{tool.name}' failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"Exception details: {type(e).__name__}")
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
+            
+            # 返回错误消息作为流
+            error_response = {
+                "role": "assistant",
+                "content": f"工具执行失败: {error_msg}",
+                "error": True,
+                "error_type": "EXECUTION_ERROR"
+            }
+            yield [error_response]
+            
+    async def _validate_json_response_async(self, response_text: str, tool_name: str) -> tuple[bool, str]:
+        """Validate if response is proper JSON and return validation result (async version)"""
+        if not response_text:
+            return False, "Empty response"
+        
+        try:
+            parsed = json.loads(response_text)
+            
+            # Check for common issues
+            if isinstance(parsed, str) and len(parsed) > 10000:
+                logger.warning(f"Tool '{tool_name}' returned very large response ({len(parsed)} chars)")
+                
+            return True, "Valid JSON"
+            
+        except json.JSONDecodeError as e:
+            error_pos = getattr(e, 'pos', 'unknown')
+            if hasattr(e, 'pos') and e.pos < len(response_text):
+                start = max(0, e.pos - 50)
+                end = min(len(response_text), e.pos + 50)
+                context = response_text[start:end]
+                logger.error(f"JSON parse error at position {error_pos}: {context}")
+            
+            return False, f"JSON decode error at position {error_pos}: {e}"
+        except Exception as e:
+            logger.error(f"Unexpected JSON validation error for '{tool_name}': {e}")
+            return False, f"Validation error: {e}"
+
+    async def run_tool_async(self, tool_name: str, session_context: SessionContext, session_id: str="", **kwargs) -> Any:
+        """Execute a tool by name with provided arguments (async version)"""
+        execution_start = time.time()
+        logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
+        logger.debug(f"Tool arguments: {kwargs}")
+        # Remove duplicate session_id from kwargs if present
+        session_id = kwargs.pop('session_id', session_id)
+        
+        # Step 1: Tool Lookup
+        tool = await self.get_tool_async(tool_name)
+        if not tool:
+            error_msg = f"Tool '{tool_name}' not found. Available: {list(self.tools.keys())}"
+            logger.error(error_msg)
+            return await self._format_error_response_async(error_msg, tool_name, "TOOL_NOT_FOUND")
+        
+        logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
+        
+        # Step 2: Execute based on tool type (self-call prevention handled at agent level)
+        
+        try:
+            # Step 3: Execute tool
+            if isinstance(tool, McpToolSpec):
+                final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
+            elif isinstance(tool, ToolSpec):
+                final_result = await self._execute_standard_tool_async(tool, **kwargs)
+            elif isinstance(tool, AgentToolSpec):
+                # For AgentToolSpec, return a generator for streaming
+                return self._execute_agent_tool_streaming_async(tool, session_context, session_id)
+            else:
+                error_msg = f"Unknown tool type: {type(tool).__name__}"
+                logger.error(error_msg)
+                return await self._format_error_response_async(error_msg, tool_name, "UNKNOWN_TOOL_TYPE")
+            
+            # Step 4: Validate Result (for non-streaming tools)
+            execution_time = time.time() - execution_start
+            logger.debug(f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s")
+            
+            # Validate JSON format
+            is_valid, validation_msg = await self._validate_json_response_async(final_result, tool_name)
+            if not is_valid:
+                logger.error(f"Tool '{tool_name}' returned invalid JSON: {validation_msg}")
+                return await self._format_error_response_async(f"Invalid JSON response: {validation_msg}", 
+                                                 tool_name, "INVALID_JSON")
+            
+            return final_result
+            
+        except Exception as e:
+            execution_time = time.time() - execution_start
+            error_msg = f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return await self._format_error_response_async(error_msg, tool_name, "EXECUTION_ERROR", str(e))
 
