@@ -283,7 +283,7 @@ class ExecuteCommandTool(ToolBase):
 
     @ToolBase.tool()
     def execute_python_code(self, code: str, workdir: Optional[str] = None, 
-                           timeout: int = 30, requirements: Optional[Union[str, List[str]]] = None) -> Dict[str, Any]:
+                           timeout: int = 30, requirements: Optional[List[str]] = None) -> Dict[str, Any]:
         """在临时执行Python代码，会话在执行完后会删除，不具有持久性
 
         Args:
@@ -307,35 +307,62 @@ class ExecuteCommandTool(ToolBase):
                 f.write(code)
                 temp_file = f.name
             
-            # 安装依赖包（如果需要）
+            # 参数类型校验与依赖处理
+            python_path = shutil.which("python") or shutil.which("python3")
+            if not python_path:
+                raise RuntimeError("未找到Python解释器，请确保Python已正确安装")
+            parsed_requirements: List[str] = []
+            already_available: List[str] = []
+            newly_installed: List[str] = []
+            install_failed: List[Dict[str, Any]] = []
+            if requirements is not None and not isinstance(requirements, list):
+                # 明确只允许 List[str]
+                return {
+                    "success": False,
+                    "error": "requirements 参数类型错误：仅允许 List[str]",
+                    "process_id": process_id,
+                    "code": code
+                }
             if requirements:
-                if isinstance(requirements, str):
-                    requirements = [requirements]
-                logger.info(f"📦 安装依赖包: {requirements}")
-                for package in requirements:
-                    install_result = self.execute_shell_command(
-                        f"pip install {package}",
-                        workdir=workdir,
-                        timeout=60
-                    )
-                    if not install_result["success"]:
-                        error_time = time.time() - start_time
-                        logger.error(f"❌ 依赖包安装失败 [{process_id}] - 包: {package}")
-                        return {
-                            "success": False,
-                            "error": f"安装依赖包失败: {package}",
-                            "install_error": install_result.get("stderr", ""),
-                            "execution_time": error_time,
-                            "process_id": process_id
-                        }
+                parsed_requirements = [p.strip() for p in requirements if isinstance(p, str) and p.strip()]
+                if parsed_requirements:
+                    logger.info(f"📦 依赖包处理: {parsed_requirements}")
+                    for package in parsed_requirements:
+                        # 提取用于导入的模块名（去掉版本限定）
+                        pure_name = package.split("[")[0]
+                        for sep in ["==", ">=", "<=", ">", "<", "~=", "!="]:
+                            if sep in pure_name:
+                                pure_name = pure_name.split(sep)[0]
+                                break
+                        pure_name = pure_name.strip()
+                        module_name = pure_name  # 简单映射
+                        try:
+                            import importlib.util
+                            spec = importlib.util.find_spec(module_name)
+                            if spec is not None:
+                                already_available.append(package)
+                                continue
+                        except Exception:
+                            pass
+                        install_cmd = f"{python_path} -m pip install {package}"
+                        install_result = self.execute_shell_command(
+                            install_cmd,
+                            workdir=workdir,
+                            timeout=120
+                        )
+                        if install_result.get("success"):
+                            newly_installed.append(package)
+                        else:
+                            install_failed.append({
+                                "package": package,
+                                "return_code": install_result.get("return_code"),
+                                "stderr": install_result.get("stderr", ""),
+                                "stdout": install_result.get("stdout", "")
+                            })
             
             # 执行Python代码
             exec_start_time = time.time()
             logger.info(f"🚀 开始执行Python代码 [{process_id}]")
-            
-            python_path = shutil.which("python") or shutil.which("python3")
-            if not python_path:
-                raise RuntimeError("未找到Python解释器，请确保Python已正确安装")
             
             python_cmd = f"{python_path} {temp_file}"
             result = self.execute_shell_command(
@@ -352,14 +379,32 @@ class ExecuteCommandTool(ToolBase):
             else:
                 logger.error(f"❌ Python代码执行失败 [{process_id}] - 返回码: {result.get('return_code', 'unknown')}")
             
-            # 添加额外信息
+            # 添加额外信息（注意：成功执行时不返回安装失败信息）
             result.update({
                 # "temp_file": temp_file,
-                "requirements": requirements,
+                "requirements": parsed_requirements or requirements,
+                "already_available": already_available if requirements else None,
+                "installed": newly_installed if requirements else None,
+                # 不在此处加入 install_failed，改为在失败时按需加入
                 "total_execution_time": total_time,
                 # "process_id": process_id
             })
-            
+            # 如果执行失败，尽可能提供详细的错误trace
+            if not result.get("success"):
+                stderr_text = result.get("stderr") or ""
+                if stderr_text:
+                    # 直接返回stderr作为错误trace，便于端到端查看
+                    result["error_traceback"] = stderr_text
+                # 执行失败时才返回依赖安装失败信息，便于定位问题
+                if requirements:
+                    result["install_failed"] = install_failed or None
+            # 如果执行失败且存在依赖安装失败，补充原因说明
+            if not result.get("success") and install_failed:
+                result["error_hint"] = "检测到部分依赖安装失败，当前环境可能无法安装所需依赖包"
+                result["install_error"] = "\n".join(
+                    [f"{i['package']}: {str(i.get('stderr') or i.get('stdout') or '')}".strip() for i in install_failed]
+                )
+
             return result
             
         except Exception as e:
@@ -369,6 +414,7 @@ class ExecuteCommandTool(ToolBase):
             return {
                 "success": False,
                 "error": str(e),
+                "error_traceback": traceback.format_exc(),
                 "code": code,
                 "execution_time": error_time,
                 "process_id": process_id
