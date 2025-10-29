@@ -182,10 +182,6 @@ class TextProcessor:
             r'上一页|下一页|previous|next|第\d+页|page \d+',
             # 加载更多
             r'加载更多|load more|查看更多|view more',
-            # 时间戳
-            r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}',  # 精确时间戳
-            r'\d{4}年\d{1,2}月\d{1,2}日',  # 中文日期
-            r'\d{1,2}/\d{1,2}/\d{4}',  # 英文日期
             # 阅读量、点赞数等
             r'阅读\s*\d+|views?\s*\d+|点赞\s*\d+|likes?\s*\d+|评论\s*\d+|comments?\s*\d+',
             # 作者信息（保留作者名但移除其他信息）
