@@ -391,7 +391,9 @@ class ExcelParser:
                 metadata['sheets'].append(sheet_name)
                 metadata['sheet_' + sheet_name] = {
                     'rows': len(sheet_data),
-                    'columns': len(sheet_data[0]) if sheet_data else 0
+                    'columns': len(sheet_data[0]) if sheet_data else 0,
+                    # 便于测试：提供表头信息
+                    'headers': sheet_data[0] if sheet_data else []
                 }
             return '\n\n'.join(markdown_tables), metadata
             
@@ -402,11 +404,15 @@ class ExcelParser:
     def _read_excel_to_dict(file_path: str) -> Dict[str, List[List[str]]]:
         """读取Excel文件到字典，正确处理合并单元格"""
         # 需要关闭read_only模式才能访问合并单元格信息
+        # data_only=True 读取公式的缓存结果；若Excel未计算过，会出现None
+        # 同时加载一个 data_only=False 的工作簿用于在缓存缺失时回退到公式文本
         workbook = load_workbook(file_path, data_only=True, read_only=False)
+        workbook_formula = load_workbook(file_path, data_only=False, read_only=False)
         excel_data = {}
 
         for sheet_name in workbook.sheetnames:
             sheet = workbook[sheet_name]
+            sheet_f = workbook_formula[sheet_name]
             
             # 创建合并单元格值映射
             merged_cell_values = {}
@@ -414,6 +420,12 @@ class ExcelParser:
                 # 获取合并单元格左上角的值
                 top_left_cell = sheet.cell(merged_range.min_row, merged_range.min_col)
                 value = top_left_cell.value
+                # 若缓存结果为空，则回退为公式文本（若存在）
+                if value is None:
+                    try:
+                        value = sheet_f.cell(merged_range.min_row, merged_range.min_col).value
+                    except Exception:
+                        value = None
                 
                 # 为合并范围内的所有单元格设置相同的值
                 for row in range(merged_range.min_row, merged_range.max_row + 1):
@@ -435,6 +447,20 @@ class ExcelParser:
                         else:
                             cell = sheet.cell(row_idx, col_idx)
                             cell_value = cell.value
+                            # 若缓存结果为空，则回退为公式文本（若存在）
+                            if cell_value is None:
+                                try:
+                                    cell_value = sheet_f.cell(row_idx, col_idx).value
+                                except Exception:
+                                    cell_value = None
+                            # 规范日期类型为可阅读字符串
+                            try:
+                                from datetime import datetime
+                                if isinstance(cell_value, datetime):
+                                    # 使用通用格式，避免因地区设置不同导致不可读
+                                    cell_value = cell_value.strftime('%Y-%m-%d %H:%M:%S')
+                            except Exception:
+                                pass
                         
                         cell_str = str(cell_value).replace('\n', '\\n') if cell_value is not None else ''
                         row_data.append(cell_str)
@@ -451,6 +477,7 @@ class ExcelParser:
                     excel_data[sheet_name] = sheet_data
         
         workbook.close()
+        workbook_formula.close()
         return excel_data
     
     @staticmethod
