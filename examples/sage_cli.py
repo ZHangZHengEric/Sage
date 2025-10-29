@@ -76,7 +76,7 @@ async def chat(agent: SAgent, tool_manager: Union[ToolManager,ToolProxy]):
             all_chunks = []
             current_message_box = None
             
-            for chunks in agent.run_stream(input_messages=messages,
+            async for chunks in agent.run_stream(input_messages=messages,
                                             tool_manager=tool_manager,
                                             session_id = session_id,
                                             user_id = config['user_id'],
