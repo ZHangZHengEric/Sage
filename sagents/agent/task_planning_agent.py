@@ -87,7 +87,7 @@ class TaskPlanningAgent(AgentBase):
                         continue
                     else:
                         unknown_content = ''
-                        if tag_type in ['next_step_description','expected_output']:
+                        if tag_type in ['next_step_description']:
                             if tag_type != last_tag_type:
                                 yield [MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
