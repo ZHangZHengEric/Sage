@@ -362,20 +362,21 @@ const handleSmartConfig = async (description) => {
 
     // 调用后端API生成Agent配置
     const result = await agentAPI.generateAgentConfig(description)
-
+    const agentConfig = result.agent
     const duration = Date.now() - startTime
     console.log(`📨 收到响应，耗时: ${duration}ms`)
     console.log('✅ 解析响应成功')
 
     // 使用后端返回的agent_config
     const newAgent = {
-      ...result
+      ...agentConfig
     }
 
     console.log('🎉 智能配置生成完成，总耗时:', Date.now() - startTime, 'ms')
     showCreationModal.value = false
     // 使用本地的saveAgent方法
     await saveAgent(newAgent)
+    showCreationModal.value = false
     ElMessage.success(t('agent.smartConfigSuccess').replace('{name}', newAgent.name))
   } catch (error) {
     const duration = Date.now() - startTime

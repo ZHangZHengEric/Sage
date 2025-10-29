@@ -23,7 +23,7 @@ class TaskObservationAgent(AgentBase):
         self.agent_description = "观测智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("TaskObservationAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_observation_system_prefix', language=session_context.get_language())
         
@@ -100,13 +100,14 @@ class TaskObservationAgent(AgentBase):
                                 message_type=MessageType.OBSERVATION.value
                             )]
                         last_tag_type = tag_type
-        yield from self._finalize_observation_result(
+        async for chunk in self._finalize_observation_result(
             session_context=session_context,
             all_content=all_content, 
             message_id=message_id,
             task_manager = task_manager
-        )
-    def _finalize_observation_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
+        ):
+            yield chunk
+    async def _finalize_observation_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
         """
         最终化观测结果
         """
