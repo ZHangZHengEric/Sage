@@ -43,7 +43,7 @@ class MemoryExtractionAgent(AgentBase):
         self.agent_name = "MemoryExtractionAgent"
         self.agent_description = "专门负责记忆提取和冲突处理的智能Agent"
     
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('memory_extraction_system_prefix', language=session_context.get_language())
         

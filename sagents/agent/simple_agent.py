@@ -27,11 +27,10 @@ class SimpleAgent(AgentBase):
         # 最大循环次数常量
         self.max_loop_count = 10
         self.agent_name = "SimpleAgent"
-        self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。
-适用于不需要推理或早期处理的任务。"""
+        self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.info(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
 
-    def run_stream(self, session_context: SessionContext, 
+    async def run_stream(self, session_context: SessionContext, 
                     tool_manager: Optional[Any] = None, 
                     session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         logger.info(f"SimpleAgent: 开始流式直接执行，会话ID: {session_id}")
@@ -48,13 +47,14 @@ class SimpleAgent(AgentBase):
         logger.info(f'历史消息的content长度：{MessageManager.calculate_messages_token_length(history_messages)}')
         system_context = session_context.system_context
         # 调用内部方法，执行流式直接执行
-        yield from self._execute_direct_stream_internal(history_messages, 
+        async for chunk in self._execute_direct_stream_internal(history_messages, 
                                                         tool_manager, 
                                                         session_id, 
                                                         system_context,
-                                                        session_context)
+                                                        session_context):
+            yield chunk
 
-    def _execute_direct_stream_internal(self, 
+    async def _execute_direct_stream_internal(self, 
                                 messages: List[MessageChunk], 
                                 tool_manager: ToolManager,
                                 session_id: str,
@@ -72,13 +72,14 @@ class SimpleAgent(AgentBase):
         messages.insert(0, system_message)
 
 
-        yield from self._execute_loop(
+        async for chunk in self._execute_loop(
                 messages_input=messages,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
                 session_id=session_id,
                 session_context=session_context
-            )
+            ):
+            yield chunk
 
     def _prepare_tools(self, 
                       tool_manager: Optional[Any], 
@@ -260,7 +261,7 @@ class SimpleAgent(AgentBase):
             logger.warning("SimpleAgent: 解析工具建议响应时JSON解码错误")
             return []
 
-    def _execute_loop(self, 
+    async def _execute_loop(self, 
                      messages_input: List[MessageChunk],
                      tools_json: List[Dict[str, Any]],
                      tool_manager: Optional[Any],
@@ -299,7 +300,7 @@ class SimpleAgent(AgentBase):
             
             # 调用LLM
             should_break = False
-            for chunks, is_complete in self._call_llm_and_process_response(
+            async for chunks, is_complete in self._call_llm_and_process_response(
                 messages_input=messages_input,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
@@ -333,7 +334,7 @@ class SimpleAgent(AgentBase):
                 logger.info("SimpleAgent: 任务完成，终止执行")
                 break
             
-    def _call_llm_and_process_response(self,
+    async def _call_llm_and_process_response(self,
         messages_input: List[MessageChunk],
         tools_json: List[Dict[str, Any]],
         tool_manager: Optional[Any],
@@ -409,12 +410,14 @@ class SimpleAgent(AgentBase):
                     yield (output_messages, False)
         # 处理工具调用
         if len(tool_calls) > 0:
-            yield from self._handle_tool_calls(
+            async for chunk in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id
-            )
+            ):
+                yield chunk
+    
         else:
             # 发送换行消息（也包含usage信息）
             output_messages = [MessageChunk(
@@ -459,7 +462,7 @@ class SimpleAgent(AgentBase):
                 if tool_call.function.arguments:
                     tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
 
-    def _handle_tool_calls(self, 
+    async def _handle_tool_calls(self, 
                          tool_calls: Dict[str, Any],
                          tool_manager: Optional[Any],
                          messages_input: List[Dict[str, Any]],
@@ -495,7 +498,7 @@ class SimpleAgent(AgentBase):
             yield (output_messages, False)
             
             # 执行工具
-            for message_chunk_list in  self._execute_tool(
+            async for message_chunk_list in self._execute_tool(
                 tool_call=tool_call,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
@@ -573,7 +576,7 @@ class SimpleAgent(AgentBase):
             show_content=f"{tool_name}({formatted_params})"
         )]
 
-    def _execute_tool(self, 
+    async def _execute_tool(self, 
                      tool_call: Dict[str, Any],
                      tool_manager: Optional[Any],
                      messages_input: List[Dict[str, Any]],
@@ -597,7 +600,7 @@ class SimpleAgent(AgentBase):
                 arguments = json.loads(tool_call['function']['arguments'])
             else:
                 arguments = {}
-            tool_response = tool_manager.run_tool(
+            tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=get_session_context(session_id),
                 session_id=session_id,
@@ -650,19 +653,21 @@ class SimpleAgent(AgentBase):
                                     yield [message_chunk_]
                 except Exception as e:
                     logger.error(f"SimpleAgent: 处理流式工具响应时发生错误: {str(e)}")
-                    yield from self._handle_tool_error(tool_call['id'], tool_name, e)
+                    async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
+                        yield chunk
             else:
                 # 处理非流式响应
                 logger.debug("SimpleAgent: 收到非流式工具响应，正在处理")
                 logger.info(f"SimpleAgent: 工具响应 {tool_response}")
-                processed_response = self.process_tool_response(tool_response, tool_call['id'])
+                processed_response = await self.process_tool_response(tool_response, tool_call['id'])
                 yield processed_response
             
         except Exception as e:
             logger.error(f"SimpleAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
-            yield from self._handle_tool_error(tool_call['id'], tool_name, e)
+            async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
+                yield chunk
 
-    def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> Generator[List[MessageChunk], None, None]:
+    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> Generator[List[MessageChunk], None, None]:
         """
         处理工具执行错误
         
@@ -688,7 +693,7 @@ class SimpleAgent(AgentBase):
         
         yield [error_chunk]
     
-    def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
+    async def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
         """
         处理工具执行响应
         

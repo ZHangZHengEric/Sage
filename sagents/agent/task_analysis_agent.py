@@ -20,7 +20,7 @@ class TaskAnalysisAgent(AgentBase):
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
         logger.info("TaskAnalysisAgent 初始化完成")
 
-    def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix', language=session_context.get_language())
         

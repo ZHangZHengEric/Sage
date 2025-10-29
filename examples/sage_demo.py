@@ -254,7 +254,7 @@ class StreamingHandler:
         self._current_stream = None
         self._current_stream_id = None
     
-    def process_stream(self, 
+    async def process_stream(self, 
                       messages: List[Dict[str, Any]], 
                       tool_manager: Union[ToolManager, ToolProxy],
                       session_id: Optional[str] = None,
@@ -276,7 +276,7 @@ class StreamingHandler:
             max_loop_count = self.component_manager.preset_max_loop_count
         
         try:
-            for chunk in self.controller.run_stream(
+            async for chunk in self.controller.run_stream(
                 messages,
                 tool_manager,
                 session_id=session_id,
@@ -436,13 +436,13 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
     streaming_handler = StreamingHandler(controller, component_manager)
     
     # 处理流式响应
-    new_messages = streaming_handler.process_stream(
+    new_messages = asyncio.run(streaming_handler.process_stream(
         st.session_state.inference_conversation.copy(),
         tool_manager,
         session_id=time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime()) +'_'+str(uuid.uuid4())[:4],
         use_deepthink=st.session_state.get('use_deepthink', True),
         use_multi_agent=st.session_state.get('use_multi_agent', True)
-    )
+    ))
     
     # 合并消息
     if new_messages:
