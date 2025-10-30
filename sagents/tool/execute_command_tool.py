@@ -283,14 +283,14 @@ class ExecuteCommandTool(ToolBase):
 
     @ToolBase.tool()
     def execute_python_code(self, code: str, workdir: Optional[str] = None, 
-                           timeout: int = 30, requirements: Optional[List[str]] = None) -> Dict[str, Any]:
+                           timeout: int = 30, requirement_list: Optional[List[str]] = None) -> Dict[str, Any]:
         """在临时执行Python代码，会话在执行完后会删除，不具有持久性
 
         Args:
             code (str): 要执行的Python代码
             workdir (str): 代码执行的工作目录（可选）
             timeout (int): 超时时间，默认30秒
-            requirements (list): 需要安装的Python包列表（可选）
+            requirement_list (list): 需要安装的Python包列表（可选）
 
         Returns:
             Dict[str, Any]: 包含执行结果的字典
@@ -315,16 +315,16 @@ class ExecuteCommandTool(ToolBase):
             already_available: List[str] = []
             newly_installed: List[str] = []
             install_failed: List[Dict[str, Any]] = []
-            if requirements is not None and not isinstance(requirements, list):
+            if requirement_list is not None and not isinstance(requirement_list, list):
                 # 明确只允许 List[str]
                 return {
                     "success": False,
-                    "error": "requirements 参数类型错误：仅允许 List[str]",
+                    "error": "requirement_list 参数类型错误：仅允许 List[str]",
                     "process_id": process_id,
                     "code": code
                 }
-            if requirements:
-                parsed_requirements = [p.strip() for p in requirements if isinstance(p, str) and p.strip()]
+            if requirement_list:
+                parsed_requirements = [p.strip() for p in requirement_list if isinstance(p, str) and p.strip()]
                 if parsed_requirements:
                     logger.info(f"📦 依赖包处理: {parsed_requirements}")
                     for package in parsed_requirements:
@@ -382,9 +382,9 @@ class ExecuteCommandTool(ToolBase):
             # 添加额外信息（注意：成功执行时不返回安装失败信息）
             result.update({
                 # "temp_file": temp_file,
-                "requirements": parsed_requirements or requirements,
-                "already_available": already_available if requirements else None,
-                "installed": newly_installed if requirements else None,
+                "requirements": parsed_requirements or requirement_list,
+                "already_available": already_available if requirement_list else None,
+                "installed": newly_installed if requirement_list else None,
                 # 不在此处加入 install_failed，改为在失败时按需加入
                 "total_execution_time": total_time,
                 # "process_id": process_id
@@ -396,7 +396,7 @@ class ExecuteCommandTool(ToolBase):
                     # 直接返回stderr作为错误trace，便于端到端查看
                     result["error_traceback"] = stderr_text
                 # 执行失败时才返回依赖安装失败信息，便于定位问题
-                if requirements:
+                if requirement_list:
                     result["install_failed"] = install_failed or None
             # 如果执行失败且存在依赖安装失败，补充原因说明
             if not result.get("success") and install_failed:
