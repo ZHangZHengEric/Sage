@@ -74,7 +74,7 @@ class TaskObservationAgent(AgentBase):
                 for delta_content_char in delta_content:
                     delta_content_all = unknown_content + delta_content_char
                     # 判断delta_content的类型
-                    tag_type = self._judge_delta_content_type(delta_content_all, all_content, tag_type=['finish_percent','completion_status','analysis','completed_task_ids','pending_task_ids','failed_task_ids'])
+                    tag_type = self._judge_delta_content_type(delta_content_all, all_content, tag_type=['analysis','completed_task_ids','pending_task_ids','failed_task_ids'])
                     all_content += delta_content_char
                     
                     if tag_type == 'unknown':
@@ -146,13 +146,6 @@ class TaskObservationAgent(AgentBase):
         
         logger.debug("ObservationAgent: 转换XML内容为JSON格式")
         try:
-            # 提取finish_percent并转换为int类型
-            finish_percent = xlm_content.split('<finish_percent>')[1].split('</finish_percent>')[0].strip()
-            finish_percent = int(finish_percent)
-            
-            # 提取completion_status
-            completion_status = xlm_content.split('<completion_status>')[1].split('</completion_status>')[0].strip()
-            
             # 提取analysis
             analysis = xlm_content.split('<analysis>')[1].split('</analysis>')[0].strip()
             
@@ -185,18 +178,12 @@ class TaskObservationAgent(AgentBase):
             
             # 构建响应JSON - 只保留简化后的字段
             response_json = {
-                "finish_percent": finish_percent,
-                "completion_status": completion_status,
                 "analysis": analysis,
                 "completed_task_ids": completed_task_ids,
                 "pending_task_ids": pending_task_ids,
                 "failed_task_ids": failed_task_ids
             }
-            
-            # 为了兼容性，添加derived字段
-            response_json["needs_more_input"] = completion_status == "need_user_input"
-            response_json["is_completed"] = completion_status in ["completed", "failed"]
-            
+                        
             logger.debug(f"ObservationAgent: XML转JSON完成: {response_json}")
             return response_json
             
@@ -249,10 +236,5 @@ class TaskObservationAgent(AgentBase):
                     logger.warning(f"ObservationAgent: 更新任务 {task_id} 状态为失败时出错: {str(e)}")
             
             logger.info(f"ObservationAgent: 任务状态更新完成，完成任务: {completed_task_ids}，失败任务: {failed_task_ids}")
-            # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
-            completed_tasks = task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
-            failed_tasks = task_manager.get_tasks_by_status(TaskStatus.FAILED)
-            if len(completed_tasks) + len(failed_tasks) == len(task_manager.get_all_tasks()):
-                observation_result['completion_status'] = 'completed'
         except Exception as e:
             logger.error(f"ObservationAgent: 更新TaskManager任务状态时发生错误: {str(e)}")
