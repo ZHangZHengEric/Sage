@@ -1045,7 +1045,8 @@ class FileParserTool(ToolBase):
             logger.debug(f"🧹 开始文本清理和处理")
             if file_extension in ['.xlsx', '.xls']:
                 cleaned_text = extracted_text
-                truncated_text = ""
+                truncated_text = extracted_text
+                text_stats = TextProcessor.get_text_stats(cleaned_text)
             else:
                 cleaned_text = TextProcessor.clean_text(extracted_text)
                 truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
