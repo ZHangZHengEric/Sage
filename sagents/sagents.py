@@ -26,6 +26,7 @@ from sagents.agent.task_summary_agent import TaskSummaryAgent
 from sagents.agent.task_stage_summary_agent import TaskStageSummaryAgent
 from sagents.agent.workflow_select_agent import WorkflowSelectAgent
 from sagents.agent.simple_react_agent import SimpleReactAgent
+from sagents.agent.task_completion_judge_agent import TaskCompletionJudgeAgent
 from sagents.agent.query_suggest_agent import QuerySuggestAgent
 from sagents.agent.task_rewrite_agent import TaskRewriteAgent
 from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
@@ -92,6 +93,10 @@ class SAgent:
         self.task_observation_agent = TaskObservationAgent(
             self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
+        self.task_completion_judge_agent = TaskCompletionJudgeAgent(
+            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+        )
+        
         self.task_planning_agent = TaskPlanningAgent(
             self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
         )
@@ -413,6 +418,9 @@ class SAgent:
             yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_executor_agent, "任务执行")
             
             yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_observation_agent, "任务观察")
+
+            yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_completion_judge_agent, "任务完成判断")
+
             if session_context.status == SessionStatus.INTERRUPTED:
                 logger.info(f"SAgent: 规划-执行-观察循环第 {loop_count} 轮被中断，会话ID: {session_id}")
                 return
@@ -426,36 +434,16 @@ class SAgent:
             # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
             completed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
             failed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.FAILED)
-            # 判断是否需要继续执行
-
-            if len(completed_tasks) + len(failed_tasks) == len(session_context.task_manager.get_all_tasks()):
-                logger.info(f"SAgent: 所有任务已完成，会话ID: {session_id}")
-                break
             
-            if "all_observations" not in session_context.audit_status:
+            # 判断是否需要继续执行
+            if len(completed_tasks) + len(failed_tasks) == len(session_context.task_manager.get_all_tasks()):
+                logger.info(f"SAgent: 规划-执行-观察循环完成，通过判断任务管理器中所有任务状态，完成任务数 {len(completed_tasks)} 加上失败任务数 {len(failed_tasks)} 等于总任务数 {len(session_context.task_manager.get_all_tasks())}，会话ID: {session_id}")
+                break
+            if "completion_status" not in session_context.audit_status:
                 continue
-            if len(session_context.audit_status['all_observations']) == 0:
-                continue
-
-            observation_dict = session_context.audit_status['all_observations'][-1]
-            if observation_dict:
-                if observation_dict.get("is_completed",False) == True:
-                    logger.info(f"SAgent: 规划-执行-观察循环完成，会话ID: {session_id}")
-                    break
-                elif observation_dict.get('needs_more_input',False) == True:
-                    logger.info(f"SAgent: 规划-执行-观察循环需要更多输入，会话ID: {session_id}")
-                    user_query = observation_dict.get('user_query', '')
-                    if user_query:
-                        clarify_msg = MessageChunk(
-                            content=user_query,
-                            message_id=str(uuid.uuid4()),
-                            role=MessageRole.ASSISTANT.value,
-                            show_content=user_query + '\n',
-                            message_type=MessageType.FINAL_ANSWER.value
-                        )
-                        yield [clarify_msg]
-                    break
-        
+            if session_context.audit_status['completion_status'] in ["completed","need_user_input","failed"]:
+                logger.info(f"SAgent: 规划-执行-观察循环完成，会话ID: {session_id}，完成状态: {session_context.audit_status['completion_status']}")
+                break
         # 执行任务总结
         yield from self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结")
 

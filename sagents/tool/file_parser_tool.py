@@ -1043,14 +1043,17 @@ class FileParserTool(ToolBase):
             
             # 清理和处理文本
             logger.debug(f"🧹 开始文本清理和处理")
-            cleaned_text = TextProcessor.clean_text(extracted_text)
-            truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
-            text_stats = TextProcessor.get_text_stats(cleaned_text)
-            
+            if file_extension in ['.xlsx', '.xls']:
+                cleaned_text = extracted_text
+                truncated_text = ""
+            else:
+                cleaned_text = TextProcessor.clean_text(extracted_text)
+                truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
+                text_stats = TextProcessor.get_text_stats(cleaned_text)
+                logger.info(f"✅ 文本提取完成 [{operation_id}] - 清理后长度: {len(cleaned_text)}, 截取长度: {len(truncated_text)}, 总耗时: {total_time:.2f}秒")
+                logger.debug(f"📊 文本统计: {text_stats}")
             total_time = time.time() - start_time
             
-            logger.info(f"✅ 文本提取完成 [{operation_id}] - 清理后长度: {len(cleaned_text)}, 截取长度: {len(truncated_text)}, 总耗时: {total_time:.2f}秒")
-            logger.debug(f"📊 文本统计: {text_stats}")
             
             # 构建结果
             result = {
