@@ -24,6 +24,7 @@ class MessageType(Enum):
     PLANNING = "planning"
     EXECUTION = "execution"  # 执行阶段时assistant 的任务描述使用
     OBSERVATION = "observation"
+    TASK_COMPLETION_JUDGE = "task_completion_judge"
     FINAL_ANSWER = "final_answer"
     SYSTEM = "system"
     QUERY_SUGGEST = "query_suggest"
