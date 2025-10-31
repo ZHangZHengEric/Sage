@@ -209,8 +209,8 @@ class SessionContext:
             "version": "1.0"
         }
         logger.debug(f"SessionContext: 设置agent配置信息完成")
-    
-    def _load_system_memories(self, tool_manager=None):
+        
+    async def _load_system_memories(self, tool_manager=None):
         """加载系统级记忆并注入到system_context
         
         Args:
@@ -221,7 +221,7 @@ class SessionContext:
         
         try:
             # 通过UserMemoryManager获取系统级记忆
-            system_memories = self.user_memory_manager.get_system_memories(self.session_id)
+            system_memories = await self.user_memory_manager.get_system_memories(self.session_id)
             
             if system_memories:
                 # 格式化记忆内容并注入到system_context

@@ -40,7 +40,7 @@ async def exec_tool(request: ExecToolRequest):
             error_detail=f"Tool '{request.tool_name}' not found"
         )
 
-    tool_response = tool_manager.run_tool(
+    tool_response = await tool_manager.run_tool_async(
             tool_name=request.tool_name,
             session_context=None,
             session_id="",
