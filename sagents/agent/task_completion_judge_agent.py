@@ -85,7 +85,7 @@ class TaskCompletionJudgeAgent(AgentBase):
         最终化任务完成判断结果
         """
         try:
-            response_json = self.convert_xlm_to_json(all_content)
+            response_json = json.loads(MessageChunk.extract_json_from_markdown(all_content))
             logger.info(f"TaskCompletionJudgeAgent: 任务完成判断结果: {response_json}")
             session_context.audit_status["completion_status"] = response_json["completion_status"]
             session_context.audit_status["finish_percent"] = response_json["finish_percent"]
