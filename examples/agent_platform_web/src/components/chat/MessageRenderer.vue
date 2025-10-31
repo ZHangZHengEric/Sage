@@ -2,65 +2,69 @@
   <div v-if="shouldRenderMessage">
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="message error">
-      <MessageAvatar messageType="error" role="assistant" />
+      <div class="avatar-container">
+        <MessageAvatar messageType="error" role="assistant" />
+        <MessageTypeLabel messageType="error" role="assistant" class="message-label" />
+      </div>
       <div class="error-bubble">
-        <MessageTypeLabel messageType="error" role="assistant" />
-        <div class="error-content">
           <div class="error-title">{{ t('error.title') }}</div>
           <div class="error-message">{{ message.show_content || message.content || t('error.unknown') }}</div>
-        </div>
       </div>
     </div>
 
     <!-- 用户消息 -->
     <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="message user">
-      <MessageAvatar :messageType="message.type || message.message_type" role="user" />
+      <div class="avatar-container">
+        <MessageAvatar :messageType="message.type || message.message_type" role="user" />
+        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" class="message-label" />
+      </div>
       <div class="user-bubble">
-        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" />
-        <div class="user-content">
-          <ReactMarkdown
+       <ReactMarkdown
             :content="formatMessageContent(message.content)"
           />
-        </div>
       </div>
     </div>
 
     <!-- 助手消息 -->
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="message assistant">
-      <MessageAvatar :messageType="message.message_type" role="assistant" />
+      <div class="avatar-container">
+        <MessageAvatar :messageType="message.message_type" role="assistant" />
+        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="message-label" />
+      </div>
       <div class="assistant-bubble">
-        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" />
-        <div class="assistant-content">
-          <ReactMarkdown
+        <ReactMarkdown
             :content="formatMessageContent(message.show_content)"
             :components="markdownComponents"
           />
-        </div>
       </div>
     </div>
 
     <!-- 工具调用按钮 -->
     <div v-else-if="hasToolCalls" class="message-container">
       <div class="message tool-calls">
-        <MessageAvatar :messageType="message.message_type" role="assistant" />
+        <div class="avatar-container">
+          <MessageAvatar :messageType="message.message_type" role="assistant" />
+          <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="message-label" />
+        </div>
         <div class="tool-calls-bubble">
-        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" />
-          <div class="tool-calls-content">
-            <button
+        <div
               v-for="(toolCall, index) in message.tool_calls"
               :key="toolCall.id || index"
-              class="tool-call-button"
+              class="tool-call-item"
               @click="handleToolClick(toolCall, getToolResult(toolCall))"
             >
-              <div class="tool-call-info">
+              <div class="tool-call-main">
                 <span class="tool-name">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
-                <span class="tool-status">
+                <span class="tool-status" :class="{ 'completed': getToolResult(toolCall), 'executing': !getToolResult(toolCall) }">
                   {{ getToolResult(toolCall) ? t('toolCall.completed') : t('toolCall.executing') }}
                 </span>
               </div>
-              <div class="tool-call-arrow">→</div>
-            </button>
-          </div>
+              <button class="tool-detail-button" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
         </div>
       </div>
     </div>
@@ -204,10 +208,48 @@ const handleDownloadFile = (filePath) => {
   gap: 12px;
   margin-bottom: 16px;
   padding: 0 16px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* 确保头像容器与消息气泡顶部对齐 */
+.message .avatar-container {
+  align-self: flex-start;
+  margin-top: 0;
 }
 
 .message-container {
   margin-bottom: 16px;
+}
+
+/* 头像容器样式 */
+.avatar-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 48px;
+  width: 48px;
+}
+
+/* 消息标签样式 */
+.message-label {
+  color: #333 !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  text-align: center;
+  white-space: normal !important;
+  width: 48px !important; /* 固定宽度，约4个中文字符 */
+  min-width: 48px !important;
+  max-width: 48px !important;
+  word-wrap: break-word;
+  word-break: break-all;
+  line-height: 1.2;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: visible;
 }
 
 /* 用户消息样式 */
@@ -222,10 +264,10 @@ const handleDownloadFile = (filePath) => {
   padding: 12px 16px;
   max-width: 70%;
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-}
-
-.user-content {
-  margin-top: 4px;
+  overflow: hidden;
+  word-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* 助手消息样式 */
@@ -236,14 +278,14 @@ const handleDownloadFile = (filePath) => {
 .assistant-bubble {
   background: white;
   border: 1px solid #e1e5e9;
-  border-radius: 18px 18px 18px 4px;
+  border-radius: 18px 18px 18px 18px;
   padding: 12px 16px;
   max-width: 70%;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.assistant-content {
-  margin-top: 4px;
+  overflow: hidden;
+  word-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* 错误消息样式 */
@@ -254,14 +296,14 @@ const handleDownloadFile = (filePath) => {
 .error-bubble {
   background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
   color: white;
-  border-radius: 18px 18px 18px 4px;
+  border-radius: 18px 18px 18px 18px;
   padding: 12px 16px;
   max-width: 70%;
   box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-}
-
-.error-content {
-  margin-top: 4px;
+  overflow: hidden;
+  word-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .error-title {
@@ -281,57 +323,150 @@ const handleDownloadFile = (filePath) => {
 .tool-calls-bubble {
   background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
   color: white;
-  border-radius: 18px 18px 18px 4px;
+  border-radius: 18px 18px 18px 18px;
   padding: 12px 16px;
   max-width: 70%;
   box-shadow: 0 2px 8px rgba(79, 172, 254, 0.3);
+  overflow: hidden;
+  word-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .tool-calls-content {
-  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.tool-call-button {
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
-  padding: 12px;
+.tool-call-item {
+  background: transparent;
+  border: transparent;
+  border-radius: 10px;
+  padding: 10px 12px;
   color: white;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 44px;
 }
 
-.tool-call-button:hover {
-  background: rgba(255, 255, 255, 0.3);
-  transform: translateY(-1px);
+.tool-call-item:hover {
+  background:transparent;
 }
 
-.tool-call-info {
+.tool-call-main {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
 }
 
 .tool-name {
   font-weight: 600;
   font-size: 14px;
+  color: white;
 }
 
 .tool-status {
   font-size: 12px;
-  opacity: 0.8;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
-.tool-call-arrow {
-  font-size: 16px;
-  opacity: 0.8;
+.tool-status.executing {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  animation: pulse 1.5s infinite;
+}
+
+.tool-status.completed {
+  background: rgba(40, 167, 69, 0.2);
+  color: #28a745;
+  border: 1px solid rgba(40, 167, 69, 0.3);
+}
+
+.tool-detail-button {
+  background: transparent;
+  border: transparent;
+  border-radius: 8px;
+  padding: 6px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+}
+
+.tool-detail-button:hover {
+  background: transparent;
+  transform: scale(1.05);
+}
+
+.tool-detail-button svg {
+  transition: transform 0.2s ease;
+}
+
+.tool-call-item:hover .tool-detail-button svg {
+  transform: translateX(2px);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .tool-call-main {
+    gap: 8px;
+  }
+  
+  .tool-name {
+    font-size: 13px;
+  }
+  
+  .tool-status {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+  
+  .tool-detail-button {
+    min-width: 28px;
+    height: 28px;
+    padding: 4px;
+  }
+  
+  .tool-detail-button svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/* 增强的动画效果 */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.tool-call-item {
+  animation: slideIn 0.3s ease-out;
+}
+
+.tool-call-item:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.tool-call-item:nth-child(3) {
+  animation-delay: 0.2s;
 }
 
 /* 工具执行样式 */
@@ -342,7 +477,7 @@ const handleDownloadFile = (filePath) => {
 .tool-execution-bubble {
   background: white;
   border: 1px solid #e1e5e9;
-  border-radius: 18px 18px 18px 4px;
+  border-radius: 18px 18px 18px 18px;
   padding: 12px 16px;
   max-width: 70%;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -432,6 +567,49 @@ const handleDownloadFile = (filePath) => {
   color: #cf1322;
   font-size: 14px;
   text-align: center;
+}
+
+/* 响应式样式 - 小屏幕优化 */
+@media (max-width: 768px) {
+  .message {
+    padding: 0 8px;
+    gap: 8px;
+  }
+  
+  .user-bubble,
+  .assistant-bubble,
+  .error-bubble,
+  .tool-calls-bubble {
+    max-width: 85%;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  
+  .message-content {
+    max-width: 85%;
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message {
+    padding: 0 4px;
+    gap: 6px;
+  }
+  
+  .user-bubble,
+  .assistant-bubble,
+  .error-bubble,
+  .tool-calls-bubble {
+    max-width: 90%;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  
+  .message-content {
+    max-width: 90%;
+    padding: 8px 10px;
+  }
 }
 
 
