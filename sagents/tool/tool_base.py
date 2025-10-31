@@ -1,5 +1,5 @@
 from operator import imod
-from typing import Dict, Any, List, Callable, Optional, Type, Union
+from typing import Dict, Any, List, Callable, Optional, Type, Union, get_origin, get_args
 from dataclasses import dataclass
 from mcp import StdioServerParameters
 from sagents.utils.logger import logger
@@ -45,26 +45,58 @@ class ToolBase:
             sig = inspect.signature(func)
             parameters = {}
             required = []
-            
+
+            # Helper: infer JSON schema type from Python/typing annotation
+            def _infer_json_type(annotation: Any) -> str:
+                try:
+                    if annotation is inspect.Parameter.empty or annotation is None:
+                        return "string"
+                    # Resolve typing constructs
+                    origin = get_origin(annotation)
+                    args = get_args(annotation)
+                    if origin is Union:
+                        # Treat Optional[T] as T
+                        non_none = [a for a in args if a is not type(None)]  # noqa: E721
+                        if len(non_none) == 1:
+                            return _infer_json_type(non_none[0])
+                        # Fallback for general Union
+                        return "string"
+                    if origin in (list, List, tuple):
+                        return "array"
+                    if origin in (dict, Dict):
+                        return "object"
+                    if origin in (str,):
+                        return "string"
+                    if origin in (int,):
+                        return "integer"
+                    if origin in (float,):
+                        return "number"
+                    if origin in (bool,):
+                        return "boolean"
+                    # Non-typing builtins
+                    if isinstance(annotation, type):
+                        name = annotation.__name__.lower()
+                        return {
+                            "str": "string",
+                            "int": "integer",
+                            "float": "number",
+                            "bool": "boolean",
+                            "dict": "object",
+                            "list": "array",
+                            "tuple": "array",
+                        }.get(name, "string")
+                except Exception:
+                    pass
+                return "string"
+
             for name, param in sig.parameters.items():
                 if name == "self":
                     continue
                     
                 param_info = {"type": "string", "description": ""}  # Default values
                 if param.annotation != inspect.Parameter.empty:
-                    type_name = param.annotation.__name__.lower()
-                    if type_name == "str":
-                        param_info["type"] = "string"
-                    elif type_name == "int":
-                        param_info["type"] = "integer"
-                    elif type_name == "float":
-                        param_info["type"] = "number"
-                    elif type_name == "bool":
-                        param_info["type"] = "boolean"
-                    elif type_name == "dict":
-                        param_info["type"] = "object"
-                    elif type_name == "list":
-                        param_info["type"] = "array"
+                    param_info["type"] = _infer_json_type(param.annotation)
+                    
                 
                 # Get parameter description from parsed docstring
                 param_desc = ""
@@ -83,6 +115,9 @@ class ToolBase:
             
             # Always use function name as tool name
             tool_name = func.__name__
+            logger.debug(f"Registering tool: {tool_name} to {cls.__name__}")
+            logger.debug(f"Parameters: {parameters}")
+            logger.debug(f"Required: {required}")
             spec = ToolSpec(
                 name=tool_name,
                 description=parsed_description or "",
