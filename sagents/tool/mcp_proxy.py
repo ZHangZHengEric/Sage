@@ -100,7 +100,6 @@ class McpProxy:
                     "Authorization": f"Bearer {server_params.api_key}",
                     "Content-Type": "application/json"
                 }
-            logger.info(f'SSE MCP server header {headers}')
             async with sse_client(server_params.url,headers=headers) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
