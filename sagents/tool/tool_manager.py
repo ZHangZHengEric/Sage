@@ -173,7 +173,7 @@ class ToolManager:
                 logger.debug(f"Loaded MCP config with {len(mcp_config.get('mcpServers', {}))} servers")
                 logger.debug(f"mcp_config: {mcp_config}")
             for server_name, config in mcp_config.get('mcpServers', {}).items():
-               self.register_mcp_server(server_name, config)
+                await self.register_mcp_server(server_name, config)
         except Exception as e:
             logger.error(f"Error loading MCP config: {str(e)}")
             return bool_registered
