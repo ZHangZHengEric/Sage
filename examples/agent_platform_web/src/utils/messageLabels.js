@@ -24,9 +24,9 @@ export const messageTypeLabels = new Map([
   ['error', ' 错误'],
   ['guide', '指导'],
   ['handoff_agent', '智能体切换'],
-  ['stage_summary', '任务阶段总结'],
+  ['stage_summary', '阶段总结'],
   ['do_subtask', '子任务'],
-  ['do_subtask_result', '任务执行结果'],
+  ['do_subtask_result', '执行结果'],
   ['rewrite', '重写'],
   ['query_suggest', '查询建议'],
   ['chunk', '数据块']
