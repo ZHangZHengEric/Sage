@@ -23,6 +23,8 @@ import pypandoc
 from pptx import Presentation
 import html2text
 from openpyxl import load_workbook
+from openpyxl.styles.numbers import is_date_format
+from openpyxl.utils.datetime import from_excel, WINDOWS_EPOCH, MAC_EPOCH
 import subprocess
 
 from .tool_base import ToolBase
@@ -399,19 +401,150 @@ class ExcelParser:
     @staticmethod
     def _read_excel_to_dict(file_path: str) -> Dict[str, List[List[str]]]:
         """读取Excel文件到字典，正确处理合并单元格"""
+        # 调试：记录入口和文件路径
+        try:
+            logger.info(f"[xlsx-debug] 开始解析: {file_path}")
+        except Exception:
+            pass
+        # 辅助：识别日期风格（包含中文/自定义格式）
+        def _looks_like_date_format(fmt: str) -> bool:
+            fmt = (fmt or '').lower()
+            try:
+                if is_date_format(fmt):
+                    return True
+            except Exception:
+                pass
+            # 兼容中文及常见日期标记
+            return any(token in fmt for token in ['y', '年', '月', '日', 'h', '时', '分', '秒'])
+
+        # 辅助：无格式时，按“可疑日期序列号”范围做兜底识别
+        def _maybe_serial_date(value: float) -> Optional[str]:
+            try:
+                # 经验范围：Excel日期序列（天）通常在 25000~80000（约1968-2099）
+                iv = float(value)
+                if 25000 <= iv <= 80000:
+                    dt = from_excel(iv, epoch=date_epoch)
+                    # 防止误判：限定合理年份
+                    if 1900 <= dt.year <= 2100:
+                        return dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                pass
+            return None
+
+        # （移除猜测式列识别与兜底转换）
+        # 之前的横向“日期序列列”识别和基于范围的兜底转换可能带来误判，按用户要求去掉，
+        # 仅使用样式/格式严格识别日期。
+
+        # 将 Excel/WPS 的日期样式转换为输出字符串
+        def _format_dt_by_code(dt, fmt_code: Optional[str]) -> str:
+            if not fmt_code:
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+            fmt = fmt_code.replace('"', '')
+            fmt_lower = fmt.lower()
+            # 常见中文格式
+            if '年' in fmt and '月' in fmt and ('日' not in fmt and 'd' not in fmt_lower):
+                return f'{dt.year}年{dt.month}月'
+            if '月' in fmt and ('日' in fmt or 'd' in fmt_lower):
+                return f'{dt.month}月{dt.day}日'
+            # 常见西式日期
+            if 'yyyy' in fmt_lower and ('mm' in fmt_lower or 'm' in fmt_lower):
+                sep = '-' if '-' in fmt else '/' if '/' in fmt else ' '
+                if 'dd' in fmt_lower or 'd' in fmt_lower:
+                    return dt.strftime(f'%Y{sep}%m{sep}%d')
+                else:
+                    return dt.strftime(f'%Y{sep}%m')
+            # 时间部分
+            if any(t in fmt_lower for t in ['hh', 'h', 'ss']):
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        # 样式级日期识别：直接读取内置/自定义 numFmtId 判定是否日期
+        # openpyxl 对部分东亚内置ID（如57/58）不一定映射到 number_format，但样式仍可用
+        def _build_style_numfmt_map(xlsx_path: str):
+            try:
+                # 直接解析底层 XML，提高兼容性
+                import zipfile, xml.etree.ElementTree as ET
+                zf = zipfile.ZipFile(xlsx_path)
+                styles_xml = zf.read('xl/styles.xml')
+                styles = ET.fromstring(styles_xml)
+                ns = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+                # 收集自定义格式
+                custom_numfmts = {}
+                for nf in styles.findall('.//main:numFmts/main:numFmt', ns):
+                    numFmtId = int(nf.get('numFmtId'))
+                    fmt = nf.get('formatCode') or ''
+                    custom_numfmts[numFmtId] = fmt
+                # 样式索引 -> numFmtId
+                style_to_numfmt = []
+                for xf in styles.findall('.//main:cellXfs/main:xf', ns):
+                    numFmtId = xf.get('numFmtId')
+                    numFmtId = int(numFmtId) if numFmtId is not None else None
+                    style_to_numfmt.append(numFmtId)
+                # 标准日期/时间内置ID集合（Excel/WPS常见）
+                builtin_date_ids = {
+                    14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47, 57, 58
+                }
+                builtin_fmt_map = {
+                    14: 'm/d/yy',
+                    15: 'd-mmm-yy',
+                    16: 'd-mmm',
+                    17: 'mmm-yy',
+                    18: 'h:mm AM/PM',
+                    19: 'h:mm:ss AM/PM',
+                    20: 'h:mm',
+                    21: 'h:mm:ss',
+                    22: 'm/d/yy h:mm',
+                    45: 'mm:ss',
+                    46: '[h]:mm:ss',
+                    47: 'mmss.0',
+                    57: 'yyyy"年"m"月"',
+                    58: 'm"月"d"日"'
+                }
+                def is_date_numfmt_id(numFmtId: Optional[int]) -> bool:
+                    if numFmtId is None:
+                        return False
+                    if numFmtId in builtin_date_ids:
+                        return True
+                    # 自定义格式的日期判断
+                    fmt = custom_numfmts.get(numFmtId, '')
+                    return _looks_like_date_format(fmt)
+                def get_numfmt_code(numFmtId: Optional[int]) -> Optional[str]:
+                    if numFmtId is None:
+                        return None
+                    return custom_numfmts.get(numFmtId) or builtin_fmt_map.get(numFmtId)
+                return style_to_numfmt, is_date_numfmt_id, get_numfmt_code
+            except Exception:
+                # 解析失败则返回空映射
+                return [], (lambda _id: False), (lambda _id: None)
         # 需要关闭read_only模式才能访问合并单元格信息
         # data_only=True 读取公式的缓存结果；若Excel未计算过，会出现None
         # 同时加载一个 data_only=False 的工作簿用于在缓存缺失时回退到公式文本
         workbook = load_workbook(file_path, data_only=True, read_only=False)
         workbook_formula = load_workbook(file_path, data_only=False, read_only=False)
+        # 判断工作簿的日期基准（Windows 1900 或 macOS 1904）
+        date1904 = getattr(workbook.properties, 'date1904', False)
+        date_epoch = MAC_EPOCH if date1904 else WINDOWS_EPOCH
+        try:
+            logger.debug(f"[xlsx-debug] 工作簿属性: date1904={date1904}")
+        except Exception:
+            pass
         excel_data = {}
+
+        # 构建样式到 numFmtId 的映射供单元格样式级判断
+        style_to_numfmt, is_date_numfmt_id, get_numfmt_code = _build_style_numfmt_map(file_path)
 
         for sheet_name in workbook.sheetnames:
             sheet = workbook[sheet_name]
             sheet_f = workbook_formula[sheet_name]
+            try:
+                logger.debug(f"[xlsx-debug] 处理工作表: {sheet_name}, max_row={sheet.max_row}, max_col={sheet.max_column}")
+            except Exception:
+                pass
             
             # 创建合并单元格值映射
             merged_cell_values = {}
+            merged_cell_formats = {}
+            merged_cell_is_date = {}
             for merged_range in sheet.merged_cells.ranges:
                 # 获取合并单元格左上角的值
                 top_left_cell = sheet.cell(merged_range.min_row, merged_range.min_col)
@@ -427,7 +560,11 @@ class ExcelParser:
                 for row in range(merged_range.min_row, merged_range.max_row + 1):
                     for col in range(merged_range.min_col, merged_range.max_col + 1):
                         merged_cell_values[(row, col)] = value
+                        merged_cell_formats[(row, col)] = getattr(top_left_cell, 'number_format', '')
+                        merged_cell_is_date[(row, col)] = getattr(top_left_cell, 'is_date', False)
             
+            # 移除猜测列识别，不进行兜底列转换
+
             # 读取数据，考虑合并单元格
             sheet_data = []
             max_row = sheet.max_row
@@ -440,9 +577,35 @@ class ExcelParser:
                         # 检查是否是合并单元格
                         if (row_idx, col_idx) in merged_cell_values:
                             cell_value = merged_cell_values[(row_idx, col_idx)]
+                            fmt = merged_cell_formats.get((row_idx, col_idx), '')
+                            is_date_flag = merged_cell_is_date.get((row_idx, col_idx), False)
                         else:
                             cell = sheet.cell(row_idx, col_idx)
+                            cell_f = sheet_f.cell(row_idx, col_idx)
                             cell_value = cell.value
+                            # 优先使用公式工作簿的样式信息，避免data_only模式下样式缺失/差异
+                            fmt = getattr(cell, 'number_format', '')
+                            is_date_flag = getattr(cell, 'is_date', False)
+                            numFmtId = None
+                            try:
+                                style_id = getattr(cell_f, 'style_id', getattr(cell, 'style_id', None))
+                                if isinstance(style_id, int) and 0 <= style_id < len(style_to_numfmt):
+                                    numFmtId = style_to_numfmt[style_id]
+                                    if is_date_numfmt_id(numFmtId):
+                                        is_date_flag = True
+                                        fmt = get_numfmt_code(numFmtId) or fmt
+                                    else:
+                                        # 非日期格式，但若存在自定义格式码，按其输出
+                                        maybe_fmt = get_numfmt_code(numFmtId)
+                                        fmt = maybe_fmt or fmt
+                            except Exception:
+                                pass
+                            # 调试：打印识别前的单元格信息（限制前5行以避免日志过多）
+                            try:
+                                if row_idx <= 5:
+                                    logger.debug(f"[xlsx-debug] r={row_idx} c={col_idx} raw='{cell_value}' type={type(cell_value).__name__} style_id={getattr(cell_f, 'style_id', getattr(cell,'style_id', None))} numFmtId={numFmtId} fmt='{fmt}' is_date_flag={is_date_flag}")
+                            except Exception:
+                                pass
                             # 若缓存结果为空，则回退为公式文本（若存在）
                             if cell_value is None:
                                 try:
@@ -453,8 +616,29 @@ class ExcelParser:
                             try:
                                 from datetime import datetime
                                 if isinstance(cell_value, datetime):
-                                    # 使用通用格式，避免因地区设置不同导致不可读
-                                    cell_value = cell_value.strftime('%Y-%m-%d %H:%M:%S')
+                                    # 改为按样式格式化输出
+                                    cell_value = _format_dt_by_code(cell_value, fmt)
+                                    try:
+                                        if row_idx <= 5:
+                                            logger.debug(f"[xlsx-debug] r={row_idx} c={col_idx} datetime格式化 => '{cell_value}'")
+                                    except Exception:
+                                        pass
+                                else:
+                                    # Excel中的日期常以序列号（float/int）存储，结合单元格格式识别为日期
+                                    if isinstance(cell_value, (int, float)):
+                                        # 使用单元格的 is_date / 样式 或自定义格式识别
+                                        if is_date_flag or _looks_like_date_format(fmt):
+                                            try:
+                                                dt = from_excel(float(cell_value), epoch=date_epoch)
+                                                cell_value = _format_dt_by_code(dt, fmt)
+                                                try:
+                                                    if row_idx <= 5:
+                                                        logger.debug(f"[xlsx-debug] r={row_idx} c={col_idx} serial=>date({float(cell_value) if isinstance(cell_value,(int,float)) else 'n/a'}) fmt='{fmt}' => '{cell_value}'")
+                                                except Exception:
+                                                    pass
+                                            except Exception:
+                                                # 转换失败则保留原值
+                                                pass
                             except Exception:
                                 pass
                         
@@ -474,6 +658,10 @@ class ExcelParser:
         
         workbook.close()
         workbook_formula.close()
+        try:
+            logger.info(f"[xlsx-debug] 解析完成: {file_path}")
+        except Exception:
+            pass
         return excel_data
     
     @staticmethod

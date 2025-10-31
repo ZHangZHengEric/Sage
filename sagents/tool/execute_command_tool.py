@@ -315,14 +315,16 @@ class ExecuteCommandTool(ToolBase):
             already_available: List[str] = []
             newly_installed: List[str] = []
             install_failed: List[Dict[str, Any]] = []
+
+
             if requirement_list is not None and not isinstance(requirement_list, list):
                 # 明确只允许 List[str]
-                return {
-                    "success": False,
-                    "error": "requirement_list 参数类型错误：仅允许 List[str]",
-                    "process_id": process_id,
-                    "code": code
-                }
+                if isinstance(json.loads(requirement_list),list)==False:
+                    return {
+                        "success": False,
+                        "error": "requirement_list 参数类型错误：仅允许 List[str]",
+                        "process_id": process_id,
+                    }
             if requirement_list:
                 parsed_requirements = [p.strip() for p in requirement_list if isinstance(p, str) and p.strip()]
                 if parsed_requirements:

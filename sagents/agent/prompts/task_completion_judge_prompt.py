@@ -42,16 +42,16 @@ completion_status：任务完成状态，
 1. 上一步完成了数据搜索，后续还需要对搜索结果进行进一步的理解和处理，不能认为是任务完成。
 2. 尽可能减少用户输入，不要打扰用户，按照你对事情的完整理解，尽可能全面的完成事情
 3. 如果基于当前的工具和能力，发现无法完成任务，将 finish_percent 设置为100，completion_status 设置为failed。
+4. 输出格式要严格按照json格式输出，不能有任何的额外内容。
 
-## 输出格式
+## 输出格式要求
+```json
+{{
+    "finish_percent": 40,
+    "completion_status": "in_progress"
+}}
 ```
-<finish_percent>
-40
-</finish_percent>
-<completion_status>
-in_progress
-</completion_status>
-```""",
+""",
     "en": """By observing the task execution results and the status of subtasks in the task manager, determine whether the needs expressed by the user in the historical dialogue have been satisfied under the agent description.
 ## Agent Description and Requirements
 {agent_description}
@@ -77,14 +77,14 @@ completion_status: Task completion status,
 1. The previous step performed data search, and further understanding and processing of the search results are required, not considered task completion.
 2. Try to reduce user input as much as possible, do not disturb users, and complete the task as comprehensively as possible based on your complete understanding of the matter.
 3. If it is found that the task cannot be completed based on the current tools and capabilities, set finish_percent to 100 and completion_status to failed.
+4. The output format must strictly follow the json format, with no additional content.
 
-## Output Format
+## Output Format Requirements
+```json
+{{
+    "finish_percent": 40,
+    "completion_status": "in_progress"
+}}
 ```
-<finish_percent>
-40
-</finish_percent>
-<completion_status>
-in_progress
-</completion_status>
-```""",
+""",
 }
