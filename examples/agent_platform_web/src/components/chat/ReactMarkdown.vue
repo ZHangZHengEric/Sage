@@ -30,13 +30,102 @@ marked.setOptions({
   mangle: false
 })
 
+// 检测视频链接的正则表达式
+const videoExtensions = /\.(mp4|webm|ogg|mov|avi|mkv)$/i
+
+// 检测图片链接的正则表达式
+const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i
+
+// 生成唯一ID
+const generateId = () => Math.random().toString(36).substr(2, 9)
+
+// 下载图片函数
+const downloadImage = (url, filename) => {
+  fetch(url)
+    .then(response => response.blob())
+    .then(blob => {
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = filename || 'image'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+    })
+    .catch(error => {
+      console.error('下载图片失败:', error)
+      // 如果fetch失败，尝试直接下载
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename || 'image'
+      link.target = '_blank'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    })
+}
+
+// 将图片添加下载按钮
+const addImageDownloadButton = (html) => {
+  return html.replace(/<img([^>]*src="([^"]*)"[^>]*)>/g, (match, attrs, src) => {
+    const imageId = generateId()
+    const filename = src.split('/').pop().split('?')[0] || 'image'
+    
+    return `<div class="markdown-image-container">
+      <img${attrs} class="markdown-image">
+      <button class="markdown-image-download" onclick="window.downloadMarkdownImage('${src}', '${filename}')" title="下载图片">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7,10 12,15 17,10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+      </button>
+    </div>`
+  })
+}
+
+// 将视频链接转换为video标签
+const convertVideoLinks = (html) => {
+  // 首先处理链接标签中的视频URL
+  html = html.replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g, (match, url, text) => {
+    if (videoExtensions.test(url)) {
+      return `<video controls class="markdown-video">
+        <source src="${url}" type="video/mp4">
+        您的浏览器不支持视频播放。
+      </video>`
+    }
+    return match
+  })
+  
+  // 然后处理直接的视频URL（不在链接标签中的）
+  html = html.replace(/(?<!src="|href=")https?:\/\/[^\s<>"]+\.(mp4|webm|ogg|mov|avi|mkv)(?:\?[^\s<>"]*)?/gi, (match) => {
+    return `<video controls class="markdown-video">
+      <source src="${match}" type="video/mp4">
+      您的浏览器不支持视频播放。
+    </video>`
+  })
+  
+  return html
+}
+
+// 设置全局下载函数
+if (typeof window !== 'undefined') {
+  window.downloadMarkdownImage = downloadImage
+}
+
 // 渲染Markdown内容
 const renderedContent = computed(() => {
   if (!props.content) return ''
   
   try {
     // 使用marked解析Markdown
-    const html = marked(props.content)
+    let html = marked(props.content)
+    
+    // 转换视频链接
+    html = convertVideoLinks(html)
+    
+    // 为图片添加下载按钮
+    html = addImageDownloadButton(html)
     
     // 使用DOMPurify清理HTML，防止XSS攻击
     return DOMPurify.sanitize(html, {
@@ -47,11 +136,14 @@ const renderedContent = computed(() => {
         'blockquote',
         'a', 'img',
         'table', 'thead', 'tbody', 'tr', 'th', 'td',
-        'div', 'span'
+        'div', 'span', 'button', 'svg', 'path', 'polyline', 'line',
+        'video', 'source'
       ],
       ALLOWED_ATTR: [
         'href', 'src', 'alt', 'title', 'class', 'id',
-        'target', 'rel'
+        'target', 'rel', 'controls', 'type', 'onclick',
+        'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
+        'points', 'x1', 'y1', 'x2', 'y2', 'd'
       ]
     })
   } catch (error) {
@@ -157,11 +249,47 @@ const renderedContent = computed(() => {
   text-decoration: underline;
 }
 
-.markdown-content img {
-  max-width: 100%;
+.markdown-content .markdown-image-container {
+  position: relative;
+  display: inline-block;
+  margin: 8px 0;
+}
+
+.markdown-content .markdown-image {
+  max-width: 300px;
   height: auto;
   border-radius: 6px;
-  margin: 8px 0;
+  display: block;
+}
+
+.markdown-content .markdown-image-download {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.markdown-content .markdown-image-container:hover .markdown-image-download {
+  opacity: 1;
+}
+
+.markdown-content .markdown-image-download:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.markdown-content .markdown-image-download svg {
+  width: 16px;
+  height: 16px;
 }
 
 .markdown-content table {
@@ -192,5 +320,13 @@ const renderedContent = computed(() => {
 
 .markdown-content del {
   text-decoration: line-through;
+}
+
+.markdown-content .markdown-video {
+  max-width: 300px;
+  height: auto;
+  border-radius: 6px;
+  margin: 12px 0;
+  background: #000;
 }
 </style>
