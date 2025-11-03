@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前版本-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_版本-0.9.5-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_版本-0.9.6-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -52,6 +52,32 @@
 ### 🚀 **立即开始你的 AI 之旅！**
 
 </div>
+
+## 你可以用 Sage 做什么
+
+- 深度研究与报告：自动研究、多源信息汇总、生成带引用的分析报告。
+- 流程与协作：设计多步骤工作流（规划 → 执行 → 观察 → 总结）。
+- 工具增强能力：网页检索、文件解析、API/命令调用、数据集操作（含 MCP 生态）。
+- 实时流式与中断：实时流式输出，支持暂停/停止/恢复长任务，过程安全。
+- 可观测性与成本：统一查看 Token 使用、运行日志、错误与成本统计。
+- 平台化管理：通过现代化 Web 界面或 API 管理智能体配置、工作流与日志。
+- 规则化偏好：可配置助手风格、语气与风险策略，保证一致性与可控性。
+- 多模型选择：灵活切换 DeepSeek、OpenAI、Anthropic、Qwen、OpenRouter 等提供方。
+- 部署与集成：支持 CLI、HTTP API、React 前端、Docker；可嵌入你的应用。
+- 安全与治理：更安全的文件访问、路径校验与工具执行控制。
+
+## v0.9.6 更新亮点（相对 main）
+
+- 平台化管理能力：可视化管理智能体、工作流、配置与日志（Web 与 API）。
+- 可靠性与流式体验：修复工具调用导致的卡顿，流式更稳；消息管线更干净。
+- 可观测性与成本：新增 `TOKEN_USAGE` 用量跟踪，日志更清晰并支持自动清理。
+- 配置灵活性：会话级 `max_loop_count` 在各智能体生效；默认存储路径更安全。
+- 工具编排：支持 `ToolProxy`，文件读取更安全；MCP 生态刷新，远程工具更易用。
+- 部署与运维：提供 `sage_server` Docker 部署脚本；配置缺失时也能顺畅启动。
+
+快速引导：
+- Agent 管理平台的启动步骤见 `examples/agent_platform_server/README.md` 与 `examples/agent_platform_web/README.md`。
+- 现有 FastAPI + React 演示保持完整支持（见下方章节）。
 
 ## 🤖 **支持的模型**
 
@@ -222,7 +248,7 @@ npm install
 npm run dev
 ```
 
-**🎯 立即试用在线演示：** 在 [**在线演示 →**](http://36.133.44.114:20040/) 立即体验所有功能
+**🎯 立即试用在线演示：** 在 [**在线演示 →**](http://36.133.44.114:20040/) 体验所有功能（如暂不可用，可按下文步骤本地启动）
 
 **演示功能：**
 - 💬 **交互式聊天界面** - 使用自定义工作流与AI智能体对话

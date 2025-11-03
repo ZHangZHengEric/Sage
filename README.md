@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/🐍_Python-3.10+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.5-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9.6-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 [![Stars](https://img.shields.io/github/stars/ZHangZHengEric/Sage?style=for-the-badge&color=gold)](https://github.com/ZHangZHengEric/Sage/stargazers)
 
 </div>
@@ -52,6 +52,32 @@
 ### 🚀 **Start Your AI Journey Now!**
 
 </div>
+
+## What You Can Do with Sage
+
+- Research Assistant: run deep research, synthesize insights, and produce cited reports.
+- Workflow Orchestration: design multi-step agent flows (plan → execute → observe → summarize).
+- Tool-Augmented Actions: browse web, parse files, call APIs/CLIs, work with datasets via tools/MCP.
+- Real-time Streaming & Interruption: stream responses live, pause/stop/resume long tasks safely.
+- Observability & Cost Tracking: see token usage, runtime logs, errors, and cost in one place.
+- Agent Platform Management: create, configure, and monitor agents via a modern web UI or API.
+- Rule Preferences: tailor assistant behavior, tone, and risk posture with enforceable rules.
+- Multi-model Choice: switch among providers (DeepSeek, OpenAI, Anthropic, Qwen, OpenRouter, etc.).
+- Deployment & Integration: use CLI, HTTP API, React frontend, Docker; embed in your apps.
+- Security & Governance: safer file access, path validation, and tool execution controls.
+
+## What's New in v0.9.6 (vs main)
+
+- Agent Management Platform: manage agents, workflows, configuration, and logs via web and API.
+- Reliability & Streaming: fix stalls with tool-calls, more robust streaming; cleaner message pipeline.
+- Observability & Cost: `TOKEN_USAGE` tracking, enhanced logging, and automatic log cleanup.
+- Config Flexibility: per-session `max_loop_count` applied across agents; safer default storage path.
+- Tool Orchestration: `ToolProxy` support, safer file-read limits, and refreshed MCP for remote tools.
+- Deployment & Ops: Docker deploy script for `sage_server`; smoother startup if configs are missing.
+
+Quick pointers:
+- Agent Platform quick start is in `examples/agent_platform_server/README.md` and `examples/agent_platform_web/README.md`.
+- Existing FastAPI + React demo remains fully supported; see the section below.
 
 ## 🤖 **Supported Models**
 
@@ -191,7 +217,7 @@ Experience Sage through our cutting-edge web application featuring a modern Reac
 
 **Quick Start:** See [FastAPI React Demo README](examples/fastapi_react_demo/README.md) for detailed setup instructions.
 
-**🎯 Try the Live Demo:** Experience all features immediately at [**Live Demo →**](http://36.133.44.114:20040/)
+**🎯 Try the Live Demo:** Experience all features immediately at [**Live Demo →**](http://36.133.44.114:20040/) (If the link is temporarily unavailable, use the local setup below.)
 
 **Demo Features:**
 - 💬 **Interactive Chat Interface** - Chat with AI agents using custom workflows
