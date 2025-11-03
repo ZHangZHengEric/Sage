@@ -18,8 +18,6 @@ from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
 from sagents.context.session_context import SessionContext
-from sagents.context.tasks.task_base import TaskBase
-from sagents.context.tasks.task_manager import TaskManager
 from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid,re
@@ -87,7 +85,7 @@ class MemoryExtractionAgent(AgentBase):
         extracted_memories = self.extract_memories_from_conversation(recent_message_str, session_id, session_context)
         # 将提取的记忆通过 session_context.user_memory_manager 存储起来
         for memory in extracted_memories:
-            session_context.user_memory_manager.remember(
+            await session_context.user_memory_manager.remember(
                 memory_key=memory['key'],
                 content=memory['content'],
                 memory_type=memory['type'],
@@ -102,7 +100,7 @@ class MemoryExtractionAgent(AgentBase):
         duplicate_keys = self._check_and_delete_duplicate_memories(existing_memories, session_id, session_context)
         # 删除重复的旧记忆
         for key in duplicate_keys:
-            session_context.user_memory_manager.forget(memory_key=key, session_id=session_id)
+            await session_context.user_memory_manager.forget(memory_key=key, session_id=session_id)
 
         # 记录执行结果到日志
         logger.info(f"MemoryExtractionAgent: 提取了 {len(extracted_memories)} 个记忆，删除了 {len(duplicate_keys)} 个重复记忆")

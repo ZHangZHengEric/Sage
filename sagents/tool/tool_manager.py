@@ -10,14 +10,11 @@ import inspect
 import json
 import asyncio
 from mcp import StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamablehttp_client
-from mcp import ClientSession, Tool
-from mcp.types import CallToolResult
+from mcp import Tool
 import traceback
 import time
 import os,sys
+from .mcp_proxy import McpProxy
 
 class ToolManager:
     def __init__(self, is_auto_discover=True):
@@ -44,51 +41,12 @@ class ToolManager:
             path: Path to scan for tools
         """
         return self._auto_discover_tools(path=path)
+
     async def initialize(self):
         """异步初始化，用于测试环境"""
         logger.info("Asynchronously initializing ToolManager")
         await self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path)
     
-
-    async def register_mcp_server(self, server_name: str, config: dict):
-        """Register an MCP server directly with configuration
-        
-        Args:
-            server_name: Name of the server
-            config: Dictionary containing server configuration:
-                - For stdio server:
-                    - command: Command to start server
-                    - args: List of arguments (optional)
-                    - env: Environment variables (optional)
-                - For SSE server:
-                    - sse_url: SSE server URL
-        """
-        bool_registered = False
-        logger.info(f"Registering MCP server: {server_name}")
-        if config.get('disabled', False):
-            logger.debug(f"Server {server_name} is disabled, skipping")
-            return bool_registered
-
-        if 'sse_url' in config:
-            logger.debug(f"Registering SSE server {server_name} with URL: {config['sse_url']}")
-            server_params = SseServerParameters(url=config['sse_url'])
-            bool_registered = await self._register_mcp_tools_sse(server_name, server_params)
-        elif 'url' in config or 'streamable_http_url' in config:
-            # 处理streamable_http_url 或 url 配置
-            url = config.get('url', config.get('streamable_http_url'))
-            logger.debug(f"Registering streamable HTTP server {server_name} with URL: {url}")
-            server_params = StreamableHttpServerParameters(url=url)
-            bool_registered = await self._register_mcp_tools_streamable_http(server_name, server_params)
-        else:
-            logger.debug(f"Registering stdio server {server_name} with command: {config['command']}")
-            server_params = StdioServerParameters(
-                command=config['command'],
-                args=config.get('args', []),
-                env=config.get('env', None)
-            )
-            bool_registered = await self._register_mcp_tools_stdio(server_name, server_params)
-        logger.info(f"Successfully registered MCP server: {server_name}")
-        return bool_registered
 
     def _auto_discover_tools(self, path: str = None):
         """Auto-discover and register all tools in the tools package
@@ -133,6 +91,7 @@ class ToolManager:
         if str(sys_package_path) in sys.path:
             sys.path.remove(str(sys_package_path))
             logger.info(f"Removed package path from sys.path: {sys_package_path}")
+
     def register_tool_class(self, tool_class: Type[ToolBase]):
         """Register all tools from a ToolBase subclass"""
         logger.info(f"Registering tools from class: {tool_class.__name__}")
@@ -201,7 +160,7 @@ class ToolManager:
         logger.info(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
 
-    async def _discover_mcp_tools(self,mcp_setting_path: str = None):
+    async def _discover_mcp_tools(self, mcp_setting_path: str = None):
         bool_registered = False
         """Discover and register tools from MCP servers"""
         logger.info(f"Discovering MCP tools from settings file: {mcp_setting_path}")
@@ -213,114 +172,49 @@ class ToolManager:
                 mcp_config = json.load(f)
                 logger.debug(f"Loaded MCP config with {len(mcp_config.get('mcpServers', {}))} servers")
                 logger.debug(f"mcp_config: {mcp_config}")
-            
             for server_name, config in mcp_config.get('mcpServers', {}).items():
-                logger.debug(f"Processing MCP server config for {server_name}")
-                logger.debug(f"Loading MCP server config for {server_name}: {config}")
-                if config.get('disabled', False):
-                    logger.debug(f"Skipping disabled MCP server: {server_name}")
-                    continue
-                
-                if 'sse_url' in config:
-                    logger.debug(f"Setting up SSE server: {server_name} at URL: {config['sse_url']}")
-                    server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
-                    bool_registered = await self._register_mcp_tools_sse(server_name, server_params)
-                elif 'url' in config or 'streamable_http_url' in config:
-                    # 处理streamable_http_url 或 url 配置
-                    url = config.get('url', config.get('streamable_http_url'))
-                    logger.debug(f"Registering streamable HTTP server {server_name} with URL: {url}")
-                    server_params = StreamableHttpServerParameters(url=url)
-                    bool_registered = await self._register_mcp_tools_streamable_http(server_name, server_params)
-                else:
-                    logger.debug(f"Setting up stdio server: {server_name} with command: {config['command']}")
-                    server_params = StdioServerParameters(
-                        command=config['command'],
-                        args=config.get('args', []),
-                        env=config.get('env', None)
-                    )
-                    bool_registered = await self._register_mcp_tools_stdio(server_name, server_params)
+                await self.register_mcp_server(server_name, config)
         except Exception as e:
             logger.error(f"Error loading MCP config: {str(e)}")
             return bool_registered
         return bool_registered
 
-    async def _register_mcp_tools_stdio(self, server_name: str, server_params: StdioServerParameters):
-        """Register tools from stdio MCP server"""
-        logger.info(f"Registering tools from stdio MCP server: {server_name}")
-        try:
-            async with stdio_client(server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    logger.debug(f"Initializing session for stdio MCP server {server_name}")
-                    start_time = time.time()
-                    await session.initialize()
-                    elapsed = time.time() - start_time
-                    logger.debug(f"Initialized session for stdio MCP server {server_name} in {elapsed:.2f} seconds")
-
-                    response = await session.list_tools()
-                    tools = response.tools
-                    logger.info(f"Received {len(tools)} tools from stdio MCP server {server_name}")
-                    for tool in tools:
-                        await self._register_mcp_tool(server_name,tool, server_params)
-        except Exception as e:
-            logger.error(f"Failed to connect to stdio MCP server {server_name}: {str(e)}")
-            logger.error(traceback.format_exc())
-            return False
-        return True
-    async def _register_mcp_tools_streamable_http(self, server_name: str, server_params: StreamableHttpServerParameters):
-        """Register tools from streamable HTTP MCP server"""
-        logger.info(f"Registering tools from streamable HTTP MCP server: {server_name} at {server_params.url}")
-        try:
-            async with streamablehttp_client(server_params.url) as (read, write,_):
-                async with ClientSession(read, write) as session:
-                    logger.debug(f"Initializing session for streamable HTTP MCP server {server_name}")
-                    start_time = time.time()
-                    await session.initialize()
-                    elapsed = time.time() - start_time
-                    logger.debug(f"Initialized session for streamable HTTP MCP server {server_name} in {elapsed:.2f} seconds")
-                    response = await session.list_tools()
-                    tools = response.tools
-                    logger.info(f"Received {len(tools)} tools from streamable HTTP MCP server {server_name}")
-                    for tool in tools:
-                        await self._register_mcp_tool(server_name, tool, server_params)
-                    return True
-        except Exception as e:
-            logger.error(f"Failed to connect to streamable HTTP MCP server {server_name}: {str(e)}")
-            return False
-
-    async def _register_mcp_tools_sse(self, server_name: str, server_params: SseServerParameters):
-        """Register tools from SSE MCP server"""
-        logger.info(f"Registering tools from SSE MCP server: {server_name} at {server_params.url}")
-
-        try:
-            headers= None
-            if server_params.api_key:
-                headers = {
-                    "Authorization": f"Bearer {server_params.api_key}",
-                    "Content-Type": "application/json"
-                }
-            logger.info(f'SSE MCP server header {headers}')
-            async with sse_client(server_params.url,headers=headers) as (read, write):
-                async with ClientSession(read, write) as session:
-                    logger.debug(f"Initializing session for SSE MCP server {server_name}")
-
-                    start_time = time.time()
-                    await session.initialize()
-                    elapsed = time.time() - start_time
-                    logger.debug(f"Session initialized in {elapsed:.2f} seconds")
-
-                    response = await session.list_tools()
-                    tools = response.tools
-                    logger.info(f"Received {len(tools)} tools from SSE MCP server {server_name}")
-                    for tool in tools:
-                        await self._register_mcp_tool(server_name, tool, server_params)
-                    return True
-        except Exception as e:
-            logger.error(f"Failed to connect to SSE MCP server {server_name}: {str(e)}")
-            return False
+    async def register_mcp_server(self, server_name: str, config: dict):
+        """Register an MCP server directly with configuration
         
+        Args:
+            server_name: Name of the server
+            config: Dictionary containing server configuration:
+                - For stdio server:
+                    - command: Command to start server
+                    - args: List of arguments (optional)
+                    - env: Environment variables (optional)
+                - For SSE server:
+                    - sse_url: SSE server URL
+        """
+        bool_registered = False
+        logger.info(f"Registering MCP server: {server_name}")
+        if config.get('disabled', False):
+            logger.debug(f"Server {server_name} is disabled, skipping")
+            return bool_registered
+        server_name = server_name.strip()
+        server_params = None
+        if 'sse_url' in config:
+            server_params = SseServerParameters(url=config['sse_url'],api_key=config.get('api_key',None))
+        elif 'url' in config or 'streamable_http_url' in config:
+            server_params = StreamableHttpServerParameters(url=config.get('url', config.get('streamable_http_url')))
+        else:
+            server_params = StdioServerParameters(command=config['command'],args=config.get('args', []),env=config.get('env', None))
+        mcp_proxy = McpProxy()
+        mcp_tools = await mcp_proxy.get_mcp_tools(server_name, server_params)
+        for mcp_tool in mcp_tools:
+            await self._register_mcp_tool(server_name, mcp_tool, server_params)    
+        bool_registered = True  
+        logger.info(f"Successfully registered MCP server: {server_name}")
+        return bool_registered
+
     async def _register_mcp_tool(self, server_name: str, tool_info:Union[Tool, dict], 
-                               server_params: Union[StdioServerParameters, SseServerParameters]):
-        
+                               server_params: Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]):
         if isinstance(tool_info, Tool):
             tool_info = tool_info.model_dump()
         if not isinstance(tool_info, dict):
@@ -343,45 +237,6 @@ class ToolManager:
         registered = self.register_tool(tool_spec)
         logger.debug(f"MCP tool {tool_info['name']} registration result: {registered}")
     
-    def register_tools_from_directory(self, dir_path: str):
-        """Register all tools from a directory containing tool modules"""
-        logger.info(f"Registering tools from directory: {dir_path}")
-        dir_path = Path(dir_path)
-        if not dir_path.is_dir():
-            logger.warning(f"Directory not found: {dir_path}")
-            return False
-            
-        logger.info(f"\nScanning directory for tools: {dir_path}")
-        tool_count = 0
-            
-        for py_file in dir_path.glob('*.py'):
-            if py_file.stem == '__init__' or py_file.stem.endswith('_base'):
-                logger.debug(f"Skipping file: {py_file.name}")
-                continue
-                
-            module_name = py_file.stem
-            logger.debug(f"Found tool module: {module_name}")
-            
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, py_file)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                
-                for name, obj in inspect.getmembers(module):
-                    if inspect.isclass(obj) and issubclass(obj, ToolBase) and obj is not ToolBase:
-                        logger.debug(f"Registering tool class: {name}")
-
-                        if self.register_tool_class(obj):
-                            tool_count = len(self.tools)
-            except Exception as e:
-                logger.error(f"Error loading tool from {py_file}: {str(e)}")
-
-                continue
-                
-        logger.info(f"Successfully registered {tool_count} tools from directory")
-
-        return tool_count > 0
-
     def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
         """Get a tool by name"""
         logger.debug(f"Getting tool by name: {name}")
@@ -446,8 +301,8 @@ class ToolManager:
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
         return [convert_spec_to_openai_format(tool) for tool in self.tools.values()]
 
-    def run_tool(self, tool_name: str, session_context: SessionContext, session_id: str="", **kwargs) -> Any:
-        """Execute a tool by name with provided arguments"""
+    async def run_tool_async(self, tool_name: str, session_context: SessionContext, session_id: str="", **kwargs) -> Any:
+        """Execute a tool by name with provided arguments (async version)"""
         execution_start = time.time()
         logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
         logger.debug(f"Tool arguments: {kwargs}")
@@ -459,7 +314,6 @@ class ToolManager:
         if not tool:
             error_msg = f"Tool '{tool_name}' not found. Available: {list(self.tools.keys())}"
             logger.error(error_msg)
-
             return self._format_error_response(error_msg, tool_name, "TOOL_NOT_FOUND")
         
         logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
@@ -469,39 +323,12 @@ class ToolManager:
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
-                from concurrent.futures import ThreadPoolExecutor
-                
-                def run_async_task():
-                    return asyncio.run(self._execute_mcp_tool(tool, session_id, **kwargs))
-                
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    try:
-                        future = executor.submit(run_async_task)
-                        final_result = future.result(timeout=300)
-                    except TimeoutError:
-                        logger.error(f"MCP tool {tool.name} execution timed out")
-                        raise RuntimeError(f"MCP tool {tool.name} execution timed out after 300 seconds")
-                    except Exception as e:
-                        logger.error(f"MCP tool {tool.name} execution failed: {str(e)}")
-                        raise
+                final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
             elif isinstance(tool, ToolSpec):
-                final_result = self._execute_standard_tool(tool, **kwargs)
+                final_result = await self._execute_standard_tool_async(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
-                from concurrent.futures import ThreadPoolExecutor
-                
-                def run_async_task():
-                    return asyncio.run(self._execute_agent_tool_streaming_async(tool, session_context, session_id))
-                
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    try:
-                        future = executor.submit(run_async_task)
-                        final_result = future.result(timeout=300)
-                    except TimeoutError:
-                        logger.error(f"MCP tool {tool.name} execution timed out")
-                        raise RuntimeError(f"MCP tool {tool.name} execution timed out after 300 seconds")
-                    except Exception as e:
-                        logger.error(f"MCP tool {tool.name} execution failed: {str(e)}")
-                        raise
+                # For AgentToolSpec, return a generator for streaming
+                return self._execute_agent_tool_streaming_async(tool, session_context, session_id)
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
@@ -526,12 +353,13 @@ class ToolManager:
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(error_msg, tool_name, "EXECUTION_ERROR", str(e))
 
+
     async def _execute_mcp_tool(self, tool: McpToolSpec, session_id: str, **kwargs) -> str:
         """Execute MCP tool and format result"""
         logger.info(f"Executing MCP tool: {tool.name} on server: {tool.server_name}")
-        
+        mcp_proxy = McpProxy()
         try:
-            result = await self._run_mcp_tool_async(tool, session_id, **kwargs)
+            result = await mcp_proxy.run_mcp_tool(tool, session_id, **kwargs)
             logger.info(f"MCP tool {tool.name} execution completed successfully")
             # Process MCP result
             if isinstance(result, dict) and result.get('content'):
@@ -548,160 +376,6 @@ class ToolManager:
         except Exception as e:
             logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
-
-    def _execute_standard_tool(self, tool: ToolSpec, **kwargs) -> str:
-        """Execute standard tool and format result"""
-        logger.debug(f"Executing standard tool: {tool.name}")
-        
-        try:
-            # Execute the tool function
-            if hasattr(tool.func, '__self__'):
-                # Bound method
-                result = tool.func(**kwargs)
-            else:
-                # Unbound method - need to create instance
-                tool_class = getattr(tool.func, '__objclass__', None)
-                if tool_class:
-                    # 检查是否有预先创建的实例
-                    if hasattr(self, '_tool_instances') and tool_class in self._tool_instances:
-                        instance = self._tool_instances[tool_class]
-                    else:
-                        instance = tool_class()
-                    result = tool.func.__get__(instance)(**kwargs)
-                else:
-                    result = tool.func(**kwargs)
-            
-            # Format result - 避免双重JSON序列化
-            # if isinstance(result, (dict, list)):
-            #     # 直接返回dict/list结果，不进行JSON字符串化
-            #     return json.dumps(result, ensure_ascii=False, indent=2)
-            # else:
-            return json.dumps({"content": result}, ensure_ascii=False, indent=2)
-                
-        except Exception as e:
-            logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
-            raise
-
-    def _format_error_response(self, error_msg: str, tool_name: str, error_type: str, 
-                              exception_detail: str = None) -> str:
-        """Format a consistent error response"""
-        error_response = {
-            "error": True,
-            "error_type": error_type,
-            "message": error_msg,
-            "tool_name": tool_name,
-            "timestamp": time.time()
-        }
-        
-        if exception_detail:
-            error_response["exception_detail"] = exception_detail
-            
-        return json.dumps(error_response, ensure_ascii=False, indent=2)
-
-    async def _run_mcp_tool_async(self, tool: McpToolSpec, session_id: str = None, **kwargs) -> Any:
-        """Run an MCP tool asynchronously"""
-        if not session_id:
-            session_id = "default"
-        
-        server_name = tool.server_name
-        logger.debug(f"MCP tool execution: {tool.name} on {server_name}")
-        
-        try:
-            if isinstance(tool.server_params, SseServerParameters):
-                return await self._execute_sse_mcp_tool(tool, **kwargs)
-            elif isinstance(tool.server_params, StreamableHttpServerParameters):
-                return await self._execute_streamable_http_mcp_tool(tool, **kwargs)
-            else:
-                return await self._execute_stdio_mcp_tool(tool, **kwargs)
-        except Exception as e:
-            logger.error(f"MCP tool '{tool.name}' failed on server '{server_name}': {str(e)}")
-            logger.debug(f"MCP error details - Tool: {tool.name}, Server: {server_name}, Args: {kwargs}")
-            raise
-
-    async def _execute_streamable_http_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
-        """Execute streamable HTTP MCP tool"""
-        headers = None
-        if tool.server_params.api_key:
-            headers = {
-                "Authorization": f"Bearer {tool.server_params.api_key}",
-                "Content-Type": "application/json"
-            }
-        async with streamablehttp_client(tool.server_params.url, headers=headers) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool.name, kwargs)
-                return result.model_dump()
-
-    
-    async def _execute_sse_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
-        """Execute SSE MCP tool"""
-        headers= None
-        if tool.server_params.api_key:
-            headers = {
-                "Authorization": f"Bearer {tool.server_params.api_key}",
-                "Content-Type": "application/json"
-            }
-        async with sse_client(tool.server_params.url,headers=headers) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool.name, kwargs)
-                return result.model_dump()
-
-    async def _execute_stdio_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
-        """Execute stdio MCP tool"""
-        async with stdio_client(tool.server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool.name, kwargs)
-                return result.model_dump()
-
-    def _validate_json_response(self, response_text: str, tool_name: str) -> tuple[bool, str]:
-        """Validate if response is proper JSON and return validation result"""
-        if not response_text:
-            return False, "Empty response"
-        
-        try:
-            parsed = json.loads(response_text)
-            
-            # Check for common issues
-            if isinstance(parsed, str) and len(parsed) > 10000:
-                logger.warning(f"Tool '{tool_name}' returned very large response ({len(parsed)} chars)")
-                
-            return True, "Valid JSON"
-            
-        except json.JSONDecodeError as e:
-            error_pos = getattr(e, 'pos', 'unknown')
-            if hasattr(e, 'pos') and e.pos < len(response_text):
-                start = max(0, e.pos - 50)
-                end = min(len(response_text), e.pos + 50)
-                context = response_text[start:end]
-                logger.error(f"JSON parse error at position {error_pos}: {context}")
-            
-            return False, f"JSON decode error at position {error_pos}: {e}"
-        except Exception as e:
-            logger.error(f"Unexpected JSON validation error for '{tool_name}': {e}")
-            return False, f"Validation error: {e}"
-
-    async def get_tool_async(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
-        """Get a tool by name (async version)"""
-        logger.debug(f"Getting tool by name: {name}")
-        return self.tools.get(name)
-
-    async def _format_error_response_async(self, error_msg: str, tool_name: str, error_type: str, 
-                              exception_detail: str = None) -> str:
-        """Format a consistent error response (async version)"""
-        error_response = {
-            "error": True,
-            "error_type": error_type,
-            "message": error_msg,
-            "tool_name": tool_name,
-            "timestamp": time.time()
-        }
-        
-        if exception_detail:
-            error_response["exception_detail"] = exception_detail
-            
-        return json.dumps(error_response, ensure_ascii=False, indent=2)
 
     async def _execute_standard_tool_async(self, tool: ToolSpec, **kwargs) -> str:
         """Execute standard tool and format result (async version)"""
@@ -805,9 +479,25 @@ class ToolManager:
                 "error_type": "EXECUTION_ERROR"
             }
             yield [error_response]
+
+    def _format_error_response(self, error_msg: str, tool_name: str, error_type: str, 
+                              exception_detail: str = None) -> str:
+        """Format a consistent error response"""
+        error_response = {
+            "error": True,
+            "error_type": error_type,
+            "message": error_msg,
+            "tool_name": tool_name,
+            "timestamp": time.time()
+        }
+        
+        if exception_detail:
+            error_response["exception_detail"] = exception_detail
             
-    async def _validate_json_response_async(self, response_text: str, tool_name: str) -> tuple[bool, str]:
-        """Validate if response is proper JSON and return validation result (async version)"""
+        return json.dumps(error_response, ensure_ascii=False, indent=2)
+
+    def _validate_json_response(self, response_text: str, tool_name: str) -> tuple[bool, str]:
+        """Validate if response is proper JSON and return validation result"""
         if not response_text:
             return False, "Empty response"
         
@@ -832,56 +522,3 @@ class ToolManager:
         except Exception as e:
             logger.error(f"Unexpected JSON validation error for '{tool_name}': {e}")
             return False, f"Validation error: {e}"
-
-    async def run_tool_async(self, tool_name: str, session_context: SessionContext, session_id: str="", **kwargs) -> Any:
-        """Execute a tool by name with provided arguments (async version)"""
-        execution_start = time.time()
-        logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
-        logger.debug(f"Tool arguments: {kwargs}")
-        # Remove duplicate session_id from kwargs if present
-        session_id = kwargs.pop('session_id', session_id)
-        
-        # Step 1: Tool Lookup
-        tool = await self.get_tool_async(tool_name)
-        if not tool:
-            error_msg = f"Tool '{tool_name}' not found. Available: {list(self.tools.keys())}"
-            logger.error(error_msg)
-            return await self._format_error_response_async(error_msg, tool_name, "TOOL_NOT_FOUND")
-        
-        logger.debug(f"Found tool: {tool_name} (type: {type(tool).__name__})")
-        
-        # Step 2: Execute based on tool type (self-call prevention handled at agent level)
-        
-        try:
-            # Step 3: Execute tool
-            if isinstance(tool, McpToolSpec):
-                final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
-            elif isinstance(tool, ToolSpec):
-                final_result = await self._execute_standard_tool_async(tool, **kwargs)
-            elif isinstance(tool, AgentToolSpec):
-                # For AgentToolSpec, return a generator for streaming
-                return self._execute_agent_tool_streaming_async(tool, session_context, session_id)
-            else:
-                error_msg = f"Unknown tool type: {type(tool).__name__}"
-                logger.error(error_msg)
-                return await self._format_error_response_async(error_msg, tool_name, "UNKNOWN_TOOL_TYPE")
-            
-            # Step 4: Validate Result (for non-streaming tools)
-            execution_time = time.time() - execution_start
-            logger.debug(f"Tool '{tool_name}' completed successfully in {execution_time:.2f}s")
-            
-            # Validate JSON format
-            is_valid, validation_msg = await self._validate_json_response_async(final_result, tool_name)
-            if not is_valid:
-                logger.error(f"Tool '{tool_name}' returned invalid JSON: {validation_msg}")
-                return await self._format_error_response_async(f"Invalid JSON response: {validation_msg}", 
-                                                 tool_name, "INVALID_JSON")
-            
-            return final_result
-            
-        except Exception as e:
-            execution_time = time.time() - execution_start
-            error_msg = f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            return await self._format_error_response_async(error_msg, tool_name, "EXECUTION_ERROR", str(e))
-
