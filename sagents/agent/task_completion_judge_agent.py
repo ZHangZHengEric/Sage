@@ -10,6 +10,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.context.tasks.task_manager import TaskManager
 import uuid
 from copy import deepcopy
+import json
 
 class TaskCompletionJudgeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
