@@ -77,7 +77,8 @@ const handleSubmit = (e) => {
 
 // 处理键盘事件
 const handleKeyDown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // 检查是否在输入法组合状态中，如果是则不处理回车键
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     handleSubmit(e)
   }

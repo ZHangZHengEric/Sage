@@ -2,15 +2,12 @@ import traceback
 from sagents.utils.prompt_manager import PromptManager
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
-from typing import Any, Dict, List, Optional, Generator
+from typing import Any, Dict, List, Generator
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_base import AgentToolSpec
 from sagents.context.tasks.task_manager import TaskManager
-from sagents.context.tasks.task_base import TaskBase, TaskStatus
-import json
 import uuid
 from copy import deepcopy
 

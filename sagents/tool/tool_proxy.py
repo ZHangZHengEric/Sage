@@ -86,13 +86,6 @@ class ToolProxy:
         self._check_tool_available(name)
         return self.tool_manager.get_tool(name)
     
-    def run_tool(self, tool_name: str, session_context: SessionContext, **kwargs) -> Any:
-        """
-        执行工具（仅限可用工具）
-        """
-        self._check_tool_available(tool_name)
-        return self.tool_manager.run_tool(tool_name, session_context, **kwargs)
-
     async def run_tool_async(self, tool_name: str, session_context: SessionContext, **kwargs) -> Any:
         """
         异步执行工具（仅限可用工具）

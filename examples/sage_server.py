@@ -1235,7 +1235,7 @@ async def exec_tool(request: ExecToolRequest):
             logger.error(f"执行工具失败: {request.tool_name}")
             return {"status": "error", "message": "工具不存在"}
 
-        tool_response = tool_manager.run_tool(
+        tool_response = await tool_manager.run_tool_async(
                 tool_name=request.tool_name,
                 session_context=None,
                 session_id="",

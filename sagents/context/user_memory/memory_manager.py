@@ -7,7 +7,7 @@ Date: 2024-12-21
 """
 
 import traceback
-from typing import Dict, Any, List, Union
+from typing import Dict, List, Union
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.logger import logger
@@ -165,7 +165,7 @@ class UserMemoryManager:
     
     # ========== 核心记忆操作接口 ==========
     
-    def remember(self, memory_key: str, content: str, memory_type: str = "experience", tags: str = "", session_id: str = None) -> str:
+    async def remember(self, memory_key: str, content: str, memory_type: str = "experience", tags: str = "", session_id: str = None) -> str:
         """记住某个记忆
         
         Args:
@@ -184,7 +184,7 @@ class UserMemoryManager:
         
         try:
             # 统一通过tool manager调用记忆工具
-            return self.tool_manager.run_tool(
+            return await self.tool_manager.run_tool_async(
                 tool_name='remember_user_memory',
                 session_context=None,
                 session_id=session_id,
@@ -199,7 +199,7 @@ class UserMemoryManager:
             logger.error(f"记住记忆失败: {e}")
             return f"记住记忆失败：{str(e)}"
     
-    def recall(self, query: str, limit: int = 5, session_id: str = None) -> str:    
+    async def recall(self, query: str, limit: int = 5, session_id: str = None) -> str:    
         """获取相似的记忆
         
         Args:
@@ -216,7 +216,7 @@ class UserMemoryManager:
         
         try:
             # 统一通过tool manager调用记忆工具
-            result = self.tool_manager.run_tool(
+            result = await self.tool_manager.run_tool_async(
                 tool_name='recall_user_memory',
                 session_context=None,
                 session_id=session_id,
@@ -264,7 +264,7 @@ class UserMemoryManager:
             logger.error(f"回忆记忆失败: {e}")
             return f"回忆记忆失败：{str(e)}"
     
-    def forget(self, memory_key: str, session_id: str = None) -> str:
+    async def forget(self, memory_key: str, session_id: str = None) -> str:
         """忘掉某个记忆
         
         Args:
@@ -279,7 +279,7 @@ class UserMemoryManager:
         
         try:
             # 统一通过tool manager调用记忆工具
-            return self.tool_manager.run_tool(
+            return await self.tool_manager.run_tool_async(
                 tool_name='forget_user_memory',
                 session_context=None,
                 session_id=session_id,
@@ -291,7 +291,7 @@ class UserMemoryManager:
             logger.error(f"忘记记忆失败: {e}")
             return f"忘记记忆失败：{str(e)}"
     
-    def get_system_memories(self, session_id: str = None) -> dict:
+    async def get_system_memories(self, session_id: str = None) -> dict:
         """获取系统级记忆并格式化
         
         Args:
@@ -314,7 +314,7 @@ class UserMemoryManager:
             for memory_type in system_memory_types:
                 try:
                     # 使用工具管理器调用按类型查询记忆的方法
-                    result = self.tool_manager.run_tool(
+                    result = await self.tool_manager.run_tool_async(
                         tool_name='recall_user_memory_by_type',
                         session_context=None,
                         session_id=effective_session_id,
