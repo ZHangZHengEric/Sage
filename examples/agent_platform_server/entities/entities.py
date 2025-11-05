@@ -115,6 +115,7 @@ class AgentConfig(BaseModel):
     availableTools: Optional[List[str]] = None
     maxLoopCount: Optional[int] = 10
     deepThinking: Optional[bool] = False
+    llmConfig: Optional[Dict[str, Any]] = None
     multiAgent: Optional[bool] = False
     description: Optional[str] = None
     created_at: Optional[str] = None
