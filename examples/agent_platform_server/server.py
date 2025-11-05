@@ -58,7 +58,9 @@ def create_argument_parser():
                        default=int(os.getenv("SAGE_DEFAULT_LLM_MAX_MODEL_LEN", "54000")), 
                        type=int, 
                        help="默认LLM 最大上下文 (环境变量: SAGE_DEFAULT_LLM_MAX_MODEL_LEN)")
-
+    parser.add_argument("--llm_api_key", help="LLM API Key（已废弃，请使用--default_llm_api_key）")
+    parser.add_argument("--llm_api_base_url", help="LLM API Base（已废弃，请使用--default_llm_api_base_url）")
+    parser.add_argument("--llm_model_name", help="LLM API Model（已废弃，请使用--default_llm_model_name）")
     parser.add_argument("--host", 
                        default=os.getenv("SAGE_HOST", "0.0.0.0"), 
                        help="Server Host (环境变量: SAGE_HOST)")
