@@ -10,7 +10,7 @@ COPY . .
 RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
 
 # Copy source and build
-RUN npm run build-only
+RUN npm run build
 
 # --- Runtime stage: serve static files with Nginx ---
 FROM docker.m.daocloud.io/nginx:1.27-alpine
