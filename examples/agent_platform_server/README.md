@@ -14,7 +14,7 @@
 在项目根目录下执行以下命令构建 Docker 镜像：
 
 ```bash
-docker build -f docker/Dockerfile -t sage-server:latest .
+docker build -f examples/agent_platform_server/docker/Dockerfile -t sage-server:latest .
 ```
 
 ### 2. 运行 Docker 容器
@@ -23,8 +23,8 @@ docker build -f docker/Dockerfile -t sage-server:latest .
 
 ```bash
 docker run -d \
-  --name sage-server \
-  -p 8001:8001 \
+  --name agent-platform-server \
+  -p 30050:8001 \
   sage-server:latest \
   --default_llm_api_key your_api_key \
   --default_llm_model_name qwen-plus \
