@@ -309,7 +309,8 @@ def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfi
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
         description=config.get("description"),
         created_at=config.get("created_at"),
-        updated_at=config.get("updated_at")
+        updated_at=config.get("updated_at"),
+        llmConfig=config.get("llmConfig")
     )
 
 
@@ -326,7 +327,8 @@ def convert_agent_to_config(agent: AgentConfig) -> Dict[str, Any]:
         "multiAgent": agent.multiAgent,
         "description": agent.description,
         "created_at": agent.created_at,
-        "updated_at": agent.updated_at
+        "updated_at": agent.updated_at,
+        "llmConfig": agent.llmConfig
     }
     
     # 移除None值
