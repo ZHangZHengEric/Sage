@@ -46,44 +46,6 @@ class ErrorResponse(BaseModel):
         super().__init__(**data)
 
 
-# ============= 聊天相关模型 =============
-
-class ChatMessage(BaseModel):
-    role: Optional[str] = None
-    content: Optional[Any] = None
-    message_id: Optional[str] = None
-    type: Optional[str] = "normal"
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-    tool_call_id: Optional[str] = None
-    show_content: Optional[str] = None
-    message_type: Optional[str] = None
-    timestamp: Optional[float] = None
-    chunk_id: Optional[str] = None
-    is_final: Optional[bool] = None
-    is_chunk: Optional[bool] = None
-    metadata: Optional[Dict[str, Any]] = None
-    session_id: Optional[str] = None
-
-class StreamRequest(BaseModel):
-    messages: List[ChatMessage]
-    session_id: Optional[str] = None
-    user_id: Optional[str] = None
-    deep_thinking: Optional[Union[bool, str]] = None
-    max_loop_count: int = 10
-    multi_agent: Optional[Union[bool, str]] = None
-    summary: bool = True  # 过时字段
-    deep_research: bool = True  # 过时字段，与multi_agent一致
-    more_suggest: bool = False
-    system_context: Optional[Dict[str, Any]] = None
-    available_workflows: Optional[Dict[str, List[str]]] = None
-    llm_model_config: Optional[Dict[str, Any]] = None
-    system_prefix: Optional[str] = None
-    available_tools: Optional[List[str]] = None
-
-    def __init__(self, **data):
-        super().__init__(**data)
-
-
 # ============= 工具相关模型 =============
 
 class ToolInfo(BaseModel):
@@ -158,31 +120,10 @@ class AgentConfig(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
-class CreateAgentRequest(BaseModel):
-    name: str
-    systemPrefix: Optional[str] = None
-    systemContext: Optional[Dict[str, Any]] = None
-    availableWorkflows: Optional[Dict[str, List[str]]] = None
-    availableTools: Optional[List[str]] = None
-    maxLoopCount: Optional[int] = 10
-    deepThinking: Optional[bool] = False
-    multiAgent: Optional[bool] = False
-    description: Optional[str] = None
-    
-
-class UpdateAgentRequest(BaseModel):
-    name: Optional[str] = None
-    systemPrefix: Optional[str] = None
-    systemContext: Optional[Dict[str, Any]] = None
-    availableWorkflows: Optional[Dict[str, List[str]]] = None
-    availableTools: Optional[List[str]] = None
-    maxLoopCount: Optional[int] = None
-    deepThinking: Optional[bool] = None
-    multiAgent: Optional[bool] = None
-    description: Optional[str] = None
-
 class AutoGenAgentRequest(BaseModel):
     agent_description: str  # Agent描述
+    available_tools: Optional[List[str]] = None  # 可选的工具名称列表，如果提供则只使用这些工具
+
 
 
 # ============= 系统相关模型 =============
@@ -211,38 +152,9 @@ class ConfigRequest(BaseModel):
 
 # ============= 响应数据模型 =============
 
-class HealthData(BaseModel):
-    status: str
-    service: str
-
-class ToolsData(BaseModel):
-    tools: List[ToolInfo]
-
-class AgentsData(BaseModel):
-    agents: List[AgentConfig]
-
-class AgentData(BaseModel):
-    agent: AgentConfig
-
 class MCPServerData(BaseModel):
     server_name: str
     status: str
-
-class SystemPromptOptimizeData(BaseModel):
-    optimized_prompt: str
-    optimization_details: Optional[Dict[str, Any]] = None
-
-class AutoGenAgentData(BaseModel):
-    agent_config: Dict[str, Any]
-
-class SessionStatusData(BaseModel):
-    session_id: str
-    status: str
-    details: Optional[Dict[str, Any]] = None
-
-class FileWorkspaceData(BaseModel):
-    files: List[Dict[str, Any]]
-    workspace_path: str
 
 
 # ============= 辅助函数 =============

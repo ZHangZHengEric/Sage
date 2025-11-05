@@ -8,7 +8,7 @@
         </button>
       </div>
 
-      <div class="modal-content">
+  <div class="modal-content">
         <div v-if="!selectedType" class="creation-options">
           <div class="option-card" @click="handleCreateBlank">
             <div class="option-icon">
@@ -43,6 +43,25 @@
               :rows="4"
               :disabled="isGenerating"
             />
+          </div>
+
+          <!-- 可选工具列表（参考 AgentEdit 样式与逻辑） -->
+          <div class="tools-select">
+            <label>{{ t('agent.availableTools') }}</label>
+            <el-select
+              v-model="selectedTools"
+              multiple
+              :placeholder="t('agent.selectTools')"
+              style="width: 100%"
+              :disabled="isGenerating"
+            >
+              <el-option
+                v-for="tool in props.tools"
+                :key="tool.name"
+                :label="tool.name"
+                :value="tool.name"
+              />
+            </el-select>
           </div>
 
           <div class="action-buttons">
@@ -85,6 +104,10 @@ const props = defineProps({
   isOpen: {
     type: Boolean,
     default: false
+  },
+  tools: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -98,6 +121,7 @@ const { t } = useLanguage()
 const selectedType = ref('')
 const description = ref('')
 const isGenerating = ref(false)
+const selectedTools = ref([])
 
 // Methods
 const handleTypeSelect = (type) => {
@@ -108,7 +132,7 @@ const handleTypeSelect = (type) => {
 }
 
 const handleCreateBlank = () => {
-  emit('create-blank')
+  emit('create-blank', selectedTools.value)
   handleClose()
 }
 
@@ -120,7 +144,13 @@ const handleCreateSmart = async () => {
 
   isGenerating.value = true
   try {
-    await emit('create-smart', description.value.trim())
+    // 使用回调握手，等待父组件异步逻辑完成
+    await new Promise((resolve, reject) => {
+      emit('create-smart', description.value.trim(), selectedTools.value, {
+        onSuccess: () => resolve(),
+        onError: (err) => reject(err)
+      })
+    })
     handleClose()
   } catch (error) {
     console.error('Smart creation failed:', error)
@@ -134,6 +164,7 @@ const handleClose = () => {
   selectedType.value = ''
   description.value = ''
   isGenerating.value = false
+  selectedTools.value = []
   emit('close')
 }
 </script>
@@ -332,6 +363,19 @@ const handleClose = () => {
 .description-input textarea:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.tools-select {
+  text-align: left;
+  margin-bottom: 24px;
+}
+
+.tools-select label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #1f2937;
+  font-size: 14px;
 }
 
 .action-buttons {
