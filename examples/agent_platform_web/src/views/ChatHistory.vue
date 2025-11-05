@@ -92,8 +92,8 @@
     <!-- 分页组件 -->
     <div v-if="totalCount > 0" class="pagination-container">
       <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
+        :current-page="currentPage"
+        :page-size="pageSize"
         :page-sizes="[5, 10, 20, 50]"
         :total="totalCount"
         :background="true"
@@ -150,6 +150,7 @@ import { useLanguage } from '../utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '../utils/exporter.js'
 import { agentAPI } from '../api/agent.js'
 import { chatAPI } from '../api/chat.js'
+import { getOrCreateUserId } from '../utils/userCache.js'
 
 // Define emits
 const emit = defineEmits(['select-conversation'])
@@ -188,12 +189,14 @@ const loadAgents = async () => {
 const loadConversationsPaginated = async () => {
   try {
     isLoading.value = true
+    const user_id = await getOrCreateUserId()
     const params = {
       page: currentPage.value,
       page_size: pageSize.value,
       search: searchTerm.value || undefined,
       agent_id: filterAgent.value !== 'all' ? filterAgent.value : undefined,
-      sort_by: sortBy.value
+      sort_by: sortBy.value,
+      user_id: user_id
     }
     const response = await chatAPI.getConversationsPaginated(params)
     paginatedConversations.value = response.list || []
