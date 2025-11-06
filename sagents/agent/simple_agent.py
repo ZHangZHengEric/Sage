@@ -258,13 +258,12 @@ class SimpleAgent(AgentBase):
         Yields:
             List[MessageChunk]: 执行结果消息块
         """
-        logger.info("SimpleAgent: 开始执行主循环")
         
         all_new_response_chunks = []
         loop_count = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
         max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
-
+        logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         while True:
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
