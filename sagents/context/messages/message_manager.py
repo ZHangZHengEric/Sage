@@ -486,6 +486,10 @@ class MessageManager:
         """
         new_messages = []
         for msg in messages:
+            # 去掉empty消息
+            if msg.message_type == MessageType.EMPTY.value:
+                logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
+                continue
             clean_msg = {
                 'role': msg.role,
                 'content': msg.content,

@@ -327,7 +327,9 @@ class SimpleReactAgent(AgentBase):
                 step_name="plan_observe",
                 tool_choice=None,
             ):
-                all_new_response_chunks.extend(deepcopy(chunks))
+                non_empty_chunks = [c for c in chunks if (c.type != MessageType.EMPTY.value and c.message_type != MessageType.EMPTY.value)]
+                if len(non_empty_chunks) > 0:
+                    all_new_response_chunks.extend(deepcopy(non_empty_chunks))
                 yield chunks
                 if is_complete:
                     should_break = True
@@ -370,7 +372,9 @@ class SimpleReactAgent(AgentBase):
                 session_id=session_id,
                 step_name="direct_execution",
             ):
-                all_new_response_chunks.extend(deepcopy(chunks))
+                non_empty_chunks = [c for c in chunks if (c.type != MessageType.EMPTY.value and c.message_type != MessageType.EMPTY.value)]
+                if len(non_empty_chunks) > 0:
+                    all_new_response_chunks.extend(deepcopy(non_empty_chunks))
                 yield chunks
                 if is_complete:
                     should_break = True
@@ -448,7 +452,7 @@ class SimpleReactAgent(AgentBase):
                     content="",
                     message_id=content_response_message_id,
                     show_content="",
-                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                    message_type=MessageType.EMPTY.value
                 )]
                 yield (output_messages, False)
             elif chunk.choices[0].delta.content:
