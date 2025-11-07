@@ -285,7 +285,9 @@ class SimpleAgent(AgentBase):
                 tool_manager=tool_manager,
                 session_id=session_id
             ):
-                all_new_response_chunks.extend(deepcopy(chunks))
+                non_empty_chunks = [c for c in chunks if (c.type != MessageType.EMPTY.value and c.message_type != MessageType.EMPTY.value)]
+                if len(non_empty_chunks) > 0:
+                    all_new_response_chunks.extend(deepcopy(non_empty_chunks))
                 yield chunks
                 if is_complete:
                     should_break = True
