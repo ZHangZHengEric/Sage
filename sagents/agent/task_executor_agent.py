@@ -118,7 +118,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     content="",
                     message_id=content_response_message_id,
                     show_content="",
-                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                    message_type=MessageType.EMPTY.value
                 )]
                 yield output_messages
                 
