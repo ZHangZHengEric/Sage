@@ -142,7 +142,7 @@ class SageStreamService:
                            force_summary: bool=False):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
-        logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, messages_count={len(messages)}")
+        logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, messages_count={len(messages)}, max_loop_count={max_loop_count}")
         if isinstance(deep_thinking, str):
             if deep_thinking == 'auto':
                 deep_thinking = None
