@@ -14,7 +14,7 @@
 在项目根目录下执行以下命令构建 Docker 镜像：
 
 ```bash
-docker build -f docker/Dockerfile -t sage-server:latest .
+docker build -f examples/agent_platform_server/docker/Dockerfile -t sage-server:latest .
 ```
 
 ### 2. 运行 Docker 容器
@@ -23,11 +23,14 @@ docker build -f docker/Dockerfile -t sage-server:latest .
 
 ```bash
 docker run -d \
-  --name sage-server \
-  -p 8001:8001 \
+  --name agent-platform-server \
+  -p 30050:8001 \
+  -v /data/agent-platform/agent_workspace:/app/agent_workspace \
+  -v /data/agent-platform/logs:/app/logs \
+  -v /data/agent-platform/data:/app/data \
   sage-server:latest \
   --default_llm_api_key your_api_key \
-  --default_llm_model_name qwen-plus \
+  --default_llm_model_name deepseek-v3 \
   --default_llm_api_base_url https://dashscope.aliyuncs.com/compatible-mode/v1/ 
 ```
 
@@ -54,7 +57,7 @@ docker run -d \
 - `--daemon`：以守护进程模式运行（布尔标志）
 - `--pid-file`：PID文件路径，默认值：sage_stream.pid
 - `--force_summary`：是否强制总结（布尔标志，默认值：False）
-
+- `--db_path`：数据库文件路径，默认值：/app/data/agent_platform.db
 **使用示例：**
 
 ```bash

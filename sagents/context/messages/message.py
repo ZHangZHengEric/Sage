@@ -41,11 +41,12 @@ class MessageType(Enum):
     ERROR = "error"
     CHUNK = "chunk"
     GUIDE = "guide"
-    
     # 特殊类型
     HANDOFF_AGENT = "handoff_agent"
     STAGE_SUMMARY = "stage_summary"
     TOKEN_USAGE = "token_usage"
+    # 空数据
+    EMPTY = "empty"
 
 
 @dataclass

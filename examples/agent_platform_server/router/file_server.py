@@ -6,14 +6,11 @@ import os
 import mimetypes
 import json
 from pathlib import Path
-from typing import Optional
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, Request, Query
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 from sagents.utils.logger import logger
-from entities.entities import (
-    StandardResponse, create_success_response, create_error_response, SageHTTPException
+from entities.entities import (create_success_response, SageHTTPException
 )
 import globals.variables as global_vars
 
