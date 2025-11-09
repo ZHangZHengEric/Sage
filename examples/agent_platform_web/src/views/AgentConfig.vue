@@ -309,10 +309,12 @@ const handleCreateAgent = () => {
   showCreationModal.value = true
 }
 
-const handleBlankConfig = () => {
+const handleBlankConfig = (selectedTools = []) => {
   showCreationModal.value = false
-  // 切换到创建视图
-  editingAgent.value = null
+  // 切换到创建视图，并预填可用工具
+  editingAgent.value = {
+    availableTools: Array.isArray(selectedTools) ? selectedTools : []
+  }
   currentView.value = 'create'
 }
 
@@ -353,7 +355,7 @@ const handleSaveAgent = async (agentData) => {
   }
 }
 
-const handleSmartConfig = async (description) => {
+const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {
   const startTime = Date.now()
   console.log('🚀 开始智能配置生成，描述:', description)
 
@@ -369,14 +371,17 @@ const handleSmartConfig = async (description) => {
 
     // 使用后端返回的agent_config
     const newAgent = {
-      ...agentConfig
+      ...agentConfig,
+      availableTools: (Array.isArray(selectedTools) && selectedTools.length > 0)
+        ? selectedTools
+        : (agentConfig.availableTools || [])
     }
 
     console.log('🎉 智能配置生成完成，总耗时:', Date.now() - startTime, 'ms')
-    showCreationModal.value = false
     // 使用本地的saveAgent方法
     await saveAgent(newAgent)
-    showCreationModal.value = false
+    // 由父组件监听器中的回调驱动子组件关闭
+    callbacks.onSuccess && callbacks.onSuccess()
     ElMessage.success(t('agent.smartConfigSuccess').replace('{name}', newAgent.name))
   } catch (error) {
     const duration = Date.now() - startTime
@@ -397,7 +402,8 @@ const handleSmartConfig = async (description) => {
       throw new Error(`网络连接错误（耗时${Math.round(duration / 1000)}秒），请检查网络连接后重试`)
     }
 
-    throw error // 重新抛出错误，让AgentCreationModal处理
+    callbacks.onError && callbacks.onError(error)
+    throw error // 保持原有错误传递行为
   }
 }
 </script>

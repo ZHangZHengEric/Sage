@@ -35,7 +35,7 @@ class StreamRequest(BaseModel):
     llm_model_config: Optional[Dict[str, Any]] = None
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
-
+    force_summary: Optional[bool] = False
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
 
@@ -380,7 +380,7 @@ async def stream_chat(request: StreamRequest):
                 more_suggest=request.more_suggest,
                 system_context=request.system_context,
                 available_workflows=request.available_workflows,
-                force_summary=global_vars.get_server_args().force_summary
+                force_summary=request.force_summary
             ):
                 # 更新流处理计数器和活动时间
                 stream_counter += 1

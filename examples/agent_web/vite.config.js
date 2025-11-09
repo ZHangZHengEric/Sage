@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
     allowedHosts: [process.env.AGENT_WEB_HOST || env.AGENT_WEB_HOST || 'agentdev.rcrai.com'],
     proxy: {
       '/api': {
-        target: process.env.VITE_API_TARGET || env.VITE_API_TARGET || 'http://localhost:23232',
+        target: process.env.VITE_API_TARGET || env.VITE_API_TARGET || 'http://localhost:8001',
         changeOrigin: true,
         secure: false,
         ws: false,

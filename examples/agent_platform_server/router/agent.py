@@ -11,10 +11,11 @@ from fastapi import APIRouter
 from sagents.utils.logger import logger
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
+from sagents.tool.tool_proxy import ToolProxy
 
 from entities.entities import ( Response, 
     AgentConfig, AutoGenAgentRequest,
-    SystemPromptOptimizeRequest, AgentsData, AgentData,
+    SystemPromptOptimizeRequest,
      SageHTTPException
 )
 import globals.variables as global_vars
@@ -212,11 +213,21 @@ async def auto_generate_agent(
     
     # 使用自动生成工具
     auto_gen_func = AutoGenAgentFunc()
+            
+    # 根据是否提供工具列表决定使用ToolManager还是ToolProxy
+    if request.available_tools:
+        logger.info(f"使用指定的工具列表: {request.available_tools}")
+        # 创建ToolProxy，只包含指定的工具
+        tool_proxy = ToolProxy(global_vars.get_tool_manager(), request.available_tools)
+        tool_manager_or_proxy = tool_proxy
+    else:
+        logger.info("使用完整的工具管理器")
+        tool_manager_or_proxy = global_vars.get_tool_manager()
     
     # 生成Agent配置
     agent_config = auto_gen_func.generate_agent_config(
         agent_description=request.agent_description,
-        tool_manager=global_vars.get_tool_manager(),
+        tool_manager=tool_manager_or_proxy,
         llm_client=model_client,
         model="qwen-plus",
     )
@@ -298,7 +309,8 @@ def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfi
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
         description=config.get("description"),
         created_at=config.get("created_at"),
-        updated_at=config.get("updated_at")
+        updated_at=config.get("updated_at"),
+        llmConfig=config.get("llmConfig")
     )
 
 
@@ -315,7 +327,8 @@ def convert_agent_to_config(agent: AgentConfig) -> Dict[str, Any]:
         "multiAgent": agent.multiAgent,
         "description": agent.description,
         "created_at": agent.created_at,
-        "updated_at": agent.updated_at
+        "updated_at": agent.updated_at,
+        "llmConfig": agent.llmConfig
     }
     
     # 移除None值

@@ -12,6 +12,11 @@
       </div>
     </div>
 
+    <!-- Token 使用消息 -->
+    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="message token-usage-message">
+      <TokenUsage :token-usage="tokenUsageData" />
+    </div>
+
     <!-- 用户消息 -->
     <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="message user">
       <div class="avatar-container">
@@ -80,6 +85,7 @@ import MessageTypeLabel from './MessageTypeLabel.vue'
 import ReactMarkdown from './ReactMarkdown.vue'
 import ReactECharts from './ReactECharts.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
+import TokenUsage from './TokenUsage.vue'
 
 const props = defineProps({
   message: {
@@ -107,6 +113,14 @@ const shouldRenderMessage = computed(() => {
 
 const isErrorMessage = computed(() => {
   return props.message.type === 'error' || props.message.message_type === 'error'
+})
+
+const isTokenUsageMessage = computed(() => {
+  return props.message.type === 'token_usage' || props.message.message_type === 'token_usage'
+})
+
+const tokenUsageData = computed(() => {
+  return props.message?.metadata?.token_usage || null
 })
 
 const hasToolCalls = computed(() => {
@@ -220,6 +234,10 @@ const handleDownloadFile = (filePath) => {
 
 .message-container {
   margin-bottom: 16px;
+}
+
+.token-usage-message {
+  justify-content: center;
 }
 
 /* 头像容器样式 */

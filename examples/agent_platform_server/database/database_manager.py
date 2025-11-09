@@ -48,6 +48,14 @@ class DatabaseManager:
             async with self._lock:
                 self._connection = sqlite3.connect(self.db_file, check_same_thread=False)
                 self._connection.row_factory = sqlite3.Row
+                # 强制使用UTF-8文本工厂，确保读取文本为UTF-8
+                self._connection.text_factory = lambda b: b.decode('utf-8', 'replace')
+                # 对于新建数据库，在创建表之前设置编码为UTF-8（已存在数据库则忽略）
+                try:
+                    self._connection.execute("PRAGMA encoding = 'UTF-8'")
+                except Exception:
+                    # 忽略可能的无效设置（已存在数据库时无效）
+                    pass
                 
                 # 创建表结构
                 cursor = self._connection.cursor()

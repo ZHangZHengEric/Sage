@@ -57,7 +57,7 @@ class MCPServer:
         cursor.execute('''
             INSERT OR REPLACE INTO mcp_servers (name, config, created_at, updated_at)
             VALUES (?, ?, ?, ?)
-        ''', (self.name, json.dumps(self.config), self.created_at, self.updated_at))
+        ''', (self.name, json.dumps(self.config, ensure_ascii=False), self.created_at, self.updated_at))
     
     @classmethod
     def get_by_name(cls, cursor: sqlite3.Cursor, name: str) -> Optional['MCPServer']:
@@ -143,7 +143,7 @@ class AgentConfig:
         cursor.execute('''
             INSERT OR REPLACE INTO agent_configs (agent_id, name, config, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?)
-        ''', (self.agent_id, self.name, json.dumps(self.config), self.created_at, self.updated_at))
+        ''', (self.agent_id, self.name, json.dumps(self.config, ensure_ascii=False), self.created_at, self.updated_at))
     
     @classmethod
     def get_by_id(cls, cursor: sqlite3.Cursor, agent_id: str) -> Optional['AgentConfig']:
@@ -245,7 +245,7 @@ class Conversation:
             INSERT OR REPLACE INTO conversations (session_id, user_id, agent_id, agent_name, title, messages, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (self.session_id, self.user_id, self.agent_id, self.agent_name, self.title, 
-              json.dumps(self.messages), self.created_at, self.updated_at))
+              json.dumps(self.messages, ensure_ascii=False), self.created_at, self.updated_at))
     
     @classmethod
     def get_by_session_id(cls, cursor: sqlite3.Cursor, session_id: str) -> Optional['Conversation']:
