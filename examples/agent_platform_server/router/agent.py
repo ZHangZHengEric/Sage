@@ -210,6 +210,7 @@ async def auto_generate_agent(
     
     # 获取模型客户端
     model_client = global_vars.get_default_model_client()
+    server_args = global_vars.get_server_args()
     
     # 使用自动生成工具
     auto_gen_func = AutoGenAgentFunc()
@@ -229,7 +230,7 @@ async def auto_generate_agent(
         agent_description=request.agent_description,
         tool_manager=tool_manager_or_proxy,
         llm_client=model_client,
-        model="qwen-plus",
+        model=server_args.default_llm_model_name,
     )
     agent_config["id"] = ''
     
@@ -264,14 +265,17 @@ async def optimize_system_prompt(
     
     # 获取模型客户端
     model_client = global_vars.get_default_model_client()
-    
+    server_args = global_vars.get_server_args()
+
     # 使用系统提示词优化器
-    optimizer = SystemPromptOptimizer(model_client)
+    optimizer = SystemPromptOptimizer()
     
     # 优化系统提示词
     optimized_prompt = optimizer.optimize_system_prompt(
-        original_prompt=request.original_prompt,
-        optimization_goals=request.optimization_goals,
+        current_prompt=request.original_prompt,
+        optimization_goal=request.optimization_goal,
+        model=server_args.default_llm_model_name,
+        llm_client=model_client,
     )
     
     if not optimized_prompt:
@@ -280,10 +284,15 @@ async def optimize_system_prompt(
             detail="系统提示词优化失败",
             error_detail="优化后的提示词为空"
         )
-    
+    res = optimized_prompt
+    res["optimization_details"] = {
+                "original_length": len(request.original_prompt),
+                "optimized_length": len(optimized_prompt),
+                "optimization_goal": request.optimization_goal
+            }
     logger.info("系统提示词优化成功")
     return await Response.succ(
-        data={"optimized_prompt": optimized_prompt},
+        data=res,
         message="系统提示词优化成功"
     )
 
@@ -310,7 +319,7 @@ def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfi
         description=config.get("description"),
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
-        llmConfig=config.get("llmConfig")
+        llmConfig=config.get("llmConfig", {})
     )
 
 

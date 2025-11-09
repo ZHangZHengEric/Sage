@@ -15,8 +15,14 @@
           </el-form-item>
 
           <el-form-item :label="t('agent.systemPrefix')" prop="systemPrefix">
-            <el-input v-model="formData.systemPrefix" type="textarea" :rows="25"
-              :placeholder="t('agent.systemPrefixPlaceholder')" />
+            <div class="system-prefix-wrapper">
+              <el-input v-model="formData.systemPrefix" type="textarea" :rows="25"
+                :placeholder="t('agent.systemPrefixPlaceholder')" />
+              <el-button class="optimize-btn-inline" size="small"
+                         @click="openOptimizeModal" :disabled="isOptimizing">
+                优化系统提示词
+              </el-button>
+            </div>
           </el-form-item>
 
           <el-row :gutter="20">
@@ -210,6 +216,38 @@
         {{ t('common.save') }}
       </el-button>
     </div>
+
+    <!-- 优化对话框 -->
+    <el-dialog v-model="showOptimizeModal" title="优化系统提示词" width="640px" :close-on-click-modal="false"
+               :close-on-press-escape="!isOptimizing" :show-close="!isOptimizing">
+      <div class="form-group">
+        <label class="form-label">优化目标 <span class="optional-text">(可选)</span></label>
+        <el-input v-model="optimizationGoal" type="textarea" :rows="3"
+                  placeholder="例如：提高专业性和准确性，增强工具使用能力..."
+                  :disabled="isOptimizing || !!optimizedResult" />
+        <div class="help-text">如果不填写优化目标，系统将进行通用优化</div>
+      </div>
+
+      <div v-if="optimizedResult" class="form-group" style="margin-top: 12px;">
+        <label class="form-label">优化结果预览 <span class="help-text-inline">（可编辑）</span></label>
+        <el-input v-model="optimizedResult" type="textarea" :rows="8"
+                  placeholder="优化结果将显示在这里，您可以直接编辑..." />
+        <div class="help-text">您可以直接编辑优化结果，确认无误后点击"应用优化"按钮</div>
+      </div>
+
+      <template #footer>
+        <el-button @click="handleOptimizeCancel" :disabled="isOptimizing">取消</el-button>
+        <template v-if="optimizedResult">
+          <el-button type="default" @click="handleResetOptimization">重新优化</el-button>
+          <el-button type="primary" @click="handleApplyOptimization">应用优化</el-button>
+        </template>
+        <template v-else>
+          <el-button type="primary" :loading="isOptimizing" @click="handleOptimizeStart" :disabled="isOptimizing">
+            开始优化
+          </el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -218,6 +256,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../utils/i18n.js'
 import { ArrowDown, ArrowUp, Delete } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
+import {agentAPI} from '../api/agent.js'
 
 // Props
 const props = defineProps({
@@ -435,6 +474,59 @@ onMounted(() => {
 onUnmounted(() => {
   destroyDragAndDrop()
 })
+
+// 优化系统提示词相关状态与方法
+const showOptimizeModal = ref(false)
+const optimizationGoal = ref('')
+const isOptimizing = ref(false)
+const optimizedResult = ref('')
+
+const openOptimizeModal = () => {
+  showOptimizeModal.value = true
+}
+
+const handleOptimizeStart = async () => {
+  const original = (formData.value.systemPrefix || '').trim()
+  if (!original) {
+    alert('请先输入系统提示词')
+    return  
+  }
+
+  isOptimizing.value = true
+  try { 
+    const response  = await agentAPI.systemPromptOptimize({
+        original_prompt: original,
+        optimization_goal: (optimizationGoal.value || '').trim() || undefined
+      })
+    optimizedResult.value = response.optimized_prompt || ''
+  } catch (err) {
+    console.error('优化请求失败:', err)
+    alert('优化请求失败，请检查网络连接')
+  } finally {
+    isOptimizing.value = false
+  }
+}
+
+const handleOptimizeCancel = () => {
+  showOptimizeModal.value = false
+  optimizationGoal.value = ''
+  isOptimizing.value = false
+  optimizedResult.value = ''
+}
+
+const handleApplyOptimization = () => {
+  if (optimizedResult.value) {
+    formData.value.systemPrefix = optimizedResult.value
+  }
+  showOptimizeModal.value = false
+  optimizationGoal.value = ''
+  optimizedResult.value = ''
+}
+
+const handleResetOptimization = () => {
+  optimizedResult.value = ''
+  optimizationGoal.value = ''
+}
 
 // 系统上下文处理方法
 const addSystemContextPair = () => {
@@ -733,6 +825,36 @@ defineExpose({
 
 :deep(.el-card__body) {
   padding: 15px 20px;
+}
+
+/* 系统提示词输入框内按钮定位 */
+.system-prefix-wrapper {
+  position: relative;
+  width: 100%; /* 让系统提示词输入区域占满到左侧面板的分割线 */
+}
+
+.system-prefix-wrapper :deep(.el-textarea__inner) {
+  padding-right: 120px; /* 为内嵌按钮留出空间，避免文本遮挡 */
+}
+
+/* 保证 textarea 组件本身也占满可用宽度 */
+.system-prefix-wrapper :deep(.el-textarea) {
+  width: 100%;
+}
+
+.optimize-btn-inline {
+
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: transparent;
+  color: #0000005f; /* 黑色文字 */
+  border-color: transparent;
+  box-shadow: none;
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-text-color: #111827;
 }
 
 /* 拖拽相关样式 */
