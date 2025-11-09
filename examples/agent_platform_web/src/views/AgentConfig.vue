@@ -363,7 +363,7 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
     console.log('📡 发送auto-generate请求...')
 
     // 调用后端API生成Agent配置
-    const result = await agentAPI.generateAgentConfig(description)
+    const result = await agentAPI.generateAgentConfig(description, selectedTools)
     const agentConfig = result.agent
     const duration = Date.now() - startTime
     console.log(`📨 收到响应，耗时: ${duration}ms`)
