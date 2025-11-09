@@ -53,5 +53,13 @@ export const agentAPI = {
       agent_description: description,
       available_tools: selectedTools
     })
+  },
+  /**
+   * 系统调用Agent
+   * @param {Object} input - 输入数据
+   * @returns {Promise<Object>}
+   */
+  systemPromptOptimize: async (input) => {
+    return await baseAPI.post(`/api/agent/system-prompt/optimize`, input)
   }
 }
