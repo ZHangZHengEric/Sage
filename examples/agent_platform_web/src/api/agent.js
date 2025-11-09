@@ -45,11 +45,13 @@ export const agentAPI = {
   /**
    * 智能生成Agent配置
    * @param {string} description - Agent描述
+   * @param {Array} selectedTools - 选中的工具列表
    * @returns {Promise<Object>}
    */
-  generateAgentConfig: async (description) => {
+  generateAgentConfig: async (description, selectedTools) => {
     return await baseAPI.post('/api/agent/auto-generate', {
-      agent_description: description
+      agent_description: description,
+      available_tools: selectedTools
     })
   }
 }

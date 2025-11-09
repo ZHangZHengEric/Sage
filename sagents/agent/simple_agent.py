@@ -43,37 +43,16 @@ class SimpleAgent(AgentBase):
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info(f"SimpleAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(message_manager.messages)}")
         history_messages = message_manager.extract_all_context_messages(recent_turns=4,max_length=self.max_history_context_length,last_turn_user_only=False)
-        logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}')
-        logger.info(f'历史消息的content长度：{MessageManager.calculate_messages_token_length(history_messages)}')
-        system_context = session_context.system_context
-        # 调用内部方法，执行流式直接执行
-        async for chunk in self._execute_direct_stream_internal(history_messages, 
-                                                        tool_manager, 
-                                                        session_id, 
-                                                        system_context,
-                                                        session_context):
-            yield chunk
-
-    async def _execute_direct_stream_internal(self, 
-                                messages: List[MessageChunk], 
-                                tool_manager: ToolManager,
-                                session_id: str,
-                                system_context: Optional[Dict[str, Any]],
-                                session_context: SessionContext) -> Generator[List[MessageChunk], None, None]:
-        logger.info(f"SimpleAgent: 输入的消息长度：{len(messages)}")
+        logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}，历史消息的content长度：{MessageManager.calculate_messages_token_length(history_messages)}')
         # 获取后续可能使用到的工具建议
-        suggested_tools = self._get_suggested_tools(messages, tool_manager, session_id, session_context)
-        
+        suggested_tools = self._get_suggested_tools(history_messages, tool_manager, session_id, session_context)
         # 准备工具列表
         tools_json = self._prepare_tools(tool_manager, suggested_tools)
-
         # 将system 加入到到messages中
         system_message = self.prepare_unified_system_message(session_id,custom_prefix=self.agent_custom_system_prefix)
-        messages.insert(0, system_message)
-
-
+        history_messages.insert(0, system_message)
         async for chunk in self._execute_loop(
-                messages_input=messages,
+                messages_input=history_messages,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
                 session_id=session_id,
@@ -279,19 +258,19 @@ class SimpleAgent(AgentBase):
         Yields:
             List[MessageChunk]: 执行结果消息块
         """
-        logger.info("SimpleAgent: 开始执行主循环")
         
         all_new_response_chunks = []
         loop_count = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
         max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
-
+        logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         while True:
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
             
             if loop_count > max_loop_count:
                 logger.warning(f"SimpleAgent: 循环次数超过 {max_loop_count}，终止循环")
+                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"Agent执行次数超过最大循环次数：{max_loop_count}, 任务暂停，是否需要继续执行？",type=MessageType.NORMAL.value)]
                 break
             
             # 合并消息
@@ -306,7 +285,9 @@ class SimpleAgent(AgentBase):
                 tool_manager=tool_manager,
                 session_id=session_id
             ):
-                all_new_response_chunks.extend(deepcopy(chunks))
+                non_empty_chunks = [c for c in chunks if ( c.message_type != MessageType.EMPTY.value)]
+                if len(non_empty_chunks) > 0:
+                    all_new_response_chunks.extend(deepcopy(non_empty_chunks))
                 yield chunks
                 if is_complete:
                     should_break = True
@@ -379,7 +360,7 @@ class SimpleAgent(AgentBase):
                     content="",
                     message_id=content_response_message_id,
                     show_content="",
-                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                    message_type=MessageType.EMPTY.value
                 )]
                 yield (output_messages, False)
 

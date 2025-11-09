@@ -12,7 +12,13 @@ RUN apt-get update && apt-get install -y \
     libreoffice \
     lsof \
     pandoc \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    tzdata \
+    upx \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime  \
+    && echo Asia/Shanghai > /etc/timezone
 
 # 复制 requirements.txt 文件
 COPY . .
