@@ -1239,21 +1239,29 @@ class FileParserTool(ToolBase):
                 cleaned_text = TextProcessor.clean_text(extracted_text)
                 truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
                 text_stats = TextProcessor.get_text_stats(cleaned_text)
+                total_time = time.time() - start_time
                 logger.info(f"✅ 文本提取完成 [{operation_id}] - 清理后长度: {len(cleaned_text)}, 截取长度: {len(truncated_text)}, 总耗时: {total_time:.2f}秒")
                 logger.debug(f"📊 文本统计: {text_stats}")
+            
+            # 计算总耗时（Excel路径也需要涵盖）
             total_time = time.time() - start_time
             
             
             # 构建结果
+            # 计算剩余未读取长度，避免负数
+            remaining_length = max(0, len(cleaned_text) - (start_index + len(truncated_text)))
+
             result = {
                 "success": True,
                 "文件的文本信息": {
                     "文件全部的文本长度": len(cleaned_text),
                     "本次读取的长度": len(truncated_text),
-                    "剩余未读取的长度": len(cleaned_text) - (start_index + len(truncated_text)),
+                    "剩余未读取的长度": remaining_length,
                     "本次读取文本的开始位置": start_index,
                     "本次读取文本的结束位置": start_index + len(truncated_text),
-                }
+                },
+                "execution_time": total_time,
+                "operation_id": operation_id
             }
             
             # 如果是全部文本，没有截断，key 使用text ，否则使用部分text
