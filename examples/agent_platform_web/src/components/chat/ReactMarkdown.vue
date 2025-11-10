@@ -3,9 +3,11 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { marked } from 'marked'
+import {computed} from 'vue'
+import {marked} from 'marked'
 import DOMPurify from 'dompurify'
+import * as echarts from 'echarts'
+
 
 const props = defineProps({
   content: {
@@ -22,12 +24,29 @@ const props = defineProps({
   }
 })
 
+const chartList = [] // 存放所有图表容器与配置项
+const renderer = new marked.Renderer()
+renderer.code = (code, language) => {
+  if (language === 'chart') {
+    const id = `chart-${Math.random().toString(36).substr(2, 9)}`
+    try {
+      const option = JSON.parse(code)
+      chartList.push({id, option})
+      return `<div id="${id}" class="markdown-chart" style="width:100%; height:300px;"></div>`
+    } catch (err) {
+      console.error('ECharts 配置解析失败:', err)
+      return `<pre style="color:red;">图表配置错误: ${err.message}</pre>`
+    }
+  }
+  return `<pre><code>${code}</code></pre>`
+}
 // 配置marked选项
 marked.setOptions({
   breaks: true,
   gfm: true,
   headerIds: false,
-  mangle: false
+  mangle: false,
+  renderer
 })
 
 // 检测视频链接的正则表达式
@@ -42,27 +61,27 @@ const generateId = () => Math.random().toString(36).substr(2, 9)
 // 下载图片函数
 const downloadImage = (url, filename) => {
   fetch(url)
-    .then(response => response.blob())
-    .then(blob => {
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(blob)
-      link.download = filename || 'image'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(link.href)
-    })
-    .catch(error => {
-      console.error('下载图片失败:', error)
-      // 如果fetch失败，尝试直接下载
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename || 'image'
-      link.target = '_blank'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-    })
+      .then(response => response.blob())
+      .then(blob => {
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(blob)
+        link.download = filename || 'image'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(link.href)
+      })
+      .catch(error => {
+        console.error('下载图片失败:', error)
+        // 如果fetch失败，尝试直接下载
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename || 'image'
+        link.target = '_blank'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      })
 }
 
 // 将图片添加下载按钮
@@ -70,7 +89,7 @@ const addImageDownloadButton = (html) => {
   return html.replace(/<img([^>]*src="([^"]*)"[^>]*)>/g, (match, attrs, src) => {
     const imageId = generateId()
     const filename = src.split('/').pop().split('?')[0] || 'image'
-    
+
     return `<div class="markdown-image-container">
       <img${attrs} class="markdown-image">
       <button class="markdown-image-download" onclick="window.downloadMarkdownImage('${src}', '${filename}')" title="下载图片">
@@ -96,7 +115,7 @@ const convertVideoLinks = (html) => {
     }
     return match
   })
-  
+
   // 然后处理直接的视频URL（不在链接标签中的）
   html = html.replace(/(?<!src="|href=")https?:\/\/[^\s<>"]+\.(mp4|webm|ogg|mov|avi|mkv)(?:\?[^\s<>"]*)?/gi, (match) => {
     return `<video controls class="markdown-video">
@@ -104,7 +123,7 @@ const convertVideoLinks = (html) => {
       您的浏览器不支持视频播放。
     </video>`
   })
-  
+
   return html
 }
 
@@ -116,17 +135,17 @@ if (typeof window !== 'undefined') {
 // 渲染Markdown内容
 const renderedContent = computed(() => {
   if (!props.content) return ''
-  
+
   try {
     // 使用marked解析Markdown
     let html = marked(props.content)
-    
+
     // 转换视频链接
     html = convertVideoLinks(html)
-    
+
     // 为图片添加下载按钮
     html = addImageDownloadButton(html)
-    
+
     // 使用DOMPurify清理HTML，防止XSS攻击
     return DOMPurify.sanitize(html, {
       ALLOWED_TAGS: [
@@ -151,6 +170,23 @@ const renderedContent = computed(() => {
     return props.content
   }
 })
+
+// 渲染 ECharts
+const renderCharts = async () => {
+  await nextTick()
+  chartList.forEach(({ id, option }) => {
+    const el = document.getElementById(id)
+    if (el) {
+      const chart = echarts.init(el)
+      chart.setOption(option)
+    }
+  })
+}
+
+// 在内容变化后重渲染图表
+onMounted(renderCharts)
+watch(() => props.content, renderCharts)
+
 </script>
 
 <style scoped>
