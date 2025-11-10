@@ -3,7 +3,7 @@
 </template>
 
 <script setup>
-import {computed} from 'vue'
+import {computed, nextTick, onMounted, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
