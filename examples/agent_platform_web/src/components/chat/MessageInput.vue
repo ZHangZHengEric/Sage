@@ -99,7 +99,7 @@ const handleStop = () => {
 
 .input-wrapper {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 12px;
   background: #f8f9fa;
   border: 2px solid #e1e5e9;
