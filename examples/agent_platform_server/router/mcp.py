@@ -48,7 +48,7 @@ async def add(request: MCPServerRequest):
         streamable_http_url=request.streamable_http_url,
         sse_url=request.sse_url,
         api_key=request.api_key,
-        disabled=request.disabled,
+        disabled=False,
     )
     return await Response.succ(
         data={"server_name": server_name, "status": "success"},
