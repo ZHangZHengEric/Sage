@@ -33,8 +33,8 @@ class Agent(Base):
         self.agent_id = agent_id
         self.name = name
         self.config = config
-        self.created_at = created_at or datetime.now().isoformat()
-        self.updated_at = updated_at or datetime.now().isoformat()
+        self.created_at = created_at or datetime.now()
+        self.updated_at = updated_at or datetime.now()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -95,7 +95,7 @@ class AgentConfigDao:
     async def save(self, config: "Agent") -> bool:
         db = await self._get_db()
         async with db.get_session() as session:
-            config.updated_at = datetime.now().isoformat()
+            config.updated_at = datetime.now()
             await session.merge(config)
             return True
 

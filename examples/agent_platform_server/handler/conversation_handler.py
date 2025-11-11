@@ -6,12 +6,12 @@
 
 import os
 import math
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from sagents.utils.logger import logger
 from sagents.context.session_context import get_session_context
 from common.exceptions import SageHTTPException
-from models.conversation import ConversationDao
+from models.conversation import ConversationDao, Conversation
 
 
 async def interrupt_session(
@@ -159,7 +159,7 @@ async def get_conversations_paginated(
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
-) -> Dict[str, Any]:
+) -> Tuple[List[Conversation], int]:
     """分页获取会话列表并构造响应字典"""
     dao = await ConversationDao.create()
     conversations, total_count = await dao.get_conversations_paginated(
@@ -170,45 +170,13 @@ async def get_conversations_paginated(
         agent_id=agent_id,
         sort_by=sort_by or "date",
     )
-
-    conversation_items: List[ConversationInfo] = []
-    for conv in conversations:
-        message_count = conv.get_message_count()
-        conversation_items.append(
-            ConversationInfo(
-                session_id=conv.session_id,
-                user_id=conv.user_id,
-                agent_id=conv.agent_id,
-                agent_name=conv.agent_name,
-                title=conv.title,
-                message_count=message_count.get("user_count", 0)
-                + message_count.get("agent_count", 0),
-                user_count=message_count.get("user_count", 0),
-                agent_count=message_count.get("agent_count", 0),
-                created_at=conv.created_at,
-                updated_at=conv.updated_at,
-            )
-        )
-
-    total_pages = math.ceil(total_count / page_size) if total_count > 0 else 0
-    has_next = page < total_pages
-    has_prev = page > 1
-
-    return {
-        "list": [item.dict() for item in conversation_items],
-        "total": total_count,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "has_next": has_next,
-        "has_prev": has_prev,
-    }
+    return conversations, total_count
 
 
 async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
     dao = await ConversationDao.create()
-    conversation = await dao.get_conversation(conversation_id)
+    conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
             status_code=404,
@@ -236,7 +204,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
 async def delete_conversation(conversation_id: str) -> str:
     """删除指定对话，返回 conversation_id"""
     dao = await ConversationDao.create()
-    conversation = await dao.get_conversation(conversation_id)
+    conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
             status_code=404,
@@ -269,37 +237,10 @@ async def _create_conversation_title(request):
             if isinstance(item, dict) and item.get("type") == "text":
                 text_content = item.get("text", "")
                 return (
-                    text_content[:50] + "..." if len(text_content) > 50 else text_content
+                    text_content[:50] + "..."
+                    if len(text_content) > 50
+                    else text_content
                 )
         return "多模态消息"
     else:
         return "新会话"
-
-
-async def _save_conversation_if_needed(
-    session_id, request, message_collector, message_order
-):
-    """如果需要，创建并保存会话；随后按原始顺序追加消息"""
-    conversation_dao = await ConversationDao.create()
-    existing_conversation = await conversation_dao.get_by_session_id(session_id)
-    if not existing_conversation:
-        conversation_title = await _create_conversation_title(request)
-        await conversation_dao.save_conversation(
-            user_id=getattr(request, "user_id", None) or "default_user",
-            agent_id=getattr(request, "agent_id", None) or "default_agent",
-            agent_name=getattr(request, "agent_name", None) or "Sage Assistant",
-            messages=[],
-            session_id=session_id,
-            title=conversation_title,
-        )
-        logger.info(f"创建新会话: {session_id}, 标题: {conversation_title}")
-    for message_id in message_order:
-        if message_id in message_collector:
-            merged_message = message_collector[message_id]
-            # 添加消息到conversation
-            await conversation_dao.add_message_to_conversation(
-                session_id, merged_message
-            )
-    logger.info(
-        f"成功按顺序保存 {len(message_collector)} 条消息到现有conversation {session_id}"
-    )
