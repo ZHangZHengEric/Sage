@@ -102,7 +102,7 @@ async def list_conversations(
         "date", description="排序方式: date, title, messages"
     ),
 ):
-    result = await get_conversations_paginated(
+    conversations, total_count = await get_conversations_paginated(
         page=page,
         page_size=page_size,
         user_id=user_id,
@@ -110,6 +110,39 @@ async def list_conversations(
         agent_id=agent_id,
         sort_by=sort_by or "date",
     )
+
+    conversation_items: List[ConversationInfo] = []
+    for conv in conversations:
+        message_count = conv.get_message_count()
+        conversation_items.append(
+            ConversationInfo(
+                session_id=conv.session_id,
+                user_id=conv.user_id,
+                agent_id=conv.agent_id,
+                agent_name=conv.agent_name,
+                title=conv.title,
+                message_count=message_count.get("user_count", 0)
+                + message_count.get("agent_count", 0),
+                user_count=message_count.get("user_count", 0),
+                agent_count=message_count.get("agent_count", 0),
+                created_at=conv.created_at.isoformat() if conv.created_at else "",
+                updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+            )
+        )
+
+    total_pages = math.ceil(total_count / page_size) if total_count > 0 else 0
+    has_next = page < total_pages
+    has_prev = page > 1
+
+    result = {
+        "list": [item.dict() for item in conversation_items],
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_next": has_next,
+        "has_prev": has_prev,
+    }
     return await Response.succ(data=result, message="获取会话列表成功")
 
 

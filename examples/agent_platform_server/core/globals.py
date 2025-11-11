@@ -5,7 +5,7 @@
 """
 
 import traceback
-from typing import Optional
+from typing import Optional, Dict, Any
 from openai import OpenAI
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.logger import logger

@@ -55,10 +55,10 @@ async def add_mcp_server(
             error_detail="MCP服务器名称已存在",
         )
     # 注册到全局工具管理器
-    tm = global_vars.get_tool_manager()
     server_config = _build_server_config(
         name, protocol, streamable_http_url, sse_url, api_key, disabled
     )
+    tm = global_vars.get_tool_manager()
     success = await tm.register_mcp_server(name, server_config)
     if not success:
         raise SageHTTPException(
@@ -156,16 +156,11 @@ async def refresh_mcp_server(server_name: str) -> str:
         )
 
     server_config = existing_server.config
-    if server_config.get("disabled", False):
-        raise SageHTTPException(
-            status_code=400,
-            detail=f"MCP服务器 '{server_name}' 已被禁用，无法刷新",
-            error_detail="禁用的服务器无法刷新",
-        )
-
     success = await tm.register_mcp_server(server_name, server_config)
     if success:
         logger.info(f"MCP server {server_name} 刷新成功")
+        server_config["disabled"] = False
+        await dao.save_mcp_server(name=server_name, config=server_config)
         return "refreshed"
     logger.warning(f"MCP server {server_name} 刷新失败，将其设置为禁用状态")
     server_config["disabled"] = True

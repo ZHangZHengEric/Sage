@@ -303,6 +303,7 @@ async def _save_conversation_if_needed(
 ):
     conversation_dao = await ConversationDao.create()
     """如果需要，保存新会话"""
+    messages = []
     existing_conversation = await conversation_dao.get_by_session_id(session_id)
     if not existing_conversation:
         conversation_title = await _create_conversation_title(request)
@@ -315,16 +316,17 @@ async def _save_conversation_if_needed(
             title=conversation_title,
         )
         logger.info(f"创建新会话: {session_id}, 标题: {conversation_title}")
+    else:
+        messages = existing_conversation.messages
     for message_id in message_order:
         if message_id in message_collector:
             merged_message = message_collector[message_id]
             # 添加消息到conversation
-            await conversation_dao.add_message_to_conversation(
-                session_id, merged_message
-            )
-            logger.info(
-                f"成功按顺序保存 {len(message_collector)} 条消息到现有conversation {session_id}"
-            )
+            messages.append(merged_message)
+    await conversation_dao.update_conversation_messages(session_id, messages)
+    logger.info(
+        f"成功按顺序保存 {len(message_collector)} 条消息到现有conversation {session_id}"
+    )
 
 
 @stream_router.post("/api/stream")

@@ -170,23 +170,12 @@ const handleRefreshMcp = async (serverName) => {
   refreshingServers.value.add(serverName)
   
   try {
-    const response = await toolAPI.refreshMcpServer(serverName)
-    console.log(`MCP server ${serverName} refresh response:`, response)
-    
-    // 重新加载服务器列表以获取最新状态（包括可能被禁用的状态）
-    await loadMcpServers()
-    
-    // 根据响应状态显示不同的消息
-    if (response.data?.status === 'disabled_due_to_failure') {
-      console.warn(`MCP server ${serverName} was disabled due to refresh failure`)
-    } else {
-      console.log(`MCP server ${serverName} refreshed successfully`)
-    }
+    await toolAPI.refreshMcpServer(serverName)
   } catch (error) {
     console.error(`Failed to refresh MCP server ${serverName}:`, error)
     // 即使出错也重新加载列表，以防服务器状态已经改变
-    await loadMcpServers()
   } finally {
+    await loadMcpServers()
     refreshingServers.value.delete(serverName)
   }
 }

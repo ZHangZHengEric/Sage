@@ -85,13 +85,23 @@ class SessionManager:
                     database = self.mysql_config.get("database", "")
                     charset = self.mysql_config.get("charset", "utf8mb4")
                     url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset={charset}"
-                    self._engine = create_async_engine(url, future=True)
+                    self._engine = create_async_engine(
+                        url,
+                        future=True,
+                        json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
+                        json_deserializer=json.loads,
+                    )
                 else:
                     if self.db_file == ":memory:":
                         url = "sqlite+aiosqlite:///:memory:"
                     else:
                         url = f"sqlite+aiosqlite:///{self.db_file}"
-                    self._engine = create_async_engine(url, future=True)
+                    self._engine = create_async_engine(
+                        url,
+                        future=True,
+                        json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
+                        json_deserializer=json.loads,
+                    )
                 # 创建 AsyncSession 工厂
                 self._SessionLocal = async_sessionmaker[AsyncSession](
                     bind=self._engine,
