@@ -24,13 +24,46 @@ const props = defineProps({
   }
 })
 
+const escapeHtml = (text) => {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }
+  return text.replace(/[&<>"']/g, char => map[char])
+}
+
+const jsToJson = (jsStr) => {
+  // 移除注释
+  jsStr = jsStr.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  // 添加属性名的引号（处理: key: value 格式）
+  jsStr = jsStr.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":')
+
+  // 处理未加引号的字符串值（简单处理：以'开头的字符串）
+  jsStr = jsStr.replace(/:\s*'([^']*)'/g, ': "$1"')
+
+  return jsStr
+}
+
 const chartList = [] // 存放所有图表容器与配置项
 const renderer = new marked.Renderer()
 renderer.code = (code, language) => {
-  if (language === 'chart') {
-    const id = `chart-${Math.random().toString(36).substr(2, 9)}`
+  console.log("language", language, code.lang)
+  // 获取代码文本，兼容不同版本的 marked
+  let codeText = typeof code === 'string' ? code : code.text
+  if (code.lang === 'echarts') {
     try {
-      const option = JSON.parse(code)
+      // 移除 option = 前缀和末尾的分号
+      codeText = codeText.replace(/^[\s\S]*?=\s*/, '').trim()
+      if (codeText.endsWith(';')) {
+        codeText = codeText.slice(0, -1).trim()
+      }
+      const id = `chart-${Math.random().toString(36).substr(2, 9)}`
+      const jsonStr = jsToJson(codeText)
+      const option = JSON.parse(jsonStr)
       chartList.push({id, option})
       return `<div id="${id}" class="markdown-chart" style="width:100%; height:300px;"></div>`
     } catch (err) {
@@ -38,7 +71,10 @@ renderer.code = (code, language) => {
       return `<pre style="color:red;">图表配置错误: ${err.message}</pre>`
     }
   }
-  return `<pre><code>${code}</code></pre>`
+
+  // 转义代码中的HTML特殊字符
+  const escapedCode = escapeHtml(codeText)
+  return `<pre><code class="language-${language || 'plaintext'}">${escapedCode}</code></pre>`
 }
 // 配置marked选项
 marked.setOptions({
@@ -138,6 +174,8 @@ const renderedContent = computed(() => {
 
   try {
     // 使用marked解析Markdown
+    chartList.length = 0
+
     let html = marked(props.content)
 
     // 转换视频链接
@@ -174,19 +212,37 @@ const renderedContent = computed(() => {
 // 渲染 ECharts
 const renderCharts = async () => {
   await nextTick()
-  chartList.forEach(({ id, option }) => {
+  // 关键：等待 DOM 完全渲染，确保容器有宽高
+  await new Promise(resolve => setTimeout(resolve, 200))
+
+  chartList.forEach(({id, option}) => {
     const el = document.getElementById(id)
-    if (el) {
-      const chart = echarts.init(el)
-      chart.setOption(option)
+    console.log(`初始化图表 ${id}:`, {
+      element: !!el,
+      width: el?.clientWidth,
+      height: el?.clientHeight
+    })
+
+    if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+      try {
+        const chart = echarts.init(el)
+        chart.setOption(option)
+        console.log(`✓ 图表 ${id} 初始化成功`)
+      } catch (err) {
+        console.error(`✗ 图表 ${id} 初始化失败:`, err)
+      }
+    } else {
+      console.warn(`✗ 图表容器 ${id} 未准备好`)
     }
   })
 }
 
 // 在内容变化后重渲染图表
 onMounted(renderCharts)
-watch(() => props.content, renderCharts)
-
+watch(() => props.content, async () => {
+  // 内容变化时，先等待 computed 更新，再渲染图表
+  await renderCharts()
+}, {flush: 'post'})
 </script>
 
 <style scoped>
@@ -364,5 +420,9 @@ watch(() => props.content, renderCharts)
   border-radius: 6px;
   margin: 12px 0;
   background: #000;
+}
+
+.markdown-content .markdown-chart {
+  height: 300px !important;
 }
 </style>
