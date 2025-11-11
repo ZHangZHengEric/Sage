@@ -27,6 +27,14 @@
                   >
                     <RefreshCw :size="16" :class="{ 'spinning': refreshingServers.has(server.name) }" />
                   </button>
+                  <button 
+                    class="action-btn delete-btn" 
+                    @click="handleDeleteMcp(server.name)"
+                    :disabled="loading"
+                    :title="t('tools.delete')"
+                  >
+                    <Trash2 :size="16" />
+                  </button>
                   <div class="mcp-status-indicator" :class="{ disabled: server.disabled }">
                     <div class="status-dot"></div>
                     <span class="status-text">{{ server.disabled ? t('tools.disabled') : t('tools.enabled') }}</span>
@@ -75,7 +83,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench,Code, Database,  Cpu, Plus, RefreshCw } from 'lucide-vue-next'
+import { Wrench,Code, Database,  Cpu, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
@@ -177,6 +185,18 @@ const handleRefreshMcp = async (serverName) => {
   } finally {
     await loadMcpServers()
     refreshingServers.value.delete(serverName)
+  }
+}
+
+const handleDeleteMcp = async (serverName) => {
+  try {
+    loading.value = true
+    await toolAPI.deleteMcpServer(serverName)
+  } catch (error) {
+    console.error(`Failed to delete MCP server ${serverName}:`, error)
+  } finally {
+    await loadMcpServers()
+    loading.value = false
   }
 }
 
