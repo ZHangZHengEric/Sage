@@ -23,7 +23,7 @@ class ToolManager:
         
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec]] = {}
         self._tool_instances: Dict[type, ToolBase] = {}  # 缓存工具实例
-        
+        self._mcp_setting_path = None
         if is_auto_discover:
             self._auto_discover_tools()
             # self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
@@ -159,6 +159,35 @@ class ToolManager:
         tool_type = type(tool_spec).__name__
         logger.info(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
+    
+    def remove_tool_by_mcp(self, server_name: str) -> bool:
+        """
+        Remove all tools registered from a specific MCP server.
+
+        Args:
+            server_name: Name of the server to remove
+
+        Returns:
+            bool: True if any tools were removed, False otherwise
+        """
+        server_name = server_name.strip()
+        removed = False
+        try:
+            to_delete = []
+            for tool_name, spec in self.tools.items():
+                # Only McpToolSpec has server_name
+                if isinstance(spec, McpToolSpec) and getattr(spec, 'server_name', None) == server_name:
+                    to_delete.append(tool_name)
+            for tool_name in to_delete:
+                del self.tools[tool_name]
+                removed = True
+                logger.info(f"Removed MCP tool '{tool_name}' from server '{server_name}'")
+            if not removed:
+                logger.warning(f"No MCP tools found for server '{server_name}' to remove")
+            return removed
+        except Exception as e:
+            logger.error(f"Failed to remove MCP server '{server_name}': {e}")
+            return False
 
     async def _discover_mcp_tools(self, mcp_setting_path: str = None):
         bool_registered = False
