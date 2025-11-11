@@ -14,7 +14,6 @@ from handler.mcp_handler import (
     add_mcp_server,
     list_mcp_servers,
     remove_mcp_server,
-    toggle_mcp_server,
     refresh_mcp_server,
 )
 
@@ -28,7 +27,6 @@ class MCPServerRequest(BaseModel):
     streamable_http_url: Optional[str] = None
     sse_url: Optional[str] = None
     api_key: Optional[str] = None
-    disabled: bool = False
 
 
 @mcp_router.post("/add")
@@ -105,32 +103,6 @@ async def remove(server_name: str):
     )
 
 
-@mcp_router.put("/{server_name}/toggle")
-async def toggle(server_name: str):
-    """
-    切换MCP服务器的启用/禁用状态
-
-    Args:
-        server_name: 服务器名称
-
-    Returns:
-        StandardResponse: 包含操作结果的标准响应
-    """
-    logger.info(f"开始切换MCP server状态: {server_name}")
-
-    new_disabled, status_text = await toggle_mcp_server(server_name)
-    logger.info(f"MCP server {server_name} 状态切换成功: {status_text}")
-
-    return await Response.succ(
-        data={
-            "server_name": server_name,
-            "disabled": new_disabled,
-            "status": status_text,
-        },
-        message=f"MCP服务器 '{server_name}' {status_text}成功",
-    )
-
-
 @mcp_router.post("/{server_name}/refresh")
 async def refresh(server_name: str):
     """
@@ -145,10 +117,4 @@ async def refresh(server_name: str):
     logger.info(f"开始刷新MCP server: {server_name}")
 
     status = await refresh_mcp_server(server_name)
-    if status == "refreshed":
-        message = f"MCP服务器 '{server_name}' 刷新成功"
-    else:
-        message = f"MCP服务器 '{server_name}' 刷新失败，已自动禁用"
-    return await Response.succ(
-        data={"server_name": server_name, "status": status}, message=message
-    )
+    return await Response.succ(data={"server_name": server_name, "status": status})

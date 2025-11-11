@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 from common.render import Response
+from sagents.utils.logger import logger
 
 from handler.agent_handler import (
     list_agents,
