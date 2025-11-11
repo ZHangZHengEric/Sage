@@ -208,6 +208,7 @@ class ToolManager:
                 logger.warning(
                     f"No MCP tools found for server '{server_name}' to remove"
                 )
+                removed = True
             return removed
         except Exception as e:
             logger.error(f"Failed to remove MCP server '{server_name}': {e}")

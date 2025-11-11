@@ -93,10 +93,10 @@ async def remove_mcp_server(server_name: str) -> str:
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
 
-    success = tm.remove_mcp_server(server_name)
+    success = await tm.remove_tool_by_mcp(server_name)
     if not success:
         raise SageHTTPException(
-            status_code=400,
+            status_code=500,
             detail=f"MCP服务器 '{server_name}' 删除失败",
             error_detail="工具管理器移除失败",
         )
