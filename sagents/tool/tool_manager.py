@@ -177,7 +177,7 @@ class ToolManager:
         logger.info(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
 
-    def remove_tool_by_mcp(self, server_name: str) -> bool:
+    async def remove_tool_by_mcp(self, server_name: str) -> bool:
         """
         Remove all tools registered from a specific MCP server.
 

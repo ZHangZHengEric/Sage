@@ -154,7 +154,7 @@ async def refresh_mcp_server(server_name: str) -> str:
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
-
+    await tm.remove_tool_by_mcp(server_name)
     server_config = existing_server.config
     success = await tm.register_mcp_server(server_name, server_config)
     if success:
