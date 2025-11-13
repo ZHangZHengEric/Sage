@@ -1,317 +1,64 @@
 """
 Agent 相关路由
-
-提供Agent的管理接口，包括创建、更新、删除、列表等功能，
-以及自动生成Agent和系统提示词优化功能
 """
 
-import uuid
-from typing import Dict, Any
 from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+from common.render import Response
 from sagents.utils.logger import logger
-from sagents.utils.auto_gen_agent import AutoGenAgentFunc
-from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
-from sagents.tool.tool_proxy import ToolProxy
 
-from entities.entities import ( Response, 
-    AgentConfig, AutoGenAgentRequest,
-    SystemPromptOptimizeRequest,
-     SageHTTPException
+from handler.agent_handler import (
+    list_agents,
+    create_agent,
+    get_agent,
+    update_agent,
+    delete_agent,
+    auto_generate_agent,
+    optimize_system_prompt,
 )
-import globals.variables as global_vars
 
-# 创建路由器
-agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
-@agent_router.get("/list")
-async def get_agents():
-    """
-    获取所有Agent配置
-    
-    Returns:
-        StandardResponse: 包含所有Agent配置的标准响应
-    """
-    # 获取数据库管理器
-    db_manager = global_vars.get_database_manager()
-    
-    # 获取所有Agent配置
-    all_configs = await db_manager.get_all_agent_configs()
-    # 转换为响应格式
-    agents_data = []
-    # 如果返回的是列表格式 [config1, config2, ...]
-    for agent in all_configs:
-        agent_id = agent.agent_id
-        agent_config = convert_config_to_agent(agent_id, agent.config)
-        agents_data.append(agent_config)
-    return await Response.succ(
-        data=agents_data,
-        message=f"成功获取 {len(agents_data)} 个Agent配置"
-    )
+# ============= Agent相关模型 =============
 
-@agent_router.post("/create")
-async def create_agent(
-    agent: AgentConfig
-):
-    """
-    创建新的Agent
-    
-    Args:
-        agent: Agent配置对象
-        
-    Returns:
-        StandardResponse: 包含操作结果的标准响应
-    """
-    agent.id = generate_agent_id()
-    logger.info(f"开始创建Agent: {agent.id}")
-    
-    # 获取数据库管理器
-    db_manager = global_vars.get_database_manager()
-    
-    # 检查Agent是否已存在
-    existing_config = await db_manager.get_agent_config(agent.id)
-    if existing_config:
-        raise SageHTTPException(
-            status_code=400,
-            detail=f"Agent '{agent.id}' 已存在",
-            error_detail=f"Agent '{agent.id}' 已存在"
-        )
-    
-    # 转换为数据库格式并保存
-    agent_config = convert_agent_to_config(agent)
-    await db_manager.save_agent_config(agent.id, agent.name, agent_config)
-    
-    logger.info(f"Agent {agent.id} 创建成功")
-    return await Response.succ(
-        data={"agent_id": agent.id},
-        message=f"Agent '{agent.id}' 创建成功"
+
+class AgentConfigDTO(BaseModel):
+    id: Optional[str] = None
+    name: str
+    systemPrefix: Optional[str] = None
+    systemContext: Optional[Dict[str, Any]] = None
+    availableWorkflows: Optional[Dict[str, List[str]]] = None
+    availableTools: Optional[List[str]] = None
+    maxLoopCount: Optional[int] = 10
+    deepThinking: Optional[bool] = False
+    llmConfig: Optional[Dict[str, Any]] = None
+    multiAgent: Optional[bool] = False
+    description: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class AutoGenAgentRequest(BaseModel):
+    agent_description: str  # Agent描述
+    available_tools: Optional[List[str]] = (
+        None  # 可选的工具名称列表，如果提供则只使用这些工具
     )
 
 
-@agent_router.get("/{agent_id}")
-async def get_agent(
-    agent_id: str):
-    """
-    根据ID获取Agent配置
-    
-    Args:
-        agent_id: Agent ID
-        
-    Returns:
-        StandardResponse: 包含Agent配置的标准响应
-    """
-    logger.info(f"获取Agent配置: {agent_id}")
-    
-    # 获取数据库管理器
-    db_manager = global_vars.get_database_manager()
-    
-    # 从数据库获取Agent配置
-    agent_config = await db_manager.get_agent_config(agent_id)
-    if not agent_config:
-        raise SageHTTPException(
-            status_code=404,
-            detail=f"Agent '{agent_id}' 不存在",
-            error_detail=f"Agent '{agent_id}' 不存在"
-        )
-    
-    # 转换为Agent模型
-    agent = convert_config_to_agent(agent_id, agent_config)
-    
-    return await Response.succ(
-        data={"agent": agent.model_dump()},
-        message=f"获取Agent '{agent_id}' 成功"
-    )
+class SystemPromptOptimizeRequest(BaseModel):
+    original_prompt: str  # 原始系统提示词
+    optimization_goal: Optional[str] = None  # 优化目标（可选）
 
 
-@agent_router.put("/{agent_id}")
-async def update_agent(
-    agent_id: str,
-    agent: AgentConfig
-):
-    """
-    更新Agent配置
-    
-    Args:
-        agent_id: Agent ID
-        agent: 更新的Agent配置
-
-    """
-    logger.info(f"开始更新Agent: {agent_id}")
-    
-    # 获取数据库管理器
-    db_manager = global_vars.get_database_manager()
-    
-    # 检查Agent是否存在
-    existing_config = await db_manager.get_agent_config(agent_id)
-    if not existing_config:
-        raise SageHTTPException(
-            status_code=404,
-            detail=f"Agent '{agent_id}' 不存在",
-            error_detail=f"Agent '{agent_id}' 不存在"
-        )
-    
-    # 转换为数据库格式并保存
-    agent_config = convert_agent_to_config(agent)
-    await db_manager.save_agent_config(agent_id, agent.name, agent_config)
-    
-    logger.info(f"Agent {agent_id} 更新成功")
-    return await Response.succ(
-        data={"agent_id": agent_id},
-        message=f"Agent '{agent_id}' 更新成功"
-    )
-
-
-@agent_router.delete("/{agent_id}")
-async def delete_agent(
-    agent_id: str
-):
-    """
-    删除Agent
-    
-    Args:
-        agent_id: Agent ID
-
-    """
-    logger.info(f"开始删除Agent: {agent_id}")
-    
-    # 获取数据库管理器
-    db_manager = global_vars.get_database_manager()
-    
-    # 检查Agent是否存在
-    existing_config = await db_manager.get_agent_config(agent_id)
-    if not existing_config:
-        raise SageHTTPException(
-            status_code=404,
-            detail=f"Agent '{agent_id}' 不存在",
-            error_detail=f"Agent '{agent_id}' 不存在"
-        )
-    
-    # 从数据库删除
-    await db_manager.delete_agent_config(agent_id)
-    
-    logger.info(f"Agent {agent_id} 删除成功")
-    return await Response.succ(
-        data={"agent_id": agent_id},
-        message=f"Agent '{agent_id}' 删除成功"
-    )
-
-
-@agent_router.post("/auto-generate")
-async def auto_generate_agent(
-    request: AutoGenAgentRequest
-):
-    """
-    自动生成Agent
-    
-    Args:
-        request: 自动生成Agent请求
-
-    """
-    logger.info(f"开始自动生成Agent: {request.agent_description}")
-    
-    # 获取模型客户端
-    model_client = global_vars.get_default_model_client()
-    server_args = global_vars.get_server_args()
-    
-    # 使用自动生成工具
-    auto_gen_func = AutoGenAgentFunc()
-            
-    # 根据是否提供工具列表决定使用ToolManager还是ToolProxy
-    if request.available_tools:
-        logger.info(f"使用指定的工具列表: {request.available_tools}")
-        # 创建ToolProxy，只包含指定的工具
-        tool_proxy = ToolProxy(global_vars.get_tool_manager(), request.available_tools)
-        tool_manager_or_proxy = tool_proxy
-    else:
-        logger.info("使用完整的工具管理器")
-        tool_manager_or_proxy = global_vars.get_tool_manager()
-    
-    # 生成Agent配置
-    agent_config = auto_gen_func.generate_agent_config(
-        agent_description=request.agent_description,
-        tool_manager=tool_manager_or_proxy,
-        llm_client=model_client,
-        model=server_args.default_llm_model_name,
-    )
-    agent_config["id"] = ''
-    
-    if not agent_config:
-        raise SageHTTPException(
-            status_code=400,
-            detail="自动生成Agent失败",
-            error_detail="生成的Agent配置为空"
-        )
-    
-    logger.info("Agent自动生成成功")
-    return await Response.succ(
-        data={"agent": agent_config},
-        message="Agent自动生成成功"
-    )
-
-
-@agent_router.post("/system-prompt/optimize")
-async def optimize_system_prompt(
-    request: SystemPromptOptimizeRequest
-):
-    """
-    优化系统提示词
-    
-    Args:
-        request: 系统提示词优化请求
-        
-    Returns:
-        StandardResponse: 包含优化后的系统提示词的标准响应
-    """
-    logger.info("开始优化系统提示词")
-    
-    # 获取模型客户端
-    model_client = global_vars.get_default_model_client()
-    server_args = global_vars.get_server_args()
-
-    # 使用系统提示词优化器
-    optimizer = SystemPromptOptimizer()
-    
-    # 优化系统提示词
-    optimized_prompt = optimizer.optimize_system_prompt(
-        current_prompt=request.original_prompt,
-        optimization_goal=request.optimization_goal,
-        model=server_args.default_llm_model_name,
-        llm_client=model_client,
-    )
-    
-    if not optimized_prompt:
-        raise SageHTTPException(
-            status_code=400,
-            detail="系统提示词优化失败",
-            error_detail="优化后的提示词为空"
-        )
-    res = optimized_prompt
-    res["optimization_details"] = {
-                "original_length": len(request.original_prompt),
-                "optimized_length": len(optimized_prompt),
-                "optimization_goal": request.optimization_goal
-            }
-    logger.info("系统提示词优化成功")
-    return await Response.succ(
-        data=res,
-        message="系统提示词优化成功"
-    )
-
-
-
-
-def generate_agent_id() -> str:
-    """生成agent ID"""
-    return f"agent_{uuid.uuid4().hex[:8]}"
-
-
-def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfig:
-    """将配置字典转换为AgentConfig对象"""
-    return AgentConfig(
+def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfigDTO:
+    """将配置字典转换为 AgentConfigResp 对象"""
+    return AgentConfigDTO(
         id=agent_id,
         name=config.get("name", f"Agent {agent_id}"),
         systemPrefix=config.get("systemPrefix") or config.get("system_prefix"),
         systemContext=config.get("systemContext") or config.get("system_context"),
-        availableWorkflows=config.get("availableWorkflows") or config.get("available_workflows"),
+        availableWorkflows=config.get("availableWorkflows")
+        or config.get("available_workflows"),
         availableTools=config.get("availableTools") or config.get("available_tools"),
         maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
@@ -319,12 +66,12 @@ def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfi
         description=config.get("description"),
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
-        llmConfig=config.get("llmConfig", {})
+        llmConfig=config.get("llmConfig", {}),
     )
 
 
-def convert_agent_to_config(agent: AgentConfig) -> Dict[str, Any]:
-    """将AgentConfig对象转换为配置字典"""
+def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
+    """将 AgentConfigResp 对象转换为配置字典"""
     config = {
         "name": agent.name,
         "systemPrefix": agent.systemPrefix,
@@ -337,8 +84,134 @@ def convert_agent_to_config(agent: AgentConfig) -> Dict[str, Any]:
         "description": agent.description,
         "created_at": agent.created_at,
         "updated_at": agent.updated_at,
-        "llmConfig": agent.llmConfig
+        "llmConfig": agent.llmConfig,
     }
-    
-    # 移除None值
+    # 去除 None 值，保持存储整洁
     return {k: v for k, v in config.items() if v is not None}
+
+
+# 创建路由器
+agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
+
+
+@agent_router.get("/list")
+async def list():
+    """
+    获取所有Agent配置
+
+    Returns:
+        StandardResponse: 包含所有Agent配置的标准响应
+    """
+    # 从 handler 获取数据
+    all_configs = await list_agents()
+    agents_data: List[Dict[str, Any]] = []
+    for agent in all_configs:
+        agent_id = agent.agent_id
+        agent_resp = convert_config_to_agent(agent_id, agent.config)
+        agents_data.append(agent_resp.model_dump())
+    logger.info(f"成功获取 {len(agents_data)} 个Agent配置")
+    return await Response.succ(
+        data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
+    )
+
+
+@agent_router.post("/create")
+async def create(agent: AgentConfigDTO):
+    """
+    创建新的Agent
+
+    Args:
+        agent: Agent配置对象
+
+    Returns:
+        StandardResponse: 包含操作结果的标准响应
+    """
+    agent_id = await create_agent(agent.name, convert_agent_to_config(agent))
+    return await Response.succ(
+        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 创建成功"
+    )
+
+
+@agent_router.get("/{agent_id}")
+async def get(agent_id: str):
+    """
+    根据ID获取Agent配置
+
+    Args:
+        agent_id: Agent ID
+
+    Returns:
+        StandardResponse: 包含Agent配置的标准响应
+    """
+    agent = await get_agent(agent_id)
+    agent_resp = convert_config_to_agent(agent_id, agent)
+    return await Response.succ(
+        data={"agent": agent_resp.model_dump()}, message=f"获取Agent '{agent_id}' 成功"
+    )
+
+
+@agent_router.put("/{agent_id}")
+async def update(agent_id: str, agent: AgentConfigDTO):
+    """
+    更新Agent配置
+
+    Args:
+        agent_id: Agent ID
+        agent: 更新的Agent配置
+
+    """
+    await update_agent(agent_id, agent.name, convert_agent_to_config(agent))
+    return await Response.succ(
+        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
+    )
+
+
+@agent_router.delete("/{agent_id}")
+async def delete(agent_id: str):
+    """
+    删除Agent
+
+    Args:
+        agent_id: Agent ID
+
+    """
+    await delete_agent(agent_id)
+    return await Response.succ(
+        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
+    )
+
+
+@agent_router.post("/auto-generate")
+async def auto_generate(request: AutoGenAgentRequest):
+    """
+    自动生成Agent
+
+    Args:
+        request: 自动生成Agent请求
+
+    """
+    agent_config = await auto_generate_agent(
+        agent_description=request.agent_description,
+        available_tools=request.available_tools,
+    )
+    return await Response.succ(
+        data={"agent": agent_config}, message="Agent自动生成成功"
+    )
+
+
+@agent_router.post("/system-prompt/optimize")
+async def optimize(request: SystemPromptOptimizeRequest):
+    """
+    优化系统提示词
+
+    Args:
+        request: 系统提示词优化请求
+
+    Returns:
+        StandardResponse: 包含优化后的系统提示词的标准响应
+    """
+    res = await optimize_system_prompt(
+        original_prompt=request.original_prompt,
+        optimization_goal=request.optimization_goal,
+    )
+    return await Response.succ(data=res, message="系统提示词优化成功")
