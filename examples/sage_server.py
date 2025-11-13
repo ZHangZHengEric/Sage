@@ -51,6 +51,9 @@ parser.add_argument("--default_llm_model_name", help="默认LLM API Model")
 parser.add_argument("--default_llm_max_tokens", default=4096, type=int, help="默认LLM API Max Tokens")
 parser.add_argument("--default_llm_temperature", default=0.2, type=float, help="默认LLM API Temperature")
 parser.add_argument("--default_llm_max_model_len", default=54000, type=int, help="默认LLM 最大上下文")
+parser.add_argument("--default_llm_top_p", default=0.9, type=float, help="默认LLM Top P")
+parser.add_argument("--default_llm_presence_penalty", default=0.0, type=float, help="默认LLM Presence Penalty")
+
 # 旧格式参数（向后兼容，已废弃）
 parser.add_argument("--llm_api_key", help="LLM API Key（已废弃，请使用--default_llm_api_key）")
 parser.add_argument("--llm_api_base_url", help="LLM API Base（已废弃，请使用--default_llm_api_base_url）")
@@ -536,9 +539,11 @@ async def initialize_system(server_args):
         if default_model_client:
             # 从配置中构建模型配置字典
             model_config_dict = {
-            'model': server_args.default_llm_model_name,
-            'max_tokens': server_args.default_llm_max_tokens,
-            'temperature': server_args.default_llm_temperature
+                'model': server_args.default_llm_model_name,
+                'max_tokens': server_args.default_llm_max_tokens,
+                'temperature': server_args.default_llm_temperature,
+                'top_p': server_args.default_llm_top_p,
+                'presence_penalty': server_args.default_llm_presence_penalty
             }
 
             if server_args.preset_running_config:
@@ -838,6 +843,16 @@ async def stream_chat(request: StreamRequest):
         temperature_value = request.llm_model_config.get('temperature', server_args.default_llm_temperature)
         if temperature_value is not None:
             llm_model_config['temperature'] = float(temperature_value)
+        
+        top_p_value = request.llm_model_config.get('top_p', server_args.default_llm_top_p)
+        if top_p_value is not None:
+            llm_model_config['top_p'] = float(top_p_value)
+        
+        presence_penalty_value = request.llm_model_config.get('presence_penalty', server_args.default_llm_presence_penalty)
+        if presence_penalty_value is not None:
+            llm_model_config['presence_penalty'] = float(presence_penalty_value)
+        
+        
         logger.info(f"初始化模型客户端，模型配置: {llm_model_config}")
 
         if request.available_tools:
