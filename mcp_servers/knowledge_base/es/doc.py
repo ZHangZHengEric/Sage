@@ -133,7 +133,8 @@ async def doc_index_create(index_name: str) -> None:
         IndexSuffixDoc: _doc_mapping(),
         IndexSuffixDocFull: _doc_full_mapping(),
     }.items():
-        await index_create(index_name=f"{index_name}_{suffix}", mapping=mapping)
+        if not await index_exists(index_name=f"{index_name}_{suffix}"):
+            await index_create(index_name=f"{index_name}_{suffix}", mapping=mapping)
 
 
 async def doc_document_insert(index_name: str, docs: List[DocDocument]) -> None:
