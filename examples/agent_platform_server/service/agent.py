@@ -30,7 +30,7 @@ def generate_agent_id() -> str:
 
 async def list_agents() -> List[Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
-    dao = await AgentConfigDao.create()
+    dao = AgentConfigDao()
     all_configs = await dao.get_all()
     return all_configs
 
@@ -40,7 +40,7 @@ async def create_agent(agent_name: str, agent_config: Dict[str, Any]) -> str:
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
 
-    dao = await AgentConfigDao.create()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_name(agent_name)
     if existing_config:
         raise SageHTTPException(
@@ -57,7 +57,7 @@ async def create_agent(agent_name: str, agent_config: Dict[str, Any]) -> str:
 async def get_agent(agent_id: str) -> Agent:
     """根据 ID 获取 Agent 配置并转换为响应结构"""
     logger.info(f"获取Agent配置: {agent_id}")
-    dao = await AgentConfigDao.create()
+    dao = AgentConfigDao()
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
@@ -73,7 +73,7 @@ async def update_agent(
 ) -> str:
     """更新指定 Agent 的配置，返回 agent_id"""
     logger.info(f"开始更新Agent: {agent_id}")
-    dao = await AgentConfigDao.create()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -92,7 +92,7 @@ async def update_agent(
 async def delete_agent(agent_id: str) -> str:
     """删除指定 Agent，返回 agent_id"""
     logger.info(f"开始删除Agent: {agent_id}")
-    dao = await AgentConfigDao.create()
+    dao = AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(

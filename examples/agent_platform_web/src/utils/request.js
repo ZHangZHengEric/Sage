@@ -28,19 +28,17 @@ class Request {
 
     // 添加默认拦截器
     addDefaultInterceptors() {
-        // 请求拦截器 - 添加通用头信息
         this.requestInterceptors.push((config) => {
+            const isFormData = config && config.data && (typeof FormData !== 'undefined') && (config.data instanceof FormData)
             const headers = {
                 'Accept': 'application/json, text/plain, */*',
-                'Content-Type': 'application/json;charset=UTF-8',
                 'Accept-Language': 'zh-CN,zh;q=0.9',
                 'X-accept-language': 'zh',
                 ...config.headers
             }
-
-            // 注意：不再尝试从 cookie 获取 ticket，因为 HttpOnly cookie 无法被 JS 读取
-            // 认证将完全依赖服务器端的 cookie 验证
-
+            if (!isFormData) {
+                headers['Content-Type'] = 'application/json;charset=UTF-8'
+            }
             return {...config, headers}
         })
 
@@ -180,9 +178,12 @@ class Request {
                 signal: controller.signal
             }
 
-            // 添加请求体
+            const isFormData = finalConfig && finalConfig.data && (typeof FormData !== 'undefined') && (finalConfig.data instanceof FormData)
             if (finalConfig.data && ['POST', 'PUT', 'PATCH'].includes(fetchOptions.method)) {
-                fetchOptions.body = JSON.stringify(finalConfig.data)
+                fetchOptions.body = isFormData ? finalConfig.data : JSON.stringify(finalConfig.data)
+                if (isFormData && fetchOptions.headers && 'Content-Type' in fetchOptions.headers) {
+                    delete fetchOptions.headers['Content-Type']
+                }
             }
 
             // 发送请求

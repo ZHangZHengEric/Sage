@@ -69,6 +69,18 @@ class ENV:
     LEGACY_LLM_API_BASE_URL = "LLM_API_BASE_URL"
     LEGACY_LLM_MODEL_NAME = "LLM_MODEL_NAME"
 
+    # MinIO
+    MINIO_ENDPOINT = "SAGE_MINIO_ENDPOINT"
+    MINIO_ACCESS_KEY = "SAGE_MINIO_ACCESS_KEY"
+    MINIO_SECRET_KEY = "SAGE_MINIO_SECRET_KEY"
+    MINIO_SECURE = "SAGE_MINIO_SECURE"
+    MINIO_BUCKET_NAME = "SAGE_MINIO_BUCKET_NAME"
+    MINIO_PUBLIC_BASE_URL = "SAGE_MINIO_PUBLIC_BASE_URL"
+
+    # Knowledge Base MCP 接口
+    KB_MCP_URL = "SAGE_KB_MCP_URL"
+    KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
+
 
 def env_str(name: str, default: Optional[str] = None) -> Optional[str]:
     return os.getenv(name, default)
