@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from config.settings import EMBED_API_KEY, EMBED_BASE_URL, EMBED_MODEL
 
 EMBED_CLIENT: Optional[AsyncOpenAI] = None
+CHUNK_SIZE = 50
 
 
 async def init_embed_client() -> AsyncOpenAI:
@@ -35,8 +36,15 @@ async def embedding(
 ) -> List[List[float]]:
     client = get_embed_client()
     m = model or EMBED_MODEL
-    r = await client.embeddings.create(model=m, input=inputs)
-    return [item.embedding for item in r.data]
+    results: List[List[float]] = []
+
+    # 按50一组切片
+    for i in range(0, len(inputs), CHUNK_SIZE):
+        batch = inputs[i : i + CHUNK_SIZE]
+        r = await client.embeddings.create(model=m, input=batch)
+        results.extend(item.embedding for item in r.data)
+
+    return results
 
 
 async def close_embed_client() -> None:
