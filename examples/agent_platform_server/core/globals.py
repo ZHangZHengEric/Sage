@@ -10,7 +10,7 @@ from openai import OpenAI
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.logger import logger
 from dataclasses import dataclass
-from models.session_manager import SessionManager
+from models.base import SessionManager
 import asyncio
 from common.exceptions import SageHTTPException
 from config.settings import StartupConfig
