@@ -9,8 +9,7 @@ from typing import Dict, Any, Optional, List
 from sqlalchemy import String, select, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-from core.globals import get_global_db
+from .base import Base, BaseDao
 
 
 class Agent(Base):
@@ -19,6 +18,7 @@ class Agent(Base):
     agent_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
@@ -56,34 +56,10 @@ class Agent(Base):
         )
 
 
-class AgentConfigDao:
+class AgentConfigDao(BaseDao):
     """
     Agent 配置数据访问对象（DAO）
     """
-
-    def __init__(self):
-        self.db = None
-        try:
-            loop = asyncio.get_running_loop()
-            self._db_task = loop.create_task(get_global_db())
-        except RuntimeError:
-            self._db_task = None
-
-    @classmethod
-    async def create(cls) -> "AgentConfigDao":
-        """工厂方法：创建并绑定已初始化的 DB 的 DAO 实例"""
-        inst = cls()
-        inst.db = await get_global_db()
-        return inst
-
-    async def _get_db(self):
-        if self.db is not None:
-            return self.db
-        if self._db_task is not None:
-            self.db = await self._db_task
-            return self.db
-        self.db = await get_global_db()
-        return self.db
 
     async def get_by_name(self, name: str) -> Optional["Agent"]:
         db = await self._get_db()

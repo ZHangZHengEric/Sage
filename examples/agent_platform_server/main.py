@@ -6,6 +6,7 @@ Sage Stream Service
 """
 
 from contextlib import asynccontextmanager
+import asyncio
 import os
 from pathlib import Path
 import sys
@@ -16,6 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
+from dotenv import load_dotenv
+
+# 指定加载的 .env 文件
+load_dotenv(".env")
+
 # 项目路径配置
 project_root = Path(os.path.realpath(__file__)).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -24,9 +30,11 @@ from common.exceptions import SageHTTPException
 from common.render import Response
 from config.settings import StartupConfig, build_startup_config
 import core.globals as global_vars
-from handler.mcp_handler import validate_and_disable_mcp_servers
+from service.mcp import validate_and_disable_mcp_servers
+from core.minio_client import init_minio_client
 from sagents.utils.logger import logger
 import router
+from service.job import JobService
 
 
 async def initialize_system():
@@ -36,10 +44,15 @@ async def initialize_system():
     os.makedirs(cfg.logs_dir, exist_ok=True)
     os.makedirs(cfg.workspace, exist_ok=True)
     # 3) 设置全局变量
+    global_vars.set_startup_config(cfg)
+    await init_minio_client()
+    # 4) 初始化全局数据库
     await global_vars.initialize_global_db()
+    # 5) 初始化工具管理器
     await global_vars.initialize_tool_manager()
+    # 6) 初始化默认模型客户端
     await global_vars.initialize_default_model_client()
-    # 4) 初始化 MCP 服务器
+    # 7) 初始化 MCP 服务器
     await validate_and_disable_mcp_servers()
 
 
@@ -63,8 +76,27 @@ def create_lifespan_handler():
         """应用生命周期管理"""
         # 启动时初始化
         await initialize_system()
+        stop_event = asyncio.Event()
+        async def _job_scheduler():
+            svc = JobService()
+            while not stop_event.is_set():
+                try:
+                    await svc.build_waiting_doc()
+                    await svc.build_failed_doc()
+                except Exception as e:
+                    logger.error(f"定时任务执行失败: {e}")
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    continue
+        scheduler_task = asyncio.create_task(_job_scheduler())
         yield
         # 关闭时清理
+        stop_event.set()
+        try:
+            await scheduler_task
+        except Exception:
+            pass
         await cleanup_system()
 
     return lifespan
@@ -154,6 +186,7 @@ def create_fastapi_app():
     app.include_router(router.conversation_router)
     app.include_router(router.tool_router)
     app.include_router(router.file_server_router)
+    app.include_router(router.kdb_router)
 
     return app
 

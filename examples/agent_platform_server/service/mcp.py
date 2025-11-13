@@ -45,7 +45,7 @@ async def add_mcp_server(
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
     logger.info(f"开始添加MCP server: {name}")
 
-    dao = await MCPServerDao.create()
+    dao = MCPServerDao()
     # 检查服务器名称是否已存在
     existing_server = await dao.get_by_name(name)
     if existing_server:
@@ -74,7 +74,7 @@ async def add_mcp_server(
 async def list_mcp_servers() -> List[MCPServer]:
     """获取所有 MCP 服务器并转换为简化响应结构"""
     logger.info("获取MCP服务器列表")
-    dao = await MCPServerDao.create()
+    dao = MCPServerDao()
     mcp_servers = await dao.get_all()
     return mcp_servers
 
@@ -84,7 +84,7 @@ async def remove_mcp_server(server_name: str) -> str:
     logger.info(f"开始删除MCP server: {server_name}")
     tm = global_vars.get_tool_manager()
 
-    dao = await MCPServerDao.create()
+    dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -111,7 +111,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
     logger.info(f"开始切换MCP server状态: {server_name}")
     tm = global_vars.get_tool_manager()
 
-    dao = await MCPServerDao.create()
+    dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -146,7 +146,7 @@ async def refresh_mcp_server(server_name: str) -> str:
     logger.info(f"开始刷新MCP server: {server_name}")
     tm = global_vars.get_tool_manager()
 
-    dao = await MCPServerDao.create()
+    dao = MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -175,7 +175,7 @@ async def validate_and_disable_mcp_servers():
     - 若注册抛出异常或失败，则从数据库中删除该服务器；
     - 若之前有部分注册的工具，尝试从 ToolManager 中移除。
     """
-    mcp_dao = await MCPServerDao.create()
+    mcp_dao = MCPServerDao()
     servers = await mcp_dao.get_all()
     removed_count = 0
     registered_count = 0

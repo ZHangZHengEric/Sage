@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from common.render import Response
 
-from handler.mcp_handler import (
+from service.mcp import (
     add_mcp_server,
     list_mcp_servers,
     remove_mcp_server,

@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional
 from common.render import Response
 from sagents.utils.logger import logger
 
-from handler.agent_handler import (
+from service.agent import (
     list_agents,
     create_agent,
     get_agent,

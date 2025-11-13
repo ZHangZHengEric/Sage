@@ -9,8 +9,7 @@ from typing import Dict, Any, Optional, List
 from sqlalchemy import String, JSON, select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-from core.globals import get_global_db
+from .base import Base, BaseDao
 
 
 class MCPServer(Base):
@@ -18,6 +17,7 @@ class MCPServer(Base):
 
     name: Mapped[str] = mapped_column(String(255), primary_key=True)
     config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
@@ -51,36 +51,10 @@ class MCPServer(Base):
         )
 
 
-class MCPServerDao:
+class MCPServerDao(BaseDao):
     """
     MCP 服务器数据访问对象（DAO）
     """
-
-    def __init__(self):
-        # 在初始化阶段获取全局数据库实例（若事件循环可用则预取）
-        self.db = None
-        try:
-            loop = asyncio.get_running_loop()
-            self._db_task = loop.create_task(get_global_db())
-        except RuntimeError:
-            # 若无运行中的事件循环，延迟到方法调用时获取
-            self._db_task = None
-
-    @classmethod
-    async def create(cls) -> "MCPServerDao":
-        """工厂方法：创建并绑定已初始化的 DB 的 DAO 实例"""
-        inst = cls()
-        inst.db = await get_global_db()
-        return inst
-
-    async def _get_db(self):
-        if self.db is not None:
-            return self.db
-        if self._db_task is not None:
-            self.db = await self._db_task
-            return self.db
-        self.db = await get_global_db()
-        return self.db
 
     async def get_by_name(self, name: str) -> Optional["MCPServer"]:
         db = await self._get_db()

@@ -12,7 +12,7 @@ from fastapi import APIRouter
 from common.exceptions import SageHTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from handler import SageStreamService
+from service.sage_stream_service import SageStreamService
 from config.settings import StartupConfig
 from sagents.utils.logger import logger
 import core.globals as global_vars
@@ -301,7 +301,7 @@ async def _create_conversation_title(request):
 async def _save_conversation_if_needed(
     session_id, request, message_collector, message_order
 ):
-    conversation_dao = await ConversationDao.create()
+    conversation_dao = ConversationDao()
     """如果需要，保存新会话"""
     messages = []
     existing_conversation = await conversation_dao.get_by_session_id(session_id)
