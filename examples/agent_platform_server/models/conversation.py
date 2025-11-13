@@ -10,8 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy import String, Text, func, select, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-from core.globals import get_global_db
+from .base import Base, BaseDao
 
 
 class Conversation(Base):
@@ -97,34 +96,10 @@ class Conversation(Base):
         )
 
 
-class ConversationDao:
+class ConversationDao(BaseDao):
     """
     会话数据访问对象（DAO）
     """
-
-    def __init__(self):
-        self.db = None
-        try:
-            loop = asyncio.get_running_loop()
-            self._db_task = loop.create_task(get_global_db())
-        except RuntimeError:
-            self._db_task = None
-
-    @classmethod
-    async def create(cls) -> "ConversationDao":
-        """工厂方法：创建并绑定已初始化的 DB 的 DAO 实例"""
-        inst = cls()
-        inst.db = await get_global_db()
-        return inst
-
-    async def _get_db(self):
-        if self.db is not None:
-            return self.db
-        if self._db_task is not None:
-            self.db = await self._db_task
-            return self.db
-        self.db = await get_global_db()
-        return self.db
 
     async def save_conversation(
         self,

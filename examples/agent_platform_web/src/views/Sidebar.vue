@@ -54,6 +54,7 @@ const pageToRouteNameMap = {
   'chat': 'Chat',
   'agents': 'AgentConfig',
   'tools': 'Tools',
+  'knowledge': 'KnowledgeBase',
   'history': 'History',
   'mcps': 'Mcps'
 }
@@ -64,6 +65,7 @@ const currentPage = computed(() => {
   if (routeName === 'Chat') return 'chat'
   if (routeName === 'AgentConfig') return 'agents'
   if (routeName === 'Tools') return 'tools'
+  if (routeName === 'KnowledgeBase' || routeName === 'KnowledgeBaseDetail') return 'knowledge'
   if (routeName === 'History') return 'history'
   if (routeName === 'Mcps') return 'mcps'
   return 'chat'
@@ -95,6 +97,12 @@ const menuItems = computed(() => [
   {
     id: 'tools',
     label: t('sidebar.tools'),
+    icon: Wrench,
+    badge: null
+  },
+  {
+    id: 'knowledge',
+    label: t('knowledgeBase.title'),
     icon: Wrench,
     badge: null
   },

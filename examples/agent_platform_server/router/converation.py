@@ -11,9 +11,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from sagents.utils.logger import logger
-from common.exceptions import SageHTTPException
 from common.render import Response
-from handler.conversation_handler import (
+from service.conversation import (
     interrupt_session,
     get_session_status,
     get_file_workspace,

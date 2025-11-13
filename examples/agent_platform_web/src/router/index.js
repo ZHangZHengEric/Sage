@@ -4,6 +4,7 @@ import AgentConfigPage from '../views/AgentConfig.vue'
 import ToolsPage from '../views/Tool.vue'
 import HistoryPage from '../views/ChatHistory.vue'
 import McpsPage from '../views/Mcp.vue'
+import KnowledgeBasePage from '../views/KnowledgeBase.vue'
 
 const routes = [
   {
@@ -44,6 +45,22 @@ const routes = [
     component: HistoryPage,
     meta: {
       title: 'history.title'
+    }
+  },
+  {
+    path: '/agent/knowledge-base',
+    name: 'KnowledgeBase',
+    component: KnowledgeBasePage,
+    meta: {
+      title: 'knowledgeBase.title'
+    }
+  },
+  {
+    path: '/agent/knowledge-base/:kdbId',
+    name: 'KnowledgeBaseDetail',
+    component: () => import('../views/KnowledgeBaseDetail.vue'),
+    meta: {
+      title: 'knowledgeBase.title'
     }
   },
   // 重定向根路径到聊天页面

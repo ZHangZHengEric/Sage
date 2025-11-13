@@ -161,7 +161,7 @@ async def get_conversations_paginated(
     sort_by: str = "date",
 ) -> Tuple[List[Conversation], int]:
     """分页获取会话列表并构造响应字典"""
-    dao = await ConversationDao.create()
+    dao = ConversationDao()
     conversations, total_count = await dao.get_conversations_paginated(
         page=page,
         page_size=page_size,
@@ -175,7 +175,7 @@ async def get_conversations_paginated(
 
 async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
-    dao = await ConversationDao.create()
+    dao = ConversationDao()
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
@@ -203,7 +203,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
 
 async def delete_conversation(conversation_id: str) -> str:
     """删除指定对话，返回 conversation_id"""
-    dao = await ConversationDao.create()
+    dao = ConversationDao()
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
