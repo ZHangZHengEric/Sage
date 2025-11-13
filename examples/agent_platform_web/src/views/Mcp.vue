@@ -27,6 +27,14 @@
                   >
                     <RefreshCw :size="16" :class="{ 'spinning': refreshingServers.has(server.name) }" />
                   </button>
+                  <button 
+                    class="action-btn delete-btn" 
+                    @click="handleDeleteMcp(server.name)"
+                    :disabled="loading"
+                    :title="t('tools.delete')"
+                  >
+                    <Trash2 :size="16" />
+                  </button>
                   <div class="mcp-status-indicator" :class="{ disabled: server.disabled }">
                     <div class="status-dot"></div>
                     <span class="status-text">{{ server.disabled ? t('tools.disabled') : t('tools.enabled') }}</span>
@@ -75,7 +83,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench,Code, Database,  Cpu, Plus, RefreshCw } from 'lucide-vue-next'
+import { Wrench,Code, Database,  Cpu, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
@@ -170,24 +178,25 @@ const handleRefreshMcp = async (serverName) => {
   refreshingServers.value.add(serverName)
   
   try {
-    const response = await toolAPI.refreshMcpServer(serverName)
-    console.log(`MCP server ${serverName} refresh response:`, response)
-    
-    // 重新加载服务器列表以获取最新状态（包括可能被禁用的状态）
-    await loadMcpServers()
-    
-    // 根据响应状态显示不同的消息
-    if (response.data?.status === 'disabled_due_to_failure') {
-      console.warn(`MCP server ${serverName} was disabled due to refresh failure`)
-    } else {
-      console.log(`MCP server ${serverName} refreshed successfully`)
-    }
+    await toolAPI.refreshMcpServer(serverName)
   } catch (error) {
     console.error(`Failed to refresh MCP server ${serverName}:`, error)
     // 即使出错也重新加载列表，以防服务器状态已经改变
-    await loadMcpServers()
   } finally {
+    await loadMcpServers()
     refreshingServers.value.delete(serverName)
+  }
+}
+
+const handleDeleteMcp = async (serverName) => {
+  try {
+    loading.value = true
+    await toolAPI.deleteMcpServer(serverName)
+  } catch (error) {
+    console.error(`Failed to delete MCP server ${serverName}:`, error)
+  } finally {
+    await loadMcpServers()
+    loading.value = false
   }
 }
 
