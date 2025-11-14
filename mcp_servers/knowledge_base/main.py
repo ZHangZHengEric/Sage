@@ -22,6 +22,9 @@ from core.client.embed_client import (
     close_embed_client,
 )
 
+"""
+文档知识库
+"""
 
 _doc_service = DocumentService()
 
@@ -41,6 +44,11 @@ async def doc_document_delete(index_name: str, doc_ids: List[str]) -> Dict[str, 
 @mcp.tool("doc_index_clear")
 async def doc_index_clear(index_name: str) -> Dict[str, Any]:
     return await _doc_service.doc_index_clear(index_name)
+
+
+@mcp.tool("doc_retrieve")
+async def doc_retrieve(index_name: str, question: str, top_k: int) -> Dict[str, Any]:
+    return await _doc_service.doc_search(index_name, question, top_k)
 
 
 mcp_app = mcp.http_app()

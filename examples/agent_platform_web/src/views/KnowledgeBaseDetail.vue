@@ -67,9 +67,15 @@
       </div>
       <div class="recall-list">
         <ul class="recall-items">
-          <li v-for="r in recallResults" :key="r.id" class="recall-item">
-            <div class="recall-title">{{ r.dataName }}</div>
-            <div class="recall-meta">{{ statusText(r.status) }} · {{ r.type }} · {{ formatTime(r.createTime) }}</div>
+          <li v-for="r in recallResults" :key="makeRecallKey(r)" class="recall-item">
+            <div class="recall-head">
+              <div class="recall-title">{{ r.title  }}</div>
+              <div class="recall-meta">Score: {{ (r.score ?? 0).toFixed(4) }} </div>
+            </div>
+            <div class="recall-snippet">
+              <ReactMarkdown :content=" r.doc_content " />
+            </div>
+  
           </li>
         </ul>
       </div>
@@ -100,6 +106,7 @@ import { Trash2, RotateCcw } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
+import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
 
 const { t } = useLanguage()
 const route = useRoute()
@@ -121,6 +128,7 @@ const fileInputRef = ref(null)
 const recallQuery = ref('')
 const recallResults = ref([])
 const recallLoading = ref(false)
+const recallExpandedMap = ref({})
 const allowedExts = ['.doc', '.docx', '.pdf', '.txt', '.json', '.eml', '.ppt', '.pptx', '.xlsx', '.xls', '.csv', '.md']
 
 const loadInfo = async () => {
@@ -254,14 +262,40 @@ const formatTime = (iso) => {
 const runRecall = async () => {
   try {
     recallLoading.value = true
-    const res = await knowledgeBaseAPI.getDocuments({ kdb_id: kdbId, query_name: recallQuery.value, page_no: 1, page_size: 50 })
+    const res = await knowledgeBaseAPI.retrieve({ kdb_id: kdbId, query: recallQuery.value, top_k: 10 })
     if (res && res.success) {
-      const { list = [] } = res.data || {}
+      const list = Array.isArray(res.data) ? res.data : []
       recallResults.value = list
     }
   } finally {
     recallLoading.value = false
   }
+}
+
+const makeRecallKey = (r) => `${r.doc_id || ''}-${r.doc_segment_id || ''}-${r.start || 0}-${r.end || 0}`
+const isRecallExpanded = (r) => !!recallExpandedMap.value[makeRecallKey(r)]
+const toggleRecall = (r) => {
+  const k = makeRecallKey(r)
+  recallExpandedMap.value[k] = !recallExpandedMap.value[k]
+}
+
+const buildExpanded = (r) => {
+  const text = r.full_content || ''
+  return highlightWindow(text, r.start, r.end, text.length, text.length)
+}
+
+const highlightWindow = (text, start, end, before = 120, after = 160) => {
+  if (!text) return ''
+  if (typeof start !== 'number' || typeof end !== 'number') {
+    return text
+  }
+  const s = Math.max(0, Math.min(start, text.length))
+  const e = Math.max(s, Math.min(end, text.length))
+  const preStart = Math.max(0, s - before)
+  const postEnd = Math.min(text.length, e + after)
+  const prefixEllipsis = preStart > 0 ? '…' : ''
+  const suffixEllipsis = postEnd < text.length ? '…' : ''
+  return `${prefixEllipsis}${text.slice(preStart, s)}<span class="recall-highlight">${text.slice(s, e)}</span>${text.slice(e, postEnd)}${suffixEllipsis}`
 }
 
 const statusText = (s) => {
@@ -312,6 +346,12 @@ const statusText = (s) => {
 .recall-ops { display: flex; gap: 8px; margin-bottom: 12px; }
 .recall-items { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .recall-item { padding: 8px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; }
-.recall-title { font-weight: 600; }
-.recall-meta { color: rgba(0,0,0,0.6); font-size: 12px; }
+.recall-head { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
+.recall-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recall-meta { color: rgba(218, 12, 12, 0.875); font-size: 14px;  }
+.recall-snippet { margin-top: 6px; border: 1px solid rgba(32, 199, 37, 0.809); border-radius: 8px; padding: 8px; }
+.recall-expanded { margin-top: 8px; }
+.recall-section { margin-top: 8px; }
+.recall-subtitle { font-size: 12px; color: rgba(0,0,0,0.6); margin-bottom: 4px; }
+:deep(.recall-highlight) { color: #ef4444; }
 </style>

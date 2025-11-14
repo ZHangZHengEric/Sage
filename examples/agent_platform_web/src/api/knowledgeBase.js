@@ -72,5 +72,10 @@ export const knowledgeBaseAPI = {
   // 文档重做
   redoDocument: (doc_id) => {
     return request.put(`/api/knowledge-base/doc/redo/${doc_id}`)
+  },
+
+  // 召回检索
+  retrieve: ({ kdb_id, query, top_k = 10 }) => {
+    return request.post('/api/knowledge-base/retrieve', { kdb_id, query, top_k })
   }
 }
