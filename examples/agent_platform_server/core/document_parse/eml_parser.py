@@ -8,7 +8,7 @@ from .base import BaseParser
 from models.file import FileDao, File
 from utils.id import gen_id
 from models.kdb_doc import KdbDocDao, KdbDoc
-from loguru import logger
+from sagents.utils.logger import logger
 from core.kdb_client import (
     DocumentInput,
     KnowledgeBaseClient,
