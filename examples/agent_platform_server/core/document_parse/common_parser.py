@@ -10,7 +10,7 @@ from core.kdb_client import (
 from models.file import FileDao, File
 from models.kdb_doc import KdbDoc
 from utils.id import gen_id
-from loguru import logger
+from sagents.utils.logger import logger
 
 
 ALLOW_ATTACH_FILE_EXTS = {
