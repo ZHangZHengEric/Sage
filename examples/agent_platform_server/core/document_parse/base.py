@@ -3,7 +3,7 @@ from __future__ import annotations
 from re import A
 from typing import Any, Dict
 
-from loguru import logger
+from sagents.utils.logger import logger
 from sagents.tool.file_parser.file_parser import FileParser
 from models.kdb_doc import KdbDoc
 
