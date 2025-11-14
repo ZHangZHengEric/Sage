@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
-from loguru import logger
+from sagents.utils.logger import logger
 
 from core.document_split import DocumentSplit
 
