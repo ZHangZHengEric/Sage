@@ -1,5 +1,5 @@
 from typing import Any, Dict, Optional, List
-from elasticsearch import AsyncElasticsearch
+from elasticsearch import AsyncElasticsearch, helpers
 from config.settings import ES_URL, ES_API_KEY, ES_USERNAME, ES_PASSWORD, EMBEDDING_DIMS
 
 ES_CLIENT: Optional[AsyncElasticsearch] = None
@@ -100,8 +100,11 @@ async def document_insert(index_name: str, docs: List[Dict[str, Any]]) -> None:
     if not docs:
         return
     es_client = get_es_client()
-    for d in docs:
-        await es_client.index(index=index_name, id=d.get("doc_id"), document=d)
+    chunk_size = 1000
+    for i in range(0, len(docs), chunk_size):
+        chunk = docs[i : i + chunk_size]
+        actions = [{"_index": index_name, "_source": doc} for doc in chunk]
+        await helpers.async_bulk(es_client, actions)
 
 
 async def document_delete(index_name: str, query: Dict[str, Any]) -> None:
