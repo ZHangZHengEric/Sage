@@ -10,11 +10,14 @@ from core.document_split import DocumentSplit
 from core.client.embed_client import (
     embedding,
 )
+from core.search_result_post_process import SearchResultPostProcessTool
 from es.doc import (
     doc_index_create,
     doc_document_insert,
     doc_document_delete,
     doc_index_clear,
+    doc_document_search,
+    get_documents_by_ids,
     DocDocument,
 )
 
@@ -41,7 +44,6 @@ class DocumentService:
 
         splitter = DocumentSplit()
         doc_documents: List[DocDocument] = []
-        total_segments = 0
         for d in docs or []:
             doc_id = d.doc_id
             if not doc_id:
@@ -56,7 +58,7 @@ class DocumentService:
             if full_content:
                 split_res = await splitter.split_text_by_punctuation(full_content)
                 sentences = split_res.get("sentences_list", [])
-                total_segments += len(sentences)
+                logger.info(f"doc_id: {doc_id}, 拆分段落数: {len(sentences)}")
                 for s in sentences:
                     doc_documents.append(
                         DocDocument(
@@ -84,7 +86,6 @@ class DocumentService:
             "success": True,
             "index_name": index_name,
             "doc_count": len(docs or []),
-            "segment_count": total_segments,
         }
 
     async def doc_document_delete(
@@ -98,3 +99,40 @@ class DocumentService:
         logger.info(f"index: {index_name}, clear index")
         cleared = await doc_index_clear(index_name)
         return {"success": True, "index_name": index_name, "cleared_indices": cleared}
+
+    async def doc_search(
+        self, index_name: str, question: str, query_size: int
+    ) -> Dict[str, Any]:
+        logger.info(
+            f"index: {index_name}, question: {question}, query_size: {query_size}"
+        )
+        embs = await embedding([question])
+        emb = embs[0]
+
+        # 返回的结果是2*query_size
+        pre_docs = await doc_document_search(index_name, question, emb, query_size)
+        # 转成List[Dict[str, Any]]
+        pre_docs_dicts = [d.model_dump() for d in pre_docs]
+        docs = SearchResultPostProcessTool().process_search_results(pre_docs_dicts)
+
+        doc_ids = list({d.get("doc_id") for d in docs if d.get("doc_id")})
+        full_map = await get_documents_by_ids(index_name, doc_ids)
+        # 给docs添加full_content
+        for d in docs:
+            doc_id = d.get("doc_id")
+            if doc_id and doc_id in full_map:
+                d["title"] = full_map[doc_id].title
+                d["path"] = full_map[doc_id].path
+                d["metadata"] = full_map[doc_id].metadata
+                d["full_content"] = full_map[doc_id].full_content
+
+        # query_size 个结果, 不够则返回所有
+        docs = docs[:query_size]
+        logger.info(
+            f"index: {index_name}, question: {question}, search_results: {docs}"
+        )
+        return {
+            "success": True,
+            "index_name": index_name,
+            "search_results": docs,
+        }

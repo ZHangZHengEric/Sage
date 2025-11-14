@@ -62,6 +62,17 @@ async def kdb_info(kdb_id: str = Query(...)):
     )
 
 
+@kdb_router.post("/retrieve")
+async def kdb_retrieve(
+    kdb_id: str = Body(...),
+    query: str = Body(...),
+    top_k: int = Body(10),
+):
+    svc = KdbService()
+    result = await svc.retrieve(kdb_id=kdb_id, query=query, top_k=top_k)
+    return await Response.succ(data=[d.to_dict() for d in result])
+
+
 @kdb_router.get("/list")
 async def kdb_list(
     query_name: str = Query(""),
