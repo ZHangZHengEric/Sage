@@ -40,8 +40,7 @@ class CommonParser(BaseParser):
         logger.info(
             f"[CommonParser] 清理旧文档开始：索引={index_name}，ID数量={len(ids)}"
         )
-        async with KnowledgeBaseClient() as kb_client:
-            await kb_client.delete_documents_by_mcp(index_name, ids)
+        await KnowledgeBaseClient().delete_documents_by_mcp(index_name, ids)
         logger.info(
             f"[CommonParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
         )
@@ -89,8 +88,7 @@ class CommonParser(BaseParser):
                         metadata=metadata,
                     )
                 )
-        async with KnowledgeBaseClient() as kb_client:
-            await kb_client.insert_documents_by_mcp(index_name, docs)
+        await KnowledgeBaseClient().insert_documents_by_mcp(index_name, docs)
         logger.info(
             f"[CommonParser] 处理完成：索引={index_name}，插入文档数={len(docs)}"
         )

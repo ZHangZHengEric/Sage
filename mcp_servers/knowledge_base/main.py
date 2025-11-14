@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 import os
 import uvicorn
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
@@ -26,36 +26,40 @@ from core.client.embed_client import (
 _doc_service = DocumentService()
 
 
-@mcp.tool()
+@mcp.tool("doc_document_insert")
 async def doc_document_insert(
     index_name: str, docs: List[DocumentInput]
 ) -> Dict[str, Any]:
     return await _doc_service.doc_document_insert(index_name, docs)
 
 
-@mcp.tool()
+@mcp.tool("doc_document_delete")
 async def doc_document_delete(index_name: str, doc_ids: List[str]) -> Dict[str, Any]:
     return await _doc_service.doc_document_delete(index_name, doc_ids)
 
 
-@mcp.tool()
+@mcp.tool("doc_index_clear")
 async def doc_index_clear(index_name: str) -> Dict[str, Any]:
     return await _doc_service.doc_index_clear(index_name)
 
 
+mcp_app = mcp.http_app()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_es_client()
-    await init_embed_client()
-    try:
-        yield
-    finally:
-        await close_embed_client()
-        await close_es_client()
+    async with mcp_app.lifespan(app):
+        await init_es_client()
+        await init_embed_client()
+        try:
+            yield
+        finally:
+            await close_embed_client()
+            await close_es_client()
 
 
 app = FastAPI(title="Knowledge Base MCP", lifespan=lifespan)
-app.mount("/mcp", mcp.streamable_http_app())
+app.mount("/", mcp_app)
 
 
 if __name__ == "__main__":

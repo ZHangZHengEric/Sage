@@ -39,7 +39,10 @@ async def close_es_client() -> None:
 
 
 async def _index_exists(client: AsyncElasticsearch, index_name: str) -> bool:
-    return await client.indices.exists(index=index_name)
+    try:
+        return await client.indices.exists(index=index_name, ignore=[404, 400])
+    except Exception:
+        return False
 
 
 def dims() -> int:
