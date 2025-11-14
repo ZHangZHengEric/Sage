@@ -42,8 +42,7 @@ class EmlParser(BaseParser):
         if isinstance(atts, list):
             ids.extend(atts)
         logger.info(f"[EmlParser] 清理旧文档开始：索引={index_name}，ID数量={len(ids)}")
-        async with KnowledgeBaseClient() as kb_client:
-            await kb_client.delete_documents_by_mcp(index_name, ids)
+        await KnowledgeBaseClient().delete_documents_by_mcp(index_name, ids)
         logger.info(
             f"[EmlParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
         )
@@ -125,6 +124,5 @@ class EmlParser(BaseParser):
             doc.meta_data["attachments"] = []
         doc_dao = KdbDocDao()
         await doc_dao.update(doc)
-        async with KnowledgeBaseClient() as kb_client:
-            await kb_client.insert_documents_by_mcp(index_name, docs)
+        await KnowledgeBaseClient().insert_documents_by_mcp(index_name, docs)
         logger.info(f"[EmlParser] 处理完成：索引={index_name}，插入文档数={len(docs)}")

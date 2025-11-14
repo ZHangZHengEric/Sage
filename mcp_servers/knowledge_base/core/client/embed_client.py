@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from typing import Optional, List
 from openai import AsyncOpenAI
-from config.settings import EMBED_API_KEY, EMBED_BASE_URL, EMBED_MODEL
+from config.settings import EMBED_API_KEY, EMBED_BASE_URL, EMBED_MODEL, EMBEDDING_DIMS
 
 EMBED_CLIENT: Optional[AsyncOpenAI] = None
-CHUNK_SIZE = 50
+CHUNK_SIZE = 10
 
 
 async def init_embed_client() -> AsyncOpenAI:
@@ -41,7 +41,9 @@ async def embedding(
     # 按50一组切片
     for i in range(0, len(inputs), CHUNK_SIZE):
         batch = inputs[i : i + CHUNK_SIZE]
-        r = await client.embeddings.create(model=m, input=batch)
+        r = await client.embeddings.create(
+            model=m, input=batch, dimensions=EMBEDDING_DIMS
+        )
         results.extend(item.embedding for item in r.data)
 
     return results

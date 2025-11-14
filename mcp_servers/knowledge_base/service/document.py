@@ -33,7 +33,7 @@ class DocumentService:
     async def doc_document_insert(
         self, index_name: str, docs: List[DocumentInput]
     ) -> Dict[str, Any]:
-
+        logger.info(f"index: {index_name}, insert docs: {docs}")
         try:
             await doc_index_create(index_name)
         except Exception as e:
@@ -77,7 +77,7 @@ class DocumentService:
         doc_contents = [d.doc_content for d in doc_documents if d.doc_content]
         embeddings = await embedding(doc_contents)
         for i, d in enumerate(doc_documents):
-            d.embedding = embeddings[i]
+            d.emb = embeddings[i]
 
         await doc_document_insert(index_name, doc_documents)
         return {
@@ -90,9 +90,11 @@ class DocumentService:
     async def doc_document_delete(
         self, index_name: str, doc_ids: List[str]
     ) -> Dict[str, Any]:
-        await doc_document_delete(index_name, doc_ids)
+        logger.info(f"index: {index_name}, delete docs: {doc_ids}")
+        deleted = await doc_document_delete(index_name, doc_ids)
         return {"success": True, "index_name": index_name, "count": deleted}
 
     async def doc_index_clear(self, index_name: str) -> Dict[str, Any]:
-        await doc_index_clear(index_name)
+        logger.info(f"index: {index_name}, clear index")
+        cleared = await doc_index_clear(index_name)
         return {"success": True, "index_name": index_name, "cleared_indices": cleared}
