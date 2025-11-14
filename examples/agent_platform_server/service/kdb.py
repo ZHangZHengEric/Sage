@@ -17,6 +17,7 @@ from common.exceptions import SageHTTPException
 from utils.id import gen_id
 from fastapi import UploadFile
 from core.minio_client import upload_kdb_file
+from core.kdb_client import KnowledgeBaseClient, DocumentRetrieveOutput
 
 
 class KdbService:
@@ -80,6 +81,7 @@ class KdbService:
         return items, total
 
     async def delete(self, kdb_id: str) -> None:
+
         await self.kdb_dao.delete_by_id(kdb_id)
         logger.info(f"删除KDB: {kdb_id}")
 
@@ -95,6 +97,17 @@ class KdbService:
             [d.id for d in docs], KdbDocStatus.PENDING
         )
         logger.info(f"重做KDB所有文档: {kdb_id}")
+
+    async def retrieve(
+        self, kdb_id: str, query: str, top_k: int = 5
+    ) -> List[DocumentRetrieveOutput]:
+        kdb = await self.kdb_dao.get_by_id(kdb_id)
+        if not kdb:
+            raise SageHTTPException(status_code=400, detail="KDB not found")
+        index_name = f"kdb_{kdb_id}"
+        kdb_client = KnowledgeBaseClient()
+        result = await kdb_client.search_documents_by_mcp(index_name, query, top_k)
+        return result
 
     # ==== 文档相关 ====
     async def doc_list(
@@ -156,6 +169,8 @@ class KdbService:
         logger.info(f"任务重做: {task_id}")
 
     async def doc_delete(self, doc_id: str) -> None:
+        kdb_client = KnowledgeBaseClient()
+        await kdb_client.delete_documents_by_mcp(f"kdb_{kdb_id}", [doc_id])
         await self.kdb_doc_dao.delete_by_ids([doc_id])
         logger.info(f"删除doc: {doc_id}")
 

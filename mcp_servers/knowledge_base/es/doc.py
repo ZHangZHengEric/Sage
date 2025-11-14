@@ -8,6 +8,7 @@ from pydantic import BaseModel
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from loguru import logger
 from core.client.es_client import (
     dims,
     index_create,
@@ -35,9 +36,6 @@ class DocDocument(BaseModel):
     path: Optional[str] = None
     title: Optional[str] = None
     metadata: Dict[str, Any] | None = None
-    sender: Optional[str] = None
-    receiver: List[str] | None = None
-    date: Optional[datetime] = None
     is_attachment: Optional[bool] = None
 
     def to_doc_source(self) -> Dict[str, Any]:
@@ -48,15 +46,11 @@ class DocDocument(BaseModel):
                 "emb": self.emb,
                 "doc_segment_id": self.doc_segment_id,
                 "doc_content": self.doc_content,
-                "origin_content": self.origin_content,
                 "start": self.start,
                 "end": self.end,
                 "path": self.path,
                 "title": self.title,
                 "metadata": self.metadata,
-                "sender": self.sender,
-                "receiver": self.receiver,
-                "date": self.date.isoformat() if self.date else None,
                 "is_attachment": self.is_attachment,
             }
         )
@@ -184,18 +178,19 @@ async def get_documents_by_ids(
             title=src.get("title"),
             metadata=src.get("metadata"),
             main_doc_id=src.get("main_doc_id"),
-            sender=src.get("sender"),
-            receiver=src.get("receiver"),
-            date=src.get("date"),
         )
         res[doc.doc_id] = doc
     return res
 
 
-async def doc_search(
+async def doc_document_search(
     index_name: str, question: str, emb: List[float], size: int
 ) -> List[DocDocument]:
     index_doc = f"{index_name}_{IndexSuffixDoc}"
+    exists = await index_exists(index_doc)
+    if not exists:
+        logger.warning(f"index {index_doc} not exists")
+        return []
 
     async def _vec():
         r = await es_search(
@@ -268,13 +263,6 @@ async def doc_search(
 
     vec_docs, bm25_docs = await asyncio.gather(_vec(), _bm25())
     docs = vec_docs + bm25_docs
-    if not docs:
-        return docs
-    doc_ids = list({d.doc_id for d in docs if d.doc_id})
-    full_map = await get_documents_by_ids(index_name, doc_ids)
-    for d in docs:
-        if d.doc_id in full_map:
-            d.full_content = full_map[d.doc_id].full_content
     return docs
 
 

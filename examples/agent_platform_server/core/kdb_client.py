@@ -2,7 +2,8 @@ from __future__ import annotations
 from config.settings import ENV, env_str
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel
-import os
+import json
+from datetime import datetime
 from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession
 
@@ -18,6 +19,30 @@ class DocumentInput(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
+
+
+class DocumentRetrieveOutput(BaseModel):
+    doc_id: str
+    main_doc_id: Optional[str] = None
+    score: Optional[float] = None
+    source: Optional[str] = None
+    doc_segment_id: Optional[str] = None
+    doc_content: Optional[str] = None
+    origin_content: Optional[str] = None
+    start: Optional[int] = None
+    end: Optional[int] = None
+    full_content: Optional[str] = None
+    path: Optional[str] = None
+    title: Optional[str] = None
+    metadata: Dict[str, Any] | None = None
+    sender: Optional[str] = None
+    receiver: List[str] | None = None
+    date: Optional[datetime] = None
+    is_attachment: Optional[bool] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        # 去除None值
+        return self.model_dump(exclude_none=True)
 
 
 class KnowledgeBaseClient:
@@ -61,7 +86,6 @@ class KnowledgeBaseClient:
                 return result.model_dump()
 
     async def clear_knowledge_base_by_mcp(self, index_name: str) -> Any:
-
         async with streamablehttp_client(
             self.url, headers=self.headers, timeout=30
         ) as (read, write, _):
@@ -74,3 +98,21 @@ class KnowledgeBaseClient:
                 if result.isError:
                     raise Exception(result.content[0].text)
                 return result.model_dump()
+
+    async def search_documents_by_mcp(
+        self, index_name: str, query: str, top_k: int = 5
+    ) -> List[DocumentRetrieveOutput]:
+        async with streamablehttp_client(
+            self.url, headers=self.headers, timeout=30
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(
+                    "doc_retrieve",
+                    {"index_name": index_name, "question": query, "top_k": top_k},
+                )
+                if result.isError:
+                    raise Exception(result.content[0].text)
+                # result.content[0].text 转json获取search_results，再转成List[DocumentRetrieveOutput]
+                search_results = json.loads(result.content[0].text)["search_results"]
+                return [DocumentRetrieveOutput(**d) for d in search_results]
