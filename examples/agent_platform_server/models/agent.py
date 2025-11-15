@@ -92,6 +92,6 @@ class AgentConfigDao(BaseDao):
         async with db.get_session() as session:
             obj = await session.get(Agent, agent_id)
             if obj:
-                session.delete(obj)
+                await session.delete(obj)
                 return True
             return False
