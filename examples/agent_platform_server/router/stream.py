@@ -9,6 +9,7 @@ import traceback
 import time
 from typing import Dict, Any, Optional, List, Union
 from fastapi import APIRouter
+from openai import OpenAI
 from common.exceptions import SageHTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
