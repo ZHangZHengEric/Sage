@@ -41,7 +41,7 @@ class KdbDocDao(BaseDao):
     async def insert(self, obj: KdbDoc) -> None:
         db = await self._get_db()
         async with db.get_session() as session:
-            await session.add(obj)
+            session.add(obj)
 
     async def batch_insert(self, objs: List[KdbDoc]) -> None:
         if not objs:

@@ -94,5 +94,5 @@ class MCPServerDao(BaseDao):
                 obj = MCPServer(
                     name=name, config=config, created_at=now, updated_at=now
                 )
-                await session.add(obj)
+                session.add(obj)
                 return obj
