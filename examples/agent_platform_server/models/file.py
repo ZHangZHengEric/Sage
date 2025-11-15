@@ -48,7 +48,7 @@ class FileDao(BaseDao):
     async def insert(self, obj: File) -> None:
         db = await self._get_db()
         async with db.get_session() as session:
-            await session.add(obj)
+            session.add(obj)
 
     async def batch_insert(self, objs: List[File]) -> None:
         if not objs:

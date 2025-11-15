@@ -51,7 +51,7 @@ class KdbDao(BaseDao):
     async def insert(self, obj: Kdb) -> None:
         db = await self._get_db()
         async with db.get_session() as session:
-            await session.add(obj)
+            session.add(obj)
 
     async def get_by_id(self, kdb_id: str) -> Optional[Kdb]:
         db = await self._get_db()
