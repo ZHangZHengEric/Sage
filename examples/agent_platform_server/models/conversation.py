@@ -201,7 +201,7 @@ class ConversationDao(BaseDao):
         async with db.get_session() as session:
             obj = await session.get(Conversation, session_id)
             if obj:
-                session.delete(obj)
+                await session.delete(obj)
                 return True
             return False
 
