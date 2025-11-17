@@ -32,6 +32,8 @@ python-daemon
 
 streamlit==1.50.0
 SQLAlchemy>=2.0.0
-aiosqlite>=0.19.0
+aiosqlite>=0.21.0
 aiomysql>=0.2.0
 greenlet==3.2.4
+PyJWT>=2.9.0
+argon2-cffi>=23.1.0

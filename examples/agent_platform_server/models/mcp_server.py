@@ -69,6 +69,17 @@ class MCPServerDao(BaseDao):
             res = await session.execute(stmt)
             return [o for o in res.scalars().all()]
 
+    async def get_all_by_user(self, user_id: str) -> List["MCPServer"]:
+        db = await self._get_db()
+        async with db.get_session() as session:
+            stmt = (
+                select(MCPServer)
+                .where(MCPServer.user_id == user_id)
+                .order_by(MCPServer.created_at)
+            )
+            res = await session.execute(stmt)
+            return [o for o in res.scalars().all()]
+
     async def delete_by_name(self, name: str) -> bool:
         db = await self._get_db()
         async with db.get_session() as session:
@@ -78,7 +89,7 @@ class MCPServerDao(BaseDao):
                 return True
             return False
 
-    async def save_mcp_server(self, name: str, config: Dict[str, Any]) -> MCPServer:
+    async def save_mcp_server(self, name: str, config: Dict[str, Any], user_id: Optional[str] = None) -> MCPServer:
         db = await self._get_db()
         async with db.get_session() as session:
             existing = await session.get(MCPServer, name)
@@ -87,12 +98,14 @@ class MCPServerDao(BaseDao):
                 # 合并更新配置，保留未提供的现有字段
                 existing.config = config
                 existing.updated_at = now
+                if user_id:
+                    existing.user_id = user_id
                 # 使用 merge 确保改动被持久化
                 await session.merge(existing)
                 return existing
             else:
-                obj = MCPServer(
-                    name=name, config=config, created_at=now, updated_at=now
-                )
+                obj = MCPServer(name=name, config=config, created_at=now, updated_at=now)
+                if user_id:
+                    obj.user_id = user_id
                 session.add(obj)
                 return obj

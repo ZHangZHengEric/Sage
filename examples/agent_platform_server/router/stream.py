@@ -8,7 +8,7 @@ import asyncio
 import traceback
 import time
 from typing import Dict, Any, Optional, List, Union
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from openai import OpenAI
 from common.exceptions import SageHTTPException
 from fastapi.responses import StreamingResponse
@@ -331,7 +331,7 @@ async def _save_conversation_if_needed(
 
 
 @stream_router.post("/api/stream")
-async def stream_chat(request: StreamRequest):
+async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口"""
     if not global_vars.get_default_model_client():
         raise SageHTTPException(
@@ -343,6 +343,10 @@ async def stream_chat(request: StreamRequest):
     if not request.messages or len(request.messages) == 0:
         raise SageHTTPException(status_code=400, detail="消息列表不能为空")
 
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    req_user_id = claims.get("userid")
+    if not request.user_id:
+        request.user_id = req_user_id
     logger.info(f"Server: 请求参数: {request}")
     # 设置流式服务
     stream_service, session_id = _setup_stream_service(request)

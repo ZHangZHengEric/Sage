@@ -4,15 +4,28 @@
     <main class="main-content">
       <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
     </main>
+
+    <!-- 登录模态框 - 临时隐藏 -->
+    <LoginModal
+        :visible="showLoginModal"
+        @close="showLoginModal = false"
+        @login-success="handleLoginSuccess"
+    />
   </div>
+
 </template>
 
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
+import LoginModal from './components/LoginModal.vue'
+import { isLoggedIn } from './utils/auth.js'
 
 const router = useRouter()
+
+// 登录模态框显示状态
+const showLoginModal = ref(!isLoggedIn())
 
 // 选中的conversation数据
 const selectedConversation = ref(null)
@@ -24,6 +37,12 @@ const handleNewChat = () => {
 const handleSelectConversation = (conversation) => {
   selectedConversation.value = conversation
   router.push({ name: 'Chat' })
+}
+
+
+// 登录成功处理（从LoginModal接收）
+const handleLoginSuccess = (userData) => {
+  showLoginModal.value = false
 }
 </script>
 
