@@ -28,20 +28,20 @@ def generate_agent_id() -> str:
 # ================= 业务函数 =================
 
 
-async def list_agents() -> List[Agent]:
+async def list_agents(user_id: str) -> List[Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
     dao = AgentConfigDao()
-    all_configs = await dao.get_all()
+    all_configs = await dao.get_all_by_user(user_id)
     return all_configs
 
 
-async def create_agent(agent_name: str, agent_config: Dict[str, Any]) -> str:
+async def create_agent(agent_name: str, agent_config: Dict[str, Any], user_id: str) -> str:
     """创建新的 Agent，返回创建的 agent_id"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
 
     dao = AgentConfigDao()
-    existing_config = await dao.get_by_name(agent_name)
+    existing_config = await dao.get_by_name_and_user(agent_name, user_id)
     if existing_config:
         raise SageHTTPException(
             status_code=400,
@@ -49,12 +49,13 @@ async def create_agent(agent_name: str, agent_config: Dict[str, Any]) -> str:
             error_detail=f"Agent '{agent_name}' 已存在",
         )
     orm_obj = Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+    orm_obj.user_id = user_id
     await dao.save(orm_obj)
     logger.info(f"Agent {agent_id} 创建成功")
     return agent_id
 
 
-async def get_agent(agent_id: str) -> Agent:
+async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
     """根据 ID 获取 Agent 配置并转换为响应结构"""
     logger.info(f"获取Agent配置: {agent_id}")
     dao = AgentConfigDao()
@@ -65,11 +66,17 @@ async def get_agent(agent_id: str) -> Agent:
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
+    if user_id and existing.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权访问该Agent",
+            error_detail="forbidden",
+        )
     return existing
 
 
 async def update_agent(
-    agent_id: str, agent_name: str, agent_config: Dict[str, Any]
+    agent_id: str, agent_name: str, agent_config: Dict[str, Any], user_id: str
 ) -> str:
     """更新指定 Agent 的配置，返回 agent_id"""
     logger.info(f"开始更新Agent: {agent_id}")
@@ -81,15 +88,22 @@ async def update_agent(
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
+    if existing_config.user_id and existing_config.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权更新该Agent",
+            error_detail="forbidden",
+        )
     orm_obj = Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     # 保留原始创建时间
     orm_obj.created_at = existing_config.created_at
+    orm_obj.user_id = user_id
     await dao.save(orm_obj)
     logger.info(f"Agent {agent_id} 更新成功")
     return agent_id
 
 
-async def delete_agent(agent_id: str) -> str:
+async def delete_agent(agent_id: str, user_id: str) -> str:
     """删除指定 Agent，返回 agent_id"""
     logger.info(f"开始删除Agent: {agent_id}")
     dao = AgentConfigDao()
@@ -99,6 +113,12 @@ async def delete_agent(agent_id: str) -> str:
             status_code=404,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
+        )
+    if existing_config.user_id and existing_config.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权删除该Agent",
+            error_detail="forbidden",
         )
     await dao.delete_by_id(agent_id)
     logger.info(f"Agent {agent_id} 删除成功")

@@ -1,0 +1,82 @@
+services:
+  sage-server:
+    restart: always
+    build:
+      context: .
+      dockerfile: examples/agent_platform_server/docker/Dockerfile
+    image: sage-server:v1.0
+    container_name: sage-server
+    ports:
+      - 30050:8080
+    env_file:
+      - .env
+  sage-web:
+    restart: always
+    build:
+      context: ./examples/agent_platform_web/
+      dockerfile: docker/Dockerfile
+    image: sage-web:v1.0
+    container_name: sage-web
+    ports:
+      - 30051:80
+    environment:
+      TZ: 'Asia/Shanghai'
+      SAGE_API_BASE_URL: http://${HOST_IP}:30050
+    depends_on:
+      - sage-server
+  sage-mysql:
+    restart: always
+    image: docker.m.daocloud.io/mysql:8.4
+    container_name: sage-mysql
+    ports:
+      - 30052:3306
+    environment:
+      TZ: 'Asia/Shanghai'
+      MYSQL_ROOT_PASSWORD: ${SAGE_MYSQL_PASSWORD}
+      MYSQL_ROOT_HOST: '%'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/conf:/etc/mysql/conf.d
+      ## 初始化脚本
+      - ./scripts:/docker-entrypoint-initdb.d
+  sage-es:
+    restart: always
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.7
+    container_name: sage-es
+    ports:
+      - 30053:9200
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - ELASTIC_PASSWORD=${SAGE_ELASTICSEARCH_PASSWORD}
+      - xpack.security.enabled=false
+      - TAKE_FILE_OWNERSHIP=true
+      - "ES_JAVA_OPTS=-Xms4096m -Xmx4096m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./es/data/node:/usr/share/elasticsearch/data
+
+  sage-minio:
+    image: m.daocloud.io/quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
+    ports:
+      - 30054:9000
+      - 30055:9001
+    volumes:
+      - ./minio/data:/data
+    command: server /data --console-address ":9001"
+    container_name: sage-minio
+    environment:
+      - MINIO_ROOT_USER=root
+      - MINIO_ROOT_PASSWORD=${SAGE_MINIO_SECRET_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3

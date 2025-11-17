@@ -92,6 +92,7 @@ async def download_file(request: Request):
 
 @conversation_router.get("/api/conversations")
 async def list_conversations(
+    request: Request,
     page: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量，最大100"),
     user_id: Optional[str] = Query(None, description="用户ID过滤"),
@@ -101,10 +102,12 @@ async def list_conversations(
         "date", description="排序方式: date, title, messages"
     ),
 ):
+    claims = getattr(request.state, "user_claims", {}) or {}
+    current_user_id = claims.get("userid") or user_id
     conversations, total_count = await get_conversations_paginated(
         page=page,
         page_size=page_size,
-        user_id=user_id,
+        user_id=current_user_id,
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
