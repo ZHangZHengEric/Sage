@@ -70,7 +70,7 @@ async def kdb_retrieve(
 ):
     svc = KdbService()
     result = await svc.retrieve(kdb_id=kdb_id, query=query, top_k=top_k)
-    return await Response.succ(data=[d.to_dict() for d in result])
+    return await Response.succ(data=result)
 
 
 @kdb_router.get("/list")
