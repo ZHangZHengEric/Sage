@@ -13,7 +13,6 @@ class StartupConfig:
     """启动参数结构体，优先级：命令行 > 环境变量 > 默认值"""
 
     # Server
-    host: str = "0.0.0.0"
     port: int = 8001
     daemon: bool = False
     pid_file: str = "sage_stream.pid"
@@ -38,6 +37,10 @@ class StartupConfig:
     default_llm_temperature: float = 0.2
     default_llm_max_model_len: int = 54000
 
+    jwt_key: str = "123"
+    jwt_expire_hours: int = 24
+    refresh_token_secret: str = "123"
+
 
 class ENV:
     # 新版 LLM 相关
@@ -49,7 +52,6 @@ class ENV:
     DEFAULT_LLM_MAX_MODEL_LEN = "SAGE_DEFAULT_LLM_MAX_MODEL_LEN"
 
     # 服务器与运行配置
-    HOST = "SAGE_HOST"
     PORT = "SAGE_PORT"
     PRESET_MCP_CONFIG = "SAGE_MCP_CONFIG_PATH"
     PRESET_RUNNING_CONFIG = "SAGE_PRESET_RUNNING_CONFIG_PATH"
@@ -80,6 +82,10 @@ class ENV:
     # Knowledge Base MCP 接口
     KB_MCP_URL = "SAGE_KB_MCP_URL"
     KB_MCP_API_KEY = "SAGE_KB_MCP_API_KEY"
+
+    JWT_KEY = "SAGE_JWT_KEY"
+    JWT_EXPIRE_HOURS = "SAGE_JWT_EXPIRE_HOURS"
+    REFRESH_TOKEN_SECRET = "SAGE_REFRESH_TOKEN_SECRET"
 
 
 def env_str(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -165,12 +171,6 @@ def create_argument_parser():
         help=f"LLM API Model（已废弃，请使用--default_llm_model_name）",
     )
 
-    # Server
-    parser.add_argument(
-        "--host",
-        default=env_str(ENV.HOST, "0.0.0.0"),
-        help=f"Server Host (环境变量: {ENV.HOST})",
-    )
     parser.add_argument(
         "--port",
         default=env_int(ENV.PORT, 8001),
@@ -273,7 +273,6 @@ def build_startup_config() -> StartupConfig:
 
     # 基础配置：解析器已合并环境默认值，此处直接使用解析器值
     cfg = StartupConfig(
-        host=args.host,
         port=args.port,
         daemon=bool(args.daemon),
         pid_file=args.pid_file,

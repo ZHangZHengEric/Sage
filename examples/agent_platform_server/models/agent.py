@@ -68,6 +68,13 @@ class AgentConfigDao(BaseDao):
             res = await session.execute(stmt)
             return res.scalars().first()
 
+    async def get_by_name_and_user(self, name: str, user_id: str) -> Optional["Agent"]:
+        db = await self._get_db()
+        async with db.get_session() as session:
+            stmt = select(Agent).where(Agent.name == name, Agent.user_id == user_id)
+            res = await session.execute(stmt)
+            return res.scalars().first()
+
     async def save(self, config: "Agent") -> bool:
         db = await self._get_db()
         async with db.get_session() as session:
@@ -84,6 +91,17 @@ class AgentConfigDao(BaseDao):
         db = await self._get_db()
         async with db.get_session() as session:
             stmt = select(Agent).order_by(Agent.created_at)
+            res = await session.execute(stmt)
+            return [o for o in res.scalars().all()]
+
+    async def get_all_by_user(self, user_id: str) -> List["Agent"]:
+        db = await self._get_db()
+        async with db.get_session() as session:
+            stmt = (
+                select(Agent)
+                .where(Agent.user_id == user_id)
+                .order_by(Agent.created_at)
+            )
             res = await session.execute(stmt)
             return [o for o in res.scalars().all()]
 

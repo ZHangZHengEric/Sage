@@ -49,6 +49,7 @@ export const useLanguageStore = defineStore('app', () => {
 // 中文翻译
 export const zhCN = {
   // 侧边栏
+  'app.title': 'Zavixai Agent',
   'sidebar.newChat': '新对话',
   'sidebar.agentConfig': 'Agent配置',
   'sidebar.tools': '工具集',
@@ -57,6 +58,16 @@ export const zhCN = {
   'sidebar.offline': '离线',
   'sidebar.language': '语言',
   'sidebar.mcps': 'MCP服务器',
+  'sidebar.chatAndConfig': '聊天与配置',
+  'sidebar.toolsAndServices': '工具与服务',
+  'sidebar.knowledgeBase': '知识库',
+  'sidebar.sessions': '会话历史',
+  'sidebar.toolsList': '工具列表',
+  'sidebar.mcpsManage': 'MCP 管理',
+  'sidebar.knowledgeBaseManage': '知识库管理',
+  'sidebar.langToggleZh': '中 / En',
+  'sidebar.langToggleEn': 'En / 中',
+  'auth.logout': '退出',
   
   // 聊天页面
   'chat.title': '对话助手',
@@ -504,6 +515,7 @@ export const zhCN = {
 // 英文翻译
 export const enUS = {
   // 侧边栏
+  'app.title': 'Zavixai Agent',
   'sidebar.newChat': 'New Chat',
   'sidebar.agentConfig': 'Agent Config',
   'sidebar.tools': 'Tools',
@@ -512,6 +524,16 @@ export const enUS = {
   'sidebar.offline': 'Offline',
   'sidebar.language': 'Language',
   'sidebar.mcps': 'MCP Servers',
+  'sidebar.chatAndConfig': 'Chat & Settings',
+  'sidebar.toolsAndServices': 'Tools & Services',
+  'sidebar.knowledgeBase': 'Knowledge Base',
+  'sidebar.sessions': 'Session History',
+  'sidebar.toolsList': 'Tools List',
+  'sidebar.mcpsManage': 'MCP Management',
+  'sidebar.knowledgeBaseManage': 'Knowledge Base',
+  'sidebar.langToggleZh': 'ZH / EN',
+  'sidebar.langToggleEn': 'EN / ZH',
+  'auth.logout': 'Logout',
   
   // 聊天页面
   'chat.title': 'Chat Assistant',

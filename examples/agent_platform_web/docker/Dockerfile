@@ -6,10 +6,11 @@ ENV NODE_OPTIONS=--dns-result-order=ipv4first
 RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
 
 # Install dependencies
-COPY . .
+COPY package.json package-lock.json ./
 RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
 
 # Copy source and build
+COPY . .
 RUN npm run build
 
 # --- Runtime stage: serve static files with Nginx ---

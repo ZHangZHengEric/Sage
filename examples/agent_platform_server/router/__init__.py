@@ -9,6 +9,7 @@ from .converation import conversation_router
 from .stream import stream_router
 from .file_server import file_server_router
 from .kdb import kdb_router
+from .user import user_router
 
 # Export all routers for easy import
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "conversation_router",
     "stream_router",
     "file_server_router",
-    "kdb_router"
+    "kdb_router",
+    "user_router",
 ]
