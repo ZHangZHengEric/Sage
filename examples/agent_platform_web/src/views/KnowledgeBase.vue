@@ -23,7 +23,16 @@
             </div>
             <div class="kb-info">
               <div class="kb-title-row">
-                <h3 class="kb-name">{{ kb.name }}</h3>
+                <div class="kb-title-left">
+                  <h3 class="kb-name">{{ kb.name }}</h3>
+                  <div class="kb-index">
+                    <span class="index-name">{{ `${kb.index_name}` }}</span>
+                    <button class="index-copy-btn" @click.stop="copyIndexName(kb)">
+                      <Copy :size="14" />
+                      {{ t('common.copy') || '复制' }}
+                    </button>
+                  </div>
+                </div>
                 <div class="kb-actions">
 
                   <div class="kb-status-indicator" :class="{ disabled: kb.disabled }">
@@ -75,7 +84,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { BookOpen, Plus, RefreshCw } from 'lucide-vue-next'
+import { BookOpen, Plus, RefreshCw, Copy } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import KnowledgeBaseAdd from '../components/KnowledgeBaseAdd.vue'
@@ -230,6 +239,22 @@ const backToList = () => {
 const goToDetail = (kb) => {
   if (!kb || !kb.id) return
   router.push({ name: 'KnowledgeBaseDetail', params: { kdbId: kb.id } })
+}
+
+const copyIndexName = async (kb) => {
+  const text = kb?.index_name || ''
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+  } catch (_) {}
+  const ta = document.createElement('textarea')
+  ta.value = text
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy') } catch (_) {}
+  document.body.removeChild(ta)
 }
 
 // 生命周期
@@ -427,6 +452,44 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 8px;
   gap: 12px;
+}
+
+.kb-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-index {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.index-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: #555;
+  background: #f2f2f2;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.index-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+  cursor: pointer;
+}
+
+.index-copy-btn:hover {
+  background: rgba(102, 126, 234, 0.2);
 }
 
 .kb-actions {
