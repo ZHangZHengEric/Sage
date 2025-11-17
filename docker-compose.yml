@@ -14,6 +14,8 @@ services:
       - 30050:8080
     env_file:
       - .env
+    mem_limit: 2g
+    cpus: 1.0
   sage-web:
     restart: always
     build:
@@ -28,6 +30,8 @@ services:
       SAGE_API_BASE_URL: http://${HOST_IP}:30050
     depends_on:
       - sage-server
+    mem_limit: 512m
+    cpus: 0.5
   sage-mysql:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
@@ -46,6 +50,8 @@ services:
       - ${ROOT_DATA_DIR}/mysql/data:/var/lib/mysql
       - ${ROOT_DATA_DIR}/mysql/conf:/etc/mysql/conf.d
       - ./assets/scripts:/docker-entrypoint-initdb.d
+    mem_limit: 1g
+    cpus: 1.0
   sage-es:
     restart: always
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.7
@@ -67,6 +73,8 @@ services:
       - ${ROOT_DATA_DIR}/es/data/node:/usr/share/elasticsearch/data
       - ./assets/es_conf/plugins:/usr/share/elasticsearch/plugins
       - ./assets/es_conf/stopwords:/usr/share/elasticsearch/config/stopwords
+    mem_limit: 6g
+    cpus: 2.0
   sage-minio:
     image: m.daocloud.io/quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
     ports:
@@ -84,3 +92,5 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    mem_limit: 1g
+    cpus: 0.5
