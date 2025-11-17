@@ -11,6 +11,7 @@ from typing import Optional, Dict, List, Any
 from sqlalchemy import select, update, func
 
 from .base import Base, BaseDao
+import hashlib
 
 
 class Kdb(Base):
@@ -44,6 +45,11 @@ class Kdb(Base):
         self.user_id = user_id
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
+
+    def get_index_name(self) -> str:
+        """获取KDB索引名称"""
+        h = hashlib.sha1(self.id.encode()).hexdigest()
+        return f"kdb_{h[:8]}"
 
 
 class KdbDao(BaseDao):
@@ -79,6 +85,7 @@ class KdbDao(BaseDao):
         query_name: str,
         page: int,
         page_size: int,
+        user_id: Optional[str] = None,
     ) -> tuple[list[Kdb], int]:
         db = await self._get_db()
         async with db.get_session() as session:
@@ -89,6 +96,8 @@ class KdbDao(BaseDao):
                 stmt = stmt.where(Kdb.name.like(f"%{query_name}%"))
             if data_type:
                 stmt = stmt.where(Kdb.data_type == data_type)
+            if user_id:
+                stmt = stmt.where(Kdb.user_id == user_id)
             count_stmt = select(func.count()).select_from(stmt.subquery())
             cnt = (await session.execute(count_stmt)).scalar() or 0
             stmt = (

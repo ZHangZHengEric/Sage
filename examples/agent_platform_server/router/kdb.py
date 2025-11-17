@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
-from fastapi import APIRouter, Body, Query, UploadFile, File, Form
+from fastapi import APIRouter, Body, Query, UploadFile, File, Form, Request
 
 from common.render import Response
 from service.kdb import KdbService
@@ -12,13 +12,18 @@ kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])
 # ===== KDB Management =====
 @kdb_router.post("/add")
 async def kdb_add(
+    http_request: Request,
     name: str = Body(...),
     type: str = Body(...),
     intro: Optional[str] = Body(""),
     language: Optional[str] = Body(""),
 ):
     svc = KdbService()
-    kdb_id = await svc.add(name=name, type=type, intro=intro, language=language)
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    kdb_id = await svc.add(
+        name=name, type=type, intro=intro, language=language, user_id=user_id
+    )
     return await Response.succ(data={"kdb_id": kdb_id})
 
 
@@ -64,34 +69,47 @@ async def kdb_info(kdb_id: str = Query(...)):
 
 @kdb_router.post("/retrieve")
 async def kdb_retrieve(
+    http_request: Request,
     kdb_id: str = Body(...),
     query: str = Body(...),
     top_k: int = Body(10),
 ):
     svc = KdbService()
-    result = await svc.retrieve(kdb_id=kdb_id, query=query, top_k=top_k)
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    result = await svc.retrieve(
+        kdb_id=kdb_id, query=query, top_k=top_k, user_id=user_id
+    )
     return await Response.succ(data=result)
 
 
 @kdb_router.get("/list")
 async def kdb_list(
+    http_request: Request,
     query_name: str = Query(""),
     type: str = Query(""),
     page: int = Query(1),
     page_size: int = Query(20),
 ):
     svc = KdbService()
-    items, total = await svc.list(
-        query_name=query_name, type=type, page=page, page_size=page_size
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    items, total, counts = await svc.list(
+        query_name=query_name,
+        type=type,
+        page=page,
+        page_size=page_size,
+        user_id=user_id,
     )
     out_list = [
         {
             "id": k.id,
             "name": k.name,
+            "index_name": k.get_index_name(),
             "intro": k.intro,
             "createTime": k.created_at.isoformat(),
             "dataSource": k.data_type,
-            "docNum": 0,
+            "docNum": counts.get(k.id, 0),
             "cover": "",
             "defaultColor": True,
             "creator": None,
@@ -126,6 +144,7 @@ async def kdb_redo_all(kdb_id: str = Body(...)):
 # ===== KDB Doc =====
 @kdb_router.get("/doc/list")
 async def kdb_doc_list(
+    http_request: Request,
     kdb_id: str = Query(...),
     query_name: str = Query(""),
     query_status: List[int] | None = Query(None),
@@ -134,6 +153,8 @@ async def kdb_doc_list(
     page_size: int = Query(20),
 ):
     svc = KdbService()
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
     docs, total = await svc.doc_list(
         kdb_id=kdb_id,
         query_name=query_name,
@@ -141,6 +162,7 @@ async def kdb_doc_list(
         task_id=task_id,
         page_no=page_no,
         page_size=page_size,
+        user_id=user_id,
     )
     items = [
         {
@@ -177,13 +199,16 @@ async def kdb_doc_info(doc_id: str):
 
 @kdb_router.post("/doc/add_by_files")
 async def kdb_doc_add_by_files(
+    http_request: Request,
     kdb_id: str = Form(...),
     override: bool = Form(False),
     files: List[UploadFile] = File(...),
 ):
     svc = KdbService()
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
     task_id = await svc.doc_add_by_upload_files(
-        kdb_id=kdb_id, files=files, override=override
+        kdb_id=kdb_id, files=files, override=override, user_id=user_id
     )
     return await Response.succ(data={"taskId": task_id})
 
