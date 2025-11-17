@@ -403,7 +403,7 @@ def build_startup_config() -> StartupConfig:
     args = parser.parse_args()
 
     cfg = StartupConfig(
-        port=pick_int(args.port, ENV.PORT, 8001),
+        port=pick_int(args.port, ENV.PORT, 8080),
         daemon=pick_bool(args.daemon, ENV.DAEMON, False),
         pid_file=pick_str(args.pid_file, ENV.PID_FILE, "sage_stream.pid"),
         logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, "logs"),
