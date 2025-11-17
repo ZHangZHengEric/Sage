@@ -184,6 +184,9 @@ async def validate_and_disable_mcp_servers():
     removed_count = 0
     registered_count = 0
     for srv in servers:
+        if srv.config.get("disabled", True):
+            logger.info(f"MCP server {srv.name} 已禁用，跳过验证")
+            continue
         status = await refresh_mcp_server(srv.name)
         if status == "disabled":
             removed_count += 1

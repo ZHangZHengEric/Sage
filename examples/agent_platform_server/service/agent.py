@@ -13,9 +13,11 @@ from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 from sagents.tool.tool_proxy import ToolProxy
 
 import core.globals as global_vars
+from config.settings import get_startup_config as kb_get_startup_config
 
 from common.exceptions import SageHTTPException
 from models.agent import Agent, AgentConfigDao
+from core.client.llm import get_chat_client
 
 # ================= 工具函数 =================
 
@@ -35,7 +37,9 @@ async def list_agents(user_id: str) -> List[Agent]:
     return all_configs
 
 
-async def create_agent(agent_name: str, agent_config: Dict[str, Any], user_id: str) -> str:
+async def create_agent(
+    agent_name: str, agent_config: Dict[str, Any], user_id: str
+) -> str:
     """创建新的 Agent，返回创建的 agent_id"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
@@ -130,8 +134,8 @@ async def auto_generate_agent(
 ) -> Dict[str, Any]:
     """自动生成 Agent 配置"""
     logger.info(f"开始自动生成Agent: {agent_description}")
-    model_client = global_vars.get_default_model_client()
-    server_args = global_vars.get_startup_config()
+    model_client = get_chat_client()
+    server_args = kb_get_startup_config()
 
     auto_gen_func = AutoGenAgentFunc()
 
@@ -166,8 +170,8 @@ async def optimize_system_prompt(
 ) -> Dict[str, Any]:
     """优化系统提示词"""
     logger.info("开始优化系统提示词")
-    model_client = global_vars.get_default_model_client()
-    server_args = global_vars.get_startup_config()
+    model_client = get_chat_client()
+    server_args = kb_get_startup_config()
 
     optimizer = SystemPromptOptimizer()
     optimized_prompt = optimizer.optimize_system_prompt(

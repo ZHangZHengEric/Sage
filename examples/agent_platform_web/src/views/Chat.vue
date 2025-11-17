@@ -66,7 +66,6 @@ import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
 import { chatAPI } from '../api/chat.js'
 import { taskAPI } from '../api/task.js'
-import { getOrCreateUserId } from '../utils/userCache.js'
 
 // Props
 const props = defineProps({
@@ -668,7 +667,6 @@ const sendMessageApi = async ({
         role: 'user',
         content: message
       }],
-      user_id: await getOrCreateUserId(),
       session_id: sessionId,
       deep_thinking: config.deepThinking,
       multi_agent: config.multiAgent,

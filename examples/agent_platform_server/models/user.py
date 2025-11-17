@@ -13,9 +13,7 @@ class User(Base):
 
     user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    email: Mapped[Optional[str]] = mapped_column(
-        String(255), unique=True, nullable=True
-    )
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     phonenum: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     role: Mapped[str] = mapped_column(String(64), default="user")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)

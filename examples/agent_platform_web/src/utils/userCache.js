@@ -46,26 +46,7 @@ const generateFingerprintHash = async () => {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
-/**
- * 获取或创建用户ID（持久化至 localStorage）。
- * 返回 Promise<string>
- */
-export const getOrCreateUserId = async () => {
-  try {
-    const existing = localStorage.getItem(STORAGE_KEY)
-    if (existing && typeof existing === 'string') {
-      return existing
-    }
-    const fp = await generateFingerprintHash()
-    const userId = `u_${fp}`
-    localStorage.setItem(STORAGE_KEY, userId)
-    return userId
-  } catch (e) {
-    // 如果 localStorage 不可用或出错，仍然返回一个临时ID
-    const fp = await generateFingerprintHash()
-    return `u_${fp}`
-  }
-}
+
 
 /**
  * 同步获取（仅当已存在于 localStorage 时），否则返回 null。

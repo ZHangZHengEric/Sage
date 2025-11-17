@@ -16,7 +16,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
 import LoginModal from './components/LoginModal.vue'
@@ -44,6 +44,22 @@ const handleSelectConversation = (conversation) => {
 const handleLoginSuccess = (userData) => {
   showLoginModal.value = false
 }
+
+const handleUserUpdated = () => {
+  showLoginModal.value = !isLoggedIn()
+}
+
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('user-updated', handleUserUpdated)
+  }
+})
+
+onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('user-updated', handleUserUpdated)
+  }
+})
 </script>
 
 <style>

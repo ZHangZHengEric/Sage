@@ -6,6 +6,10 @@ services:
       dockerfile: examples/agent_platform_server/docker/Dockerfile
     image: sage-server:v1.0
     container_name: sage-server
+    volumes:
+      - ${ROOT_DATA_DIR}/sage-server/agent_workspace:/app/agent_workspace
+      - ${ROOT_DATA_DIR}/sage-server/logs:/app/logs
+      - ${ROOT_DATA_DIR}/sage-server/data:/app/data
     ports:
       - 30050:8080
     env_file:
@@ -39,10 +43,9 @@ services:
         soft: -1
         hard: -1
     volumes:
-      - ./mysql/data:/var/lib/mysql
-      - ./mysql/conf:/etc/mysql/conf.d
-      ## 初始化脚本
-      - ./scripts:/docker-entrypoint-initdb.d
+      - ${ROOT_DATA_DIR}/mysql/data:/var/lib/mysql
+      - ${ROOT_DATA_DIR}/mysql/conf:/etc/mysql/conf.d
+      - ${ROOT_DATA_DIR}/mysql/scripts:/docker-entrypoint-initdb.d
   sage-es:
     restart: always
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.7
@@ -61,19 +64,20 @@ services:
         soft: -1
         hard: -1
     volumes:
-      - ./es/data/node:/usr/share/elasticsearch/data
-
+      - ${ROOT_DATA_DIR}/es/data/node:/usr/share/elasticsearch/data
+      - ./assets/es_conf/plugins:/usr/share/elasticsearch/plugins
+      - ./assets/es_conf/stopwords:/usr/share/elasticsearch/config/stopwords
   sage-minio:
     image: m.daocloud.io/quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
     ports:
       - 30054:9000
       - 30055:9001
     volumes:
-      - ./minio/data:/data
+      - ${ROOT_DATA_DIR}/minio/data:/data
     command: server /data --console-address ":9001"
     container_name: sage-minio
     environment:
-      - MINIO_ROOT_USER=root
+      - MINIO_ROOT_USER=${SAGE_MINIO_ACCESS_KEY}
       - MINIO_ROOT_PASSWORD=${SAGE_MINIO_SECRET_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]

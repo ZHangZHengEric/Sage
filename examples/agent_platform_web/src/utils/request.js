@@ -94,7 +94,6 @@ class Request {
                         message = '未授权，请重新登录'
                         code = 'UNAUTHORIZED'
                         // 清除登录状态（但不能清除 HttpOnly cookie）
-                        const {removeCookie} = require('./auth.js')
                         localStorage.removeItem('userInfo')
                         localStorage.removeItem('isLoggedIn')
                         localStorage.removeItem('loginTime')

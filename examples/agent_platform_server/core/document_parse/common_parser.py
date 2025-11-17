@@ -3,10 +3,8 @@ from __future__ import annotations
 from typing import List, Dict
 
 from .base import BaseParser
-from core.kdb_client import (
-    DocumentInput,
-    KnowledgeBaseClient,
-)
+
+from core.kb.knowledge_base import DocumentService, DocumentInput
 from models.file import FileDao, File
 from models.kdb_doc import KdbDoc
 from utils.id import gen_id
@@ -40,7 +38,7 @@ class CommonParser(BaseParser):
         logger.info(
             f"[CommonParser] 清理旧文档开始：索引={index_name}，ID数量={len(ids)}"
         )
-        await KnowledgeBaseClient().delete_documents_by_mcp(index_name, ids)
+        await DocumentService().doc_document_delete(index_name, ids)
         logger.info(
             f"[CommonParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
         )
@@ -88,7 +86,7 @@ class CommonParser(BaseParser):
                         metadata=metadata,
                     )
                 )
-        await KnowledgeBaseClient().insert_documents_by_mcp(index_name, docs)
+        await DocumentService().doc_document_insert(index_name, docs)
         logger.info(
             f"[CommonParser] 处理完成：索引={index_name}，插入文档数={len(docs)}"
         )
