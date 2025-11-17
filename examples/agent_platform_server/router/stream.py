@@ -17,7 +17,9 @@ from service.sage_stream_service import SageStreamService
 from config.settings import StartupConfig
 from sagents.utils.logger import logger
 import core.globals as global_vars
+from config.settings import get_startup_config as kb_get_startup_config
 from models.conversation import ConversationDao
+from core.client.llm import get_chat_client
 
 # 创建路由器
 stream_router = APIRouter()
@@ -88,7 +90,7 @@ def _build_llm_model_config(request_config: dict, server_args: StartupConfig) ->
 
 
 def _create_model_client(request_config: dict, server_args: StartupConfig):
-    model_client = global_vars.get_default_model_client()
+    model_client = get_chat_client()
     if request_config:
         api_key = request_config.get("api_key", server_args.default_llm_api_key)
         base_url = request_config.get("base_url", server_args.default_llm_api_base_url)
@@ -127,7 +129,7 @@ def _setup_stream_service(request: StreamRequest):
     # 清理LLM模型配置
     if request.llm_model_config:
         request.llm_model_config = _clean_llm_model_config(request.llm_model_config)
-    server_args = global_vars.get_startup_config()
+    server_args = kb_get_startup_config()
     model_client = _create_model_client(request.llm_model_config, server_args)
     llm_model_config = _build_llm_model_config(request.llm_model_config, server_args)
     max_model_len = request.llm_model_config.get(
@@ -333,7 +335,7 @@ async def _save_conversation_if_needed(
 @stream_router.post("/api/stream")
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口"""
-    if not global_vars.get_default_model_client():
+    if not get_chat_client():
         raise SageHTTPException(
             status_code=503,
             detail="模型客户端未配置或不可用",

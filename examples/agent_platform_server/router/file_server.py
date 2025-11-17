@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from sagents.utils.logger import logger
 from common.exceptions import SageHTTPException
-from core.globals import get_startup_config
+from config.settings import get_startup_config
 
 # 创建路由器
 file_server_router = APIRouter()

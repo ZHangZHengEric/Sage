@@ -19,3 +19,4 @@ coverage/
 .vite/
 .nuxt/
 .DS_Store
+data

@@ -26,7 +26,8 @@ COPY examples/agent_platform_server/requirements.txt .
 # 安装 Python 依赖
 RUN pip install  -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
-COPY . .
+COPY examples/agent_platform_server  /app/examples/agent_platform_server
+COPY sagents /app/sagents
 
 # 创建工作空间目录 & 日志目录
 RUN mkdir -p /app/agent_workspace /app/logs

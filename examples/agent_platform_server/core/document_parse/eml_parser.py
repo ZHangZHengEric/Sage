@@ -9,11 +9,9 @@ from models.file import FileDao, File
 from utils.id import gen_id
 from models.kdb_doc import KdbDocDao, KdbDoc
 from sagents.utils.logger import logger
-from core.kdb_client import (
-    DocumentInput,
-    KnowledgeBaseClient,
-)
-from core.minio_client import upload_kdb_file
+
+from core.kb.knowledge_base import DocumentInput, DocumentService
+from core.client.minio import upload_kdb_file
 
 
 ALLOW_ATTACH_FILE_EXTS = {
@@ -42,7 +40,7 @@ class EmlParser(BaseParser):
         if isinstance(atts, list):
             ids.extend(atts)
         logger.info(f"[EmlParser] 清理旧文档开始：索引={index_name}，ID数量={len(ids)}")
-        await KnowledgeBaseClient().delete_documents_by_mcp(index_name, ids)
+        await DocumentService().doc_document_delete(index_name, ids)
         logger.info(
             f"[EmlParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
         )
@@ -124,5 +122,5 @@ class EmlParser(BaseParser):
             doc.meta_data["attachments"] = []
         doc_dao = KdbDocDao()
         await doc_dao.update(doc)
-        await KnowledgeBaseClient().insert_documents_by_mcp(index_name, docs)
+        await DocumentService().doc_document_insert(index_name, docs)
         logger.info(f"[EmlParser] 处理完成：索引={index_name}，插入文档数={len(docs)}")

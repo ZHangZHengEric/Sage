@@ -39,7 +39,6 @@ export const chatAPI = {
     const queryParams = new URLSearchParams()
     if (params.page) queryParams.append('page', params.page)
     if (params.page_size) queryParams.append('page_size', params.page_size)
-    if (params.user_id) queryParams.append('user_id', params.user_id)
     if (params.search) queryParams.append('search', params.search)
     if (params.agent_id) queryParams.append('agent_id', params.agent_id)
     if (params.sort_by) queryParams.append('sort_by', params.sort_by)

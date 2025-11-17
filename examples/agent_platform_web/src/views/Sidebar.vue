@@ -216,7 +216,6 @@ const handleLogout = () => {
 
 .sidebar-nav {
   flex: 1;
-  padding: 20px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
