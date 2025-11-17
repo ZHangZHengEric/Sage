@@ -64,7 +64,7 @@ services:
       - ELASTIC_PASSWORD=${SAGE_ELASTICSEARCH_PASSWORD}
       - xpack.security.enabled=false
       - TAKE_FILE_OWNERSHIP=true
-      - "ES_JAVA_OPTS=-Xms4096m -Xmx4096m"
+      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
     ulimits:
       memlock:
         soft: -1
@@ -73,8 +73,8 @@ services:
       - ${ROOT_DATA_DIR}/es/data/node:/usr/share/elasticsearch/data
       - ./assets/es_conf/plugins:/usr/share/elasticsearch/plugins
       - ./assets/es_conf/stopwords:/usr/share/elasticsearch/config/stopwords
-    mem_limit: 6g
-    cpus: 2.0
+    mem_limit: 2g
+    cpus: 1.0
   sage-minio:
     image: m.daocloud.io/quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
     ports:
