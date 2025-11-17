@@ -45,7 +45,7 @@ services:
     volumes:
       - ${ROOT_DATA_DIR}/mysql/data:/var/lib/mysql
       - ${ROOT_DATA_DIR}/mysql/conf:/etc/mysql/conf.d
-      - ${ROOT_DATA_DIR}/mysql/scripts:/docker-entrypoint-initdb.d
+      - ./assets/scripts:/docker-entrypoint-initdb.d
   sage-es:
     restart: always
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.7
