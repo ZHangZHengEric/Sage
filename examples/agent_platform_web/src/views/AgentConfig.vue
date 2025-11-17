@@ -276,6 +276,7 @@ const handleImport = () => {
         // 创建新的Agent配置
         const newAgent = {
           name: importedConfig.name + t('agent.importSuffix'),
+          llmConfig: importedConfig.llmConfig || {},
           description: importedConfig.description || '',
           systemPrefix: importedConfig.systemPrefix || '',
           deepThinking: importedConfig.deepThinking || false,
