@@ -149,6 +149,7 @@ export const zhCN = {
   'common.create': '创建',
   'common.creating': '创建中...',
   'common.total': '总条数',
+  'common.copy': '复制',
   'agent.availableTools': '可用工具',
   'agent.toolsCount': '个',
   'agent.tools': '工具',
@@ -641,6 +642,7 @@ export const enUS = {
   'common.create': 'Create',
   'common.creating': 'Creating...',
   'common.total': 'Total',
+  'common.copy': 'Copy',
   
   // Agent创建模态框
   'agentCreation.title': 'Create New Agent',

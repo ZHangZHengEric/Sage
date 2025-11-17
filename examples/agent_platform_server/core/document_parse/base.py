@@ -9,11 +9,11 @@ from models.kdb_doc import KdbDoc
 
 
 class BaseParser:
-    async def clear_old(self, kdbId: str, doc: KdbDoc) -> None:
-        logger.info(f"[Parser] clear_old: kdb={kdbId}, doc_id={doc.id}")
+    async def clear_old(self, index_name: str, doc: KdbDoc) -> None:
+        logger.info(f"[Parser] clear_old: index_name={index_name}, doc_id={doc.id}")
 
-    async def process(self, kdbId: str, doc: KdbDoc) -> None:
-        logger.info(f"[Parser] process: kdb={kdbId}, doc_id={doc.id}")
+    async def process(self, index_name: str, doc: KdbDoc) -> None:
+        logger.info(f"[Parser] process: index_name={index_name}, doc_id={doc.id}")
 
     async def convert_file_to_text(
         self,

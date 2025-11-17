@@ -27,7 +27,12 @@ class KdbService:
         self.file_dao = FileDao()
 
     async def add(
-        self, name: str, type: str, intro: str = "", language: str = ""
+        self,
+        name: str,
+        type: str,
+        intro: str = "",
+        language: str = "",
+        user_id: str = "",
     ) -> str:
         kdb_id = gen_id()
         obj = Kdb(
@@ -36,7 +41,7 @@ class KdbService:
             intro=intro or "",
             setting={"kdbAttach": {"language": language or "zh-cn"}},
             data_type=type,
-            user_id="",
+            user_id=user_id or "",
         )
         await self.kdb_dao.insert(obj)
         logger.info(f"创建KDB: {kdb_id} - {name}")
@@ -70,18 +75,20 @@ class KdbService:
         type: str = "",
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[Kdb], int]:
+        user_id: Optional[str] = None,
+    ) -> Tuple[List[Kdb], int, Dict[str, int]]:
         items, total = await self.kdb_dao.get_list(
             kdb_ids=None,
             data_type=type,
             query_name=query_name,
             page=page,
             page_size=page_size,
+            user_id=user_id,
         )
-        return items, total
+        counts = await self.kdb_doc_dao.get_counts_by_kdb_ids([k.id for k in items])
+        return items, total, counts
 
     async def delete(self, kdb_id: str) -> None:
-
         await self.kdb_dao.delete_by_id(kdb_id)
         logger.info(f"删除KDB: {kdb_id}")
 
@@ -99,13 +106,14 @@ class KdbService:
         logger.info(f"重做KDB所有文档: {kdb_id}")
 
     async def retrieve(
-        self, kdb_id: str, query: str, top_k: int = 5
+        self, kdb_id: str, query: str, top_k: int = 5, user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         kdb = await self.kdb_dao.get_by_id(kdb_id)
         if not kdb:
             raise SageHTTPException(status_code=400, detail="KDB not found")
-        index_name = f"kdb_{kdb_id}"
-        result = await DocumentService().doc_search(index_name, query, top_k)
+        if user_id and kdb.user_id and kdb.user_id != user_id:
+            raise SageHTTPException(status_code=403, detail="forbidden")
+        result = await DocumentService().doc_search(kdb.get_index_name(), query, top_k)
         return result
 
     # ==== 文档相关 ====
@@ -117,7 +125,14 @@ class KdbService:
         task_id: str = "",
         page_no: int = 1,
         page_size: int = 20,
+        user_id: Optional[str] = None,
     ) -> Tuple[List[KdbDoc], int]:
+        if user_id:
+            kdb = await self.kdb_dao.get_by_id(kdb_id)
+            if not kdb:
+                raise SageHTTPException(status_code=404, detail="KDB not found")
+            if kdb.user_id and kdb.user_id != user_id:
+                raise SageHTTPException(status_code=403, detail="forbidden")
         docs, total = await self.kdb_doc_dao.get_list(
             kdb_id,
             query_name,
@@ -133,11 +148,17 @@ class KdbService:
         return d
 
     async def doc_add_by_upload_files(
-        self, kdb_id: str, files: List[UploadFile], override: bool = False
+        self,
+        kdb_id: str,
+        files: List[UploadFile],
+        override: bool = False,
+        user_id: Optional[str] = None,
     ) -> str:
         kdb = await self.kdb_dao.get_by_id(kdb_id)
         if not kdb:
             raise SageHTTPException(status_code=400, detail="KDB not found")
+        if user_id and kdb.user_id and kdb.user_id != user_id:
+            raise SageHTTPException(status_code=403, detail="forbidden")
         save_files: List[File] = []
         for uf in files or []:
             if not uf or not uf.filename:
@@ -171,7 +192,10 @@ class KdbService:
         kdb_doc = await self.kdb_doc_dao.get_by_id(doc_id)
         if not kdb_doc:
             raise SageHTTPException(status_code=400, detail="KDB Doc not found")
-        await DocumentService().doc_document_delete(f"kdb_{kdb_doc.kdb_id}", [doc_id])
+        kdb = await self.kdb_dao.get_by_id(kdb_doc.kdb_id)
+        if not kdb:
+            raise SageHTTPException(status_code=400, detail="KDB not found")
+        await DocumentService().doc_document_delete(kdb.get_index_name(), [doc_id])
         await self.kdb_doc_dao.delete_by_ids([doc_id])
         logger.info(f"删除doc: {doc_id}")
 

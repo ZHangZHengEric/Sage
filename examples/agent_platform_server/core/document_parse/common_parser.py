@@ -28,8 +28,7 @@ ALLOW_ATTACH_FILE_EXTS = {
 
 
 class CommonParser(BaseParser):
-    async def clear_old(self, kdbId: str, doc: KdbDoc) -> None:
-        index_name = f"kdb_{kdbId}"
+    async def clear_old(self, index_name: str, doc: KdbDoc) -> None:
         ids: List[str] = [doc.id]
         md = doc.meta_data or {}
         atts = md.get("attachments")
@@ -43,8 +42,7 @@ class CommonParser(BaseParser):
             f"[CommonParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
         )
 
-    async def process(self, kdbId: str, doc: KdbDoc, file: File):
-        index_name = f"kdb_{kdbId}"
+    async def process(self, index_name: str, doc: KdbDoc, file: File):
         file_dao = FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, _ = await self.convert_file_to_text(file.path)

@@ -147,3 +147,17 @@ class KdbDocDao(BaseDao):
         db = await self._get_db()
         async with db.get_session() as session:
             await session.execute(delete(KdbDoc).where(KdbDoc.id.in_(ids)))
+
+    async def get_counts_by_kdb_ids(self, kdb_ids: List[str]) -> dict[str, int]:
+        if not kdb_ids:
+            return {}
+        db = await self._get_db()
+        async with db.get_session() as session:
+            stmt = (
+                select(KdbDoc.kdb_id, func.count())
+                .where(KdbDoc.kdb_id.in_(kdb_ids))
+                .group_by(KdbDoc.kdb_id)
+            )
+            res = await session.execute(stmt)
+            rows = res.all()
+            return {str(kdb_id): int(cnt or 0) for kdb_id, cnt in rows}
