@@ -70,9 +70,9 @@ class JobService:
                 )
                 logger.error(f"不支持的文档类型: {doc.data_source}")
                 return
-            await parser.clear_old(kdb.id, doc)
+            await parser.clear_old(kdb.get_index_name(), doc)
             # 3. 调用文档解析器处理文档
-            await parser.process(kdb.id, doc, file)
+            await parser.process(kdb.get_index_name(), doc, file)
             # 调用知识库入库接口，
             await self.kdb_doc_dao.update_status(doc.id, KdbDocStatus.SUCCESS)
             logger.info(f"处理文档成功 - DocId: {doc.id}, docName: {doc.doc_name}")
