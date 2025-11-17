@@ -35,6 +35,7 @@ from core.minio_client import init_minio_client
 from sagents.utils.logger import logger
 import router
 from service.job import JobService
+from service.user import parse_access_token
 
 
 async def initialize_system():
@@ -77,6 +78,7 @@ def create_lifespan_handler():
         # 启动时初始化
         await initialize_system()
         stop_event = asyncio.Event()
+
         async def _job_scheduler():
             svc = JobService()
             while not stop_event.is_set():
@@ -89,6 +91,7 @@ def create_lifespan_handler():
                     await asyncio.wait_for(stop_event.wait(), timeout=5)
                 except asyncio.TimeoutError:
                     continue
+
         scheduler_task = asyncio.create_task(_job_scheduler())
         yield
         # 关闭时清理
@@ -164,6 +167,52 @@ def create_fastapi_app():
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        path = request.url.path
+        whitelist = {
+            "/api/health",
+            "/api/user/login",
+            "/api/user/register",
+            "/api/files/workspace",
+            "/api/files/workspace/download",
+            "/api/files/workspace/preview",
+            "/api/files/logs",
+            "/api/files/logs/download",
+            "/api/files/logs/preview",
+        }
+        if path.startswith("/api") and path not in whitelist:
+            auth = request.headers.get("Authorization", "")
+            if not auth.lower().startswith("bearer "):
+                error_response = await Response.error(
+                    code=401, message="未授权", error_detail="missing bearer token"
+                )
+                return JSONResponse(
+                    status_code=401, content=error_response.model_dump()
+                )
+            token = auth.split(" ", 1)[1].strip()
+            try:
+                claims = parse_access_token(token)
+                request.state.user_claims = claims
+            except Exception as e:
+                if isinstance(e, SageHTTPException):
+                    error_response = await Response.error(
+                        code=e.status_code,
+                        message=e.detail,
+                        error_detail=e.error_detail,
+                    )
+                    return JSONResponse(
+                        status_code=e.status_code, content=error_response.model_dump()
+                    )
+                error_response = await Response.error(
+                    code=401, message="Token非法", error_detail=str(e)
+                )
+                return JSONResponse(
+                    status_code=401, content=error_response.model_dump()
+                )
+        response = await call_next(request)
+        return response
+
     register_exception_handlers(app)
 
     # 健康检查接口
@@ -187,6 +236,7 @@ def create_fastapi_app():
     app.include_router(router.tool_router)
     app.include_router(router.file_server_router)
     app.include_router(router.kdb_router)
+    app.include_router(router.user_router)
 
     return app
 
@@ -207,10 +257,10 @@ def start_server(cfg: StartupConfig, app):
 
         with context:
             uvicorn.run(
-                app, host=cfg.host, port=cfg.port, log_level="debug", reload=False
+                app, host="0.0.0.0", port=cfg.port, log_level="debug", reload=False
             )
     else:
-        uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="debug", reload=False)
+        uvicorn.run(app, host="0.0.0.0", port=cfg.port, log_level="debug", reload=False)
 
 
 def main():

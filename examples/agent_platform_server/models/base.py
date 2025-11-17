@@ -100,6 +100,10 @@ class SessionManager:
                     user = self.mysql_config.get("user", "")
                     password = self.mysql_config.get("password", "")
                     host = self.mysql_config.get("host", "127.0.0.1")
+                    # 对密码中的特殊字符进行 URL 编码，防止连接串解析失败
+                    from urllib.parse import quote_plus
+
+                    password = quote_plus(password)
                     port = int(self.mysql_config.get("port", 3306))
                     database = self.mysql_config.get("database", "")
                     charset = self.mysql_config.get("charset", "utf8mb4")
@@ -273,29 +277,11 @@ class SessionManager:
                     pass
             return cfg
 
-        # JSON 文件路径
-        if (
-            isinstance(db_path, str)
-            and os.path.exists(db_path)
-            and os.path.isfile(db_path)
-        ):
-            try:
-                with open(db_path, "r", encoding="utf-8") as f:
-                    file_cfg = json.load(f)
-                for key in ["host", "port", "user", "password", "database", "charset"]:
-                    if key in file_cfg:
-                        cfg[key] = file_cfg[key]
-                if "port" in cfg:
-                    cfg["port"] = int(cfg["port"])
-                return cfg
-            except Exception as e:
-                logger.warning(f"解析MySQL配置文件失败: {e}")
-
         # 环境变量兜底
-        cfg["host"] = os.environ.get("MYSQL_HOST", "127.0.0.1")
-        cfg["port"] = int(os.environ.get("MYSQL_PORT", "3306"))
-        cfg["user"] = os.environ.get("MYSQL_USER", "")
-        cfg["password"] = os.environ.get("MYSQL_PASSWORD", "")
-        cfg["database"] = os.environ.get("MYSQL_DATABASE", "")
-        cfg["charset"] = os.environ.get("MYSQL_CHARSET", "utf8mb4")
+        cfg["host"] = os.environ.get("SAGE_MYSQL_HOST", "127.0.0.1")
+        cfg["port"] = int(os.environ.get("SAGE_MYSQL_PORT", "3306"))
+        cfg["user"] = os.environ.get("SAGE_MYSQL_USER", "")
+        cfg["password"] = os.environ.get("SAGE_MYSQL_PASSWORD", "")
+        cfg["database"] = os.environ.get("SAGE_MYSQL_DATABASE", "")
+        cfg["charset"] = os.environ.get("SAGE_MYSQL_CHARSET", "utf8mb4")
         return cfg

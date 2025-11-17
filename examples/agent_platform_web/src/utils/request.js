@@ -36,6 +36,10 @@ class Request {
                 'X-accept-language': 'zh',
                 ...config.headers
             }
+            const token = (typeof localStorage !== 'undefined') ? localStorage.getItem('access_token') : null
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`
+            }
             if (!isFormData) {
                 headers['Content-Type'] = 'application/json;charset=UTF-8'
             }
@@ -94,6 +98,9 @@ class Request {
                         localStorage.removeItem('userInfo')
                         localStorage.removeItem('isLoggedIn')
                         localStorage.removeItem('loginTime')
+                        if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent('user-updated'))
+                        }
                         break
                     case 403:
                         message = '权限不足'

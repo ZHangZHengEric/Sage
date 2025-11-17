@@ -2,7 +2,7 @@
 Agent 相关路由
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 from common.render import Response
@@ -95,7 +95,7 @@ agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
 
 @agent_router.get("/list")
-async def list():
+async def list(http_request: Request):
     """
     获取所有Agent配置
 
@@ -103,7 +103,9 @@ async def list():
         StandardResponse: 包含所有Agent配置的标准响应
     """
     # 从 handler 获取数据
-    all_configs = await list_agents()
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    all_configs = await list_agents(user_id)
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
@@ -116,7 +118,7 @@ async def list():
 
 
 @agent_router.post("/create")
-async def create(agent: AgentConfigDTO):
+async def create(agent: AgentConfigDTO, http_request: Request):
     """
     创建新的Agent
 
@@ -126,14 +128,16 @@ async def create(agent: AgentConfigDTO):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    agent_id = await create_agent(agent.name, convert_agent_to_config(agent))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    agent_id = await create_agent(agent.name, convert_agent_to_config(agent), user_id)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 创建成功"
     )
 
 
 @agent_router.get("/{agent_id}")
-async def get(agent_id: str):
+async def get(agent_id: str, http_request: Request):
     """
     根据ID获取Agent配置
 
@@ -143,7 +147,9 @@ async def get(agent_id: str):
     Returns:
         StandardResponse: 包含Agent配置的标准响应
     """
-    agent = await get_agent(agent_id)
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    agent = await get_agent(agent_id, user_id)
     agent_resp = convert_config_to_agent(agent_id, agent)
     return await Response.succ(
         data={"agent": agent_resp.model_dump()}, message=f"获取Agent '{agent_id}' 成功"
@@ -151,7 +157,7 @@ async def get(agent_id: str):
 
 
 @agent_router.put("/{agent_id}")
-async def update(agent_id: str, agent: AgentConfigDTO):
+async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     """
     更新Agent配置
 
@@ -160,14 +166,16 @@ async def update(agent_id: str, agent: AgentConfigDTO):
         agent: 更新的Agent配置
 
     """
-    await update_agent(agent_id, agent.name, convert_agent_to_config(agent))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    await update_agent(agent_id, agent.name, convert_agent_to_config(agent), user_id)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
     )
 
 
 @agent_router.delete("/{agent_id}")
-async def delete(agent_id: str):
+async def delete(agent_id: str, http_request: Request):
     """
     删除Agent
 
@@ -175,7 +183,9 @@ async def delete(agent_id: str):
         agent_id: Agent ID
 
     """
-    await delete_agent(agent_id)
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    await delete_agent(agent_id, user_id)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
     )

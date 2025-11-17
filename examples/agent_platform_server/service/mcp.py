@@ -4,7 +4,7 @@ MCP 业务处理模块
 封装 MCP 相关的业务逻辑，供路由层调用。
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from sagents.utils.logger import logger
 import core.globals as global_vars
@@ -41,6 +41,7 @@ async def add_mcp_server(
     sse_url: str,
     api_key: str,
     disabled: bool = False,
+    user_id: Optional[str] = None,
 ) -> str:
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
     logger.info(f"开始添加MCP server: {name}")
@@ -67,15 +68,18 @@ async def add_mcp_server(
             error_detail="Tool manager registration failed",
         )
     # 保存到数据库
-    await dao.save_mcp_server(name=name, config=server_config)
+    await dao.save_mcp_server(name=name, config=server_config, user_id=user_id)
     return name
 
 
-async def list_mcp_servers() -> List[MCPServer]:
+async def list_mcp_servers(user_id: Optional[str] = None) -> List[MCPServer]:
     """获取所有 MCP 服务器并转换为简化响应结构"""
     logger.info("获取MCP服务器列表")
     dao = MCPServerDao()
-    mcp_servers = await dao.get_all()
+    if user_id:
+        mcp_servers = await dao.get_all_by_user(user_id)
+    else:
+        mcp_servers = await dao.get_all()
     return mcp_servers
 
 

@@ -4,9 +4,9 @@ MCP (Model Context Protocol) 相关路由
 提供MCP服务器的管理接口，包括添加、删除、配置等功能
 """
 
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from sagents.utils.logger import logger
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from common.render import Response
 
@@ -30,7 +30,7 @@ class MCPServerRequest(BaseModel):
 
 
 @mcp_router.post("/add")
-async def add(request: MCPServerRequest):
+async def add(req: MCPServerRequest, http_request: Request):
     """
     添加MCP服务器到工具管理器
 
@@ -41,23 +41,26 @@ async def add(request: MCPServerRequest):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    logger.info(f"开始添加MCP server: {request.name}")
+    logger.info(f"开始添加MCP server: {req.name}")
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
     server_name = await add_mcp_server(
-        name=request.name,
-        protocol=request.protocol,
-        streamable_http_url=request.streamable_http_url,
-        sse_url=request.sse_url,
-        api_key=request.api_key,
+        name=req.name,
+        protocol=req.protocol,
+        streamable_http_url=req.streamable_http_url,
+        sse_url=req.sse_url,
+        api_key=req.api_key,
         disabled=False,
+        user_id=user_id,
     )
     return await Response.succ(
         data={"server_name": server_name, "status": "success"},
-        message=f"MCP server {request.name} 添加成功",
+        message=f"MCP server {req.name} 添加成功",
     )
 
 
 @mcp_router.get("/list")
-async def list():
+async def list(http_request: Request):
     """
     获取所有MCP服务器列表
 
@@ -66,7 +69,9 @@ async def list():
     """
     logger.info("获取MCP服务器列表")
 
-    mcp_servers = await list_mcp_servers()
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    mcp_servers = await list_mcp_servers(user_id=user_id)
     servers: List[Dict[str, Any]] = []
     for server in mcp_servers:
         config = server.config
