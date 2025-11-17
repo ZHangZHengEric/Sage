@@ -5,56 +5,17 @@
 """
 
 import traceback
+import os
+import json
 from typing import Optional, Dict, Any
-from openai import OpenAI
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.logger import logger
-from dataclasses import dataclass
-from models.base import SessionManager
-import asyncio
-from common.exceptions import SageHTTPException
 from config.settings import StartupConfig
+from config.settings import get_startup_config
 
 _GLOBAL_TOOL_MANAGER: Optional[ToolManager] = None  # 工具管理器
-_GLOBAL_MODEL_CLIENT: Optional[OpenAI] = None  # 默认模型客户端
 _GLOBAL_STARTUP_CONFIG: Optional[StartupConfig] = None  # 服务器启动参数
-_GLOBAL_DB: Optional[SessionManager] = None  # 全局数据库管理器实例
-_GLOBAL_DB_INIT_LOCK = asyncio.Lock()  # 数据库初始化锁，确保单例初始化
 _GLOBAL_ACTIVE_SESSION: Dict[str, Dict[str, Any]] = {}  # 活跃会话映射
-
-
-async def get_global_db() -> SessionManager:
-    """获取全局数据库管理器实例。
-
-    要求在项目启动阶段通过 `set_global_db()` 预先设置全局实例。
-    若未设置则直接抛出错误，避免在运行时隐式初始化。
-    """
-    global _GLOBAL_DB
-    if _GLOBAL_DB is None:
-        raise SageHTTPException(
-            status_code=500,
-            detail="全局数据库管理器未设置",
-            error_detail="请在项目启动时调用 set_global_db() 设置全局数据库管理器",
-        )
-    return _GLOBAL_DB
-
-
-def set_global_db(db: SessionManager):
-    """设置全局数据库管理器实例（可用于测试或自定义配置）。"""
-    global _GLOBAL_DB
-    _GLOBAL_DB = db
-
-
-def get_startup_config():
-    """获取服务器启动参数"""
-    global _GLOBAL_STARTUP_CONFIG
-    return _GLOBAL_STARTUP_CONFIG
-
-
-def set_startup_config(cfg: StartupConfig):
-    """设置服务器启动参数"""
-    global _GLOBAL_STARTUP_CONFIG
-    _GLOBAL_STARTUP_CONFIG = cfg
 
 
 def get_tool_manager():
@@ -67,18 +28,6 @@ def set_tool_manager(tm: ToolManager):
     """设置工具管理器"""
     global _GLOBAL_TOOL_MANAGER
     _GLOBAL_TOOL_MANAGER = tm
-
-
-def get_default_model_client():
-    """获取默认模型客户端"""
-    global _GLOBAL_MODEL_CLIENT
-    return _GLOBAL_MODEL_CLIENT
-
-
-def set_default_model_client(client: OpenAI):
-    """设置默认模型客户端"""
-    global _GLOBAL_MODEL_CLIENT
-    _GLOBAL_MODEL_CLIENT = client
 
 
 def get_all_active_sessions_service_map() -> Dict[str, Dict[str, Any]]:
@@ -104,57 +53,67 @@ async def initialize_tool_manager():
         return None
 
 
-async def initialize_default_model_client():
-    """初始化默认模型客户端"""
-    config = get_startup_config()
-    try:
-        logger.debug(f"默认 API 密钥: {config.default_llm_api_key}...")
-        logger.debug(f"默认 API 基础 URL: {config.default_llm_api_base_url}...")
-        default_model_client = OpenAI(
-            api_key=config.default_llm_api_key,
-            base_url=config.default_llm_api_base_url,
-        )
-        default_model_client.model = config.default_llm_model_name
-        set_default_model_client(default_model_client)
-        return default_model_client
-    except Exception as e:
-        logger.error(f"默认模型客户端初始化失败: {e}")
-        logger.error(traceback.format_exc())
-        return None
+async def _should_initialize_data() -> bool:
+    cfg = get_startup_config()
+    if cfg and cfg.db_type == "memory":
+        return True
+    from models.mcp_server import MCPServerDao
+    from models.agent import AgentConfigDao
+
+    mcp_server_dao = MCPServerDao()
+    mcp_servers = await mcp_server_dao.get_all()
+    agent_config_dao = AgentConfigDao()
+    agent_configs = await agent_config_dao.get_all()
+    return len(mcp_servers) == 0 and len(agent_configs) == 0
 
 
-async def initialize_global_db():
-    """初始化全局数据库管理器"""
-    config = get_startup_config()
-    try:
-        db_manager = SessionManager(db_type=config.db_type, db_path=config.db_path)
-        await db_manager.init_conn()
-        set_global_db(db_manager)
-        await db_manager.init_data(
-            preset_mcp_config=config.preset_mcp_config,
-            preset_agent_config=config.preset_running_config,
-        )
-        return db_manager
-    except Exception as e:
-        logger.error(f"全局数据库管理器初始化失败: {e}")
-        logger.error(traceback.format_exc())
-        return None
+async def _load_preset_mcp_config(config_path: str):
+    if not config_path or not os.path.exists(config_path):
+        logger.warning(f"预设MCP配置文件不存在: {config_path}")
+        return
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    mcp_servers = config.get("mcpServers", {})
+    from models.mcp_server import MCPServerDao
+
+    mcp_server_dao = MCPServerDao()
+    for name, server_config in mcp_servers.items():
+        await mcp_server_dao.save_mcp_server(name, server_config)
+    logger.info(f"已加载 {len(mcp_servers)} 个MCP服务器配置")
 
 
-async def close_global_db():
-    """关闭全局数据库管理器"""
-    db_manager = get_global_db()
-    if db_manager:
-        db_manager.close()
-        set_global_db(None)
+async def _load_preset_agent_config(config_path: str):
+    if not config_path or not os.path.exists(config_path):
+        logger.warning(f"预设Agent配置文件不存在: {config_path}")
+        return
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    from models.agent import AgentConfigDao, Agent
+
+    agent_config_dao = AgentConfigDao()
+    if "systemPrefix" in config or "systemContext" in config:
+        obj = Agent(agent_id="default", name="Default Agent", config=config)
+        await agent_config_dao.save(obj)
+        logger.info("已加载默认Agent配置（旧格式）")
+    else:
+        count = 0
+        for agent_id, agent_config in config.items():
+            if isinstance(agent_config, dict):
+                name = agent_config.get("name", f"Agent {agent_id}")
+                obj = Agent(agent_id=agent_id, name=name, config=agent_config)
+                await agent_config_dao.save(obj)
+                count += 1
+        logger.info(f"已加载 {count} 个Agent配置")
 
 
-async def close_default_model_client():
-    """关闭默认模型客户端"""
-    default_model_client = get_default_model_client()
-    if default_model_client:
-        default_model_client.close()
-        set_default_model_client(None)
+async def initialize_db_data():
+    cfg = get_startup_config()
+    if not await _should_initialize_data():
+        logger.debug("数据库已存在数据，跳过预加载")
+        return
+    await _load_preset_mcp_config(cfg.preset_mcp_config)
+    await _load_preset_agent_config(cfg.preset_running_config)
+    logger.debug("数据库预加载完成")
 
 
 async def close_tool_manager():

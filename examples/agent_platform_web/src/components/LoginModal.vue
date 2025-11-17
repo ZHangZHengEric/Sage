@@ -61,27 +61,6 @@
           />
         </div>
 
-        <div class="form-group">
-          <label for="reg_email">邮箱（可选）</label>
-          <input 
-            type="email" 
-            id="reg_email"
-            v-model="registerForm.email"
-            placeholder="请输入邮箱"
-            :disabled="isLoading"
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="reg_phonenum">手机号（可选）</label>
-          <input 
-            type="text" 
-            id="reg_phonenum"
-            v-model="registerForm.phonenum"
-            placeholder="请输入手机号"
-            :disabled="isLoading"
-          />
-        </div>
 
         <div class="form-group">
           <label for="reg_password">密码</label>

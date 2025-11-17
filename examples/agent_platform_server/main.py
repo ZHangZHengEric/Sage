@@ -28,31 +28,30 @@ sys.path.insert(0, str(project_root))
 
 from common.exceptions import SageHTTPException
 from common.render import Response
-from config.settings import StartupConfig, build_startup_config
-import core.globals as global_vars
+from config.settings import (
+    init_startup_config,
+    get_startup_config,
+)
 from service.mcp import validate_and_disable_mcp_servers
-from core.minio_client import init_minio_client
+from core.client import init_clients, close_clients
 from sagents.utils.logger import logger
 import router
 from service.job import JobService
 from service.user import parse_access_token
+from core.globals import initialize_db_data, close_tool_manager, initialize_tool_manager
+from mcp_server.knwoledge_base import kdb_mcp
+
+kdb_mcp_http = kdb_mcp.http_app(path="/mcp/kdb")
 
 
 async def initialize_system():
-    cfg = global_vars.get_startup_config()
+
     logger.info("正在初始化 Sage Platform Server...")
-    # 1) 初始化工作目录
-    os.makedirs(cfg.logs_dir, exist_ok=True)
-    os.makedirs(cfg.workspace, exist_ok=True)
-    # 3) 设置全局变量
-    global_vars.set_startup_config(cfg)
-    await init_minio_client()
-    # 4) 初始化全局数据库
-    await global_vars.initialize_global_db()
+    await init_clients()
+    # 4) 初始化数据库预置数据（DB 连接已在 client 初始化中完成）
+    await initialize_db_data()
     # 5) 初始化工具管理器
-    await global_vars.initialize_tool_manager()
-    # 6) 初始化默认模型客户端
-    await global_vars.initialize_default_model_client()
+    await initialize_tool_manager()
     # 7) 初始化 MCP 服务器
     await validate_and_disable_mcp_servers()
 
@@ -60,13 +59,38 @@ async def initialize_system():
 async def cleanup_system():
     """清理系统资源"""
     logger.info("正在清理 Sage Platform Server 资源...")
-    # 1) 清理数据库连接
+    # 1) 清理第三方客户端
+    await close_clients()
     # 2) 清理工具管理器
-    await global_vars.close_tool_manager()
-    # 3) 清理默认模型客户端
-    await global_vars.close_default_model_client()
-    # 4) 清理全局数据库管理器
-    await global_vars.close_global_db()
+    await close_tool_manager()
+
+
+async def _job_scheduler(stop_event: asyncio.Event):
+    svc = JobService()
+    while not stop_event.is_set():
+        try:
+            await svc.build_waiting_doc()
+            await svc.build_failed_doc()
+        except Exception as e:
+            logger.error(f"定时任务执行失败: {e}")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            continue
+
+
+def start_job_scheduler() -> tuple[asyncio.Event, asyncio.Task]:
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(_job_scheduler(stop_event))
+    return stop_event, task
+
+
+async def stop_job_scheduler(stop_event: asyncio.Event, task: asyncio.Task):
+    stop_event.set()
+    try:
+        await task
+    except Exception:
+        pass
 
 
 def create_lifespan_handler():
@@ -74,33 +98,15 @@ def create_lifespan_handler():
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """应用生命周期管理"""
-        # 启动时初始化
-        await initialize_system()
-        stop_event = asyncio.Event()
-
-        async def _job_scheduler():
-            svc = JobService()
-            while not stop_event.is_set():
-                try:
-                    await svc.build_waiting_doc()
-                    await svc.build_failed_doc()
-                except Exception as e:
-                    logger.error(f"定时任务执行失败: {e}")
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    continue
-
-        scheduler_task = asyncio.create_task(_job_scheduler())
-        yield
-        # 关闭时清理
-        stop_event.set()
-        try:
-            await scheduler_task
-        except Exception:
-            pass
-        await cleanup_system()
+        async with kdb_mcp_http.lifespan(app):
+            """应用生命周期管理"""
+            # 启动时初始化
+            await initialize_system()
+            stop_event, scheduler_task = start_job_scheduler()
+            yield
+            # 关闭时清理
+            await stop_job_scheduler(stop_event, scheduler_task)
+            await cleanup_system()
 
     return lifespan
 
@@ -155,6 +161,7 @@ def create_fastapi_app():
         description="基于 Sage 框架的智能体流式服务",
         version="1.0.0",
         lifespan=create_lifespan_handler(),
+        routes=[*kdb_mcp_http.routes],
     )
 
     # 注册中间件与异常处理器
@@ -241,9 +248,9 @@ def create_fastapi_app():
     return app
 
 
-def start_server(cfg: StartupConfig, app):
+def start_server(app):
     """启动服务器"""
-
+    cfg = get_startup_config()
     # 守护进程模式
     if cfg.daemon:
         import daemon
@@ -267,14 +274,11 @@ def main():
     """主函数 - 启动Sage Stream Service"""
     try:
         # 1) 处理启动参数
-        cfg = build_startup_config()
-        global_vars.set_startup_config(cfg)
-
+        init_startup_config()
         # 创建FastAPI应用
         app = create_fastapi_app()
-
         # 启动服务器
-        start_server(cfg, app)
+        start_server(app)
 
     except Exception as e:
         logger.error(f"服务启动失败: {e}")
