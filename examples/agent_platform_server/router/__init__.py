@@ -10,15 +10,21 @@ from .stream import stream_router
 from .file_server import file_server_router
 from .kdb import kdb_router
 from .user import user_router
+from .system import system_router
 
 # Export all routers for easy import
 __all__ = [
-    "mcp_router",
-    "tool_router", 
-    "agent_router",
-    "conversation_router",
-    "stream_router",
-    "file_server_router",
-    "kdb_router",
-    "user_router",
+    "register_routes",
 ]
+
+
+def register_routes(app):
+    app.include_router(mcp_router)
+    app.include_router(agent_router)
+    app.include_router(stream_router)
+    app.include_router(conversation_router)
+    app.include_router(tool_router)
+    app.include_router(file_server_router)
+    app.include_router(kdb_router)
+    app.include_router(user_router)
+    app.include_router(system_router)

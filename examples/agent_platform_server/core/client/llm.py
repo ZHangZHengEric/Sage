@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, List
 from openai import OpenAI, AsyncOpenAI
 from config.settings import StartupConfig
 from sagents.utils.logger import logger
@@ -50,9 +50,7 @@ async def close_chat_client() -> None:
         if MODEL_CLIENT is not None:
             fn = getattr(MODEL_CLIENT, "close", None)
             if fn is not None:
-                res = fn()
-                if hasattr(res, "__await__"):
-                    await res
+                fn()
     except Exception:
         pass
     MODEL_CLIENT = None
@@ -98,7 +96,7 @@ async def embedding(
     m = model or EMBED_MODEL or "text-embedding-3-large"
     results: List[List[float]] = []
     for i in range(0, len(inputs or []), CHUNK_SIZE):
-        batch = inputs[i : i + CHUNK_SIZE]
+        batch = inputs[i: i + CHUNK_SIZE]
         r = await client.embeddings.create(
             model=m, input=batch, dimensions=EMBEDDING_DIMS
         )

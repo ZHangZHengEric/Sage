@@ -5,7 +5,7 @@
 import os
 
 import math
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from common.exceptions import SageHTTPException
-from config.settings import StartupConfig
-from config.settings import get_startup_config
+import config
 from sagents.utils.logger import logger
 
 MINIO_CLIENT = None
@@ -10,7 +9,7 @@ MINIO_CLIENT = None
 
 async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str:
     client = MINIO_CLIENT
-    cfg = get_startup_config()
+    cfg = config.get_startup_config()
     bucket = cfg.minio_bucket_name if cfg else None
     public_base = cfg.minio_public_base_url if cfg else None
     if not client or not bucket or not public_base:
@@ -56,7 +55,7 @@ def _minio_ensure_bucket(client, bucket: str) -> None:
         raise SageHTTPException(status_code=500, detail=str(e))
 
 
-async def init_minio_client(cfg: StartupConfig | None = None):
+async def init_minio_client(cfg: config.StartupConfig | None = None):
     try:
         from minio import Minio
     except Exception:

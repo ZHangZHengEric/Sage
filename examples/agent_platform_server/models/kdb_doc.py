@@ -39,49 +39,37 @@ class KdbDocStatus:
 
 class KdbDocDao(BaseDao):
     async def insert(self, obj: KdbDoc) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            session.add(obj)
+        await BaseDao.insert(self, obj)
 
     async def batch_insert(self, objs: List[KdbDoc]) -> None:
         if not objs:
             return
-        db = await self._get_db()
-        async with db.get_session() as session:
-            session.add_all(objs)
+        await BaseDao.batch_insert(self, objs)
+
+    async def update(self, obj: KdbDoc) -> None:
+        await BaseDao.save(self, obj)
 
     async def get_by_kdb_id(self, kdb_id: str) -> list[KdbDoc]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(KdbDoc).where(KdbDoc.kdb_id == kdb_id)
-            return list((await session.execute(stmt)).scalars().all())
+        where = [KdbDoc.kdb_id == kdb_id]
+        return await BaseDao.get_list(self, KdbDoc, where=where)
 
     async def batch_update_status(self, ids: List[str], status: int) -> None:
         if not ids:
             return
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.execute(
-                update(KdbDoc).where(KdbDoc.id.in_(ids)).values(status=status)
-            )
+        await BaseDao.update_where(self, KdbDoc, where=[KdbDoc.id.in_(ids)], values={"status": status})
 
     async def update_status(self, doc_id: str, status: int) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.execute(
-                update(KdbDoc).where(KdbDoc.id == doc_id).values(status=status)
-            )
+        await BaseDao.update_where(self, KdbDoc, where=[KdbDoc.id == doc_id], values={"status": status})
 
     async def update_status_and_retry(self, doc_id: str, status: int) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.execute(
-                update(KdbDoc)
-                .where(KdbDoc.id == doc_id)
-                .values(status=status, retry_count=KdbDoc.retry_count + 1)
-            )
+        await BaseDao.update_where(
+            self,
+            KdbDoc,
+            where=[KdbDoc.id == doc_id],
+            values={"status": status, "retry_count": KdbDoc.retry_count + 1},
+        )
 
-    async def get_list(
+    async def get_kdb_docs_paginated(
         self,
         kdb_id: str,
         query_name: str,
@@ -90,63 +78,49 @@ class KdbDocDao(BaseDao):
         page_no: int,
         page_size: int,
     ) -> tuple[list[KdbDoc], int]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(KdbDoc).where(KdbDoc.kdb_id == kdb_id)
-            if query_task_id:
-                stmt = stmt.where(KdbDoc.task_id == query_task_id)
-            if query_name:
-                stmt = stmt.where(KdbDoc.doc_name.like(f"%{query_name}%"))
-            if status:
-                stmt = stmt.where(KdbDoc.status.in_(status))
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            cnt = (await session.execute(count_stmt)).scalar() or 0
-            stmt = (
-                stmt.offset((page_no - 1) * page_size)
-                .limit(page_size)
-                .order_by(KdbDoc.created_at.desc())
-            )
-            res = (await session.execute(stmt)).scalars().all()
-            return list(res), int(cnt)
+        """分页查询KDB文档"""
+        where = [KdbDoc.kdb_id == kdb_id]
+        if query_task_id:
+            where.append(KdbDoc.task_id == query_task_id)
+        if query_name:
+            where.append(KdbDoc.doc_name.like(f"%{query_name}%"))
+        if status:
+            where.append(KdbDoc.status.in_(status))
+        items, total = await BaseDao.paginate_list(
+            self,
+            KdbDoc,
+            where=where,
+            order_by=KdbDoc.created_at.desc(),
+            page=page_no,
+            page_size=page_size,
+        )
+        return items, total
 
     async def get_list_by_status_and_data_source(
         self, status: int, data_source: str, limit: int
     ) -> list[KdbDoc]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = (
-                select(KdbDoc)
-                .where(KdbDoc.status == status)
-                .where(KdbDoc.data_source == data_source)
-                .limit(limit)
-                .order_by(KdbDoc.created_at.asc())
-            )
-            return list((await session.execute(stmt)).scalars().all())
+        where = [KdbDoc.status == status, KdbDoc.data_source == data_source]
+        return await BaseDao.get_list(
+            self, KdbDoc, where=where, order_by=KdbDoc.created_at.asc(), limit=limit
+        )
 
     async def get_failed_list(self, data_source: str, limit: int) -> list[KdbDoc]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = (
-                select(KdbDoc)
-                .where(KdbDoc.status == KdbDocStatus.FAILED)
-                .where(KdbDoc.data_source == data_source)
-                .where(KdbDoc.retry_count < 3)
-                .limit(limit)
-                .order_by(KdbDoc.created_at.asc())
-            )
-            return list((await session.execute(stmt)).scalars().all())
+        where = [
+            KdbDoc.status == KdbDocStatus.FAILED,
+            KdbDoc.data_source == data_source,
+            KdbDoc.retry_count < 3,
+        ]
+        return await BaseDao.get_list(
+            self, KdbDoc, where=where, order_by=KdbDoc.created_at.asc(), limit=limit
+        )
 
     async def get_by_id(self, data_id: int | str) -> Optional[KdbDoc]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            return await session.get(KdbDoc, str(data_id))
+        return await BaseDao.get_by_id(self, KdbDoc, str(data_id))
 
     async def delete_by_ids(self, ids: List[str]) -> None:
         if not ids:
             return
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.execute(delete(KdbDoc).where(KdbDoc.id.in_(ids)))
+        await BaseDao.delete_where(self, KdbDoc, where=[KdbDoc.id.in_(ids)])
 
     async def get_counts_by_kdb_ids(self, kdb_ids: List[str]) -> dict[str, int]:
         if not kdb_ids:

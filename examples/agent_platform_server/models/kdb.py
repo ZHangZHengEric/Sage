@@ -8,8 +8,6 @@ from sqlalchemy import JSON
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
-from sqlalchemy import select, update, func
-
 from .base import Base, BaseDao
 import hashlib
 
@@ -55,55 +53,37 @@ class Kdb(Base):
 class KdbDao(BaseDao):
 
     async def insert(self, obj: Kdb) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            session.add(obj)
+        await BaseDao.insert(self, obj)
 
     async def get_by_id(self, kdb_id: str) -> Optional[Kdb]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            return await session.get(Kdb, kdb_id)
+        return await BaseDao.get_by_id(self, Kdb, kdb_id)
 
     async def delete_by_id(self, kdb_id: str) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            obj = await session.get(Kdb, kdb_id)
-            if obj:
-                await session.delete(obj)
+        await BaseDao.delete_by_id(self, Kdb, kdb_id)
 
     async def update_by_id(self, kdb_id: str, update_map: Dict[str, Any]) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.execute(
-                update(Kdb).where(Kdb.id == kdb_id).values(**update_map)
-            )
+        await BaseDao.update_where(
+            self, Kdb, where=[Kdb.id == kdb_id], values=update_map
+        )
 
-    async def get_list(
-        self,
-        kdb_ids: List[str] | None,
-        data_type: str,
-        query_name: str,
-        page: int,
-        page_size: int,
-        user_id: Optional[str] = None,
-    ) -> tuple[list[Kdb], int]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(Kdb)
-            if kdb_ids:
-                stmt = stmt.where(Kdb.id.in_(kdb_ids))
-            if query_name:
-                stmt = stmt.where(Kdb.name.like(f"%{query_name}%"))
-            if data_type:
-                stmt = stmt.where(Kdb.data_type == data_type)
-            if user_id:
-                stmt = stmt.where(Kdb.user_id == user_id)
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            cnt = (await session.execute(count_stmt)).scalar() or 0
-            stmt = (
-                stmt.offset((page - 1) * page_size)
-                .limit(page_size)
-                .order_by(Kdb.created_at.desc())
-            )
-            res = (await session.execute(stmt)).scalars().all()
-            return list(res), int(cnt)
+    async def get_kdbs_paginated(self, kdb_ids: List[str] | None, data_type: str, query_name: str, page: int, page_size: int, user_id: Optional[str] = None,) -> tuple[list[Kdb], int]:
+        """分页查询KDB"""
+        where = []
+        if kdb_ids:
+            where.append(Kdb.id.in_(kdb_ids))
+        if query_name:
+            where.append(Kdb.name.like(f"%{query_name}%"))
+        if data_type:
+            where.append(Kdb.data_type == data_type)
+        if user_id:
+            where.append(Kdb.user_id == user_id)
+
+        items, total = await BaseDao.paginate_list(
+            self,
+            Kdb,
+            where=where,
+            order_by=Kdb.created_at.desc(),
+            page=page,
+            page_size=page_size,
+        )
+        return items, total

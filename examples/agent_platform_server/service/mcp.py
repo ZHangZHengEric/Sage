@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from sagents.utils.logger import logger
 import core.globals as global_vars
 from common.exceptions import SageHTTPException
-from models.mcp_server import MCPServerDao, MCPServer
+import models
 
 
 def _build_server_config(
@@ -46,7 +46,7 @@ async def add_mcp_server(
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
     logger.info(f"开始添加MCP server: {name}")
 
-    dao = MCPServerDao()
+    dao = models.MCPServerDao()
     # 检查服务器名称是否已存在
     existing_server = await dao.get_by_name(name)
     if existing_server:
@@ -72,23 +72,20 @@ async def add_mcp_server(
     return name
 
 
-async def list_mcp_servers(user_id: Optional[str] = None) -> List[MCPServer]:
+async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServer]:
     """获取所有 MCP 服务器并转换为简化响应结构"""
     logger.info("获取MCP服务器列表")
-    dao = MCPServerDao()
-    if user_id:
-        mcp_servers = await dao.get_all_by_user(user_id)
-    else:
-        mcp_servers = await dao.get_all()
+    dao = models.MCPServerDao()
+    mcp_servers = await dao.get_list(user_id)
     return mcp_servers
 
 
-async def remove_mcp_server(server_name: str) -> str:
+async def remove_mcp_server(server_name: str, user_id: Optional[str] = None) -> str:
     """删除 MCP 服务器，返回 server_name"""
     logger.info(f"开始删除MCP server: {server_name}")
     tm = global_vars.get_tool_manager()
 
-    dao = MCPServerDao()
+    dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -115,7 +112,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
     logger.info(f"开始切换MCP server状态: {server_name}")
     tm = global_vars.get_tool_manager()
 
-    dao = MCPServerDao()
+    dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -149,8 +146,7 @@ async def refresh_mcp_server(server_name: str) -> str:
     """刷新 MCP 服务器连接，返回是否成功"""
     logger.info(f"开始刷新MCP server: {server_name}")
     tm = global_vars.get_tool_manager()
-
-    dao = MCPServerDao()
+    dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
@@ -170,28 +166,3 @@ async def refresh_mcp_server(server_name: str) -> str:
     server_config["disabled"] = True
     await dao.save_mcp_server(name=server_name, config=server_config)
     return "disabled"
-
-
-async def validate_and_disable_mcp_servers():
-    """验证数据库中的 MCP 服务器配置并注册到 ToolManager；清理不可用项。
-
-    - 对每个保存的 MCP 服务器尝试注册；
-    - 若注册抛出异常或失败，则从数据库中删除该服务器；
-    - 若之前有部分注册的工具，尝试从 ToolManager 中移除。
-    """
-    mcp_dao = MCPServerDao()
-    servers = await mcp_dao.get_all()
-    removed_count = 0
-    registered_count = 0
-    for srv in servers:
-        if srv.config.get("disabled", True):
-            logger.info(f"MCP server {srv.name} 已禁用，跳过验证")
-            continue
-        status = await refresh_mcp_server(srv.name)
-        if status == "disabled":
-            removed_count += 1
-        else:
-            registered_count += 1
-    logger.info(
-        f"MCP 验证完成：成功 {registered_count} 个，禁用 {removed_count} 个不可用服务器"
-    )
