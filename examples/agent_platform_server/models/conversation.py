@@ -110,9 +110,6 @@ class ConversationDao(BaseDao):
     async def get_by_session_id(self, session_id: str) -> Optional[Conversation]:
         return await BaseDao.get_by_id(self, Conversation, session_id)
 
-    async def get_all_conversations(self) -> List[Conversation]:
-        return await BaseDao.get_list(self, Conversation, order_by=Conversation.updated_at.desc())
-
     async def get_conversations_paginated(
         self,
         page: int = 1,
@@ -138,19 +135,35 @@ class ConversationDao(BaseDao):
         else:
             order = Conversation.updated_at.desc()
 
-        items, total = await BaseDao.paginate_list(
-            self,
-            Conversation,
-            where=where,
-            order_by=order,
-            page=page,
-            page_size=page_size,
-        )
-        return items, total
+        # Step 1: 仅查询 session_id，并进行计数 + 分页 + 排序
+        db = await self._get_db()
+        async with db.get_session() as session:
+            base_stmt = select(Conversation.session_id)
+            if where:
+                for cond in where:
+                    base_stmt = base_stmt.where(cond)
 
-    async def get_conversations_by_agent(self, agent_id: str) -> List[Conversation]:
-        where = [Conversation.agent_id == agent_id]
-        return await BaseDao.get_list(self, Conversation, where=where, order_by=Conversation.updated_at.desc())
+            count_stmt = select(func.count()).select_from(base_stmt.subquery())
+            total = int((await session.execute(count_stmt)).scalar() or 0)
+
+            if order is not None:
+                base_stmt = base_stmt.order_by(order)
+            base_stmt = base_stmt.offset((page - 1) * page_size).limit(page_size)
+
+            id_res = await session.execute(base_stmt)
+            ids = list(id_res.scalars().all())
+
+            if not ids:
+                return [], total
+
+            # Step 2: 使用批量 session_id 查询完整字段，并使用相同排序保证顺序一致
+            data_stmt = select(Conversation).where(Conversation.session_id.in_(ids))
+            if order is not None:
+                data_stmt = data_stmt.order_by(order)
+
+            res = await session.execute(data_stmt)
+            items = list(res.scalars().all())
+            return items, total
 
     async def delete_conversation(self, session_id: str) -> bool:
         return await BaseDao.delete_by_id(self, Conversation, session_id)
