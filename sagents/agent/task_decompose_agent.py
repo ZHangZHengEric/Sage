@@ -58,7 +58,7 @@ class TaskDecomposeAgent(AgentBase):
         unknown_content = ''
         full_response = ''
         last_tag_type = ''
-        for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
+        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
                                              step_name="task_decompose"):
             if len(llm_repsonse_chunk.choices) == 0:
