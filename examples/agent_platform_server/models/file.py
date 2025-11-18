@@ -7,9 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 
 from .base import Base, BaseDao
-from typing import List, Optional, Dict, Any
-from sqlalchemy import select, func, update, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Optional, Dict
+from sqlalchemy import select, delete
 
 
 class File(Base):
@@ -24,41 +23,26 @@ class File(Base):
 
 class FileDao(BaseDao):
     async def get_by_id(self, id: str) -> Optional[File]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(File).where(File.id == id)
-            return (await session.execute(stmt)).scalars().first()
+        return await BaseDao.get_by_id(self, File, id)
 
     async def get_by_ids(self, ids: List[str]) -> Dict[str, File]:
         if not ids:
             return {}
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(File).where(File.id.in_(ids))
-            res = (await session.execute(stmt)).scalars().all()
-            return {f.id: f for f in res}
+        items = await BaseDao.get_list(self, File, where=[File.id.in_(ids)])
+        return {f.id: f for f in items}
 
     async def delete_by_file_ids(self, ids: List[str]) -> None:
         if not ids:
             return
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.execute(delete(File).where(File.id.in_(ids)))
+        await BaseDao.delete_where(self, File, where=[File.id.in_(ids)])
 
     async def insert(self, obj: File) -> None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            session.add(obj)
+        await BaseDao.insert(self, obj)
 
     async def batch_insert(self, objs: List[File]) -> None:
         if not objs:
             return
-        db = await self._get_db()
-        async with db.get_session() as session:
-            await session.add_all(objs)
+        await BaseDao.batch_insert(self, objs)
 
     async def get_by_file_path(self, path: str) -> Optional[File]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(File).where(File.path == path)
-            return (await session.execute(stmt)).scalars().first()
+        return await BaseDao.get_first(self, File, where=[File.path == path])

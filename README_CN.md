@@ -186,7 +186,7 @@ Sage 包含多个强大的工具系统，需要特定的依赖项：
 - **核心框架**: `openai`, `pydantic`, `python-dotenv`
 - **工具系统**: `chardet`, `docstring_parser`, `requests`, `httpx`
 - **MCP 支持**: `mcp`, `fastmcp` 
-- **Web 界面**: `fastapi`, `uvicorn`, `websockets`
+- **Web 界面**: `fastapi`, `uvicorn`,
 - **演示应用**: `streamlit`, `gradio`
 
 所有依赖项都由安装脚本自动管理。

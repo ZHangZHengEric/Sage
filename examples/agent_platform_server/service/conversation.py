@@ -5,13 +5,13 @@
 """
 
 import os
-import math
 from typing import Optional, Dict, Any, List, Tuple
 
 from sagents.utils.logger import logger
 from sagents.context.session_context import get_session_context
 from common.exceptions import SageHTTPException
-from models.conversation import ConversationDao, Conversation
+import models
+from core.globals import get_all_active_sessions_service_map
 
 
 async def interrupt_session(
@@ -159,9 +159,9 @@ async def get_conversations_paginated(
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
-) -> Tuple[List[Conversation], int]:
+) -> Tuple[List[models.Conversation], int]:
     """分页获取会话列表并构造响应字典"""
-    dao = ConversationDao()
+    dao = models.ConversationDao()
     conversations, total_count = await dao.get_conversations_paginated(
         page=page,
         page_size=page_size,
@@ -175,7 +175,7 @@ async def get_conversations_paginated(
 
 async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
-    dao = ConversationDao()
+    dao = models.ConversationDao()
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
@@ -203,7 +203,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
 
 async def delete_conversation(conversation_id: str) -> str:
     """删除指定对话，返回 conversation_id"""
-    dao = ConversationDao()
+    dao = models.ConversationDao()
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
@@ -221,26 +221,3 @@ async def delete_conversation(conversation_id: str) -> str:
         )
     logger.info(f"会话 {conversation_id} 删除成功")
     return conversation_id
-
-
-async def _create_conversation_title(request):
-    """创建会话标题（从首条用户消息提取前50字符，兼容多模态）"""
-    if not getattr(request, "messages", None) or len(request.messages) == 0:
-        return "新会话"
-
-    first_message = request.messages[0].content
-    if isinstance(first_message, str):
-        return first_message[:50] + "..." if len(first_message) > 50 else first_message
-    elif isinstance(first_message, list) and len(first_message) > 0:
-        # 如果是多模态消息，尝试提取文本内容
-        for item in first_message:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text_content = item.get("text", "")
-                return (
-                    text_content[:50] + "..."
-                    if len(text_content) > 50
-                    else text_content
-                )
-        return "多模态消息"
-    else:
-        return "新会话"

@@ -23,6 +23,7 @@ class StartupConfig:
     workspace: str = "agent_workspace"
     memory_root: Optional[str] = None
     force_summary: bool = False
+    no_auth: bool = False  # 无认证模式，根据入参用户id获取数据
 
     # DB
     db_type: str = "file"  # file | memory | mysql
@@ -90,6 +91,7 @@ class ENV:
     DAEMON = "SAGE_DAEMON"
     PID_FILE = "SAGE_PID_FILE"
     FORCE_SUMMARY = "SAGE_FORCE_SUMMARY"
+    NO_AUTH = "SAGE_NO_AUTH"
 
     # 数据库
     DB_TYPE = "SAGE_DB_TYPE"
@@ -410,6 +412,7 @@ def build_startup_config() -> StartupConfig:
         workspace=pick_str(args.workspace, ENV.WORKSPACE, "agent_workspace"),
         memory_root=pick_str(args.memory_root, ENV.MEMORY_ROOT),
         force_summary=pick_bool(args.force_summary, ENV.FORCE_SUMMARY, False),
+        no_auth=pick_bool(False, ENV.NO_AUTH, False),
         db_type=pick_str(args.db_type, ENV.DB_TYPE, "file"),
         db_path=pick_str(args.db_path, ENV.DB_PATH, "./data/"),
         mysql_host=pick_str(args.mysql_host, ENV.MYSQL_HOST, "127.0.0.1"),
@@ -463,7 +466,8 @@ def get_startup_config() -> StartupConfig:
     return _GLOBAL_STARTUP_CONFIG
 
 
-def init_startup_config():
+def init_startup_config() -> StartupConfig:
     global _GLOBAL_STARTUP_CONFIG
     cfg = build_startup_config()
     _GLOBAL_STARTUP_CONFIG = cfg
+    return cfg

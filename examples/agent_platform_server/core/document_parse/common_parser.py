@@ -5,8 +5,7 @@ from typing import List, Dict
 from .base import BaseParser
 
 from core.kb.knowledge_base import DocumentService, DocumentInput
-from models.file import FileDao, File
-from models.kdb_doc import KdbDoc
+import models
 from utils.id import gen_id
 from sagents.utils.logger import logger
 
@@ -28,7 +27,7 @@ ALLOW_ATTACH_FILE_EXTS = {
 
 
 class CommonParser(BaseParser):
-    async def clear_old(self, index_name: str, doc: KdbDoc) -> None:
+    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> None:
         ids: List[str] = [doc.id]
         md = doc.meta_data or {}
         atts = md.get("attachments")
@@ -42,8 +41,8 @@ class CommonParser(BaseParser):
             f"[CommonParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
         )
 
-    async def process(self, index_name: str, doc: KdbDoc, file: File):
-        file_dao = FileDao()
+    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File):
+        file_dao = models.FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, _ = await self.convert_file_to_text(file.path)
         docs: List[DocumentInput] = []
@@ -64,7 +63,7 @@ class CommonParser(BaseParser):
             md.get("attachments", []) if isinstance(md.get("attachments"), list) else []
         )
         if attach_ids:
-            attach_map: Dict[str, File] = await file_dao.get_by_ids(attach_ids)
+            attach_map: Dict[str, models.File] = await file_dao.get_by_ids(attach_ids)
             logger.info(f"[CommonParser] 发现附件：数量={len(attach_map)}")
             for att in attach_map.values():
                 if att.extension not in ALLOW_ATTACH_FILE_EXTS:

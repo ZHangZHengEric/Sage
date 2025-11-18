@@ -12,7 +12,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from sagents.utils.logger import logger
 from common.exceptions import SageHTTPException
-from config.settings import get_startup_config
+from common.render import Response
+import config
 
 # 创建路由器
 file_server_router = APIRouter()
@@ -117,13 +118,13 @@ DIRECTORY_TEMPLATE = """
 def get_workspace_path():
     """获取工作空间路径"""
 
-    return get_startup_config().workspace
+    return config.get_startup_config().workspace
 
 
 def get_logs_path():
     """获取日志目录路径"""
 
-    return get_startup_config().logs_dir
+    return config.get_startup_config().logs_dir
 
 
 def format_file_size(size_bytes: int) -> str:
@@ -533,7 +534,7 @@ async def get_file_server_info():
     workspace_path = get_workspace_path()
     logs_path = get_logs_path()
 
-    return create_success_response(
+    return Response.succ(
         message="文件服务器信息",
         data={
             "workspace": {

@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import (
 from sagents.utils.logger import logger
 from common.exceptions import SageHTTPException
 from config.settings import StartupConfig
-from models.base import Base
 
 
 class SessionManager:
@@ -94,9 +93,7 @@ class SessionManager:
                     expire_on_commit=False,
                 )
 
-                async with self._engine.begin() as conn:
-                    await conn.run_sync(Base.metadata.create_all)
-                logger.debug(f"数据库初始化完成 ({self._engine_name})")
+                logger.debug(f"数据库连接初始化完成 ({self._engine_name})")
 
         except Exception as e:
             logger.error(f"数据库初始化失败: {e}")

@@ -5,14 +5,14 @@ from typing import Any, Dict
 
 from sagents.utils.logger import logger
 from sagents.tool.file_parser.file_parser import FileParser
-from models.kdb_doc import KdbDoc
+import models
 
 
 class BaseParser:
-    async def clear_old(self, index_name: str, doc: KdbDoc) -> None:
+    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> None:
         logger.info(f"[Parser] clear_old: index_name={index_name}, doc_id={doc.id}")
 
-    async def process(self, index_name: str, doc: KdbDoc) -> None:
+    async def process(self, index_name: str, doc: models.KdbDoc) -> None:
         logger.info(f"[Parser] process: index_name={index_name}, doc_id={doc.id}")
 
     async def convert_file_to_text(

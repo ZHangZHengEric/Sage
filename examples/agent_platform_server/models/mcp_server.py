@@ -33,23 +33,6 @@ class MCPServer(Base):
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "config": self.config,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MCPServer":
-        return cls(
-            name=data["name"],
-            config=data["config"],
-            created_at=data.get("created_at"),
-            updated_at=data.get("updated_at"),
-        )
-
 
 class MCPServerDao(BaseDao):
     """
@@ -57,50 +40,27 @@ class MCPServerDao(BaseDao):
     """
 
     async def get_by_name(self, name: str) -> Optional["MCPServer"]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            obj = await session.get(MCPServer, name)
-            return obj
+        return await BaseDao.get_by_id(self, MCPServer, name)
 
-    async def get_all(self) -> List["MCPServer"]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = select(MCPServer).order_by(MCPServer.created_at)
-            res = await session.execute(stmt)
-            return [o for o in res.scalars().all()]
-
-    async def get_all_by_user(self, user_id: str) -> List["MCPServer"]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            stmt = (
-                select(MCPServer)
-                .where(MCPServer.user_id == user_id)
-                .order_by(MCPServer.created_at)
-            )
-            res = await session.execute(stmt)
-            return [o for o in res.scalars().all()]
+    async def get_list(self, user_id: Optional[str] = None) -> List["MCPServer"]:
+        where = [MCPServer.user_id == user_id] if user_id else None
+        return await BaseDao.get_list(self, MCPServer, where=where, order_by=MCPServer.created_at)
 
     async def delete_by_name(self, name: str) -> bool:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            obj = await session.get(MCPServer, name)
-            if obj:
-                await session.delete(obj)
-                return True
-            return False
+        return await BaseDao.delete_by_id(self, MCPServer, name)
 
-    async def save_mcp_server(self, name: str, config: Dict[str, Any], user_id: Optional[str] = None) -> MCPServer:
+    async def save_mcp_server(
+        self, name: str, config: Dict[str, Any], user_id: Optional[str] = None
+    ) -> MCPServer:
         db = await self._get_db()
         async with db.get_session() as session:
             existing = await session.get(MCPServer, name)
             now = datetime.now()
             if existing:
-                # 合并更新配置，保留未提供的现有字段
                 existing.config = config
                 existing.updated_at = now
                 if user_id:
                     existing.user_id = user_id
-                # 使用 merge 确保改动被持久化
                 await session.merge(existing)
                 return existing
             else:

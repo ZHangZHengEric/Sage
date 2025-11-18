@@ -13,10 +13,10 @@ from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 from sagents.tool.tool_proxy import ToolProxy
 
 import core.globals as global_vars
-from config.settings import get_startup_config as kb_get_startup_config
+import config
+import models
 
 from common.exceptions import SageHTTPException
-from models.agent import Agent, AgentConfigDao
 from core.client.llm import get_chat_client
 
 # ================= 工具函数 =================
@@ -30,10 +30,10 @@ def generate_agent_id() -> str:
 # ================= 业务函数 =================
 
 
-async def list_agents(user_id: str) -> List[Agent]:
+async def list_agents(user_id: str) -> List[models.Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
-    dao = AgentConfigDao()
-    all_configs = await dao.get_all_by_user(user_id)
+    dao = models.AgentConfigDao()
+    all_configs = await dao.get_list(user_id)
     return all_configs
 
 
@@ -44,7 +44,7 @@ async def create_agent(
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
 
-    dao = AgentConfigDao()
+    dao = models.AgentConfigDao()
     existing_config = await dao.get_by_name_and_user(agent_name, user_id)
     if existing_config:
         raise SageHTTPException(
@@ -52,17 +52,17 @@ async def create_agent(
             detail=f"Agent '{agent_name}' 已存在",
             error_detail=f"Agent '{agent_name}' 已存在",
         )
-    orm_obj = Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+    orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     orm_obj.user_id = user_id
     await dao.save(orm_obj)
     logger.info(f"Agent {agent_id} 创建成功")
     return agent_id
 
 
-async def get_agent(agent_id: str, user_id: Optional[str] = None) -> Agent:
+async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agent:
     """根据 ID 获取 Agent 配置并转换为响应结构"""
     logger.info(f"获取Agent配置: {agent_id}")
-    dao = AgentConfigDao()
+    dao = models.AgentConfigDao()
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
@@ -84,7 +84,7 @@ async def update_agent(
 ) -> str:
     """更新指定 Agent 的配置，返回 agent_id"""
     logger.info(f"开始更新Agent: {agent_id}")
-    dao = AgentConfigDao()
+    dao = models.AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -98,7 +98,7 @@ async def update_agent(
             detail="无权更新该Agent",
             error_detail="forbidden",
         )
-    orm_obj = Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+    orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     # 保留原始创建时间
     orm_obj.created_at = existing_config.created_at
     orm_obj.user_id = user_id
@@ -110,7 +110,7 @@ async def update_agent(
 async def delete_agent(agent_id: str, user_id: str) -> str:
     """删除指定 Agent，返回 agent_id"""
     logger.info(f"开始删除Agent: {agent_id}")
-    dao = AgentConfigDao()
+    dao = models.AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
@@ -135,7 +135,7 @@ async def auto_generate_agent(
     """自动生成 Agent 配置"""
     logger.info(f"开始自动生成Agent: {agent_description}")
     model_client = get_chat_client()
-    server_args = kb_get_startup_config()
+    server_args = config.get_startup_config()
 
     auto_gen_func = AutoGenAgentFunc()
 
@@ -171,7 +171,7 @@ async def optimize_system_prompt(
     """优化系统提示词"""
     logger.info("开始优化系统提示词")
     model_client = get_chat_client()
-    server_args = kb_get_startup_config()
+    server_args = config.get_startup_config()
 
     optimizer = SystemPromptOptimizer()
     optimized_prompt = optimizer.optimize_system_prompt(
