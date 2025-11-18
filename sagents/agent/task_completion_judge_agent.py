@@ -62,7 +62,7 @@ class TaskCompletionJudgeAgent(AgentBase):
         ]
         message_id = str(uuid.uuid4())
         all_content = ''
-        for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
+        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
                                              step_name="task_completion_judge"):
             if len(llm_repsonse_chunk.choices) == 0:
