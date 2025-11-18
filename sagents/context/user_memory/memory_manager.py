@@ -7,9 +7,7 @@ Date: 2024-12-21
 """
 
 import traceback
-from typing import Dict, List, Union
-from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_proxy import ToolProxy
+from typing import Dict, List, Union, Any
 from sagents.utils.logger import logger
 from .memory_types import MemoryEntry, MemoryType
 from datetime import datetime
@@ -23,7 +21,7 @@ class UserMemoryManager:
     以user_id为索引，自动选择最佳的记忆工具实现。
     """
 
-    def __init__(self, user_id: str, tool_manager: Union[ToolManager, ToolProxy] = None):
+    def __init__(self, user_id: str, tool_manager: Any = None):
         """
         初始化用户记忆管理器
 
