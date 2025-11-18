@@ -186,7 +186,7 @@ Sage includes several powerful tool systems that require specific dependencies:
 - **Core Framework**: `openai`, `pydantic`, `python-dotenv`
 - **Tool System**: `chardet`, `docstring_parser`, `requests`, `httpx`
 - **MCP Support**: `mcp`, `fastmcp` 
-- **Web Interface**: `fastapi`, `uvicorn`, `websockets`
+- **Web Interface**: `fastapi`, `uvicorn`
 - **Demo Applications**: `streamlit`, `gradio`
 
 All dependencies are automatically managed by the installation script.

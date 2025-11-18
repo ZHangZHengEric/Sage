@@ -16,10 +16,11 @@ from pydantic import BaseModel
 from service.sage_stream_service import SageStreamService
 from config.settings import StartupConfig
 from sagents.utils.logger import logger
-import core.globals as global_vars
-from config.settings import get_startup_config as kb_get_startup_config
-from models.conversation import ConversationDao
+import models
 from core.client.llm import get_chat_client
+import core.globals as global_vars
+
+import config
 
 # 创建路由器
 stream_router = APIRouter()
@@ -129,7 +130,7 @@ def _setup_stream_service(request: StreamRequest):
     # 清理LLM模型配置
     if request.llm_model_config:
         request.llm_model_config = _clean_llm_model_config(request.llm_model_config)
-    server_args = kb_get_startup_config()
+    server_args = config.get_startup_config()
     model_client = _create_model_client(request.llm_model_config, server_args)
     llm_model_config = _build_llm_model_config(request.llm_model_config, server_args)
     max_model_len = request.llm_model_config.get(
@@ -304,7 +305,7 @@ async def _create_conversation_title(request):
 async def _save_conversation_if_needed(
     session_id, request, message_collector, message_order
 ):
-    conversation_dao = ConversationDao()
+    conversation_dao = models.ConversationDao()
     """如果需要，保存新会话"""
     messages = []
     existing_conversation = await conversation_dao.get_by_session_id(session_id)
