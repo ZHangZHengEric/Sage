@@ -91,7 +91,7 @@ async def index_exists(index_name: str) -> bool:
 
 async def index_delete(index_name: str) -> None:
     es_client = get_es_client()
-    await es_client.indices.delete(index=index_name, ignore=[404])
+    await es_client.indices.delete(index=index_name, ignore_unavailable=True)
 
 
 async def index_clear(index_name: str) -> None:
@@ -107,7 +107,7 @@ async def document_insert(index_name: str, docs: List[Dict[str, Any]]) -> None:
     es_client = get_es_client()
     chunk_size = 1000
     for i in range(0, len(docs), chunk_size):
-        chunk = docs[i : i + chunk_size]
+        chunk = docs[i: i + chunk_size]
         actions = [{"_index": index_name, "_source": doc} for doc in chunk]
         await helpers.async_bulk(es_client, actions)
 

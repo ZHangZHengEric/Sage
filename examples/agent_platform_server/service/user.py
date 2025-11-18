@@ -4,8 +4,8 @@ import jwt
 from argon2 import PasswordHasher
 from argon2 import exceptions as argon2_exceptions
 from sagents.utils.logger import logger
-from config.settings import get_startup_config
-from models.user import User, UserDao
+import config
+import models
 from utils.id import gen_id
 from common.exceptions import SageHTTPException
 
@@ -27,8 +27,8 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def _gen_tokens(user: User) -> Tuple[str, str, int]:
-    cfg = get_startup_config()
+def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
+    cfg = config.get_startup_config()
     exp_seconds = int(cfg.jwt_expire_hours) * 60 * 60
     now = int(time.time())
     access_claims = {
@@ -52,7 +52,7 @@ def _gen_tokens(user: User) -> Tuple[str, str, int]:
 
 
 def parse_access_token(token: str) -> Optional[dict]:
-    cfg = get_startup_config()
+    cfg = config.get_startup_config()
     try:
         claims = jwt.decode(token, cfg.jwt_key, algorithms=["HS256"])
         return claims
@@ -67,7 +67,7 @@ def parse_access_token(token: str) -> Optional[dict]:
 
 
 def parse_refresh_token(token: str) -> Optional[dict]:
-    cfg = get_startup_config()
+    cfg = config.get_startup_config()
     try:
         claims = jwt.decode(token, cfg.refresh_token_secret, algorithms=["HS256"])
         return claims
@@ -83,7 +83,7 @@ async def register_user(
     email: Optional[str] = None,
     phonenum: Optional[str] = None,
 ) -> str:
-    dao = UserDao()
+    dao = models.UserDao()
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
@@ -97,7 +97,7 @@ async def register_user(
             )
     user_id = gen_id()
     password_hash = _hash_password(password)
-    user = User(
+    user = models.User(
         user_id=user_id,
         username=username,
         password_hash=password_hash,
@@ -110,7 +110,7 @@ async def register_user(
 
 
 async def login_user(username_or_email: str, password: str) -> Tuple[str, str, int]:
-    dao = UserDao()
+    dao = models.UserDao()
     user = await dao.get_by_username(username_or_email)
     if not user and "@" in username_or_email:
         user = await dao.get_by_email(username_or_email)
