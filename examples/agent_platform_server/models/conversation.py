@@ -156,13 +156,13 @@ class ConversationDao(BaseDao):
             if not ids:
                 return [], total
 
-            # Step 2: 使用批量 session_id 查询完整字段，并使用相同排序保证顺序一致
+            # Step 2: 使用批量 session_id 查询完整字段，不使用 SQL 排序
             data_stmt = select(Conversation).where(Conversation.session_id.in_(ids))
-            if order is not None:
-                data_stmt = data_stmt.order_by(order)
-
             res = await session.execute(data_stmt)
             items = list(res.scalars().all())
+            # 在应用层按照第一步的 ids 顺序进行排序，避免 SQL order_by
+            order_index = {sid: idx for idx, sid in enumerate(ids)}
+            items.sort(key=lambda x: order_index.get(x.session_id, len(order_index)))
             return items, total
 
     async def delete_conversation(self, session_id: str) -> bool:
