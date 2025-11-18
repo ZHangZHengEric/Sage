@@ -3,9 +3,8 @@ from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.routing import Mount, Host
 import uvicorn
-from typing import List, Dict, Any,Union
+from typing import List, Dict, Any, Union
 import argparse
-from openai import OpenAI
 import json
 import pypandoc
 from pathlib import Path
@@ -24,14 +23,16 @@ parser.add_argument('--api_key', type=str, help='serper API Key')
 args = parser.parse_args()
 
 # 返回提取的内容，以及内容的长度
+
+
 @mcp.tool()
 async def search_web_page(
-    query: str, 
+    query: str,
     date_range: str = None,
     count: int = 10,
-    page_index:int=1,
-    country:str = None,
-    language:str = None,
+    page_index: int = 1,
+    country: str = None,
+    language: str = None,
 ) -> str:
     """
     Search the web using the google API. 
@@ -72,7 +73,7 @@ async def search_web_page(
             payload["tbs"] = date_range
         if count:
             payload["num"] = count
-        if page_index>1:
+        if page_index > 1:
             payload["page"] = page_index
         if country:
             payload["gl"] = country
@@ -92,7 +93,7 @@ async def search_web_page(
             response.raise_for_status()
             data = response.json()
             # print(f'search response: {data}')
-            
+
             if "organic" not in data:
                 return "No results found."
 
@@ -113,8 +114,10 @@ async def search_web_page(
         return f"Error communicating with Bocha Web Search API: {str(e)}"
     except Exception as e:
         return f"Unexpected error: {str(e)}"
+
+
 @mcp.tool()
-async def search_image_from_web(query: str, date_range: str = None,country:str = None,count: int = 10):
+async def search_image_from_web(query: str, date_range: str = None, country: str = None, count: int = 10):
     """ this tool is used to search images from web.
     The results are returned in a list of dictionaries, each dictionary contains the following keys:
         title: The title of the image
@@ -136,7 +139,7 @@ async def search_image_from_web(query: str, date_range: str = None,country:str =
         )
     # Endpoint
     url = "https://google.serper.dev/images"
-    
+
     try:
         payload = {
             "q": query,
@@ -160,7 +163,7 @@ async def search_image_from_web(query: str, date_range: str = None,country:str =
             response.raise_for_status()
             data = response.json()
             # print(f'search response: {data}')
-            
+
             if "images" not in data:
                 return "No results found."
 
@@ -190,7 +193,5 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=34011)
     # result  =  asyncio.run(web_search("长跑运动中需要关注的指标"))
     # print(result)
-    
-    
 
     # mcp.run(transport='stdio')

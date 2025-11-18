@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from typing import Optional, List
-from openai import OpenAI, AsyncOpenAI
+from openai import AsyncOpenAI
 from config.settings import StartupConfig
 from sagents.utils.logger import logger
 
-MODEL_CLIENT: Optional[OpenAI] = None
+MODEL_CLIENT: Optional[AsyncOpenAI] = None
 MODEL_NAME: Optional[str] = None
 
 EMBED_CLIENT: Optional[AsyncOpenAI] = None
@@ -14,7 +14,7 @@ EMBEDDING_DIMS: int = 1024
 CHUNK_SIZE = 10
 
 
-async def init_chat_client(cfg: Optional[StartupConfig] = None) -> OpenAI:
+async def init_chat_client(cfg: Optional[StartupConfig] = None) -> AsyncOpenAI:
     global MODEL_CLIENT, MODEL_NAME
     if MODEL_CLIENT is not None:
         return MODEL_CLIENT
@@ -31,13 +31,13 @@ async def init_chat_client(cfg: Optional[StartupConfig] = None) -> OpenAI:
         )
         return None
 
-    MODEL_CLIENT = OpenAI(api_key=api_key, base_url=base_url)
+    MODEL_CLIENT = AsyncOpenAI(api_key=api_key, base_url=base_url)
     MODEL_CLIENT.model = model_name
     MODEL_NAME = model_name
     return MODEL_CLIENT
 
 
-def get_chat_client() -> OpenAI:
+def get_chat_client() -> AsyncOpenAI:
     global MODEL_CLIENT
     if MODEL_CLIENT is None:
         raise RuntimeError("Model client not initialized")

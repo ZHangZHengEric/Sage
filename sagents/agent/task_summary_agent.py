@@ -1,17 +1,16 @@
 
-import traceback
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, Generator
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_base import AgentToolSpec
+
 from sagents.utils.prompt_manager import PromptManager
-import json
 import uuid
 from copy import deepcopy
+
 
 class TaskSummaryAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
@@ -23,16 +22,16 @@ class TaskSummaryAgent(AgentBase):
     async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
-        
+
         # 提取任务描述
         if 'task_rewrite' in session_context.audit_status:
             task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
                 role=MessageRole.USER.value,
-                content = session_context.audit_status['task_rewrite'],
+                content=session_context.audit_status['task_rewrite'],
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3,max_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=3, max_length=self.max_history_context_length)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         task_manager_status_and_results = task_manager.get_all_tasks_summary()
@@ -40,7 +39,7 @@ class TaskSummaryAgent(AgentBase):
         completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(task_manager_status_and_results)))
         completed_actions_messages.append(message_manager.get_last_observation_message())
         completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
-        
+
         # 使用PromptManager获取模板，传入语言参数
         summary_template = PromptManager().get_agent_prompt_auto("task_summary_template", language=session_context.get_language())
         prompt = summary_template.format(
@@ -58,11 +57,11 @@ class TaskSummaryAgent(AgentBase):
                 message_type=MessageType.FINAL_ANSWER.value
             )
         ]
-        
+
         message_id = str(uuid.uuid4())
-        for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
-                                             session_id=session_id,
-                                             step_name="final_answer"):
+        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
+                                                                 session_id=session_id,
+                                                                 step_name="final_answer"):
             if len(llm_repsonse_chunk.choices) == 0:
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:
