@@ -73,7 +73,7 @@ class TaskAnalysisAgent(AgentBase):
             )
         ]
         all_analysis_chunks_content=  ''
-        for llm_repsonse_chunk in self._call_llm_streaming(
+        async for llm_repsonse_chunk in self._call_llm_streaming(
             messages=llm_request_message,
             session_id=session_id,
             step_name="task_analysis",

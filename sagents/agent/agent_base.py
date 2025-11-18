@@ -1,34 +1,31 @@
 from abc import ABC, abstractmethod
-from math import log
-from tracemalloc import stop
 from typing import List, Dict, Any, Optional, Generator, Union
-import re,json
-import uuid
-import time
-from httpx import request
+import json
 from sagents.utils.logger import logger
 from sagents.utils.stream_format import merge_stream_response_to_non_stream_response
 from sagents.tool.tool_base import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import get_session_context, SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-import traceback,os
-from openai import OpenAI
+import traceback
+import os
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
-from openai.types.chat.chat_completion_chunk import Choice,ChoiceDelta
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
+
 
 class AgentBase(ABC):
     """
     智能体基类
-    
+
     为所有智能体提供通用功能和接口，包括消息处理、工具转换、
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Optional[OpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = "", max_model_len: int = 64000):
+    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = "", max_model_len: int = 64000):
         """
         初始化智能体基类
-        
+
         Args:
             model: 可执行的语言模型实例
             model_config: 模型配置参数
@@ -45,52 +42,52 @@ class AgentBase(ABC):
         self.max_history_context_length = int(self.max_model_input_len // 2)
 
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大上下文长度: {self.max_model_len}, 最大输入长度: {self.max_model_input_len}, 最大历史上下文长度: {self.max_history_context_length}")
-    
+
     def to_tool(self) -> AgentToolSpec:
         """
         将智能体转换为工具格式
-        
+
         Returns:
             AgentToolSpec: 包含智能体运行方法的工具规范
         """
         logger.debug(f"AgentBase: 将 {self.__class__.__name__} 转换为工具格式")
-        
+
         tool_spec = AgentToolSpec(
             name=self.__class__.__name__,
             description=self.agent_description + '\n\n Agent类型的工具，可以自动读取历史对话，所需不需要运行的参数',
-            func=self.run,
+            func=self.run_stream,
             parameters={},
             required=[]
         )
-        
+
         return tool_spec
 
     @abstractmethod
-    async def run_stream(self, 
-                   session_context: SessionContext, 
-                   tool_manager: ToolManager = None,
-                   session_id: str = None,
-                   ) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self,
+                         session_context: SessionContext,
+                         tool_manager: ToolManager = None,
+                         session_id: str = None,
+                         ) -> Generator[List[MessageChunk], None, None]:
         """
         流式处理消息的抽象方法
-        
+
         Args:
             session_context: 会话上下文
             tool_manager: 可选的工具管理器
             session_id: 会话ID
-            
+
         Yields:
             List[MessageChunk]: 流式输出的消息块
         """
         pass
-    
+
     def _remove_tool_call_without_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         移除assistant 是tool call 但是在messages中其他的role 为tool 的消息中没有对应的tool call id
-        
+
         Args:
             messages: 输入消息列表
-            
+
         Returns:
             List[Dict[str, Any]]: 移除了没有对应 tool_call_id 的tool call 消息
         """
@@ -107,23 +104,23 @@ class AgentBase(ABC):
                     continue
             new_messages.append(msg)
         return new_messages
-    
-    def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
+
+    async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
         """
         通用的流式模型调用方法，有这个封装，主要是为了将
         模型调用和日志记录等功能统一起来，以及token 的记录等，方便后续的维护和扩展。
-        
+
         Args:
             messages: 输入消息列表
             session_id: 会话ID（用于请求记录）
             step_name: 步骤名称（用于请求记录）
             model_config_override: 覆盖模型配置（用于工具调用等）
-            
+
         Returns:
             Generator: 语言模型的流式响应
         """
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
-        
+
         # 确定最终的模型配置
         final_config = {**self.model_config}
         if model_config_override:
@@ -139,9 +136,9 @@ class AgentBase(ABC):
                     serializable_messages.append(msg.to_dict())
                 else:
                     serializable_messages.append(msg)
-            
+
             # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
-            serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls','tool_call_id']} for msg in serializable_messages]
+            serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
             # print("serializable_messages:",serializable_messages)
             # 确保所有的messages 中都包含role 和 content
             for msg in serializable_messages:
@@ -150,33 +147,31 @@ class AgentBase(ABC):
                 if 'content' not in msg:
                     msg['content'] = ''
 
-
             logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成，模型配置: {final_config}")
-            
+
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
-            
-            stream = self.model.chat.completions.create(
+
+            stream = await self.model.chat.completions.create(
                 messages=serializable_messages,
                 stream=True,
                 stream_options={"include_usage": True},
                 extra_body={
                     "chat_template_kwargs": {"enable_thinking": False},
-                    "enable_thinking":False,
-                    "thinking":{'type':"disabled"},
-                    "top_k":20
+                    "enable_thinking": False,
+                    "thinking": {'type': "disabled"},
+                    "top_k": 20
                 },
                 **final_config
             )
-            # 直接yield chunks，不再收集用于日志记录
-            for chunk in stream:
+            async for chunk in stream:
                 # print(chunk)
                 all_chunks.append(chunk)
                 yield chunk
 
         except Exception as e:
             logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
-            all_chunks.append( ChatCompletionChunk(
+            all_chunks.append(ChatCompletionChunk(
                 id="",
                 object="chat.completion.chunk",
                 created=0,
@@ -192,7 +187,7 @@ class AgentBase(ABC):
                     )
                 ],
                 usage=None,
-            ) )
+            ))
             raise e
         finally:
             # 将次请求记录在session context 中的llm调用记录中
@@ -207,38 +202,38 @@ class AgentBase(ABC):
                 }
                 # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                 try:
-                    llm_response =  merge_stream_response_to_non_stream_response(all_chunks)
+                    llm_response = merge_stream_response_to_non_stream_response(all_chunks)
                 except:
                     logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
                     logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
                     llm_response = None
-                session_context.add_llm_request(llm_request,llm_response)
+                session_context.add_llm_request(llm_request, llm_response)
 
     def prepare_unified_system_message(self,
-                                     session_id: Optional[str] = None,
-                                     custom_prefix: Optional[str] = None) -> MessageChunk:
+                                       session_id: Optional[str] = None,
+                                       custom_prefix: Optional[str] = None) -> MessageChunk:
         """
         准备统一的系统消息
-        
+
         Args:
             session_id: 会话ID
             custom_prefix: 自定义前缀,会添加到system_prefix 后面，system context 前面
-            
+
         Returns:
             MessageChunk: 系统消息
         """
-        system_prefix  = ""
+        system_prefix = ""
         if hasattr(self, 'SYSTEM_PREFIX_FIXED'):
-            system_prefix =  self.SYSTEM_PREFIX_FIXED
+            system_prefix = self.SYSTEM_PREFIX_FIXED
         else:
             if self.system_prefix:
                 system_prefix = self.system_prefix
             else:
                 system_prefix += f"\n你是一个{self.__class__.__name__}智能体。"
-            
+
         if custom_prefix:
-            system_prefix += custom_prefix +'\n'
-        
+            system_prefix += custom_prefix + '\n'
+
         # 根据session_id获取session_context
         if session_id:
             session_context = get_session_context(session_id)
@@ -280,27 +275,27 @@ class AgentBase(ABC):
             type=MessageType.SYSTEM.value
         )
 
-    def _judge_delta_content_type(self, 
-                                 delta_content: str, 
-                                 all_tokens_str: str, 
-                                 tag_type: List[str] = None) -> str:
+    def _judge_delta_content_type(self,
+                                  delta_content: str,
+                                  all_tokens_str: str,
+                                  tag_type: List[str] = None) -> str:
         if tag_type is None:
             tag_type = []
-            
+
         start_tag = [f"<{tag}>" for tag in tag_type]
         end_tag = [f"</{tag}>" for tag in tag_type]
-        
+
         # 构造结束标签的所有可能前缀
         end_tag_process_list = []
         for tag in end_tag:
             for i in range(len(tag)):
-                end_tag_process_list.append(tag[:i + 1])    
-        
+                end_tag_process_list.append(tag[:i + 1])
+
         last_tag = None
         last_tag_index = None
-        
+
         all_tokens_str = (all_tokens_str + delta_content).strip()
-        
+
         # 查找最后出现的标签
         for tag in start_tag + end_tag:
             index = all_tokens_str.rfind(tag)
@@ -308,13 +303,13 @@ class AgentBase(ABC):
                 if last_tag_index is None or index > last_tag_index:
                     last_tag = tag
                     last_tag_index = index
-        
+
         if last_tag is None:
             return "tag"
-            
+
         if last_tag in start_tag:
             if last_tag_index + len(last_tag) == len(all_tokens_str):
-                return 'tag'    
+                return 'tag'
             for end_tag_process in end_tag_process_list:
                 if all_tokens_str.endswith(end_tag_process):
                     return 'unknown'
@@ -322,4 +317,3 @@ class AgentBase(ABC):
                 return last_tag.replace('<', '').replace('>', '')
         elif last_tag in end_tag:
             return 'tag'
-

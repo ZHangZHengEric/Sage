@@ -9,7 +9,7 @@ import traceback
 import time
 from typing import Dict, Any, Optional, List, Union
 from fastapi import APIRouter, Request
-from openai import OpenAI
+from openai import AsyncOpenAI
 from common.exceptions import SageHTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -99,7 +99,7 @@ def _create_model_client(request_config: dict, server_args: StartupConfig):
         logger.info(
             f"初始化新的模型客户端，模型配置api_key: {api_key}, base_url: {base_url}, model: {model_name}"
         )
-        model_client = OpenAI(api_key=api_key, base_url=base_url)
+        model_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         model_client.model = model_name
     return model_client
 

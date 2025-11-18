@@ -6,7 +6,7 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession, Tool
 
-from .tool_config import McpToolSpec,SseServerParameters,StreamableHttpServerParameters, StdioServerParameters
+from .tool_config import McpToolSpec, SseServerParameters, StreamableHttpServerParameters, StdioServerParameters
 
 
 # 专用异常类型，用于更精确地区分失败原因
@@ -20,6 +20,7 @@ class McpInitializationError(Exception):
 
 class McpToolsRetrievalError(Exception):
     """MCP 工具列表获取失败（调用 session.list_tools() 时失败）"""
+
 
 class McpProxy:
 
@@ -45,7 +46,7 @@ class McpProxy:
             if isinstance(server_params, SseServerParameters):
                 return await self._get_mcp_tools_sse(server_name, server_params)
             elif isinstance(server_params, StreamableHttpServerParameters):
-                return await self._get_mcp_tools_streamable_http(server_name, server_params)  
+                return await self._get_mcp_tools_streamable_http(server_name, server_params)
             elif isinstance(server_params, StdioServerParameters):
                 return await self._get_mcp_tools_stdio(server_name, server_params)
             else:
@@ -67,16 +68,15 @@ class McpProxy:
                 result = await session.call_tool(tool.name, kwargs)
                 return result.model_dump()
 
-
     async def _execute_sse_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
         """Execute SSE MCP tool"""
-        headers= None
+        headers = None
         if tool.server_params.api_key:
             headers = {
                 "Authorization": f"Bearer {tool.server_params.api_key}",
                 "Content-Type": "application/json"
             }
-        async with sse_client(tool.server_params.url,headers=headers) as (read, write):
+        async with sse_client(tool.server_params.url, headers=headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool.name, kwargs)
@@ -89,7 +89,6 @@ class McpProxy:
                 await session.initialize()
                 result = await session.call_tool(tool.name, kwargs)
                 return result.model_dump()
-
 
     async def _get_mcp_tools_streamable_http(self, server_name: str, server_params: StreamableHttpServerParameters) -> List[Tool]:
         """Register tools from streamable HTTP MCP server"""
@@ -125,7 +124,15 @@ class McpProxy:
                         ) from list_err
         except BaseExceptionGroup as eg:
             # 解包并识别 HTTP 状态错误（如 502、503 等）
-            http_errors = [ex for ex in getattr(eg, "exceptions", []) if isinstance(ex, httpx.HTTPStatusError)]
+            exceptions = getattr(eg, "exceptions", None)
+            if exceptions is None:
+                exceptions = []
+            elif not isinstance(exceptions, (list, tuple)):
+                exceptions = [exceptions]
+
+            http_errors = [
+                ex for ex in exceptions if isinstance(ex, httpx.HTTPStatusError)
+            ]
             if http_errors:
                 first = http_errors[0]
                 status_code = getattr(getattr(first, "response", None), "status_code", None)
@@ -149,13 +156,13 @@ class McpProxy:
         """Register tools from SSE MCP server"""
 
         try:
-            headers= None
+            headers = None
             if server_params.api_key:
                 headers = {
                     "Authorization": f"Bearer {server_params.api_key}",
                     "Content-Type": "application/json"
                 }
-            async with sse_client(server_params.url,headers=headers) as (read, write):
+            async with sse_client(server_params.url, headers=headers) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     response = await session.list_tools()

@@ -16,7 +16,6 @@ async def mcp_lifespan(app):
         yield
 
 __all__ = [
-    "get_mcp_http_apps",
     "get_mcp_routes",
     "mcp_lifespan",
 ]
