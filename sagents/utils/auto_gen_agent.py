@@ -32,7 +32,7 @@ class AutoGenAgentFunc:
         """
         logger.info("AutoGenAgentFunc initialized")
 
-    def generate_agent_config(
+    async def generate_agent_config(
         self,
         agent_description: str,
         tool_manager: Union[ToolManager, ToolProxy],
@@ -63,7 +63,7 @@ class AutoGenAgentFunc:
             logger.info(f"获取到 {len(available_tools)} 个可用工具")
 
             # 生成基础配置
-            basic_config = self._generate_basic_config(agent_description, available_tools, llm_client, model)
+            basic_config = await self._generate_basic_config(agent_description, available_tools, llm_client, model)
             if not basic_config:
                 raise Exception("生成基础配置失败")
 
@@ -74,12 +74,12 @@ class AutoGenAgentFunc:
                 logger.info(f"使用ToolProxy中预选的工具: {selected_tools}")
             else:
                 # 如果是ToolManager，进行工具选择
-                selected_tools = self._select_tools(basic_config, available_tools, llm_client, model)
+                selected_tools = await self._select_tools(basic_config, available_tools, llm_client, model)
                 if selected_tools is None:
                     raise Exception("选择工具失败")
 
             # 生成工作流程
-            workflows = self._generate_workflows(basic_config, selected_tools, llm_client, model)
+            workflows = await self._generate_workflows(basic_config, selected_tools, llm_client, model)
             if workflows is None:
                 raise Exception("生成工作流程失败")
 
@@ -128,7 +128,7 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             return []
 
-    def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str) -> dict:
+    async def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str) -> dict:
         """
         生成基础配置（名称、描述、系统提示词等）
 
@@ -194,7 +194,7 @@ Agent描述：{description}
 """
 
             logger.debug("调用大模型生成基础配置")
-            response = self._call_llm(client, prompt, model)
+            response = await self._call_llm(client, prompt, model)
 
             # 解析响应
             try:
@@ -216,14 +216,14 @@ Agent描述：{description}
                 logger.error(f"原始响应: {response}")
                 logger.error(f"提取的JSON: {json_str if 'json_str' in locals() else 'N/A'}")
                 # 返回默认配置
-                return self._get_default_basic_config(description)
+                return await self._get_default_basic_config(description)
 
         except Exception as e:
             logger.error(f"生成基础配置失败: {str(e)}")
             logger.error(traceback.format_exc())
             return None
 
-    def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str) -> List[str]:
+    async def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str) -> List[str]:
         """
         根据Agent基础配置选择合适的工具
 
@@ -264,7 +264,7 @@ Agent系统提示词：
 """
 
             logger.debug("调用大模型选择工具")
-            response = self._call_llm(client, prompt, model)
+            response = await self._call_llm(client, prompt, model)
 
             try:
                 # 提取JSON内容
@@ -347,7 +347,7 @@ Agent系统提示词：
 """
 
             logger.debug("调用大模型生成工作流程")
-            response = self._call_llm(client, prompt, model)
+            response = await self._call_llm(client, prompt, model)
 
             try:
                 # 提取JSON内容
@@ -484,7 +484,7 @@ Agent系统提示词：
         # 如果都失败了，返回原始响应
         return response
 
-    def _call_llm(self, client, prompt: str, model: str) -> str:
+    async def _call_llm(self, client, prompt: str, model: str) -> str:
         """
         调用大模型API
 
@@ -511,7 +511,7 @@ Agent系统提示词：
             if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
                 logger.debug("使用OpenAI标准API调用")
                 # OpenAI客户端，使用标准调用方式
-                response = client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=actual_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=2000,
@@ -561,7 +561,7 @@ Agent系统提示词：
             logger.error(traceback.format_exc())
             raise
 
-    def _get_default_basic_config(self, description: str) -> Dict[str, Any]:
+    async def _get_default_basic_config(self, description: str) -> Dict[str, Any]:
         """获取默认的基础配置"""
         return {
             "name": "智能助手",

@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import sys
 import uvicorn
+import asyncio
 from fastapi import FastAPI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -41,6 +42,13 @@ async def initialize_system():
     await core.initialize_clients()
     # 4) 初始化数据库预置数据
     await core.initialize_data()
+
+
+async def post_initialize():
+    """服务启动后执行一次的后置任务"""
+    logger.info("正在执行 Sage Platform Server 启动后的后置任务...")
+    # 1) 初始化mcp
+    await core.initialize_mcp()
 
 
 async def cleanup_system():
@@ -96,6 +104,11 @@ async def app_lifespan(app: FastAPI):
         await initialize_system()
         init_scheduler()
         try:
+            async def _run_post_init():
+                await asyncio.sleep(0)
+                await post_initialize()
+
+            asyncio.create_task(_run_post_init())
             yield
         finally:
             await shutdown_scheduler()
@@ -130,6 +143,7 @@ def start_server(cfg: config.StartupConfig):
         log_level="debug",
         reload=False,
         factory=True,
+
     )
     if cfg.daemon:
         import daemon
