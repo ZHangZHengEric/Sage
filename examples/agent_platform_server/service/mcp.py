@@ -156,6 +156,7 @@ async def refresh_mcp_server(server_name: str) -> str:
         )
     await tm.remove_tool_by_mcp(server_name)
     server_config = existing_server.config
+    server_config["disabled"] = False
     success = await tm.register_mcp_server(server_name, server_config)
     if success:
         logger.info(f"MCP server {server_name} 刷新成功")

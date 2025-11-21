@@ -45,7 +45,19 @@
             <div class="conversation-info" @click="handleSelectConversation(conversation)">
               <div class="conversation-title-row">
                 <h3 class="conversation-title">{{ conversation.title }}</h3>
+                 <!-- 展示session_id并支持复制 -->
+                 
                 <div class="conversation-meta">
+ <span class="conversation-session-id">
+                    {{ conversation.session_id }}
+                    <button
+                      class="copy-session-id-btn"
+                      @click.stop="copySessionId(conversation)"
+                      :title="t('common.copy') || '复制'"
+                    >
+                      <Copy :size="12" />
+                    </button>
+                  </span>
                   <span class="conversation-date">
                     <Calendar :size="12" />
                     {{ formatDate(conversation.updated_at) }}
@@ -144,7 +156,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share } from 'lucide-vue-next'
+import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import { useLanguage } from '../utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '../utils/exporter.js'
@@ -270,6 +282,31 @@ const handleShareConversation = async (conversation) => {
   conversation.messages = response.messages || []
   shareConversation.value = conversation
   showShareModal.value = true
+}
+
+const copySessionId = async (conversation) => {
+  const text = conversation?.session_id || ''
+  if (!text) return
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      ElMessage.success('session_id已复制')
+      return
+    }
+  } catch (_) {}
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    ElMessage.success('session_id已复制')
+  } catch (e) {
+    ElMessage.error('复制失败')
+  }
 }
 
 const formatMessageForExport = (messages) => {
@@ -483,7 +520,7 @@ onMounted(async () => {
   align-items: center;
   flex-shrink: 0;
 }
-
+.conversation-session-id,
 .conversation-date,
 .conversation-time {
   display: flex;
@@ -491,6 +528,22 @@ onMounted(async () => {
   gap: 0.25rem;
   font-size: 0.75rem;
   color: rgba(72, 65, 65, 0.7);
+}
+
+.copy-session-id-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: #667eea;
+  cursor: pointer;
+}
+
+.copy-session-id-btn:hover {
+  text-decoration: underline;
 }
 
 .conversation-preview {
