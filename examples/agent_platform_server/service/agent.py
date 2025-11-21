@@ -147,7 +147,7 @@ async def auto_generate_agent(
         logger.info("使用完整的工具管理器")
         tool_manager_or_proxy = global_vars.get_tool_manager()
 
-    agent_config = auto_gen_func.generate_agent_config(
+    agent_config = await auto_gen_func.generate_agent_config(
         agent_description=agent_description,
         tool_manager=tool_manager_or_proxy,
         llm_client=model_client,
@@ -174,7 +174,7 @@ async def optimize_system_prompt(
     server_args = config.get_startup_config()
 
     optimizer = SystemPromptOptimizer()
-    optimized_prompt = optimizer.optimize_system_prompt(
+    optimized_prompt = await optimizer.optimize_system_prompt(
         current_prompt=original_prompt,
         optimization_goal=optimization_goal,
         model=server_args.default_llm_model_name,
