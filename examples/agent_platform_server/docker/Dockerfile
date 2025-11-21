@@ -5,26 +5,29 @@ RUN sed -i s@/deb.debian.org/@/mirrors.aliyun.com/@g /etc/apt/sources.list.d/deb
 WORKDIR /app
 
 # 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    build-essential \
-    libreoffice \
-    lsof \
-    pandoc \
-    ca-certificates \
-    tzdata \
-    upx \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        build-essential \
+        libreoffice \
+        fonts-noto-cjk \
+        lsof \
+        pandoc \
+        ca-certificates \
+        tzdata \
+        upx \
     && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime  \
-    && echo Asia/Shanghai > /etc/timezone
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # 复制 requirements.txt 文件
 COPY examples/agent_platform_server/requirements.txt .
 
 # 安装 Python 依赖
-RUN pip install  -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 COPY examples/agent_platform_server  /app/examples/agent_platform_server
 COPY sagents /app/sagents
