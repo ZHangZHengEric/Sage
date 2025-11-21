@@ -90,7 +90,10 @@ async def initialize_data():
     await initialize_db_data()
     # 5) 初始化工具管理器
     await initialize_tool_manager()
-    # 6) 初始化 MCP 服务器
+
+
+async def initialize_mcp():
+    """初始化 MCP 服务器"""
     await validate_and_disable_mcp_servers()
 
 
