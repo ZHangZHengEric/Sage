@@ -8,6 +8,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import get_session_context, SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 import traceback
+import time
 import os
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
@@ -130,6 +131,7 @@ class AgentBase(ABC):
         try:
             # 发起LLM请求
             # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
+            start_request_time = time.time()
             serializable_messages = []
             for msg in messages:
                 if isinstance(msg, MessageChunk):
@@ -191,6 +193,7 @@ class AgentBase(ABC):
             raise e
         finally:
             # 将次请求记录在session context 中的llm调用记录中
+            logger.info(f"{step_name}: 调用语言模型进行流式生成，耗时: {time.time() - start_request_time},返回{len(all_chunks)}个chunk")
             if session_id:
                 # 调用seesion manager 中获取llm logger，然后记录请求以及完整的响应
                 session_context = get_session_context(session_id)
