@@ -57,8 +57,8 @@ class SessionContext:
         self.status = SessionStatus.IDLE
         self.system_context = {}       # 当前系统的环境变量
         self.message_manager = MessageManager()
-        self.task_manager = TaskManager(session_id=self.session_id)
         from sagents.context.tasks.task_manager import TaskManager
+        self.task_manager = TaskManager(session_id=self.session_id)
         self.workflow_manager = WorkflowManager()  # 工作流管理器
         self.audit_status = {}  # 主要存储 agent 执行过程中保存的结构化信息
 
