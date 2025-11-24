@@ -8,7 +8,6 @@ from enum import Enum
 from openai import responses
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
-from sagents.context.tasks.task_manager import TaskManager
 from sagents.context.user_memory.memory_manager import UserMemoryManager
 from sagents.context.workflows import WorkflowManager
 from sagents.utils.logger import logger
@@ -59,6 +58,7 @@ class SessionContext:
         self.system_context = {}       # 当前系统的环境变量
         self.message_manager = MessageManager()
         self.task_manager = TaskManager(session_id=self.session_id)
+        from sagents.context.tasks.task_manager import TaskManager
         self.workflow_manager = WorkflowManager()  # 工作流管理器
         self.audit_status = {}  # 主要存储 agent 执行过程中保存的结构化信息
 
