@@ -46,6 +46,7 @@ class StreamRequest(BaseModel):
     available_tools: Optional[List[str]] = None
     force_summary: Optional[bool] = False
     agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
 
     def __init__(self, **data):
         super().__init__(**data)
