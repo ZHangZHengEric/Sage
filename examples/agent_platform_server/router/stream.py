@@ -46,7 +46,6 @@ class StreamRequest(BaseModel):
     available_tools: Optional[List[str]] = None
     force_summary: Optional[bool] = False
     agent_id: Optional[str] = None
-    agent_name: Optional[str] = None
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -351,6 +350,22 @@ async def stream_chat(request: StreamRequest, http_request: Request):
     if not request.user_id:
         request.user_id = req_user_id
     logger.info(f"Server: 请求参数: {request}")
+    # 用户有传agent_id，则根据agent_id查询agent配置并更新到request
+    if request.agent_id:
+        agent_dao = models.AgentConfigDao()
+        agent = await agent_dao.get_by_id(request.agent_id)
+        if agent and agent.config:
+            request.llm_model_config = agent.config.get("llm_model_config", {})
+            request.available_tools = agent.config.get("available_tools", [])
+            request.available_workflows = agent.config.get("available_workflows", {})
+            request.deep_thinking = agent.config.get("deep_thinking", False)
+            request.max_loop_count = agent.config.get("max_loop_count", 10)
+            request.multi_agent = agent.config.get("multi_agent", False)
+            request.more_suggest = agent.config.get("more_suggest", False)
+            request.system_context = agent.config.get("system_context", {})
+            request.system_prefix = agent.config.get("system_prefix", "")
+        else:
+            logger.warning(f"Agent {request.agent_id} not found")
     # 设置流式服务
     stream_service, session_id = _setup_stream_service(request)
 
