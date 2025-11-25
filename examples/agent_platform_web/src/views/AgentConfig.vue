@@ -452,7 +452,11 @@ const openUsageModal = async (agent) => {
   }
 }
 
-const backendEndpoint = import.meta.env.VITE_SAGE_BACKEND_ENDPOINT || ''
+const backendEndpoint = (
+  import.meta.env.VITE_SAGE_API_BASE_URL ||
+  import.meta.env.VITE_BACKEND_ENDPOINT ||
+  ''
+).replace(/\/+$/, '')
 
 const generateUsageCodes = (agent) => {
   const body = {
