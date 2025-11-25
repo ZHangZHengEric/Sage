@@ -67,6 +67,8 @@ export const zhCN = {
   'sidebar.knowledgeBaseManage': '知识库管理',
   'sidebar.langToggleZh': '中 / En',
   'sidebar.langToggleEn': 'En / 中',
+  'sidebar.apiReference': 'API参考',
+  'sidebar.apiAgentChat': 'Agent对话-api/stream',
   'auth.logout': '退出',
   
   // 聊天页面
@@ -534,6 +536,8 @@ export const enUS = {
   'sidebar.knowledgeBaseManage': 'Knowledge Base',
   'sidebar.langToggleZh': 'ZH / EN',
   'sidebar.langToggleEn': 'EN / ZH',
+  'sidebar.apiReference': 'API Reference',
+  'sidebar.apiAgentChat': 'Agent Chat - api/stream',
   'auth.logout': 'Logout',
   
   // 聊天页面
@@ -1030,4 +1034,3 @@ const translations = {
   zhCN: zhCN,
   enUS: enUS
 }
-
