@@ -94,12 +94,15 @@
 
   <!-- 调用示例弹框 -->
   <el-dialog v-model="showUsageModal" :title="usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例'" width="60%">
-    <el-tabs v-model="usageActiveTab">
-      <el-tab-pane label="cURL" name="curl" />
-      <el-tab-pane label="Python" name="python" />
-      <el-tab-pane label="Go" name="go" />
-      <el-tab-pane label="Java" name="java" />
-    </el-tabs>
+    <div class="usage-header">
+      <el-tabs v-model="usageActiveTab">
+        <el-tab-pane label="cURL" name="curl" />
+        <el-tab-pane label="Python" name="python" />
+        <el-tab-pane label="Go" name="go" />
+        <el-tab-pane label="Java" name="java" />
+      </el-tabs>
+      <el-button type="danger" plain class="usage-warning-btn">不同的会话要替换session_id为不同值。system_context 根据真实值替换</el-button>
+    </div>
     <div class="usage-code">
       <button class="copy-icon-btn" @click="copyUsageCode" title="复制">
         <Copy :size="16" />
@@ -736,6 +739,18 @@ const copyUsageCode = async () => {
 .usage-code {
   margin-top: 12px;
   position: relative;
+}
+
+.usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.usage-warning-btn {
+  white-space: nowrap;
 }
 
 .usage-code :deep(pre) {
