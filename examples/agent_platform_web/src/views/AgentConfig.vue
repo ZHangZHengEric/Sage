@@ -546,9 +546,32 @@ const copyUsageCode = async () => {
   const md = usageCodeMap.value[usageActiveTab.value] || ''
   const raw = md.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '')
   try {
-    await navigator.clipboard.writeText(raw)
-    ElMessage.success('代码已复制到剪贴板')
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(raw)
+      ElMessage.success('代码已复制到剪贴板')
+      return
+    }
+  } catch (_) {}
+
+  const ta = document.createElement('textarea')
+  ta.value = raw
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.left = '-9999px'
+  ta.style.top = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  try {
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    if (ok) {
+      ElMessage.success('代码已复制到剪贴板')
+    } else {
+      ElMessage.error('复制失败')
+    }
   } catch (e) {
+    document.body.removeChild(ta)
     ElMessage.error('复制失败')
   }
 }
