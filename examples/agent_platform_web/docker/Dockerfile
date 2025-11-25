@@ -3,6 +3,8 @@
 FROM docker.m.daocloud.io/node:22-alpine AS builder
 WORKDIR /app
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
+ARG SAGE_API_BASE_URL
+ENV VITE_SAGE_API_BASE_URL=$SAGE_API_BASE_URL
 RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
 
 # Install dependencies
