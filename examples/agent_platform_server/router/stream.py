@@ -357,15 +357,15 @@ async def stream_chat(request: StreamRequest, http_request: Request):
         agent = await agent_dao.get_by_id(request.agent_id)
         if agent and agent.config:
             request.agent_name = agent.name or "Sage Assistant"
-            request.llm_model_config = agent.config.get("llm_model_config", {})
-            request.available_tools = agent.config.get("available_tools", [])
-            request.available_workflows = agent.config.get("available_workflows", {})
-            request.deep_thinking = agent.config.get("deep_thinking", False)
-            request.max_loop_count = agent.config.get("max_loop_count", 10)
-            request.multi_agent = agent.config.get("multi_agent", False)
-            request.more_suggest = agent.config.get("more_suggest", False)
-            request.system_context = agent.config.get("system_context", {})
-            request.system_prefix = agent.config.get("system_prefix", "")
+            request.llm_model_config = agent.config.get("llmConfig", {})
+            request.available_tools = agent.config.get("availableTools", [])
+            request.available_workflows = agent.config.get("availableWorkflows", {})
+            request.deep_thinking = agent.config.get("deepThinking", False)
+            request.max_loop_count = agent.config.get("maxLoopCount", 10)
+            request.multi_agent = agent.config.get("multiAgent", False)
+            request.more_suggest = agent.config.get("moreSuggest", False)
+            request.system_context = agent.config.get("systemContext", {})
+            request.system_prefix = agent.config.get("systemPrefix", "")
         else:
             logger.warning(f"Agent {request.agent_id} not found")
     # 设置流式服务
