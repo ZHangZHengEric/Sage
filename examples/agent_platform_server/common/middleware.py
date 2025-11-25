@@ -14,6 +14,7 @@ import config
 WHITELIST_API_PATHS = frozenset(
     {
         "/api/health",
+        "/api/stream",
         "/api/user/login",
         "/api/user/register",
         "/api/files/workspace",
