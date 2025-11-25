@@ -355,6 +355,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
         agent_dao = models.AgentConfigDao()
         agent = await agent_dao.get_by_id(request.agent_id)
         if agent and agent.config:
+            request.agent_name = agent.name or "Sage Assistant"
             request.llm_model_config = agent.config.get("llm_model_config", {})
             request.available_tools = agent.config.get("available_tools", [])
             request.available_workflows = agent.config.get("available_workflows", {})
