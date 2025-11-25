@@ -29,7 +29,9 @@ export const messageTypeLabels = new Map([
   ['do_subtask_result', '执行结果'],
   ['rewrite', '重写'],
   ['query_suggest', '查询建议'],
-  ['chunk', '数据块']
+  ['chunk_start', '数据块开始'],
+  ['json_chunk', '数据块'],
+  ['chunk_end', '数据块结束']
 ])
 
 // 工具名称标签映射
