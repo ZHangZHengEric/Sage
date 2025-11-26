@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from .render import Response
 from .exceptions import SageHTTPException
 from service.user import parse_access_token
+import re
 
 import config
 
@@ -15,6 +16,8 @@ WHITELIST_API_PATHS = frozenset(
     {
         "/api/health",
         "/api/stream",
+        "/api/stream/submit_task",
+        "/api/stream/task_messages",
         "/api/user/login",
         "/api/user/register",
         "/api/files/workspace",
@@ -23,8 +26,32 @@ WHITELIST_API_PATHS = frozenset(
         "/api/files/logs",
         "/api/files/logs/download",
         "/api/files/logs/preview",
+        "/api/conversations",
+        "/api/conversations/{conversation_id}",
+        "/api/conversations/{conversation_id}/messages",
     }
 )
+
+
+def _compile_whitelist_regex(paths: frozenset[str]):
+    patterns = []
+    for p in paths:
+        if "{" in p and "}" in p:
+            regex = "^" + re.sub(r"\{[^}]+\}", r"[^/]+", p) + "$"
+            patterns.append(re.compile(regex))
+    return tuple(patterns)
+
+
+WHITELIST_API_REGEXES = _compile_whitelist_regex(WHITELIST_API_PATHS)
+
+
+def _is_whitelisted(path: str) -> bool:
+    if path in WHITELIST_API_PATHS:
+        return True
+    for r in WHITELIST_API_REGEXES:
+        if r.match(path):
+            return True
+    return False
 
 
 def register_middlewares(app):
@@ -42,7 +69,7 @@ def register_middlewares(app):
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
-        if path.startswith("/api") and path not in WHITELIST_API_PATHS:
+        if path.startswith("/api") and not _is_whitelisted(path):
             auth = request.headers.get("Authorization", "")
 
             if not (auth.startswith("Bearer ") or auth.startswith("bearer ")):
