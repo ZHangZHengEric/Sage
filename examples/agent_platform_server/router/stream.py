@@ -19,6 +19,7 @@ from sagents.utils.logger import logger
 import models
 from core.client.llm import get_chat_client
 import core.globals as global_vars
+from common.render import Response
 
 import config
 
@@ -333,6 +334,79 @@ async def _save_conversation_if_needed(
     )
 
 
+async def _ensure_conversation(session_id: str, request: StreamRequest) -> None:
+    conversation_dao = models.ConversationDao()
+    existing_conversation = await conversation_dao.get_by_session_id(session_id)
+    if not existing_conversation:
+        conversation_title = await _create_conversation_title(request)
+        await conversation_dao.save_conversation(
+            user_id=request.user_id or "default_user",
+            agent_id=request.agent_id or "default_agent",
+            agent_name=request.agent_name or "Sage Assistant",
+            messages=[],
+            session_id=session_id,
+            title=conversation_title,
+        )
+
+
+async def _save_single_message(
+    session_id: str, message_collector: dict, message_id: str
+) -> None:
+    if not message_id or message_id not in message_collector:
+        return
+    conversation_dao = models.ConversationDao()
+    existing_conversation = await conversation_dao.get_by_session_id(session_id)
+    messages = existing_conversation.messages if existing_conversation else []
+    merged_message = message_collector.get(message_id)
+    messages.append(merged_message)
+    await conversation_dao.update_conversation_messages(session_id, messages)
+
+
+async def _run_async_stream_task(
+    request: StreamRequest, session_id: str, stream_service: SageStreamService
+) -> None:
+    try:
+        messages = _prepare_messages(request.messages)
+        message_collector, message_order = _initialize_message_collector(messages)
+        await _ensure_conversation(session_id, request)
+        current_message_id: str | None = None
+        saved_ids: set[str] = set()
+        async for result in stream_service.process_stream(
+            messages=messages,
+            session_id=session_id,
+            user_id=request.user_id,
+            deep_thinking=request.deep_thinking,
+            max_loop_count=request.max_loop_count,
+            multi_agent=request.multi_agent,
+            more_suggest=request.more_suggest,
+            system_context=request.system_context,
+            available_workflows=request.available_workflows,
+            force_summary=request.force_summary,
+        ):
+            _update_message_collector(message_collector, message_order, result)
+            mid = result.get("message_id")
+            if current_message_id is None:
+                current_message_id = mid
+            elif mid and mid != current_message_id and current_message_id not in saved_ids:
+                await _save_single_message(session_id, message_collector, current_message_id)
+                saved_ids.add(current_message_id)
+                current_message_id = mid
+            await asyncio.sleep(0.01)
+        if current_message_id and current_message_id not in saved_ids:
+            await _save_single_message(session_id, message_collector, current_message_id)
+        await _save_conversation_if_needed(
+            session_id, request, message_collector, message_order
+        )
+    except Exception:
+        pass
+    finally:
+        all_active_sessions_service_map = (
+            global_vars.get_all_active_sessions_service_map()
+        )
+        if session_id in all_active_sessions_service_map:
+            del all_active_sessions_service_map[session_id]
+
+
 @stream_router.post("/api/stream")
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口"""
@@ -482,3 +556,57 @@ async def stream_chat(request: StreamRequest, http_request: Request):
             logger.info(f"会话 {session_id} 资源已清理")
 
     return StreamingResponse(generate_stream(), media_type="text/plain")
+
+
+@stream_router.post("/api/stream/submit_task")
+async def submit_stream_task(request: StreamRequest, http_request: Request):
+    if not get_chat_client():
+        raise SageHTTPException(
+            status_code=503,
+            detail="模型客户端未配置或不可用",
+            error_detail="Model client is not configured or unavailable",
+        )
+    if not request.messages or len(request.messages) == 0:
+        raise SageHTTPException(status_code=400, detail="消息列表不能为空")
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    req_user_id = claims.get("userid")
+    if not request.user_id:
+        request.user_id = req_user_id
+    if request.agent_id:
+        agent_dao = models.AgentConfigDao()
+        agent = await agent_dao.get_by_id(request.agent_id)
+        if agent and agent.config:
+            request.agent_name = agent.name or "Sage Assistant"
+            request.llm_model_config = agent.config.get("llmConfig", {})
+            request.available_tools = agent.config.get("availableTools", [])
+            request.available_workflows = agent.config.get("availableWorkflows", {})
+            request.deep_thinking = agent.config.get("deepThinking", False)
+            request.max_loop_count = agent.config.get("maxLoopCount", 10)
+            request.multi_agent = agent.config.get("multiAgent", False)
+            request.more_suggest = agent.config.get("moreSuggest", False)
+            request.system_context = agent.config.get("systemContext", {})
+            request.system_prefix = agent.config.get("systemPrefix", "")
+    stream_service, session_id = _setup_stream_service(request)
+    asyncio.create_task(_run_async_stream_task(request, session_id, stream_service))
+    return await Response.succ(
+        data={"session_id": session_id}, message="异步任务已提交"
+    )
+
+
+@stream_router.get("/api/stream/task_messages")
+async def get_stream_messages(session_id: str):
+    dao = models.ConversationDao()
+    conversation = await dao.get_by_session_id(session_id)
+    if not conversation:
+        raise SageHTTPException(
+            status_code=404,
+            detail=f"会话 {session_id} 不存在",
+            error_detail=f"Conversation '{session_id}' not found",
+        )
+    return await Response.succ(
+        data={
+            "conversation_id": session_id,
+            "messages": conversation.messages if isinstance(conversation.messages, list) else [],
+        },
+        message="获取会话消息成功",
+    )
