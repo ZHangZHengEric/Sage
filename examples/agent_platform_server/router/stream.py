@@ -369,6 +369,10 @@ async def _run_async_stream_task(
         messages = _prepare_messages(request.messages)
         message_collector, message_order = _initialize_message_collector(messages)
         await _ensure_conversation(session_id, request)
+        # 将用户消息保存到conversation
+        for message in messages:
+            if message.get("role") == "user":
+                await _save_single_message(session_id, message_collector, message.get("message_id"))
         current_message_id: str | None = None
         saved_ids: set[str] = set()
         async for result in stream_service.process_stream(
@@ -394,9 +398,16 @@ async def _run_async_stream_task(
             await asyncio.sleep(0.01)
         if current_message_id and current_message_id not in saved_ids:
             await _save_single_message(session_id, message_collector, current_message_id)
-        await _save_conversation_if_needed(
-            session_id, request, message_collector, message_order
-        )
+        # 补全 end_data
+        end_data = {
+            "message_id": str(uuid.uuid4()),
+            "type": "stream_end",
+            "session_id": session_id,
+            "timestamp": time.time(),
+        }
+        message_collector[end_data["message_id"]] = end_data
+        # 保存stream_end消息到conversation
+        await _save_single_message(session_id, message_collector, end_data["message_id"])
     except Exception:
         pass
     finally:
@@ -590,23 +601,4 @@ async def submit_stream_task(request: StreamRequest, http_request: Request):
     asyncio.create_task(_run_async_stream_task(request, session_id, stream_service))
     return await Response.succ(
         data={"session_id": session_id}, message="异步任务已提交"
-    )
-
-
-@stream_router.get("/api/stream/task_messages")
-async def get_stream_messages(session_id: str):
-    dao = models.ConversationDao()
-    conversation = await dao.get_by_session_id(session_id)
-    if not conversation:
-        raise SageHTTPException(
-            status_code=404,
-            detail=f"会话 {session_id} 不存在",
-            error_detail=f"Conversation '{session_id}' not found",
-        )
-    return await Response.succ(
-        data={
-            "conversation_id": session_id,
-            "messages": conversation.messages if isinstance(conversation.messages, list) else [],
-        },
-        message="获取会话消息成功",
     )
