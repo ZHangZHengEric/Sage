@@ -93,8 +93,8 @@ def _build_llm_model_config(request_config: dict, server_args: StartupConfig) ->
 def _create_model_client(request_config: dict, server_args: StartupConfig):
     model_client = get_chat_client()
     if request_config:
-        api_key = request_config.get("api_key", server_args.default_llm_api_key)
-        base_url = request_config.get("base_url", server_args.default_llm_api_base_url)
+        api_key = request_config.get("apiKey", server_args.default_llm_api_key)
+        base_url = request_config.get("baseUrl", server_args.default_llm_api_base_url)
         model_name = request_config.get("model", server_args.default_llm_model_name)
         logger.info(
             f"初始化新的模型客户端，模型配置api_key: {api_key}, base_url: {base_url}, model: {model_name}"
