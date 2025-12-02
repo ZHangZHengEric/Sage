@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
 logging.getLogger("streamlit.runtime.scriptrunner_utils.script_run_context").setLevel(logging.ERROR)
 
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI,AsyncOpenAI
 
 # 设置页面配置 - 必须在任何其他streamlit调用之前
 st.set_page_config(
@@ -46,7 +46,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.logger import logger
-from openai import OpenAI
+from openai import OpenAI,AsyncOpenAI
 
 
 
@@ -130,7 +130,7 @@ class ComponentManager:
         # 初始化组件变量
         self._tool_manager: Optional[Union[ToolManager, ToolProxy]] = None
         self._controller: Optional[SAgent] = None
-        self._model: Optional[OpenAI] = None
+        self._model: Optional[AsyncOpenAI] = None
         
     async def initialize(self) -> tuple[Union[ToolManager, ToolProxy], SAgent]:
         """异步初始化所有组件"""
@@ -178,11 +178,11 @@ class ComponentManager:
         
         return tool_manager
     
-    def _init_model(self) -> OpenAI:
+    def _init_model(self) -> AsyncOpenAI:
         """初始化模型"""
         logger.debug(f"初始化模型，base_url: {self.base_url}")
         try:
-            return OpenAI(
+            return AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
