@@ -26,8 +26,8 @@ from pydantic import BaseModel
 import uvicorn
 
 # 添加 Sage 项目路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-print(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
@@ -35,7 +35,7 @@ from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.logger import logger
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
-from openai import OpenAI
+from openai import OpenAI,AsyncOpenAI
 from sagents.context.session_context import SessionStatus,get_session_context
 
 
@@ -168,7 +168,7 @@ class SageStreamService:
     提供智能体对话的流式处理能力
     """
     
-    def __init__(self, model: Optional[OpenAI] = None, 
+    def __init__(self, model: Optional[AsyncOpenAI] = None, 
                         model_config: Optional[Dict[str, Any]] = None, 
                         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
                         preset_running_config: Optional[Dict[str, Any]] = None,
@@ -241,26 +241,26 @@ class SageStreamService:
 
 #         "deepThinking": false,
 #   "multiAgent": false,
-        # 设置deepThinking
-        if "deepThinking" in self.preset_running_config:
-            self.preset_deep_thinking = self.preset_running_config['deepThinking']
-            logger.debug(f"使用预设deepThinking: {self.preset_deep_thinking}")
+        # 设置deep_thinking
+        if "deep_thinking" in self.preset_running_config:
+            self.preset_deep_thinking = self.preset_running_config['deep_thinking']
+            logger.debug(f"使用预设deep_thinking: {self.preset_deep_thinking}")
         elif "deepThinking" in self.preset_running_config:
             self.preset_deep_thinking = self.preset_running_config['deepThinking']
             logger.debug(f"使用预设deepThinking: {self.preset_deep_thinking}")
         else:
             self.preset_deep_thinking = None
-            logger.debug(f"未使用预设deepThinking")
+            logger.debug(f"未使用预设deep_thinking")
         # 设置multiAgent
-        if "multiAgent" in self.preset_running_config:
-            self.preset_multi_agent = self.preset_running_config['multiAgent']
-            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
+        if "multi_agent" in self.preset_running_config:
+            self.preset_multi_agent = self.preset_running_config['multi_agent']
+            logger.debug(f"使用预设multi_agent: {self.preset_multi_agent}")
         elif "multiAgent" in self.preset_running_config:
             self.preset_multi_agent = self.preset_running_config['multiAgent']
             logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
         else:
             self.preset_multi_agent = None
-            logger.debug(f"未使用预设multiAgent")
+            logger.debug(f"未使用预设multi_agent")
 
         # 设置max_model_len
         if max_model_len:
@@ -486,7 +486,7 @@ class SageStreamService:
 default_stream_service: Optional[SageStreamService] = None
 all_active_sessions_service_map: Dict[str, Dict[str, Any]] = {}
 tool_manager: Optional[ToolManager] = None
-default_model_client: Optional[OpenAI] = None
+default_model_client: Optional[AsyncOpenAI] = None
 
 
 
@@ -517,7 +517,7 @@ async def initialize_system(server_args):
         if server_args.default_llm_api_key:
             logger.info(f"默认 API 密钥: {server_args.default_llm_api_key}...")
             logger.info(f"默认 API 基础 URL: {server_args.default_llm_api_base_url}...")
-            default_model_client = OpenAI(
+            default_model_client = AsyncOpenAI(
                 api_key=server_args.default_llm_api_key,
                 base_url=server_args.default_llm_api_base_url
             )
@@ -825,7 +825,7 @@ async def stream_chat(request: StreamRequest):
         logger.info(f"初始化新的模型客户端，模型配置api_key :{request.llm_model_config.get('api_key', server_args.default_llm_api_key)}")
         logger.info(f"初始化新的模型客户端，模型配置base_url :{request.llm_model_config.get('base_url', server_args.default_llm_api_base_url)}")
         logger.info(f"初始化新的模型客户端，模型配置model :{request.llm_model_config.get('model', server_args.default_llm_model_name)}")
-        model_client = OpenAI(
+        model_client = AsyncOpenAI(
             api_key=request.llm_model_config.get('api_key', server_args.default_llm_api_key),
             base_url=request.llm_model_config.get('base_url', server_args.default_llm_api_base_url),
         )
