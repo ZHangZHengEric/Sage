@@ -17,7 +17,7 @@ from sagents.tool.tool_proxy import ToolProxy
 from sagents.context.messages.message import MessageChunk, MessageType
 from copy import deepcopy
 
-from openai import OpenAI
+from openai import OpenAI,AsyncOpenAI
 from rich.console import Console
 import time
 import uuid
@@ -270,7 +270,7 @@ if __name__ == '__main__':
             tool_proxy = tool_manager
 
         # 初始化 model
-        client = OpenAI(
+        client = AsyncOpenAI(
             api_key=config['api_key'],
             base_url=config['base_url']
         )
