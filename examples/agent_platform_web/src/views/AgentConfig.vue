@@ -55,6 +55,10 @@
       </div>
 
       <div class="agent-actions">
+          <el-button type="default" class="action-icon" @click="openUsageModal(agent)">
+            <Settings :size="16" />
+            示例
+          </el-button>
         <el-button type="default" @click="handleEditAgent(agent)">
           <Edit :size="16" />
           {{ t('agent.edit') }}
@@ -87,18 +91,44 @@
   <!-- Agent创建模态框 -->
   <AgentCreationOption :isOpen="showCreationModal" :tools="tools" @create-blank="handleBlankConfig"
     @create-smart="handleSmartConfig" @close="showCreationModal = false" />
- </div>
+
+  <!-- 调用示例弹框 -->
+  <el-dialog v-model="showUsageModal" :title="usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例'" width="60%">
+    <div class="usage-header">
+      <el-tabs v-model="usageActiveTab">
+        <el-tab-pane label="cURL" name="curl" />
+        <el-tab-pane label="Python" name="python" />
+        <el-tab-pane label="Go" name="go" />
+        <el-tab-pane label="Java" name="java" />
+      </el-tabs>
+      <el-button type="danger" plain class="usage-warning-btn">不同的会话要替换session_id为不同值。system_context 根据真实值替换</el-button>
+    </div>
+    <div class="usage-code">
+      <button class="copy-icon-btn" @click="copyUsageCode" title="复制">
+        <Copy :size="16" />
+      </button>
+      <ReactMarkdown :content="usageCodeMarkdown" />
+    </div>
+    <template #footer>
+      <div class="dialog-footer">
+        <el-button @click="copyUsageCode">复制</el-button>
+        <el-button type="primary" @click="showUsageModal = false">关闭</el-button>
+      </div>
+    </template>
+  </el-dialog>
+</div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { Plus, Edit, Trash2, Bot, Settings, Download, Upload } from 'lucide-vue-next'
+import { ref, onMounted, computed } from 'vue'
+import { Plus, Edit, Trash2, Bot, Settings, Download, Upload, Copy } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
 import { toolAPI } from '../api/tool.js'
+import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
 
 // State
 const agents = ref([])
@@ -108,6 +138,10 @@ const tools = ref([])
 const showCreationModal = ref(false)
 const currentView = ref('list') // 'list', 'create', 'edit', 'view'
 const editingAgent = ref(null)
+const showUsageModal = ref(false)
+const usageAgent = ref(null)
+const usageActiveTab = ref('curl')
+const usageCodeMap = ref({ curl: '', python: '', go: '', java: '' })
 
 // Composables
 const { t } = useLanguage()
@@ -407,6 +441,143 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
     throw error // 保持原有错误传递行为
   }
 }
+
+// 生成调用示例
+const openUsageModal = async (agent) => {
+  try {
+    usageAgent.value = agent
+    generateUsageCodes(agent)
+    usageActiveTab.value = 'curl'
+    showUsageModal.value = true
+  } catch (e) {
+    console.error('生成调用示例失败:', e)
+    ElMessage.error('生成调用示例失败')
+  }
+}
+
+const backendEndpoint = (
+  import.meta.env.VITE_SAGE_API_BASE_URL ||
+  import.meta.env.VITE_BACKEND_ENDPOINT ||
+  ''
+).replace(/\/+$/, '')
+
+const generateUsageCodes = (agent) => {
+  const body = {
+    messages: [
+      { role: 'user', content: '你好，请帮我处理一个任务' }
+    ],
+    session_id: 'demo-session',
+    deep_thinking: agent.deepThinking ?? null,
+    multi_agent: agent.multiAgent ?? null,
+    max_loop_count: agent.maxLoopCount ?? 20,
+    system_prefix: agent.systemPrefix || '',
+    system_context: agent.systemContext || {},
+    available_workflows: agent.availableWorkflows || {},
+    llm_model_config: agent.llmConfig || null,
+    available_tools: agent.availableTools || [],
+  }
+
+  const jsonStr = JSON.stringify(body, null, 2)
+  const curl = [
+    `curl -X POST "${backendEndpoint}/api/stream" \\
+  -H "Content-Type: application/json" \\
+  -d '${jsonStr}'`
+  ].join('\n')
+
+  const python = [
+    'import requests',
+    '',
+    `url = "${backendEndpoint}/api/stream"`,
+    'payload = ' + jsonStr,
+    'headers = {"Content-Type": "application/json"}',
+    '',
+    'resp = requests.post(url, json=payload, headers=headers)',
+    'print(resp.status_code)'
+  ].join('\n')
+
+  const go = [
+    'package main',
+    '',
+    'import (',
+    '  "bytes"',
+    '  "net/http"',
+    '  "fmt"',
+    ')',
+    '',
+    'func main() {',
+    `  url := "${backendEndpoint}/api/stream"`,
+    '  body := []byte(`' + jsonStr.replace(/`/g, '\\`') + '`)',
+    '  req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))',
+    '  req.Header.Set("Content-Type", "application/json")',
+    '  resp, err := http.DefaultClient.Do(req)',
+    '  if err != nil {',
+    '    panic(err)',
+    '  }',
+    '  fmt.Println(resp.Status)',
+    '}',
+  ].join('\n')
+
+  const java = [
+    'import java.net.*;',
+    'import java.io.*;',
+    '',
+    'public class Demo {',
+    '  public static void main(String[] args) throws Exception {',
+    `    String url = "${backendEndpoint}/api/stream";`,
+    '    String json = ' + JSON.stringify(jsonStr) + ';',
+    '    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();',
+    '    conn.setRequestMethod("POST");',
+    '    conn.setRequestProperty("Content-Type", "application/json");',
+    '    conn.setDoOutput(true);',
+    '    try (OutputStream os = conn.getOutputStream()) {',
+    '      os.write(json.getBytes("UTF-8"));',
+    '    }',
+    '    System.out.println(conn.getResponseCode());',
+    '  }',
+    '}',
+  ].join('\n')
+
+  usageCodeMap.value.curl = '```bash\n' + curl + '\n```'
+  usageCodeMap.value.python = '```python\n' + python + '\n```'
+  usageCodeMap.value.go = '```go\n' + go + '\n```'
+  usageCodeMap.value.java = '```java\n' + java + '\n```'
+}
+
+const usageCodeMarkdown = computed(() => usageCodeMap.value[usageActiveTab.value] || '')
+
+const copyUsageCode = async () => {
+  const md = usageCodeMap.value[usageActiveTab.value] || ''
+  const raw = md.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '')
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(raw)
+      ElMessage.success('代码已复制到剪贴板')
+      return
+    }
+  } catch (_) {}
+
+  const ta = document.createElement('textarea')
+  ta.value = raw
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.left = '-9999px'
+  ta.style.top = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  try {
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    if (ok) {
+      ElMessage.success('代码已复制到剪贴板')
+    } else {
+      ElMessage.error('复制失败')
+    }
+  } catch (e) {
+    document.body.removeChild(ta)
+    ElMessage.error('复制失败')
+  }
+}
 </script>
 
 <style scoped>
@@ -530,6 +701,10 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
   min-width: 0;
 }
 
+.agent-actions .action-icon {
+  flex: 0 0 auto;
+}
+
 
 
 .config-badge {
@@ -559,6 +734,48 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
   justify-content: space-between;
   align-items: center;
 
+}
+
+.usage-code {
+  margin-top: 12px;
+  position: relative;
+}
+
+.usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.usage-warning-btn {
+  white-space: nowrap;
+}
+
+.usage-code :deep(pre) {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.usage-code :deep(code) {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.copy-icon-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: rgba(0,0,0,0.05);
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.copy-icon-btn:hover {
+  background: rgba(0,0,0,0.1);
 }
 
 </style>
