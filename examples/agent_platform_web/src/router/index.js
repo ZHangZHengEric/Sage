@@ -5,6 +5,7 @@ import ToolsPage from '../views/Tool.vue'
 import HistoryPage from '../views/ChatHistory.vue'
 import McpsPage from '../views/Mcp.vue'
 import KnowledgeBasePage from '../views/KnowledgeBase.vue'
+import ApiAgentChatPage from '../views/ApiAgentChat.vue'
 
 const routes = [
   {
@@ -61,6 +62,14 @@ const routes = [
     component: () => import('../views/KnowledgeBaseDetail.vue'),
     meta: {
       title: 'knowledgeBase.title'
+    }
+  },
+  {
+    path: '/api/agent-chat',
+    name: 'ApiAgentChat',
+    component: ApiAgentChatPage,
+    meta: {
+      title: 'api.agentChatTitle'
     }
   },
   // 重定向根路径到聊天页面

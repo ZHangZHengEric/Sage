@@ -109,13 +109,24 @@ const predefinedServices = ref([
       { id: 'svc_history', nameKey: 'sidebar.history', url: 'History', isInternal: true }
     ]
   }
+  ,
+  {
+    id: 'cat5',
+    key: 'api_reference',
+    nameKey: 'sidebar.apiReference',
+    icon: '📘',
+    children: [
+      { id: 'svc_api_agent_chat', nameKey: 'sidebar.apiAgentChat', url: 'ApiAgentChat', isInternal: true }
+    ]
+  }
 ])
 
 const expandedCategories = ref({
   chat_and_config: true,
   tools_and_services: false,
   knowledge_base: false,
-  history: false
+  history: false,
+  api_reference: false
 })
 
 const toggleCategory = (key) => {
