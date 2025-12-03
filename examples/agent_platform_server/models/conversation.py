@@ -126,7 +126,7 @@ class ConversationDao(BaseDao):
             where.append(Conversation.agent_id == agent_id)
         if search:
             like = f"%{search}%"
-            where.append((Conversation.title.like(like)) | (Conversation.messages.like(like)))
+            where.append((Conversation.title.like(like)))
 
         if sort_by == "title":
             order = Conversation.title.asc()
