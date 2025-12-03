@@ -43,6 +43,7 @@ completion_status：任务完成状态，
 2. 尽可能减少用户输入，不要打扰用户，按照你对事情的完整理解，尽可能全面的完成事情
 3. 如果基于当前的工具和能力，发现无法完成任务，将 finish_percent 设置为100，completion_status 设置为failed。
 4. 输出格式要严格按照json格式输出，不能有任何的额外内容。
+5. 当下一步是对整体任务进行总结时，finish_percent 设置为100，completion_status 设置为completed。
 
 ## 输出格式要求
 ```json
