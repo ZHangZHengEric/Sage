@@ -622,8 +622,8 @@ class StreamRequest(BaseModel):
     deep_thinking: Optional[Union[bool, str]] = None
     max_loop_count: int = 10
     multi_agent: Optional[Union[bool, str]] = None
-    summary : bool =True  # 过时字段
-    deep_research: bool = True # 过时字段，与multi_agent一致
+    summary : bool = None  # 过时字段
+    deep_research: bool = None # 过时字段，与multi_agent一致
     more_suggest: bool = False
     force_summary: bool = False
     system_context: Optional[Dict[str, Any]] = None
