@@ -38,6 +38,7 @@ decompose_template = {
 6. 如果有任务Thinking的过程，子任务要与Thinking的处理逻辑一致。
 7. 子任务数量不要超过10个，较简单的子任务可以合并为一个子任务。
 8. 子任务描述中不要直接说出工具的原始名称，使用工具描述来表达工具。
+9. 只关注用户最新的需求或者任务进行拆分，不要关注用户历史对话中的其他任务。
 ## 输出格式
 ```
 <task_item>
@@ -68,6 +69,7 @@ Observe user latest needs or tasks through user's historical dialogue
 6. If there is a task Thinking process, subtasks should be consistent with the Thinking processing logic.
 7. The number of subtasks should not exceed 10. Simpler subtasks can be merged into one subtask.
 8. Do not directly mention the original names of tools in subtask descriptions. Use tool descriptions to express tools.
+9. Only focus on user latest needs or tasks for decomposition, do not focus on other tasks in user historical dialogue.
 ## Output Format
 ```
 <task_item>
