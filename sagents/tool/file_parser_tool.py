@@ -1191,8 +1191,41 @@ class FileParserTool(ToolBase):
                         
                 elif file_extension in ['.xlsx', '.xls']:
                     logger.debug(f"📈 使用Excel解析器")
-                    extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(input_file_path)
-                    if include_metadata:
+                    excel_metadata = {}
+                    if file_extension == '.xlsx':
+                        extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(input_file_path)
+                    else:
+                        xlsx_output_path = input_file_path + 'x'
+                        try:
+                            subprocess.run(['libreoffice', '--version'], check=True, capture_output=True)
+                            logger.info(f"尝试使用LibreOffice将XLS转换为XLSX: {input_file_path} -> {xlsx_output_path}")
+                            command = [
+                                'libreoffice',
+                                '--headless',
+                                '--convert-to', 'xlsx',
+                                '--outdir', os.path.dirname(input_file_path),
+                                input_file_path
+                            ]
+                            result = subprocess.run(command, capture_output=True, text=True, check=True)
+                            logger.info(f"LibreOffice转换输出: {result.stdout}")
+                            logger.error(f"LibreOffice转换错误输出: {result.stderr}")
+                            if os.path.exists(xlsx_output_path):
+                                extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(xlsx_output_path)
+                                logger.info(f"XLS成功转换为XLSX并提取内容: {xlsx_output_path}")
+                                os.remove(xlsx_output_path)
+                            else:
+                                extracted_text = "XLS文件转换失败，无法生成XLSX文件。请手动转换为XLSX格式。"
+                                logger.error(f"XLS文件转换失败，未找到生成的XLSX文件: {xlsx_output_path}")
+                        except FileNotFoundError:
+                            extracted_text = "LibreOffice未安装或不在PATH中，无法自动转换XLS文件。请安装LibreOffice或手动转换为XLSX格式。"
+                            logger.error("LibreOffice未安装或不在PATH中，无法自动转换XLS文件。")
+                        except subprocess.CalledProcessError as e:
+                            extracted_text = f"LibreOffice转换XLS文件时出错: {e.stderr}"
+                            logger.error(f"LibreOffice转换XLS文件时出错: {e.stderr}")
+                        except Exception as e:
+                            extracted_text = f"处理XLS文件时发生未知错误: {e}"
+                            logger.error(f"处理XLS文件时发生未知错误: {e}")
+                    if include_metadata and excel_metadata:
                         metadata.update(excel_metadata)
                 elif file_extension in ['.html', '.htm']:
                     logger.debug(f"🌐 使用HTML解析器")
