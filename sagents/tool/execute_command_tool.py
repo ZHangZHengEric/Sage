@@ -282,13 +282,14 @@ class ExecuteCommandTool(ToolBase):
             self.process_manager.cleanup_finished_processes()
 
     @ToolBase.tool()
-    def execute_python_code(self, code: str, workdir: Optional[str] = None, 
-                           timeout: int = 30, requirement_list: Optional[List[str]] = None) -> Dict[str, Any]:
-        """在临时执行Python代码，会话在执行完后会删除，不具有持久性
+    def execute_python_code(self, code: str, code_save_path: str, 
+                           timeout: int = 30, requirement_list: Optional[List[str]] = None,
+                           ) -> Dict[str, Any]:
+        """在临时执行Python代码，会话在执行完后会删除，代码会保存到指定路径
 
         Args:
             code (str): 要执行的Python代码
-            workdir (str): 代码执行的工作目录（可选）
+            code_save_path (str): 代码保存路径，必填项，不能为空字符串
             timeout (int): 超时时间，默认30秒
             requirement_list (list): 需要安装的Python包列表（可选）
 
@@ -298,14 +299,30 @@ class ExecuteCommandTool(ToolBase):
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
         logger.info(f"🐍 execute_python_code开始执行 [{process_id}] - 代码长度: {len(code)} 字符")
-        logger.info(f"📁 工作目录: {workdir or '临时目录'}, 超时: {timeout}秒")
         
-        temp_file = None
+        if not code_save_path:
+            return {
+                "success": False,
+                "error": "code_save_path 为必填项，且不能为空字符串",
+                "process_id": process_id,
+            }
+        logger.info(f"📝 代码保存路径: {code_save_path}")
+        
+        code_file_path = None
         try:
-            # 创建临时Python文件
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            target_path = code_save_path
+            if not os.path.isabs(target_path):
+                return {
+                    "success": False,
+                    "error": "code_save_path 必须是绝对路径",
+                    "process_id": process_id,
+                }
+            exec_workdir = os.path.dirname(target_path)
+            os.makedirs(exec_workdir, exist_ok=True)
+            with open(target_path, 'w', encoding='utf-8') as f:
                 f.write(code)
-                temp_file = f.name
+            code_file_path = target_path
+            logger.info(f"📁 工作目录: {exec_workdir}, 超时: {timeout}秒")
             
             # 参数类型校验与依赖处理
             python_path = shutil.which("python") or shutil.which("python3")
@@ -349,7 +366,7 @@ class ExecuteCommandTool(ToolBase):
                         install_cmd = f"{python_path} -m pip install {package}"
                         install_result = self.execute_shell_command(
                             install_cmd,
-                            workdir=workdir,
+                            workdir=exec_workdir,
                             timeout=120
                         )
                         if install_result.get("success"):
@@ -366,10 +383,10 @@ class ExecuteCommandTool(ToolBase):
             exec_start_time = time.time()
             logger.info(f"🚀 开始执行Python代码 [{process_id}]")
             
-            python_cmd = f"{python_path} {temp_file}"
+            python_cmd = f"{python_path} {code_file_path}"
             result = self.execute_shell_command(
                 python_cmd,
-                workdir=workdir,
+                workdir=exec_workdir,
                 timeout=timeout
             )
             
@@ -383,13 +400,15 @@ class ExecuteCommandTool(ToolBase):
             
             # 添加额外信息（注意：成功执行时不返回安装失败信息）
             result.update({
-                # "temp_file": temp_file,
+                # "code_file_path": code_file_path,
                 "requirements": parsed_requirements or requirement_list,
                 "already_available": already_available if requirement_list else None,
                 "installed": newly_installed if requirement_list else None,
                 # 不在此处加入 install_failed，改为在失败时按需加入
                 "total_execution_time": total_time,
                 # "process_id": process_id
+                "code_file_path": code_file_path,
+                "code_persisted": True,
             })
             # 如果执行失败，尽可能提供详细的错误trace
             if not result.get("success"):
@@ -422,13 +441,7 @@ class ExecuteCommandTool(ToolBase):
                 "process_id": process_id
             }
         finally:
-            # 清理临时文件
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.unlink(temp_file)
-                    logger.debug(f"🗑️ 临时文件已删除: {temp_file}")
-                except Exception as e:
-                    logger.warning(f"⚠️ 删除临时文件失败: {str(e)}")
+            pass
 
     @ToolBase.tool()
     def check_command_availability(self, commands: List[str]) -> Dict[str, Any]:
