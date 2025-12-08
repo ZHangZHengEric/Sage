@@ -72,13 +72,13 @@ EOF
 
 ```bash
 # Web interface with enhanced features (recommended)
-streamlit run examples/sage_demo.py -- \
+streamlit run app/sage_demo.py -- \
   --api_key $OPENAI_API_KEY \
   --model mistralai/mistral-small-3.1-24b-instruct:free \
   --base_url https://openrouter.ai/api/v1
 
 # Command line interface
-python examples/multi_turn_demo.py
+python app/multi_turn_demo.py
 ```
 
 🎉 **That's it!** You should now see the Sage web interface running at `http://localhost:8501` with real-time token tracking!
@@ -379,7 +379,7 @@ controller.export_token_usage("usage_report.csv")
 1. **[Architecture Guide](ARCHITECTURE.md)** - Understand how Sage works internally
 2. **[Tool Development](TOOL_DEVELOPMENT.md)** - Build powerful custom tools
 3. **[Advanced Configuration](CONFIGURATION.md)** - Fine-tune performance
-4. **[Production Deployment](../examples/production_setup.py)** - Deploy to production
+4. **[Production Deployment](../app/production_setup.py)** - Deploy to production
 5. **[API Reference](API_REFERENCE.md)** - Complete API documentation
 
 ## 🔍 Troubleshooting
@@ -416,4 +416,4 @@ controller.reset_all_token_stats()
 
 ---
 
-**🎉 Congratulations!** You're now ready to build powerful multi-agent applications with Sage. Check out our [examples](../examples/) for more advanced use cases! 
+**🎉 Congratulations!** You're now ready to build powerful multi-agent applications with Sage. Check out our [app](../app/) for more advanced use cases! 

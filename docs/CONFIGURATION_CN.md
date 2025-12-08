@@ -270,7 +270,7 @@ tools:
 ### 基本用法
 
 ```bash
-python examples/sage_demo.py [选项]
+python app/sage_demo.py [选项]
 ```
 
 ### 可用参数
@@ -293,10 +293,10 @@ python examples/sage_demo.py [选项]
 
 ```bash
 # 基本用法
-python examples/sage_demo.py --api_key sk-your-key
+python app/sage_demo.py --api_key sk-your-key
 
 # 高级配置
-python examples/sage_demo.py \
+python app/sage_demo.py \
   --api_key sk-your-key \
   --model gpt-4 \
   --max_tokens 8192 \
@@ -305,14 +305,14 @@ python examples/sage_demo.py \
   --streaming
 
 # 自定义工具和配置
-python examples/sage_demo.py \
+python app/sage_demo.py \
   --api_key sk-your-key \
   --tools_folders ./my_tools ./shared_tools \
   --config_file ./my_config.yaml \
   --web --port 8080
 
 # OpenRouter 使用
-python examples/sage_demo.py \
+python app/sage_demo.py \
   --api_key sk-or-v1-your-key \
   --base_url https://openrouter.ai/api/v1 \
   --model mistralai/mistral-large

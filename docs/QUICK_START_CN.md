@@ -72,13 +72,13 @@ EOF
 
 ```bash
 # 增强功能网页界面（推荐）
-streamlit run examples/sage_demo.py -- \
+streamlit run app/sage_demo.py -- \
   --api_key $OPENAI_API_KEY \
   --model mistralai/mistral-small-3.1-24b-instruct:free \
   --base_url https://openrouter.ai/api/v1
 
 # 命令行界面
-python examples/multi_turn_demo.py
+python app/multi_turn_demo.py
 ```
 
 🎉 **就是这样！** 您现在应该看到 Sage 网页界面在 `http://localhost:8501` 运行，支持实时token跟踪！
@@ -379,7 +379,7 @@ controller.export_token_usage("usage_report.csv")
 1. **[架构指南](ARCHITECTURE_CN.md)** - 了解Sage内部工作原理
 2. **[工具开发](TOOL_DEVELOPMENT_CN.md)** - 构建强大的自定义工具
 3. **[高级配置](CONFIGURATION_CN.md)** - 微调性能
-4. **[生产部署](../examples/production_setup.py)** - 部署到生产环境
+4. **[生产部署](../app/production_setup.py)** - 部署到生产环境
 5. **[API参考](API_REFERENCE_CN.md)** - 完整API文档
 
 ## 🔍 故障排除
@@ -416,4 +416,4 @@ controller.reset_all_token_stats()
 
 ---
 
-**🎉 恭喜！** 您现在已准备好使用Sage构建强大的多智能体应用程序。查看我们的[示例](../examples/)以了解更多高级用例！ 
+**🎉 恭喜！** 您现在已准备好使用Sage构建强大的多智能体应用程序。查看我们的[示例](../app/)以了解更多高级用例！ 
