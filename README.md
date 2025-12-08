@@ -42,7 +42,7 @@
 🌐 **Interactive Web Interface** - Modern React + FastAPI UI with real-time streaming visualization  
 📊 **Advanced Token Tracking** - Comprehensive usage statistics and cost monitoring across all agents  
 ⚙️ **Rich Configuration** - Environment variables, config files, CLI options, and runtime updates  
-🔧 **Developer Friendly** - Clean APIs, comprehensive docs, examples, and extensive error handling  
+🔧 **Developer Friendly** - Clean APIs, comprehensive docs, app, and extensive error handling  
 🎯 **Production Ready** - Robust error recovery, logging, retry mechanisms, and performance optimization
 
 ---
@@ -76,7 +76,7 @@
 - Deployment & Ops: Docker deploy script for `sage_server`; smoother startup if configs are missing.
 
 Quick pointers:
-- Agent Platform quick start is in `examples/agent_platform_server/README.md` and `examples/agent_platform_web/README.md`.
+- Agent Platform quick start is in `app/server/README.md` and `app/web/README.md`.
 - Existing FastAPI + React demo remains fully supported; see the section below.
 
 ## 🤖 **Supported Models**
@@ -176,7 +176,7 @@ cd Sage
 pip install -r requirements.txt
 
 # Install dependencies for the FastAPI React demo
-pip install -r examples/fastapi_react_demo/requirements.txt
+pip install -r app/fastapi_react_demo/requirements.txt
 ```
 
 #### 🔧 Dependencies Overview
@@ -215,7 +215,7 @@ Experience Sage through our cutting-edge web application featuring a modern Reac
 - 📱 **Responsive Design** - Adapts to all screen sizes
 - 🔧 **TypeScript Support** - Full type safety throughout
 
-**Quick Start:** See [FastAPI React Demo README](examples/fastapi_react_demo/README.md) for detailed setup instructions.
+**Quick Start:** See [FastAPI React Demo README](app/fastapi_react_demo/README.md) for detailed setup instructions.
 
 **🎯 Try the Live Demo:** Experience all features immediately at [**Live Demo →**](http://36.133.44.114:20040/) (If the link is temporarily unavailable, use the local setup below.)
 
@@ -227,7 +227,7 @@ Experience Sage through our cutting-edge web application featuring a modern Reac
 - 🛠️ **System Configuration** - Adjust model settings, temperature, and other parameters
 - 📊 **Real-time Monitoring** - Watch token usage and execution progress in real-time
 
-Access the local application at `http://localhost:8080`. For detailed setup instructions, see the [FastAPI React Demo README](examples/fastapi_react_demo/README.md).
+Access the local application at `http://localhost:8080`. For detailed setup instructions, see the [FastAPI React Demo README](app/fastapi_react_demo/README.md).
 
 ### 💻 **Command Line Usage**
 
@@ -235,10 +235,10 @@ Sage provides a powerful command-line interface for interactive AI agent convers
 
 ```bash
 # Basic usage
-python examples/sage_cli.py --api_key YOUR_API_KEY --model deepseek/deepseek-chat --base_url https://api.deepseek.com
+python app/sage_cli.py --api_key YOUR_API_KEY --model deepseek/deepseek-chat --base_url https://api.deepseek.com
 
 # With advanced options
-python examples/sage_cli.py \
+python app/sage_cli.py \
   --api_key YOUR_API_KEY \
   --model deepseek/deepseek-chat \
   --base_url https://api.deepseek.com \
@@ -255,7 +255,7 @@ python examples/sage_cli.py \
 - 🎨 **Beautiful Interface**: Colored message frames with different visual effects
 - ⚡ **Streaming Output**: Real-time AI responses for smooth interaction
 
-**📖 For detailed CLI usage, configuration, and examples, see [Examples README](examples/README.md)**
+**📖 For detailed CLI usage, configuration, and app, see [Examples README](app/README.md)**
 
 
 
@@ -582,7 +582,7 @@ result = tool_manager.run_tool(
 - **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
 - **[Tool Development](docs/TOOL_DEVELOPMENT.md)** - Create custom tools
 - **[Configuration Guide](docs/CONFIGURATION.md)** - Advanced configuration options
-- **[Examples](docs/EXAMPLES.md)** - Real-world usage examples
+- **[Examples](docs/EXAMPLES.md)** - Real-world usage app
 
 ## 🎯 Production Deployment
 

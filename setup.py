@@ -10,7 +10,7 @@ setup(
     author_email="",
     url="https://github.com/ZHangZHengEric/Sage",
     license="MIT",
-    packages=find_packages(include=["sagents*"], exclude=["tests*", "examples*", "docs*", "assets*", "logs*"]),
+    packages=find_packages(include=["sagents*"], exclude=["tests*", "app*", "docs*", "assets*", "logs*"]),
     include_package_data=True,
     install_requires=[
         "gradio>=4.0.0",

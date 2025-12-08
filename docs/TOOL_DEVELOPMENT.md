@@ -803,10 +803,10 @@ CMD ["python", "-m", "sage.tools.server"]
 
 Check out our collection of example tools:
 
-- **[Data Processing Tools](examples/tools/data_processing/)**: CSV, JSON, XML processors
-- **[Web Tools](examples/tools/web/)**: URL fetching, web scraping, API clients
-- **[File Tools](examples/tools/files/)**: File operations, format conversions
-- **[Utility Tools](examples/tools/utilities/)**: Date/time, string processing, validation
+- **[Data Processing Tools](app/tools/data_processing/)**: CSV, JSON, XML processors
+- **[Web Tools](app/tools/web/)**: URL fetching, web scraping, API clients
+- **[File Tools](app/tools/files/)**: File operations, format conversions
+- **[Utility Tools](app/tools/utilities/)**: Date/time, string processing, validation
 
 ## 🤝 Contributing Tools
 

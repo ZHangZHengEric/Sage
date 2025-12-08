@@ -288,7 +288,7 @@ custom_agents:
 ### Basic Usage
 
 ```bash
-python examples/sage_demo.py [OPTIONS]
+python app/sage_demo.py [OPTIONS]
 ```
 
 ### Available Arguments
@@ -311,10 +311,10 @@ python examples/sage_demo.py [OPTIONS]
 
 ```bash
 # Basic usage with API key
-python examples/sage_demo.py --api_key sk-your-key
+python app/sage_demo.py --api_key sk-your-key
 
 # Advanced configuration
-python examples/sage_demo.py \
+python app/sage_demo.py \
   --api_key sk-your-key \
   --model gpt-4 \
   --max_tokens 8192 \
@@ -324,13 +324,13 @@ python examples/sage_demo.py \
   --streaming
 
 # Web interface with custom port
-python examples/sage_demo.py \
+python app/sage_demo.py \
   --api_key sk-your-key \
   --web \
   --port 8080
 
 # Using configuration file
-python examples/sage_demo.py \
+python app/sage_demo.py \
   --config_file ./config/production.yaml \
   --api_key sk-your-key
 ```
