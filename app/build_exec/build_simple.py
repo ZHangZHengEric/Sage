@@ -10,12 +10,13 @@ import subprocess
 import shutil
 from pathlib import Path
 
+
 class SimpleBuilder:
     def __init__(self):
         self.project_root = Path(__file__).parent.parent.parent  # 回到 agent_server 目录
         print("项目根目录:", self.project_root)
         self.build_dir = Path(__file__).parent / "build"  # 构建目录放在 build_tools 下
-        
+
     def clean_build(self):
         """清理构建目录"""
         print("🧹 清理构建目录...")
@@ -26,15 +27,15 @@ class SimpleBuilder:
                 print("⚠️  无法删除构建目录，继续使用现有目录")
         self.build_dir.mkdir(exist_ok=True)
         print("✅ 构建目录清理完成")
-    
+
     def build_binary(self):
         """构建二进制文件（仅 PyInstaller 单文件）"""
         print("🔨 构建二进制文件...")
-        
+
         try:
             # 切换到项目目录
             os.chdir(self.project_root)
-            
+
             # 使用 PyInstaller 构建
             cmd = [
                 sys.executable, "-m", "PyInstaller",
@@ -43,7 +44,7 @@ class SimpleBuilder:
                 "--distpath", str(self.build_dir),
                 "--workpath", str(self.build_dir / "work"),
                 "--name", "sage_stream_service",
-                
+
                 # 添加 prompt 文件和其他资源文件
                 "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'agent' / 'prompts'}/*{os.pathsep}sagents/agent/prompts/",
                 "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'utils'}/*{os.pathsep}sagents/utils/",
@@ -209,15 +210,15 @@ class SimpleBuilder:
                 "--collect-all", "pathspec",
                 "--collect-all", "pluggy",
                 # 测试相关依赖不需要打包到生产二进制
-                "examples/sage_server.py"
+                "app/sage_server.py"
             ]
-            
+
             print(f"执行命令: {' '.join(cmd)}")
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            
+
             print("✅ 二进制文件构建完成")
             return True
-            
+
         except subprocess.CalledProcessError as e:
             print(f"❌ 构建失败: {e}")
             print(f"错误输出: {e.stderr}")
@@ -225,38 +226,39 @@ class SimpleBuilder:
         except Exception as e:
             print(f"❌ 构建异常: {e}")
             return False
-    
+
     # 已移除 Docker 与部署相关函数
-    
+
     def build(self):
         """执行完整构建流程"""
         print("🚀 开始 Sage Stream Service 简化构建流程")
         print("=" * 50)
-        
+
         # 1. 清理构建目录
         self.clean_build()
-        
+
         # 2. 构建二进制文件
         if not self.build_binary():
             return False
-        
+
         # 仅生成二进制，不创建任何 Docker 文件或部署包
-        
+
         print("=" * 50)
         print("🎉 构建完成!")
         print(f"📦 二进制输出目录: {self.build_dir}")
-        
+
         return True
+
 
 def main():
     """主函数"""
     builder = SimpleBuilder()
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == "--clean":
         builder.clean_build()
         print("✅ 清理完成")
         return
-    
+
     success = builder.build()
     if success:
         print("✅ 构建成功")
@@ -265,6 +267,7 @@ def main():
     else:
         print("❌ 构建失败")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

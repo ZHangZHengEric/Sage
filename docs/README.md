@@ -31,7 +31,7 @@ Welcome to the comprehensive documentation for Sage Multi-Agent Framework v0.9 -
 - **[API Reference](API_REFERENCE.md)** - Complete API documentation
 - **[Tool Development](TOOL_DEVELOPMENT.md)** - Create custom tools
 - **[Configuration Guide](CONFIGURATION.md)** - Advanced configuration
-- **[Examples](EXAMPLES.md)** - Real-world usage examples
+- **[Examples](EXAMPLES.md)** - Real-world usage app
 
 ## 📖 Documentation Overview
 
@@ -53,10 +53,10 @@ Welcome to the comprehensive documentation for Sage Multi-Agent Framework v0.9 -
 - [Configuration](CONFIGURATION.md) - Advanced configuration options
 
 ### Examples & Tutorials
-- [Basic Examples](EXAMPLES.md#basic-examples) - Simple use cases
-- [Advanced Examples](EXAMPLES.md#advanced-examples) - Complex scenarios
-- [Integration Examples](EXAMPLES.md#integration-examples) - Third-party integrations
-- [Web Application](../examples/fastapi_react_demo/README.md) - Modern React + FastAPI demo
+- [Basic Examples](EXAMPLES.md#basic-app) - Simple use cases
+- [Advanced Examples](EXAMPLES.md#advanced-app) - Complex scenarios
+- [Integration Examples](EXAMPLES.md#integration-app) - Third-party integrations
+- [Web Application](../app/fastapi_react_demo/README.md) - Modern React + FastAPI demo
 
 ## 🔥 What's New in v0.9
 
@@ -175,7 +175,7 @@ result = controller.run(
 ### Streamlit Demo
 Beautiful interactive web interface:
 ```bash
-streamlit run examples/sage_demo.py -- \
+streamlit run app/sage_demo.py -- \
   --api_key YOUR_API_KEY \
   --model deepseek-chat \
   --base_url https://api.deepseek.com/v1
@@ -184,7 +184,7 @@ streamlit run examples/sage_demo.py -- \
 ### FastAPI + React Application
 Modern web application with TypeScript:
 ```bash
-cd examples/fastapi_react_demo
+cd app/fastapi_react_demo
 python start_backend.py
 
 # New terminal
@@ -257,7 +257,7 @@ We welcome contributions! See our development guides:
 - **Issues**: [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/ZHangZHengEric/Sage/discussions)
 - **Documentation**: This documentation site
-- **Examples**: [Examples Directory](../examples/)
+- **Examples**: [Examples Directory](../app/)
 
 ## 📄 License
 

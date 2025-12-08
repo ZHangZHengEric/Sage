@@ -3,7 +3,7 @@ services:
     restart: always
     build:
       context: .
-      dockerfile: examples/agent_platform_server/docker/Dockerfile
+      dockerfile: app/server/docker/Dockerfile
     image: sage-server:v1.0
     container_name: sage-server
     volumes:
@@ -19,7 +19,7 @@ services:
   sage-web:
     restart: always
     build:
-      context: ./examples/agent_platform_web/
+      context: ./app/web/
       dockerfile: docker/Dockerfile
     image: sage-web:v1.0
     container_name: sage-web
@@ -88,7 +88,7 @@ services:
       - MINIO_ROOT_USER=${SAGE_MINIO_ACCESS_KEY}
       - MINIO_ROOT_PASSWORD=${SAGE_MINIO_SECRET_KEY}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
       timeout: 20s
       retries: 3
