@@ -14,7 +14,7 @@
 在项目根目录下执行以下命令构建 Docker 镜像：
 
 ```bash
-docker build -f examples/agent_platform_server/docker/Dockerfile -t sage-server:latest .
+docker build -f app/server/docker/Dockerfile -t sage-server:latest .
 ```
 
 ### 2. 运行 Docker 容器

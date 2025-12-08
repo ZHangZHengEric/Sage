@@ -76,7 +76,7 @@
 - 部署与运维：提供 `sage_server` Docker 部署脚本；配置缺失时也能顺畅启动。
 
 快速引导：
-- Agent 管理平台的启动步骤见 `examples/agent_platform_server/README.md` 与 `examples/agent_platform_web/README.md`。
+- Agent 管理平台的启动步骤见 `app/server/README.md` 与 `app/web/README.md`。
 - 现有 FastAPI + React 演示保持完整支持（见下方章节）。
 
 ## 🤖 **支持的模型**
@@ -176,7 +176,7 @@ cd Sage
 pip install -r requirements.txt
 
 # 安装 FastAPI React 演示依赖
-pip install -r examples/fastapi_react_demo/requirements.txt
+pip install -r app/fastapi_react_demo/requirements.txt
 ```
 
 #### 🔧 **依赖概览**
@@ -197,19 +197,19 @@ Sage 包含多个强大的工具系统，需要特定的依赖项：
 
 ```bash
 # 使用 DeepSeek-V3（推荐）
-streamlit run examples/sage_demo.py -- \
+streamlit run app/sage_demo.py -- \
   --api_key YOUR_DEEPSEEK_API_KEY \
   --model deepseek-chat \
   --base_url https://api.deepseek.com/v1
 
 # 使用 OpenRouter（多模型）
-streamlit run examples/sage_demo.py -- \
+streamlit run app/sage_demo.py -- \
   --api_key YOUR_OPENROUTER_API_KEY \
   --model deepseek/deepseek-chat \
   --base_url https://openrouter.ai/api/v1
 
 # 使用 GPT-4
-streamlit run examples/sage_demo.py -- \
+streamlit run app/sage_demo.py -- \
   --api_key YOUR_OPENAI_API_KEY \
   --model gpt-4o \
   --base_url https://api.openai.com/v1
@@ -237,7 +237,7 @@ streamlit run examples/sage_demo.py -- \
 
 **快速开始：**
 ```bash
-cd examples/fastapi_react_demo
+cd app/fastapi_react_demo
 
 # 后端设置
 python start_backend.py
@@ -258,7 +258,7 @@ npm run dev
 - 🛠️ **系统配置** - 调整模型设置、温度和其他参数
 - 📊 **实时监控** - 实时观察令牌使用情况和执行进度
 
-在 `http://localhost:8080` 访问本地应用。详细设置说明请参见 [FastAPI React Demo README](examples/fastapi_react_demo/README.md)。
+在 `http://localhost:8080` 访问本地应用。详细设置说明请参见 [FastAPI React Demo README](app/fastapi_react_demo/README.md)。
 
 ### 💻 **命令行使用**
 
@@ -266,10 +266,10 @@ Sage 提供强大的命令行界面，支持与AI智能体进行交互式对话�
 
 ```bash
 # 基本用法
-python examples/sage_cli.py --api_key YOUR_API_KEY --model deepseek/deepseek-chat --base_url https://api.deepseek.com
+python app/sage_cli.py --api_key YOUR_API_KEY --model deepseek/deepseek-chat --base_url https://api.deepseek.com
 
 # 高级选项
-python examples/sage_cli.py \
+python app/sage_cli.py \
   --api_key YOUR_API_KEY \
   --model deepseek/deepseek-chat \
   --base_url https://api.deepseek.com \
@@ -286,7 +286,7 @@ python examples/sage_cli.py \
 - 🎨 **美观界面**: 彩色消息框架，不同类型消息有不同视觉效果
 - ⚡ **流式输出**: 实时AI响应，提供流畅的交互体验
 
-**📖 详细的CLI使用方法、配置和示例，请参见 [示例说明文档](examples/README.md)**
+**📖 详细的CLI使用方法、配置和示例，请参见 [示例说明文档](app/README.md)**
 
 
 

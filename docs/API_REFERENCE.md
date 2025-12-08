@@ -744,6 +744,6 @@ metrics = monitor.export_metrics()
 
 ---
 
-For more examples and advanced usage patterns, see the [Examples Guide](EXAMPLES.md).
+For more app and advanced usage patterns, see the [Examples Guide](EXAMPLES.md).
 
 **Built with ❤️ by Eric ZZ and the Sage community** 

@@ -2,7 +2,7 @@
 layout: default
 title: Examples & Use Cases
 nav_order: 10
-description: "Practical examples and use cases for the Sage Multi-Agent Framework"
+description: "Practical app and use cases for the Sage Multi-Agent Framework"
 ---
 
 {: .note }
@@ -16,15 +16,15 @@ description: "Practical examples and use cases for the Sage Multi-Agent Framewor
 
 # 🎯 Examples and Use Cases
 
-This document provides practical examples for using Sage Multi-Agent Framework in various scenarios.
+This document provides practical app for using Sage Multi-Agent Framework in various scenarios.
 
 ## 📋 Table of Contents
 
-- [Getting Started Examples](#-getting-started-examples)
+- [Getting Started Examples](#-getting-started-app)
 - [Research and Analysis](#-research-and-analysis)
 - [Problem Solving](#-problem-solving)
-- [Custom Tool Examples](#-custom-tool-examples)
-- [Configuration Examples](#-configuration-examples)
+- [Custom Tool Examples](#-custom-tool-app)
+- [Configuration Examples](#-configuration-app)
 - [Real-world Applications](#-real-world-applications)
 
 ## 🚀 Getting Started Examples
@@ -480,4 +480,4 @@ The `run()` method supports the following parameters:
 
 The `run_stream()` method supports the same parameters as `run()` and yields message chunks for real-time processing.
 
-These examples demonstrate the flexibility and power of Sage Multi-Agent Framework. Start with simple examples and gradually explore more complex use cases as you become familiar with the system. 
+These app demonstrate the flexibility and power of Sage Multi-Agent Framework. Start with simple app and gradually explore more complex use cases as you become familiar with the system. 
