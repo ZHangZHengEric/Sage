@@ -20,7 +20,8 @@ from mcp import StdioServerParameters
 from mcp import Tool
 import traceback
 import time
-import os, sys
+import os
+import sys
 from .mcp_proxy import McpProxy
 
 
@@ -60,7 +61,6 @@ class ToolManager:
         Args:
             path: Optional custom path to scan for tools. If None, uses package directory.
         """
-        logger.info("Auto-discovering tools")
         package_path = Path(path) if path else Path(__file__).parent
         sys_package_path = package_path.parent
         # 自动推断完整包名（如 sagents.tool）
@@ -72,27 +72,21 @@ class ToolManager:
         if p.name == "sagents":
             pkg_parts.insert(0, "sagents")
         full_package_name = ".".join(pkg_parts)
-        logger.info(f"Auto-discovery full package name: {full_package_name}")
-        logger.info(f"Scanning path: {package_path}")
+        logger.info(f"Auto-discovery full package name: {full_package_name}, package_path: {package_path}")
         # 需要将package_path 加入sys.path
         if str(sys_package_path) not in sys.path:
             sys.path.append(str(sys_package_path))
-            logger.info(f"Added path to sys.path: {sys_package_path}")
-        for _, module_name, _ in pkgutil.iter_modules([str(package_path)]):
-            if module_name == "tool_base" or module_name.endswith("_base"):
-                logger.debug(f"Skipping base module: {module_name}")
-                continue
-            try:
-                logger.info(f"Attempting to import module: {module_name}")
-                module = importlib.import_module(f".{module_name}", full_package_name)
-                for _, obj in inspect.getmembers(module):
-                    if inspect.isclass(obj) and issubclass(obj, ToolBase):
-                        logger.info(f"Found tool class: {obj.__name__}")
-                        self.register_tool_class(obj)
-            except ImportError as e:
-                logger.error(f"Failed to import module {module_name}: {e}")
-                logger.error(traceback.format_exc())
-                continue
+        # 递归获取所有子类
+
+        def get_all_subclasses(cls):
+            all_subclasses = set()
+            for subclass in cls.__subclasses__():
+                all_subclasses.add(subclass)
+                all_subclasses.update(get_all_subclasses(subclass))
+            return all_subclasses
+
+        for tool_class in get_all_subclasses(ToolBase):
+            self.register_tool_class(tool_class)
         logger.info(f"Auto-discovery completed with {len(self.tools)} total tools")
         # 将package_path 从sys.path 中移除
         if str(sys_package_path) in sys.path:
@@ -101,19 +95,15 @@ class ToolManager:
 
     def register_tool_class(self, tool_class: Type[ToolBase]):
         """Register all tools from a ToolBase subclass"""
-        logger.info(f"Registering tools from class: {tool_class.__name__}")
-        tool_instance = tool_class()
-        # 缓存工具实例，以便后续执行时重用
-        self._tool_instances[tool_class] = tool_instance
-        instance_tools = tool_instance.tools
+        class_tools = getattr(tool_class, "_tools", {}) or {}
 
-        if not instance_tools:
+        if not class_tools:
             logger.warning(f"No tools found in {tool_class.__name__}")
             return False
 
-        logger.info(f"\nRegistering tools to manager from {tool_class.__name__}:")
+        logger.info(f"Registering tools to manager from {tool_class.__name__}:")
         registered = False
-        for tool_name, tool_spec in instance_tools.items():
+        for tool_name, tool_spec in class_tools.items():
             # 修正工具规格中的__objclass__
             if hasattr(tool_spec.func, "__objclass__"):
                 tool_spec.func.__objclass__ = tool_class
@@ -512,6 +502,8 @@ class ToolManager:
                         instance = self._tool_instances[tool_class]
                     else:
                         instance = tool_class()
+                        if hasattr(self, "_tool_instances"):
+                            self._tool_instances[tool_class] = instance
                     bound_method = tool.func.__get__(instance)
                     if asyncio.iscoroutinefunction(bound_method):
                         result = await bound_method(**kwargs)

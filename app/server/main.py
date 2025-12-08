@@ -22,6 +22,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from dotenv import load_dotenv
 
+import warnings
+for m in ("websockets", "uvicorn"):
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        module=m
+    )
+
 # 指定加载的 .env 文件
 load_dotenv(".env")
 

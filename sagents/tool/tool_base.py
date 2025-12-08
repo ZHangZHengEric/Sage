@@ -1,17 +1,16 @@
 from operator import imod
 from typing import Dict, Any, List, Callable, Optional, Type, Union, get_origin, get_args
 from dataclasses import dataclass
-from mcp import StdioServerParameters
 from sagents.utils.logger import logger
 import inspect
-import json
 from functools import wraps
-from docstring_parser import parse,DocstringStyle
+from docstring_parser import parse, DocstringStyle
 from .tool_config import ToolSpec, AgentToolSpec, McpToolSpec, SseServerParameters, StreamableHttpServerParameters
+
 
 class ToolBase:
     _tools: Dict[str, ToolSpec] = {}  # Class-level registry
-    
+
     def __init__(self):
         logger.debug(f"Initializing {self.__class__.__name__}")
         self.tools = {}  # Instance-specific registry
@@ -23,9 +22,18 @@ class ToolBase:
                 if name not in self.__class__._tools:
                     self.__class__._tools[name] = spec
                 logger.debug(f"Registered tool: {name} to {self.__class__.__name__}")
-    
+
+    def __init_subclass__(cls, **kwargs):
+        """Ensure each subclass has its own tool registry"""
+        super().__init_subclass__(**kwargs)
+        cls._tools = {}
+        # Register tools defined in this class (or inherited)
+        for name, value in inspect.getmembers(cls):
+            if hasattr(value, "_tool_spec"):
+                cls._tools[name] = value._tool_spec
+
     @classmethod
-    def tool(cls,disabled:bool=False):
+    def tool(cls, disabled: bool = False):
         """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法"""
         def decorator(func):
             if disabled:
@@ -34,13 +42,13 @@ class ToolBase:
             logger.info(f"Applying tool decorator to {func.__name__} in {cls.__name__}")
             # Parse full docstring using docstring_parser
             docstring_text = inspect.getdoc(func) or ""
-            parsed_docstring = parse(docstring_text,style=DocstringStyle.GOOGLE)
-            
+            parsed_docstring = parse(docstring_text, style=DocstringStyle.GOOGLE)
+
             # Use parsed description if available
             parsed_description = parsed_docstring.short_description or ""
             if parsed_docstring.long_description:
                 parsed_description += "\n" + parsed_docstring.long_description
-            
+
             # Extract parameters from signature
             sig = inspect.signature(func)
             parameters = {}
@@ -92,27 +100,26 @@ class ToolBase:
             for name, param in sig.parameters.items():
                 if name == "self":
                     continue
-                    
+
                 param_info = {"type": "string", "description": ""}  # Default values
                 if param.annotation != inspect.Parameter.empty:
                     param_info["type"] = _infer_json_type(param.annotation)
-                    
-                
+
                 # Get parameter description from parsed docstring
                 param_desc = ""
                 for doc_param in parsed_docstring.params:
                     if doc_param.arg_name == name:
                         param_desc = doc_param.description
                         break
-                
+
                 # Use docstring description if available, otherwise default
                 param_info["description"] = param_desc or f"The {name} parameter"
-                
+
                 if param.default == inspect.Parameter.empty:
                     required.append(name)
-                
+
                 parameters[name] = param_info
-            
+
             # Always use function name as tool name
             tool_name = func.__name__
             logger.debug(f"Registering tool: {tool_name} to {cls.__name__}")
@@ -125,29 +132,29 @@ class ToolBase:
                 parameters=parameters,
                 required=required
             )
-            
+
             @wraps(func)
             def wrapper(*args, **kwargs):
                 logger.debug(f"Calling tool: {tool_name} with {len(kwargs)} args")
                 result = func(*args, **kwargs)
                 logger.debug(f"Completed tool: {tool_name}")
                 return result
-            
+
             # Store the tool spec on both the wrapper and original function
             wrapper._tool_spec = spec
             func._tool_spec = spec
-            
+
             # Set __objclass__ to enable instance method binding detection
             wrapper.__objclass__ = cls
             func.__objclass__ = cls
-            
+
             # Register in class registry
             if not hasattr(func, '_is_classmethod'):
                 # For instance methods, register in class registry
                 if not hasattr(cls, '_tools'):
                     cls._tools = {}
                 cls._tools[tool_name] = spec
-            
+
             logger.debug(f"Registered tool to toolbase: {tool_name}")
             return wrapper
         return decorator
