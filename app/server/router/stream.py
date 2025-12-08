@@ -497,11 +497,12 @@ async def stream_chat(request: StreamRequest, http_request: Request):
                     logger.info(
                         f"📊 流处理状态 - 会话: {session_id}, 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
                     )
+
+                # 更新消息收集器
+                _update_message_collector(message_collector, message_order, result)
                 # 如果关闭了content_beautify，则result去除show_content
                 if not request.content_beautify and "show_content" in result:
                     del result["show_content"]
-                # 更新消息收集器
-                _update_message_collector(message_collector, message_order, result)
                 # 处理JSON传输（分块或直接发送）
                 try:
                     async for chunk in _send_chunked_json(result):
