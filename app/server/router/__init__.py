@@ -11,6 +11,7 @@ from .file_server import file_server_router
 from .kdb import kdb_router
 from .user import user_router
 from .system import system_router
+from .oss import oss_router
 
 # Export all routers for easy import
 __all__ = [
@@ -28,3 +29,4 @@ def register_routes(app):
     app.include_router(kdb_router)
     app.include_router(user_router)
     app.include_router(system_router)
+    app.include_router(oss_router)
