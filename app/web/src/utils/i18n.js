@@ -5,23 +5,23 @@ import { ref, computed } from 'vue'
 export const useLanguageStore = defineStore('app', () => {
   // 状态
   const language = ref('zhCN') // 默认中文
-  
+
   // 计算属性
   const isZhCN = computed(() => language.value === 'zhCN')
   const isEnUS = computed(() => language.value === 'enUS')
-  
+
   // 方法
   const setLanguage = (lang) => {
     language.value = lang
     // 保存到本地存储
     localStorage.setItem('language', lang)
   }
-  
+
   const toggleLanguage = () => {
     const newLang = language.value === 'zhCN' ? 'enUS' : 'zhCN'
     setLanguage(newLang)
   }
-  
+
   // 初始化
   const initialize = () => {
     // 从本地存储恢复语言设置
@@ -30,15 +30,15 @@ export const useLanguageStore = defineStore('app', () => {
       language.value = savedLanguage
     }
   }
-  
+
   return {
     // 状态
     language,
-    
+
     // 计算属性
     isZhCN,
     isEnUS,
-    
+
     // 方法
     setLanguage,
     toggleLanguage,
@@ -70,7 +70,7 @@ export const zhCN = {
   'sidebar.apiReference': 'API参考',
   'sidebar.apiAgentChat': 'Agent对话-api/stream',
   'auth.logout': '退出',
-  
+
   // 聊天页面
   'chat.title': '对话助手',
   'chat.current': '当前',
@@ -95,7 +95,7 @@ export const zhCN = {
   'chat.settings': '设置',
   'chat.loadAgentsError': '加载Agent失败',
   'chat.downloadError': '下载文件失败',
-  
+
   // Agent配置页面
   'agent.title': 'Agent配置',
   'agent.subtitle': '管理您的AI助手配置',
@@ -179,7 +179,7 @@ export const zhCN = {
   'agent.nameLength': '名称长度应在2-50个字符之间',
   'agent.descriptionLength': '描述长度不能超过200个字符',
   'agent.systemPrefixRequired': '请输入系统提示词',
-  
+
   // Agent创建模态框
   'agentCreation.title': '创建新Agent',
   'agentCreation.blankConfig': '空白配置',
@@ -193,7 +193,7 @@ export const zhCN = {
   'agentCreation.error': '生成失败，请重试',
   'agentCreation.networkError': '网络错误，请检查连接',
   'agentCreation.invalidResponse': '服务器返回无效数据',
-  
+
   // Agent编辑面板
   'agentEdit.viewAgent': '查看Agent',
   'agentEdit.editAgent': '编辑Agent',
@@ -240,11 +240,11 @@ export const zhCN = {
   'agentEdit.workflowStepsCount': '步骤',
   'agentEdit.systemContextPlaceholder': '请输入系统上下文的JSON格式数据，例如：{"key1": "value1", "key2": "value2"}',
   'agentEdit.workflowPlaceholder': '请输入工作流的JSON格式数据，例如：{"workflow1": ["step1", "step2"], "workflow2": ["step3", "step4"]}',
-  
+
   // 工具调用
   'toolCall.completed': '已完成',
   'toolCall.executing': '执行中',
-  
+
   // 工具页面
   'tools.title': '工具集',
   'tools.subtitle': '浏览和了解可用的工具',
@@ -268,7 +268,7 @@ export const zhCN = {
   'tools.source.basic': '基础工具',
   'tools.source.builtin': '内置工具',
   'tools.source.system': '系统工具',
-  
+
   // MCP服务器相关
   'tools.Tools': '工具',
   'tools.mcpServers': 'MCP服务器',
@@ -290,7 +290,7 @@ export const zhCN = {
   'tools.connectionUrl': '连接地址',
   'tools.serverInfo': '服务器信息',
   'tools.toolsAndParams': '工具与参数',
-  
+
   // 添加MCP服务器表单
   'tools.basicInfo': '基本信息',
   'tools.serverName': '服务器名称',
@@ -312,7 +312,7 @@ export const zhCN = {
   'tools.cancel': '取消',
   'tools.add': '添加',
   'tools.adding': '添加中...',
-  
+
   // 添加MCP服务器对话框
   'addMcpServer': '添加MCP服务器',
   'serverName': '服务器名称',
@@ -352,7 +352,7 @@ export const zhCN = {
   'toolDetail.no': '否',
   'toolDetail.noParameters': '此工具无需参数',
   'toolDetail.rawConfig': '原始配置',
-  
+
   // 知识库管理
   'knowledgeBase.title': '知识库管理',
   'knowledgeBase.subtitle': '管理和配置您的知识库',
@@ -399,7 +399,7 @@ export const zhCN = {
   'knowledgeBase.status.processing': '处理中',
   'knowledgeBase.status.success': '已完成',
   'knowledgeBase.status.failed': '失败',
-  
+
   // 添加知识库表单
   'knowledgeBase.add.title': '添加知识库',
   'knowledgeBase.add.basicInfo': '基本信息',
@@ -415,16 +415,16 @@ export const zhCN = {
   'knowledgeBase.add.submitting': '添加中...',
   'knowledgeBase.add.success': '知识库添加成功',
   'knowledgeBase.add.error': '添加知识库失败',
-  
+
   // 知识库详情和类型
   'knowledgeBase.documents': '文档',
   'knowledgeBase.lastUpdated': '最后更新',
   'knowledgeBase.noDescription': '暂无描述',
   'knowledgeBase.documentType': '文档知识库',
-  'knowledgeBase.qaType': '问答知识库', 
+  'knowledgeBase.qaType': '问答知识库',
   'knowledgeBase.codeType': '代码知识库',
   'knowledgeBase.unknownType': '未知类型',
-  
+
   // 历史页面
   'history.title': '对话记录',
   'history.subtitle': '管理和查看历史对话',
@@ -471,14 +471,16 @@ export const zhCN = {
   'history.conversationTitle': '对话标题：',
   'history.messageCount': '消息数量：',
   'history.visibleMessages': '条可见消息',
-  
+
   // 消息输入
   'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行)',
   'messageInput.send': '发送',
   'messageInput.stop': '停止',
   'messageInput.sendTitle': '发送消息',
   'messageInput.stopTitle': '停止生成',
-  
+  'messageInput.uploadFile': '上传文件',
+  'messageInput.removeFile': '移除文件',
+
   // 配置面板
   'config.title': '配置设置',
   'config.selectAgent': '选择智能体:',
@@ -490,7 +492,7 @@ export const zhCN = {
   'config.moreSuggestDesc': '提供更多的解决方案建议',
   'config.maxLoopCount': '最大循环次数:',
   'config.maxLoopCountDesc': '限制智能体的最大思考循环次数',
-  
+
   // 任务管理
   'task.title': '任务状态',
   'task.noTasks': '暂无任务',
@@ -503,7 +505,7 @@ export const zhCN = {
   'task.result': '结果:',
   'task.relatedDocs': '相关文档:',
   'task.subtasks': '子任务:',
-  
+
   // 工作空间
   'workspace.title': '工作空间',
   'workspace.noFiles': '暂无文件',
@@ -539,7 +541,7 @@ export const enUS = {
   'sidebar.apiReference': 'API Reference',
   'sidebar.apiAgentChat': 'Agent Chat - api/stream',
   'auth.logout': 'Logout',
-  
+
   // 聊天页面
   'chat.title': 'Chat Assistant',
   'chat.current': 'Current',
@@ -564,7 +566,7 @@ export const enUS = {
   'chat.settings': 'Settings',
   'chat.loadAgentsError': 'Failed to load agents',
   'chat.downloadError': 'Failed to download file',
-  
+
   // Agent配置页面
   'agent.title': 'Agent Configuration',
   'agent.subtitle': 'Manage your AI assistant configurations',
@@ -634,7 +636,7 @@ export const enUS = {
   'agent.nameLength': 'Name length should be between 2-50 characters',
   'agent.descriptionLength': 'Description length cannot exceed 200 characters',
   'agent.systemPrefixRequired': 'Please enter system prompt',
-  
+
   // 通用选项
   'common.on': 'On',
   'common.off': 'Off',
@@ -647,7 +649,7 @@ export const enUS = {
   'common.creating': 'Creating...',
   'common.total': 'Total',
   'common.copy': 'Copy',
-  
+
   // Agent创建模态框
   'agentCreation.title': 'Create New Agent',
   'agentCreation.blankConfig': 'Blank Configuration',
@@ -661,7 +663,7 @@ export const enUS = {
   'agentCreation.error': 'Generation failed, please try again',
   'agentCreation.networkError': 'Network error, please check connection',
   'agentCreation.invalidResponse': 'Server returned invalid data',
-  
+
   // Agent编辑面板
   'agentEdit.viewAgent': 'View Agent',
   'agentEdit.editAgent': 'Edit Agent',
@@ -708,11 +710,11 @@ export const enUS = {
   'agentEdit.workflowStepsCount': 'Steps',
   'agentEdit.systemContextPlaceholder': 'Enter system context in JSON format, e.g.: {"key1": "value1", "key2": "value2"}',
   'agentEdit.workflowPlaceholder': 'Enter workflows in JSON format, e.g.: {"workflow1": ["step1", "step2"], "workflow2": ["step3", "step4"]}',
-  
+
   // 工具调用
   'toolCall.completed': 'Completed',
   'toolCall.executing': 'Executing',
-  
+
   // 工具页面
   'tools.title': 'Tools',
   'tools.subtitle': 'Browse and learn about available tools',
@@ -736,7 +738,7 @@ export const enUS = {
   'tools.source.basic': 'Basic Tools',
   'tools.source.builtin': 'Built-in Tools',
   'tools.source.system': 'System Tools',
-  
+
   // MCP Server related
   'tools.Tools': 'Internal Tools',
   'tools.mcpServers': 'MCP Servers',
@@ -756,7 +758,7 @@ export const enUS = {
   'tools.connectionUrl': 'Connection URL',
   'tools.serverInfo': 'Server Info',
   'tools.toolsAndParams': 'Tools & Parameters',
-  
+
   // Add MCP Server Form
   'tools.basicInfo': 'Basic Information',
   'tools.serverName': 'Server Name',
@@ -778,7 +780,7 @@ export const enUS = {
   'tools.cancel': 'Cancel',
   'tools.add': 'Add',
   'tools.adding': 'Adding...',
-  
+
   // Add MCP Server Dialog
   'addMcpServer': 'Add MCP Server',
   'serverName': 'Server Name',
@@ -818,7 +820,7 @@ export const enUS = {
   'toolDetail.no': 'No',
   'toolDetail.noParameters': 'This tool requires no parameters',
   'toolDetail.rawConfig': 'Raw Configuration',
-  
+
   // 知识库管理
   'knowledgeBase.title': 'Knowledge Base Management',
   'knowledgeBase.subtitle': 'Manage and configure your knowledge bases',
@@ -865,7 +867,7 @@ export const enUS = {
   'knowledgeBase.status.processing': 'Processing',
   'knowledgeBase.status.success': 'Success',
   'knowledgeBase.status.failed': 'Failed',
-  
+
   // 添加知识库表单
   'knowledgeBase.add.title': 'Add Knowledge Base',
   'knowledgeBase.add.basicInfo': 'Basic Information',
@@ -881,16 +883,16 @@ export const enUS = {
   'knowledgeBase.add.submitting': 'Adding...',
   'knowledgeBase.add.success': 'Knowledge base added successfully',
   'knowledgeBase.add.error': 'Failed to add knowledge base',
-  
+
   // 知识库详情和类型
   'knowledgeBase.documents': 'Documents',
   'knowledgeBase.lastUpdated': 'Last Updated',
   'knowledgeBase.noDescription': 'No description',
   'knowledgeBase.documentType': 'Document Knowledge Base',
   'knowledgeBase.qaType': 'Q&A Knowledge Base',
-  'knowledgeBase.codeType': 'Code Knowledge Base', 
+  'knowledgeBase.codeType': 'Code Knowledge Base',
   'knowledgeBase.unknownType': 'Unknown Type',
-  
+
   // 历史页面
   'history.title': 'Chat History',
   'history.subtitle': 'Manage and view historical conversations',
@@ -937,14 +939,16 @@ export const enUS = {
   'history.conversationTitle': 'Conversation Title:',
   'history.messageCount': 'Message Count:',
   'history.visibleMessages': 'visible messages',
-  
+
   // 消息输入
   'messageInput.placeholder': 'Type your message... (Shift+Enter for new line)',
   'messageInput.send': 'Send',
   'messageInput.stop': 'Stop',
   'messageInput.sendTitle': 'Send message',
   'messageInput.stopTitle': 'Stop generation',
-  
+  'messageInput.uploadFile': 'Upload file',
+  'messageInput.removeFile': 'Remove file',
+
   // 配置面板
   'config.title': 'Configuration Settings',
   'config.selectAgent': 'Select Agent:',
@@ -956,7 +960,7 @@ export const enUS = {
   'config.moreSuggestDesc': 'Provide more solution suggestions',
   'config.maxLoopCount': 'Max Loop Count:',
   'config.maxLoopCountDesc': 'Limit the maximum thinking loops for agents',
-  
+
   // 任务管理
   'task.title': 'Task Status',
   'task.noTasks': 'No tasks',
@@ -969,7 +973,7 @@ export const enUS = {
   'task.result': 'Result:',
   'task.relatedDocs': 'Related Documents:',
   'task.subtasks': 'Subtasks:',
-  
+
   // 工作空间
   'workspace.title': 'Workspace',
   'workspace.noFiles': 'No files',
@@ -981,18 +985,18 @@ export const enUS = {
 };
 
 export function useLanguage() {
-const langStore = useLanguageStore()
-  
+  const langStore = useLanguageStore()
+
   // 当前翻译对象
   const currentTranslation = computed(() => {
     return translations[langStore.language] || translations.zhCN
   })
-  
+
   // 翻译函数
   const t = (key, params = {}) => {
     const translation = currentTranslation.value
     let text = translation[key] || key
-    
+
     // 处理参数替换
     if (params && typeof params === 'object') {
       Object.keys(params).forEach(param => {
@@ -1000,7 +1004,7 @@ const langStore = useLanguageStore()
         text = text.replace(regex, params[param])
       })
     }
-    
+
     return text
   }
 
