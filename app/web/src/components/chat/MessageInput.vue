@@ -1,24 +1,26 @@
 <template>
   <form @submit="handleSubmit" class="message-form">
-    <!-- 图片预览区域 -->
-    <div v-if="uploadedImages.length > 0" class="image-preview-container">
+    <!-- 文件预览区域 -->
+    <div v-if="uploadedFiles.length > 0" class="image-preview-container">
       <div class="image-preview-list">
-        <div v-for="(image, index) in uploadedImages" :key="index" class="image-preview-item">
-          <img :src="image.preview" :alt="`预览图 ${index + 1}`" class="preview-image" />
-          <button type="button" @click="removeImage(index)" class="remove-image-btn"
-            :title="t('messageInput.removeImage')">
-            ✕
-          </button>
+        <div v-for="(file, index) in uploadedFiles" :key="index" class="image-preview-item">
+          <!-- 图片预览 -->
+          <img v-if="file.type === 'image'" :src="file.preview" :alt="`预览图 ${index + 1}`" class="preview-image" />
+          <!-- 视频预览 -->
+          <video v-else-if="file.type === 'video'" :src="file.preview || file.url" class="preview-video" muted
+            playsinline></video>
+          <!-- 其他文件预览 -->
+          <div v-else class="file-preview-content" :title="file.name">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="file-icon">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+              <polyline points="13 2 13 9 20 9"></polyline>
+            </svg>
+            <span class="file-name">{{ file.name }}</span>
+          </div>
 
-        </div>
-      </div>
-    </div>
-    <div v-if="uploadedVideos.length > 0" class="image-preview-container">
-      <div class="image-preview-list">
-        <div v-for="(video, index) in uploadedVideos" :key="'v-' + index" class="image-preview-item">
-          <video :src="video.preview || video.url" class="preview-video" muted playsinline></video>
-          <button type="button" @click="removeVideo(index)" class="remove-image-btn"
-            :title="t('messageInput.removeImage')">
+          <button type="button" @click="removeFile(index)" class="remove-image-btn"
+            :title="t('messageInput.removeFile')">
             ✕
           </button>
         </div>
@@ -26,13 +28,13 @@
     </div>
 
     <div class="input-wrapper">
-      <!-- 图片上传按钮 -->
+      <!-- 文件上传按钮 -->
       <button type="button" @click="triggerFileInput" class="upload-button" :disabled="isLoading"
-        :title="t('messageInput.uploadImage')">
+        :title="t('messageInput.uploadFile')">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
-            d="M21 19V5C21 3.9 20.1 3 19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19ZM8.5 13.5L11 16.51L14.5 12L19 18H5L8.5 13.5Z"
-            fill="currentColor" />
+            d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
 
@@ -44,15 +46,14 @@
           :title="t('messageInput.stopTitle')">
           ⏹️ {{ t('messageInput.stop') }}
         </button>
-        <button v-else type="submit" :disabled="!inputValue.trim() && uploadedImages.length === 0" class="send-button"
+        <button v-else type="submit" :disabled="!inputValue.trim() && uploadedFiles.length === 0" class="send-button"
           :title="t('messageInput.sendTitle')">
           {{ t('messageInput.send') }}
         </button>
       </div>
 
       <!-- 隐藏的文件输入框 -->
-      <input ref="fileInputRef" type="file" accept="image/*,video/*" multiple @change="handleFileSelect"
-        style="display: none;" />
+      <input ref="fileInputRef" type="file" multiple @change="handleFileSelect" style="display: none;" />
     </div>
   </form>
 </template>
@@ -77,9 +78,8 @@ const inputValue = ref('')
 const textareaRef = ref(null)
 const fileInputRef = ref(null)
 
-// 图片上传相关状态
-const uploadedImages = ref([])
-const uploadedVideos = ref([])
+// 文件上传相关状态
+const uploadedFiles = ref([])
 
 // 自动调整文本区域高度
 const adjustTextareaHeight = async () => {
@@ -98,24 +98,22 @@ watch(inputValue, () => {
 // 处理表单提交
 const handleSubmit = (e) => {
   e.preventDefault()
-  if ((inputValue.value.trim() || uploadedImages.value.length > 0 || uploadedVideos.value.length > 0) && !props.isLoading) {
+  if ((inputValue.value.trim() || uploadedFiles.value.length > 0) && !props.isLoading) {
     let messageContent = inputValue.value.trim()
-    if (uploadedImages.value.length > 0 || uploadedVideos.value.length > 0) {
-      const imageUrls = uploadedImages.value.filter(img => img.url).map(img => img.url)
-      const videoUrls = uploadedVideos.value.filter(v => v.url).map(v => v.url)
-      const urls = [...imageUrls, ...videoUrls]
-      if (urls.length > 0) {
+    if (uploadedFiles.value.length > 0) {
+      const fileUrls = uploadedFiles.value.filter(f => f.url).map(f => f.url)
+
+      if (fileUrls.length > 0) {
         if (messageContent) {
           messageContent += '\n\n'
         }
-        messageContent += urls.join('\n')
+        messageContent += fileUrls.join('\n')
       }
     }
     if (messageContent) {
       emit('sendMessage', messageContent)
       inputValue.value = ''
-      uploadedImages.value = []
-      uploadedVideos.value = []
+      uploadedFiles.value = []
     }
   }
 }
@@ -145,96 +143,67 @@ const triggerFileInput = () => {
 const handleFileSelect = async (event) => {
   const files = Array.from(event.target.files)
   if (files.length === 0) return
-  const imageFiles = files.filter(f => f.type.startsWith('image/'))
-  const videoFiles = files.filter(f => f.type.startsWith('video/'))
-  if (imageFiles.length === 0 && videoFiles.length === 0) {
-    alert('请选择有效的图片或视频文件')
-    return
-  }
-  for (const file of imageFiles) {
-    await processImageFile(file)
-  }
-  for (const file of videoFiles) {
-    await processVideoFile(file)
+
+  for (const file of files) {
+    await processFile(file)
   }
   event.target.value = ''
 }
 
-// 处理单个图片文件
-const processImageFile = async (file) => {
-  // 创建预览URL
-  const preview = URL.createObjectURL(file)
+// 处理单个文件
+const processFile = async (file) => {
+  const isImage = file.type.startsWith('image/')
+  const isVideo = file.type.startsWith('video/')
 
-  // 添加到上传列表，直接标记为上传成功状态
-  const imageItem = {
+  let preview = null
+  if (isImage || isVideo) {
+    preview = URL.createObjectURL(file)
+  }
+
+  // 添加到上传列表，初始状态
+  const fileItem = {
     file,
     preview,
-    uploading: false,
+    type: isImage ? 'image' : (isVideo ? 'video' : 'file'),
+    name: file.name,
+    uploading: true,
     url: null
   }
 
-  uploadedImages.value.push(imageItem)
+  uploadedFiles.value.push(fileItem)
 
   try {
     // 调用OSS API上传
-    const imageUrl = await ossApi.uploadImage(file)
+    const url = await ossApi.uploadFile(file)
 
-    // 更新图片URL
-    imageItem.url = imageUrl
+    // 更新文件URL
+    fileItem.url = url
+    fileItem.uploading = false
 
-    console.log('图片上传成功:', imageUrl)
+    console.log('文件上传成功:', url)
 
   } catch (error) {
-    console.error('图片上传失败:', error)
+    console.error('文件上传失败:', error)
 
-    // 移除失败的图片
-    const index = uploadedImages.value.indexOf(imageItem)
+    // 移除失败的文件
+    const index = uploadedFiles.value.indexOf(fileItem)
     if (index > -1) {
-      uploadedImages.value.splice(index, 1)
-      URL.revokeObjectURL(preview)
+      uploadedFiles.value.splice(index, 1)
+      if (preview) {
+        URL.revokeObjectURL(preview)
+      }
     }
-    alert('图片上传失败，请重试')
+    alert('文件上传失败，请重试')
   }
 }
 
-const processVideoFile = async (file) => {
-  const preview = URL.createObjectURL(file)
-  const videoItem = {
-    file,
-    preview,
-    uploading: false,
-    url: null
+// 移除文件
+const removeFile = (index) => {
+  const file = uploadedFiles.value[index]
+  if (file.preview) {
+    URL.revokeObjectURL(file.preview)
   }
-  uploadedVideos.value.push(videoItem)
-  try {
-    const videoUrl = await ossApi.uploadVideo(file)
-    videoItem.url = videoUrl
-    console.log('视频上传成功:', videoUrl)
-  } catch (error) {
-    console.error('视频上传失败:', error)
-    const index = uploadedVideos.value.indexOf(videoItem)
-    if (index > -1) {
-      uploadedVideos.value.splice(index, 1)
-      URL.revokeObjectURL(preview)
-    }
-    alert('视频上传失败，请重试')
-  }
-}
-
-// 移除图片
-const removeImage = (index) => {
-  const image = uploadedImages.value[index]
-  if (image.preview) {
-    URL.revokeObjectURL(image.preview)
-  }
-  uploadedImages.value.splice(index, 1)
-}
-const removeVideo = (index) => {
-  const video = uploadedVideos.value[index]
-  if (video && video.preview) {
-    URL.revokeObjectURL(video.preview)
-  }
-  uploadedVideos.value.splice(index, 1)
+  uploadedFiles.value.splice(index, 1)
 }
 </script>
 
@@ -445,7 +414,38 @@ const removeVideo = (index) => {
   transform: scale(1.1);
 }
 
+/* File preview specific styles */
+.file-preview-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  background: #f0f0f0;
+  color: #5f6368;
+}
 
+.file-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.file-name {
+  font-size: 10px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.2;
+  width: 100%;
+  word-break: break-all;
+}
 
 /* 深色模式支持 */
 @media (prefers-color-scheme: dark) {
@@ -497,6 +497,11 @@ const removeVideo = (index) => {
   .image-preview-item {
     background: #3d3d3d;
     border-color: #555;
+  }
+
+  .file-preview-content {
+    background: #3d3d3d;
+    color: #9aa0a6;
   }
 }
 </style>
