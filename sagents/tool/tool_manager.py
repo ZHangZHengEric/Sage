@@ -25,6 +25,47 @@ import sys
 from .mcp_proxy import McpProxy
 
 
+def _innermost_exception(exc: BaseException) -> BaseException:
+    seen = set()
+    cur: BaseException = exc
+    while True:
+        cur_id = id(cur)
+        if cur_id in seen:
+            return cur
+        seen.add(cur_id)
+
+        if isinstance(cur, BaseExceptionGroup):
+            exceptions = getattr(cur, "exceptions", None)
+            if exceptions:
+                cur = exceptions[0]
+                continue
+
+        cause = getattr(cur, "__cause__", None)
+        if cause is not None:
+            cur = cause
+            continue
+
+        context = getattr(cur, "__context__", None)
+        if context is not None:
+            cur = context
+            continue
+
+        return cur
+
+
+def _innermost_exception_message(exc: BaseException) -> str:
+    inner = _innermost_exception(exc)
+    msg = str(inner).strip()
+    return msg if msg else repr(inner)
+
+
+def _raise_innermost_exception(exc: BaseException) -> None:
+    inner = _innermost_exception(exc)
+    if isinstance(inner, Exception):
+        raise inner from None
+    raise Exception(_innermost_exception_message(inner)) from None
+
+
 class ToolManager:
     def __init__(self, is_auto_discover=True):
         """初始化工具管理器"""
@@ -441,12 +482,13 @@ class ToolManager:
 
         except Exception as e:
             execution_time = time.time() - execution_start
+            error_detail = _innermost_exception_message(e)
             error_msg = (
-                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
+                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
             )
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(
-                error_msg, tool_name, "EXECUTION_ERROR", str(e)
+                error_msg, tool_name, "EXECUTION_ERROR", error_detail
             )
 
     async def _execute_mcp_tool(
@@ -475,6 +517,10 @@ class ToolManager:
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
         except Exception as e:
+            if isinstance(e, BaseExceptionGroup):
+                msg = _innermost_exception_message(e)
+                logger.error(f"MCP tool execution failed: {tool.name} - {msg}")
+                _raise_innermost_exception(e)
             logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
 
