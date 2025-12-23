@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+
+from core.client.llm import embedding
+from core.kb.document_split import DocumentSplit
+from core.kb.es.doc import (
+    DocDocument,
+    doc_document_delete,
+    doc_document_insert,
+    doc_document_search,
+    doc_index_clear,
+    doc_index_create,
+    get_documents_by_ids,
+)
+from core.kb.search_result_post_process import SearchResultPostProcessTool
 from pydantic import BaseModel
 
 from sagents.utils.logger import logger
-
-from core.kb.document_split import DocumentSplit
-from core.client.llm import embedding
-from core.kb.search_result_post_process import SearchResultPostProcessTool
-from core.kb.es.doc import (
-    doc_index_create,
-    doc_document_insert,
-    doc_document_delete,
-    doc_index_clear,
-    doc_document_search,
-    get_documents_by_ids,
-    DocDocument,
-)
 
 
 class DocumentInput(BaseModel):

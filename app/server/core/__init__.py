@@ -1,21 +1,23 @@
+import config
+
+from sagents.utils.logger import logger
+
+from .client.db import close_db_client, init_db_client
+from .client.es import close_es_client, init_es_client
+from .client.llm import (
+    close_chat_client,
+    close_embed_client,
+    init_chat_client,
+    init_embed_client,
+)
+from .client.minio import close_minio_client, init_minio_client
 from .globals import (
+    close_tool_manager,
     initialize_db_data,
     initialize_db_tables,
-    close_tool_manager,
     initialize_tool_manager,
     validate_and_disable_mcp_servers,
 )
-import config
-from .client.minio import init_minio_client, close_minio_client
-from .client.llm import (
-    init_embed_client,
-    close_embed_client,
-    init_chat_client,
-    close_chat_client,
-)
-from .client.es import init_es_client, close_es_client
-from .client.db import init_db_client, close_db_client
-from sagents.utils.logger import logger
 
 
 async def initialize_clients():

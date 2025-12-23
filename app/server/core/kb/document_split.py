@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
 import hashlib
-from typing import List, Dict, Any
 import logging
+import re
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

@@ -5,13 +5,14 @@
 """
 
 import os
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from sagents.utils.logger import logger
-from sagents.context.session_context import get_session_context
-from common.exceptions import SageHTTPException
 import models
+from common.exceptions import SageHTTPException
 from core.globals import get_all_active_sessions_service_map
+
+from sagents.context.session_context import get_session_context
+from sagents.utils.logger import logger
 
 
 async def interrupt_session(

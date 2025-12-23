@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional, List
-from openai import AsyncOpenAI
+from typing import List, Optional
+
 from config.settings import StartupConfig
+from openai import AsyncOpenAI
+
 from sagents.utils.logger import logger
 
 MODEL_CLIENT: Optional[AsyncOpenAI] = None

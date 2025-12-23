@@ -2,26 +2,27 @@
 流式聊天接口路由模块
 """
 
-import json
-import uuid
 import asyncio
-import traceback
+import json
 import time
-from typing import Dict, Any, Optional, List, Union
-from fastapi import APIRouter, Request
-from openai import AsyncOpenAI
-from common.exceptions import SageHTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from service.sage_stream_service import SageStreamService
-from config.settings import StartupConfig
-from sagents.utils.logger import logger
-import models
-from core.client.llm import get_chat_client
-import core.globals as global_vars
-from common.render import Response
+import traceback
+import uuid
+from typing import Any, Dict, List, Optional, Union
 
 import config
+import core.globals as global_vars
+import models
+from common.exceptions import SageHTTPException
+from common.render import Response
+from config.settings import StartupConfig
+from core.client.llm import get_chat_client
+from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
+from openai import AsyncOpenAI
+from pydantic import BaseModel
+from service.sage_stream_service import SageStreamService
+
+from sagents.utils.logger import logger
 
 # 创建路由器
 stream_router = APIRouter()
@@ -543,7 +544,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
                 session_id, request, message_collector, message_order
             )
 
-        except GeneratorExit as ge:
+        except GeneratorExit:
             import sys
 
             disconnect_msg = f"🔌 [GENERATOR_EXIT] 客户端断开连接，生成器被关闭 - 会话ID: {session_id}, 时间: {time.time()}"

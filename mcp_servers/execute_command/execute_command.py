@@ -6,22 +6,17 @@ Execute Command MCP Server
 具备完善的安全机制和错误处理。
 """
 
-import asyncio
+import argparse
+import hashlib
+import logging
 import os
-import sys
+import platform
+import shutil
 import subprocess
 import tempfile
 import time
-import platform
-import shutil
-import json
-import hashlib
-import logging
-import argparse
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple, Union
 import traceback
+from typing import Any, Dict, List, Optional, Tuple
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -171,7 +166,7 @@ async def execute_shell_command(
     
     try:
         # 安全检查
-        logger.debug(f"🔒 开始安全检查")
+        logger.debug("🔒 开始安全检查")
         is_safe, reason = security_manager.is_command_safe(command)
         if not is_safe:
             error_time = time.time() - start_time
@@ -339,7 +334,7 @@ async def execute_python_code(
     temp_file = None
     try:
         # 创建临时Python文件
-        logger.debug(f"📄 创建临时Python文件")
+        logger.debug("📄 创建临时Python文件")
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(code)
             temp_file = f.name
@@ -568,7 +563,7 @@ def main():
     # 初始化安全管理器
     security_manager = SecurityManager(enable_dangerous_commands=args.enable_dangerous_commands)
     
-    logger.info(f"启动命令执行 MCP Server")
+    logger.info("启动命令执行 MCP Server")
     logger.info(f"端口: {args.port}")
     logger.info(f"主机: {args.host}")
     logger.info(f"最大超时: {args.max_timeout}秒")

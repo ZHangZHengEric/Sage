@@ -5,7 +5,8 @@ SQLAlchemy 基础设施
 
 import asyncio
 from typing import Any, Optional, Sequence, Type
-from sqlalchemy import select, update, delete, func
+
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase
 
 

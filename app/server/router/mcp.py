@@ -4,18 +4,19 @@ MCP (Model Context Protocol) 相关路由
 提供MCP服务器的管理接口，包括添加、删除、配置等功能
 """
 
-from typing import Optional, List, Dict, Any
-from sagents.utils.logger import logger
+from typing import Any, Dict, List, Optional
+
+from common.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from common.render import Response
-
 from service.mcp import (
     add_mcp_server,
     list_mcp_servers,
-    remove_mcp_server,
     refresh_mcp_server,
+    remove_mcp_server,
 )
+
+from sagents.utils.logger import logger
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])

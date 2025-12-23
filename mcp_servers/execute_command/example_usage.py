@@ -6,12 +6,13 @@ Execute Command MCP Server 使用示例
 """
 
 import asyncio
-import json
+
 from execute_command import (
-    execute_shell_command,
+    check_command_availability,
     execute_python_code,
-    check_command_availability
+    execute_shell_command,
 )
+
 
 async def demo_shell_commands():
     """演示Shell命令执行"""
@@ -95,12 +96,12 @@ async def demo_error_handling():
     # 尝试执行不存在的命令
     print("\n2. 尝试执行不存在的命令:")
     result = await execute_shell_command("nonexistent_command_xyz")
-    print(f"   结果: 命令执行失败")
+    print("   结果: 命令执行失败")
     
     # Python语法错误
     print("\n3. Python语法错误:")
     result = await execute_python_code("print('hello world'")  # 缺少右括号
-    print(f"   结果: 语法错误被正确捕获")
+    print("   结果: 语法错误被正确捕获")
 
 async def main():
     """主演示函数"""

@@ -4,9 +4,9 @@
 
 import json
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import String, Text, func, select, JSON
+from sqlalchemy import JSON, String, Text, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, BaseDao

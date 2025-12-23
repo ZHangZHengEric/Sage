@@ -6,21 +6,20 @@ Execute Command MCP Server 测试套件
 """
 
 import asyncio
-import tempfile
-import os
 import sys
+import tempfile
 from pathlib import Path
 
 # 添加当前目录到Python路径
 sys.path.insert(0, str(Path(__file__).parent))
 
 from execute_command import (
-    execute_shell_command,
-    execute_python_code,
     check_command_availability,
+    execute_python_code,
+    execute_shell_command,
     security_manager,
-    process_manager
 )
+
 
 class ExecuteCommandTester:
     """命令执行测试器"""
