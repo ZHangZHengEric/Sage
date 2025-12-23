@@ -2,16 +2,16 @@
 Router module that exports all routers for the agent platform server.
 """
 
-from .mcp import mcp_router
-from .tool import tool_router
 from .agent import agent_router
 from .converation import conversation_router
-from .stream import stream_router
 from .file_server import file_server_router
 from .kdb import kdb_router
-from .user import user_router
-from .system import system_router
+from .mcp import mcp_router
 from .oss import oss_router
+from .stream import stream_router
+from .system import system_router
+from .tool import tool_router
+from .user import user_router
 
 # Export all routers for easy import
 __all__ = [

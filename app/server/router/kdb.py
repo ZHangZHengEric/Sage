@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import Dict, Any, Optional, List
-
-from fastapi import APIRouter, Body, Query, UploadFile, File, Form, Request
+from typing import Any, Dict, List, Optional
 
 from common.render import Response
+from fastapi import APIRouter, Body, File, Form, Query, Request, UploadFile
 from service.kdb import KdbService
 
 kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])

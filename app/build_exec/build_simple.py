@@ -5,9 +5,9 @@ Sage Server 构建脚本（仅生成二进制）
 """
 
 import os
-import sys
-import subprocess
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -214,7 +214,7 @@ class SimpleBuilder:
             ]
 
             print(f"执行命令: {' '.join(cmd)}")
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
 
             print("✅ 二进制文件构建完成")
             return True

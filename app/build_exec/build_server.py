@@ -4,9 +4,9 @@ Sage Server 构建脚本（只生成本地单文件二进制）
 """
 
 import os
-import sys
-import subprocess
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -134,7 +134,7 @@ class ServerBuilder:
         print(" ".join(cmd))
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
             print("🎉 PyInstaller 构建成功")
             return True
 

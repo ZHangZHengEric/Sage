@@ -2,22 +2,22 @@
 Agent 相关路由
 """
 
+from typing import Any, Dict, List, Optional
+
+from common.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-from common.render import Response
-from sagents.utils.logger import logger
-
 from service.agent import (
-    list_agents,
-    create_agent,
-    get_agent,
-    update_agent,
-    delete_agent,
     auto_generate_agent,
+    create_agent,
+    delete_agent,
+    get_agent,
+    list_agents,
     optimize_system_prompt,
+    update_agent,
 )
 
+from sagents.utils.logger import logger
 
 # ============= Agent相关模型 =============
 

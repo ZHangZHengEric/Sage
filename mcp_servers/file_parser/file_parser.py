@@ -1,33 +1,27 @@
-import httpx
-from mcp.server.fastmcp import FastMCP
-from starlette.applications import Starlette
-from starlette.routing import Mount, Host
-import uvicorn
-from typing import List, Dict, Any, Union, Optional, Tuple
 import argparse
-import pypandoc
-from pathlib import Path
-import pdfplumber
-import subprocess
-from pptx import Presentation
-import aspose.slides as slides
-import os
-import html2text
-import requests
-from openpyxl import load_workbook
-import chardet
-import mimetypes
-import tempfile
-import shutil
-import logging
-import time
-from datetime import datetime
-import zipfile
-import io
-import base64
 import hashlib
+import logging
+import os
 import re
+import subprocess
+import tempfile
+import time
 import traceback
+from pathlib import Path
+from typing import Any, Dict, List
+
+import aspose.slides as slides
+import chardet
+import html2text
+import pdfplumber
+import pypandoc
+import requests
+import uvicorn
+from mcp.server.fastmcp import FastMCP
+from openpyxl import load_workbook
+from pptx import Presentation
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -227,7 +221,7 @@ class PDFParser:
                     "pages": len(pdf.pages),
                     "metadata": pdf.metadata or {}
                 }
-        except Exception as e:
+        except Exception:
             return {"pages": 0, "metadata": {}}
 
 
@@ -528,7 +522,7 @@ async def extract_text_from_file(
 
     try:
         # 验证文件
-        logger.debug(f"🔍 开始文件验证")
+        logger.debug("🔍 开始文件验证")
         validation_result = FileValidator.validate_file(input_file_path)
 
         if not validation_result["valid"]:
@@ -555,40 +549,40 @@ async def extract_text_from_file(
 
         try:
             if file_extension == '.pdf':
-                logger.debug(f"📕 使用PDF解析器")
+                logger.debug("📕 使用PDF解析器")
                 extracted_text = PDFParser.extract_text(input_file_path)
                 if include_metadata:
                     metadata = PDFParser.get_pdf_info(input_file_path)
 
             elif file_extension in ['.docx', '.doc']:
-                logger.debug(f"📝 使用Word解析器")
+                logger.debug("📝 使用Word解析器")
                 if file_extension == '.docx':
                     extracted_text = OfficeParser.extract_text_from_docx(input_file_path)
                 else:
                     extracted_text = OfficeParser.extract_text_from_doc(input_file_path)
 
             elif file_extension in ['.pptx', '.ppt']:
-                logger.debug(f"📊 使用PowerPoint解析器")
+                logger.debug("📊 使用PowerPoint解析器")
                 if file_extension == '.pptx':
                     extracted_text = OfficeParser.extract_text_from_pptx(input_file_path)
                 else:
                     extracted_text = OfficeParser.extract_text_from_ppt(input_file_path)
 
             elif file_extension in ['.xlsx', '.xls']:
-                logger.debug(f"📈 使用Excel解析器")
+                logger.debug("📈 使用Excel解析器")
                 extracted_text = ExcelParser.extract_text_from_xlsx(input_file_path)
 
             elif file_extension in ['.html', '.htm']:
-                logger.debug(f"🌐 使用HTML解析器")
+                logger.debug("🌐 使用HTML解析器")
                 extracted_text = WebParser.extract_text_from_html(input_file_path)
 
             elif file_extension in ['.txt', '.csv', '.json', '.xml', '.md', '.markdown']:
-                logger.debug(f"📄 使用纯文本解析器")
+                logger.debug("📄 使用纯文本解析器")
                 extracted_text = PlainTextParser.extract_text_from_plain_file(input_file_path)
 
             else:
                 # 尝试使用Pandoc解析
-                logger.debug(f"🔧 尝试使用Pandoc解析器")
+                logger.debug("🔧 尝试使用Pandoc解析器")
                 extracted_text = PlainTextParser.extract_text_with_pandoc(input_file_path)
 
             parse_time = time.time() - parse_start_time
@@ -597,7 +591,7 @@ async def extract_text_from_file(
         except Exception as parse_error:
             parse_time = time.time() - parse_start_time
             logger.warning(f"⚠️ 主解析器失败 [{operation_id}] - 错误: {str(parse_error)}, 耗时: {parse_time:.2f}秒")
-            logger.debug(f"🔧 尝试Pandoc备用解析器")
+            logger.debug("🔧 尝试Pandoc备用解析器")
 
             try:
                 extracted_text = PlainTextParser.extract_text_with_pandoc(input_file_path)
@@ -614,7 +608,7 @@ async def extract_text_from_file(
                 }
 
         # 清理和处理文本
-        logger.debug(f"🧹 开始文本清理和处理")
+        logger.debug("🧹 开始文本清理和处理")
         cleaned_text = TextProcessor.clean_text(extracted_text)
         truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
         text_stats = TextProcessor.get_text_stats(cleaned_text)
@@ -692,7 +686,7 @@ async def extract_text_from_url(
 
     try:
         # 验证URL格式
-        logger.debug(f"🔍 验证URL格式")
+        logger.debug("🔍 验证URL格式")
         if not url.startswith(('http://', 'https://')):
             error_time = time.time() - start_time
             logger.error(f"❌ URL格式无效 [{operation_id}] - URL: {url}, 耗时: {error_time:.2f}秒")
@@ -706,7 +700,7 @@ async def extract_text_from_url(
 
         # 提取网页内容
         fetch_start_time = time.time()
-        logger.info(f"🌐 开始获取网页内容")
+        logger.info("🌐 开始获取网页内容")
 
         extracted_text = WebParser.extract_text_from_url(url, timeout)
 
@@ -714,7 +708,7 @@ async def extract_text_from_url(
         logger.info(f"✅ 网页内容获取成功 [{operation_id}] - 原始文本长度: {len(extracted_text)}, 获取耗时: {fetch_time:.2f}秒")
 
         # 清理和处理文本
-        logger.debug(f"🧹 开始文本清理和处理")
+        logger.debug("🧹 开始文本清理和处理")
         cleaned_text = TextProcessor.clean_text(extracted_text)
         truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
         text_stats = TextProcessor.get_text_stats(cleaned_text)

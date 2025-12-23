@@ -2,20 +2,20 @@
 Sage流式服务处理器
 """
 
-import os
-import json
-from re import A
-import uuid
 import asyncio
-import traceback
+import json
+import os
 import time
-from typing import List, Dict, Any, Optional, Union
+import traceback
+import uuid
+from typing import Any, Dict, Optional, Union
+
+from openai import AsyncOpenAI
 
 from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.logger import logger
-from openai import AsyncOpenAI
 
 
 class SageStreamService:
@@ -287,7 +287,7 @@ class SageStreamService:
 
         except GeneratorExit:
             logger.warning(f"🔌 process_stream: 客户端断开连接，会话ID: {session_id}")
-            logger.warning(f"🔍 GeneratorExit 详情: 客户端在流式处理过程中断开了连接")
+            logger.warning("🔍 GeneratorExit 详情: 客户端在流式处理过程中断开了连接")
             logger.warning(f"📋 GeneratorExit 堆栈跟踪: {traceback.format_exc()}")
             # 重新抛出GeneratorExit，让上层处理
             raise

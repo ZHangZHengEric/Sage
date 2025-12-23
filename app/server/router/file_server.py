@@ -3,17 +3,18 @@
 提供静态文件访问和下载功能，支持workspace和logs-dir目录
 """
 
-import os
-import mimetypes
 import json
+import mimetypes
+import os
 from pathlib import Path
-from fastapi import APIRouter, Request, Query
+
+import config
+from common.exceptions import SageHTTPException
+from common.render import Response
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from sagents.utils.logger import logger
-from common.exceptions import SageHTTPException
-from common.render import Response
-import config
 
 # 创建路由器
 file_server_router = APIRouter()
@@ -272,7 +273,7 @@ def get_directory_listing(
 
             try:
                 stat = os.stat(item_path)
-                mod_time = os.path.getmtime(item_path)
+                os.path.getmtime(item_path)
                 mod_time_str = Path(item_path).stat().st_mtime
                 import datetime
 

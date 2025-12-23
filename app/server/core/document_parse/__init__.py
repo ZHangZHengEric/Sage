@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Type, Optional
+from typing import Dict, Optional, Type
 
 from .base import BaseParser
 from .common_parser import CommonParser
