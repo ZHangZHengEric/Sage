@@ -199,7 +199,7 @@ class FileHandler:
                             )
                         else:
                             filename = f"downloaded_file_{int(time.time())}"
-                    except:
+                    except Exception:
                         filename = f"downloaded_file_{int(time.time())}"
 
                 temp_file_path = os.path.join(temp_dir, filename)
@@ -270,9 +270,6 @@ class TextProcessor:
         # 默认的字符替换字典
         default_correct_dict = {
             '"': '"',
-            '"': '"',
-            """: "'",
-            """: "'",
             "…": "...",
             "—": "-",
             "–": "-",
@@ -428,7 +425,7 @@ class ParserFactory:
                             return ".pptx"
                         elif "xl/workbook.xml" in file_list:
                             return ".xlsx"
-                except:
+                except Exception:
                     pass
                 return ".txt"  # 如果无法确定，默认为文本
             elif header.startswith(b"<!DOCTYPE html") or header.startswith(b"<html"):
@@ -492,7 +489,7 @@ class ParserFactory:
             return primary_parser, False
 
         # 如果还是失败，尝试文本解析器作为最后的fallback
-        print(f"🔄 使用文本解析器作为最后的fallback")
+        print("🔄 使用文本解析器作为最后的fallback")
         return self.get_parser(".txt"), True
 
 

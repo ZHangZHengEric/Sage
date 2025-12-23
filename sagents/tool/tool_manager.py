@@ -248,7 +248,7 @@ class ToolManager:
         bool_registered = False
         """Discover and register tools from MCP servers"""
         logger.info(f"Discovering MCP tools from settings file: {mcp_setting_path}")
-        if os.path.exists(mcp_setting_path) == False:
+        if not os.path.exists(mcp_setting_path):
             logger.warning(f"MCP setting file not found: {mcp_setting_path}")
             return bool_registered
         try:

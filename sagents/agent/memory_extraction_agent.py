@@ -149,12 +149,12 @@ class MemoryExtractionAgent(AgentBase):
             # 解析LLM返回结果
             try:
                 duplicate_keys = json.loads(MessageChunk.extract_json_from_markdown(all_response_chunks_content))['duplicate_keys']
-            except:
+            except Exception:
                 logger.error(f"MemoryExtractionAgent: 解析重复记忆失败: {traceback.format_exc()}")
                 logger.error(f"MemoryExtractionAgent: 解析重复记忆失败: {all_response_chunks_content}")
                 duplicate_keys = []
             return duplicate_keys
-        except:
+        except Exception:
             logger.error(f"MemoryExtractionAgent: 检查重复记忆失败: {traceback.format_exc()}")
             return []
 
@@ -170,7 +170,7 @@ class MemoryExtractionAgent(AgentBase):
             提取的记忆列表
         """
         if not recent_message_str:
-            logger.info(f"MemoryExtractionAgent: 对话历史为空，无法提取记忆")
+            logger.info("MemoryExtractionAgent: 对话历史为空，无法提取记忆")
             return []
         try:
             # 构建记忆提取的prompt
@@ -207,7 +207,7 @@ class MemoryExtractionAgent(AgentBase):
             logger.info(f"MemoryExtractionAgent: 从对话中提取了 {len(extracted_memories)} 条潜在记忆")
             return extracted_memories
 
-        except Exception as e:
+        except Exception:
             logger.error(f"MemoryExtractionAgent: 提取对话记忆失败: {traceback.format_exc()}")
             return []
 

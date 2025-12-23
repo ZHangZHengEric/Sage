@@ -84,7 +84,7 @@ class UserMemoryManager:
             if total_unavailable > 0:
                 # 检查是否完全禁用记忆功能
                 if total_unavailable == len(required_tools):
-                    logger.warning(f"所有记忆工具都不可用，记忆功能已禁用")
+                    logger.warning("所有记忆工具都不可用，记忆功能已禁用")
                     self.memory_disabled = True
                     return
                 else:

@@ -323,7 +323,7 @@ class TextParser(BaseFileParser):
                 "total_elements": count_elements(data),
                 "max_depth": self._get_json_depth(data)
             }
-        except:
+        except Exception:
             return {"is_valid_json": False}
     
     def _get_json_depth(self, obj, depth=0):

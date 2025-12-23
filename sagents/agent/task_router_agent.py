@@ -70,8 +70,8 @@ class TaskRouterAgent(AgentBase):
                 )]
         try:
             task_router_result = json.loads(MessageChunk.extract_json_from_markdown(all_task_router_chunks_content))
-        except:
-            logger.warning(f"TaskRouterAgent: 路由结果解析失败，使用默认值")
+        except Exception:
+            logger.warning("TaskRouterAgent: 路由结果解析失败，使用默认值")
             logger.warning(f"TaskRouterAgent: 路由结果解析失败，原始内容：{all_task_router_chunks_content}")
             task_router_result = {"agent_name": "单智能体", "deep_think": False}
         session_context.audit_status['router_agent'] = task_router_result["agent_name"]

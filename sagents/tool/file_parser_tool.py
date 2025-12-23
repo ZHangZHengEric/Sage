@@ -273,7 +273,7 @@ class PDFParser:
                     "pages": len(pdf.pages),
                     "metadata": pdf.metadata or {}
                 }
-        except Exception as e:
+        except Exception:
             return {"pages": 0, "metadata": {}}
 
 class OfficeParser:
@@ -1103,7 +1103,7 @@ class FileParserTool(ToolBase):
         
         try:
             # 验证文件
-            logger.debug(f"🔍 开始文件验证")
+            logger.debug("🔍 开始文件验证")
             validation_result = FileValidator.validate_file(input_file_path)
             
             if not validation_result["valid"]:
@@ -1130,20 +1130,20 @@ class FileParserTool(ToolBase):
             
             try:
                 if file_extension == '.pdf':
-                    logger.debug(f"📕 使用PDF解析器")
+                    logger.debug("📕 使用PDF解析器")
                     extracted_text = PDFParser.extract_text(input_file_path)
                     if include_metadata:
                         metadata = PDFParser.get_pdf_info(input_file_path)
                         
                 elif file_extension in ['.docx', '.doc']:
-                    logger.debug(f"📝 使用Word解析器")
+                    logger.debug("📝 使用Word解析器")
                     if file_extension == '.docx':
                         extracted_text = OfficeParser.extract_text_from_docx(input_file_path)
                     else:
                         extracted_text = OfficeParser.extract_text_from_doc(input_file_path)
                         
                 elif file_extension in ['.pptx', '.ppt']:
-                    logger.debug(f"📊 使用PowerPoint解析器")
+                    logger.debug("📊 使用PowerPoint解析器")
                     if file_extension == '.pptx':
                         extracted_text = OfficeParser.extract_text_from_pptx(input_file_path)
                     else:
@@ -1183,7 +1183,7 @@ class FileParserTool(ToolBase):
                             logger.error(f"处理PPT文件时发生未知错误: {e}")
                         
                 elif file_extension in ['.xlsx', '.xls']:
-                    logger.debug(f"📈 使用Excel解析器")
+                    logger.debug("📈 使用Excel解析器")
                     excel_metadata = {}
                     if file_extension == '.xlsx':
                         extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(input_file_path)
@@ -1221,16 +1221,16 @@ class FileParserTool(ToolBase):
                     if include_metadata and excel_metadata:
                         metadata.update(excel_metadata)
                 elif file_extension in ['.html', '.htm']:
-                    logger.debug(f"🌐 使用HTML解析器")
+                    logger.debug("🌐 使用HTML解析器")
                     extracted_text = WebParser.extract_text_from_html(input_file_path)
                     
                 elif file_extension in ['.txt', '.csv', '.json', '.xml', '.md', '.markdown']:
-                    logger.debug(f"📄 使用纯文本解析器")
+                    logger.debug("📄 使用纯文本解析器")
                     extracted_text = PlainTextParser.extract_text_from_plain_file(input_file_path)
                     
                 else:
                     # 尝试使用Pandoc解析
-                    logger.debug(f"🔧 尝试使用Pandoc解析器")
+                    logger.debug("🔧 尝试使用Pandoc解析器")
                     extracted_text = PlainTextParser.extract_text_with_pandoc(input_file_path)
                 
                 parse_time = time.time() - parse_start_time
@@ -1239,7 +1239,7 @@ class FileParserTool(ToolBase):
             except Exception as parse_error:
                 parse_time = time.time() - parse_start_time
                 logger.warning(f"⚠️ 主解析器失败 [{operation_id}] - 错误: {str(parse_error)}, 耗时: {parse_time:.2f}秒")
-                logger.debug(f"🔧 尝试Pandoc备用解析器")
+                logger.debug("🔧 尝试Pandoc备用解析器")
                 
                 try:
                     extracted_text = PlainTextParser.extract_text_with_pandoc(input_file_path)
@@ -1256,7 +1256,7 @@ class FileParserTool(ToolBase):
                     }
             
             # 清理和处理文本
-            logger.debug(f"🧹 开始文本清理和处理")
+            logger.debug("🧹 开始文本清理和处理")
             if file_extension in ['.xlsx', '.xls']:
                 cleaned_text = extracted_text
                 truncated_text = extracted_text
@@ -1340,7 +1340,7 @@ class FileParserTool(ToolBase):
         
         try:
             # 验证URL格式
-            logger.debug(f"🔍 验证URL格式")
+            logger.debug("🔍 验证URL格式")
             if not url.startswith(('http://', 'https://')):
                 error_time = time.time() - start_time
                 logger.error(f"❌ URL格式无效 [{operation_id}] - URL: {url}, 耗时: {error_time:.2f}秒")
@@ -1355,7 +1355,7 @@ class FileParserTool(ToolBase):
             
             # 提取网页内容
             fetch_start_time = time.time()
-            logger.info(f"🌐 开始获取网页内容")
+            logger.info("🌐 开始获取网页内容")
             
             try:
                 extracted_text = WebParser.extract_text_from_url(url, timeout)
@@ -1407,7 +1407,7 @@ class FileParserTool(ToolBase):
                 }
             
             # 清理和处理文本
-            logger.debug(f"🧹 开始文本清理和处理")
+            logger.debug("🧹 开始文本清理和处理")
             cleaned_text = TextProcessor.clean_text(extracted_text)
             truncated_text = TextProcessor.truncate_text(cleaned_text, start_index, max_length)
             text_stats = TextProcessor.get_text_stats(cleaned_text)

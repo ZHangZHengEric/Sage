@@ -332,9 +332,9 @@ class SAgent:
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks
 
-                logger.debug(f"SAgent: 检查是否需要提取记忆")
+                logger.debug("SAgent: 检查是否需要提取记忆")
                 if session_context.user_memory_manager:
-                    logger.debug(f"SAgent: 开始记忆提取")
+                    logger.debug("SAgent: 开始记忆提取")
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context,
                         tool_manager=tool_manager,
@@ -361,7 +361,7 @@ class SAgent:
                 yield message_chunks
         finally:
             # 保存会话状态到文件
-            logger.info(f"run_stream finally save context info")
+            logger.info("run_stream finally save context info")
             try:
                 session_context.save()
             except Exception as save_error:
