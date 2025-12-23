@@ -1,17 +1,18 @@
-import traceback
-from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase
-from typing import Any, Dict, List, Optional, Generator
-from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext
-from sagents.tool.tool_manager import ToolManager
-from sagents.utils.prompt_manager import PromptManager
+import datetime
 import json
 import re
+import traceback
 import uuid
-from copy import deepcopy
-import datetime
+from typing import Any, Dict, Generator, List
+
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message_manager import MessageManager
+from sagents.context.session_context import SessionContext
+from sagents.tool.tool_manager import ToolManager
+from sagents.utils.logger import logger
+from sagents.utils.prompt_manager import PromptManager
+
+from .agent_base import AgentBase
 
 
 class TaskStageSummaryAgent(AgentBase):

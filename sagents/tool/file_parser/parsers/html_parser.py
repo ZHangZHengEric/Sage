@@ -3,11 +3,13 @@ HTML文件解析器
 支持HTML文件的文本提取和元数据获取
 """
 
-import traceback
-from typing import Dict, Any, List
-from bs4 import BeautifulSoup
-import html2text
 import re
+import traceback
+from typing import Any, Dict
+
+import html2text
+from bs4 import BeautifulSoup
+
 from .base_parser import BaseFileParser, ParseResult
 
 
