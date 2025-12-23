@@ -625,7 +625,7 @@ class TaskManager:
                         result_summary = parsed_summary.get("result_summary", "")
                     else:
                         result_summary = execution_summary
-                except json.JSONDecodeError as e:
+                except json.JSONDecodeError:
                     result_summary = execution_summary
             elif execution_summary:
                 result_summary = str(execution_summary)

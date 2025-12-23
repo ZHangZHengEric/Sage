@@ -90,7 +90,7 @@ class MessageManager:
                 if not message.show_content and not message.content and not message.tool_calls:
                     self.stats['filtered_messages'] += 1
                     continue
-            except:
+            except Exception:
                 logger.error(f"MessageManager: 添加消息失败，消息内容: {message}")
                 continue
 

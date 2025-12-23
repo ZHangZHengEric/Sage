@@ -76,7 +76,7 @@ class TaskRewriteAgent(AgentBase):
                 )]
         try:
             rewrite_request = json.loads(MessageChunk.extract_json_from_markdown(all_rewrite_chunks_content))['rewrite_request']
-        except:
+        except Exception:
             rewrite_request = all_rewrite_chunks_content
         session_context.audit_status['task_rewrite'] = rewrite_request
         logger.info(f"TaskRewriteAgent: 重写后的请求: {rewrite_request}")

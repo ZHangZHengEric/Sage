@@ -208,7 +208,7 @@ class AgentBase(ABC):
                 # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
                 try:
                     llm_response = merge_stream_response_to_non_stream_response(all_chunks)
-                except:
+                except Exception:
                     logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
                     logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
                     llm_response = None
@@ -244,7 +244,7 @@ class AgentBase(ABC):
             session_context = get_session_context(session_id)
             system_context_info = session_context.system_context
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
-            system_prefix += f"\n补充其他的信息：\n "
+            system_prefix += "\n补充其他的信息：\n "
             for key, value in system_context_info.items():
                 if isinstance(value, dict):
                     # 如果值是字典，格式化显示

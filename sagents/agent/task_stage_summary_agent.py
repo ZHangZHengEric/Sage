@@ -94,7 +94,7 @@ class TaskStageSummaryAgent(AgentBase):
         # 更新所有任务的执行总结
         self._update_all_tasks_execution_summary(summary_result, unsummary_but_completed_tasks, task_manager)
 
-        logger.info(f"StageSummaryAgent: 所有任务总结生成完成")
+        logger.info("StageSummaryAgent: 所有任务总结生成完成")
 
         yield [MessageChunk(
             message_id=str(uuid.uuid4()),

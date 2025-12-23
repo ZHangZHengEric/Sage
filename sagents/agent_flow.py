@@ -77,7 +77,7 @@ class AgentFlow:
                     session_context.message_manager.add_messages(message_chunks)
                     yield message_chunks
 
-        except Exception as e:
+        except Exception:
             logger.error(f"SAgent: 运行智能体流程时出错: {traceback.format_exc()}")
         finally:
             try:
