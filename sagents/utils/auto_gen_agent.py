@@ -430,7 +430,7 @@ Agent系统提示词：
         try:
             json.loads(response)
             return response
-        except:
+        except Exception:
             pass
 
         # 查找JSON代码块
@@ -458,7 +458,7 @@ Agent系统提示词：
                     try:
                         json.loads(json_str)
                         return json_str
-                    except:
+                    except Exception:
                         continue
 
         # 查找第一个完整的JSON数组
@@ -477,7 +477,7 @@ Agent系统提示词：
                     try:
                         json.loads(json_str)
                         return json_str
-                    except:
+                    except Exception:
                         continue
 
         # 如果都失败了，返回原始响应

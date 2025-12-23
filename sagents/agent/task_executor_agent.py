@@ -308,22 +308,16 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             except json.JSONDecodeError:
                 try:
                     function_params = eval(tool_call['function']['arguments'])
-                except:
-                    logger.error(f"TaskExecutorAgent: 第一次参数解析报错，再次进行参数解析失败")
+                except Exception:
+                    logger.error("TaskExecutorAgent: 第一次参数解析报错，再次进行参数解析失败")
                     logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
 
             formatted_params = ''
             if isinstance(function_params, str):
                 try:
                     function_params = json.loads(function_params)
-                except json.JSONDecodeError:
-                    try:
-                        function_params = eval(function_params)
-                    except:
-                        logger.error(f"TaskExecutorAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
-                        logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
-                        logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
-                        logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
+                except Exception:
+                    logger.error("TaskExecutorAgent: 参数解析失败，无法进行再次解析")
 
             if isinstance(function_params, dict):
                 tool_call['function']['arguments'] = json.dumps(function_params, ensure_ascii=False)
@@ -387,7 +381,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 arguments = json.loads(tool_call['function']['arguments'])
             else:
                 arguments = {}
-            if isinstance(arguments, dict) == False:
+            # 如果参数不是字典，说明参数解析失败
+            if not isinstance(arguments, dict):
                 async for chunk in self._handle_tool_error(tool_call['id'], tool_name, "工具参数格式错误"):
                     yield chunk
                 return

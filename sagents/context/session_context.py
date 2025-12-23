@@ -187,7 +187,7 @@ class SessionContext:
                     llm_config["api_key"] = model.api_key
                 if hasattr(model, 'base_url') and model.base_url:
                     llm_config["base_url"] = str(model.base_url)
-                logger.debug(f"SessionContext: 从OpenAI客户端提取API配置信息")
+                logger.debug("SessionContext: 从OpenAI客户端提取API配置信息")
             except Exception as e:
                 logger.warning(f"SessionContext: 提取API配置信息失败: {e}")
 
@@ -207,7 +207,7 @@ class SessionContext:
             "exportTime": current_time.isoformat(),
             "version": "1.0"
         }
-        logger.debug(f"SessionContext: 设置agent配置信息完成")
+        logger.debug("SessionContext: 设置agent配置信息完成")
 
     async def _load_system_memories(self, tool_manager=None):
         """加载系统级记忆并注入到system_context

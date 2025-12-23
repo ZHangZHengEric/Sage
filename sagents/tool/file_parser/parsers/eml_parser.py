@@ -443,7 +443,7 @@ class EMLParser(BaseFileParser):
                     content = self._decode_payload_part(msg)
                     if content and len(content) > 10:
                         components.append(content[:100])
-            except:
+            except Exception:
                 pass
 
             # 生成哈希值作为备用Message-ID
@@ -501,7 +501,7 @@ class EMLParser(BaseFileParser):
                     decoded = data.decode(detected_encoding, errors="ignore")
                     if self._is_valid_decoded_text(decoded):
                         return decoded
-        except:
+        except Exception:
             pass
 
         # 常见编码回退
@@ -739,7 +739,7 @@ class EMLParser(BaseFileParser):
                             body_data["text_content"] = payload.decode(
                                 "utf-8", errors="replace"
                             )
-                        except:
+                        except Exception:
                             body_data["text_content"] = str(payload, errors="replace")
 
             # 设置元数据
@@ -897,17 +897,17 @@ class EMLParser(BaseFileParser):
                                 attach_content = (
                                     f"附件文件: {file_name} (类型: {ctype})"
                                 )
-                            except Exception as e:
+                            except Exception:
                                 traceback.print_exc()
                                 attach_content = ""
 
                         # 清理临时文件
                         try:
                             os.unlink(temp_file_path)
-                        except:
+                        except Exception:
                             pass
 
-                    except Exception as e:
+                    except Exception:
                         traceback.print_exc()
                         attach_content = ""
                 else:

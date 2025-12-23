@@ -66,6 +66,7 @@ class TaskPlanningAgent(AgentBase):
         message_id = str(uuid.uuid4())
         unknown_content = ''
         all_content = ''
+        last_tag_type = None
         async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                                                  session_id=session_id,
                                                                  step_name="planning"):
