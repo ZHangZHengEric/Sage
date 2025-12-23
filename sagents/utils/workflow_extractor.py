@@ -6,9 +6,10 @@ Workflow Extractor - 从messages中提取workflow的工具类
 
 import json
 import traceback
-from typing import Dict, List, Any, Optional
-import requests
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import requests
 
 
 class WorkflowExtractor:

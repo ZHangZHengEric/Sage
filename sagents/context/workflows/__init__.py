@@ -9,7 +9,7 @@
 支持新旧两种工作流格式的自动检测和转换。
 """
 
-from .workflow import WorkflowStep, Workflow, WorkflowFormat
+from .workflow import Workflow, WorkflowFormat, WorkflowStep
 from .workflow_manager import WorkflowManager
 
 __all__ = [

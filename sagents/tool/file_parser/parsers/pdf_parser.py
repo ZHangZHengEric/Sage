@@ -5,8 +5,10 @@ PDF文件解析器
 
 import os
 import traceback
-from typing import Dict, Any
+from typing import Any, Dict
+
 import pdfplumber
+
 from .base_parser import BaseFileParser, ParseResult
 
 

@@ -6,12 +6,14 @@ Author: Eric ZZ
 Date: 2024-12-21
 """
 
-import traceback
-from typing import Dict, List, Union, Any
-from sagents.utils.logger import logger
-from .memory_types import MemoryEntry, MemoryType
-from datetime import datetime
 import json
+import traceback
+from datetime import datetime
+from typing import Any, Dict, List
+
+from sagents.utils.logger import logger
+
+from .memory_types import MemoryEntry, MemoryType
 
 
 class UserMemoryManager:

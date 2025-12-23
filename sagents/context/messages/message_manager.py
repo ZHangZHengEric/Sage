@@ -14,16 +14,15 @@ MessageManager 优化版消息管理器
 版本: 2.0 (优化版)
 """
 
-import json
 import datetime
-from math import log
-import traceback
 import uuid
-from typing import Dict, List, Optional, Any, Set, Union
 from copy import deepcopy
-import dataclasses
+from typing import Any, Dict, List, Optional, Union
+
 from sagents.utils.logger import logger
-from .message import MessageRole, MessageType, MessageChunk
+
+from .message import MessageChunk, MessageRole, MessageType
+
 
 class MessageManager:
     """

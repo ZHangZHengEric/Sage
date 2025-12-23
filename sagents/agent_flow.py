@@ -1,17 +1,19 @@
 # 该模块可以接受拼接的智能体的流程，按照流程运行执行体。
 
 import traceback
-from typing import List, Generator
-from sagents.agent.agent_base import AgentBase
-from sagents.context.session_context import SessionContext, delete_session_context, init_session_context
-from sagents.tool.tool_manager import ToolManager
-from sagents.context.messages.message import MessageChunk
-from sagents.context.session_context import SessionStatus
-from sagents.context.messages.message_manager import MessageManager
-from sagents.tool.tool_proxy import ToolProxy
-from sagents.context.messages.message import MessageRole, MessageType
 import uuid
-from typing import Dict, Any, Optional, Union
+from typing import Any, Dict, Generator, List, Optional, Union
+
+from sagents.agent.agent_base import AgentBase
+from sagents.context.messages.message import MessageChunk
+from sagents.context.session_context import (
+    SessionContext,
+    SessionStatus,
+    delete_session_context,
+    init_session_context,
+)
+from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.logger import logger
 
 

@@ -3,23 +3,21 @@ EML文件解析器
 支持邮件文件的文本提取和元数据获取
 """
 
-import email
-import email.utils
-from email.header import decode_header
-from email.feedparser import headerRE
-from email import policy
-import traceback
-import tempfile
-import os
 import asyncio
 import concurrent.futures
-import threading
-import re
-import base64
+import email
+import email.utils
+import os
+import tempfile
+import traceback
+from email import policy
+from email.feedparser import headerRE
+from email.header import decode_header
+from typing import Any, Dict, List, Tuple
+
 import chardet
-import time
-from typing import Dict, Any, List, Tuple
 import html2text
+
 from .base_parser import BaseFileParser, ParseResult
 
 # 尝试导入flanker，如果没有则使用email.utils作为备选
@@ -39,7 +37,7 @@ try:
     HAS_OPENCC = True
 except ImportError:
     HAS_OPENCC = False
-    convert = lambda x: x  # 如果没有OpenCC，直接返回原文
+    def convert(x): return x  # 如果没有OpenCC，直接返回原文
     print(
         "Warning: OpenCC not available, skipping traditional to simplified conversion"
     )
@@ -185,8 +183,8 @@ class EMLParser(BaseFileParser):
             date = enhanced_metadata.get("date", "")
             if date:
                 try:
-                    from email.utils import parsedate_to_datetime
                     from datetime import datetime
+                    from email.utils import parsedate_to_datetime
 
                     date_obj = parsedate_to_datetime(date)
                     date_str = datetime.strftime(date_obj, "%Y-%m-%d %H:%M:%S")
@@ -317,7 +315,7 @@ class EMLParser(BaseFileParser):
                 if line.lower().startswith(header_pattern.lower()):
                     found_header = True
                     # 获取头部值（去掉头部名称和冒号）
-                    header_value = line[len(header_pattern) :].strip()
+                    header_value = line[len(header_pattern):].strip()
 
                     # 检查后续行是否是续行（以空格或制表符开始）
                     j = i + 1
@@ -880,8 +878,8 @@ class EMLParser(BaseFileParser):
                     attach_content = ""
 
                     # 创建临时文件来处理附件内容
-                    import tempfile
                     import os
+                    import tempfile
 
                     try:
                         with tempfile.NamedTemporaryFile(
@@ -1128,7 +1126,7 @@ class EMLParser(BaseFileParser):
             if sender:
                 try:
                     if self.flanker_available:
-                        parsed = flanker.addresslib.address.parse(sender)
+                        parsed = address.parse(sender)
                         if parsed:
                             metadata["sender"] = parsed.full_spec
                         else:
@@ -1159,7 +1157,7 @@ class EMLParser(BaseFileParser):
             if receiver:
                 try:
                     if self.flanker_available:
-                        parsed = flanker.addresslib.address.parse(receiver)
+                        parsed = address.parse(receiver)
                         if parsed:
                             metadata["receiver"] = parsed.full_spec
                         else:

@@ -10,8 +10,8 @@
 - UserMemoryManager: 用户记忆管理器（集成工具管理器）
 """
 
-from .memory_types import MemoryType, MemoryBackend, MemoryEntry
 from .memory_manager import UserMemoryManager
+from .memory_types import MemoryBackend, MemoryEntry, MemoryType
 
 __all__ = [
     'MemoryType',

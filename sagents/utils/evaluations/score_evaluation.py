@@ -1,9 +1,9 @@
 import json
-import asyncio
 from string import Template
 
-from .base_agent_processor import BaseAgentProcessor
 from ..logger import logger
+from .base_agent_processor import BaseAgentProcessor
+
 
 class AgentScoreEvaluator(BaseAgentProcessor):
     def __init__(

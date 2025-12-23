@@ -1,10 +1,13 @@
-import uuid
+import json
+import re
 import time
-from typing import Dict, Any, Optional, List, Union
-from dataclasses import dataclass, asdict
+import uuid
+from dataclasses import asdict, dataclass
 from enum import Enum
-import json,re
+from typing import Any, Dict, List, Optional
+
 from sagents.utils.logger import logger
+
 
 class MessageRole(Enum):
     """消息角色枚举"""

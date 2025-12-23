@@ -4,8 +4,10 @@ PPTX文件解析器
 """
 
 import traceback
-from typing import Dict, Any
+from typing import Any, Dict
+
 from pptx import Presentation
+
 from .base_parser import BaseFileParser, ParseResult
 
 

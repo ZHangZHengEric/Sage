@@ -1,27 +1,23 @@
-import os
-import shutil
-import tempfile
 import hashlib
 import mimetypes
-import logging
+import os
+import platform
+import re
 import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
-import urllib.parse
-import requests
-import asyncio
-import stat
-import platform
-import zipfile
-import tarfile
-import re
+from typing import Any, Dict, Optional
+
 import chardet
-import traceback
-from typing import Dict, Any, List, Optional, Union
+import pandas as pd
+import requests
+
+from sagents.utils.logger import logger
 
 from .tool_base import ToolBase
-from sagents.utils.logger import logger
-import pandas as pd
+
+
 class FileSystemError(Exception):
     """文件系统异常"""
     pass

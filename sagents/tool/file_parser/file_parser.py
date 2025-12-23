@@ -5,34 +5,30 @@ A tool for extracting text content from various file formats via network URLs.
 Only supports network URLs for security reasons - no local file access.
 """
 
-import os
-import tempfile
 import hashlib
-import mimetypes
-import time
-import urllib.parse
-import requests
+import os
 import re
-import chardet
+import tempfile
+import time
 import traceback
-from typing import Dict, Any, List, Optional
+import urllib.parse
 from pathlib import Path
-import email
-import email.utils
-from email.header import decode_header
+from typing import Any, Dict, List, Optional
+
+import chardet
+import requests
 
 # 第三方库（现在由各个解析器子类处理）
-
 # 导入新的解析器子类
 from .parsers import (
     BaseFileParser,
-    ParseResult,
-    PDFParser,
     DOCXParser,
     EMLParser,
-    PPTXParser,
     ExcelParser,
     HTMLParser,
+    ParseResult,
+    PDFParser,
+    PPTXParser,
     TextParser,
 )
 

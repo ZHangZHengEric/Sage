@@ -3,12 +3,12 @@
 """
 
 from .base_parser import BaseFileParser, ParseResult
-from .pdf_parser import PDFParser
 from .docx_parser import DOCXParser
 from .eml_parser import EMLParser
-from .pptx_parser import PPTXParser
 from .excel_parser import ExcelParser
 from .html_parser import HTMLParser
+from .pdf_parser import PDFParser
+from .pptx_parser import PPTXParser
 from .text_parser import TextParser
 
 __all__ = [
