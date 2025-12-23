@@ -11,7 +11,7 @@ from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext, get_session_context
-from sagents.tool.tool_base import AgentToolSpec
+from sagents.tool.tool_config import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.logger import logger
 from sagents.utils.stream_format import merge_stream_response_to_non_stream_response

@@ -6,7 +6,7 @@ from typing import Any, Dict, Generator, List, Optional
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext, get_session_context
-from sagents.tool.tool_base import AgentToolSpec
+from sagents.tool.tool_config import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
