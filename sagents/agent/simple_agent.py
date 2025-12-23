@@ -105,7 +105,7 @@ class SimpleAgent(AgentBase):
                                 session_context: SessionContext) -> bool:
         # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
         if messages_input[-1].role == 'tool':
-            logger.info(f"messages_input[-1].role是 tool 调用结果，不是任务完成")
+            logger.info("messages_input[-1].role是 tool 调用结果，不是任务完成")
             return False
 
         # 只提取最后一个user以及之后的messages
@@ -513,8 +513,8 @@ class SimpleAgent(AgentBase):
             except json.JSONDecodeError:
                 try:
                     function_params = eval(tool_call['function']['arguments'])
-                except:
-                    logger.error(f"SimpleAgent: 第一次参数解析报错，再次进行参数解析失败")
+                except Exception:
+                    logger.error("SimpleAgent: 第一次参数解析报错，再次进行参数解析失败")
                     logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
 
             if isinstance(function_params, str):
@@ -523,8 +523,8 @@ class SimpleAgent(AgentBase):
                 except json.JSONDecodeError:
                     try:
                         function_params = eval(function_params)
-                    except:
-                        logger.error(f"SimpleAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
+                    except Exception:
+                        logger.error("SimpleAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
                         logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
                         logger.error(f"SimpleAgent: 工具参数格式错误: {function_params}")
                         logger.error(f"SimpleAgent: 工具参数类型: {type(function_params)}")

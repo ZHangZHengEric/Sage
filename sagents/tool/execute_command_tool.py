@@ -332,7 +332,7 @@ class ExecuteCommandTool(ToolBase):
 
             if requirement_list is not None and not isinstance(requirement_list, list):
                 # 明确只允许 List[str]
-                if isinstance(json.loads(requirement_list),list)==False:
+                if not isinstance(json.loads(requirement_list), list):
                     return {
                         "success": False,
                         "error": "requirement_list 参数类型错误：仅允许 List[str]",
