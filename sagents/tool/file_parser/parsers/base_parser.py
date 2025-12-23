@@ -3,12 +3,12 @@
 定义统一的解析接口和返回结构
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union
-from dataclasses import dataclass
-import os
 import mimetypes
+import os
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 
 @dataclass

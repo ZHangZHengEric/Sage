@@ -1,8 +1,8 @@
 import json
-import asyncio
 
-from .base_agent_processor import BaseAgentProcessor
 from ..logger import logger
+from .base_agent_processor import BaseAgentProcessor
+
 
 class CheckpointGenerationAgent(BaseAgentProcessor):
     def __init__(

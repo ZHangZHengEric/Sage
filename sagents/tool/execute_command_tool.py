@@ -6,24 +6,20 @@ Execute Command Tool
 具备完善的安全机制和错误处理。
 """
 
-import asyncio
+import hashlib
+import json
 import os
-import sys
-import subprocess
-import tempfile
-import time
 import platform
 import shutil
-import json
-import hashlib
-import logging
+import subprocess
+import time
 import traceback
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
+
+from sagents.utils.logger import logger
 
 from .tool_base import ToolBase
-from sagents.utils.logger import logger
+
 
 class SecurityManager:
     """安全管理器 - 负责命令安全检查"""

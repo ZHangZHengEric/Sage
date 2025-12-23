@@ -1,9 +1,13 @@
-import traceback
-from pydantic import BaseModel
-from openai.types.chat import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    ChatCompletionMessageToolCall,
+)
 from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_message_tool_call import Function
 from openai.types.completion_usage import CompletionUsage
+
+
 def merge_stream_response_to_non_stream_response(chunks):
     """
     将流式的chunk，进行合并成非流式的response

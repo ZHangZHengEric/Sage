@@ -7,15 +7,17 @@ Author: Eric ZZ
 Date: 2024-12-21
 """
 
-import os
 import json
+import os
 import re
 import traceback
-from typing import List, Dict, Any, Optional
-from pathlib import Path
 from datetime import datetime
-from .tool_base import ToolBase
+from pathlib import Path
+from typing import Any, Dict, List
+
 from sagents.utils.logger import logger
+
+from .tool_base import ToolBase
 
 try:
     from rank_bm25 import BM25Okapi

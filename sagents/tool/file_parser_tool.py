@@ -1,34 +1,25 @@
-import os
-import shutil
-import tempfile
 import hashlib
-import mimetypes
-import logging
+import os
+import subprocess
 import time
-from datetime import datetime
-from pathlib import Path
-import urllib.parse
-import requests
-import asyncio
-import stat
-import platform
-import zipfile
-import tarfile
-import re
-import chardet
 import traceback
-from typing import Dict, Any, List, Optional, Union,Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import chardet
+import html2text
 import pdfplumber
 import pypandoc
-from pptx import Presentation
-import html2text
+import requests
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
-from openpyxl.utils.datetime import from_excel, WINDOWS_EPOCH, MAC_EPOCH
-import subprocess
+from openpyxl.utils.datetime import MAC_EPOCH, WINDOWS_EPOCH, from_excel
+from pptx import Presentation
+
+from sagents.utils.logger import logger
 
 from .tool_base import ToolBase
-from sagents.utils.logger import logger
+
 
 class FileParserError(Exception):
     """文件解析异常"""
@@ -463,7 +454,8 @@ class ExcelParser:
         def _build_style_numfmt_map(xlsx_path: str):
             try:
                 # 直接解析底层 XML，提高兼容性
-                import zipfile, xml.etree.ElementTree as ET
+                import xml.etree.ElementTree as ET
+                import zipfile
                 zf = zipfile.ZipFile(xlsx_path)
                 styles_xml = zf.read('xl/styles.xml')
                 styles = ET.fromstring(styles_xml)
@@ -915,8 +907,9 @@ class WebParser:
     @staticmethod
     def _smart_decode_response(response, url: str) -> str:
         """智能解码HTTP响应内容"""
-        import chardet
         import re
+
+        import chardet
         
         # 1. 首先尝试从Content-Type header获取编码
         content_type = response.headers.get('Content-Type', '')

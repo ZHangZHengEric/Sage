@@ -3,10 +3,12 @@
 支持各种文本文件的解析和元数据获取
 """
 
-import traceback
-import chardet
 import re
-from typing import Dict, Any, List
+import traceback
+from typing import Any, Dict
+
+import chardet
+
 from .base_parser import BaseFileParser, ParseResult
 
 

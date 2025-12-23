@@ -1,18 +1,20 @@
-import traceback
-from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase
-from typing import Any, Dict, List, Optional, Generator
-from sagents.utils.logger import logger
-from sagents.tool.tool_manager import ToolManager
-from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
-from sagents.context.session_context import SessionContext
-from sagents.context.tasks.task_base import TaskBase
-from sagents.context.tasks.task_manager import TaskManager
-from sagents.utils.prompt_manager import PromptManager
 import json
-import uuid,re
-from copy import deepcopy
+import re
+import traceback
+import uuid
+from typing import Any, Dict, Generator, List, Optional
+
 from openai import AsyncOpenAI
+
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message_manager import MessageManager
+from sagents.context.session_context import SessionContext
+from sagents.tool.tool_manager import ToolManager
+from sagents.utils.logger import logger
+from sagents.utils.prompt_manager import PromptManager
+
+from .agent_base import AgentBase
+
 
 class QuerySuggestAgent(AgentBase):
     def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = None, system_prefix: str = "", max_model_len: int = 64000):

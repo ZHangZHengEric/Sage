@@ -1,8 +1,10 @@
 """
 任务完成工具
 """
-from typing import Dict, Any
-from .tool_base import ToolBase, ToolSpec
+from typing import Any, Dict
+
+from .tool_base import ToolBase
+
 
 class TaskInterruptionTool(ToolBase):
     """任务中断工具"""
