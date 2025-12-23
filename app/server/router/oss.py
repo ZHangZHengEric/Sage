@@ -1,6 +1,6 @@
-from fastapi import APIRouter, UploadFile, File
 from common.render import Response
 from core.client.minio import upload_kdb_file
+from fastapi import APIRouter, File, UploadFile
 
 oss_router = APIRouter(prefix="/api/oss", tags=["OSS"])
 

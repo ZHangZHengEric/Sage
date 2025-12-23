@@ -5,19 +5,18 @@ Agent 业务处理模块
 """
 
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from sagents.utils.logger import logger
-from sagents.utils.auto_gen_agent import AutoGenAgentFunc
-from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
-from sagents.tool.tool_proxy import ToolProxy
-
-import core.globals as global_vars
 import config
+import core.globals as global_vars
 import models
-
 from common.exceptions import SageHTTPException
 from core.client.llm import get_chat_client
+
+from sagents.tool.tool_proxy import ToolProxy
+from sagents.utils.auto_gen_agent import AutoGenAgentFunc
+from sagents.utils.logger import logger
+from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 
 # ================= 工具函数 =================
 

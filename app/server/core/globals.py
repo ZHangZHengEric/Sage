@@ -4,15 +4,16 @@
 统一管理系统中的所有全局变量，包括服务实例、配置参数等
 """
 
-from calendar import c
-import traceback
-import os
 import json
-from typing import Optional, Dict, Any
+import os
+import traceback
+from typing import Any, Dict, Optional
+
+import config
+from config.settings import StartupConfig
+
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.logger import logger
-from config.settings import StartupConfig
-import config
 
 _GLOBAL_TOOL_MANAGER: Optional[ToolManager] = None  # 工具管理器
 _GLOBAL_STARTUP_CONFIG: Optional[StartupConfig] = None  # 服务器启动参数

@@ -1,5 +1,5 @@
-from fastmcp import FastMCP
 from core.kb.knowledge_base import DocumentService
+from fastmcp import FastMCP
 
 kdb_mcp = FastMCP("Knowledge Base MCP Server")
 

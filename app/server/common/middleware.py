@@ -2,15 +2,16 @@
 中间件模块
 """
 
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from .render import Response
-from .exceptions import SageHTTPException
-from service.user import parse_access_token
 import re
 
 import config
+from fastapi import Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from service.user import parse_access_token
+
+from .exceptions import SageHTTPException
+from .render import Response
 
 WHITELIST_API_PATHS = frozenset(
     {
