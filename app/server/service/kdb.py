@@ -6,16 +6,16 @@ KDB 领域服务，实现知识库与文档相关业务逻辑（异步）
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Tuple, Optional
-
-from sagents.utils.logger import logger
+from typing import Any, Dict, List, Optional, Tuple
 
 import models
 from common.exceptions import SageHTTPException
-from utils.id import gen_id
-from fastapi import UploadFile
 from core.client.minio import upload_kdb_file
 from core.kb.knowledge_base import DocumentService
+from fastapi import UploadFile
+from utils.id import gen_id
+
+from sagents.utils.logger import logger
 
 
 class KdbService:

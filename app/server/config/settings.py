@@ -2,10 +2,10 @@
 配置相关, 支持命令行参数、环境变量、默认值
 """
 
-import os
 import argparse
+import os
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Any, Optional
 
 # ===== 全局启动参数（统一存放于此） =====
 _GLOBAL_STARTUP_CONFIG: Optional[Any] = None
@@ -223,15 +223,15 @@ def create_argument_parser():
 
     # 兼容旧格式（不提供默认值，仍可从 apply_llm_backward_compat 兜底）
     parser.add_argument(
-        "--llm_api_key", help=f"LLM API Key（已废弃，请使用--default_llm_api_key）"
+        "--llm_api_key", help="LLM API Key（已废弃，请使用--default_llm_api_key）"
     )
     parser.add_argument(
         "--llm_api_base_url",
-        help=f"LLM API Base（已废弃，请使用--default_llm_api_base_url）",
+        help="LLM API Base（已废弃，请使用--default_llm_api_base_url）",
     )
     parser.add_argument(
         "--llm_model_name",
-        help=f"LLM API Model（已废弃，请使用--default_llm_model_name）",
+        help="LLM API Model（已废弃，请使用--default_llm_model_name）",
     )
 
     parser.add_argument(

@@ -3,9 +3,9 @@ Agent 配置数据模型（SQLAlchemy ORM）
 """
 
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import String, select, JSON
+from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, BaseDao

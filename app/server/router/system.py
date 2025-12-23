@@ -1,6 +1,7 @@
-from fastapi import APIRouter
 import time
+
 from common.render import Response
+from fastapi import APIRouter
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])

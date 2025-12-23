@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 from typing import List
-from sagents.utils.logger import logger
+
 import models
 from core.document_parse import get_document_parser
 
+from sagents.utils.logger import logger
 
 DEFAULT_BATCH_SIZE = 5
 

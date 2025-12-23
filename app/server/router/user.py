@@ -1,8 +1,9 @@
 from typing import Optional
+
+from common.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from common.render import Response
-from service.user import register_user, login_user
+from service.user import login_user, register_user
 
 
 class RegisterRequest(BaseModel):

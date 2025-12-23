@@ -1,7 +1,8 @@
-from .knwoledge_base import kdb_mcp
 from contextlib import asynccontextmanager
+
 from starlette.routing import BaseRoute
 
+from .knwoledge_base import kdb_mcp
 
 mcp_http_app = kdb_mcp.http_app(path="/mcp/kdb")
 

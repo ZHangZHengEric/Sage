@@ -1,21 +1,12 @@
+import argparse
+import os
+
 import httpx
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
-from starlette.routing import Mount, Host
-import uvicorn
-from typing import List, Dict, Any, Union
-import argparse
-import json
-import pypandoc
-from pathlib import Path
-import pdfplumber
-import subprocess
-from pptx import Presentation
-import aspose.slides as slides
-import os
-import html2text
-import requests
-import asyncio
+from starlette.routing import Mount
+
 mcp = FastMCP("Serper Search")
 
 parser = argparse.ArgumentParser(description='启动 MCP Server 并传入 API Key')

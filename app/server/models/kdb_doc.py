@@ -2,15 +2,13 @@
 KdbDoc ORM 模型（异步SQLAlchemy）
 """
 
-from sqlalchemy import String, Integer
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import JSON
-from sqlalchemy import select, func, update, delete
-
 from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import JSON, Integer, String, func, select
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, BaseDao
-from typing import Optional, List
 
 
 class KdbDoc(Base):

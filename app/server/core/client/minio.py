@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from common.exceptions import SageHTTPException
 import config
+from common.exceptions import SageHTTPException
+
 from sagents.utils.logger import logger
 
 MINIO_CLIENT = None
@@ -14,8 +15,9 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     public_base = cfg.minio_public_base_url if cfg else None
     if not client or not bucket or not public_base:
         raise SageHTTPException(status_code=400, detail="MinIO not configured")
-    from datetime import datetime
     import io
+    from datetime import datetime
+
     from utils.file import split_file_name
 
     origin, ext = split_file_name(base_name)

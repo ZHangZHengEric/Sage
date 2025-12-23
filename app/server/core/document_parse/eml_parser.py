@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-
 import os
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-from .base import BaseParser
 import models
 from utils.id import gen_id
+
+from core.client.minio import upload_kdb_file
+from core.kb.knowledge_base import DocumentInput, DocumentService
 from sagents.utils.logger import logger
 
-from core.kb.knowledge_base import DocumentInput, DocumentService
-from core.client.minio import upload_kdb_file
-
+from .base import BaseParser
 
 ALLOW_ATTACH_FILE_EXTS = {
     ".doc",

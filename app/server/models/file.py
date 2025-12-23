@@ -2,13 +2,13 @@
 File ORM 模型（异步SQLAlchemy）
 """
 
-from sqlalchemy import String, Integer
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
+from typing import Dict, List, Optional
+
+from sqlalchemy import Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, BaseDao
-from typing import List, Optional, Dict
-from sqlalchemy import select, delete
 
 
 class File(Base):

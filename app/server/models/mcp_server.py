@@ -3,10 +3,9 @@ MCP服务器数据模型（SQLAlchemy ORM）
 """
 
 from datetime import datetime
-import asyncio
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import String, JSON, select
+from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, BaseDao

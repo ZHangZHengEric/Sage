@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from typing import List, Dict
+from typing import Dict, List
 
-from .base import BaseParser
-
-from core.kb.knowledge_base import DocumentService, DocumentInput
 import models
-from utils.id import gen_id
+
+from core.kb.knowledge_base import DocumentInput, DocumentService
 from sagents.utils.logger import logger
 
+from .base import BaseParser
 
 ALLOW_ATTACH_FILE_EXTS = {
     ".doc",

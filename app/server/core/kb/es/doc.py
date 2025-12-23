@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from core.client.es import (
     dims,
-    index_create,
-    document_insert,
     document_delete,
-    search as es_search,
-    index_exists,
-    index_delete,
+    document_insert,
     index_clear,
+    index_create,
+    index_delete,
+    index_exists,
 )
+from core.client.es import (
+    search as es_search,
+)
+from pydantic import BaseModel
 
 
 class DocDocument(BaseModel):
