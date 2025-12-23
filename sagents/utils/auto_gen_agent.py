@@ -14,12 +14,11 @@
 import json
 import time
 import traceback
-from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
+from typing import Any, Dict, List, Union
 
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
-from sagents.tool.tool_config import ToolSpec, McpToolSpec, AgentToolSpec
 from sagents.utils.logger import logger
 
 

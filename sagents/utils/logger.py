@@ -1,13 +1,12 @@
-import os
-import logging
-import inspect
-import sys
-import traceback
-import glob
-import time
-import threading
-import queue
 import atexit
+import glob
+import inspect
+import logging
+import os
+import queue
+import sys
+import threading
+import traceback
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from typing import Dict, Optional

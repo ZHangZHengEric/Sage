@@ -1,16 +1,17 @@
-import traceback
-from sagents.utils.prompt_manager import PromptManager
-from sagents.context.messages.message_manager import MessageManager
-from .agent_base import AgentBase
-from typing import Any, Dict, List, Generator
-from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
-from sagents.context.session_context import SessionContext
-from sagents.tool.tool_manager import ToolManager
-from sagents.context.tasks.task_manager import TaskManager
-import uuid
-from copy import deepcopy
 import json
+import uuid
+from typing import Any, Dict, Generator, List
+
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message_manager import MessageManager
+from sagents.context.session_context import SessionContext
+from sagents.context.tasks.task_manager import TaskManager
+from sagents.tool.tool_manager import ToolManager
+from sagents.utils.logger import logger
+from sagents.utils.prompt_manager import PromptManager
+
+from .agent_base import AgentBase
+
 
 class TaskCompletionJudgeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):

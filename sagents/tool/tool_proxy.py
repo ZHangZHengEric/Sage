@@ -1,7 +1,10 @@
-from typing import List, Dict, Any, Optional
-from .tool_manager import ToolManager
-from sagents.utils.logger import logger
+from typing import Any, Dict, List, Optional
+
 from sagents.context.session_context import SessionContext
+from sagents.utils.logger import logger
+
+from .tool_manager import ToolManager
+
 
 class ToolProxy:
     """

@@ -1,6 +1,8 @@
 from dataclasses import dataclass
-from typing import Dict, Any, List, Callable, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Union
+
 from mcp import StdioServerParameters
+
 
 @dataclass
 class SseServerParameters:
