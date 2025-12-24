@@ -12,6 +12,11 @@ import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# 项目路径配置
+project_root = Path(os.path.realpath(__file__)).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+
 import common
 import config
 import core
@@ -33,10 +38,6 @@ for m in ("websockets", "uvicorn"):
 
 # 指定加载的 .env 文件
 load_dotenv(".env")
-
-# 项目路径配置
-project_root = Path(os.path.realpath(__file__)).parent.parent.parent
-sys.path.insert(0, str(project_root))
 
 
 _mcp_routes = mcp_server.get_mcp_routes()
