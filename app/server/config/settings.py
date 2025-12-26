@@ -16,33 +16,33 @@ class StartupConfig:
     """启动参数结构体，优先级：命令行 > 环境变量 > 默认值"""
 
     # Server
-    port: int = 8001
+    port: int = 8080
     daemon: bool = False
     pid_file: str = "sage_stream.pid"
     logs_dir: str = "logs"
     workspace: str = "agent_workspace"
     memory_root: Optional[str] = None
     force_summary: bool = False
-    no_auth: bool = False  # 无认证模式，根据入参用户id获取数据
+    no_auth: bool = True  # 无认证模式，根据入参用户id获取数据
 
     # DB
-    db_type: str = "file"  # file | memory | mysql
+    db_type: str = "memory"  # file | memory | mysql
     db_path: str = "./data/"  # file 模式为目录；memory 为忽略；mysql 支持 DSN/JSON/ENV
-    mysql_host: Optional[str] = None
-    mysql_port: Optional[int] = None
-    mysql_user: Optional[str] = None
-    mysql_password: Optional[str] = None
-    mysql_database: Optional[str] = None
-    mysql_charset: Optional[str] = "utf8mb4"
+    mysql_host: str = "127.0.0.1"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: str = "sage.1234"
+    mysql_database: str = "sage"
+    mysql_charset: str = "utf8mb4"
 
     # Presets
     preset_mcp_config: str = "mcp_setting.json"
     preset_running_config: str = "agent_setting.json"
 
     # LLM defaults
-    default_llm_api_key: Optional[str] = None
-    default_llm_api_base_url: Optional[str] = None
-    default_llm_model_name: Optional[str] = None
+    default_llm_api_key: str = ""
+    default_llm_api_base_url: str = "https://api.deepseek.com/v1"
+    default_llm_model_name: str = "deepseek-chat"
     default_llm_max_tokens: int = 4096
     default_llm_temperature: float = 0.2
     default_llm_max_model_len: int = 54000
@@ -54,7 +54,7 @@ class StartupConfig:
     # Embedding
     embed_api_key: Optional[str] = None
     embed_base_url: Optional[str] = None
-    embed_model: Optional[str] = None
+    embed_model: str = "text-embedding-3-large"
     embed_dims: int = 1024
 
     # Elasticsearch
@@ -192,7 +192,7 @@ def create_argument_parser():
     """创建命令行参数解析器，支持环境变量，优先级：指定入参 > 环境变量 > 默认值"""
     parser = argparse.ArgumentParser(description="Sage Stream Service")
 
-    # 新格式参数（推荐使用）
+    # 新格式参数
     parser.add_argument(
         "--default_llm_api_key",
         help=f"默认LLM API Key (环境变量: {ENV.DEFAULT_LLM_API_KEY})",
@@ -221,18 +221,6 @@ def create_argument_parser():
         help=f"默认LLM 最大上下文 (环境变量: {ENV.DEFAULT_LLM_MAX_MODEL_LEN})",
     )
 
-    # 兼容旧格式（不提供默认值，仍可从 apply_llm_backward_compat 兜底）
-    parser.add_argument(
-        "--llm_api_key", help="LLM API Key（已废弃，请使用--default_llm_api_key）"
-    )
-    parser.add_argument(
-        "--llm_api_base_url",
-        help="LLM API Base（已废弃，请使用--default_llm_api_base_url）",
-    )
-    parser.add_argument(
-        "--llm_model_name",
-        help="LLM API Model（已废弃，请使用--default_llm_model_name）",
-    )
 
     parser.add_argument(
         "--port",
@@ -359,97 +347,121 @@ def create_argument_parser():
     return parser
 
 
-def apply_llm_backward_compat(
-    cfg: StartupConfig, args: argparse.Namespace
-) -> StartupConfig:
-    """处理LLM参数向后兼容：直接使用解析器值，仅在缺失时兜底旧环境变量"""
-    api_key = args.default_llm_api_key or env_str(ENV.DEFAULT_LLM_API_KEY)
-    base_url = args.default_llm_api_base_url or env_str(ENV.DEFAULT_LLM_API_BASE_URL)
-    model_name = args.default_llm_model_name or env_str(ENV.DEFAULT_LLM_MODEL_NAME)
-    max_tokens = (
-        args.default_llm_max_tokens
-        if args.default_llm_max_tokens is not None
-        else env_int(ENV.DEFAULT_LLM_MAX_TOKENS, 4096)
-    )
-    temperature = (
-        args.default_llm_temperature
-        if args.default_llm_temperature is not None
-        else env_float(ENV.DEFAULT_LLM_TEMPERATURE, 0.2)
-    )
-    max_model_len = (
-        args.default_llm_max_model_len
-        if args.default_llm_max_model_len is not None
-        else env_int(ENV.DEFAULT_LLM_MAX_MODEL_LEN, 54000)
-    )
-
-    # 旧参数兜底（仅在新参数未提供时）
-    api_key = api_key or args.llm_api_key or env_str(ENV.LEGACY_LLM_API_KEY)
-    base_url = base_url or args.llm_api_base_url or env_str(ENV.LEGACY_LLM_API_BASE_URL)
-    model_name = model_name or args.llm_model_name or env_str(ENV.LEGACY_LLM_MODEL_NAME)
-
-    if max_model_len is None or max_model_len < 8000:
-        max_model_len = 54000
-
-    cfg.default_llm_api_key = api_key
-    cfg.default_llm_api_base_url = base_url
-    cfg.default_llm_model_name = model_name
-    cfg.default_llm_max_tokens = max_tokens or cfg.default_llm_max_tokens
-    cfg.default_llm_temperature = temperature or cfg.default_llm_temperature
-    cfg.default_llm_max_model_len = max_model_len
-    return cfg
-
-
 def build_startup_config() -> StartupConfig:
     """解析命令行并按优先级合并环境变量与默认值，得到结构化启动配置"""
     parser = create_argument_parser()
     args = parser.parse_args()
 
     cfg = StartupConfig(
-        port=pick_int(args.port, ENV.PORT, 8080),
-        daemon=pick_bool(args.daemon, ENV.DAEMON, False),
-        pid_file=pick_str(args.pid_file, ENV.PID_FILE, "sage_stream.pid"),
-        logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, "logs"),
-        workspace=pick_str(args.workspace, ENV.WORKSPACE, "agent_workspace"),
-        memory_root=pick_str(args.memory_root, ENV.MEMORY_ROOT),
-        force_summary=pick_bool(args.force_summary, ENV.FORCE_SUMMARY, False),
-        no_auth=pick_bool(False, ENV.NO_AUTH, False),
-        db_type=pick_str(args.db_type, ENV.DB_TYPE, "file"),
-        db_path=pick_str(args.db_path, ENV.DB_PATH, "./data/"),
-        mysql_host=pick_str(args.mysql_host, ENV.MYSQL_HOST, "127.0.0.1"),
-        mysql_port=pick_int(args.mysql_port, ENV.MYSQL_PORT, 3306),
-        mysql_user=pick_str(args.mysql_user, ENV.MYSQL_USER, "root"),
-        mysql_password=pick_str(args.mysql_password, ENV.MYSQL_PASSWORD, "sage.1234"),
-        mysql_database=pick_str(args.mysql_database, ENV.MYSQL_DATABASE, "sage"),
-        mysql_charset="utf8mb4",
+        port=pick_int(args.port, ENV.PORT, StartupConfig.port),
+        daemon=pick_bool(args.daemon, ENV.DAEMON, StartupConfig.daemon),
+        pid_file=pick_str(args.pid_file, ENV.PID_FILE, StartupConfig.pid_file),
+        logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
+        workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
+        memory_root=pick_str(
+            args.memory_root, ENV.MEMORY_ROOT, StartupConfig.memory_root
+        ),
+        force_summary=pick_bool(
+            args.force_summary, ENV.FORCE_SUMMARY, StartupConfig.force_summary
+        ),
+        no_auth=pick_bool(False, ENV.NO_AUTH, StartupConfig.no_auth),
+        db_type=pick_str(args.db_type, ENV.DB_TYPE, StartupConfig.db_type),
+        db_path=pick_str(args.db_path, ENV.DB_PATH, StartupConfig.db_path),
+        mysql_host=pick_str(args.mysql_host, ENV.MYSQL_HOST, StartupConfig.mysql_host),
+        mysql_port=pick_int(args.mysql_port, ENV.MYSQL_PORT, StartupConfig.mysql_port),
+        mysql_user=pick_str(args.mysql_user, ENV.MYSQL_USER, StartupConfig.mysql_user),
+        mysql_password=pick_str(
+            args.mysql_password, ENV.MYSQL_PASSWORD, StartupConfig.mysql_password
+        ),
+        mysql_database=pick_str(
+            args.mysql_database, ENV.MYSQL_DATABASE, StartupConfig.mysql_database
+        ),
+        mysql_charset=StartupConfig.mysql_charset,
         preset_mcp_config=pick_str(
-            args.preset_mcp_config, ENV.PRESET_MCP_CONFIG, "mcp_setting.json"
+            args.preset_mcp_config,
+            ENV.PRESET_MCP_CONFIG,
+            StartupConfig.preset_mcp_config,
         ),
         preset_running_config=pick_str(
-            args.preset_running_config, ENV.PRESET_RUNNING_CONFIG, "agent_setting.json"
+            args.preset_running_config,
+            ENV.PRESET_RUNNING_CONFIG,
+            StartupConfig.preset_running_config,
         ),
-        embed_api_key=pick_str(args.embedding_api_key, ENV.EMBEDDING_API_KEY),
-        embed_base_url=pick_str(args.embedding_base_url, ENV.EMBEDDING_BASE_URL),
+        default_llm_api_key=pick_str(
+            args.default_llm_api_key,
+            ENV.DEFAULT_LLM_API_KEY,
+            StartupConfig.default_llm_api_key,
+        ),
+        default_llm_api_base_url=pick_str(
+            args.default_llm_api_base_url,
+            ENV.DEFAULT_LLM_API_BASE_URL,
+            StartupConfig.default_llm_api_base_url,
+        ),
+        default_llm_model_name=pick_str(
+            args.default_llm_model_name,
+            ENV.DEFAULT_LLM_MODEL_NAME,
+            StartupConfig.default_llm_model_name,
+        ),
+        default_llm_max_tokens=pick_int(
+            args.default_llm_max_tokens,
+            ENV.DEFAULT_LLM_MAX_TOKENS,
+            StartupConfig.default_llm_max_tokens,
+        ),
+        default_llm_temperature=pick_float(
+            args.default_llm_temperature,
+            ENV.DEFAULT_LLM_TEMPERATURE,
+            StartupConfig.default_llm_temperature,
+        ),
+        default_llm_max_model_len=pick_int(
+            args.default_llm_max_model_len,
+            ENV.DEFAULT_LLM_MAX_MODEL_LEN,
+            StartupConfig.default_llm_max_model_len,
+        ),
+        embed_api_key=pick_str(
+            args.embedding_api_key, ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
+        ),
+        embed_base_url=pick_str(
+            args.embedding_base_url,
+            ENV.EMBEDDING_BASE_URL,
+            StartupConfig.embed_base_url,
+        ),
         embed_model=pick_str(
-            args.embedding_model, ENV.EMBEDDING_MODEL, "text-embedding-3-large"
+            args.embedding_model, ENV.EMBEDDING_MODEL, StartupConfig.embed_model
         ),
-        embed_dims=pick_int(args.embedding_dims, ENV.EMBEDDING_DIMS, 1024),
-        es_url=pick_str(args.es_url, ENV.ES_URL),
-        es_api_key=pick_str(args.es_api_key, ENV.ES_API_KEY),
-        es_username=pick_str(args.es_username, ENV.ES_USERNAME),
-        es_password=pick_str(args.es_password, ENV.ES_PASSWORD),
-        minio_endpoint=pick_str(args.minio_endpoint, ENV.MINIO_ENDPOINT),
-        minio_access_key=pick_str(args.minio_access_key, ENV.MINIO_ACCESS_KEY),
-        minio_secret_key=pick_str(args.minio_secret_key, ENV.MINIO_SECRET_KEY),
-        minio_secure=pick_bool(args.minio_secure, ENV.MINIO_SECURE, False),
-        minio_bucket_name=pick_str(args.minio_bucket_name, ENV.MINIO_BUCKET_NAME),
+        embed_dims=pick_int(
+            args.embedding_dims, ENV.EMBEDDING_DIMS, StartupConfig.embed_dims
+        ),
+        es_url=pick_str(args.es_url, ENV.ES_URL, StartupConfig.es_url),
+        es_api_key=pick_str(args.es_api_key, ENV.ES_API_KEY, StartupConfig.es_api_key),
+        es_username=pick_str(
+            args.es_username, ENV.ES_USERNAME, StartupConfig.es_username
+        ),
+        es_password=pick_str(
+            args.es_password, ENV.ES_PASSWORD, StartupConfig.es_password
+        ),
+        minio_endpoint=pick_str(
+            args.minio_endpoint, ENV.MINIO_ENDPOINT, StartupConfig.minio_endpoint
+        ),
+        minio_access_key=pick_str(
+            args.minio_access_key, ENV.MINIO_ACCESS_KEY, StartupConfig.minio_access_key
+        ),
+        minio_secret_key=pick_str(
+            args.minio_secret_key, ENV.MINIO_SECRET_KEY, StartupConfig.minio_secret_key
+        ),
+        minio_secure=pick_bool(
+            args.minio_secure, ENV.MINIO_SECURE, StartupConfig.minio_secure
+        ),
+        minio_bucket_name=pick_str(
+            args.minio_bucket_name,
+            ENV.MINIO_BUCKET_NAME,
+            StartupConfig.minio_bucket_name,
+        ),
         minio_public_base_url=pick_str(
-            args.minio_public_base_url, ENV.MINIO_PUBLIC_BASE_URL
+            args.minio_public_base_url,
+            ENV.MINIO_PUBLIC_BASE_URL,
+            StartupConfig.minio_public_base_url,
         ),
     )
-
-    # 处理 LLM 兼容性和默认值
-    cfg = apply_llm_backward_compat(cfg, args)
-
     # 规范化路径
     if cfg.workspace:
         cfg.workspace = os.path.abspath(cfg.workspace)
