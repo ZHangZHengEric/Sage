@@ -39,7 +39,7 @@ async def shutdown_scheduler():
     global scheduler
     if scheduler:
         try:
-            await scheduler.shutdown(wait=False)
+            scheduler.shutdown(wait=False)
             logger.info("定时任务 Scheduler 已关闭")
         except Exception as e:
             logger.error(f"关闭 scheduler 失败: {e}")

@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from config.settings import StartupConfig
+from core.config import StartupConfig
 from elasticsearch import AsyncElasticsearch, helpers
 
 from core.client.llm import EMBEDDING_DIMS

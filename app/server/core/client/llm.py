@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from config.settings import StartupConfig
+from core.config import StartupConfig
 from openai import AsyncOpenAI
 
 from sagents.utils.logger import logger
@@ -52,7 +52,9 @@ async def close_chat_client() -> None:
         if MODEL_CLIENT is not None:
             fn = getattr(MODEL_CLIENT, "close", None)
             if fn is not None:
-                fn()
+                res = fn()
+                if hasattr(res, "__await__"):
+                    await res
     except Exception:
         pass
     MODEL_CLIENT = None

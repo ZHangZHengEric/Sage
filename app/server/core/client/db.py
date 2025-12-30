@@ -4,8 +4,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from common.exceptions import SageHTTPException
-from config.settings import StartupConfig
+from core.exceptions import SageHTTPException
+from core.config import StartupConfig
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -105,7 +105,7 @@ class SessionManager:
     async def close(self):
         async with self._lock:
             if self._engine:
-                self._engine.dispose()
+                await self._engine.dispose()
                 self._engine = None
 
     @asynccontextmanager

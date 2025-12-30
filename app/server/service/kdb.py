@@ -9,14 +9,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import models
-from common.exceptions import SageHTTPException
+from core.exceptions import SageHTTPException
 from core.client.minio import upload_kdb_file
-from core.kb.knowledge_base import DocumentService
+from service.kb.knowledge_base import DocumentService
 from fastapi import UploadFile
 from utils.id import gen_id
 
 from sagents.utils.logger import logger
-from core.document_parse import get_document_parser
+from service.document_parse import get_document_parser
 
 DEFAULT_BATCH_SIZE = 5
 

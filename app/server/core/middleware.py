@@ -4,7 +4,7 @@
 
 import re
 
-import config
+from core import config
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

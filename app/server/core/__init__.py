@@ -1,4 +1,4 @@
-import config
+from core import config
 
 from sagents.utils.logger import logger
 
@@ -11,7 +11,7 @@ from .client.llm import (
     init_embed_client,
 )
 from .client.minio import close_minio_client, init_minio_client
-from .globals import (
+from .bootstrap import (
     close_tool_manager,
     initialize_db_data,
     initialize_db_tables,
@@ -97,9 +97,3 @@ async def initialize_data():
 async def initialize_mcp():
     """初始化 MCP 服务器"""
     await validate_and_disable_mcp_servers()
-
-
-async def cleanup_data():
-    """清理数据库数据"""
-    # 1) 清理工具管理器
-    await close_tool_manager()

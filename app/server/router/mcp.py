@@ -6,7 +6,7 @@ MCP (Model Context Protocol) 相关路由
 
 from typing import Any, Dict, List, Optional
 
-from common.render import Response
+from core.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from service.mcp import (

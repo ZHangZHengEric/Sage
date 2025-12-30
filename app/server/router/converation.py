@@ -6,7 +6,7 @@ import math
 import os
 from typing import List, Optional
 
-from common.render import Response
+from core.render import Response
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel

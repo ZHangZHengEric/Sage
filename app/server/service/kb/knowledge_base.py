@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from core.client.llm import embedding
-from core.kb.document_split import DocumentSplit
-from core.kb.es.doc import (
+from service.kb.document_split import DocumentSplit
+from service.kb.es.doc import (
     DocDocument,
     doc_document_delete,
     doc_document_insert,
@@ -13,7 +13,7 @@ from core.kb.es.doc import (
     doc_index_create,
     get_documents_by_ids,
 )
-from core.kb.search_result_post_process import SearchResultPostProcessTool
+from service.kb.search_result_post_process import SearchResultPostProcessTool
 from pydantic import BaseModel
 
 from sagents.utils.logger import logger
