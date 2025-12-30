@@ -109,9 +109,6 @@ def _create_model_client(request_config: dict, server_args: StartupConfig):
 
 def _create_tool_proxy(request: StreamRequest):
     """创建工具代理"""
-    if not request.available_tools:
-        return global_vars.get_tool_manager()
-
     logger.info(f"初始化工具代理，可用工具: {request.available_tools}")
 
     # 如果request.multi_agent 是true，要确保request.available_tools没有 complete_task 这个工具

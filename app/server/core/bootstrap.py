@@ -1,8 +1,5 @@
 import json
 import os
-import traceback
-from typing import Optional
-
 from core import config
 from sagents.utils.logger import logger
 from .globals import get_tool_manager, set_tool_manager
@@ -16,7 +13,6 @@ async def initialize_tool_manager():
         return tool_manager_instance
     except Exception as e:
         logger.error(f"工具管理器初始化失败: {e}")
-        logger.error(traceback.format_exc())
         return None
 
 
