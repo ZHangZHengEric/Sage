@@ -11,11 +11,14 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-
 from sagents.utils.logger import logger
 
 
 class SessionManager:
+    """
+    异步数据库会话管理器
+    支持 SQLite 文件 / 内存数据库和 MySQL
+    """
 
     def __init__(self, cfg: StartupConfig):
         self.cfg = cfg
@@ -25,8 +28,9 @@ class SessionManager:
 
         self._engine_name = "sqlite"
         self._engine = None
-        self._SessionLocal: Optional[async_sessionmaker[AsyncSession]] = None
+        self._SessionLocal: Optional[async_sessionmaker] = None
 
+        # 数据库初始化
         if self.db_type == "file":
             os.makedirs(self.db_path, exist_ok=True)
             self.db_file = os.path.join(self.db_path, "agent_platform.db")
@@ -56,18 +60,21 @@ class SessionManager:
             )
 
     async def init_conn(self):
+        """
+        初始化数据库连接和 session 工厂
+        """
         try:
             async with self._lock:
                 if self._engine_name == "mysql":
-                    user = self.mysql_config.get("user", "")
-                    password = self.mysql_config.get("password", "")
-                    host = self.mysql_config.get("host", "127.0.0.1")
                     from urllib.parse import quote_plus
 
-                    password = quote_plus(password)
+                    user = self.mysql_config.get("user", "")
+                    password = quote_plus(self.mysql_config.get("password", ""))
+                    host = self.mysql_config.get("host", "127.0.0.1")
                     port = int(self.mysql_config.get("port", 3306))
                     database = self.mysql_config.get("database", "")
                     charset = self.mysql_config.get("charset", "utf8mb4")
+
                     url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}?charset={charset}"
                     self._engine = create_async_engine(
                         url,
@@ -80,6 +87,7 @@ class SessionManager:
                         url = "sqlite+aiosqlite:///:memory:"
                     else:
                         url = f"sqlite+aiosqlite:///{self.db_file}"
+
                     self._engine = create_async_engine(
                         url,
                         future=True,
@@ -87,7 +95,7 @@ class SessionManager:
                         json_deserializer=json.loads,
                     )
 
-                self._SessionLocal = async_sessionmaker[AsyncSession](
+                self._SessionLocal = async_sessionmaker(
                     bind=self._engine,
                     autoflush=False,
                     autocommit=False,
@@ -103,47 +111,66 @@ class SessionManager:
             )
 
     async def close(self):
+        """
+        关闭数据库连接
+        """
         async with self._lock:
             if self._engine:
                 await self._engine.dispose()
                 self._engine = None
 
     @asynccontextmanager
-    async def get_session(self):
-        async with self._lock:
-            if not self._SessionLocal or not self._engine:
-                raise SageHTTPException(
-                    status_code=500,
-                    detail="数据库未初始化",
-                    error_detail="SQLAlchemy 引擎或会话工厂不存在",
-                )
-            session: AsyncSession = self._SessionLocal()
-            try:
-                yield session
+    async def get_session(self, autocommit: bool = True):
+        """
+        获取异步数据库会话
+        :param autocommit: 是否在上下文退出时自动提交事务
+        """
+        if not self._SessionLocal or not self._engine:
+            raise SageHTTPException(
+                status_code=500,
+                detail="数据库未初始化",
+                error_detail="SQLAlchemy 引擎或会话工厂不存在",
+            )
+        session: AsyncSession = self._SessionLocal()
+        try:
+            yield session
+            if autocommit:
                 await session.commit()
-            except Exception as e:
-                await session.rollback()
-                logger.error(f"数据库操作失败: {e}")
-                raise SageHTTPException(
-                    status_code=500, detail="数据库操作失败", error_detail=str(e)
-                )
-            finally:
-                await session.close()
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"数据库操作失败: {e}")
+            raise SageHTTPException(
+                status_code=500, detail="数据库操作失败", error_detail=str(e)
+            )
+        finally:
+            await session.close()
 
 
 # ===== 全局 DB 管理 =====
 DB_MANAGER: Optional[SessionManager] = None
 
 
-async def init_db_client(cfg: StartupConfig) -> SessionManager:
+async def init_db_client(cfg: StartupConfig) -> Optional[SessionManager]:
+    """
+    初始化全局数据库客户端
+    """
     global DB_MANAGER
     if DB_MANAGER is not None:
         return DB_MANAGER
+
+    # MySQL 参数检查
     if cfg.db_type == "mysql":
-        required = [cfg.mysql_host, cfg.mysql_port, cfg.mysql_user, cfg.mysql_password, cfg.mysql_database]
+        required = [
+            cfg.mysql_host,
+            cfg.mysql_port,
+            cfg.mysql_user,
+            cfg.mysql_password,
+            cfg.mysql_database,
+        ]
         if not all(required):
             logger.warning("MySQL 参数不足，未初始化数据库客户端")
             return None
+
     mgr = SessionManager(cfg)
     await mgr.init_conn()
     DB_MANAGER = mgr
@@ -151,6 +178,9 @@ async def init_db_client(cfg: StartupConfig) -> SessionManager:
 
 
 async def get_global_db() -> SessionManager:
+    """
+    获取全局数据库客户端
+    """
     global DB_MANAGER
     if DB_MANAGER is None:
         raise SageHTTPException(
@@ -162,6 +192,9 @@ async def get_global_db() -> SessionManager:
 
 
 async def close_db_client() -> None:
+    """
+    关闭全局数据库客户端
+    """
     global DB_MANAGER
     try:
         if DB_MANAGER is not None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from core.client.llm import embedding
+from core.client.embed import embedding
 from service.kb.document_split import DocumentSplit
 from service.kb.es.doc import (
     DocDocument,
