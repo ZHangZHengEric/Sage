@@ -78,10 +78,12 @@ class SimpleAgent(AgentBase):
         """
         logger.debug("SimpleAgent: 准备工具列表")
 
-        if not tool_manager or not suggested_tools:
-            logger.warning("SimpleAgent: 未提供工具管理器或建议工具")
+        if not tool_manager:
+            logger.warning("SimpleAgent: 未提供工具管理器")
             return []
-
+        if not suggested_tools:
+            logger.info("SimpleAgent: 未提供建议工具")
+            return []
         # 获取所有工具
         tools_json = tool_manager.get_openai_tools()
 
