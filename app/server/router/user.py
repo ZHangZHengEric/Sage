@@ -1,6 +1,6 @@
 from typing import Optional
 
-from common.render import Response
+from core.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from service.user import login_user, register_user

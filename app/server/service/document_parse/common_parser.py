@@ -4,7 +4,7 @@ from typing import Dict, List
 
 import models
 
-from core.kb.knowledge_base import DocumentInput, DocumentService
+from service.kb.knowledge_base import DocumentInput, DocumentService
 from sagents.utils.logger import logger
 
 from .base import BaseParser

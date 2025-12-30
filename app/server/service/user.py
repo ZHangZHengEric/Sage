@@ -1,12 +1,12 @@
 import time
 from typing import Optional, Tuple
 
-import config
+from core import config
 import jwt
 import models
 from argon2 import PasswordHasher
 from argon2 import exceptions as argon2_exceptions
-from common.exceptions import SageHTTPException
+from core.exceptions import SageHTTPException
 from utils.id import gen_id
 
 from sagents.utils.logger import logger

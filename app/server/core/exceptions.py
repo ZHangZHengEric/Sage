@@ -5,7 +5,7 @@
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from common.render import Response
+from core.render import Response
 from sagents.utils.logger import logger
 
 # ============= 自定义异常类 =============

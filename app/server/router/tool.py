@@ -5,8 +5,8 @@
 from typing import Any, Dict, Optional
 
 import core.globals as global_vars
-from common.exceptions import SageHTTPException
-from common.render import Response
+from core.exceptions import SageHTTPException
+from core.render import Response
 from fastapi import APIRouter
 from pydantic import BaseModel
 

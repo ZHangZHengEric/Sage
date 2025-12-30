@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import config
-from common.exceptions import SageHTTPException
+from core import config
+from core.exceptions import SageHTTPException
 
 from sagents.utils.logger import logger
 

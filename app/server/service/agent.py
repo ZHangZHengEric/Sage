@@ -7,10 +7,10 @@ Agent 业务处理模块
 import uuid
 from typing import Any, Dict, List, Optional
 
-import config
+from core import config
 import core.globals as global_vars
 import models
-from common.exceptions import SageHTTPException
+from core.exceptions import SageHTTPException
 from core.client.llm import get_chat_client
 
 from sagents.tool.tool_proxy import ToolProxy
