@@ -23,8 +23,9 @@ import core
 import mcp_server
 import router
 import uvicorn
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
+
+from jobs.scheduler import init_scheduler, shutdown_scheduler
 from fastapi import FastAPI
 
 from sagents.utils.logger import logger
@@ -41,8 +42,6 @@ load_dotenv(".env")
 
 
 _mcp_routes = mcp_server.get_mcp_routes()
-
-scheduler: AsyncIOScheduler | None = None
 
 
 async def initialize_system():
@@ -68,44 +67,6 @@ async def cleanup_system():
     await core.close_clients()
     # 3) 清理数据库数据
     await core.cleanup_data()
-
-
-async def build_jobs():
-    from service.job import JobService
-
-    svc = JobService()
-    await svc.build_waiting_doc()
-    await svc.build_failed_doc()
-
-
-def init_scheduler():
-    """初始化 scheduler（单例）"""
-    global scheduler
-    if scheduler is None:
-        scheduler = AsyncIOScheduler()
-    """注册所有定时任务"""
-    scheduler.add_job(
-        build_jobs,
-        trigger="interval",
-        seconds=5,
-        id="build_jobs",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=10,
-    )
-    scheduler.start()
-    logger.info("定时任务 Scheduler 已启动")
-
-
-async def shutdown_scheduler():
-    global scheduler
-    if scheduler:
-        try:
-            await scheduler.shutdown(wait=False)
-            logger.info("定时任务 Scheduler 已关闭")
-        except Exception as e:
-            logger.error(f"关闭 scheduler 失败: {e}")
 
 
 @asynccontextmanager
