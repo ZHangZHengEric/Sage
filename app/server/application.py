@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from core.middleware import register_middlewares
 from core.exceptions import register_exception_handlers
-import router
-import mcp_server
+from routers import register_routes as register_chat_routes
+from mcp_routers import register_routes as register_mcp_routes
 from lifespan import app_lifespan
 
 def create_fastapi_app() -> FastAPI:
@@ -23,8 +23,8 @@ def create_fastapi_app() -> FastAPI:
     register_exception_handlers(app)
 
     # 注册 HTTP API 路由
-    router.register_routes(app)
+    register_chat_routes(app)
 
     # 注册 MCP 路由
-    mcp_server.register_routes(app)
+    register_mcp_routes(app)
     return app

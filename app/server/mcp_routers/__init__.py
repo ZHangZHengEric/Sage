@@ -12,10 +12,6 @@ async def mcp_lifespan(app):
     async with mcp_http_app.lifespan(app):
         yield
 
-__all__ = [
-    "mcp_lifespan",
-]
-
 
 def register_routes(app: FastAPI, *, prefix: str = "") -> None:
     """
@@ -30,3 +26,9 @@ def register_routes(app: FastAPI, *, prefix: str = "") -> None:
         return  # 已注册，防重复
 
     app.mount(prefix or "/", mcp_http_app)
+
+
+__all__ = [
+    "register_routes",
+    "mcp_lifespan",
+]

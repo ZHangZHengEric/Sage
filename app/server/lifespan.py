@@ -1,14 +1,17 @@
 import asyncio
-import warnings
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from sagents.utils.logger import logger
 
-import core
-import mcp_server
+from core.lifecycle import (
+    close_clients,
+    initialize_clients,
+    initialize_data,
+    initialize_mcp,
+)
 from jobs.scheduler import init_scheduler, shutdown_scheduler
-
+from mcp_routers import mcp_lifespan
 
 # =========================
 # 初始化 / 清理逻辑
@@ -19,10 +22,10 @@ async def initialize_system():
     logger.info("正在初始化 Sage Platform Server...")
 
     # 初始化第三方客户端（mysql / minio / llm / embed 等）
-    await core.initialize_clients()
+    await initialize_clients()
 
     # 初始化数据库预置数据
-    await core.initialize_data()
+    await initialize_data()
 
 
 async def post_initialize():
@@ -32,14 +35,14 @@ async def post_initialize():
     logger.info("正在执行 Sage Platform Server 启动后的后置任务...")
 
     # 初始化 MCP（注册 tools / 同步远端能力等）
-    await core.initialize_mcp()
+    await initialize_mcp()
 
 
 async def cleanup_system():
     logger.info("正在清理 Sage Platform Server 资源...")
 
     # 关闭第三方客户端
-    await core.close_clients()
+    await close_clients()
 
 
 
@@ -70,13 +73,13 @@ async def app_lifespan(app: FastAPI):
     await initialize_system()
 
     # 2) MCP 生命周期（依赖 core 已初始化）
-    async with mcp_server.mcp_lifespan(app):
+    async with mcp_lifespan(app):
 
         # 3) 启动调度器
         try:
             init_scheduler()
         except Exception:
-            logger.exception("Scheduler 初始化失败")
+            logger.error("Scheduler 初始化失败")
             raise
 
         # 4) 启动后置任务（受控后台执行）

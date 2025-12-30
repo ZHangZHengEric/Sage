@@ -22,7 +22,12 @@ class ToolProxy:
             tool_manager: 全局工具管理器实例
             available_tools: 可用工具名称列表
         """
+        if not available_tools:
+            available_tools = []
+        # 初始化工具管理器引用
         self.tool_manager = tool_manager
+        
+        # 过滤出存在的工具
         self._available_tools = set(available_tools)
         
         # 验证工具是否存在
