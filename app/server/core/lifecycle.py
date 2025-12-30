@@ -3,12 +3,8 @@ from sagents.utils.logger import logger
 
 from .client.db import close_db_client, init_db_client
 from .client.es import close_es_client, init_es_client
-from .client.llm import (
-    close_chat_client,
-    close_embed_client,
-    init_chat_client,
-    init_embed_client,
-)
+from .client.llm import close_chat_client, init_chat_client
+from .client.embed import close_embed_client, init_embed_client
 from .client.minio import close_minio_client, init_minio_client
 from .bootstrap import (
     initialize_db_data,
