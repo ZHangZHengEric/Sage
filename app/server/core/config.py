@@ -17,7 +17,6 @@ class StartupConfig:
 
     # Server
     port: int = 8080
-    daemon: bool = False
     pid_file: str = "sage_stream.pid"
     logs_dir: str = "logs"
     workspace: str = "agent_workspace"
@@ -247,11 +246,7 @@ def create_argument_parser():
         "--memory_root",
         help=f"记忆存储根目录（可选） (环境变量: {ENV.MEMORY_ROOT})",
     )
-    parser.add_argument(
-        "--daemon",
-        action="store_true",
-        help=f"以守护进程模式运行 (环境变量: {ENV.DAEMON})",
-    )
+
     parser.add_argument(
         "--pid-file",
         help=f"PID文件路径 (环境变量: {ENV.PID_FILE})",
@@ -354,7 +349,6 @@ def build_startup_config() -> StartupConfig:
 
     cfg = StartupConfig(
         port=pick_int(args.port, ENV.PORT, StartupConfig.port),
-        daemon=pick_bool(args.daemon, ENV.DAEMON, StartupConfig.daemon),
         pid_file=pick_str(args.pid_file, ENV.PID_FILE, StartupConfig.pid_file),
         logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
         workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
