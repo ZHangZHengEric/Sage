@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import core.globals as global_vars
 import models
-from common.exceptions import SageHTTPException
+from core.exceptions import SageHTTPException
 
 from sagents.utils.logger import logger
 

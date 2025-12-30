@@ -131,7 +131,7 @@ class ToolManager:
         # 将package_path 从sys.path 中移除
         if str(sys_package_path) in sys.path:
             sys.path.remove(str(sys_package_path))
-            logger.info(f"Removed package path from sys.path: {sys_package_path}")
+            logger.debug(f"Removed package path from sys.path: {sys_package_path}")
 
     def register_tool_class(self, tool_class: Type[ToolBase]):
         """Register all tools from a ToolBase subclass"""

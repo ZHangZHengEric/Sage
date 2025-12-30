@@ -8,7 +8,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import models
-from common.exceptions import SageHTTPException
+from core.exceptions import SageHTTPException
 from core.globals import get_all_active_sessions_service_map
 
 from sagents.context.session_context import get_session_context

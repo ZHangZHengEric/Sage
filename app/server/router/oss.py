@@ -1,4 +1,4 @@
-from common.render import Response
+from core.render import Response
 from core.client.minio import upload_kdb_file
 from fastapi import APIRouter, File, UploadFile
 
