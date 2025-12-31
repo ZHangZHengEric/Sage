@@ -3,7 +3,7 @@
 """
 查询建议Agent指令定义
 
-包含查询建议agent使用的指令内容，支持中英文
+包含查询建议agent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -61,6 +61,32 @@ Question 2 that users might ask or direction 2 for deeper exploration
 </suggest_item>
 <suggest_item>
 Question 3 that users might ask or direction 3 for deeper exploration
+</suggest_item>
+```""",
+    "pt": """# Guia de Geração de Sugestões
+Sua tarefa é gerar perguntas que os usuários podem fazer em seguida com base no diálogo acima, ou coisas que podem ajudar os usuários a resolver questões relacionadas mais profundas.
+
+## Diálogo do Usuário
+{task_description}
+
+## Requisitos
+1. As perguntas ou direções sugeridas devem estar relacionadas ao diálogo do usuário.
+2. As perguntas ou direções sugeridas devem ter uma certa profundidade e ser capazes de ajudar os usuários a resolver problemas.
+3. As perguntas ou direções sugeridas devem ter uma certa amplitude e ser capazes de ajudar os usuários a explorar diferentes ângulos.
+4. Gere apenas 3 sugestões.
+5. Cada sugestão deve ser concisa, não mais de 20 caracteres.
+6. As sugestões são da perspectiva do usuário.
+
+## Formato de Saída
+```
+<suggest_item>
+Pergunta 1 que os usuários podem fazer ou direção 1 para exploração mais profunda
+</suggest_item>
+<suggest_item>
+Pergunta 2 que os usuários podem fazer ou direção 2 para exploração mais profunda
+</suggest_item>
+<suggest_item>
+Pergunta 3 que os usuários podem fazer ou direção 3 para exploração mais profunda
 </suggest_item>
 ```"""
 }

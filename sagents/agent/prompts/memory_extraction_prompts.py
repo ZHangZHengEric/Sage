@@ -3,7 +3,7 @@
 """
 记忆提取Agent指令定义
 
-包含MemoryExtractionAgent使用的指令内容，支持中英文
+包含MemoryExtractionAgent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -12,7 +12,8 @@ AGENT_IDENTIFIER = "MemoryExtractionAgent"
 # 记忆提取系统前缀
 memory_extraction_system_prefix = {
     "zh": "你是一个记忆提取智能体，专门负责从对话历史中提取潜在的系统级记忆，检测和处理记忆冲突，提供智能化的记忆管理建议。",
-    "en": "You are a memory extraction agent, specializing in extracting potential system-level memories from conversation history, detecting and handling memory conflicts, and providing intelligent memory management recommendations."
+    "en": "You are a memory extraction agent, specializing in extracting potential system-level memories from conversation history, detecting and handling memory conflicts, and providing intelligent memory management recommendations.",
+    "pt": "Você é um agente de extração de memória, especializado em extrair potenciais memórias do nível do sistema de histórico de conversa, detectar e lidar com conflitos de memória, e fornecer recomendações de gerenciamento de memória inteligente."
 }
 
 # 记忆提取模板
@@ -104,7 +105,51 @@ If no information worth remembering is found, please return an empty extracted_m
 {{
     "extracted_memories": []
 }}
-</Return Format Requirements>"""
+</Return Format Requirements>""",
+    "pt": """Por favor, analise o seguinte diálogo e extraia informações do nível do sistema que valem a pena memória de longo prazo.
+
+<Contexto Atual do Sistema>
+{system_context}
+</Contexto Atual do Sistema>
+
+<Histórico de Diálogo>
+{formatted_conversation}
+</Histórico de Diálogo>
+
+Por favor, extraia os seguintes quatro tipos de memórias do nível do sistema:
+1. **Preferências do Usuário (preference)**: Preferências, hábitos, preferências de estilo expressos explicitamente pelo usuário
+2. **Requisitos do Usuário (requirement)**: Requisitos específicos de preferência do usuário para métodos, formatos, conteúdo de resposta da IA, não registros do que os usuários querem fazer
+3. **Persona do Usuário (persona)**: Identidade, histórico, experiência, nível de habilidade e outras informações pessoais do usuário
+4. **Restrições (constraint)**: Restrições de tempo, ambiente, trabalho e outras mencionadas pelos usuários
+
+Princípios de Extração:
+- Extraia apenas informações explicitamente expressas com valor de longo prazo
+- Ignore conteúdo temporário e único. Coisas que os usuários querem fazer não precisam ser registradas como memórias do nível do sistema de "requisitos do usuário".
+- Garanta que o conteúdo da memória seja preciso e específico
+- Gere chaves de identificação concisas e claras para cada memória
+- As descrições na chave e no conteúdo da memória devem usar valores absolutos tanto quanto possível, por exemplo, o tempo "amanhã" deve ser convertido para data absoluta.
+- As memórias devem ser extraídas do conteúdo expresso pelo Usuário, não do contexto do sistema ou processos de execução da IA.
+- Não extraia informações já mencionadas no contexto do sistema.
+
+<Requisitos de Formato de Retorno>
+Por favor, retorne no formato JSON da seguinte forma:
+{{
+    "extracted_memories": [
+        {{
+            "key": "Identificador único da memória",
+            "content": "Conteúdo específico da memória, preciso sem informações faltantes",
+            "type": "Tipo de memória (preference/requirement/persona/constraint/context/project/workflow/experience/learning/skill/note/bookmark/pattern)",
+            "tags": ["Tag relacionada 1", "Tag relacionada 2"],
+            "source": "Fragmento de diálogo no qual a extração é baseada"
+        }}
+    ]
+}}
+
+Se nenhuma informação digna de lembrança for encontrada, por favor retorne um array extracted_memories vazio.
+{{
+    "extracted_memories": []
+}}
+</Requisitos de Formato de Retorno>"""
 }
 
 # 记忆去重模板
@@ -200,5 +245,51 @@ Output format is a Json list of keys, for example:
 ```
 Output requirements:
 1. key1 is the key of the memory to be forgotten.
-2. Do not output any other content or explanations, only output Json format content."""
+2. Do not output any other content or explanations, only output Json format content.""",
+    "pt": """Por favor, analise as seguintes memórias existentes e identifique memórias duplicadas que precisam ser deletadas.
+
+As regras para julgar se há memórias duplicadas devem satisfazer as seguintes duas condições:
+1. As chaves de duas memórias basicamente expressam o mesmo conteúdo, e o conteúdo das duas memórias também está em campos semelhantes ou significados opostos.
+2. As duas memórias juntas causarão contradições e conflitos
+
+Exemplo 1
+Chave da Memória 1: Preferência de idioma
+Conteúdo da Memória 1: Chinês
+Chave da Memória 2: Preferência de idioma
+Conteúdo da Memória 2: Inglês
+Conclusão: Duplicada, o usuário só pode ter uma preferência
+
+Exemplo 2
+Chave da Memória 1: Habilidade linguística do usuário
+Conteúdo da Memória 1: Chinês
+Chave da Memória 2: Habilidade linguística do usuário
+Conteúdo da Memória 2: Inglês
+Conclusão: Não duplicada, o usuário pode ter duas habilidades linguísticas
+
+Exemplo 3
+Chave da Memória 1: Esporte favorito
+Conteúdo da Memória 1: O usuário gosta de futebol
+Chave da Memória 2: Esporte favorito
+Conteúdo da Memória 2: O usuário gosta de basquete
+Conclusão: Não duplicada, o usuário pode ter dois esportes favoritos
+
+Exemplo 4
+Chave da Memória 1: Nome/Título
+Conteúdo da Memória 1: Zhang San
+Chave da Memória 2: Nome/Título
+Conteúdo da Memória 2: Li Si
+Conclusão: Duplicada, o usuário não pode ter dois nomes/títulos
+
+Memórias existentes atuais:
+{existing_memories}
+
+O formato de saída é uma lista Json de chaves, por exemplo:
+```json
+{{
+    "duplicate_keys": ["key1"]
+}}
+```
+Requisitos de saída:
+1. key1 é a chave da memória a ser esquecida.
+2. Não produza nenhum outro conteúdo ou explicação, apenas produza conteúdo no formato Json."""
 }

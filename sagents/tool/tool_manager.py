@@ -1,68 +1,28 @@
-import asyncio
-import json
-import os
-import sys
-import time
-import traceback
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Type, Union
-
-from mcp import StdioServerParameters, Tool
-
-from sagents.context.session_context import SessionContext
-from sagents.utils.logger import logger
-
-from .mcp_proxy import McpProxy
+from typing import Dict, Any, List, Type, Optional, Union
 from .tool_base import ToolBase
 from .tool_config import (
-    AgentToolSpec,
+    convert_spec_to_openai_format,
+    ToolSpec,
     McpToolSpec,
     SseServerParameters,
     StreamableHttpServerParameters,
-    ToolSpec,
-    convert_spec_to_openai_format,
+    AgentToolSpec,
 )
-
-
-def _innermost_exception(exc: BaseException) -> BaseException:
-    seen = set()
-    cur: BaseException = exc
-    while True:
-        cur_id = id(cur)
-        if cur_id in seen:
-            return cur
-        seen.add(cur_id)
-
-        if isinstance(cur, BaseExceptionGroup):
-            exceptions = getattr(cur, "exceptions", None)
-            if exceptions:
-                cur = exceptions[0]
-                continue
-
-        cause = getattr(cur, "__cause__", None)
-        if cause is not None:
-            cur = cause
-            continue
-
-        context = getattr(cur, "__context__", None)
-        if context is not None:
-            cur = context
-            continue
-
-        return cur
-
-
-def _innermost_exception_message(exc: BaseException) -> str:
-    inner = _innermost_exception(exc)
-    msg = str(inner).strip()
-    return msg if msg else repr(inner)
-
-
-def _raise_innermost_exception(exc: BaseException) -> None:
-    inner = _innermost_exception(exc)
-    if isinstance(inner, Exception):
-        raise inner from None
-    raise Exception(_innermost_exception_message(inner)) from None
+from sagents.utils.logger import logger
+from sagents.context.session_context import SessionContext
+import importlib
+import pkgutil
+from pathlib import Path
+import inspect
+import json
+import asyncio
+from mcp import StdioServerParameters
+from mcp import Tool
+import traceback
+import time
+import os
+import sys
+from .mcp_proxy import McpProxy
 
 
 class ToolManager:
@@ -96,15 +56,16 @@ class ToolManager:
         logger.info("Asynchronously initializing ToolManager")
         await self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path)
 
-    def _auto_discover_tools(self, path: str = None):
+    def _auto_discover_tools(self, path: Optional[str] = None):
         """Auto-discover and register all tools in the tools package
         Args:
             path: Optional custom path to scan for tools. If None, uses package directory.
         """
+        logger.info("Auto-discovering tools")
         package_path = Path(path) if path else Path(__file__).parent
         sys_package_path = package_path.parent
         # 自动推断完整包名（如 sagents.tool）
-        pkg_parts = []
+        pkg_parts: List[str] = []
         p = package_path
         while p.name != "sagents" and p.parent != p:
             pkg_parts.insert(0, p.name)
@@ -112,38 +73,48 @@ class ToolManager:
         if p.name == "sagents":
             pkg_parts.insert(0, "sagents")
         full_package_name = ".".join(pkg_parts)
-        logger.info(f"Auto-discovery full package name: {full_package_name}, package_path: {package_path}")
+        logger.info(f"Auto-discovery full package name: {full_package_name}")
+        logger.info(f"Scanning path: {package_path}")
         # 需要将package_path 加入sys.path
         if str(sys_package_path) not in sys.path:
             sys.path.append(str(sys_package_path))
-        # 递归获取所有子类
-
-        def get_all_subclasses(cls):
-            all_subclasses = set()
-            for subclass in cls.__subclasses__():
-                all_subclasses.add(subclass)
-                all_subclasses.update(get_all_subclasses(subclass))
-            return all_subclasses
-
-        for tool_class in get_all_subclasses(ToolBase):
-            self.register_tool_class(tool_class)
+            logger.info(f"Added path to sys.path: {sys_package_path}")
+        for _, module_name, _ in pkgutil.iter_modules([str(package_path)]):
+            if module_name == "tool_base" or module_name.endswith("_base"):
+                logger.debug(f"Skipping base module: {module_name}")
+                continue
+            try:
+                logger.info(f"Attempting to import module: {module_name}")
+                module = importlib.import_module(f".{module_name}", full_package_name)
+                for _, obj in inspect.getmembers(module):
+                    if inspect.isclass(obj) and issubclass(obj, ToolBase):
+                        logger.info(f"Found tool class: {obj.__name__}")
+                        self.register_tool_class(obj)
+            except ImportError as e:
+                logger.error(f"Failed to import module {module_name}: {e}")
+                logger.error(traceback.format_exc())
+                continue
         logger.info(f"Auto-discovery completed with {len(self.tools)} total tools")
         # 将package_path 从sys.path 中移除
         if str(sys_package_path) in sys.path:
             sys.path.remove(str(sys_package_path))
-            logger.debug(f"Removed package path from sys.path: {sys_package_path}")
+            logger.info(f"Removed package path from sys.path: {sys_package_path}")
 
     def register_tool_class(self, tool_class: Type[ToolBase]):
         """Register all tools from a ToolBase subclass"""
-        class_tools = getattr(tool_class, "_tools", {}) or {}
+        logger.info(f"Registering tools from class: {tool_class.__name__}")
+        tool_instance = tool_class()
+        # 缓存工具实例，以便后续执行时重用
+        self._tool_instances[tool_class] = tool_instance
+        instance_tools = tool_instance.tools
 
-        if not class_tools:
+        if not instance_tools:
             logger.warning(f"No tools found in {tool_class.__name__}")
             return False
 
-        logger.info(f"Registering tools to manager from {tool_class.__name__}:")
+        logger.info(f"\nRegistering tools to manager from {tool_class.__name__}:")
         registered = False
-        for tool_name, tool_spec in class_tools.items():
+        for tool_name, tool_spec in instance_tools.items():
             # 修正工具规格中的__objclass__
             if hasattr(tool_spec.func, "__objclass__"):
                 tool_spec.func.__objclass__ = tool_class
@@ -244,11 +215,11 @@ class ToolManager:
             logger.error(f"Failed to remove MCP server '{server_name}': {e}")
             return False
 
-    async def _discover_mcp_tools(self, mcp_setting_path: str = None):
+    async def _discover_mcp_tools(self, mcp_setting_path: Optional[str] = None):
         bool_registered = False
         """Discover and register tools from MCP servers"""
         logger.info(f"Discovering MCP tools from settings file: {mcp_setting_path}")
-        if not os.path.exists(mcp_setting_path):
+        if mcp_setting_path is None or not os.path.exists(mcp_setting_path):
             logger.warning(f"MCP setting file not found: {mcp_setting_path}")
             return bool_registered
         try:
@@ -284,15 +255,19 @@ class ToolManager:
             logger.debug(f"Server {server_name} is disabled, skipping")
             return bool_registered
         server_name = server_name.strip()
-        server_params = None
+        server_params: Optional[Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]] = None
         try:
             if "sse_url" in config:
                 server_params = SseServerParameters(
                     url=config["sse_url"], api_key=config.get("api_key", None)
                 )
             elif "url" in config or "streamable_http_url" in config:
+                url_val = config.get("url") or config.get("streamable_http_url")
+                if not isinstance(url_val, str):
+                    logger.warning(f"Invalid URL for server {server_name}: {url_val}")
+                    return False
                 server_params = StreamableHttpServerParameters(
-                    url=config.get("url", config.get("streamable_http_url"))
+                    url=url_val
                 )
             else:
                 server_params = StdioServerParameters(
@@ -331,9 +306,30 @@ class ToolManager:
             input_schema = tool_info.get("input_schema", {})
         else:
             input_schema = tool_info.get("inputSchema", {})
+        
+        # 兼容 MCP 的 i18n 元数据来源：优先从 _meta/meta 中读取；其次从顶层键读取；然后从 annotations 中读取；最后从 inputSchema.properties 聚合
+        meta = tool_info.get("_meta") or tool_info.get("meta") or {} or tool_info.get("annotations", {}) or {}
+        description_i18n = meta.get("description_i18n") or tool_info.get("description_i18n", {})
+
+        # 参数多语言描述聚合
+        param_description_i18n = meta.get("param_description_i18n") or tool_info.get("param_description_i18n", {})
+        try:
+            if not param_description_i18n and isinstance(input_schema.get("properties", {}), dict):
+                aggregated: Dict[str, Any] = {}
+                for param_name, schema in input_schema.get("properties", {}).items():
+                    if isinstance(schema, dict) and isinstance(schema.get("description_i18n"), dict):
+                        aggregated[param_name] = schema.get("description_i18n")
+                if aggregated:
+                    param_description_i18n = aggregated
+        except Exception:
+            # 保底，避免注册失败
+            pass
+
         tool_spec = McpToolSpec(
             name=tool_info["name"],
             description=tool_info.get("description", ""),
+            description_i18n=description_i18n or {},
+            param_description_i18n=param_description_i18n or {},
             func=None,
             parameters=input_schema.get("properties", {}),
             required=input_schema.get("required", []),
@@ -343,44 +339,54 @@ class ToolManager:
         registered = self.register_tool(tool_spec)
         logger.debug(f"MCP tool {tool_info['name']} registration result: {registered}")
 
-    def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
+    def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec, AgentToolSpec]]:
         """Get a tool by name"""
         logger.debug(f"Getting tool by name: {name}")
         return self.tools.get(name)
 
-    def list_tools(self) -> List[Dict[str, Any]]:
-        """List all available tools with metadata"""
+    def list_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """List all available tools with metadata, supports language filtering via convert_spec_to_openai_format"""
         logger.debug(f"Listing all {len(self.tools)} tools with metadata")
-        return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-                "required": tool.required,
-            }
-            for tool in self.tools.values()
-        ]
 
-    def list_tools_simplified(self) -> List[Dict[str, Any]]:
-        """List all available tools with simplified metadata"""
+        tools_list: List[Dict[str, Any]] = []
+        for tool in self.tools.values():
+            spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
+            fn = spec.get("function", {})
+            params = fn.get("parameters", {})
+            tools_list.append({
+                "name": fn.get("name", getattr(tool, "name", "")),
+                "description": fn.get("description", getattr(tool, "description", "")),
+                "parameters": params.get("properties", {}),
+                "required": params.get("required", getattr(tool, "required", [])),
+            })
+        return tools_list
+
+    def list_tools_simplified(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """List all available tools with simplified metadata, using convert_spec_to_openai_format for i18n"""
         logger.debug(f"Listing all {len(self.tools)} tools with simplified metadata")
-        return [
-            {"name": tool.name, "description": tool.description}
-            for tool in self.tools.values()
-        ]
 
-    def list_all_tools_name(self) -> List[str]:
-        """List all available tools with name"""
+        simplified = []
+        for tool in self.tools.values():
+            spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
+            fn = spec.get("function", {})
+            simplified.append({
+                "name": fn.get("name", getattr(tool, "name", "")),
+                "description": fn.get("description", getattr(tool, "description", "")),
+            })
+        return simplified
+
+    def list_all_tools_name(self, lang: Optional[str] = None) -> List[str]:
+        """List all available tools with name (language param accepted for API consistency)"""
         logger.debug(f"Listing all {len(self.tools)} tools with name")
         return [tool.name for tool in self.tools.values()]
 
-    def list_tools_with_type(self) -> List[Dict[str, Any]]:
-        """List all available tools with type and source information"""
+    def list_tools_with_type(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """List tools with type/source info, descriptions and parameters localized via convert_spec_to_openai_format"""
         logger.debug(f"Listing all {len(self.tools)} tools with type information")
-        tools_with_type = []
 
+        tools_with_type: List[Dict[str, Any]] = []
         for tool in self.tools.values():
-            # 根据工具类型判断
+            # 类型与来源
             if isinstance(tool, McpToolSpec):
                 tool_type = "mcp"
                 source = f"MCP Server: {tool.server_name}"
@@ -389,28 +395,34 @@ class ToolManager:
                 source = "专业智能体"
             elif isinstance(tool, ToolSpec):
                 tool_type = "basic"
-                # 根据工具名称推断来源
                 source = "基础工具"
             else:
                 tool_type = "unknown"
                 source = "未知来源"
 
-            tools_with_type.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": getattr(tool, "parameters", {}),
-                    "type": tool_type,
-                    "source": source,
-                }
-            )
+            spec = convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain)
+            fn = spec.get("function", {})
+            params = fn.get("parameters", {})
+
+            tools_with_type.append({
+                "name": fn.get("name", getattr(tool, "name", "")),
+                "description": fn.get("description", getattr(tool, "description", "")),
+                "parameters": params.get("properties", {}),
+                "type": tool_type,
+                "source": source,
+            })
 
         return tools_with_type
 
-    def get_openai_tools(self) -> List[Dict[str, Any]]:
-        """Get tool specifications in OpenAI-compatible format"""
+    def get_openai_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Get OpenAI-compatible function specs, localized via convert_spec_to_openai_format"""
         logger.debug(f"Getting OpenAI tool specifications for {len(self.tools)} tools")
-        return [convert_spec_to_openai_format(tool) for tool in self.tools.values()]
+
+        tools_json: List[Dict[str, Any]] = []
+        for tool in self.tools.values():
+            tools_json.append(convert_spec_to_openai_format(tool, lang=lang, fallback_chain=fallback_chain))
+
+        return tools_json
 
     async def run_tool_async(
         self,
@@ -481,13 +493,12 @@ class ToolManager:
 
         except Exception as e:
             execution_time = time.time() - execution_start
-            error_detail = _innermost_exception_message(e)
             error_msg = (
-                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
+                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
             )
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(
-                error_msg, tool_name, "EXECUTION_ERROR", error_detail
+                error_msg, tool_name, "EXECUTION_ERROR", str(e)
             )
 
     async def _execute_mcp_tool(
@@ -516,10 +527,6 @@ class ToolManager:
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
         except Exception as e:
-            if isinstance(e, BaseExceptionGroup):
-                msg = _innermost_exception_message(e)
-                logger.error(f"MCP tool execution failed: {tool.name} - {msg}")
-                _raise_innermost_exception(e)
             logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
 
@@ -547,8 +554,6 @@ class ToolManager:
                         instance = self._tool_instances[tool_class]
                     else:
                         instance = tool_class()
-                        if hasattr(self, "_tool_instances"):
-                            self._tool_instances[tool_class] = instance
                     bound_method = tool.func.__get__(instance)
                     if asyncio.iscoroutinefunction(bound_method):
                         result = await bound_method(**kwargs)
@@ -646,7 +651,7 @@ class ToolManager:
         error_msg: str,
         tool_name: str,
         error_type: str,
-        exception_detail: str = None,
+        exception_detail: Optional[str] = None,
     ) -> str:
         """Format a consistent error response"""
         error_response = {

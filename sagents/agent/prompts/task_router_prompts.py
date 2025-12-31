@@ -3,7 +3,7 @@
 """
 任务路由Agent指令定义
 
-包含TaskRouterAgent使用的指令内容，支持中英文
+包含TaskRouterAgent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -12,7 +12,8 @@ AGENT_IDENTIFIER = "TaskRouterAgent"
 # 任务路由系统前缀
 task_router_system_prefix = {
     "zh": "你是一个任务路由智能体，专门负责根据用户的任务描述，将任务路由到不同的智能体以及是否需要深度思考",
-    "en": "You are a task routing agent, specializing in routing tasks to different agents and determining whether deep thinking is needed based on user task descriptions"
+    "en": "You are a task routing agent, specializing in routing tasks to different agents and determining whether deep thinking is needed based on user task descriptions",
+    "pt": "Você é um agente de roteamento de tarefas, especializado em rotear tarefas para diferentes agentes e determinar se o pensamento profundo é necessário com base nas descrições de tarefas do usuário"
 }
 
 # 路由模板
@@ -77,6 +78,37 @@ Output format is json, key is agent_name, value is the agent name, deep_think is
 Example:
 {{
     "agent_name": "Multi-agent",
+    "deep_think": false
+}}""",
+    "pt": """Você é um agente de roteamento de tarefas. Sua tarefa é rotear tarefas para diferentes agentes e determinar se o pensamento profundo é necessário com base nas descrições de tarefas do usuário. Diferentes agentes e pensamento profundo não têm relação direta, é apenas para melhor conclusão da tarefa.
+
+Regras de seleção de agente:
+- Se a descrição da tarefa do usuário requer processamento computacional ou lógico complexo, como chamar pelo menos duas ferramentas externas (como múltiplas buscas de informações), escolha multi-agente.
+- Se a descrição da tarefa do usuário é simples e clara, como chamar apenas uma ferramenta externa ou não chamar ferramentas externas, escolha agente único.
+- Quando o usuário expressa que a execução da tarefa anterior teve problemas, escolha multi-agente.
+
+Regras de julgamento de pensamento profundo:
+- Quando a expressão da tarefa do usuário é simples e clara, não requer raciocínio lógico complexo, então o pensamento profundo é false.
+- Quando a expressão da tarefa do usuário é complexa, requer raciocínio lógico complexo, então o pensamento profundo é true.
+- Quando a expressão da tarefa do usuário é vaga e pouco clara, incerta se requer raciocínio lógico complexo, então o pensamento profundo é true.
+- Quando o usuário expressa que a execução da tarefa anterior teve problemas, o pensamento profundo é true.
+
+Lista atual de agentes:
+1. Multi-agente
+2. Agente único
+
+Lista atual de ferramentas:
+{tool_list}
+
+Descrição da tarefa do usuário:
+{task_desc}
+
+Por favor, roteie para o agente apropriado com base na descrição da tarefa do usuário.
+
+O formato de saída é json, a chave é agent_name, o valor é o nome do agente, deep_think é se o pensamento profundo é necessário
+Exemplo:
+{{
+    "agent_name": "Multi-agente",
     "deep_think": false
 }}"""
 }

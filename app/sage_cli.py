@@ -7,7 +7,7 @@ import time
 import traceback
 import uuid
 from copy import deepcopy
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 from openai import AsyncOpenAI
 from rich.console import Console
@@ -50,7 +50,7 @@ def display_tools(console, tool_manager: Union[ToolManager, ToolProxy]):
         console.print(f"\n[red]获取工具列表时出错: {e}[/red]")
 
 
-async def chat(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]):
+async def chat(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], context_budget_config: Optional[Dict[str, Any]] = None):
     # 对话式的，流式的打印只显示 show_content 的信息到命令行，且命令行的样式要好看一些，调用agent 进行对话
 
     console = Console()
@@ -86,7 +86,8 @@ async def chat(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]):
                                                  deep_thinking=config['use_deepthink'],
                                                  multi_agent=config['use_multi_agent'],
                                                  available_workflows=config['available_workflows'],
-                                                 system_context=config['system_context']
+                                                 system_context=config['system_context'],
+                                                 context_budget_config=context_budget_config
                                                  ):
                 for chunk in chunks:
                     if isinstance(chunk, MessageChunk):
@@ -141,90 +142,39 @@ def parse_arguments() -> Dict[str, Any]:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
-  python sagents_cli.py --api_key YOUR_API_KEY --model gpt-4
-  python sagents_cli.py --api_key YOUR_API_KEY --model gpt-4 --query "帮我分析一下数据"
+  python sage_cli.py --default_llm_api_key YOUR_API_KEY --default_llm_model_name gpt-4
         """
     )
 
-    parser.add_argument('--api_key', required=True,
-                        help='OpenRouter API key（必需）')
-    parser.add_argument('--model', required=True,
-                        help='模型名称')
-    parser.add_argument('--base_url', required=True,
-                        help='API base URL')
-    parser.add_argument('--user_id', type=str, default=None,
-                        help='用户ID')
-    parser.add_argument('--memory_root', type=str, default=None,
-                        help='记忆根目录')
-    parser.add_argument('--tools_folders', nargs='+', default=[],
-                        help='工具目录路径（多个路径用空格分隔）')
-    parser.add_argument('--max_tokens', type=int, default=4096,
-                        help='最大令牌数')
-    parser.add_argument('--temperature', type=float, default=0.2,
-                        help='温度参数')
-    parser.add_argument('--no-deepthink', action='store_true', default=None,
-                        help='禁用深度思考')
-    parser.add_argument('--no-multi-agent', action='store_true', default=None,
-                        help='禁用多智能体推理')
-    parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'),
-                        help='工作目录')
+    # 与 sage_server.py 保持一致的参数
+    parser.add_argument('--default_llm_api_key', required=True, help='默认LLM API Key')
+    parser.add_argument('--default_llm_api_base_url', required=True, help='默认LLM API Base')
+    parser.add_argument('--default_llm_model_name', required=True, help='默认LLM API Model')
+    parser.add_argument('--default_llm_max_tokens', default=4096, type=int, help='默认LLM API Max Tokens')
+    parser.add_argument('--default_llm_temperature', default=0.2, type=float, help='默认LLM API Temperature')
+    parser.add_argument('--default_llm_max_model_len', default=54000, type=int, help='默认LLM 最大上下文')
+    parser.add_argument('--default_llm_top_p', default=0.9, type=float, help='默认LLM Top P')
+    parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float, help='默认LLM Presence Penalty')
+
+    parser.add_argument("--context_history_ratio", type=float, default=0.2,
+                        help='上下文预算管理器：历史消息的比例（0-1之间）')
+    parser.add_argument("--context_active_ratio", type=float, default=0.3,
+                        help='上下文预算管理器：活跃消息的比例（0-1之间）')
+    parser.add_argument("--context_max_new_message_ratio", type=float, default=0.5,
+                        help='上下文预算管理器：新消息的比例（0-1之间）')
+    parser.add_argument("--context_recent_turns", type=int, default=0,
+                        help='上下文预算管理器：限制最近的对话轮数，0表示不限制')
+
+    parser.add_argument('--user_id', type=str, default=None, help='用户ID')
+    parser.add_argument('--memory_root', type=str, default=None, help='记忆根目录')
+    parser.add_argument('--tools_folders', nargs='+', default=[], help='工具目录路径（多个路径用空格分隔）')
+    parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
+    parser.add_argument('--no-multi-agent', action='store_true', default=None, help='禁用多智能体推理')
+    parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录')
     parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'),
-                        help="""MCP 设置文件路径，文件内容为json格式，示例：
-{
-    "mcpServers": {
-        "auth_sse_mcp_server": {
-            "sse_url": "http://127.0.0.1:20042/sse",
-            "disabled": false,
-            "api_key": "sk-0r4Y-8eAeRXeA-9TpQdoxoHCDsdLpY5VVG2mJHpuzaVvc"
-        },
-        "sse_mcp_server": {
-            "sse_url": "http://127.0.0.1:14343/sse",
-            "disabled": true
-        },
-        "streamable_mcp_server": {
-            "streamablehhtp_url": "http://127.0.0.1:14348/mcp",
-            "disabled": true
-        },
-        "filesystem": {
-            "command": "npx",
-            "args": ["@modelcontextprotocol/server-filesystem", "/path/to/workspace"],
-            "env": {}
-        }
-    }
-}
-""")
+                        help="""MCP 设置文件路径，文件内容为json格式""")
     parser.add_argument('--preset_running_agent_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_agent_config.json'),
-                        help="""预设运行配置文件路径，文件内容为json格式，示例：
-{{
-  "systemPrefix": "你是一个智能助手，你可以帮助用户解决问题",
-  "deepThinking": false,
-  "multiAgent": false,
-  "moreSupport": false,
-  "maxLoopCount": 10,
-  "llmConfig": {{
-    "model": "",
-    "maxTokens": "",
-    "temperature": ""
-  }},
-  "availableTools": [
-    "complete_task",
-    "calculate",
-    "file_read",
-    "file_write",
-    "replace_text_in_file",
-  ],
-  "systemContext": {{
-    "key":"value"
-  }},
-  "availableWorkflows": {{
-    "流程名称": [
-      "步骤1",
-      "步骤2",
-      "步骤3"
-    ]
-  }},
-}}
-""")
+                        help="""预设运行配置文件路径""")
 
     args = parser.parse_args()
 
@@ -238,12 +188,15 @@ def parse_arguments() -> Dict[str, Any]:
 
     # 合并命令行参数和配置文件内容，命令行参数优先
     config = {
-        'api_key': args.api_key,
-        'model_name': args.model if args.model else preset_running_agent_config.get('llmConfig', {}).get('model', ''),
-        'base_url': args.base_url,
+        'api_key': args.default_llm_api_key,
+        'model_name': args.default_llm_model_name if args.default_llm_model_name else preset_running_agent_config.get('llmConfig', {}).get('model', ''),
+        'base_url': args.default_llm_api_base_url,
         'tools_folders': args.tools_folders,
-        'max_tokens': args.max_tokens if args.max_tokens else int(preset_running_agent_config.get('llmConfig', {}).get('maxTokens', 4096)),
-        'temperature': args.temperature if args.temperature else float(preset_running_agent_config.get('llmConfig', {}).get('temperature', 0.2)),
+        'max_tokens': args.default_llm_max_tokens if args.default_llm_max_tokens else int(preset_running_agent_config.get('llmConfig', {}).get('maxTokens', 4096)),
+        'temperature': args.default_llm_temperature if args.default_llm_temperature else float(preset_running_agent_config.get('llmConfig', {}).get('temperature', 0.2)),
+        'max_model_len': args.default_llm_max_model_len,
+        'top_p': args.default_llm_top_p,
+        'presence_penalty': args.default_llm_presence_penalty,
         'use_deepthink': not args.no_deepthink if args.no_deepthink is not None else preset_running_agent_config.get('deepThinking', False),
         'use_multi_agent': not args.no_multi_agent if args.no_multi_agent is not None else preset_running_agent_config.get('multiAgent', False),
         'workspace': args.workspace,
@@ -255,6 +208,10 @@ def parse_arguments() -> Dict[str, Any]:
         'max_loop_count': preset_running_agent_config.get('maxLoopCount', 10),
         'user_id': args.user_id,
         'memory_root': args.memory_root,
+        'context_history_ratio': args.context_history_ratio,
+        'context_active_ratio': args.context_active_ratio,
+        'context_max_new_message_ratio': args.context_max_new_message_ratio,
+        'context_recent_turns': args.context_recent_turns,
     }
     logger.info(f"config: {config}")
     return config
@@ -279,13 +236,29 @@ if __name__ == '__main__':
         )
         client.model = config['model_name']
 
+        # 构建context_budget_config字典
+        context_budget_config = {
+            'max_model_len': config['max_model_len']
+        }
+        if config['context_history_ratio'] is not None:
+            context_budget_config['history_ratio'] = config['context_history_ratio']
+        if config['context_active_ratio'] is not None:
+            context_budget_config['active_ratio'] = config['context_active_ratio']
+        if config['context_max_new_message_ratio'] is not None:
+            context_budget_config['max_new_message_ratio'] = config['context_max_new_message_ratio']
+        if config['context_recent_turns'] is not None:
+            context_budget_config['recent_turns'] = config['context_recent_turns']
+
         # 初始化 SAgent
         sagent = SAgent(
             model=client,
             model_config={
                 "model": config['model_name'],
                 "max_tokens": config['max_tokens'],
-                "temperature": config['temperature']
+                "temperature": config['temperature'],
+                "max_model_len": config['max_model_len'],
+                "top_p": config['top_p'],
+                "presence_penalty": config['presence_penalty']
             },
             system_prefix=config['system_prefix'],
             workspace=config['workspace'],
@@ -293,7 +266,7 @@ if __name__ == '__main__':
         )
 
         # 调用 chat 函数
-        await chat(sagent, tool_proxy)
+        await chat(sagent, tool_proxy, context_budget_config)
 
     import asyncio
     asyncio.run(main_async())

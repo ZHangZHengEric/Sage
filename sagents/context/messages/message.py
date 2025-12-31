@@ -1,13 +1,11 @@
+import uuid
+import time
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, asdict
+from enum import Enum
 import json
 import re
-import time
-import uuid
-from dataclasses import asdict, dataclass
-from enum import Enum
-from typing import Any, Dict, List, Optional
-
 from sagents.utils.logger import logger
-
 
 class MessageRole(Enum):
     """消息角色枚举"""
@@ -192,6 +190,16 @@ class MessageChunk:
             return False
         
         return True
+
+    def get_content(self) -> Optional[str]:
+        """获取消息内容
+        
+        优先返回 show_content，如果不存在则返回 content
+        
+        Returns:
+            Optional[str]: 消息内容
+        """
+        return self.show_content if self.show_content else self.content
 
     @classmethod
     def extract_json_from_markdown(cls, content: str) -> str:

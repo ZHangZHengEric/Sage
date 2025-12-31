@@ -14,8 +14,8 @@ Agent系统指令优化工具类
 import json
 import re
 import traceback
+from typing import Dict, Any, Optional
 from datetime import datetime
-from typing import Any, Dict, Optional
 
 try:
     from sagents.utils.logger import logger
@@ -75,7 +75,7 @@ class SystemPromptOptimizer:
 
             # 2. 生成优化后的各个部分（默认使用分段生成，更精确）
             try:
-                sections = await self._generate_optimized_sections_segmented(
+                sections: Dict[str, str] = await self._generate_optimized_sections_segmented(
                     current_prompt, analysis, llm_client, model, optimization_goal
                 )
                 logger.info("完成分段内容生成")
@@ -306,43 +306,43 @@ class SystemPromptOptimizer:
             else:
                 logger.info("使用默认优化算法（无特定目标）")
 
-            sections = {}
+            sections: Dict[str, str] = {}
 
             # 定义需要生成的部分 - 优化后的定义，更加明确各部分的职责
             section_definitions = {
                 "role": {
                     "description": "角色定义内容（简洁明确的角色描述，说明AI的身份和主要职责）",
-                    "app": "例如：你是一个专业的数据分析师、你是一个客户服务助手等",
+                    "examples": "例如：你是一个专业的数据分析师、你是一个客户服务助手等",
                     "avoid_confusion": "不要包含具体的技能列表或操作指导"
                 },
                 "skills": {
                     "description": "技能列表内容（无序列表格式，每项技能要具体明确，说明AI具备的专业能力）",
-                    "app": "例如：数据分析能力、客户沟通技巧、问题解决能力等",
+                    "examples": "例如：数据分析能力、客户沟通技巧、问题解决能力等",
                     "avoid_confusion": "不要包含工具使用方法或具体操作步骤"
                 },
                 "tool_guidance": {
                     "description": "工具使用指导内容（无序列表格式，具体说明何时使用哪些工具，以及使用的条件和方法）",
-                    "app": "例如：使用CRM工具查询客户信息、使用计算器进行数值计算等",
+                    "examples": "例如：使用CRM工具查询客户信息、使用计算器进行数值计算等",
                     "avoid_confusion": "专注于工具的使用方法，不要包含一般性的行为要求或禁止事项"
                 },
                 "content_preference": {
                     "description": "结果内容偏好（无序列表格式，说明回答内容的质量标准、详细程度、专业性要求等积极的内容要求）",
-                    "app": "例如：回答要准确详细、提供具体的数据支持、包含实用的建议等",
+                    "examples": "例如：回答要准确详细、提供具体的数据支持、包含实用的建议等",
                     "avoid_confusion": "专注于积极的内容要求，不要包含禁止性的限制条件"
                 },
                 "format_preference": {
                     "description": "结果形式偏好（无序列表格式，说明回答的格式要求、结构规范、展示方式等）",
-                    "app": "例如：使用表格展示数据、采用分点列举、包含标题和小结等",
+                    "examples": "例如：使用表格展示数据、采用分点列举、包含标题和小结等",
                     "avoid_confusion": "专注于格式和展示方式，不要包含内容质量要求或禁止事项"
                 },
                 "terminology": {
                     "description": "特殊名词定义（无序列表格式，格式：术语名称：详细定义和使用说明）",
-                    "app": "例如：CRM：客户关系管理系统，用于管理客户信息和销售流程",
+                    "examples": "例如：CRM：客户关系管理系统，用于管理客户信息和销售流程",
                     "avoid_confusion": "只包含专业术语的定义，不要包含操作指导或限制条件"
                 },
                 "constraints": {
                     "description": "限制和约束（无序列表格式，明确的禁止行为、边界条件、安全要求等消极限制）",
-                    "app": "例如：不要泄露客户隐私、不要提供医疗建议、不要执行危险操作等",
+                    "examples": "例如：不要泄露客户隐私、不要提供医疗建议、不要执行危险操作等",
                     "avoid_confusion": "只包含明确的禁止事项和限制条件，不要包含积极的要求或建议"
                 }
             }
@@ -388,7 +388,7 @@ class SystemPromptOptimizer:
 {section_info['description']}
 
 **内容示例**：
-{section_info['app']}
+{section_info['examples']}
 
 **避免混淆**：
 {section_info['avoid_confusion']}

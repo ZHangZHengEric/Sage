@@ -1,11 +1,9 @@
-import asyncio
 import json
-import re
-from typing import Any, Dict
-
-import yaml
 from openai import AsyncOpenAI
-
+import yaml
+import asyncio
+from typing import Dict, Any
+import re
 from ..logger import logger
 
 
@@ -23,7 +21,7 @@ class BaseAgentProcessor:
 
     async def call_qianxun(
         self,
-        prompt,
+        prompt: Any,
         model_name: str = "qianxun-m9500",
         r_format: str = "text",
         max_tokens: int = 15000,
@@ -39,12 +37,22 @@ class BaseAgentProcessor:
                 if isinstance(prompt, list):
                     full_prompt = prompt
                 else:
-                    full_prompt = [{"role": "user", "content": prompt}]
+                    full_prompt = [{"role": "user", "content": str(prompt)}]
+                
+                # Construct response_format properly based on r_format string
+                resp_fmt = {"type": "text"}
+                if r_format == "json_object":
+                    resp_fmt = {"type": "json_object"}
+                elif r_format == "text":
+                    resp_fmt = {"type": "text"}
+                else:
+                    # Default fallback or pass as is if typed dict matches
+                    resp_fmt = {"type": r_format} # type: ignore
 
                 response = await self.client.chat.completions.create(
-                    response_format={"type": r_format},
+                    response_format=resp_fmt, # type: ignore
                     model=model_name,
-                    messages=full_prompt,
+                    messages=full_prompt, # type: ignore
                     temperature=temperature,
                     timeout=timeout,
                     max_tokens=max_tokens,
