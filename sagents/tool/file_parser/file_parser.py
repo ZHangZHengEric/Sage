@@ -5,30 +5,30 @@ A tool for extracting text content from various file formats via network URLs.
 Only supports network URLs for security reasons - no local file access.
 """
 
-import hashlib
 import os
-import re
 import tempfile
+import hashlib
 import time
-import traceback
 import urllib.parse
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-import chardet
 import requests
+import re
+import chardet
+import traceback
+from typing import Dict, Any, List, Optional
+from pathlib import Path
 
 # 第三方库（现在由各个解析器子类处理）
+
 # 导入新的解析器子类
 from .parsers import (
     BaseFileParser,
-    DOCXParser,
-    EMLParser,
-    ExcelParser,
-    HTMLParser,
     ParseResult,
     PDFParser,
+    DOCXParser,
+    EMLParser,
     PPTXParser,
+    ExcelParser,
+    HTMLParser,
     TextParser,
 )
 
@@ -262,7 +262,7 @@ class TextProcessor:
         }
 
     @staticmethod
-    def replace_wrong_char(text: str, correct_dict: Dict[str, str] = None) -> str:
+    def replace_wrong_char(text: str, correct_dict: Optional[Dict[str, str]] = None) -> str:
         """替换错误字符"""
         if not text:
             return ""
@@ -270,6 +270,10 @@ class TextProcessor:
         # 默认的字符替换字典
         default_correct_dict = {
             '"': '"',
+            "“": '"',
+            "”": '"',
+            "‘": "'",
+            "’": "'",
             "…": "...",
             "—": "-",
             "–": "-",
@@ -506,7 +510,7 @@ class FileParser:
         max_length: int = 500000,
         timeout: int = 60,
         enable_text_cleaning: bool = True,
-        correct_dict: Dict[str, str] = None,
+        correct_dict: Optional[Dict[str, str]] = None,
         is_remove_wrap: bool = False,
     ) -> Dict[str, Any]:
         """从本地文件或网络文件提取文本内容

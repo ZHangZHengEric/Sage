@@ -1,24 +1,20 @@
 # 该模块可以接受拼接的智能体的流程，按照流程运行执行体。
 
 import traceback
-import uuid
-from typing import Any, Dict, Generator, List, Optional, Union
-
+from typing import List, AsyncGenerator
 from sagents.agent.agent_base import AgentBase
-from sagents.context.messages.message import MessageChunk
-from sagents.context.session_context import (
-    SessionContext,
-    SessionStatus,
-    delete_session_context,
-    init_session_context,
-)
+from sagents.context.session_context import SessionContext, delete_session_context, init_session_context
 from sagents.tool.tool_manager import ToolManager
+from sagents.context.messages.message import MessageChunk
+from sagents.context.session_context import SessionStatus
 from sagents.tool.tool_proxy import ToolProxy
+import uuid
+from typing import Dict, Any, Optional, Union
 from sagents.utils.logger import logger
 
 
 class AgentFlow:
-    def __init__(self, agent_list: List[AgentBase], workspace: str, memory_root: str = None) -> None:
+    def __init__(self, agent_list: List[AgentBase], workspace: str, memory_root: Optional[str] = None) -> None:
         self.agent_list = agent_list
         self.workspace = workspace
         self.memory_root = memory_root  # 如果为None则不使用本地记忆工具
@@ -29,7 +25,7 @@ class AgentFlow:
                          session_id: Optional[str] = None,
                          user_id: Optional[str] = None,
                          system_context: Optional[Dict[str, Any]] = None,
-                         available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List[MessageChunk], None, None]:
+                         available_workflows: Optional[Dict[str, Any]] = {}) -> AsyncGenerator[List[MessageChunk], None]:
         """
         运行智能体流程，返回消息流
         Args:

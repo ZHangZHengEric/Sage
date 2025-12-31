@@ -6,20 +6,19 @@ Execute Command Tool
 具备完善的安全机制和错误处理。
 """
 
-import hashlib
-import json
 import os
+import subprocess
+import tempfile
+import time
 import platform
 import shutil
-import subprocess
-import time
+import json
+import hashlib
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
-
-from sagents.utils.logger import logger
+from typing import Dict, List, Any, Optional, Tuple
 
 from .tool_base import ToolBase
-
+from sagents.utils.logger import logger
 
 class SecurityManager:
     """安全管理器 - 负责命令安全检查"""
@@ -128,7 +127,30 @@ class ExecuteCommandTool(ToolBase):
         self.process_manager = ProcessManager()
         super().__init__()
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "在指定目录执行Shell命令，含安全检查与超时控制",
+            "en": "Execute a shell command with safety checks and timeout",
+            "pt": "Executar comando shell com verificações de segurança e timeout"
+        },
+        param_description_i18n={
+            "command": {"zh": "待执行的Shell命令字符串", "en": "Shell command to execute", "pt": "Comando shell a executar"},
+            "workdir": {"zh": "执行目录，默认当前目录", "en": "Working directory, defaults to current", "pt": "Diretório de trabalho, padrão atual"},
+            "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
+            "env_vars": {"zh": "附加环境变量字典", "en": "Additional environment variables dict", "pt": "Dicionário de variáveis de ambiente adicionais"}
+        },
+        return_data={
+            "type": "object",
+            "properties": {
+                "success": {"type": "boolean"},
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "return_code": {"type": "integer"},
+                "execution_time": {"type": "number"}
+            },
+            "required": ["success"]
+        }
+    )
     def execute_shell_command(self, command: str, workdir: Optional[str] = None, 
                              timeout: int = 30, env_vars: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """在指定目录执行Shell命令，后台执行请通过command 进行设置
@@ -265,10 +287,12 @@ class ExecuteCommandTool(ToolBase):
             
             error_time = time.time() - start_time
             logger.error(f"💥 命令执行异常 [{process_id}] - 错误: {str(e)}, 耗时: {error_time:.2f}秒")
+            logger.error(traceback.format_exc())
             
             return {
                 "success": False,
                 "error": str(e),
+                "error_traceback": traceback.format_exc(),
                 "command": command,
                 "execution_time": error_time,
                 "process_id": process_id
@@ -277,48 +301,40 @@ class ExecuteCommandTool(ToolBase):
             # 清理已完成的进程
             self.process_manager.cleanup_finished_processes()
 
-    @ToolBase.tool()
-    def execute_python_code(self, code: str, code_save_path: str, 
-                           timeout: int = 30, requirement_list: Optional[List[str]] = None,
-                           ) -> Dict[str, Any]:
-        """在临时执行Python代码，会话在执行完后会删除，代码会保存到指定路径
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "在临时文件中运行Python代码，可选依赖安装",
+            "en": "Run Python code in a temp file, optionally install deps",
+            "pt": "Execute código Python em arquivo temporário, opcionalmente instale dependências"
+        },
+        param_description_i18n={
+            "code": {"zh": "Python代码文本", "en": "Python code text", "pt": "Texto de código Python"},
+            "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
+            "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
+            "requirement_list": {"zh": "需要安装的包名称列表", "en": "List of packages to install", "pt": "Lista de pacotes para instalar"}
+        }
+    )
+    def execute_python_code(self, code: str, workdir: Optional[str] = None, 
+                           timeout: int = 30, requirement_list: Optional[List[str]] = None) -> Dict[str, Any]:
+        """在临时执行Python代码，会话在执行完后会删除，不具有持久性
 
         Args:
             code (str): 要执行的Python代码
-            code_save_path (str): 代码保存路径，必填项，不能为空字符串
+            workdir (str): 代码执行的工作目录（可选）
             timeout (int): 超时时间，默认30秒
             requirement_list (list): 需要安装的Python包列表（可选）
-
-        Returns:
-            Dict[str, Any]: 包含执行结果的字典
         """
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
         logger.info(f"🐍 execute_python_code开始执行 [{process_id}] - 代码长度: {len(code)} 字符")
+        logger.info(f"📁 工作目录: {workdir or '临时目录'}, 超时: {timeout}秒")
         
-        if not code_save_path:
-            return {
-                "success": False,
-                "error": "code_save_path 为必填项，且不能为空字符串",
-                "process_id": process_id,
-            }
-        logger.info(f"📝 代码保存路径: {code_save_path}")
-        
-        code_file_path = None
+        temp_file = None
         try:
-            target_path = code_save_path
-            if not os.path.isabs(target_path):
-                return {
-                    "success": False,
-                    "error": "code_save_path 必须是绝对路径",
-                    "process_id": process_id,
-                }
-            exec_workdir = os.path.dirname(target_path)
-            os.makedirs(exec_workdir, exist_ok=True)
-            with open(target_path, 'w', encoding='utf-8') as f:
+            # 创建临时Python文件
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(code)
-            code_file_path = target_path
-            logger.info(f"📁 工作目录: {exec_workdir}, 超时: {timeout}秒")
+                temp_file = f.name
             
             # 参数类型校验与依赖处理
             python_path = shutil.which("python") or shutil.which("python3")
@@ -362,7 +378,7 @@ class ExecuteCommandTool(ToolBase):
                         install_cmd = f"{python_path} -m pip install {package}"
                         install_result = self.execute_shell_command(
                             install_cmd,
-                            workdir=exec_workdir,
+                            workdir=workdir,
                             timeout=120
                         )
                         if install_result.get("success"):
@@ -379,10 +395,10 @@ class ExecuteCommandTool(ToolBase):
             exec_start_time = time.time()
             logger.info(f"🚀 开始执行Python代码 [{process_id}]")
             
-            python_cmd = f"{python_path} {code_file_path}"
+            python_cmd = f"{python_path} {temp_file}"
             result = self.execute_shell_command(
                 python_cmd,
-                workdir=exec_workdir,
+                workdir=workdir,
                 timeout=timeout
             )
             
@@ -396,15 +412,13 @@ class ExecuteCommandTool(ToolBase):
             
             # 添加额外信息（注意：成功执行时不返回安装失败信息）
             result.update({
-                # "code_file_path": code_file_path,
+                # "temp_file": temp_file,
                 "requirements": parsed_requirements or requirement_list,
                 "already_available": already_available if requirement_list else None,
                 "installed": newly_installed if requirement_list else None,
                 # 不在此处加入 install_failed，改为在失败时按需加入
                 "total_execution_time": total_time,
                 # "process_id": process_id
-                "code_file_path": code_file_path,
-                "code_persisted": True,
             })
             # 如果执行失败，尽可能提供详细的错误trace
             if not result.get("success"):
@@ -427,6 +441,7 @@ class ExecuteCommandTool(ToolBase):
         except Exception as e:
             error_time = time.time() - start_time
             logger.error(f"💥 Python代码执行异常 [{process_id}] - 错误: {str(e)}")
+            logger.error(traceback.format_exc())
             
             return {
                 "success": False,
@@ -437,9 +452,34 @@ class ExecuteCommandTool(ToolBase):
                 "process_id": process_id
             }
         finally:
-            pass
+            # 清理临时文件
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                    logger.debug(f"🗑️ 临时文件已删除: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 删除临时文件失败: {str(e)}")
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "检查系统命令是否可用及其路径",
+            "en": "Check whether system commands are available and their paths",
+            "pt": "Verificar se comandos do sistema estão disponíveis e seus caminhos"
+        },
+        param_description_i18n={
+            "commands": {"zh": "待检查的命令名列表", "en": "List of command names to check", "pt": "Lista de nomes de comando para verificar"}
+        },
+        return_data={
+            "type": "object",
+            "properties": {
+                "available": {"type": "boolean"},
+                "path": {"type": "string"},
+                "version": {"type": "string"},
+                "error": {"type": "string"}
+            },
+            "required": ["available"]
+        }
+    )
     def check_command_availability(self, commands: List[str]) -> Dict[str, Any]:
         """检查系统中命令的可用性
 
@@ -526,6 +566,7 @@ class ExecuteCommandTool(ToolBase):
         except Exception as e:
             error_time = time.time() - start_time
             logger.error(f"💥 命令可用性检查异常 [{check_id}] - 错误: {str(e)}")
+            logger.error(traceback.format_exc())
             
             return {
                 "success": False,

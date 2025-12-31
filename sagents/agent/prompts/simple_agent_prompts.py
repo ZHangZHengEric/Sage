@@ -3,7 +3,7 @@
 """
 SimpleAgent指令定义
 
-包含SimpleAgent使用的指令内容，支持中英文
+包含SimpleAgent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -20,7 +20,12 @@ agent_custom_system_prefix = {
 1. After calling tools, you must describe the tool call results in natural language oriented to user needs, do not end the task directly.
 2. If you need to call tools, explain why you need to call the tool before calling it, but do not reveal the real tool name or ID information, instead use simple language to describe the tool's functionality.
 3. Carefully check the tool list to ensure tool names are correct and parameters are correct, do not call non-existent tools.
-4. Prohibit outputting explicit expressions like "I will end this session", instead ask follow-up questions or requirements based on the conversation. If there are no follow-up questions or requirements, do not output any other additional content."""
+4. Prohibit outputting explicit expressions like "I will end this session", instead ask follow-up questions or requirements based on the conversation. If there are no follow-up questions or requirements, do not output any other additional content.""",
+    "pt": """# Outros Requisitos Básicos de Execução:
+1. Após chamar ferramentas, você deve descrever os resultados da chamada da ferramenta em linguagem natural orientada às necessidades do usuário, não termine a tarefa diretamente.
+2. Se você precisar chamar ferramentas, explique por que precisa chamar a ferramenta antes de chamá-la, mas não revele o nome real da ferramenta ou informações de ID, em vez disso, use linguagem simples para descrever a funcionalidade da ferramenta.
+3. Verifique cuidadosamente a lista de ferramentas para garantir que os nomes das ferramentas estejam corretos e os parâmetros estejam corretos, não chame ferramentas inexistentes.
+4. Proíba expressões explícitas como "Vou encerrar esta sessão", em vez disso, faça perguntas de acompanhamento ou requisitos com base na conversa. Se não houver perguntas ou requisitos de acompanhamento, não produza nenhum outro conteúdo adicional."""
 }
 
 # 工具建议模板
@@ -72,7 +77,31 @@ Output Format:
 Notes:
 1. Tool names must be from the available tools list.
 2. Return all possible tool names that might be used. Do not return tools that are unlikely to be used.
-3. Return at most 7 possible tools."""
+3. Return at most 7 possible tools.""",
+    "pt": """Você é um especialista em recomendação de ferramentas. Sua tarefa é recomendar ferramentas adequadas para os usuários com base em suas necessidades.
+Você precisa identificar todas as ferramentas possíveis que podem ser usadas para resolver a solicitação do usuário com base no histórico de conversas, solicitação do usuário e configuração do agente.
+
+## Requisitos de Configuração do Agente
+{agent_config}
+
+## Ferramentas Disponíveis
+{available_tools_str}
+
+## Histórico de Conversas do Usuário e Nova Solicitação
+{messages}
+
+Formato de Saída:
+```json
+[
+    "nome_ferramenta1",
+    "nome_ferramenta2",
+    ...
+]
+```
+Notas:
+1. Os nomes das ferramentas devem ser da lista de ferramentas disponíveis.
+2. Retorne todos os nomes de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
+3. Retorne no máximo 7 ferramentas possíveis."""
 }
 
 # 任务完成判断模板
@@ -144,5 +173,39 @@ or
     "task_interrupted": false
 }}
 ```
-reason should be as simple as possible, maximum 20 characters"""
+reason should be as simple as possible, maximum 20 characters""",
+    "pt": """Você precisa determinar se deve interromper a execução da tarefa com base no histórico de conversas e na solicitação do usuário.
+
+## Regras para Interromper a Execução da Tarefa
+1. Interromper a execução da tarefa:
+  - Quando você acredita que as respostas existentes na conversa já satisfizeram a solicitação do usuário e não são necessárias mais respostas ou ações.
+  - Quando você acredita que ocorreu uma exceção durante a conversa e após duas tentativas, a tarefa ainda não pode continuar.
+  - Quando a confirmação ou entrada do usuário é necessária durante a conversa.
+
+2. Continuar a execução da tarefa:
+  - Quando você acredita que as respostas existentes na conversa ainda não satisfizeram a solicitação do usuário, ou quando as perguntas ou solicitações do usuário precisam continuar sendo executadas.
+  - Quando as chamadas de ferramentas são concluídas, mas os resultados não foram descritos em texto, continue a execução da tarefa porque os usuários não podem ver os resultados da execução da ferramenta.
+  - Quando o Assistente AI expressa na conversa que continuará fazendo outras coisas ou continuará analisando outros conteúdos, como expressões como (aguardando chamada de ferramenta, aguarde, aguardando geração, próximo, vou chamar), então continue a execução da tarefa.
+
+## Lógica de Consistência do Conteúdo de Saída
+1. Se o motivo for "aguardando chamada de ferramenta", então task_interrupted é false
+
+## Histórico de Conversas do Usuário e Processo de Execução da Solicitação
+{messages}
+
+Formato de Saída:
+```json
+{{
+    "reason": "Tarefa concluída",
+    "task_interrupted": true
+}}
+```
+ou
+```json
+{{
+    "reason": "Aguardando chamada de ferramenta",
+    "task_interrupted": false
+}}
+```
+O motivo deve ser o mais simples possível, no máximo 20 caracteres"""
 }

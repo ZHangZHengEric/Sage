@@ -10,22 +10,19 @@ Author: Eric ZZ
 Date: 2024-12-21
 """
 
-import json
-import re
 import traceback
-import uuid
-from typing import Any, Dict, Generator, List, Optional
-
-from openai import AsyncOpenAI
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_context import SessionContext
-from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
-from sagents.utils.prompt_manager import PromptManager
-
 from .agent_base import AgentBase
+from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
+from sagents.utils.logger import logger
+from sagents.tool.tool_manager import ToolManager
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.session_context import SessionContext
+from sagents.utils.prompt_manager import PromptManager
+import json
+import uuid
+import re
+from openai import AsyncOpenAI
 
 
 class MemoryExtractionAgent(AgentBase):
@@ -37,13 +34,13 @@ class MemoryExtractionAgent(AgentBase):
     3. 提供智能化的记忆管理建议
     """
 
-    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = ..., system_prefix: str = "", max_model_len: int = 64000):
-        super().__init__(model, model_config, system_prefix, max_model_len)
+    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = ""):
+        super().__init__(model, model_config, system_prefix)
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('memory_extraction_system_prefix')
         self.agent_name = "MemoryExtractionAgent"
         self.agent_description = "专门负责记忆提取和冲突处理的智能Agent"
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('memory_extraction_system_prefix', language=session_context.get_language())
 
@@ -51,12 +48,13 @@ class MemoryExtractionAgent(AgentBase):
         memory_manager = session_context.user_memory_manager
 
         # 获取最近的对话历史
-        recent_messages = message_manager.extract_all_context_messages(recent_turns=5, max_length=self.max_history_context_length)
+        recent_messages = message_manager.extract_all_context_messages(recent_turns=5)
 
         # 提取记忆
-        extracted_memories = await self.extract_memories_from_conversation(recent_messages, session_id, session_context)
+        recent_messages_str = MessageManager.convert_messages_to_str(recent_messages)
+        extracted_memories = await self.extract_memories_from_conversation(recent_messages_str, session_id, session_context)
 
-        if extracted_memories:
+        if extracted_memories and memory_manager:
             # 去重处理
             deduplicated_memories = self.deduplicate_memories(extracted_memories, memory_manager, session_context)
 
@@ -79,30 +77,38 @@ class MemoryExtractionAgent(AgentBase):
             )]
         # 现获取执行的提问和执行的历史
         message_manager = session_context.message_manager
-        conversation_messages = message_manager.extract_all_context_messages(recent_turns=1, max_length=self.max_history_context_length, last_turn_user_only=False)
+        conversation_messages = message_manager.extract_all_context_messages(recent_turns=1, last_turn_user_only=False)
 
         logger.debug(f"MemoryExtractionAgent: 从对话中提取记忆，对话历史: {conversation_messages}")
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         # 先提取对话中的记忆
         extracted_memories = await self.extract_memories_from_conversation(recent_message_str, session_id, session_context)
         # 将提取的记忆通过 session_context.user_memory_manager 存储起来
-        for memory in extracted_memories:
-            await session_context.user_memory_manager.remember(
-                memory_key=memory['key'],
-                content=memory['content'],
-                memory_type=memory['type'],
-                tags=memory.get('tags', []),
-                session_id=session_id
-            )
+        if session_context and session_context.user_memory_manager:
+            memory_manager = session_context.user_memory_manager
+            # 去重处理
+            deduplicated_memories = self.deduplicate_memories(extracted_memories, memory_manager, session_context)
+
+            for memory in deduplicated_memories:
+                await memory_manager.remember(
+                    memory_key=memory['key'],
+                    content=memory['content'],
+                    memory_type=memory['type'],
+                    tags=memory.get('tags', []),
+                    session_id=session_id
+                )
 
         # 在现有的记忆中，判断是否要删除重复的旧的记忆
-        existing_memories = session_context.user_memory_manager.get_system_memories(session_id)
+        if session_context.user_memory_manager:
+            existing_memories = session_context.user_memory_manager.get_system_memories(session_id)
 
-        # 调用模型判断是否要删除重复的旧记忆
-        duplicate_keys = await self._check_and_delete_duplicate_memories(existing_memories, session_id, session_context)
-        # 删除重复的旧记忆
-        for key in duplicate_keys:
-            await session_context.user_memory_manager.forget(memory_key=key, session_id=session_id)
+            # 调用模型判断是否要删除重复的旧记忆
+            duplicate_keys = await self._check_and_delete_duplicate_memories(existing_memories, session_id or "", session_context)
+            # 删除重复的旧记忆
+            for key in duplicate_keys:
+                await session_context.user_memory_manager.forget(memory_key=key, session_id=session_id)
+        else:
+            duplicate_keys = []
 
         # 记录执行结果到日志
         logger.info(f"MemoryExtractionAgent: 提取了 {len(extracted_memories)} 个记忆，删除了 {len(duplicate_keys)} 个重复记忆")
@@ -121,11 +127,11 @@ class MemoryExtractionAgent(AgentBase):
     async def _check_and_delete_duplicate_memories(self, existing_memories: List[Dict], session_id: str, session_context: SessionContext):
         """检查并删除重复的旧记忆"""
         if not existing_memories:
-            return
+            return []
         try:
 
             llm_request_message = [
-                self.prepare_unified_system_message(session_id=session_id),
+                self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
                 MessageChunk(
                     role=MessageRole.USER.value,
                     content=PromptManager().get_agent_prompt_auto('memory_deduplication_template', language=session_context.get_language()).format(existing_memories=existing_memories),
@@ -136,7 +142,7 @@ class MemoryExtractionAgent(AgentBase):
             ]
             all_response_chunks_content = ''
             async for llm_repsonse_chunk in self._call_llm_streaming(
-                messages=llm_request_message,
+                messages=cast(List[Union[MessageChunk, Dict[str, Any]]], llm_request_message),
                 session_id=session_id,
                 step_name="memory_duplicate_check"
             ):
@@ -158,7 +164,7 @@ class MemoryExtractionAgent(AgentBase):
             logger.error(f"MemoryExtractionAgent: 检查重复记忆失败: {traceback.format_exc()}")
             return []
 
-    async def extract_memories_from_conversation(self, recent_message_str: str, session_id: Optional[str] = None, session_context: SessionContext = None) -> List[Dict]:
+    async def extract_memories_from_conversation(self, recent_message_str: str, session_id: Optional[str] = None, session_context: Optional[SessionContext] = None) -> List[Dict]:
         """从对话历史中提取潜在的系统级记忆
 
         Args:
@@ -174,11 +180,12 @@ class MemoryExtractionAgent(AgentBase):
             return []
         try:
             # 构建记忆提取的prompt
-            extraction_prompt = PromptManager().get_agent_prompt_auto('memory_extraction_template', language=session_context.get_language()).format(
+            lang = session_context.get_language() if session_context else "zh"
+            extraction_prompt = PromptManager().get_agent_prompt_auto('memory_extraction_template', language=lang).format(
                 formatted_conversation=recent_message_str,
-                system_context=self.prepare_unified_system_message(session_id=session_id).content)
+                system_context=self.prepare_unified_system_message(session_id=session_id, language=lang).content)
 
-            llm_request_message = [
+            llm_request_message: List[Union[MessageChunk, Dict[str, Any]]] = [
                 # self.prepare_unified_system_message(session_id=session_id),
                 MessageChunk(
                     role=MessageRole.USER.value,
@@ -192,8 +199,9 @@ class MemoryExtractionAgent(AgentBase):
             all_extraction_chunks_content = ''
             async for llm_repsonse_chunk in self._call_llm_streaming(
                 messages=llm_request_message,
-                session_id=session_id,
-                step_name="memory_extraction"
+                session_id=session_id or "",
+                step_name="memory_extraction",
+                model_config_override={"response_format": {"type": "json_object"}}
             ):
                 if len(llm_repsonse_chunk.choices) == 0:
                     continue

@@ -7,17 +7,15 @@ Author: Eric ZZ
 Date: 2024-12-21
 """
 
-import json
 import os
+import json
 import re
 import traceback
-from datetime import datetime
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
-from typing import Any, Dict, List
-
-from sagents.utils.logger import logger
-
+from datetime import datetime
 from .tool_base import ToolBase
+from sagents.utils.logger import logger
 
 try:
     from rank_bm25 import BM25Okapi
@@ -88,8 +86,8 @@ class MemoryTool(ToolBase):
         super().__init__()
         logger.info("MemoryTool initialized, will get memory_root dynamically from environment")
 
-    def _validate_memory_data(self, memory_key: str = None, content: str = None,
-                              tags: List[str] = None, memories: Dict[str, Any] = None) -> tuple[bool, str]:
+    def _validate_memory_data(self, memory_key: Optional[str] = None, content: Optional[str] = None,
+                              tags: Optional[List[str]] = None, memories: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """统一的记忆数据校验函数
 
         Args:
@@ -161,7 +159,7 @@ class MemoryTool(ToolBase):
         except Exception as e:
             return False, f"校验过程中发生错误: {str(e)}"
 
-    def _format_response(self, success: bool, message: str, memories: List[Dict] = None, error: str = None) -> str:
+    def _format_response(self, success: bool, message: str, memories: Optional[List[Dict]] = None, error: Optional[str] = None) -> str:
         """格式化标准返回结果
 
         Args:
@@ -496,7 +494,20 @@ class MemoryTool(ToolBase):
         matches.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         return matches[:limit]
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "记录用户记忆条目",
+            "en": "Record a user memory entry",
+            "pt": "Registra uma memória do usuário"
+        },
+        param_description_i18n={
+            "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
+            "memory_key": {"zh": "记忆键（唯一标识）", "en": "Memory key (unique)", "pt": "Chave da memória (única)"},
+            "content": {"zh": "记忆内容", "en": "Memory content", "pt": "Conteúdo da memória"},
+            "memory_type": {"zh": "记忆类型", "en": "Memory type", "pt": "Tipo de memória"},
+            "tags": {"zh": "标签（逗号分隔或列表）", "en": "Tags (comma-separated or list)", "pt": "Tags (separadas por vírgula ou lista)"}
+        }
+    )
     def remember_user_memory(self, user_id: str, memory_key: str, content: str, memory_type: str = "experience", tags: str = "") -> str:
         """记录用户的记忆，包括不限于用户偏好、个人信息、特殊要求、重要上下文等，memory_key和content 均使用用户的语言种类，便于后续检索。
         memory_key 和 content 中的描述尽可能使用绝对值，例如时间"明天"，要转换成绝对日期。
@@ -579,7 +590,19 @@ class MemoryTool(ToolBase):
             logger.error(f"记录记忆失败 {user_id}: {e}")
             return self._format_response(False, "记录记忆失败", error=str(e))
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "按类型检索用户记忆",
+            "en": "Recall user memories by type",
+            "pt": "Recupera memórias por tipo"
+        },
+        param_description_i18n={
+            "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
+            "memory_type": {"zh": "记忆类型", "en": "Memory type", "pt": "Tipo de memória"},
+            "query": {"zh": "查询内容（可选）", "en": "Query text (optional)", "pt": "Consulta (opcional)"},
+            "limit": {"zh": "返回数量限制", "en": "Result limit", "pt": "Limite de resultados"}
+        }
+    )
     def recall_user_memory_by_type(self, user_id: str, memory_type: str, query: str = "", limit: int = 5) -> str:
         """按记忆类型检索用户的记忆
 
@@ -678,7 +701,18 @@ class MemoryTool(ToolBase):
             logger.error(f"按类型搜索记忆失败 {user_id}: {e}")
             return self._format_response(False, "搜索记忆失败", error=str(e))
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "根据关键词搜索用户记忆",
+            "en": "Search user memories by keywords",
+            "pt": "Pesquisa memórias por palavras-chave"
+        },
+        param_description_i18n={
+            "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
+            "query": {"zh": "查询内容（关键词）", "en": "Query keywords", "pt": "Palavras-chave de consulta"},
+            "limit": {"zh": "返回数量限制", "en": "Result limit", "pt": "Limite de resultados"}
+        }
+    )
     def recall_user_memory(self, user_id: str, query: str, limit: int = 5) -> str:
         """根据查询内容检索用户的记忆，返回与查询内容相关的记忆列表
 
@@ -749,7 +783,17 @@ class MemoryTool(ToolBase):
             logger.error(f"搜索记忆失败 {user_id}: {e}")
             return self._format_response(False, "搜索记忆失败", error=str(e))
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "删除指定的用户记忆",
+            "en": "Delete a specific user memory",
+            "pt": "Exclui uma memória específica"
+        },
+        param_description_i18n={
+            "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
+            "memory_key": {"zh": "要删除的记忆键", "en": "Memory key to delete", "pt": "Chave da memória a excluir"}
+        }
+    )
     def forget_user_memory(self, user_id: str, memory_key: str) -> str:
         """删除用户的指定的记忆
 

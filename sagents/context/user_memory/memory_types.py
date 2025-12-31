@@ -7,10 +7,10 @@ Date: 2024-12-21
 """
 
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
 
 
 class MemoryType(Enum):
@@ -50,10 +50,10 @@ class MemoryEntry:
     key: str                        # 记忆标识（唯一键）
     content: str                    # 记忆内容（统一使用字符串存储）
     memory_type: MemoryType         # 记忆类型
-    created_at: datetime = None     # 创建时间
-    updated_at: datetime = None     # 更新时间
+    created_at: Optional[datetime] = None     # 创建时间
+    updated_at: Optional[datetime] = None     # 更新时间
     importance: float = 0.5         # 重要性评分 (0-1)
-    tags: List[str] = None          # 标签列表
+    tags: Optional[List[str]] = None          # 标签列表
     access_count: int = 0           # 访问次数
     version: int = 1                # 版本号（用于追踪更新历史）
     
@@ -67,14 +67,18 @@ class MemoryEntry:
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
+        # 确保可选字段不为None (由__post_init__保证，但mypy不知道)
+        created_at_str = self.created_at.isoformat() if self.created_at else datetime.now().isoformat()
+        updated_at_str = self.updated_at.isoformat() if self.updated_at else datetime.now().isoformat()
+        
         return {
             'key': self.key,
             'content': self.content,
             'memory_type': self.memory_type.value,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
+            'created_at': created_at_str,
+            'updated_at': updated_at_str,
             'importance': self.importance,
-            'tags': self.tags,
+            'tags': self.tags if self.tags is not None else [],
             'access_count': self.access_count,
             'version': self.version
         }
@@ -148,9 +152,10 @@ class MemoryEntry:
             return True
         
         # 在标签中搜索
-        for tag in self.tags:
-            if query_lower in tag.lower():
-                return True
+        if self.tags:
+            for tag in self.tags:
+                if query_lower in tag.lower():
+                    return True
         
         # 在key中搜索
         if query_lower in self.key.lower():

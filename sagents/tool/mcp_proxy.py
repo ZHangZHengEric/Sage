@@ -1,18 +1,12 @@
-from typing import Any, List, Union, cast
-
+from typing import Any, List, Union, Optional
 import httpx
-from mcp import ClientSession, Tool
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamablehttp_client
-from mcp.types import TextContent
 
-from .tool_config import (
-    McpToolSpec,
-    SseServerParameters,
-    StdioServerParameters,
-    StreamableHttpServerParameters,
-)
+from mcp.client.stdio import stdio_client
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
+from mcp import ClientSession, Tool
+
+from .tool_config import McpToolSpec, SseServerParameters, StreamableHttpServerParameters, StdioServerParameters
 
 
 # 专用异常类型，用于更精确地区分失败原因
@@ -28,50 +22,9 @@ class McpToolsRetrievalError(Exception):
     """MCP 工具列表获取失败（调用 session.list_tools() 时失败）"""
 
 
-def _innermost_exception(exc: BaseException) -> BaseException:
-    seen = set()
-    cur: BaseException = exc
-    while True:
-        cur_id = id(cur)
-        if cur_id in seen:
-            return cur
-        seen.add(cur_id)
-
-        if isinstance(cur, BaseExceptionGroup):
-            exceptions = getattr(cur, "exceptions", None)
-            if exceptions:
-                cur = exceptions[0]
-                continue
-
-        cause = getattr(cur, "__cause__", None)
-        if cause is not None:
-            cur = cause
-            continue
-
-        context = getattr(cur, "__context__", None)
-        if context is not None:
-            cur = context
-            continue
-
-        return cur
-
-
-def _innermost_exception_message(exc: BaseException) -> str:
-    inner = _innermost_exception(exc)
-    msg = str(inner).strip()
-    return msg if msg else repr(inner)
-
-
-def _raise_innermost_exception(exc: BaseException) -> None:
-    inner = _innermost_exception(exc)
-    if isinstance(inner, Exception):
-        raise inner from None
-    raise Exception(_innermost_exception_message(inner)) from None
-
-
 class McpProxy:
 
-    async def run_mcp_tool(self, tool: McpToolSpec, session_id: str = None, **kwargs) -> Any:
+    async def run_mcp_tool(self, tool: McpToolSpec, session_id: Optional[str] = None, **kwargs) -> Any:
         """Run an MCP tool asynchronously"""
         if not session_id:
             session_id = "default"
@@ -84,8 +37,8 @@ class McpProxy:
                 return await self._execute_stdio_mcp_tool(tool, **kwargs)
             else:
                 raise ValueError(f"Unknown server params type: {type(tool.server_params)}")
-        except Exception:
-            raise
+        except Exception as e:
+            raise e
 
     async def get_mcp_tools(self, server_name: str, server_params: Union[SseServerParameters, StreamableHttpServerParameters, StdioServerParameters]) -> List[Tool]:
         """Get MCP tools"""
@@ -98,62 +51,53 @@ class McpProxy:
                 return await self._get_mcp_tools_stdio(server_name, server_params)
             else:
                 raise ValueError(f"Unknown server params type: {type(server_params)}")
-        except Exception:
-            raise
+        except Exception as e:
+            raise e
 
     async def _execute_streamable_http_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
         """Execute streamable HTTP MCP tool"""
+        if not isinstance(tool.server_params, StreamableHttpServerParameters):
+            raise ValueError(f"Invalid server params type for streamable http tool: {type(tool.server_params)}")
+
         headers = None
         if tool.server_params.api_key:
             headers = {
                 "Authorization": f"Bearer {tool.server_params.api_key}",
                 "Content-Type": "application/json"
             }
-        try:
-            async with streamablehttp_client(tool.server_params.url, headers=headers) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(tool.name, kwargs)
-                    if result.isError:
-                        err = cast(TextContent, result.content[0])
-                        raise Exception(err.text)
-                    return result.model_dump()
-        except BaseExceptionGroup as eg:
-            _raise_innermost_exception(eg)
+        async with streamablehttp_client(tool.server_params.url, headers=headers) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
+                return result.model_dump()
 
     async def _execute_sse_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
         """Execute SSE MCP tool"""
+        if not isinstance(tool.server_params, SseServerParameters):
+            raise ValueError(f"Invalid server params type for sse tool: {type(tool.server_params)}")
+
         headers = None
         if tool.server_params.api_key:
             headers = {
                 "Authorization": f"Bearer {tool.server_params.api_key}",
                 "Content-Type": "application/json"
             }
-        try:
-            async with sse_client(tool.server_params.url, headers=headers) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(tool.name, kwargs)
-                    if result.isError:
-                        err = cast(TextContent, result.content[0])
-                        raise Exception(err.text)
-                    return result.model_dump()
-        except BaseExceptionGroup as eg:
-            _raise_innermost_exception(eg)
+        async with sse_client(tool.server_params.url, headers=headers) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
+                return result.model_dump()
 
     async def _execute_stdio_mcp_tool(self, tool: McpToolSpec, **kwargs) -> Any:
         """Execute stdio MCP tool"""
-        try:
-            async with stdio_client(tool.server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(tool.name, kwargs)
-                    if result.isError:
-                        err = cast(TextContent, result.content[0])
-                        raise Exception(err.text)
-                    return result.model_dump()
-        except BaseExceptionGroup as eg:
-            _raise_innermost_exception(eg)
+        if not isinstance(tool.server_params, StdioServerParameters):
+            raise ValueError(f"Invalid server params type for stdio tool: {type(tool.server_params)}")
+
+        async with stdio_client(tool.server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool.name, kwargs)
+                return result.model_dump()
 
     async def _get_mcp_tools_streamable_http(self, server_name: str, server_params: StreamableHttpServerParameters) -> List[Tool]:
         """Register tools from streamable HTTP MCP server"""
@@ -233,8 +177,9 @@ class McpProxy:
                     response = await session.list_tools()
                     tools = response.tools
                     return tools
-        except Exception:
-            raise
+        except Exception as e:
+            """ 抛出异常"""
+            raise e
 
     async def _get_mcp_tools_stdio(self, server_name: str, server_params: StdioServerParameters) -> List[Tool]:
         """Register tools from stdio MCP server"""
@@ -245,5 +190,6 @@ class McpProxy:
                     response = await session.list_tools()
                     tools = response.tools
                     return tools
-        except Exception:
-            raise
+        except Exception as e:
+            """ 抛出异常"""
+            raise e

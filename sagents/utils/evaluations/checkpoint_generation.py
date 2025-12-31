@@ -1,8 +1,8 @@
 import json
+from typing import List, Dict, Any
 
-from ..logger import logger
 from .base_agent_processor import BaseAgentProcessor
-
+from ..logger import logger
 
 class CheckpointGenerationAgent(BaseAgentProcessor):
     def __init__(
@@ -12,17 +12,17 @@ class CheckpointGenerationAgent(BaseAgentProcessor):
     ):
         super().__init__(api_key, base_url)     
 
-    async def task_generation(self, prompt: str, messages: list, model_name: str):
+    async def task_generation(self, prompt: str, messages: List[Dict[str, Any]], model_name: str):
         messages.append({"role": "user", "content": prompt})
         response = await self.call_qianxun(messages, model_name=model_name)
         messages.append({"role": "assistant", "content": response})
         return response
 
-    def system_prompt(self, system: str, messages: list):
+    def system_prompt(self, system: str, messages: List[Dict[str, Any]]):
         messages.append({"role": "system", "content": system})
         
     async def workflow(self, user_messages: list, agent_config: str, tools_description: str, model_name: str):
-        messages = []
+        messages: List[Dict[str, Any]] = []
 
         self.system_prompt(system="""
 你是一个专业的智能 Agent 能力测评专家，负责根据给定的 Agent 配置和可用工具集，为指定的多轮对话场景生成高质量的测试用例与结构化评估方案。

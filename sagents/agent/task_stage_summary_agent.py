@@ -1,29 +1,27 @@
-import datetime
-import json
-import re
 import traceback
-import uuid
-from typing import Any, Dict, Generator, List
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from .agent_base import AgentBase
+from typing import Any, Dict, List, AsyncGenerator, Optional
+from sagents.utils.logger import logger
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
-
-from .agent_base import AgentBase
+import json
+import re
+import uuid
+import datetime
 
 
 class TaskStageSummaryAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
-        super().__init__(model, model_config, system_prefix, max_model_len)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+        super().__init__(model, model_config, system_prefix)
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix")
         self.agent_name = "StageSummaryAgent"
         self.agent_description = "任务执行阶段性总结智能体，专门负责生成任务执行的阶段性总结"
         logger.info("StageSummaryAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取带有正确语言的prompt
         self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
 
@@ -38,17 +36,35 @@ class TaskStageSummaryAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=1, max_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=1)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         # 提取任务管理器状态
-        task_manager_status = task_manager.get_status_description() if task_manager else '无任务管理器'
+        if task_manager:
+            task_manager_status = task_manager.get_status_description(language=session_context.get_language())
+        else:
+            from sagents.utils.prompt_manager import prompt_manager
+            task_manager_status = prompt_manager.get_prompt(
+                'task_manager_none',
+                agent='common',
+                language=session_context.get_language(),
+                default='无任务管理器'
+            )
 
         # 提取未总结但已完成的任务
         unsummary_but_completed_tasks = task_manager.get_unsummary_but_completed_tasks()
         task_info = []
+        task_info_template = PromptManager().get_prompt(
+            'task_info_simple',
+            agent='common',
+            language=session_context.get_language(),
+            default="- 任务ID: {task_id}, 描述: {description}"
+        )
         for task_item in unsummary_but_completed_tasks:
-            info = f"- 任务ID: {task_item.task_id}, 描述: {task_item.description}"
+            info = task_info_template.format(
+                task_id=task_item.task_id,
+                description=task_item.description
+            )
             task_info.append(info)
         tasks_to_summarize = "\n".join(task_info)
 
@@ -57,7 +73,7 @@ class TaskStageSummaryAgent(AgentBase):
         execution_history_messages_str = MessageManager.convert_messages_to_str(execution_history_messages)
 
         # 提取生成的文档
-        generated_documents = self._extract_generated_documents(execution_history_messages)
+        generated_documents = self._extract_generated_documents(execution_history_messages, language=session_context.get_language())
         logger.info(f"执行历史最大的长度:{int((self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(tasks_to_summarize)-MessageManager.calculate_str_token_length(task_manager_status)-MessageManager.calculate_str_token_length(generated_documents) )//2)}")
         execution_history_messages_str = execution_history_messages_str[-(int((self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(tasks_to_summarize)-MessageManager.calculate_str_token_length(task_manager_status)-MessageManager.calculate_str_token_length(generated_documents))//2)):]
 
@@ -71,7 +87,7 @@ class TaskStageSummaryAgent(AgentBase):
         )
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
@@ -96,16 +112,22 @@ class TaskStageSummaryAgent(AgentBase):
 
         logger.info("StageSummaryAgent: 所有任务总结生成完成")
 
+        stage_summary_label = PromptManager().get_prompt(
+            'stage_summary_label',
+            agent='common',
+            language=session_context.get_language(),
+            default="阶段性任务总结："
+        )
         yield [MessageChunk(
             message_id=str(uuid.uuid4()),
             role=MessageRole.ASSISTANT.value,
-            content="阶段性任务总结："+json.dumps(summary_result, ensure_ascii=False),
+            content=stage_summary_label+json.dumps(summary_result, ensure_ascii=False),
             message_type=MessageType.STAGE_SUMMARY.value,
             show_content=""
         )]
 
     def convert_xml_to_json(self, xml_content: str) -> Dict[str, Any]:
-        result = {
+        result: Dict[str, Any] = {
             "task_summaries": []
         }
         try:
@@ -169,12 +191,13 @@ class TaskStageSummaryAgent(AgentBase):
             logger.error(f"StageSummaryAgent: 更新任务执行总结失败: {str(e)}")
             logger.error(f"异常详情: {traceback.format_exc()}")
 
-    def _extract_generated_documents(self, messages: List[MessageChunk]) -> str:
+    def _extract_generated_documents(self, messages: List[MessageChunk], language: str = 'zh') -> str:
         """
         从消息历史中提取file_write工具调用生成的文件路径
 
         Args:
             messages: 消息列表
+            language: 语言设置，'zh'、'en' 或 'pt'，默认为 'zh'
 
         Returns:
             str: 格式化的生成文档信息
@@ -195,14 +218,40 @@ class TaskStageSummaryAgent(AgentBase):
                             })
             # 格式化输出
             if not generated_files:
-                return "本次执行过程中没有生成任何文件文档。"
+                no_docs = PromptManager().get_prompt(
+                    'no_generated_documents',
+                    agent='common',
+                    language=language,
+                    default="本次执行过程中没有生成任何文件文档。"
+                )
+                return no_docs
 
+            file_path_label_text = PromptManager().get_prompt(
+                'file_path_label',
+                agent='common',
+                language=language,
+                default="文件路径:"
+            )
+            
             formatted_docs = []
             for i, file_info in enumerate(generated_files, 1):
-                doc_info = f"{i}. 文件路径: {file_info['path']}"
+                doc_info = f"{i}. {file_path_label_text} {file_info['path']}"
                 formatted_docs.append(doc_info)
-            return f"本次执行过程中生成了 {len(generated_files)} 个文件文档：\n" + "\n".join(formatted_docs)
+            
+            summary_text = PromptManager().get_prompt(
+                'generated_documents_summary',
+                agent='common',
+                language=language,
+                default=f"本次执行过程中生成了 {len(generated_files)} 个文件文档："
+            )
+            return summary_text.format(count=len(generated_files)) + "\n" + "\n".join(formatted_docs)
 
         except Exception as e:
             logger.error(f"StageSummaryAgent: 提取生成文档失败: {str(e)}")
-            return "无法提取生成文档信息。"
+            cannot_extract = PromptManager().get_prompt(
+                'cannot_extract_documents',
+                agent='common',
+                language=language,
+                default="无法提取生成文档信息。"
+            )
+            return cannot_extract

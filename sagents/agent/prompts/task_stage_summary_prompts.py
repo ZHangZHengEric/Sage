@@ -3,7 +3,7 @@
 """
 任务阶段总结Agent指令定义
 
-包含任务阶段总结agent使用的指令内容，支持中英文
+包含任务阶段总结agent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -12,7 +12,8 @@ AGENT_IDENTIFIER = "TaskStageSummaryAgent"
 # 任务阶段总结系统前缀
 task_stage_summary_system_prefix = {
     "zh": "你是一个智能AI助手，专门负责生成任务执行的阶段性总结。你需要客观分析执行情况，总结成果，并为用户提供清晰的进度汇报。",
-    "en": "You are an intelligent AI assistant specialized in generating stage summaries of task execution. You need to objectively analyze execution status, summarize achievements, and provide clear progress reports to users."
+    "en": "You are an intelligent AI assistant specialized in generating stage summaries of task execution. You need to objectively analyze execution status, summarize achievements, and provide clear progress reports to users.",
+    "pt": "Você é um assistente de IA inteligente especializado em gerar resumos de estágio da execução de tarefas. Você precisa analisar objetivamente o status de execução, resumir conquistas e fornecer relatórios de progresso claros aos usuários."
 }
 
 # 任务执行总结生成模板
@@ -133,5 +134,64 @@ Only output JSON in the following format, do not output other content, do not ou
 8. The focus of result_summary is detailed answers to subtasks and key achievements, providing rich basic information for subsequent overall task summary.
 9. **result_summary** must contain only actual data, numbers, ratios, times, and other quantitative information and content from the execution process, not invented data.
 10. result_summary can be a summary of task execution results that are bad or fail, not just a summary, but based on actual data and results from the execution process.
+""",
+    "pt": """# Guia de Geração de Resumo de Execução de Tarefas
+
+## Descrição da Tarefa Geral
+{task_description}
+
+## Lista de Tarefas a Resumir
+{tasks_to_summarize}
+
+## Status do Gerenciador de Tarefas
+{task_manager_status}
+
+## Processo de Execução
+{execution_history}
+
+## Documentos Gerados
+{generated_documents}
+
+## Requisitos de Resumo
+Analise o status de execução de cada tarefa que precisa ser resumida e gere resumos de execução independentes para cada tarefa.
+
+## Formato de Saída
+Produza apenas JSON no formato a seguir, não produza outro conteúdo, não produza ```:
+
+{{
+  "task_summaries": [
+    {{
+      "task_id": "ID da Tarefa",
+      "result_documents": ["Caminho do Documento 1", "Caminho do Documento 2"],
+      "result_summary": "Relatório detalhado de resumo dos resultados de execução da tarefa"
+    }},
+    {{
+      "task_id": "ID da Tarefa",
+      "result_documents": ["Caminho do Documento 1", "Caminho do Documento 2"],
+      "result_summary": "Relatório detalhado de resumo dos resultados de execução da tarefa"
+    }}
+  ]
+}}
+
+## Instruções
+1. task_summaries: Contém uma lista de resumos para todas as tarefas que precisam ser resumidas
+2. Cada resumo de tarefa inclui:
+   - task_id: Deve corresponder exatamente ao task_id na lista de tarefas a resumir
+   - result_documents: Lista de caminhos de documentos reais gerados durante a execução através da ferramenta file_write, extraídos dos documentos gerados para tarefas correspondentes
+   - result_summary: Resultados detalhados de execução da tarefa (não enfatize o processo), exigindo que os resultados principais sejam incluídos, o conteúdo deve ser substancial e bem estruturado, não apenas um resumo, mas incluir resultados de dados detalhados para uso no resumo final.
+3. Requisitos de result_summary:
+   - Conteúdo substancial: Tão detalhado quanto escrever um documento de relatório formal, quanto mais detalhado melhor
+   - Estrutura clara: Use parágrafos e pontos para organizar o conteúdo para fácil leitura e compreensão
+   - Dados específicos: Inclua dados específicos, números, proporções e outras informações quantitativas
+   - Análise aprofundada: Não apenas descreva fatos, mas também forneça análise e insights
+   - Linguagem profissional: Use linguagem profissional e precisa para descrição
+   - Dados precisos: Inclua todas as informações quantitativas relevantes, como dados, números, proporções, tempo, etc., garantindo que correspondam aos fatos no processo de execução, especialmente informações de tempo. Se houver informações ausentes, consulte o tempo registrado pelo sistema, não invente o tempo.
+4. O resumo deve ser objetivo e preciso, destacando conquistas-chave e descobertas importantes
+5. O conteúdo do resumo de cada tarefa deve ser especificamente para essa tarefa, não incluir informações de outras tarefas
+6. task_id deve corresponder exatamente ao task_id na lista de tarefas a resumir
+7. result_documents deve ser caminhos de arquivo reais extraídos dos documentos gerados
+8. O foco de result_summary são respostas detalhadas às subtarefas e conquistas-chave, fornecendo informações básicas ricas para o resumo geral subsequente da tarefa.
+9. **result_summary** deve conter apenas dados reais, números, proporções, tempos e outras informações quantitativas e conteúdo do processo de execução, não dados inventados.
+10. result_summary pode ser um resumo de resultados de execução de tarefas que são ruins ou falham, não apenas um resumo, mas com base em dados e resultados reais do processo de execução.
 """
 }

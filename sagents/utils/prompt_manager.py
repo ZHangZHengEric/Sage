@@ -5,17 +5,15 @@ Prompt管理器 - 统一管理系统中的所有prompt
 """
 
 import inspect
-from pathlib import Path
 from typing import Optional
-
+from pathlib import Path
 from sagents.utils.logger import logger
-
 
 # 自动导入agent prompt模块
 def _auto_import_prompt_modules():
     """自动导入prompts文件夹下的所有prompt模块"""
-    import glob
     import importlib
+    import glob
     
     prompt_modules = {}
     prompts_dir = Path(__file__).parent.parent / "agent" / "prompts"
@@ -42,33 +40,42 @@ def _auto_import_prompt_modules():
                 # 新结构：查找模块中的prompt变量（不以_开头，不是AGENT_IDENTIFIER，且是字典类型）
                 zh_prompts = {}
                 en_prompts = {}
+                pt_prompts = {}
                 
                 for attr_name in dir(module):
                     if (not attr_name.startswith('_') and 
                         attr_name != 'AGENT_IDENTIFIER' and 
                         not attr_name.endswith('_PROMPTS_ZH') and 
-                        not attr_name.endswith('_PROMPTS_EN')):
+                        not attr_name.endswith('_PROMPTS_EN') and
+                        not attr_name.endswith('_PROMPTS_PT')):
                         
                         attr_value = getattr(module, attr_name)
-                        # 检查是否是包含zh和en键的字典
-                        if isinstance(attr_value, dict) and 'zh' in attr_value and 'en' in attr_value:
+                        # 检查是否是包含zh、en和pt键的字典
+                        if isinstance(attr_value, dict) and 'zh' in attr_value and 'en' in attr_value and 'pt' in attr_value:
                             zh_prompts[attr_name] = attr_value['zh']
                             en_prompts[attr_name] = attr_value['en']
+                            pt_prompts[attr_name] = attr_value['pt']
                 
                 # 如果找到了prompt，则存储
-                if zh_prompts or en_prompts:
-                    prompt_modules[f"{agent_identifier}_PROMPTS_ZH"] = zh_prompts
-                    prompt_modules[f"{agent_identifier}_PROMPTS_EN"] = en_prompts
-                    logger.debug(f"成功导入prompt模块: {module_name} (agent: {agent_identifier}, zh: {len(zh_prompts)}, en: {len(en_prompts)})")
+                if zh_prompts or en_prompts or pt_prompts:
+                    if zh_prompts:
+                        prompt_modules[f"{agent_identifier}_PROMPTS_ZH"] = zh_prompts
+                    if en_prompts:
+                        prompt_modules[f"{agent_identifier}_PROMPTS_EN"] = en_prompts
+                    if pt_prompts:
+                        prompt_modules[f"{agent_identifier}_PROMPTS_PT"] = pt_prompts
+                    logger.debug(f"成功导入prompt模块: {module_name} (agent: {agent_identifier}, zh: {len(zh_prompts)}, en: {len(en_prompts)}, pt: {len(pt_prompts)})")
                 else:
                     # 兼容旧格式：查找模块中的PROMPTS变量
                     for attr_name in dir(module):
-                        if attr_name.endswith("_PROMPTS_ZH") or attr_name.endswith("_PROMPTS_EN"):
+                        if attr_name.endswith("_PROMPTS_ZH") or attr_name.endswith("_PROMPTS_EN") or attr_name.endswith("_PROMPTS_PT"):
                             # 使用AGENT_IDENTIFIER + 语言后缀作为键
                             if attr_name.endswith("_PROMPTS_ZH"):
                                 key = f"{agent_identifier}_PROMPTS_ZH"
-                            else:
+                            elif attr_name.endswith("_PROMPTS_EN"):
                                 key = f"{agent_identifier}_PROMPTS_EN"
+                            else:
+                                key = f"{agent_identifier}_PROMPTS_PT"
                             prompt_modules[key] = getattr(module, attr_name)
                     logger.debug(f"成功导入prompt模块(旧格式): {module_name} (agent: {agent_identifier})")
                         
@@ -99,6 +106,12 @@ class PromptManager:
             self.prompts = {}
             self.agent_prompts_zh = {}
             self.agent_prompts_en = {}
+            self.agent_prompts_pt = {}
+            self.agent_prompts_map = {
+                'zh': self.agent_prompts_zh,
+                'en': self.agent_prompts_en,
+                'pt': self.agent_prompts_pt,
+            }
             self._load_agent_prompts()
             PromptManager._initialized = True
     
@@ -118,12 +131,13 @@ class PromptManager:
                 # 提取agent名称（去掉_PROMPTS_EN后缀），保持原始大小写
                 agent_name = module_key[:-11]  # 去掉"_PROMPTS_EN"
                 self.agent_prompts_en[agent_name] = module_content
+            elif module_key.endswith("_PROMPTS_PT"):
+                # 提取agent名称（去掉_PROMPTS_PT后缀），保持原始大小写
+                agent_name = module_key[:-11]  # 去掉"_PROMPTS_PT"
+                self.agent_prompts_pt[agent_name] = module_content
         
-        logger.info(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个")
+        logger.info(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个")
     
-
-    
-
     
     def get_prompt(self, key: str, default: Optional[str] = None, agent: Optional[str] = None, language: str = 'zh') -> str:
         """获取prompt内容
@@ -132,7 +146,7 @@ class PromptManager:
             key: prompt的键名
             default: 默认值，如果找不到对应的prompt则返回此值
             agent: agent类型，如果指定则从对应agent的prompt中获取
-            language: 语言，'zh'或'en'，默认为'zh'
+            language: 语言，'zh'、'en'或'pt'，默认为'zh'
             
         Returns:
             prompt内容
@@ -142,7 +156,8 @@ class PromptManager:
         """
         # 如果指定了agent，从agent prompt中获取
         if agent:
-            agent_prompts = self.agent_prompts_zh if language == 'zh' else self.agent_prompts_en
+            # agent_prompts = self.agent_prompts_zh if language == 'zh' else self.agent_prompts_en
+            agent_prompts = self.agent_prompts_map.get(language, 'zh')
             if agent in agent_prompts and key in agent_prompts[agent]:
                 return agent_prompts[agent][key]
             # 如果在指定agent中找不到，尝试从common中获取
@@ -169,7 +184,7 @@ class PromptManager:
             key: prompt的键名
             default: 默认值，如果找不到则返回此值
             agent: agent类型，如果指定则从对应agent的prompt中获取
-            language: 语言，'zh'或'en'，默认为'zh'
+            language: 语言，'zh'、'en'或'pt'，默认为'zh'
             
         Returns:
             prompt内容，如果找不到则返回默认值
@@ -191,7 +206,7 @@ class PromptManager:
         Args:
             key: prompt的键名
             agent: agent类型，如果指定则从对应agent的prompt中获取
-            language: 语言，'zh'或'en'，默认为'zh'
+            language: 语言，'zh'、'en'或'pt'，默认为'zh'
             **kwargs: 模板参数
             
         Returns:
@@ -238,7 +253,7 @@ class PromptManager:
         Args:
             agent: agent类型
             key: prompt的键名
-            language: 语言，'zh'或'en'，默认为'zh'
+            language: 语言，'zh'、'en'或'pt'，默认为'zh'
             default: 默认值，如果不提供且找不到prompt则抛出异常
             
         Returns:
@@ -254,7 +269,7 @@ class PromptManager:
         
         Args:
             key: prompt的键名
-            language: 语言，'zh'或'en'，默认为'zh'
+            language: 语言，'zh'、'en'或'pt'，默认为'zh'
             default: 默认值，如果不提供且找不到prompt则抛出异常
             
         Returns:

@@ -1,25 +1,23 @@
-import hashlib
 import os
-import subprocess
+import hashlib
 import time
-import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
+import requests
+import re
 import chardet
-import html2text
+import traceback
+from typing import Dict, Any, List, Optional, Tuple
 import pdfplumber
 import pypandoc
-import requests
+from pptx import Presentation
+import html2text
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
-from openpyxl.utils.datetime import MAC_EPOCH, WINDOWS_EPOCH, from_excel
-from pptx import Presentation
-
-from sagents.utils.logger import logger
+from openpyxl.utils.datetime import from_excel, WINDOWS_EPOCH, MAC_EPOCH
+import subprocess
 
 from .tool_base import ToolBase
-
+from sagents.utils.logger import logger
 
 class FileParserError(Exception):
     """文件解析异常"""
@@ -133,7 +131,7 @@ class TextProcessor:
             with open(file_path, 'rb') as f:
                 raw_data = f.read(10000)  # 读取前10KB进行检测
                 result = chardet.detect(raw_data)
-                return result.get('encoding', 'utf-8')
+                return result.get('encoding') or 'utf-8'
         except Exception:
             return 'utf-8'
     
@@ -143,7 +141,6 @@ class TextProcessor:
         if not text:
             return ""
         
-        import re
         
         # 移除常见的网页无关内容
         patterns_to_remove = [
@@ -368,7 +365,7 @@ class ExcelParser:
         try:
             excel_data = ExcelParser._read_excel_to_dict(file_path)
             markdown_tables = []
-            metadata = {}
+            metadata: Dict[str, Any] = {}
             metadata['sheets'] = []
             for sheet_name, sheet_data in excel_data.items():
                 # 限制行数
@@ -454,8 +451,8 @@ class ExcelParser:
         def _build_style_numfmt_map(xlsx_path: str):
             try:
                 # 直接解析底层 XML，提高兼容性
-                import xml.etree.ElementTree as ET
                 import zipfile
+                import xml.etree.ElementTree as ET
                 zf = zipfile.ZipFile(xlsx_path)
                 styles_xml = zf.read('xl/styles.xml')
                 styles = ET.fromstring(styles_xml)
@@ -463,15 +460,18 @@ class ExcelParser:
                 # 收集自定义格式
                 custom_numfmts = {}
                 for nf in styles.findall('.//main:numFmts/main:numFmt', ns):
-                    numFmtId = int(nf.get('numFmtId'))
+                    nf_id_str = nf.get('numFmtId')
+                    if nf_id_str is None:
+                        continue
+                    nf_id = int(nf_id_str)
                     fmt = nf.get('formatCode') or ''
-                    custom_numfmts[numFmtId] = fmt
+                    custom_numfmts[nf_id] = fmt
                 # 样式索引 -> numFmtId
                 style_to_numfmt = []
                 for xf in styles.findall('.//main:cellXfs/main:xf', ns):
-                    numFmtId = xf.get('numFmtId')
-                    numFmtId = int(numFmtId) if numFmtId is not None else None
-                    style_to_numfmt.append(numFmtId)
+                    xf_id_str = xf.get('numFmtId')
+                    xf_id = int(xf_id_str) if xf_id_str is not None else None
+                    style_to_numfmt.append(xf_id)
                 # 标准日期/时间内置ID集合（Excel/WPS常见）
                 builtin_date_ids = {
                     14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47, 57, 58
@@ -727,7 +727,7 @@ class WebParser:
         initial_retry_delay = 2  # 初始重试延迟增加到2秒
         
         # 根据URL特征调整超时时间和策略
-        adjusted_timeout = timeout
+        adjusted_timeout: float = float(timeout)
         is_github = 'github.com' in url or 'githubusercontent.com' in url
         
         if is_github:
@@ -907,8 +907,6 @@ class WebParser:
     @staticmethod
     def _smart_decode_response(response, url: str) -> str:
         """智能解码HTTP响应内容"""
-        import re
-
         import chardet
         
         # 1. 首先尝试从Content-Type header获取编码
@@ -944,8 +942,9 @@ class WebParser:
         detected_encoding = None
         try:
             detection_result = chardet.detect(response.content)
-            if detection_result and detection_result.get('confidence', 0) > 0.7:
-                detected_encoding = detection_result['encoding'].lower()
+            encoding_result = detection_result.get('encoding') if detection_result else None
+            if detection_result and encoding_result and detection_result.get('confidence', 0) > 0.7:
+                detected_encoding = encoding_result.lower()
                 confidence = detection_result.get('confidence', 0)
                 logger.debug(f"🔍 chardet检测编码: {detected_encoding} (置信度: {confidence:.2f})")
         except Exception as e:
@@ -1020,7 +1019,6 @@ class WebParser:
         text = h.handle(html_content)
         
         # 后处理：清理多余的空白和格式化
-        import re
         
         # 清理多余的换行符
         text = re.sub(r'\n{3,}', '\n\n', text)
@@ -1057,7 +1055,7 @@ class PlainTextParser:
             raise FileParserError(f"文本文件解析失败: {str(e)}")
     
     @staticmethod
-    def extract_text_with_pandoc(file_path: str, input_format: str = None) -> str:
+    def extract_text_with_pandoc(file_path: str, input_format: Optional[str] = None) -> str:
         """使用Pandoc提取文本"""
         try:
             if input_format:
@@ -1075,7 +1073,19 @@ class FileParserTool(ToolBase):
         super().__init__()
 
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "从非文本文件中提取Markdown文本（含PDF/Office/CSV等）",
+            "en": "Extract Markdown text from non-text files (PDF/Office/CSV)",
+            "pt": "Extrai texto Markdown de arquivos não textuais (PDF/Office/CSV)"
+        },
+        param_description_i18n={
+            "input_file_path": {"zh": "输入文件的绝对路径", "en": "Absolute path of input file", "pt": "Caminho absoluto do arquivo de entrada"},
+            "start_index": {"zh": "开始字符位置，默认0", "en": "Start character index, default 0", "pt": "Índice inicial de caractere, padrão 0"},
+            "max_length": {"zh": "最大提取长度，默认5000，最大5000", "en": "Max extract length, default 5000, max 5000", "pt": "Comprimento máximo de extração, padrão 5000, máximo 5000"},
+            "include_metadata": {"zh": "是否包含文件元数据", "en": "Whether to include file metadata", "pt": "Se deve incluir metadados do arquivo"}
+        }
+    )
     def extract_text_from_non_text_file(
         self, 
         input_file_path: str, 
@@ -1160,9 +1170,9 @@ class FileParserTool(ToolBase):
                                 '--outdir', os.path.dirname(input_file_path),
                                 input_file_path
                             ]
-                            result = subprocess.run(command, capture_output=True, text=True, check=True)
-                            logger.info(f"LibreOffice转换输出: {result.stdout}")
-                            logger.error(f"LibreOffice转换错误输出: {result.stderr}")
+                            convert_result = subprocess.run(command, capture_output=True, text=True, check=True)
+                            logger.info(f"LibreOffice转换输出: {convert_result.stdout}")
+                            logger.error(f"LibreOffice转换错误输出: {convert_result.stderr}")
 
                             if os.path.exists(pptx_output_path):
                                 extracted_text = OfficeParser.extract_text_from_pptx(pptx_output_path)
@@ -1184,7 +1194,7 @@ class FileParserTool(ToolBase):
                         
                 elif file_extension in ['.xlsx', '.xls']:
                     logger.debug("📈 使用Excel解析器")
-                    excel_metadata = {}
+                    excel_metadata: Dict[str, Any] = {}
                     if file_extension == '.xlsx':
                         extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(input_file_path)
                     else:
@@ -1199,9 +1209,9 @@ class FileParserTool(ToolBase):
                                 '--outdir', os.path.dirname(input_file_path),
                                 input_file_path
                             ]
-                            result = subprocess.run(command, capture_output=True, text=True, check=True)
-                            logger.info(f"LibreOffice转换输出: {result.stdout}")
-                            logger.error(f"LibreOffice转换错误输出: {result.stderr}")
+                            convert_result = subprocess.run(command, capture_output=True, text=True, check=True)
+                            logger.info(f"LibreOffice转换输出: {convert_result.stdout}")
+                            logger.error(f"LibreOffice转换错误输出: {convert_result.stderr}")
                             if os.path.exists(xlsx_output_path):
                                 extracted_text, excel_metadata = ExcelParser.extract_text_from_xlsx(xlsx_output_path)
                                 logger.info(f"XLS成功转换为XLSX并提取内容: {xlsx_output_path}")
@@ -1314,7 +1324,19 @@ class FileParserTool(ToolBase):
                 "operation_id": operation_id
             }
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "从URL提取网页文本内容（自动清理与截断）",
+            "en": "Extract web page text from URL (clean + truncate)",
+            "pt": "Extrai texto da página da web via URL (limpeza + truncamento)"
+        },
+        param_description_i18n={
+            "url": {"zh": "目标URL地址", "en": "Target URL", "pt": "URL de destino"},
+            "start_index": {"zh": "开始字符位置，默认0", "en": "Start character index, default 0", "pt": "Índice inicial de caractere, padrão 0"},
+            "max_length": {"zh": "最大提取长度，默认5000", "en": "Max extract length, default 5000", "pt": "Comprimento máximo de extração, padrão 5000"},
+            "timeout": {"zh": "请求超时时间（秒），默认30", "en": "Request timeout (seconds), default 30", "pt": "Tempo de espera da requisição (segundos), padrão 30"}
+        }
+    )
     def extract_text_from_url(
         self,
         url: str,
@@ -1506,10 +1528,13 @@ class FileParserTool(ToolBase):
         
         return suggestions
 
-    @ToolBase.tool()
-
-
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "获取支持的文件格式及最大文件大小",
+            "en": "Get supported file formats and max file sizes",
+            "pt": "Obter formatos de arquivo suportados e tamanhos máximos"
+        }
+    )
     def get_supported_formats(self) -> Dict[str, Any]:
         """获取支持的文件格式列表
 

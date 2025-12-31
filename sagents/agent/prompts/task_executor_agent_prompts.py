@@ -34,7 +34,21 @@ If the tool set contains the file_write function tool, the requirements are as f
 6. If writing code is needed, use the file_write function tool, with code content as function parameters.
 7. If outputting reports or summaries, use the file_write function tool, with report content as function parameters, using markdown format.
 8. If using file_write to create files, always create files in the working directory, requiring absolute file paths.
-9. For generating large documents or code, first use file_write to generate partial content or framework, then use replace_text_in_file for more detailed content filling."""
+9. For generating large documents or code, first use file_write to generate partial content or framework, then use replace_text_in_file for more detailed content filling.""",
+    "pt": """Execute tarefas com base na descrição e requisitos mais recentes da tarefa.
+
+Observe as seguintes regras de execução de tarefas, não use ferramentas fora do conjunto de ferramentas, caso contrário ocorrerão erros:
+1. Se não for necessário usar ferramentas, retorne o conteúdo diretamente em português. Sua saída de texto deve estar em formato markdown.
+2. Apenas leia e escreva arquivos no diretório de trabalho. Se o usuário não fornecer um caminho de arquivo, você deve criar um novo arquivo neste diretório.
+3. Ao chamar ferramentas, não produza outro texto, chame todas as ferramentas não interdependentes tanto quanto possível.
+4. Não exponha seu diretório de trabalho, informações de ID e nomes de ferramentas no texto de saída.
+
+Se o conjunto de ferramentas contiver a ferramenta de função file_write, os requisitos são os seguintes:
+5. Se for para gerar planos, esquemas, criação de conteúdo, código ou outros textos grandes, use a ferramenta de função file_write para salvar o conteúdo em arquivos em várias partes, com o conteúdo do arquivo como parâmetros da função, usando formato markdown.
+6. Se for necessário escrever código, use a ferramenta de função file_write, com o conteúdo do código como parâmetros da função.
+7. Se for para produzir relatórios ou resumos, use a ferramenta de função file_write, com o conteúdo do relatório como parâmetros da função, usando formato markdown.
+8. Se usar file_write para criar arquivos, sempre crie arquivos no diretório de trabalho, exigindo caminhos de arquivo absolutos.
+9. Para gerar documentos ou código maiores, primeiro use file_write para gerar conteúdo parcial ou estrutura, depois use replace_text_in_file para preenchimento de conteúdo mais detalhado."""
 }
 
 # 任务执行提示模板
@@ -48,5 +62,10 @@ task_execution_template = {
 
 Expected output: {next_expected_output}
 
-Please start executing the task directly, observe the conversation history, and don't do repetitive work. Don't give any next step suggestions or plans."""
+Please start executing the task directly, observe the conversation history, and don't do repetitive work. Don't give any next step suggestions or plans.""",
+    "pt": """Por favor, execute os seguintes requisitos ou tarefas: {next_subtask_description}
+
+Saída esperada: {next_expected_output}
+
+Por favor, comece a executar a tarefa diretamente, observe o histórico de conversas e não faça trabalho repetitivo. Não dê sugestões ou planos para os próximos passos."""
 }

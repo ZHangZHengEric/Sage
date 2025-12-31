@@ -16,13 +16,11 @@ MessageManager 优化版消息管理器
 
 import datetime
 import uuid
+from typing import Dict, List, Optional, Any, Union, Sequence
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Union
-
 from sagents.utils.logger import logger
-
-from .message import MessageChunk, MessageRole, MessageType
-
+from sagents.context.messages.context_budget import ContextBudgetManager
+from .message import MessageRole, MessageType, MessageChunk
 
 class MessageManager:
     """
@@ -34,7 +32,8 @@ class MessageManager:
     
     def __init__(self, session_id: Optional[str] = None, 
                  max_token_limit: int = 8000,
-                 compression_threshold: float = 0.7):
+                 compression_threshold: float = 0.7,
+                 context_budget_config: Optional[Dict[str, Any]] = None):
         """
         初始化消息管理器
         
@@ -42,20 +41,39 @@ class MessageManager:
             session_id: 会话ID
             max_token_limit: 最大token限制
             compression_threshold: 压缩阈值
+            context_budget_config: 上下文预算管理器配置，包含以下键：
+                - max_model_len: 模型最大token长度，默认 40000
+                - history_ratio: 历史消息的比例（0-1之间），默认 0.2 (20%)
+                - active_ratio: 活跃消息的比例（0-1之间），默认 0.3 (30%)
+                - max_new_message_ratio: 新消息的比例（0-1之间），默认 0.5 (50%)
+                - recent_turns: 限制最近的对话轮数，0表示不限制，默认 0
         """
         self.session_id = session_id or f"session_{uuid.uuid4().hex[:8]}"
         self.max_token_limit = max_token_limit
         self.compression_threshold = compression_threshold
         
+        # 处理context_budget_config为None的情况
+        if context_budget_config is None:
+            context_budget_config = {}
+        
+        self.context_budget_manager = ContextBudgetManager(
+            max_model_len=context_budget_config.get('max_model_len', 40000),
+            history_ratio=context_budget_config.get('history_ratio', 0.2),     
+            active_ratio=context_budget_config.get('active_ratio', 0.3),       
+            max_new_message_ratio=context_budget_config.get('max_new_message_ratio', 0.5), 
+            recent_turns=context_budget_config.get('recent_turns', 0)        
+        )
+        
         # 消息存储（只存储非system消息）
         self.messages: List[MessageChunk] = []
         
         # 兼容性：保留pending_chunks属性（现在已不使用）
-        self.pending_chunks = []
+        self.pending_chunks: List[Any] = []
 
-        
+        self.active_start_index: Optional[int] = None
+
         # 统计信息
-        self.stats = {
+        self.stats: Dict[str, Any] = {
             'total_messages': 0,
             'total_chunks': 0,
             'merged_messages': 0,
@@ -67,6 +85,58 @@ class MessageManager:
         }
         
         logger.info(f"MessageManager: 初始化完成，会话ID: {self.session_id}")
+
+    def set_active_start_index(self, index: Optional[int]) -> None:
+        """
+        设置活跃消息的起始索引
+        
+        活跃消息指的是固定加入上下文的连续对话，从此索引开始的消息将被视为活跃消息。
+        索引之前的消息将被视为历史消息，可用于相似度检索。
+        
+        Args:
+            index: 活跃消息的起始索引，None表示所有消息都是活跃消息
+        """  
+        self.active_start_index = index
+        logger.info(f"MessageManager: 设置 active_start_index = {index}，"
+                   f"历史消息: {index if index else 0}条，"
+                   f"活跃消息: {len(self.messages) - (index if index else 0)}条")
+    
+    def _extract_current_query(self) -> str:
+        """提取最新用户查询（私有辅助方法）
+        
+        Returns:
+            最新用户消息的内容，如果没有则返回空字符串
+        """
+        for msg in reversed(self.messages):
+            if msg.role == MessageRole.USER.value:
+                return msg.get_content() or ""
+        return ""
+    
+    def prepare_history_split(self, agent_config: Dict[str, Any]) -> Dict[str, Any]:
+        """准备历史消息切分
+        计算预算、切分消息、设置活跃消息起始索引，并提取最新用户查询
+        """
+        # 1. 计算预算
+        budget_info = self.context_budget_manager.calculate_budget(agent_config)
+        
+        # 2. 切分消息
+        split_result = self.context_budget_manager.split_messages(
+            messages=self.messages,
+            active_budget=budget_info['active_budget']
+        )
+        
+        # 3. 设置活跃消息起始索引
+        self.set_active_start_index(len(split_result['history_messages']))
+        
+        # 4. 提取最新用户查询
+        current_query = self._extract_current_query()
+        
+        return {
+            'budget_info': budget_info,
+            'split_result': split_result,
+            'current_query': current_query
+        }
+    
 
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk]], agent_name: Optional[str] = None) -> bool:
         """
@@ -115,7 +185,7 @@ class MessageManager:
         return old_messages_chunks
 
     @staticmethod
-    def calculate_messages_token_length(messages: List[Union[MessageChunk,Dict]]) -> int:
+    def calculate_messages_token_length(messages: Sequence[Union[MessageChunk,Dict]]) -> int:
         """
         计算消息列表的token长度, 只计算content字段
         
@@ -129,7 +199,7 @@ class MessageManager:
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk(**message)
-            token_length += MessageManager.calculate_str_token_length(message.content or '')
+            token_length += MessageManager.calculate_str_token_length(message.get_content() or '')
         return token_length
 
     @staticmethod
@@ -147,14 +217,21 @@ class MessageManager:
         Returns:
             int: 字符串的token长度
         """
-        token_length = 0
+        # 处理None或空字符串的情况
+        if content is None:
+            return 0
+            
+        token_length = 0.0
         for char in content:
-            if char.isalpha():
+            # 判断是否是中文字符 (CJK统一表意文字)
+            if '\u4e00' <= char <= '\u9fff':
+                token_length += 0.6
+            elif char.isalpha():
                 token_length += 0.25
             elif char.isdigit():
                 token_length += 0.2
             else:
-                token_length += 0.6
+                token_length += 0.4
         return int(token_length)
 
     @staticmethod
@@ -260,22 +337,29 @@ class MessageManager:
         filtered_messages = deepcopy(accept_messages)
         return filtered_messages
 
-    def extract_all_context_messages(self,recent_turns:int=0,max_length = 20000,last_turn_user_only:bool=True) -> List[MessageChunk]:
+    def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True) -> List[MessageChunk]:
         """
         提取所有有意义的上下文消息，包括用户消息和助手消息，最后一个消息对话，可选是否只提取用户消息，如果只提取用户消息，即是本次请求的上下文，否则带上本次执行已有内容
         
+        注意：消息的长度限制由 context_budget_manager 在 prepare_history_split() 中通过 active_start_index 控制
+        
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
-            max_length: 提取的最大长度，0表示不限制
             last_turn_user_only: 是否只提取最后一个对话轮的用户消息，默认是True
 
         Returns:
             提取后的消息列表
         """
-        logger.info(f"MessageManager: 提取所有上下文消息，最近轮数：{recent_turns}，最大长度：{max_length}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}")
+        logger.info(f"MessageManager: 提取所有上下文消息，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}")
         all_context_messages = []
         chat_list = []
-        for msg in self.messages:
+
+        if self.active_start_index is not None:
+            active_messages = self.messages[self.active_start_index:]
+        else:
+            active_messages = self.messages
+            
+        for msg in active_messages:
             if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
                 chat_list.append([msg])
             elif msg.role != MessageRole.USER.value:
@@ -291,17 +375,11 @@ class MessageManager:
             last_chat = chat_list[-1]
             all_context_messages.append(last_chat[0])
             chat_list = chat_list[:-1]
-        # 合并消息
-        merged_length = 0
+        # 合并消息（长度限制由 context_budget_manager 通过 active_start_index 控制）
         for chat in chat_list[::-1]:
             merged_messages = []
-
             merged_messages.append(chat[0])
-            merged_length += MessageManager.calculate_str_token_length(chat[0].content or '')
             
-            if merged_length > max_length:
-                logger.info(f"MessageManager: 合并消息长度超过最大长度，当前长度：{merged_length}，最大长度：{max_length}")
-                break
             for msg in chat[1:]:
                 if msg.type in [MessageType.FINAL_ANSWER.value,
                                 MessageType.DO_SUBTASK_RESULT.value,
@@ -309,13 +387,14 @@ class MessageManager:
                                 MessageType.TASK_ANALYSIS.value,
                                 MessageType.TOOL_CALL_RESULT.value]:
                     merged_messages.append(msg)
-                    merged_length += MessageManager.calculate_str_token_length(msg.content or '')
-            if merged_length > max_length:
-                logger.info(f"MessageManager: 合并消息长度超过最大长度，当前长度：{merged_length}，最大长度：{max_length}")
-                break
-            logger.info(f"MessageManager: 合并消息长度，当前长度：{merged_length}，最大长度：{max_length}")
+            
             all_context_messages.extend(merged_messages[::-1])
-        return all_context_messages[::-1]
+        
+        result_messages = all_context_messages[::-1]
+        # 打印提取结果的统计信息
+        total_tokens = MessageManager.calculate_messages_token_length(result_messages)
+        logger.info(f"MessageManager: 提取完成，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
+        return result_messages
     
     # def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
     #     """
@@ -372,13 +451,13 @@ class MessageManager:
         Returns:
             提取后的消息列表
         """
-        messages_after_last_user = []
+        messages_after_last_user: List[MessageChunk] = []
         for msg in self.messages:
             if msg.role == MessageRole.USER.value:
                 messages_after_last_user = []
             else:
                 messages_after_last_user.append(msg)
-        message_after_last_stage_summary = []
+        message_after_last_stage_summary: List[MessageChunk] = []
         for msg in messages_after_last_user:
             if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.STAGE_SUMMARY.value:
                 message_after_last_stage_summary = []
@@ -401,7 +480,7 @@ class MessageManager:
 
     def extract_after_last_observation_messages(self) -> List[MessageChunk]:
         
-        messages_after_last_observation = []
+        messages_after_last_observation: List[MessageChunk] = []
         for msg in self.messages:
             if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
                 messages_after_last_observation = []
@@ -409,20 +488,20 @@ class MessageManager:
         return messages_after_last_observation
 
     def get_after_last_user_messages(self) -> List[MessageChunk]:
-        messages_after_last_user = []
+        messages_after_last_user: List[MessageChunk] = []
         for msg in self.messages:
             if msg.role == MessageRole.USER.value:
                 messages_after_last_user = []
             messages_after_last_user.append(msg)
         return messages_after_last_user
 
-    def get_last_observation_message(self) -> MessageChunk:
+    def get_last_observation_message(self) -> Optional[MessageChunk]:
         for msg in self.messages[::-1]:
             if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
                 return msg
         return None
     
-    def get_last_user_message(self) -> MessageChunk:
+    def get_last_user_message(self) -> Optional[MessageChunk]:
         for msg in self.messages[::-1]:
             if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
                 return msg
@@ -430,7 +509,7 @@ class MessageManager:
 
     def get_all_execution_messages_after_last_user(self,recent_turns:int=0,max_content_length:int=0) -> List[MessageChunk]:
         messages_after_last_user = self.get_after_last_user_messages()
-        messages_after_last_execution = []
+        messages_after_last_execution: List[MessageChunk] = []
         for msg in messages_after_last_user:
             if msg.type in [MessageType.EXECUTION.value,
                             MessageType.DO_SUBTASK_RESULT.value,
@@ -443,7 +522,7 @@ class MessageManager:
         if max_content_length >0 :
             # 截取从后往前的 n条消息，n条消息的content长度 < max_content_length ,但是n+1 消息，content长度 > max_content_length
             # 则只保留 n条消息
-            new_messages_after_last_execution = []
+            new_messages_after_last_execution: List[MessageChunk] = []
             total_length = 0
             for msg in messages_after_last_execution[::-1]:
                 if msg.content:

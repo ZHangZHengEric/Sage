@@ -3,13 +3,11 @@ HTML文件解析器
 支持HTML文件的文本提取和元数据获取
 """
 
-import re
 import traceback
-from typing import Any, Dict
-
-import html2text
+from typing import Dict, Any
 from bs4 import BeautifulSoup
-
+import html2text
+import re
 from .base_parser import BaseFileParser, ParseResult
 
 
@@ -123,14 +121,14 @@ class HTMLParser(BaseFileParser):
             Dict[str, Any]: HTML元数据
         """
         try:
-            metadata = {}
+            metadata: Dict[str, Any] = {}
             
             # 提取基本HTML信息
             metadata["html_length"] = len(html_content)
             metadata["doctype"] = self._extract_doctype(html_content)
             
             # 提取head信息
-            head = soup.find('head')
+            head: Any = soup.find('head')
             if head:
                 # 标题
                 title_tag = head.find('title')
@@ -175,7 +173,7 @@ class HTMLParser(BaseFileParser):
                 metadata["inline_script_count"] = inline_scripts
             
             # 提取body信息
-            body = soup.find('body')
+            body: Any = soup.find('body')
             if body:
                 # 统计各种HTML元素
                 metadata["heading_counts"] = {
@@ -214,16 +212,16 @@ class HTMLParser(BaseFileParser):
                 metadata["table_details"] = table_info
             
             # 语言信息
-            html_tag = soup.find('html')
+            html_tag: Any = soup.find('html')
             if html_tag:
                 metadata["language"] = html_tag.get('lang', '')
             
             # 字符编码
-            charset_meta = soup.find('meta', attrs={'charset': True})
+            charset_meta: Any = soup.find('meta', attrs={'charset': True})
             if charset_meta:
                 metadata["charset"] = charset_meta.get('charset', '')
             else:
-                http_equiv_meta = soup.find('meta', attrs={'http-equiv': 'Content-Type'})
+                http_equiv_meta: Any = soup.find('meta', attrs={'http-equiv': 'Content-Type'})
                 if http_equiv_meta:
                     content = http_equiv_meta.get('content', '')
                     charset_match = re.search(r'charset=([^;\\s]+)', content)

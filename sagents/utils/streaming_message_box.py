@@ -1,7 +1,6 @@
-import os
 import shutil
-from typing import List, Tuple
-
+from typing import Tuple, List
+import os
 from rich.console import Console
 from rich.text import Text
 
@@ -55,7 +54,7 @@ class StreamingMessageBox:
         self.box_width = min(self.terminal_width - 4, 80)  # 最大80字符，最小留4字符边距
         self.content_width = self.box_width - 4  # 减去边框(2个字符)和空格(2个字符)
         self.current_line = ""
-        self.lines = []
+        self.lines: List[str] = []
         self.header_printed = False
         self.last_printed_content = ""
         self.line_started = False  # 标记当前行是否已开始

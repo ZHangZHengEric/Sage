@@ -4,10 +4,8 @@ PPTX文件解析器
 """
 
 import traceback
-from typing import Any, Dict
-
+from typing import Dict, Any
 from pptx import Presentation
-
 from .base_parser import BaseFileParser, ParseResult
 
 
@@ -90,7 +88,7 @@ class PPTXParser(BaseFileParser):
             traceback.print_exc()
             return self.create_error_result(error_msg, file_path)
     
-    def _extract_pptx_metadata(self, prs: Presentation, slide_texts: list) -> Dict[str, Any]:
+    def _extract_pptx_metadata(self, prs: Any, slide_texts: list) -> Dict[str, Any]:
         """
         提取PPTX特定元数据
         

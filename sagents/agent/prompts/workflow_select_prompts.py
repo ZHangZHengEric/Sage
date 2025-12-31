@@ -3,7 +3,7 @@
 """
 工作流选择Agent指令定义
 
-包含工作流选择agent使用的指令内容，支持中英文
+包含工作流选择agent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -62,5 +62,31 @@ selected_workflow_index 从0 开始计数""",
 
 Please ensure the output JSON format is correct. Only output the JSON string without any other content or explanation.
 If there is no suitable workflow, please set has_matching_workflow to false.
-selected_workflow_index starts counting from 0"""
+selected_workflow_index starts counting from 0""",
+    "pt": """Você é um especialista em seleção de fluxo de trabalho. Por favor, selecione o mais adequado dos modelos de fluxo de trabalho fornecidos com base no histórico de diálogo do usuário.
+## Descrição e Requisitos do Agente
+{agent_description}
+
+## Histórico de Diálogo
+{conversation_history}
+
+## Modelos de Fluxo de Trabalho Disponíveis
+{workflow_list}
+
+## Requisitos da Tarefa
+1. Analise cuidadosamente as necessidades principais e os tipos de tarefas do usuário no histórico de diálogo
+2. Compare os cenários aplicáveis de cada modelo de fluxo de trabalho
+3. Selecione um fluxo de trabalho correspondente ou determine que não há fluxo de trabalho adequado
+
+## Formato de Saída (JSON)
+```json
+{{
+    "has_matching_workflow": true/false,
+    "selected_workflow_index": 0
+}}
+```
+
+Por favor, certifique-se de que o formato JSON de saída está correto. Esta saída produz apenas a string JSON, não precisa conter nenhum outro conteúdo ou explicação.
+Se não houver fluxo de trabalho adequado, defina has_matching_workflow como false.
+selected_workflow_index começa a contar a partir de 0"""
 }

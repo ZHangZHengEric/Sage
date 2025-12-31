@@ -1,7 +1,7 @@
+from typing import Dict, Any, List, Optional
+from enum import Enum
 import datetime
 import uuid
-from enum import Enum
-from typing import Any, Dict, List, Optional
 
 
 class TaskStatus(Enum):
@@ -22,7 +22,7 @@ class TaskPriority(Enum):
 
 
 class TaskBase:
-    def __init__(self, description: str = None,
+    def __init__(self, description: Optional[str] = None,
                  task_id: Optional[str] = None,
                  title: Optional[str] = None,
                  task_type: str = "normal",
@@ -122,7 +122,7 @@ class TaskBase:
         }
         self.summary_generated_at = summary_generated_at
 
-    def start_execution(self, assigned_to: str = None) -> None:
+    def start_execution(self, assigned_to: Optional[str] = None) -> None:
         """开始执行任务"""
         self.status = TaskStatus.IN_PROGRESS
         self.start_time = datetime.datetime.now().isoformat()
@@ -130,7 +130,7 @@ class TaskBase:
             self.assigned_to = assigned_to
 
     def complete_execution(self, result: Any = None, 
-                          execution_details: Dict[str, Any] = None) -> None:
+                          execution_details: Optional[Dict[str, Any]] = None) -> None:
         """完成任务执行"""
         self.status = TaskStatus.COMPLETED
         self.end_time = datetime.datetime.now().isoformat()
@@ -140,7 +140,7 @@ class TaskBase:
             self.update_execution_details(execution_details)
 
     def fail_execution(self, error_message: str, 
-                      execution_details: Dict[str, Any] = None) -> None:
+                      execution_details: Optional[Dict[str, Any]] = None) -> None:
         """标记任务执行失败"""
         self.status = TaskStatus.FAILED
         self.end_time = datetime.datetime.now().isoformat()
@@ -231,7 +231,7 @@ class TaskBase:
 
     def to_summary_dict(self) -> Dict[str, Any]:
         """转换为摘要格式(用于减少token使用)"""
-        summary = {
+        summary: Dict[str, Any] = {
             'task_id': self.task_id,
             'title': self.title,
             'description': self.description,
