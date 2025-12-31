@@ -14,8 +14,8 @@
 import json
 import time
 import traceback
+from typing import Dict, Any, List, Union, Optional
 from datetime import datetime
-from typing import Any, Dict, List, Union
 
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
@@ -127,7 +127,7 @@ class AutoGenAgentFunc:
             logger.error(traceback.format_exc())
             return []
 
-    async def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str) -> dict:
+    async def _generate_basic_config(self, description: str, available_tools: List[Dict], client, model: str) -> Optional[Dict[str, Any]]:
         """
         生成基础配置（名称、描述、系统提示词等）
 
@@ -222,7 +222,7 @@ Agent描述：{description}
             logger.error(traceback.format_exc())
             return None
 
-    async def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str) -> List[str]:
+    async def _select_tools(self, basic_config: Dict, available_tools: List[Dict], client, model: str) -> Optional[List[str]]:
         """
         根据Agent基础配置选择合适的工具
 
@@ -293,7 +293,7 @@ Agent系统提示词：
             logger.error(traceback.format_exc())
             return None
 
-    async def _generate_workflows(self, basic_config: Dict, selected_tools: List[str], client, model: str) -> Dict[str, List[str]]:
+    async def _generate_workflows(self, basic_config: Dict, selected_tools: List[str], client, model: str) -> Optional[Dict[str, List[str]]]:
         """
         生成Agent的工作流程配置
 
@@ -551,7 +551,7 @@ Agent系统提示词：
                 )
                 result = response.choices[0].message.content
                 logger.debug(f"大模型响应长度: {len(result) if result else 0}")
-                return result
+                return result or ""
 
         except Exception as e:
             logger.error(f"调用大模型失败: {str(e)}")
@@ -621,7 +621,7 @@ Agent系统提示词：
             ]
         }
 
-    def save_config_to_file(self, config: Dict[str, Any], file_path: str) -> str:
+    def save_config_to_file(self, config: Dict[str, Any], file_path: str) -> Optional[str]:
         """
         将配置保存到文件
 

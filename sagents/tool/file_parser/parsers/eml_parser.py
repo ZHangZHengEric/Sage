@@ -3,22 +3,24 @@ EML文件解析器
 支持邮件文件的文本提取和元数据获取
 """
 
-import asyncio
-import concurrent.futures
 import email
 import email.utils
-import os
-import tempfile
-import traceback
-from email import policy
-from email.feedparser import headerRE
 from email.header import decode_header
-from typing import Any, Dict, List, Tuple
-
+# from email.feedparser import headerRE # Removed as it is internal and might be missing
+from email import policy
+import traceback
+import tempfile
+import os
+import asyncio
+import concurrent.futures
+import re
 import chardet
+from typing import Dict, Any, List, Tuple, Optional
 import html2text
-
 from .base_parser import BaseFileParser, ParseResult
+
+# Define headerRE manually as it's not available in newer python versions or specific environments
+headerRE = re.compile(r'^(From |[\041-\071\073-\176]{1,}:|[\t ])')
 
 # 尝试导入flanker，如果没有则使用email.utils作为备选
 try:
@@ -37,7 +39,10 @@ try:
     HAS_OPENCC = True
 except ImportError:
     HAS_OPENCC = False
-    def convert(x): return x  # 如果没有OpenCC，直接返回原文
+
+    def convert(x):
+        return x  # 如果没有OpenCC，直接返回原文
+        
     print(
         "Warning: OpenCC not available, skipping traditional to simplified conversion"
     )
@@ -183,8 +188,8 @@ class EMLParser(BaseFileParser):
             date = enhanced_metadata.get("date", "")
             if date:
                 try:
-                    from datetime import datetime
                     from email.utils import parsedate_to_datetime
+                    from datetime import datetime
 
                     date_obj = parsedate_to_datetime(date)
                     date_str = datetime.strftime(date_obj, "%Y-%m-%d %H:%M:%S")
@@ -315,7 +320,7 @@ class EMLParser(BaseFileParser):
                 if line.lower().startswith(header_pattern.lower()):
                     found_header = True
                     # 获取头部值（去掉头部名称和冒号）
-                    header_value = line[len(header_pattern):].strip()
+                    header_value = line[len(header_pattern) :].strip()
 
                     # 检查后续行是否是续行（以空格或制表符开始）
                     j = i + 1
@@ -463,12 +468,21 @@ class EMLParser(BaseFileParser):
 
             return f"<fallback-{int(time.time())}@eml-parser>"
 
-    def _smart_decode(self, data: bytes, charset: str = None) -> str:
+    def _smart_decode(self, data: Any, charset: Optional[str] = None) -> str:
         """
         智能解码，支持多种编码格式
         """
         if isinstance(data, str):
             return data
+
+        # Ensure data is bytes
+        if not isinstance(data, bytes):
+             if data is None:
+                 return ""
+             try:
+                 return str(data)
+             except Exception:
+                 return ""
 
         # 扩展编码映射
         encoding_map = {
@@ -633,12 +647,12 @@ class EMLParser(BaseFileParser):
             clean_str = addresses_str.replace("\r", "").replace("\n", " ").strip()
             return [], [clean_str] if clean_str else []
 
-    def _extract_body(self, msg: email.message.Message) -> Dict[str, str]:
+    def _extract_body(self, msg: Any) -> Dict[str, Any]:
         """
         提取邮件正文，支持多种格式和编码，增强验证机制
         """
         try:
-            body_data = {
+            body_data: Dict[str, Any] = {
                 "text_content": "",
                 "html_content": "",
                 "raw_content": "",
@@ -649,8 +663,8 @@ class EMLParser(BaseFileParser):
 
             if msg.is_multipart():
                 # 处理多部分邮件
-                text_parts = []
-                html_parts = []
+                text_parts: List[str] = []
+                html_parts: List[str] = []
 
                 for part in msg.walk():
                     if part.get_content_maintype() == "multipart":
@@ -781,7 +795,6 @@ class EMLParser(BaseFileParser):
             return ""
 
         # 移除常见的乱码字符
-        import re
 
         # 移除替换字符和BOM
         content = content.replace("\ufffd", "").replace("\ufeff", "")
@@ -834,7 +847,7 @@ class EMLParser(BaseFileParser):
         # 最后使用忽略错误的UTF-8解码
         return payload.decode("utf-8", errors="ignore")
 
-    def _extract_attachments(self, msg: email.message.Message) -> Dict[str, Any]:
+    def _extract_attachments(self, msg: Any) -> Dict[str, Any]:
         """
         提取邮件附件
         参考原始实现的get_attachment方法
@@ -845,7 +858,7 @@ class EMLParser(BaseFileParser):
         Returns:
             Dict[str, Any]: 附件信息字典，包含files和images列表
         """
-        attachment = {
+        attachment: Dict[str, List[Any]] = {
             "files": [],
             "images": [],
         }
@@ -878,8 +891,8 @@ class EMLParser(BaseFileParser):
                     attach_content = ""
 
                     # 创建临时文件来处理附件内容
-                    import os
                     import tempfile
+                    import os
 
                     try:
                         with tempfile.NamedTemporaryFile(
@@ -1105,7 +1118,7 @@ class EMLParser(BaseFileParser):
                 "content_type": content_type,
             }
 
-    def _extract_metadata(self, msg: email.message.EmailMessage) -> dict:
+    def _extract_metadata(self, msg: Any) -> dict:
         """
         提取邮件元数据，增强容错性和完整性
         """
@@ -1339,7 +1352,6 @@ class EMLParser(BaseFileParser):
         if not body_text:
             return ""
 
-        import re
 
         # 先转换HTML（如果包含HTML标签）
         if "<" in body_text and ">" in body_text:

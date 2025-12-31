@@ -7,7 +7,7 @@
 # from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 # from sagents.context.session_context import SessionContext, get_session_context
 # from sagents.tool.tool_manager import ToolManager
-# from sagents.tool.tool_config import AgentToolSpec
+# from sagents.tool.tool_base import AgentToolSpec
 # import json
 # import uuid
 # from copy import deepcopy

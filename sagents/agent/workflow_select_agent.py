@@ -1,35 +1,33 @@
 
-import json
-import uuid
-from typing import Any, Dict, Generator, List
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from .agent_base import AgentBase
+from typing import Any, Dict, List, AsyncGenerator, Optional
+from sagents.utils.logger import logger
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
-
-from .agent_base import AgentBase
+import json
+import uuid
 
 
 class WorkflowSelectAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any] = None, system_prefix: str = "", max_model_len: int = 64000):
+    def __init__(self, model: Any, model_config: Optional[Dict[str, Any]] = None, system_prefix: str = ""):
         if model_config is None:
             model_config = {}
-        super().__init__(model, model_config, system_prefix, max_model_len)
+        super().__init__(model, model_config, system_prefix)
         self.agent_name = "WorkflowSelectAgent"
         self.agent_description = "工作流选择智能体，专门负责根据用户需求选择最合适的工作流"
         logger.info("WorkflowSelectAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
 
         # 提取最近的对话历史
         if 'task_rewrite' in session_context.audit_status:
             recent_message_str = session_context.audit_status['task_rewrite']
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=1, max_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=1)
             recent_message_str = MessageManager.convert_messages_to_str(history_messages)
 
         # 使用WorkflowManager格式化工作流列表
@@ -44,7 +42,7 @@ class WorkflowSelectAgent(AgentBase):
         )
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

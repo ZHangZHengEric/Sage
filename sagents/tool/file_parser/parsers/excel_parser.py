@@ -4,11 +4,9 @@ Excel文件解析器
 """
 
 import traceback
-from typing import Any, Dict, List
-
-import openpyxl
+from typing import Dict, Any, List
 import pandas as pd
-
+import openpyxl
 from .base_parser import BaseFileParser, ParseResult
 
 
