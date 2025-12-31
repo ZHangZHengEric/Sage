@@ -4,11 +4,10 @@ Session上下文管理器
 用于在多session环境下正确识别当前session，支持同步和异步环境
 """
 
-import contextvars
 import threading
-from contextlib import asynccontextmanager, contextmanager
 from typing import Optional
-
+from contextlib import contextmanager, asynccontextmanager
+import contextvars
 
 class SessionContextManager:
     """Session上下文管理器，支持同步和异步环境"""

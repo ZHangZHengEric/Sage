@@ -1,38 +1,31 @@
-import os
-import sys
-import traceback
-import uuid
-from typing import Any, Dict, Generator, List, Optional, Union
-
-from sagents.agent.agent_base import AgentBase
-from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
-from sagents.agent.query_suggest_agent import QuerySuggestAgent
-from sagents.agent.simple_agent import SimpleAgent
-from sagents.agent.task_analysis_agent import TaskAnalysisAgent
-from sagents.agent.task_completion_judge_agent import TaskCompletionJudgeAgent
-from sagents.agent.task_decompose_agent import TaskDecomposeAgent
-from sagents.agent.task_executor_agent import TaskExecutorAgent
-from sagents.agent.task_obversation_agent import TaskObservationAgent
-from sagents.agent.task_planning_agent import TaskPlanningAgent
-from sagents.agent.task_rewrite_agent import TaskRewriteAgent
+from sagents.context.session_context import SessionContext, init_session_context, SessionStatus, get_session_context, delete_session_context, list_active_sessions
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.tasks.task_base import TaskStatus
+from sagents.utils.session_local import session_manager
+from sagents.utils.logger import logger
 from sagents.agent.task_router_agent import TaskRouterAgent
+from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
+from sagents.agent.task_rewrite_agent import TaskRewriteAgent
+from sagents.agent.query_suggest_agent import QuerySuggestAgent
+from sagents.agent.task_completion_judge_agent import TaskCompletionJudgeAgent
+from sagents.agent.workflow_select_agent import WorkflowSelectAgent
 from sagents.agent.task_stage_summary_agent import TaskStageSummaryAgent
 from sagents.agent.task_summary_agent import TaskSummaryAgent
-from sagents.agent.workflow_select_agent import WorkflowSelectAgent
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import (
-    SessionContext,
-    SessionStatus,
-    delete_session_context,
-    get_session_context,
-    init_session_context,
-    list_active_sessions,
-)
-from sagents.context.tasks.task_base import TaskStatus
-from sagents.tool.tool_manager import ToolManager
+from sagents.agent.task_planning_agent import TaskPlanningAgent
+from sagents.agent.task_obversation_agent import TaskObservationAgent
+from sagents.agent.task_executor_agent import TaskExecutorAgent
+from sagents.agent.task_decompose_agent import TaskDecomposeAgent
+from sagents.agent.task_analysis_agent import TaskAnalysisAgent
+from sagents.agent.simple_agent import SimpleAgent
+from sagents.agent.agent_base import AgentBase
 from sagents.tool.tool_proxy import ToolProxy
-from sagents.utils.logger import logger
-from sagents.utils.session_local import session_manager
+from sagents.tool.tool_manager import ToolManager
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator
+import time
+import traceback
+import uuid
+import os
+import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from sagents.agent.simple_agent_v2 import SimpleAgent
@@ -46,7 +39,7 @@ class SAgent:
     包括任务分析、规划、执行、观察和总结等阶段。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_root: str = None, max_model_len: int = 60000):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_root: Optional[str] = None):
         """
         初始化智能体控制器
 
@@ -62,8 +55,6 @@ class SAgent:
         self.system_prefix = system_prefix
         self.workspace = workspace
         self.memory_root = memory_root  # 如果为None则不使用本地记忆工具
-        self.max_model_len = max_model_len
-
         self._init_agents()
 
         logger.info("SAgent: 智能体控制器初始化完成")
@@ -80,47 +71,47 @@ class SAgent:
         #     self.model, self.model_config, system_prefix=self.system_prefix
         # )
         self.simple_agent = SimpleAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_analysis_agent = TaskAnalysisAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_decompose_agent = TaskDecomposeAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_executor_agent = TaskExecutorAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_observation_agent = TaskObservationAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_completion_judge_agent = TaskCompletionJudgeAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
 
         self.task_planning_agent = TaskPlanningAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_summary_agent = TaskSummaryAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_stage_summary_agent = TaskStageSummaryAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.workflow_select_agent = WorkflowSelectAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.query_suggest_agent = QuerySuggestAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_rewrite_agent = TaskRewriteAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.memory_extraction_agent = MemoryExtractionAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
         self.task_router_agent = TaskRouterAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix, max_model_len=self.max_model_len
+            self.model, self.model_config, system_prefix=self.system_prefix
         )
 
         logger.info("SAgent: 所有智能体初始化完成")
@@ -132,11 +123,16 @@ class SAgent:
                          user_id: Optional[str] = None,
                          deep_thinking: Optional[Union[bool, str]] = None,
                          max_loop_count: int = 10,
-                         multi_agent: bool = None,
+                         multi_agent: Optional[bool] = None,
                          more_suggest: bool = False,
                          force_summary: bool = False,
                          system_context: Optional[Dict[str, Any]] = None,
-                         available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
+                         available_workflows: Optional[Dict[str, Any]] = {},
+                         context_budget_config: Optional[Dict[str, Any]] = None) -> AsyncGenerator[List['MessageChunk'], None]:
+        # 统计耗时：首个非空 show_content 与完整执行总耗时
+        _start_time = time.time()
+        _first_show_time = None
+
         # 调用内部方法执行流式处理，对结果进行过滤
         async for message_chunks in self.run_stream_internal(
             input_messages=input_messages,
@@ -150,11 +146,30 @@ class SAgent:
             force_summary=force_summary,
             system_context=system_context,
             available_workflows=available_workflows,
+            context_budget_config=context_budget_config,
         ):
             # 过滤掉空消息块
             for message_chunk in message_chunks:
+                # 记录首个 show_content 不为空的耗时
+                if _first_show_time is None:
+                    try:
+                        sc = getattr(message_chunk, 'show_content', None)
+                        if sc and str(sc).strip():
+                            _first_show_time = time.time()
+                            _delta_ms = int((_first_show_time - _start_time) * 1000)
+                            logger.info(f"SAgent: 会话 {session_id} 首个可显示内容耗时 {_delta_ms} ms")
+                    except Exception as _e:
+                        logger.error(f"SAgent: 统计首个show_content耗时出错: {_e}\n{traceback.format_exc()}")
                 if message_chunk.content or message_chunk.show_content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
                     yield [message_chunk]
+
+        # 流结束后记录完整执行总耗时
+        try:
+            _end_time = time.time()
+            _total_ms = int((_end_time - _start_time) * 1000)
+            logger.info(f"SAgent: 会话 {session_id} 完整执行耗时 {_total_ms} ms")
+        except Exception as _e:
+            logger.error(f"SAgent: 统计总耗时出错: {_e}\n{traceback.format_exc()}")
 
     async def run_stream_internal(self,
                                   input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
@@ -163,11 +178,12 @@ class SAgent:
                                   user_id: Optional[str] = None,
                                   deep_thinking: Optional[Union[bool, str]] = None,
                                   max_loop_count: int = 10,
-                                  multi_agent: bool = None,
+                                  multi_agent: Optional[bool] = None,
                                   more_suggest: bool = False,
                                   force_summary: bool = False,
                                   system_context: Optional[Dict[str, Any]] = None,
-                                  available_workflows: Optional[Dict[str, Any]] = {}) -> Generator[List['MessageChunk'], None, None]:
+                                  available_workflows: Optional[Dict[str, Any]] = {},
+                                  context_budget_config: Optional[Dict[str, Any]] = None) -> AsyncGenerator[List['MessageChunk'], None]:
         """
         执行智能体任务的主流程
 
@@ -182,6 +198,12 @@ class SAgent:
             more_suggest: 是否开启更多建议
             system_context: 系统上下文
             available_workflows: 可用工作流列表
+            context_budget_config: 上下文预算管理器配置，包含以下键：
+                - max_model_len: 模型最大token长度
+                - history_ratio: 历史消息的比例（0-1之间），默认 0.2 (20%)
+                - active_ratio: 活跃消息的比例（0-1之间），默认 0.3 (30%)
+                - max_new_message_ratio: 新消息的比例（0-1之间），默认 0.5 (50%)
+                - recent_turns: 限制最近的对话轮数，0表示不限制，默认 0
 
         Yields:
             消息块列表
@@ -190,7 +212,13 @@ class SAgent:
             # 初始化会话
             # 初始化该session 的context 管理器
             session_id = session_id or str(uuid.uuid4())
-            session_context = init_session_context(session_id, user_id=user_id, workspace_root=self.workspace, memory_root=self.memory_root)
+            session_context = init_session_context(
+                session_id=session_id,
+                user_id=user_id or "",
+                workspace_root=self.workspace,
+                memory_root=self.memory_root or "",
+                context_budget_config=context_budget_config
+            )
             with session_manager.session_context(session_id):
                 logger.info(f"开始流式工作流，会话ID: {session_id}")
                 # 设置agent配置信息到SessionContext
@@ -199,13 +227,12 @@ class SAgent:
                     model_config=self.model_config,
                     system_prefix=self.system_prefix,
                     workspace=self.workspace,
-                    memory_root=self.memory_root,
-                    max_model_len=self.max_model_len,
+                    memory_root=self.memory_root or "",
                     available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
                     system_context=system_context or {},
                     available_workflows=available_workflows or {},
-                    deep_thinking=deep_thinking,
-                    multi_agent=multi_agent,
+                    deep_thinking=deep_thinking if isinstance(deep_thinking, bool) else False,
+                    multi_agent=multi_agent if isinstance(multi_agent, bool) else False,
                     more_suggest=more_suggest,
                     max_loop_count=max_loop_count
                 )
@@ -234,6 +261,9 @@ class SAgent:
                     if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
                         session_context.message_manager.add_messages(message)
                 logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                
+                # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
+                session_context.set_history_context()
 
                 # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite
                 # if session_context.message_manager.get_all_messages_content_length() > 30000:
@@ -393,7 +423,7 @@ class SAgent:
 
             # 清理会话，防止内存泄漏
             try:
-                delete_session_context(session_id)
+                delete_session_context(session_id or "")
                 logger.info(f"SAgent: 已清理会话 {session_id}")
             except Exception as cleanup_error:
                 logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
@@ -402,7 +432,7 @@ class SAgent:
                                             session_context: SessionContext,
                                             tool_manager: Optional[Any],
                                             session_id: str,
-                                            max_loop_count: int) -> Generator[List[MessageChunk], None, None]:
+                                            max_loop_count: int) -> AsyncGenerator[List[MessageChunk], None]:
         # 执行任务分解
         async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_decompose_agent, "任务分解"):
             yield chunk
@@ -506,7 +536,7 @@ class SAgent:
         logger.info(f"SAgent: 初始化消息数量: {len(input_messages)}")
         return input_messages
 
-    async def _handle_workflow_error(self, error: Exception) -> Generator[List[MessageChunk], None, None]:
+    async def _handle_workflow_error(self, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工作流执行错误
 
@@ -533,7 +563,7 @@ class SAgent:
 
         session_context_ = get_session_context(session_id)
         if session_context_:
-            return session_context_.status
+            return {"status": session_context_.status}
         return None
 
     def list_active_sessions(self) -> List[Dict[str, Any]]:

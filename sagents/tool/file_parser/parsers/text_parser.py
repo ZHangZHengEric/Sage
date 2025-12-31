@@ -3,12 +3,10 @@
 支持各种文本文件的解析和元数据获取
 """
 
-import re
 import traceback
-from typing import Any, Dict
-
 import chardet
-
+import re
+from typing import Dict, Any
 from .base_parser import BaseFileParser, ParseResult
 
 
@@ -108,7 +106,7 @@ class TextParser(BaseFileParser):
             with open(file_path, 'rb') as file:
                 raw_data = file.read(10000)  # 读取前10KB用于检测
                 result = chardet.detect(raw_data)
-                encoding = result.get('encoding', 'utf-8')
+                encoding = result.get('encoding') or 'utf-8'
                 confidence = result.get('confidence', 0)
                 
                 # 如果置信度太低，使用默认编码
@@ -133,7 +131,7 @@ class TextParser(BaseFileParser):
             Dict[str, Any]: 文本元数据
         """
         try:
-            metadata = {
+            metadata: Dict[str, Any] = {
                 "encoding": encoding,
                 "file_type": self._detect_file_type(file_path, text)
             }

@@ -3,7 +3,7 @@
 """
 任务分析Agent指令定义
 
-包含TaskAnalysisAgent使用的指令内容，支持中英文
+包含TaskAnalysisAgent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -12,7 +12,8 @@ AGENT_IDENTIFIER = "TaskAnalysisAgent"
 # 任务分析Agent指令 - 新结构：以prompt名称为第一级，语言为第二级
 task_analysis_system_prefix = {
     "zh": "你是一个任务分析智能体，代替其他的智能体，要以其他智能体的人称来输出，专门负责分析任务并将其分解为组件。请仔细理解用户最新的需求，帮其他的agent来分析任务，提供清晰、自然的分析过程。",
-    "en": "You are a task analysis agent, representing other agents, and should output in the persona of other agents. You specialize in analyzing user latest needs or tasks and decomposing them into components. Please carefully understand user latest needs, help other agents analyze tasks, and provide clear, natural analysis processes."
+    "en": "You are a task analysis agent, representing other agents, and should output in the persona of other agents. You specialize in analyzing user latest needs or tasks and decomposing them into components. Please carefully understand user latest needs, help other agents analyze tasks, and provide clear, natural analysis processes.",
+    "pt": "Você é um agente de análise de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você se especializa em analisar as necessidades ou tarefas mais recentes do usuário e decompô-las em componentes. Por favor, entenda cuidadosamente as necessidades mais recentes do usuário, ajude outros agentes a analisar tarefas e forneça processos de análise claros e naturais."
 }
 
 analysis_template = {
@@ -85,11 +86,47 @@ Finally, I will summarize the analysis results in clear, natural language, inclu
 Please express your analysis in complete paragraph form, as naturally and fluently as if you were explaining your thought process to a colleague. Do not use markdown list and titles; instead, use colloquial language to express your thought process.
 Output the analysis directly as if it were a thought process, without adding extra explanations or annotations, and without questioning or asking back to the user.
 Be as colloquial and detailed as possible. Do not mention the original names of tools or database/knowledge base IDs.
-Pay attention to language requirements. If required to answer in Chinese, the output analysis must also be in Chinese. If required to answer in English, the output analysis must also be in English."""
+Pay attention to language requirements. If required to answer in Chinese, the output analysis must also be in Chinese. If required to answer in English, the output analysis must also be in English.""",
+    "pt": """Por favor, analise cuidadosamente o seguinte diálogo e explique seu processo de pensamento em linguagem natural e fluente:
+Registro de Diálogo (Ordenado do Mais Antigo ao Mais Recente):
+{conversation}
+
+Descrição e Requisitos do Agente
+{agent_description}
+
+As seguintes ferramentas estão atualmente disponíveis:
+{available_tools}
+
+Por favor, analise de acordo com as seguintes etapas:
+Primeiro, preciso entender as necessidades centrais mais recentes do usuário a partir da perspectiva do usuário. Que informações-chave podem ser extraídas do diálogo? Qual é o objetivo real que o usuário deseja alcançar?
+
+Em seguida, vou analisar esta tarefa passo a passo. Especificamente, preciso considerar os seguintes aspectos:
+- Contexto e histórico da tarefa
+- Problemas específicos a serem resolvidos
+- Possíveis fontes de dados ou informações envolvidas
+- Possíveis caminhos de solução
+
+Durante o processo de análise, vou pensar sobre:
+- Quais informações são conhecidas e podem ser usadas diretamente
+- Quais informações precisam de verificação ou busca adicional
+- Possíveis limitações ou desafios
+- Qual é a estratégia de solução ideal
+
+Finalmente, vou resumir os resultados da análise em linguagem clara e natural, incluindo:
+- Explicação detalhada dos requisitos da tarefa
+- Etapas e métodos específicos de solução
+- Pontos-chave que precisam de atenção especial
+- Quaisquer possíveis soluções alternativas
+
+Por favor, expresse sua análise em forma de parágrafo completo, tão natural e fluentemente quanto se estivesse explicando seu processo de pensamento para um colega. Não use lista e títulos em markdown; em vez disso, use linguagem coloquial para expressar seu processo de pensamento.
+Produza a análise diretamente como se fosse um processo de pensamento, sem adicionar explicações ou anotações extras, e sem questionar ou perguntar de volta ao usuário.
+Seja o mais coloquial e detalhado possível. Não mencione os nomes originais das ferramentas ou IDs de banco de dados ou base de conhecimento.
+Preste atenção aos requisitos de idioma. Se for necessário responder em chinês, a análise de saída também deve estar em chinês. Se for necessário responder em inglês, a análise de saída também deve estar em inglês. Se for necessário responder em português, a análise de saída também deve estar em português."""
 }
 
 # 任务分析提示文本 - 用于显示给用户的分析开始提示
 task_analysis_prompt = {
     "zh": "任务分析：",
-    "en": "Task Analysis:"
+    "en": "Task Analysis:",
+    "pt": "Análise de Tarefa:"
 }

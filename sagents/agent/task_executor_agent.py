@@ -1,22 +1,20 @@
-import json
 import traceback
-import uuid
-from typing import Any, Dict, Generator, List, Optional
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_context import SessionContext, get_session_context
-from sagents.tool.tool_config import AgentToolSpec
-from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
-from sagents.utils.prompt_manager import PromptManager
-
 from .agent_base import AgentBase
+from typing import Any, Dict, List, Optional, AsyncGenerator, cast, Union
+from sagents.utils.logger import logger
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.session_context import SessionContext, get_session_context
+from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_config import AgentToolSpec
+from sagents.utils.prompt_manager import PromptManager
+import json
+import uuid
 
 
 class TaskExecutorAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
-        super().__init__(model, model_config, system_prefix, max_model_len)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+        super().__init__(model, model_config, system_prefix)
         self.TASK_EXECUTION_PROMPT_TEMPLATE = PromptManager().get_agent_prompt_auto('task_execution_template')
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('task_executor_system_prefix')
         self.agent_name = "TaskExecutorAgent"
@@ -25,7 +23,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 """
         logger.info("TaskExecutorAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取模板和系统前缀，使用正确的语言
         self.TASK_EXECUTION_PROMPT_TEMPLATE = PromptManager().get_agent_prompt_auto('task_execution_template', language=session_context.get_language())
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('task_executor_system_prefix', language=session_context.get_language())
@@ -37,11 +35,11 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 content=session_context.audit_status['task_rewrite'],
                 message_type=MessageType.NORMAL.value
             )]
-            messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=10, max_content_length=self.max_history_context_length)
+            messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=10)
             history_messages = rewrite_user + messages_after_last_user
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=10, max_length=self.max_history_context_length, last_turn_user_only=True)
-            messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=12, max_content_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=10, last_turn_user_only=True)
+            messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=12)
             history_messages.extend(messages_after_last_user)
 
         last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
@@ -58,19 +56,19 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             show_content=""
         )
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id)
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language())
         ]
         llm_request_message.extend(history_messages)
         llm_request_message.append(prompt_message_chunk)
         yield [prompt_message_chunk]
 
-        tools_json = self._prepare_tools(tool_manager, last_planning_message_dict)
+        tools_json = self._prepare_tools(tool_manager, last_planning_message_dict, session_context)
 
         async for chunk in self._call_llm_and_process_response(
             messages_input=llm_request_message,
             tools_json=tools_json,
             tool_manager=tool_manager,
-            session_id=session_id
+            session_id=session_id or ""
         ):
             yield chunk
 
@@ -79,7 +77,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                                              tools_json: List[Dict[str, Any]],
                                              tool_manager: Optional[ToolManager],
                                              session_id: str
-                                             ) -> Generator[List[MessageChunk], None, None]:
+                                             ) -> AsyncGenerator[List[MessageChunk], None]:
 
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(messages_input)
         logger.info(f"SimpleAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
@@ -90,16 +88,16 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             model_config_override['tools'] = tools_json
 
         response = self._call_llm_streaming(
-            messages=clean_message_input,
+            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,
             step_name="task_execution",
             model_config_override=model_config_override
         )
 
-        tool_calls = {}
+        tool_calls: Dict[str, Any] = {}
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
-        last_tool_call_id = None
+        last_tool_call_id: Optional[str] = None
 
         # 处理流式响应块
         async for chunk in response:
@@ -107,7 +105,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)
+                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
                 # 更新last_tool_call_id
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
@@ -152,7 +150,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             async for chunk in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
-                messages_input=messages_input,
+                messages_input=cast(List[Dict[str, Any]], messages_input),
                 session_id=session_id,
             ):
                 yield chunk
@@ -169,13 +167,15 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
     def _prepare_tools(self,
                        tool_manager: Optional[ToolManager],
-                       subtask_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+                       subtask_info: Dict[str, Any],
+                       session_context: SessionContext) -> List[Dict[str, Any]]:
         """
         准备工具列表
 
         Args:
             tool_manager: 工具管理器
             subtask_info: 子任务信息
+            session_context: 会话上下文
 
         Returns:
             List[Dict[str, Any]]: 工具配置列表
@@ -185,7 +185,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             return []
 
         # 获取所有工具
-        tools_json = tool_manager.get_openai_tools()
+        tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
         # 根据建议的工具进行过滤，同时移除掉complete_task 这个工具
         suggested_tools = subtask_info.get('required_tools', [])
@@ -237,9 +237,9 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],
-                                 tool_manager: Optional[Any],
+                                 tool_manager: Optional[ToolManager],
                                  messages_input: List[Dict[str, Any]],
-                                 session_id: str) -> Generator[tuple[List[MessageChunk], bool], None, None]:
+                                 session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具调用
 
@@ -316,8 +316,14 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             if isinstance(function_params, str):
                 try:
                     function_params = json.loads(function_params)
-                except Exception:
-                    logger.error("TaskExecutorAgent: 参数解析失败，无法进行再次解析")
+                except json.JSONDecodeError:
+                    try:
+                        function_params = eval(function_params)
+                    except Exception:
+                        logger.error("TaskExecutorAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
+                        logger.error(f"TaskExecutorAgent: 原始参数: {tool_call['function']['arguments']}")
+                        logger.error(f"TaskExecutorAgent: 工具参数格式错误: {function_params}")
+                        logger.error(f"TaskExecutorAgent: 工具参数类型: {type(function_params)}")
 
             if isinstance(function_params, dict):
                 tool_call['function']['arguments'] = json.dumps(function_params, ensure_ascii=False)
@@ -358,9 +364,9 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
     async def _execute_tool(self,
                             tool_call: Dict[str, Any],
-                            tool_manager: Optional[Any],
+                            tool_manager: Optional[ToolManager],
                             messages_input: List[Dict[str, Any]],
-                            session_id: str) -> Generator[List[MessageChunk], None, None]:
+                            session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行工具
 
@@ -381,12 +387,14 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 arguments = json.loads(tool_call['function']['arguments'])
             else:
                 arguments = {}
-            # 如果参数不是字典，说明参数解析失败
             if not isinstance(arguments, dict):
-                async for chunk in self._handle_tool_error(tool_call['id'], tool_name, "工具参数格式错误"):
+                async for chunk in self._handle_tool_error(tool_call['id'], tool_name, Exception("工具参数格式错误")):
                     yield chunk
                 return
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
+            if not tool_manager:
+                raise ValueError("Tool manager is not provided")
+
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=get_session_context(session_id),
@@ -455,7 +463,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
                 yield chunk
 
-    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> Generator[List[MessageChunk], None, None]:
+    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具执行错误
 
@@ -472,7 +480,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         error_chunk = MessageChunk(
             role='tool',
-            content=error_message,
+            content=json.dumps({"error": error_message}, ensure_ascii=False),
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.TOOL_CALL_RESULT.value,
@@ -481,7 +489,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         yield [error_chunk]
 
-    def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
+    def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[MessageChunk]:
         """
         处理工具执行响应
 
@@ -490,7 +498,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             tool_call_id: 工具调用ID
 
         Returns:
-            List[Dict[str, Any]]: 处理后的结果消息
+            List[MessageChunk]: 处理后的结果消息
         """
         logger.debug(f"TaskExecutorAgent: 处理工具响应，工具调用ID: {tool_call_id}")
 

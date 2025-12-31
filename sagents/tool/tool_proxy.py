@@ -1,10 +1,7 @@
-from typing import Any, Dict, List, Optional
-
-from sagents.context.session_context import SessionContext
-from sagents.utils.logger import logger
-
+from typing import List, Dict, Any, Optional
 from .tool_manager import ToolManager
-
+from sagents.utils.logger import logger
+from sagents.context.session_context import SessionContext
 
 class ToolProxy:
     """
@@ -22,12 +19,7 @@ class ToolProxy:
             tool_manager: 全局工具管理器实例
             available_tools: 可用工具名称列表
         """
-        if not available_tools:
-            available_tools = []
-        # 初始化工具管理器引用
         self.tool_manager = tool_manager
-        
-        # 过滤出存在的工具
         self._available_tools = set(available_tools)
         
         # 验证工具是否存在
@@ -52,39 +44,39 @@ class ToolProxy:
     
     # ToolManager 兼容接口
     
-    def get_openai_tools(self) -> List[Dict[str, Any]]:
+    def get_openai_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
-        获取 OpenAI 格式的工具规范（仅限可用工具）
+        获取 OpenAI 格式的工具规范（仅限可用工具），支持语言筛选
         """
-        all_tools = self.tool_manager.get_openai_tools()
+        all_tools = self.tool_manager.get_openai_tools(lang=lang, fallback_chain=fallback_chain)
         return [tool for tool in all_tools if tool['function']['name'] in self._available_tools]
     
-    def list_tools_simplified(self) -> List[Dict[str, Any]]:
+    def list_tools_simplified(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
-        获取简化的工具列表（仅限可用工具）
+        获取简化的工具列表（仅限可用工具），支持语言筛选
         """
-        all_tools = self.tool_manager.list_tools_simplified()
+        all_tools = self.tool_manager.list_tools_simplified(lang=lang, fallback_chain=fallback_chain)
         return [tool for tool in all_tools if tool['name'] in self._available_tools]
     
-    def list_tools(self) -> List[Dict[str, Any]]:
+    def list_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
-        获取详细的工具列表（仅限可用工具）
+        获取详细的工具列表（仅限可用工具），支持语言筛选
         """
-        all_tools = self.tool_manager.list_tools()
+        all_tools = self.tool_manager.list_tools(lang=lang, fallback_chain=fallback_chain)
         return [tool for tool in all_tools if tool['name'] in self._available_tools]
     
-    def list_all_tools_name(self) -> List[str]:
+    def list_all_tools_name(self, lang: Optional[str] = None) -> List[str]:
         """
-        获取所有工具名称（包括不可用工具）
+        获取所有工具名称（包括不可用工具），接受语言参数以保持接口一致性
         """
-        all_tools_name =  self.tool_manager.list_all_tools_name()
+        all_tools_name =  self.tool_manager.list_all_tools_name(lang=lang)
         return [tool_name for tool_name in all_tools_name if tool_name in self._available_tools]
     
-    def list_tools_with_type(self) -> List[Dict[str, Any]]:
+    def list_tools_with_type(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
-        获取带类型的工具列表（仅限可用工具）
+        获取带类型的工具列表（仅限可用工具），支持语言筛选
         """
-        all_tools = self.tool_manager.list_tools_with_type()
+        all_tools = self.tool_manager.list_tools_with_type(lang=lang, fallback_chain=fallback_chain)
         return [tool for tool in all_tools if tool['name'] in self._available_tools]
     
     def get_tool(self, name: str) -> Optional[Any]:

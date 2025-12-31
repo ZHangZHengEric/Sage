@@ -1,9 +1,8 @@
 import json
 from string import Template
 
-from ..logger import logger
 from .base_agent_processor import BaseAgentProcessor
-
+from ..logger import logger
 
 class AgentScoreEvaluator(BaseAgentProcessor):
     def __init__(
@@ -37,7 +36,6 @@ class AgentScoreEvaluator(BaseAgentProcessor):
 
   输入包含：
   - `Agent_config`: Agent配置，包含system，调用工具范围，设置固定要求，工作流等信息；
-  - `user_messages`: 用户提出的问题；
   - `agent_result`: Agent 执行后的结果，包括其思考过程、工具调用记录及最终回复；
   - `evaluation_checkpoints`: 一系列评估检查点（CP1, CP2, ...），每个包含：
     - `checkpoint_id`: 检查点编号；
@@ -95,15 +93,19 @@ class AgentScoreEvaluator(BaseAgentProcessor):
         ]
 
         response = await self.call_qianxun(messages, model_name=model_name)
-        response = self.parse_json_response(response)
-        if isinstance(response, (dict, list)):
-            response = {"evaluation_result": response}
-            response = json.dumps(response, ensure_ascii=False)
-        elif isinstance(response, str):
-            response = response
-        logger.info("evaluation response: " + response)
-
-        return response
+        parsed_response = self.parse_json_response(response)
+        
+        final_result_str = ""
+        if isinstance(parsed_response, (dict, list)):
+            final_response = {"evaluation_result": parsed_response}
+            final_result_str = json.dumps(final_response, ensure_ascii=False)
+        elif isinstance(parsed_response, str):
+            final_result_str = parsed_response
+        else:
+            final_result_str = str(parsed_response)
+            
+        logger.info("evaluation response: " + final_result_str)
+        return final_result_str
 
 
 

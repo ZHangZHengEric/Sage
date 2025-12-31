@@ -1,18 +1,16 @@
-import json
 import traceback
+from sagents.context.messages.message_manager import MessageManager
+from .agent_base import AgentBase
+from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
+from sagents.utils.logger import logger
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.session_context import SessionContext, get_session_context
+from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_config import AgentToolSpec
+from sagents.utils.prompt_manager import PromptManager
+import json
 import uuid
 from copy import deepcopy
-from typing import Any, Dict, Generator, List, Optional
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_context import SessionContext, get_session_context
-from sagents.tool.tool_config import AgentToolSpec
-from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
-from sagents.utils.prompt_manager import PromptManager
-
-from .agent_base import AgentBase
 
 
 class SimpleAgent(AgentBase):
@@ -23,8 +21,8 @@ class SimpleAgent(AgentBase):
     适用于不需要推理或早期处理的任务。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
-        super().__init__(model, model_config, system_prefix, max_model_len)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+        super().__init__(model, model_config, system_prefix)
 
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix')
         # 最大循环次数常量
@@ -34,8 +32,8 @@ class SimpleAgent(AgentBase):
         logger.info(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
 
     async def run_stream(self, session_context: SessionContext,
-                         tool_manager: Optional[Any] = None,
-                         session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+                         tool_manager: Optional[ToolManager] = None,
+                         session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         logger.info(f"SimpleAgent: 开始流式直接执行，会话ID: {session_id}")
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
@@ -44,48 +42,52 @@ class SimpleAgent(AgentBase):
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
-        logger.info(f"SimpleAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(message_manager.messages)}")
-        history_messages = message_manager.extract_all_context_messages(recent_turns=4, max_length=self.max_history_context_length, last_turn_user_only=False)
-        logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}，历史消息的content长度：{MessageManager.calculate_messages_token_length(history_messages)}')
+        logger.info(f"SimpleAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], message_manager.messages))}")
+        history_messages = message_manager.extract_all_context_messages(recent_turns=20, last_turn_user_only=False)
+        logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}，历史消息的content长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages))}')
         # 获取后续可能使用到的工具建议
-        suggested_tools = await self._get_suggested_tools(history_messages, tool_manager, session_id, session_context)
+        if tool_manager:
+            suggested_tools = await self._get_suggested_tools(history_messages, tool_manager, session_id or "", session_context)
+        else:
+            suggested_tools = []
         # 准备工具列表
-        tools_json = self._prepare_tools(tool_manager, suggested_tools)
+        tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
         # 将system 加入到到messages中
-        system_message = self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix)
+        system_message = self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix, language=session_context.get_language())
         history_messages.insert(0, system_message)
         async for chunk in self._execute_loop(
             messages_input=history_messages,
             tools_json=tools_json,
             tool_manager=tool_manager,
-            session_id=session_id,
+            session_id=session_id or "",
             session_context=session_context
         ):
             yield chunk
 
     def _prepare_tools(self,
                        tool_manager: Optional[Any],
-                       suggested_tools: List[str]) -> List[Dict[str, Any]]:
+                       suggested_tools: List[str],
+                       session_context: SessionContext) -> List[Dict[str, Any]]:
         """
         准备工具列表
 
         Args:
             tool_manager: 工具管理器
             suggested_tools: 建议工具列表
+            session_context: 会话上下文
 
         Returns:
             List[Dict[str, Any]]: 工具配置列表
         """
         logger.debug("SimpleAgent: 准备工具列表")
 
-        if not tool_manager:
-            logger.warning("SimpleAgent: 未提供工具管理器")
+        if not tool_manager or not suggested_tools:
+            logger.warning("SimpleAgent: 未提供工具管理器或建议工具")
             return []
-        if not suggested_tools:
-            logger.info("SimpleAgent: 未提供建议工具")
-            return []
+
         # 获取所有工具
-        tools_json = tool_manager.get_openai_tools()
+        # tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=[ session_context.get_language().split('-')[0] if '-' in session_context.get_language() else "en", "en"])
+        tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
         # 根据建议过滤工具
         tools_suggest_json = [
@@ -129,7 +131,7 @@ class SimpleAgent(AgentBase):
         messages_input = [{'role': 'user', 'content': prompt}]
         # 使用基类的流式调用方法，自动处理LLM request日志
         response = self._call_llm_streaming(
-            messages=messages_input,
+            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             session_id=session_id,
             step_name="task_complete_judge"
         )
@@ -189,7 +191,7 @@ class SimpleAgent(AgentBase):
             prompt = tool_suggestion_template.format(
                 session_id=session_id,
                 available_tools_str=available_tools_str,
-                agent_config=self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix).content,
+                agent_config=self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix, language=session_context.get_language()).content,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
 
@@ -247,9 +249,9 @@ class SimpleAgent(AgentBase):
     async def _execute_loop(self,
                             messages_input: List[MessageChunk],
                             tools_json: List[Dict[str, Any]],
-                            tool_manager: Optional[Any],
+                            tool_manager: Optional[ToolManager],
                             session_id: str,
-                            session_context: SessionContext) -> Generator[List[MessageChunk], None, None]:
+                            session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行主循环
 
@@ -263,7 +265,7 @@ class SimpleAgent(AgentBase):
             List[MessageChunk]: 执行结果消息块
         """
 
-        all_new_response_chunks = []
+        all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
         max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
@@ -278,7 +280,10 @@ class SimpleAgent(AgentBase):
                 break
 
             # 合并消息
-            messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks, messages_input)
+            messages_input = MessageManager.merge_new_messages_to_old_messages(
+                cast(List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks),
+                cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
+            )
             all_new_response_chunks = []
 
             # 调用LLM
@@ -305,10 +310,13 @@ class SimpleAgent(AgentBase):
                 logger.info("SimpleAgent: 检测到停止条件，终止执行")
                 break
 
-            messages_input = MessageManager.merge_new_messages_to_old_messages(all_new_response_chunks, messages_input)
+            messages_input = MessageManager.merge_new_messages_to_old_messages(
+                cast(List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks),
+                cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
+            )
             all_new_response_chunks = []
 
-            if MessageManager.calculate_messages_token_length(messages_input) > self.max_model_input_len:
+            if MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)) > self.max_model_input_len:
                 logger.warning(f"SimpleAgent: 消息长度超过 {self.max_model_input_len}，截断消息")
                 # 任务暂停，返回一个超长的错误消息块
                 yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？", type=MessageType.ERROR.value)]
@@ -322,9 +330,9 @@ class SimpleAgent(AgentBase):
     async def _call_llm_and_process_response(self,
                                              messages_input: List[MessageChunk],
                                              tools_json: List[Dict[str, Any]],
-                                             tool_manager: Optional[Any],
+                                             tool_manager: Optional[ToolManager],
                                              session_id: str
-                                             ) -> Generator[tuple[List[MessageChunk], bool], None, None]:
+                                             ) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
 
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(messages_input)
         logger.info(f"SimpleAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
@@ -335,13 +343,13 @@ class SimpleAgent(AgentBase):
             model_config_override['tools'] = tools_json
 
         response = self._call_llm_streaming(
-            messages=clean_message_input,
+            messages=cast(List[Union[MessageChunk, Dict[str, Any]]], clean_message_input),
             session_id=session_id,
             step_name="direct_execution",
             model_config_override=model_config_override
         )
 
-        tool_calls = {}
+        tool_calls: Dict[str, Any] = {}
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
@@ -349,10 +357,16 @@ class SimpleAgent(AgentBase):
         # 处理流式响应块
         async for chunk in response:
             # print(chunk)
+            if chunk is None:
+                logger.warning(f"Received None chunk from LLM response, skipping... chunk: {chunk}")
+                continue
+            if chunk.choices is None:
+                logger.warning(f"Received chunk with None choices from LLM response, skipping... chunk: {chunk}")
+                continue
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id)
+                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
                 # 更新last_tool_call_id
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
@@ -399,7 +413,7 @@ class SimpleAgent(AgentBase):
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
-                session_id=session_id
+                session_id=session_id or ""
             ):
                 yield chunk
 
@@ -449,9 +463,9 @@ class SimpleAgent(AgentBase):
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],
-                                 tool_manager: Optional[Any],
-                                 messages_input: List[Dict[str, Any]],
-                                 session_id: str) -> Generator[tuple[List[MessageChunk], bool], None, None]:
+                                 tool_manager: Optional[ToolManager],
+                                 messages_input: List[MessageChunk],
+                                 session_id: str) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
         """
         处理工具调用
 
@@ -564,9 +578,9 @@ class SimpleAgent(AgentBase):
 
     async def _execute_tool(self,
                             tool_call: Dict[str, Any],
-                            tool_manager: Optional[Any],
-                            messages_input: List[Dict[str, Any]],
-                            session_id: str) -> Generator[List[MessageChunk], None, None]:
+                            tool_manager: Optional[ToolManager],
+                            messages_input: List[MessageChunk],
+                            session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行工具
 
@@ -586,6 +600,10 @@ class SimpleAgent(AgentBase):
                 arguments = json.loads(tool_call['function']['arguments'])
             else:
                 arguments = {}
+
+            if tool_manager is None:
+                raise ValueError("Tool manager is not provided")
+
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=get_session_context(session_id),
@@ -653,7 +671,7 @@ class SimpleAgent(AgentBase):
             async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
                 yield chunk
 
-    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> Generator[List[MessageChunk], None, None]:
+    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具执行错误
 
@@ -670,7 +688,7 @@ class SimpleAgent(AgentBase):
 
         error_chunk = MessageChunk(
             role='tool',
-            content=error_message,
+            content=json.dumps({"error": error_message}, ensure_ascii=False),
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.TOOL_CALL_RESULT.value,
@@ -679,7 +697,7 @@ class SimpleAgent(AgentBase):
 
         yield [error_chunk]
 
-    async def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[Dict[str, Any]]:
+    async def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[MessageChunk]:
         """
         处理工具执行响应
 
@@ -688,7 +706,7 @@ class SimpleAgent(AgentBase):
             tool_call_id: 工具调用ID
 
         Returns:
-            List[Dict[str, Any]]: 处理后的结果消息
+            List[MessageChunk]: 处理后的结果消息
         """
         logger.debug(f"DirectExecutorAgent: 处理工具响应，工具调用ID: {tool_call_id}")
 
@@ -738,7 +756,7 @@ class SimpleAgent(AgentBase):
                 show_content="工具调用失败\n\n"
             )]
 
-    def _should_stop_execution(self, all_new_response_chunks: List[Dict[str, Any]]) -> bool:
+    def _should_stop_execution(self, all_new_response_chunks: List[MessageChunk]) -> bool:
         """
         判断是否应该停止执行
 

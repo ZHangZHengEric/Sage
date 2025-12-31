@@ -1,23 +1,19 @@
+import os
 import hashlib
 import mimetypes
-import os
-import platform
-import re
 import time
-import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-
-import chardet
-import pandas as pd
+import urllib.parse
 import requests
-
-from sagents.utils.logger import logger
+import platform
+import re
+import chardet
+from typing import Dict, Any, Optional, List
 
 from .tool_base import ToolBase
-
-
+from sagents.utils.logger import logger
+import pandas as pd
 class FileSystemError(Exception):
     """文件系统异常"""
     pass
@@ -124,7 +120,7 @@ class FileMetadata:
             with open(file_path, 'rb') as f:
                 raw_data = f.read(10000)
                 result = chardet.detect(raw_data)
-                return result.get('encoding', 'utf-8')
+                return result.get('encoding') or 'utf-8'
         except Exception:
             return 'utf-8'
 
@@ -137,7 +133,20 @@ class FileSystemTool(ToolBase):
         self.default_upload_url = "http://36.133.44.114:20034/askonce/api/v1/doc/upload"
         self.default_headers = {"User-Source": 'AskOnce_bakend'}
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "读取文本文件指定行范围内容",
+            "en": "Read text file within a line range",
+            "pt": "Lê conteúdo do arquivo em intervalo de linhas"
+        },
+        param_description_i18n={
+            "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
+            "start_line": {"zh": "开始行号，默认0", "en": "Start line number, default 0", "pt": "Linha inicial, padrão 0"},
+            "end_line": {"zh": "结束行号（不包含）", "en": "End line number (exclusive)", "pt": "Linha final (exclusiva)"},
+            "encoding": {"zh": "文件编码，auto自动检测", "en": "File encoding, 'auto' for detection", "pt": "Codificação, 'auto' para detectar"},
+            "max_size_mb": {"zh": "最大读取文件大小（MB）", "en": "Maximum file size to read (MB)", "pt": "Tamanho máximo do arquivo para leitura (MB)"}
+        }
+    )
     def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 20, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
         """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
@@ -230,7 +239,19 @@ class FileSystemTool(ToolBase):
             logger.error(f"💥 读取文件异常 [{operation_id}] - 错误: {str(e)}")
             return {"status": "error", "message": f"读取文件失败: {str(e)}"}
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "按模式写入文本到文件",
+            "en": "Write text to file with mode",
+            "pt": "Grava texto no arquivo com modo"
+        },
+        param_description_i18n={
+            "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
+            "content": {"zh": "要写入的文本内容", "en": "Text content to write", "pt": "Conteúdo de texto a gravar"},
+            "mode": {"zh": "写入模式 overwrite/append/prepend", "en": "Write mode overwrite/append/prepend", "pt": "Modo de gravação overwrite/append/prepend"},
+            "encoding": {"zh": "文件编码", "en": "File encoding", "pt": "Codificação do arquivo"}
+        }
+    )
     def file_write(self, file_path: str, content: str, mode: str = "overwrite", 
                    encoding: str = "utf-8") -> Dict[str, Any]:
         """智能文件写入工具
@@ -290,7 +311,7 @@ class FileSystemTool(ToolBase):
             # 获取文件信息
             file_info = FileMetadata.get_file_info(file_path)
             
-            result = {
+            result: Dict[str, Any] = {
                 "status": "success",
                 "message": f"文件写入成功 ({mode}模式)",
                 "file_info": {
@@ -406,7 +427,18 @@ class FileSystemTool(ToolBase):
     #         logger.error(f"💥 上传异常 [{operation_id}] - 错误: {str(e)}")
     #         return {"status": "error", "message": f"上传失败: {str(e)}"}
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "按关键词检索文件并返回上下文",
+            "en": "Search file by keywords and return context",
+            "pt": "Pesquisa por palavras-chave e retorna contexto"
+        },
+        param_description_i18n={
+            "file_path": {"zh": "要搜索的文件路径", "en": "File path to search", "pt": "Caminho do arquivo para buscar"},
+            "keywords": {"zh": "关键词列表", "en": "List of keywords", "pt": "Lista de palavras-chave"},
+            "return_search_item": {"zh": "返回的匹配条目数量", "en": "Number of matched items to return", "pt": "Quantidade de resultados retornados"}
+        }
+    )
     def search_content_in_file(self, file_path: str, keywords:list[str],return_search_item=5) -> Dict[str, Any]:
         
         """在文件中通过关键词匹配，搜索相关的内容的上下文内容
@@ -459,7 +491,7 @@ class FileSystemTool(ToolBase):
             all_positions.sort()
             
             # 合并相近的匹配位置，避免重复的上下文
-            merged_results = []
+            merged_results: List[Dict[str, Any]] = []
             for pos, keyword in all_positions:
                 # 计算上下文范围
                 start_char = max(0, pos - context_size // 2)
@@ -521,7 +553,17 @@ class FileSystemTool(ToolBase):
             }
 
     
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "从URL下载文件到目录",
+            "en": "Download file from URL to directory",
+            "pt": "Baixa arquivo da URL para diretório"
+        },
+        param_description_i18n={
+            "url": {"zh": "要下载的文件URL", "en": "File URL to download", "pt": "URL do arquivo para download"},
+            "working_dir": {"zh": "保存文件的目录", "en": "Directory to save the file", "pt": "Diretório para salvar o arquivo"}
+        }
+    )
     def download_file_from_url(self, url: str, working_dir: str) -> Dict[str, Any]:
         """从URL下载文件并保存到指定目录
 
@@ -608,7 +650,20 @@ class FileSystemTool(ToolBase):
             logger.error(f"💥 下载异常 [{operation_id}] - 错误: {str(e)}")
             return {"status": "error", "message": f"下载失败: {str(e)}"}
 
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "在文件中搜索并替换文本",
+            "en": "Search and replace text in file",
+            "pt": "Busca e substitui texto no arquivo"
+        },
+        param_description_i18n={
+            "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
+            "search_pattern": {"zh": "要搜索的模式或文本", "en": "Pattern or text to search", "pt": "Padrão ou texto a buscar"},
+            "replacement": {"zh": "替换文本", "en": "Replacement text", "pt": "Texto de substituição"},
+            "use_regex": {"zh": "是否使用正则表达式", "en": "Use regular expression", "pt": "Usar expressão regular"},
+            "case_sensitive": {"zh": "是否区分大小写", "en": "Case sensitive", "pt": "Diferenciar maiúsculas/minúsculas"}
+        }
+    )
     def update_file(self, file_path: str, search_pattern: str, replacement: str, 
                           use_regex: bool = False, case_sensitive: bool = True) -> Dict[str, Any]:
         """更新文件中匹配的文本内容
@@ -675,7 +730,17 @@ class FileSystemTool(ToolBase):
         except Exception as e:
             return {"status": "error", "message": f"搜索替换失败: {str(e)}"} 
     
-    @ToolBase.tool()
+    @ToolBase.tool(
+        description_i18n={
+            "zh": "将CSV转换为Excel",
+            "en": "Convert CSV to Excel",
+            "pt": "Converte CSV para Excel"
+        },
+        param_description_i18n={
+            "csv_file_path": {"zh": "输入CSV文件路径", "en": "Input CSV file path", "pt": "Caminho do arquivo CSV de entrada"},
+            "excel_file_path": {"zh": "输出Excel文件路径", "en": "Output Excel file path", "pt": "Caminho do arquivo Excel de saída"}
+        }
+    )
     def convert_csv_to_excel(self, csv_file_path: str, excel_file_path: str) -> Dict[str, Any]:
         """将CSV文件转换为Excel文件
 

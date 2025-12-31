@@ -3,12 +3,12 @@
 定义统一的解析接口和返回结构
 """
 
-import mimetypes
-import os
 from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+import os
+import mimetypes
 from datetime import datetime
-from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -24,10 +24,10 @@ class BaseFileParser(ABC):
     """基础文件解析器抽象类"""
     
     # 支持的文件扩展名
-    SUPPORTED_EXTENSIONS = []
+    SUPPORTED_EXTENSIONS: List[str] = []
     
     # 支持的MIME类型
-    SUPPORTED_MIME_TYPES = []
+    SUPPORTED_MIME_TYPES: List[str] = []
     
     def __init__(self):
         """初始化解析器"""

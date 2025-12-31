@@ -1,18 +1,19 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
-import datetime
-import json
-import os
-import threading
 import time
+import threading
+from typing import Dict, Any, Optional, List
 from enum import Enum
-from typing import Any, Dict, List
-
-import pytz
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
+from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
+from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
 from sagents.utils.logger import logger
+import json
+import os
+import datetime
+import pytz
 
 
 class SessionStatus(Enum):
@@ -25,11 +26,13 @@ class SessionStatus(Enum):
 
 
 class SessionContext:
-    def __init__(self, session_id: str, user_id: str = None, workspace_root: str = None, memory_root: str = None):
+    def __init__(self, session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, memory_root: Optional[str] = None,
+                 context_budget_config: Optional[Dict[str, Any]] = None):
         self.session_id = session_id
         self.user_id = user_id
-        self.llm_requests_logs = []           # 大模型的请求记录
+        self.llm_requests_logs: List[Dict[str, Any]] = []           # 大模型的请求记录
         self.workspace_root = workspace_root  # agent 的工作空间
+        self.memory_root: Optional[str] = None
 
         # 根据传入的memory_root参数设置环境变量
         if memory_root is not None:
@@ -45,22 +48,22 @@ class SessionContext:
             # 如果传入None，则移除环境变量（禁用本地记忆）
             os.environ.pop('MEMORY_ROOT_PATH', None)
             self.memory_root = None
-
+            
         self.session_workspace = None      # agent 该会话的工作空间，保存日志等信息
         self.agent_workspace = None         # agent 该会话的工作空间，保存执行过程中产生的内容
         self.thread_id = threading.get_ident()
         self.start_time = time.time()
         self.end_time = None
         self.status = SessionStatus.IDLE
-        self.system_context = {}       # 当前系统的环境变量
-        self.message_manager = MessageManager()
+        self.system_context: Dict[str, Any] = {}       # 当前系统的环境变量
+        self.message_manager = MessageManager(context_budget_config=context_budget_config)
         from sagents.context.tasks.task_manager import TaskManager
         self.task_manager = TaskManager(session_id=self.session_id)
         self.workflow_manager = WorkflowManager()  # 工作流管理器
-        self.audit_status = {}  # 主要存储 agent 执行过程中保存的结构化信息
-
+        self.audit_status: Dict[str, Any] = {}  # 主要存储 agent 执行过程中保存的结构化信息
+        self.session_memory_manager = SessionMemoryManager()
         # Agent配置信息存储
-        self.agent_config = {}  # 存储agent的配置信息，包括模型配置、系统前缀等
+        self.agent_config: Dict[str, Any] = {}  # 存储agent的配置信息，包括模型配置、系统前缀等
 
         # 初始化UserMemoryManager
         self.user_memory_manager = None
@@ -115,6 +118,8 @@ class SessionContext:
                     self.message_manager.add_messages(MessageChunk(**message_item))
                 logger.info(f"已经成功加载{len(messages)}条历史消息")
 
+        # 移除会话状态机初始化（按需解耦 SessionStateMachine）
+
     def init_user_memory_manager(self, tool_manager=None):
         """初始化用户记忆管理器
 
@@ -143,11 +148,11 @@ class SessionContext:
                 logger.error(f"SessionContext: 初始化UserMemoryManager失败: {e}")
                 self.user_memory_manager = None
 
-    def set_agent_config(self, model: str = None, model_config: dict = None, system_prefix: str = None,
-                         workspace: str = None, memory_root: str = None, max_model_len: int = None,
-                         available_tools: list = None, system_context: dict = None,
-                         available_workflows: dict = None, deep_thinking: bool = None,
-                         multi_agent: bool = None, more_suggest: bool = False,
+    def set_agent_config(self, model: Optional[str] = None, model_config: Optional[dict] = None, system_prefix: Optional[str] = None,
+                         workspace: Optional[str] = None, memory_root: Optional[str] = None,
+                         available_tools: Optional[list] = None, system_context: Optional[dict] = None,
+                         available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
+                         multi_agent: Optional[bool] = None, more_suggest: bool = False,
                          max_loop_count: int = 10, **kwargs):
         """设置agent配置信息
 
@@ -157,7 +162,6 @@ class SessionContext:
             system_prefix: 系统前缀
             workspace: 工作空间路径
             memory_root: 记忆根目录
-            max_model_len: 最大模型长度
             available_tools: 可用工具列表
             system_context: 系统上下文
             available_workflows: 可用工作流
@@ -256,6 +260,20 @@ class SessionContext:
             logger.error(f"获取系统级记忆摘要失败: {e}")
             return ""
 
+
+    def match_language(self, response_language: str) -> str:
+        """根据 response_language 匹配语言"""
+        _LANGUAGE_ALIAS_MAP = {
+            'zh': ['zh', 'zh-CN'],
+            'en': ['en', 'en-US'],
+            'pt': ['pt', 'pt-BR'],
+        }
+        for canonical_lang, aliases in _LANGUAGE_ALIAS_MAP.items():
+            for alias in aliases:
+                if alias in response_language:
+                    return canonical_lang
+        return 'zh'
+
     def get_language(self) -> str:
         """获取当前会话的语言设置
 
@@ -265,8 +283,9 @@ class SessionContext:
         Returns:
             str: 'zh' 或 'en'
         """
-        response_language = self.system_context.get('response_language', 'zh-CN(简体中文)')
-        return 'zh' if 'zh' in response_language or '中文' in response_language else 'en'
+        response_language = self.system_context.get('response_language')
+        # return 'zh' if 'zh' in response_language or '中文' in response_language else 'en'
+        return self.match_language(str(response_language or 'zh'))
 
     # 注意：自动记忆提取功能已迁移到sagents层面
     # 现在由sagents直接调用MemoryExtractionAgent来处理记忆提取和更新
@@ -283,6 +302,7 @@ class SessionContext:
             "response": response,
             "timestamp": time.time(),
         })
+
 
     def get_tokens_usage_info(self):
         """获取tokens使用信息"""
@@ -366,6 +386,8 @@ class SessionContext:
                 "session_workspace": self.session_workspace,
                 "agent_workspace": self.agent_workspace,
                 "tokens_usage_info": self.get_tokens_usage_info(),
+                "audit_status": self.audit_status,
+                # 已移除 SessionStateMachine 相关持久化
             }, f, ensure_ascii=False, indent=4)
 
         # 保存agent配置文件
@@ -407,13 +429,76 @@ class SessionContext:
             except (TypeError, ValueError):
                 # 不可序列化的值，转换为字符串
                 return str(obj)
+    
+    def _serialize_messages_for_context(self, messages: List[MessageChunk]) -> str:
+        """序列化消息列表为系统上下文格式的字符串（私有方法）"""
+        # 获取当前语言设置
+        language = self.get_language()
+        
+        # 从PromptManager获取多语言文本
+        explanation = prompt_manager.get_prompt(
+            "history_messages_explanation",
+            agent="SessionContext",
+            language=language,
+            default=(
+                "以下是检索到的相关历史对话上下文，这些消息与当前查询相关，"
+                "可以帮助你更好地理解对话背景和用户意图。请参考这些历史消息来提供更准确和连贯的回答。\n"
+                "=== 相关历史对话上下文 ===\n"
+            )
+        )
+        
+        # 获取消息格式模板
+        message_format_template = prompt_manager.get_prompt(
+            "history_message_format",
+            agent="SessionContext",
+            language=language,
+            default="[Memory {index}] ({time}): {content}"
+        )
+        
+        messages_str_list = []
+        for idx, msg in enumerate(messages):
+            content = msg.get_content()
+            utc_time = datetime.datetime.fromtimestamp(msg.timestamp, tz=datetime.timezone.utc)
+            local_time = utc_time.astimezone()
+            time_str = local_time.strftime('%Y-%m-%d %H:%M:%S %z')
+            messages_str_list.append(message_format_template.format(index=idx + 1, time=time_str, content=content))
+        
+        messages_content = "\n".join(messages_str_list)
+        return explanation + messages_content
+    
+    def set_history_context(self) -> None:
+        """准备并设置历史上下文到 system_context
+
+        完整流程：计算预算 -> 切分消息 -> 设置索引 -> BM25重排序 -> 序列化 -> 保存到system_context
+        
+        这是 SessionContext 的职责：协调消息检索和上下文保存。
+        """
+        # 1. 准备历史上下文
+        prepare_result = self.message_manager.prepare_history_split(self.agent_config)
+
+        # 2. 检索历史消息
+        history_messages = self.session_memory_manager.retrieve_history_messages(
+            messages=prepare_result['split_result']['history_messages'],
+            query=prepare_result['current_query'],
+            history_budget=prepare_result['budget_info']['history_budget']
+        )
+
+        if len(history_messages) > 0:
+            # 4. 序列化为字符串并插入到system_context
+            history_messages_str = self._serialize_messages_for_context(history_messages)
+            self.system_context['history_messages'] = history_messages_str
+        
+        logger.info(
+            f"SessionContext: 历史上下文准备完成 - "
+            f"检索历史消息{len(history_messages)}条消息到system_context"
+        )
 
 
 # 全局会话上下文管理
 _active_sessions: Dict[str, SessionContext] = {}
 
 
-def get_session_context(session_id: str) -> SessionContext:
+def get_session_context(session_id: str) -> Optional[SessionContext]:
     """获取会话上下文"""
     if session_id not in _active_sessions:
         logger.error(f"SessionContext: 会话 {session_id} 不存在")
@@ -421,11 +506,11 @@ def get_session_context(session_id: str) -> SessionContext:
     return _active_sessions[session_id]
 
 
-def init_session_context(session_id: str, user_id: str = None, workspace_root: str = None, memory_root: str = None) -> SessionContext:
+def init_session_context(session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, memory_root: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None) -> SessionContext:
     """初始化会话上下文"""
     if session_id in _active_sessions:
         return _active_sessions[session_id]
-    _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, memory_root)
+    _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, memory_root, context_budget_config=context_budget_config)
     return _active_sessions[session_id]
 
 

@@ -1,25 +1,24 @@
 
-import uuid
-from typing import Any, Dict, Generator, List
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from .agent_base import AgentBase
+from typing import Any, Dict, List, AsyncGenerator, Optional
+from sagents.utils.logger import logger
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
-from sagents.utils.prompt_manager import PromptManager
 
-from .agent_base import AgentBase
+from sagents.utils.prompt_manager import PromptManager
+import uuid
 
 
 class TaskSummaryAgent(AgentBase):
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", max_model_len: int = 64000):
-        super().__init__(model, model_config, system_prefix, max_model_len)
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
+        super().__init__(model, model_config, system_prefix)
         self.agent_name = "TaskSummaryAgent"
         self.agent_description = "任务总结智能体，专门负责生成任务执行的总结报告"
         logger.info("TaskSummaryAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
@@ -31,7 +30,7 @@ class TaskSummaryAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3, max_length=self.max_history_context_length)
+            history_messages = message_manager.extract_all_context_messages(recent_turns=3)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         task_manager_status_and_results = task_manager.get_all_tasks_summary()
@@ -48,7 +47,7 @@ class TaskSummaryAgent(AgentBase):
             execution_results=completed_actions_messages_str,
         )
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

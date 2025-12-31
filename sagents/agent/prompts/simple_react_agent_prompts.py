@@ -3,7 +3,7 @@
 """
 SimpleReactAgent指令定义
 
-包含SimpleReactAgent使用的指令内容，支持中英文
+包含SimpleReactAgent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -20,7 +20,12 @@ agent_custom_system_prefix = {
 - Before each execution, you must first conduct evaluation and planning, then actually answer questions or execute tasks.
 - Users will guide you through the process to complete tasks, you need to conduct evaluation, planning and execution according to user guidance.
 - Evaluation and planning don't need too many words, but should be concise and clear, guiding the next action.
-- Users cannot see tool execution results, you need to inform users through natural language summaries."""
+- Users cannot see tool execution results, you need to inform users through natural language summaries.""",
+    "pt": """**Requisitos Básicos**:
+- Antes de cada execução, você deve primeiro conduzir avaliação e planejamento, depois realmente responder perguntas ou executar tarefas.
+- Os usuários irão guiá-lo através do processo para completar tarefas, você precisa conduzir avaliação, planejamento e execução de acordo com a orientação do usuário.
+- Avaliação e planejamento não precisam de muitas palavras, mas devem ser concisos e claros, guiando a próxima ação.
+- Os usuários não podem ver os resultados da execução da ferramenta, você precisa informar os usuários através de resumos em linguagem natural."""
 }
 
 # 规划消息提示
@@ -30,7 +35,10 @@ plan_message_prompt = {
 - 不要做用户没有要求的任务。规划时只需要满足用户的请求，不要做过多额外的事情。""",
     "en": """Evaluate and plan the actions that have been executed, no user confirmation needed, output format: Currently***, next step is to***.
 - Don't output the real tool names, but output tool descriptions.
-- Don't do tasks that users haven't requested. When planning, only satisfy user requests, don't do too many extra things."""
+- Don't do tasks that users haven't requested. When planning, only satisfy user requests, don't do too many extra things.""",
+    "pt": """Avalie e planeje as ações que foram executadas, não é necessária confirmação do usuário, formato de saída: Atualmente***, o próximo passo é***.
+- Não produza os nomes reais das ferramentas, mas produza descrições das ferramentas.
+- Não faça tarefas que os usuários não solicitaram. Ao planejar, apenas satisfaça as solicitações do usuário, não faça muitas coisas extras."""
 }
 
 # 首次规划消息提示
@@ -42,7 +50,11 @@ first_plan_message_prompt = {
     "en": """Next, start evaluating and planning to complete user requirements, only conduct evaluation and planning, don't execute, and no user confirmation needed.
 - Don't output the real tool names, but output tool descriptions.
 - When evaluating and planning, focus on recommended workflow guidance.
-- Don't do tasks that users haven't requested. When planning, only satisfy user requests, don't do too many extra things."""
+- Don't do tasks that users haven't requested. When planning, only satisfy user requests, don't do too many extra things.""",
+    "pt": """Em seguida, comece a avaliar e planejar para completar os requisitos do usuário, apenas conduza avaliação e planejamento, não execute, e não é necessária confirmação do usuário.
+- Não produza os nomes reais das ferramentas, mas produza descrições das ferramentas.
+- Ao avaliar e planejar, concentre-se na orientação do fluxo de trabalho recomendado.
+- Não faça tarefas que os usuários não solicitaram. Ao planejar, apenas satisfaça as solicitações do usuário, não faça muitas coisas extras."""
 }
 
 # 执行消息提示
@@ -56,7 +68,12 @@ execute_message_prompt = {
 Don't do the following behaviors:
 1. Don't explain the execution process at the end, such as: user requirements completed, ending session.
 2. Don't output subsequent suggested planning, such as: next step is to***.
-3. Don't call session ending tools."""
+3. Don't call session ending tools.""",
+    "pt": """Em seguida, execute o conteúdo planejado acima diretamente.
+Não faça os seguintes comportamentos:
+1. Não explique o processo de execução no final, como: requisitos do usuário concluídos, encerrando sessão.
+2. Não produza planejamento sugerido subsequente, como: o próximo passo é***.
+3. Não chame ferramentas de encerramento de sessão."""
 }
 
 # 工具建议模板
@@ -102,7 +119,28 @@ Output Format:
 Notes:
 1. Tool names must be from the available tools list.
 2. Return all possible tool names that might be used. For tools that are completely unlikely to be used, don't return them.
-3. Return at most 7 possible tools."""
+3. Return at most 7 possible tools.""",
+    "pt": """Você é um assistente inteligente, você precisa ajudar os usuários com base em suas necessidades, responder perguntas dos usuários ou satisfazer requisitos dos usuários.
+Você precisa identificar todas as ferramentas possíveis que podem ser usadas para resolver a solicitação do usuário com base no histórico de conversas e na solicitação do usuário.
+
+## Ferramentas Disponíveis
+{available_tools_str}
+
+## Histórico de Conversas do Usuário e Nova Solicitação
+{messages}
+
+Formato de Saída:
+```json
+[
+    "nome_ferramenta1",
+    "nome_ferramenta2",
+    ...
+]
+```
+Notas:
+1. Os nomes das ferramentas devem ser da lista de ferramentas disponíveis.
+2. Retorne todos os nomes de ferramentas possíveis que possam ser usados. Para ferramentas que são completamente improváveis de serem usadas, não as retorne.
+3. Retorne no máximo 7 ferramentas possíveis."""
 }
 
 # 任务完成判断模板
@@ -152,5 +190,29 @@ Output Format:
 }}
 
 reason should be as simple as possible, maximum 20 characters
+```""",
+    "pt": """Você precisa determinar se deve interromper a execução da tarefa com base no histórico de conversas e na solicitação do usuário.
+
+## Regras de Interrupção de Execução de Tarefa
+1. Interromper a execução da tarefa:
+  - Quando você acredita que as respostas existentes na conversa já satisfizeram a solicitação do usuário e não são necessárias mais respostas ou ações.
+  - Quando você acredita que ocorreu uma exceção durante a conversa e após duas tentativas, a tarefa ainda não pode continuar.
+  - Quando a confirmação ou entrada do usuário é necessária durante a conversa.
+2. Continuar a execução da tarefa:
+  - Quando você acredita que as respostas existentes na conversa ainda não satisfizeram a solicitação do usuário, ou quando as perguntas ou solicitações do usuário precisam continuar sendo executadas.
+  - Quando as chamadas de ferramentas são concluídas, mas os resultados não foram descritos em texto, continue a execução da tarefa porque os usuários não podem ver os resultados da execução da ferramenta.
+
+## Histórico de Conversas do Usuário e Processo de Execução da Solicitação
+{messages}
+
+Formato de Saída:
+```json
+{{
+    "task_interrupted": true,
+    "reason": "Tarefa concluída"
+}}
+```
+
+O motivo deve ser o mais simples possível, no máximo 20 caracteres
 ```"""
 }

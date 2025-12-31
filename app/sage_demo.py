@@ -50,18 +50,32 @@ sys.path.insert(0, str(project_root))
 class ComponentManager:
     """组件管理器 - 负责初始化和管理核心组件"""
 
-    def __init__(self, api_key: str, model_name: str = None, base_url: str = None,
-                 max_tokens: int = None, temperature: float = None,
-                 workspace: str = None, memory_root: str = None, mcp_config: str = None,
-                 preset_running_config: str = None, logs_dir: str = None):
+    def __init__(self, api_key: str, model_name: Optional[str] = None, base_url: Optional[str] = None,
+                 max_tokens: Optional[int] = None, temperature: Optional[float] = None,
+                 max_model_len: Optional[int] = None, top_p: Optional[float] = None,
+                 presence_penalty: Optional[float] = None,
+                 workspace: Optional[str] = None, memory_root: Optional[str] = None,
+                 mcp_config: Optional[str] = None,
+                 preset_running_config: Optional[str] = None, logs_dir: Optional[str] = None,
+                 context_history_ratio: Optional[float] = None,
+                 context_active_ratio: Optional[float] = None,
+                 context_max_new_message_ratio: Optional[float] = None,
+                 context_recent_turns: Optional[int] = None):
         logger.debug(f"使用配置 - 模型: {model_name}, 温度: {temperature}")
         self.api_key = api_key
         self.model_name = model_name
         self.base_url = base_url
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.max_model_len = max_model_len
+        self.top_p = top_p
+        self.presence_penalty = presence_penalty
         self.workspace = workspace or "workspace"
         self.memory_root = memory_root
+        self.context_history_ratio = float(context_history_ratio) if context_history_ratio is not None else None
+        self.context_active_ratio = float(context_active_ratio) if context_active_ratio is not None else None
+        self.context_max_new_message_ratio = float(context_max_new_message_ratio) if context_max_new_message_ratio is not None else None
+        self.context_recent_turns = context_recent_turns
         self.mcp_config = mcp_config
         self.preset_running_config = preset_running_config
         self.logs_dir = logs_dir
@@ -73,6 +87,19 @@ class ComponentManager:
         self.preset_available_workflows = None
         self.preset_available_tools = None
         self.preset_max_loop_count = None
+
+        # 构建context_budget_config字典
+        self.context_budget_config: Dict[str, Any] = {
+            'max_model_len': self.max_model_len
+        }
+        if self.context_history_ratio is not None:
+            self.context_budget_config['history_ratio'] = self.context_history_ratio
+        if self.context_active_ratio is not None:
+            self.context_budget_config['active_ratio'] = self.context_active_ratio
+        if self.context_max_new_message_ratio is not None:
+            self.context_budget_config['max_new_message_ratio'] = self.context_max_new_message_ratio
+        if self.context_recent_turns is not None:
+            self.context_budget_config['recent_turns'] = self.context_recent_turns
 
         if preset_running_config and os.path.exists(preset_running_config):
             try:
@@ -193,10 +220,14 @@ class ComponentManager:
             model_config = {
                 "model": self.model_name,
                 "temperature": self.temperature,
-                "max_tokens": self.max_tokens
+                "max_tokens": self.max_tokens,
+                "max_model_len": self.max_model_len,
+                "top_p": self.top_p,
+                "presence_penalty": self.presence_penalty
             }
 
             # 使用preset_running_config中的system_prefix（参考sage_server.py的实现）
+
             controller = SAgent(
                 self._model,
                 model_config,
@@ -245,18 +276,19 @@ def create_user_message(content: str) -> Dict[str, Any]:
 class StreamingHandler:
     """流式处理器 - 处理实时消息流"""
 
-    def __init__(self, controller: SAgent, component_manager: ComponentManager = None):
+    def __init__(self, controller: SAgent, component_manager: Optional[ComponentManager] = None):
         self.controller = controller
         self.component_manager = component_manager
-        self._current_stream = None
-        self._current_stream_id = None
+        self._current_stream: Optional[Any] = None
+        self._current_stream_id: Optional[str] = None
 
     async def process_stream(self,
                              messages: List[Dict[str, Any]],
                              tool_manager: Union[ToolManager, ToolProxy],
                              session_id: Optional[str] = None,
                              use_deepthink: bool = True,
-                             use_multi_agent: bool = True) -> List[Dict[str, Any]]:
+                             use_multi_agent: bool = True,
+                             context_budget_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """处理消息流"""
         logger.debug("开始处理流式响应")
 
@@ -281,7 +313,8 @@ class StreamingHandler:
                 multi_agent=use_multi_agent,
                 max_loop_count=max_loop_count,
                 system_context=system_context,
-                available_workflows=available_workflows
+                available_workflows=available_workflows,
+                context_budget_config=context_budget_config
             ):
                 # 将message chunk类型的chunks 转化成字典
                 chunks_dict = [msg.to_dict() for msg in chunk]
@@ -432,13 +465,16 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
     component_manager = st.session_state.get('component_manager', None)
     streaming_handler = StreamingHandler(controller, component_manager)
 
+    context_budget_config = component_manager.context_budget_config if component_manager else None
+
     # 处理流式响应
     new_messages = asyncio.run(streaming_handler.process_stream(
         st.session_state.inference_conversation.copy(),
         tool_manager,
         session_id=time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime()) + '_'+str(uuid.uuid4())[:4],
         use_deepthink=st.session_state.get('use_deepthink', True),
-        use_multi_agent=st.session_state.get('use_multi_agent', True)
+        use_multi_agent=st.session_state.get('use_multi_agent', True),
+        context_budget_config=context_budget_config
     ))
 
     # 合并消息
@@ -456,11 +492,18 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
         logger.info("响应生成完成")
 
 
-def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
-                 max_tokens: int = None, temperature: float = None,
-                 workspace: str = None, memory_root: str = None, mcp_config: str = None,
-                 preset_running_config: str = None, logs_dir: str = None,
-                 host: str = None, port: int = None):
+def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optional[str] = None,
+                 max_tokens: Optional[int] = None, temperature: Optional[float] = None,
+                 max_model_len: Optional[int] = None, top_p: Optional[float] = None,
+                 presence_penalty: Optional[float] = None,
+                 workspace: Optional[str] = None, memory_root: Optional[str] = None,
+                 mcp_config: Optional[str] = None,
+                 preset_running_config: Optional[str] = None, logs_dir: Optional[str] = None,
+                 host: Optional[str] = None, port: Optional[int] = None,
+                 context_history_ratio: Optional[float] = None,
+                 context_active_ratio: Optional[float] = None,
+                 context_max_new_message_ratio: Optional[float] = None,
+                 context_recent_turns: Optional[int] = None):
     """运行 Streamlit web 界面"""
     logger.info("启动 Streamlit web 演示")
 
@@ -485,11 +528,18 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
         'base_url': base_url,
         'max_tokens': max_tokens,
         'temperature': temperature,
+        'max_model_len': max_model_len,
+        'top_p': top_p,
+        'presence_penalty': presence_penalty,
         'workspace': workspace,
         'memory_root': memory_root,
         'mcp_config': mcp_config,
         'preset_running_config': preset_running_config,
-        'logs_dir': logs_dir
+        'logs_dir': logs_dir,
+        'context_history_ratio': context_history_ratio,
+        'context_active_ratio': context_active_ratio,
+        'context_max_new_message_ratio': context_max_new_message_ratio,
+        'context_recent_turns': context_recent_turns
     }
     # 设置界面（此时能获取到正确的配置）
     use_multi_agent, use_deepthink = setup_ui(config)
@@ -508,11 +558,18 @@ def run_web_demo(api_key: str, model_name: str = None, base_url: str = None,
                     base_url=base_url,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    max_model_len=max_model_len,
+                    top_p=top_p,
+                    presence_penalty=presence_penalty,
                     workspace=workspace,
                     memory_root=memory_root,
                     mcp_config=mcp_config,
                     preset_running_config=preset_running_config,
-                    logs_dir=logs_dir
+                    logs_dir=logs_dir,
+                    context_history_ratio=context_history_ratio,
+                    context_active_ratio=context_active_ratio,
+                    context_max_new_message_ratio=context_max_new_message_ratio,
+                    context_recent_turns=context_recent_turns
                 )
                 tool_manager, controller = asyncio.run(component_manager.initialize())
                 st.session_state.tool_manager = tool_manager
@@ -571,6 +628,22 @@ def parse_arguments() -> Dict[str, Any]:
                         help='默认LLM API Max Tokens')
     parser.add_argument('--default_llm_temperature', default=0.3, type=float,
                         help='默认LLM API Temperature')
+    parser.add_argument('--default_llm_max_model_len', default=54000, type=int,
+                        help='默认LLM 最大上下文')
+    parser.add_argument('--default_llm_top_p', default=0.9, type=float,
+                        help='默认LLM Top P')
+    parser.add_argument('--default_llm_presence_penalty', default=0.0, type=float,
+                        help='默认LLM Presence Penalty')
+
+    parser.add_argument("--context_history_ratio", type=float, default=0.2,
+                        help='上下文预算管理器：历史消息的比例（0-1之间）')
+    parser.add_argument("--context_active_ratio", type=float, default=0.3,
+                        help='上下文预算管理器：活跃消息的比例（0-1之间）')
+    parser.add_argument("--context_max_new_message_ratio", type=float, default=0.5,
+                        help='上下文预算管理器：新消息的比例（0-1之间）')
+    parser.add_argument("--context_recent_turns", type=int, default=0,
+                        help='上下文预算管理器：限制最近的对话轮数，0表示不限制')
+
     parser.add_argument('--host', default='0.0.0.0',
                         help='Server Host')
     parser.add_argument('--port', default=8001, type=int,
@@ -599,6 +672,13 @@ def parse_arguments() -> Dict[str, Any]:
         'base_url': args.default_llm_api_base_url,
         'max_tokens': args.default_llm_max_tokens,
         'temperature': args.default_llm_temperature,
+        'max_model_len': args.default_llm_max_model_len,
+        'top_p': args.default_llm_top_p,
+        'presence_penalty': args.default_llm_presence_penalty,
+        'context_history_ratio': args.context_history_ratio,
+        'context_active_ratio': args.context_active_ratio,
+        'context_max_new_message_ratio': args.context_max_new_message_ratio,
+        'context_recent_turns': args.context_recent_turns,
         'host': args.host,
         'port': args.port,
         'mcp_config': args.mcp_config,
@@ -623,13 +703,20 @@ def main():
             config['base_url'],
             config['max_tokens'],
             config['temperature'],
+            config['max_model_len'],
+            config['top_p'],
+            config['presence_penalty'],
             config['workspace'],
             config['memory_root'],
             config['mcp_config'],
             config['preset_running_config'],
             config['logs_dir'],
             config['host'],
-            config['port']
+            config['port'],
+            config['context_history_ratio'],
+            config['context_active_ratio'],
+            config['context_max_new_message_ratio'],
+            config['context_recent_turns']
         )
 
     except Exception as e:

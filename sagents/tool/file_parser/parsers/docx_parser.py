@@ -4,10 +4,8 @@ DOCX文件解析器
 """
 
 import traceback
-from typing import Any, Dict
-
+from typing import Dict, Any
 from docx import Document
-
 from .base_parser import BaseFileParser, ParseResult
 
 
@@ -69,7 +67,7 @@ class DOCXParser(BaseFileParser):
             traceback.print_exc()
             return self.create_error_result(error_msg, file_path)
     
-    def _extract_text(self, doc: Document) -> str:
+    def _extract_text(self, doc: Any) -> str:
         """
         提取文档文本内容
         
@@ -125,7 +123,7 @@ class DOCXParser(BaseFileParser):
         
         return "\\n".join(table_text)
     
-    def _extract_docx_metadata(self, doc: Document) -> Dict[str, Any]:
+    def _extract_docx_metadata(self, doc: Any) -> Dict[str, Any]:
         """
         提取DOCX特定的元数据
         
@@ -135,7 +133,7 @@ class DOCXParser(BaseFileParser):
         Returns:
             Dict[str, Any]: DOCX元数据
         """
-        metadata = {}
+        metadata: Dict[str, Any] = {}
         
         try:
             # 文档核心属性

@@ -6,14 +6,12 @@ Author: Eric ZZ
 Date: 2024-12-21
 """
 
-import json
 import traceback
-from datetime import datetime
-from typing import Any, Dict, List
-
+from typing import Dict, List, Any, Optional
 from sagents.utils.logger import logger
-
 from .memory_types import MemoryEntry, MemoryType
+from datetime import datetime
+import json
 
 
 class UserMemoryManager:
@@ -153,7 +151,9 @@ class UserMemoryManager:
 
         for i, memory in enumerate(memories, 1):
             # 格式化时间
-            created_time = memory.created_at.strftime("%Y-%m-%d %H:%M")
+            created_time = "Unknown"
+            if memory.created_at:
+                created_time = memory.created_at.strftime("%Y-%m-%d %H:%M")
 
             # 构建简化的记忆条目
             memory_line = f"{i}. 【{memory.key}】{memory.content} ({created_time})"
@@ -165,7 +165,7 @@ class UserMemoryManager:
 
     # ========== 核心记忆操作接口 ==========
 
-    async def remember(self, memory_key: str, content: str, memory_type: str = "experience", tags: str = "", session_id: str = None) -> str:
+    async def remember(self, memory_key: str, content: str, memory_type: str = "experience", tags: str = "", session_id: Optional[str] = None) -> str:
         """记住某个记忆
 
         Args:
@@ -199,7 +199,7 @@ class UserMemoryManager:
             logger.error(f"记住记忆失败: {e}")
             return f"记住记忆失败：{str(e)}"
 
-    async def recall(self, query: str, limit: int = 5, session_id: str = None) -> str:
+    async def recall(self, query: str, limit: int = 5, session_id: Optional[str] = None) -> str:
         """获取相似的记忆
 
         Args:
@@ -264,7 +264,7 @@ class UserMemoryManager:
             logger.error(f"回忆记忆失败: {e}")
             return f"回忆记忆失败：{str(e)}"
 
-    async def forget(self, memory_key: str, session_id: str = None) -> str:
+    async def forget(self, memory_key: str, session_id: Optional[str] = None) -> str:
         """忘掉某个记忆
 
         Args:
@@ -291,7 +291,7 @@ class UserMemoryManager:
             logger.error(f"忘记记忆失败: {e}")
             return f"忘记记忆失败：{str(e)}"
 
-    async def get_system_memories(self, session_id: str = None) -> dict:
+    async def get_system_memories(self, session_id: Optional[str] = None) -> dict:
         """获取系统级记忆并格式化
 
         Args:
@@ -398,7 +398,7 @@ class UserMemoryManager:
     # 注意：记忆提取和冲突处理功能已迁移到MemoryExtractionAgent
     # 这些功能现在由sagents层面直接调用MemoryExtractionAgent来处理
 
-    def get_system_memories_summary(self, session_id: str) -> str:
+    async def get_system_memories_summary(self, session_id: str) -> str:
         """获取系统级记忆的摘要
 
         Args:
@@ -407,5 +407,5 @@ class UserMemoryManager:
         Returns:
             系统级记忆的摘要字符串
         """
-        system_memories = self.get_system_memories(session_id)
+        system_memories = await self.get_system_memories(session_id)
         return self.format_system_memories_for_context(system_memories)

@@ -1,41 +1,37 @@
-import json
-import re
 import traceback
+from sagents.context.messages.message_manager import MessageManager
+from .agent_base import AgentBase
+from typing import Any, Dict, List, Optional, AsyncGenerator
+from sagents.utils.logger import logger
+from sagents.tool.tool_manager import ToolManager
+from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
+from sagents.context.session_context import SessionContext
+from sagents.utils.prompt_manager import PromptManager
+import json
 import uuid
-from typing import Any, Dict, Generator, List, Optional
-
+import re
 from openai import AsyncOpenAI
 
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.messages.message_manager import MessageManager
-from sagents.context.session_context import SessionContext
-from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
-from sagents.utils.prompt_manager import PromptManager
-
-from .agent_base import AgentBase
-
-
 class QuerySuggestAgent(AgentBase):
-    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = None, system_prefix: str = "", max_model_len: int = 64000):
+    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Optional[Dict[str, Any]] = None, system_prefix: str = ""):
         if model_config is None:
             model_config = {}
-        super().__init__(model, model_config, system_prefix, max_model_len)
+        super().__init__(model, model_config, system_prefix)
         self.agent_name = "QuerySuggestAgent"
         self.agent_description = "查询建议智能体，专门负责根据用户对话生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。"
         logger.info("QuerySuggestAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
 
-        conversation_messages = message_manager.extract_all_context_messages(recent_turns=2,max_length=self.max_history_context_length,last_turn_user_only=False)
+        conversation_messages = message_manager.extract_all_context_messages(recent_turns=2, last_turn_user_only=False)
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         suggest_template = PromptManager().get_agent_prompt_auto('suggest_template', language=session_context.get_language())
         prompt = suggest_template.format(
             task_description=recent_message_str
         )
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
@@ -88,7 +84,7 @@ class QuerySuggestAgent(AgentBase):
         async for chunk in self._finalize_query_suggest_result(full_response, message_id):
             yield chunk
 
-    async def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> Generator[List[MessageChunk], None, None]:
+    async def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> AsyncGenerator[List[MessageChunk], None]:
         logger.debug("QuerySuggestAgent: 处理最终查询建议结果")
         try:
             # 解析查询建议列表
@@ -113,7 +109,7 @@ class QuerySuggestAgent(AgentBase):
                 message_type=MessageType.QUERY_SUGGEST.value
             )]
             
-    def _convert_xlm_to_json(self, xml_str: str) -> List[str]:
+    def _convert_xlm_to_json(self, xml_str: str) -> List[Dict[str, str]]:
         # 使用正则表达式提取 <suggest_item> 标签中的内容
         pattern = r'<suggest_item>(.*?)</suggest_item>'
         suggest_items = re.findall(pattern, xml_str, re.DOTALL)

@@ -3,7 +3,7 @@
 """
 任务分解Agent指令定义
 
-包含TaskDecomposeAgent使用的指令内容，支持中英文
+包含TaskDecomposeAgent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -12,7 +12,8 @@ AGENT_IDENTIFIER = "TaskDecomposeAgent"
 # 任务分解系统前缀
 task_decompose_system_prefix = {
     "zh": "你是一个任务分解智能体，代替其他的智能体，要以其他智能体的人称来输出，你需要根据用户需求，将复杂任务分解为清晰可执行的子任务。",
-    "en": "You are a task decomposition agent, representing other agents, and should output in the persona of other agents. You need to decompose complex tasks into clear and executable subtasks based on user needs."
+    "en": "You are a task decomposition agent, representing other agents, and should output in the persona of other agents. You need to decompose complex tasks into clear and executable subtasks based on user needs.",
+    "pt": "Você é um agente de decomposição de tarefas, representando outros agentes, e deve produzir saída na persona de outros agentes. Você precisa decompor tarefas complexas em subtarefas claras e executáveis com base nas necessidades do usuário."
 }
 
 # 分解模板
@@ -77,6 +78,37 @@ Subtask 1 description
 </task_item>
 <task_item>
 Subtask 2 description
+</task_item>
+```""",
+    "pt": """# Guia de Decomposição de Tarefas
+Observe as necessidades ou tarefas mais recentes do usuário através do diálogo histórico do usuário
+
+## Descrição e Requisitos do Agente
+{agent_description}
+
+## Diálogo Histórico do Usuário (Ordenado do Mais Antigo ao Mais Recente)
+{task_description}
+
+## Ferramentas Disponíveis
+{available_tools_str}
+
+## Requisitos de Decomposição
+1. Decomponha apenas quando as tarefas forem complexas. Se a tarefa em si for muito simples, ela pode ser usada diretamente como uma subtarefa. Não divida forçadamente para aumentar a quantidade.
+2. A decomposição de subtarefas deve considerar o alcance das capacidades das ferramentas disponíveis.
+3. Garanta que cada subtarefa seja atômica e o mais independente possível, evitando divisão artificial de tarefas sem significado.
+4. Considere as dependências entre tarefas. A lista de saída deve ser ordenada, classificada por prioridade do alto para o baixo. Tarefas com a mesma prioridade devem ser classificadas por relação de dependência.
+5. O formato de saída deve seguir estritamente os requisitos abaixo.
+6. Se houver um processo Thinking de tarefa, as subtarefas devem ser consistentes com a lógica de processamento Thinking.
+7. O número de subtarefas não deve exceder 10. Subtarefas mais simples podem ser mescladas em uma subtarefa.
+8. Não mencione diretamente os nomes originais das ferramentas nas descrições das subtarefas. Use descrições de ferramentas para expressar ferramentas.
+9. Concentre-se apenas nas necessidades ou tarefas mais recentes do usuário para decomposição, não se concentre em outras tarefas no diálogo histórico do usuário.
+## Formato de Saída
+```
+<task_item>
+Descrição da subtarefa 1
+</task_item>
+<task_item>
+Descrição da subtarefa 2
 </task_item>
 ```"""
 }

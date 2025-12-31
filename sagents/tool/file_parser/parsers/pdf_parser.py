@@ -5,10 +5,8 @@ PDF文件解析器
 
 import os
 import traceback
-from typing import Any, Dict
-
+from typing import Dict, Any
 import pdfplumber
-
 from .base_parser import BaseFileParser, ParseResult
 
 
@@ -111,7 +109,7 @@ class PDFParser(BaseFileParser):
         Returns:
             Dict[str, Any]: PDF元数据
         """
-        metadata = {}
+        metadata: Dict[str, Any] = {}
         
         try:
             # 基本信息

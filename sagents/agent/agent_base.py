@@ -1,20 +1,19 @@
-import json
-import os
-import time
-import traceback
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, List, Optional, Union
-
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
+import json
+from sagents.utils.logger import logger
+from sagents.utils.stream_format import merge_stream_response_to_non_stream_response
+from sagents.tool.tool_config import AgentToolSpec
+from sagents.tool.tool_manager import ToolManager
+from sagents.context.session_context import get_session_context, SessionContext
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.utils.prompt_manager import prompt_manager
+import traceback
+import time
+import os
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
-
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext, get_session_context
-from sagents.tool.tool_config import AgentToolSpec
-from sagents.tool.tool_manager import ToolManager
-from sagents.utils.logger import logger
-from sagents.utils.stream_format import merge_stream_response_to_non_stream_response
 
 
 class AgentBase(ABC):
@@ -25,7 +24,7 @@ class AgentBase(ABC):
     流式处理和内容解析等核心功能。
     """
 
-    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = "", max_model_len: int = 64000):
+    def __init__(self, model: Optional[AsyncOpenAI] = None, model_config: Dict[str, Any] = {}, system_prefix: str = ""):
         """
         初始化智能体基类
 
@@ -33,18 +32,20 @@ class AgentBase(ABC):
             model: 可执行的语言模型实例
             model_config: 模型配置参数
             system_prefix: 系统前缀提示
-            max_model_len: 模型最大上下文长度
         """
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
         self.agent_description = f"{self.__class__.__name__} agent"
         self.agent_name = self.__class__.__name__
-        self.max_model_len = max_model_len
-        self.max_model_input_len = self.max_model_len - self.model_config.get('max_tokens', 4096)
-        self.max_history_context_length = int(self.max_model_input_len // 2)
+        
+        # 设置最大输入长度（用于安全检查，防止消息过长）
+        # 实际的上下文长度由 SessionContext 中的 context_budget_manager 动态管理
+        # 这里只是作为兜底的安全阈值
 
-        logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大上下文长度: {self.max_model_len}, 最大输入长度: {self.max_model_input_len}, 最大历史上下文长度: {self.max_history_context_length}")
+        self.max_model_input_len = 50000
+
+        logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}")
 
     def to_tool(self) -> AgentToolSpec:
         """
@@ -58,6 +59,7 @@ class AgentBase(ABC):
         tool_spec = AgentToolSpec(
             name=self.__class__.__name__,
             description=self.agent_description + '\n\n Agent类型的工具，可以自动读取历史对话，所需不需要运行的参数',
+            description_i18n={},
             func=self.run_stream,
             parameters={},
             required=[]
@@ -68,9 +70,9 @@ class AgentBase(ABC):
     @abstractmethod
     async def run_stream(self,
                          session_context: SessionContext,
-                         tool_manager: ToolManager = None,
-                         session_id: str = None,
-                         ) -> Generator[List[MessageChunk], None, None]:
+                         tool_manager: Optional[ToolManager] = None,
+                         session_id: Optional[str] = None,
+                         ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         流式处理消息的抽象方法
 
@@ -82,7 +84,9 @@ class AgentBase(ABC):
         Yields:
             List[MessageChunk]: 流式输出的消息块
         """
-        pass
+        if False:
+            yield []
+
 
     def _remove_tool_call_without_id(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -128,9 +132,14 @@ class AgentBase(ABC):
         final_config = {**self.model_config}
         if model_config_override:
             final_config.update(model_config_override)
+        
+        model_name = cast(str, final_config.pop('model')) if 'model' in final_config else "gpt-3.5-turbo"
         all_chunks = []
 
         try:
+            if self.model is None:
+                raise ValueError("Model is not initialized")
+            
             # 发起LLM请求
             # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
             start_request_time = time.time()
@@ -157,7 +166,8 @@ class AgentBase(ABC):
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
 
             stream = await self.model.chat.completions.create(
-                messages=serializable_messages,
+                model=model_name,
+                messages=cast(List[Any], serializable_messages),
                 stream=True,
                 stream_options={"include_usage": True},
                 extra_body={
@@ -216,13 +226,15 @@ class AgentBase(ABC):
 
     def prepare_unified_system_message(self,
                                        session_id: Optional[str] = None,
-                                       custom_prefix: Optional[str] = None) -> MessageChunk:
+                                       custom_prefix: Optional[str] = None,
+                                       language: Optional[str] = None) -> MessageChunk:
         """
         准备统一的系统消息
 
         Args:
             session_id: 会话ID
             custom_prefix: 自定义前缀,会添加到system_prefix 后面，system context 前面
+            language: 语言设置
 
         Returns:
             MessageChunk: 系统消息
@@ -234,17 +246,36 @@ class AgentBase(ABC):
             if self.system_prefix:
                 system_prefix = self.system_prefix
             else:
-                system_prefix += f"\n你是一个{self.__class__.__name__}智能体。"
+                # 使用PromptManager获取多语言文本
+                agent_intro = prompt_manager.get_prompt(
+                    'agent_intro_template',
+                    agent='common',
+                    language=language,
+                    default=f"\n你是一个{self.__class__.__name__}智能体。"
+                )
+                system_prefix += agent_intro.format(agent_name=self.__class__.__name__)
 
         if custom_prefix:
             system_prefix += custom_prefix + '\n'
 
-        # 根据session_id获取session_context
+        # 根据session_id获取session_context信息（用于获取system_context和agent_workspace）
+        session_context = None
         if session_id:
             session_context = get_session_context(session_id)
+        
+        if session_context:
             system_context_info = session_context.system_context
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
-            system_prefix += "\n补充其他的信息：\n "
+            
+            # 使用PromptManager获取多语言文本
+            additional_info = prompt_manager.get_prompt(
+                'additional_info_label',
+                agent='common',
+                language=language,
+                default="\n补充其他的信息：\n "
+            )
+            system_prefix += additional_info
+            
             for key, value in system_context_info.items():
                 if isinstance(value, dict):
                     # 如果值是字典，格式化显示
@@ -262,10 +293,26 @@ class AgentBase(ABC):
             # 补充当前工作空间中的文件情况，工作空间的路径是 session_context.agent_workspace,需要把这个文件夹下的文件或者文件夹，有可能多层路径，给展示出来，类似tree 结构，只展示文件的相对路径
             current_agent_workspace = session_context.agent_workspace
             if current_agent_workspace:
-                system_prefix += f"\n当前工作空间 {session_context.system_context['file_workspace']} 的文件情况：\n"
+                workspace_name = session_context.system_context.get('file_workspace', '')
+                
+                # 使用PromptManager获取多语言文本
+                workspace_files = prompt_manager.get_prompt(
+                    'workspace_files_label',
+                    agent='common',
+                    language=language,
+                    default=f"\n当前工作空间 {workspace_name} 的文件情况：\n"
+                )
+                system_prefix += workspace_files.format(workspace=workspace_name)
+                
                 # 如果没有文件，就不展示了
                 if not os.listdir(current_agent_workspace):
-                    system_prefix += "当前工作空间下没有文件。\n"
+                    no_files = prompt_manager.get_prompt(
+                        'no_files_message',
+                        agent='common',
+                        language=language,
+                        default="当前工作空间下没有文件。\n"
+                    )
+                    system_prefix += no_files
                 else:
                     for root, dirs, files in os.walk(current_agent_workspace):
                         for file_item in files:
@@ -283,7 +330,7 @@ class AgentBase(ABC):
     def _judge_delta_content_type(self,
                                   delta_content: str,
                                   all_tokens_str: str,
-                                  tag_type: List[str] = None) -> str:
+                                  tag_type: Optional[List[str]] = None) -> str:
         if tag_type is None:
             tag_type = []
 
@@ -297,7 +344,7 @@ class AgentBase(ABC):
                 end_tag_process_list.append(tag[:i + 1])
 
         last_tag = None
-        last_tag_index = None
+        last_tag_index: Optional[int] = None
 
         all_tokens_str = (all_tokens_str + delta_content).strip()
 
@@ -312,6 +359,10 @@ class AgentBase(ABC):
         if last_tag is None:
             return "tag"
 
+        # Ensure last_tag_index is not None for mypy
+        if last_tag_index is None:
+             return "tag"
+
         if last_tag in start_tag:
             if last_tag_index + len(last_tag) == len(all_tokens_str):
                 return 'tag'
@@ -322,3 +373,5 @@ class AgentBase(ABC):
                 return last_tag.replace('<', '').replace('>', '')
         elif last_tag in end_tag:
             return 'tag'
+        
+        return "tag"

@@ -1,13 +1,10 @@
-import datetime
+from typing import Dict, List, Optional, Any, cast
 import json
-from typing import Any, Dict, List, Optional
-
+import datetime
+from .task_base import TaskBase
 from sagents.tool.file_system_tool import FileSystemTool
 from sagents.utils.logger import logger
-
-from .task_base import TaskBase
-
-
+from sagents.utils.prompt_manager import prompt_manager
 class TaskManager:
     """
     任务管理器
@@ -148,7 +145,7 @@ class TaskManager:
         
         return True
 
-    def start_task(self, task_id: str, assigned_to: str = None) -> bool:
+    def start_task(self, task_id: str, assigned_to: Optional[str] = None) -> bool:
         """
         开始执行任务
         
@@ -172,7 +169,7 @@ class TaskManager:
         return True
 
     def complete_task(self, task_id: str, result: Any = None, 
-                     execution_details: Dict[str, Any] = None) -> bool:
+                     execution_details: Optional[Dict[str, Any]] = None) -> bool:
         """
         完成任务执行
         
@@ -198,7 +195,7 @@ class TaskManager:
         return True
 
     def fail_task(self, task_id: str, error_message: str, 
-                 execution_details: Dict[str, Any] = None) -> bool:
+                 execution_details: Optional[Dict[str, Any]] = None) -> bool:
         """
         标记任务失败
         
@@ -235,6 +232,7 @@ class TaskManager:
         from .task_base import TaskStatus
         
         # 处理不同类型的status参数
+        target_status: Any
         if isinstance(status, str):
             # 如果是字符串，尝试转换为枚举
             try:
@@ -265,7 +263,16 @@ class TaskManager:
                 ready_tasks.append(task)
         
         # 按优先级排序
-        ready_tasks.sort(key=lambda x: x.priority.value if hasattr(x.priority, 'value') else x.priority, reverse=True)
+        def get_priority_value(task: TaskBase) -> int:
+            p = task.priority
+            if hasattr(p, 'value'):
+                return int(p.value)
+            try:
+                return int(cast(Any, p)) if p is not None else 0
+            except (ValueError, TypeError):
+                return 0
+
+        ready_tasks.sort(key=get_priority_value, reverse=True)
         return ready_tasks
 
     def get_next_task(self) -> Optional[TaskBase]:
@@ -298,7 +305,7 @@ class TaskManager:
             }
         
         from .task_base import TaskStatus
-        status_counts = {}
+        status_counts: Dict[Any, int] = {}
         for task in self.tasks.values():
             status_counts[task.status] = status_counts.get(task.status, 0) + 1
         
@@ -412,13 +419,16 @@ class TaskManager:
         # 获取该Agent可能感兴趣的任务（基于类型匹配）
         relevant_statuses = ['pending', 'in_progress', 'completed']
         relevant_tasks = [task for task in self.tasks.values() 
-                         if task.status in relevant_statuses]
+                         if getattr(task.status, 'value', str(task.status)) in relevant_statuses]
+        
+        # 获取下一个可用任务
+        next_task = self.get_next_task()
         
         return {
             'agent_name': agent_name,
             'assigned_tasks': [task.to_summary_dict() for task in assigned_tasks],
             'relevant_tasks': [task.to_summary_dict() for task in relevant_tasks[-10:]],  # 最近10个
-            'next_available_task': self.get_next_task().to_summary_dict() if self.get_next_task() else None
+            'next_available_task': next_task.to_summary_dict() if next_task else None
         }
 
     def get_unsummary_but_completed_tasks(self) -> List[TaskBase]:
@@ -580,9 +590,12 @@ class TaskManager:
         }
         self.task_history.append(entry)
 
-    def get_status_description(self) -> str:
+    def get_status_description(self, language: str = 'zh') -> str:
         """
         获取任务管理器的简化状态描述字符串
+        
+        Args:
+            language: 语言设置，'zh'、'en' 或 'pt'，默认为 'zh'
         
         Returns:
             str: 格式化的状态描述字符串，包含所有任务的基本信息
@@ -591,19 +604,48 @@ class TaskManager:
             # 获取所有任务
             all_tasks = self.get_all_tasks()
             if not all_tasks:
-                return "任务管理器中暂无任务"
+                no_tasks = prompt_manager.get_prompt(
+                    'task_manager_no_tasks',
+                    agent='common',
+                    language=language,
+                    default="任务管理器中暂无任务"
+                )
+                return no_tasks
             
             # 构建简化的状态描述
-            status_lines = [f"任务管理器包含 {len(all_tasks)} 个任务："]
+            contains_tasks = prompt_manager.get_prompt(
+                'task_manager_contains_tasks',
+                agent='common',
+                language=language,
+                default=f"任务管理器包含 {len(all_tasks)} 个任务："
+            )
+            status_lines = [contains_tasks.format(count=len(all_tasks))]
+            
+            task_info_template = prompt_manager.get_prompt(
+                'task_manager_task_info',
+                agent='common',
+                language=language,
+                default="- 任务ID: {task_id}, 描述: {description}, 状态: {status}"
+            )
             
             for task in all_tasks:
-                status_info = f"- 任务ID: {task.task_id}, 描述: {task.description}, 状态: {task.status.value}"
+                status_info = task_info_template.format(
+                    task_id=task.task_id,
+                    description=task.description,
+                    status=task.status.value
+                )
                 status_lines.append(status_info)
             
             return "\n".join(status_lines)
             
         except Exception as e:
-            return f"任务管理器状态获取失败: {str(e)}"
+            status_failed = prompt_manager.get_prompt(
+                'task_manager_status_failed',
+                agent='common',
+                language=language,
+                default=f"任务管理器状态获取失败: {str(e)}"
+            )
+            return status_failed.format(error=str(e))
 
     def get_all_tasks_summary(self) -> str:
         status_info = {
@@ -643,9 +685,9 @@ class TaskManager:
             # 读取文档内容
             if task_status["result_documents"]:
                 logger.info(f"TaskSummaryAgent: 读取 {len(task_status['result_documents'])} 个文档内容")
-                task_status["result_documents"] = self._read_document_contents(task_status["result_documents"])
+                task_status["result_documents"] = self._read_document_contents(cast(List[Any], task_status["result_documents"]))
             
-            status_info["tasks"].append(task_status)
+            cast(List[Any], status_info["tasks"]).append(task_status)
             logger.info(f"TaskSummaryAgent: 第 {i+1} 个任务处理完成")
             
         result_json = json.dumps(status_info, ensure_ascii=False, indent=2)

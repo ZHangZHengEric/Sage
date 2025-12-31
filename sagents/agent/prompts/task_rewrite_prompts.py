@@ -3,7 +3,7 @@
 """
 任务重写Agent指令定义
 
-包含任务重写agent使用的指令内容，支持中英文
+包含任务重写agent使用的指令内容，支持中文、英文和葡萄牙语
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
@@ -12,7 +12,8 @@ AGENT_IDENTIFIER = "TaskRewriteAgent"
 # 任务重写系统前缀
 task_rewrite_system_prefix = {
     "zh": "你是一个智能AI助手，专门负责重写用户的请求。你需要根据用户的历史对话以及最新的请求，重写用户最新的请求。禁止回答用户的请求，只能重写用户的请求。",
-    "en": "You are an intelligent AI assistant specialized in rewriting user requests. You need to rewrite the user's latest request based on the user's historical dialogue and latest request. You are prohibited from answering user requests and can only rewrite user requests."
+    "en": "You are an intelligent AI assistant specialized in rewriting user requests. You need to rewrite the user's latest request based on the user's historical dialogue and latest request. You are prohibited from answering user requests and can only rewrite user requests.",
+    "pt": "Você é um assistente de IA inteligente especializado em reescrever solicitações de usuários. Você precisa reescrever a solicitação mais recente do usuário com base no diálogo histórico do usuário e na solicitação mais recente. Você está proibido de responder às solicitações do usuário e só pode reescrever as solicitações do usuário."
 }
 
 # 重写模板
@@ -74,5 +75,34 @@ Example:
 {latest_request}
 
 ## Rewritten Request
+""",
+    "pt": """# Guia de Reescrita de Solicitação do Usuário
+## Descrição da Tarefa
+Com base no diálogo histórico do usuário e na solicitação mais recente, reescreva a solicitação mais recente do usuário, com o objetivo de, sem ler o diálogo histórico, através da leitura da solicitação reescrita, também poder esclarecer com precisão a intenção do usuário.
+
+## Requisitos da Tarefa
+1. A solicitação reescrita deve descrever detalhadamente e precisamente as necessidades do usuário, sem ambiguidade.
+2. Se a nova solicitação estiver relacionada ao diálogo histórico, integre as informações do diálogo histórico na solicitação reescrita.
+3. Se for necessário resumir o histórico do diálogo, adicione-o à solicitação reescrita.
+4. Se as informações no histórico do diálogo (como IDs relacionados ou informações de referência, etc.) forem úteis para a nova solicitação, integre-as na solicitação reescrita.
+5. Não responda às perguntas do usuário, apenas reescreva as perguntas do usuário para torná-las mais precisas.
+6. Se a solicitação do usuário não tiver conexão direta com o diálogo histórico, produza diretamente a solicitação mais recente como a solicitação reescrita.
+7. A solicitação reescrita deve manter um estilo e idioma consistentes com o diálogo histórico do usuário.
+
+## Requisitos de Formato de Saída
+1. Formato json
+2. Campo: rewrite_request
+Exemplo:
+{{
+    "rewrite_request": "xx"
+}}
+
+## Histórico do Diálogo
+{dialogue_history}
+
+## Solicitação Mais Recente
+{latest_request}
+
+## Solicitação Reescrita
 """
 }
