@@ -75,3 +75,4 @@ apscheduler>=3.10.4
 streamlit==1.50.0
 
 loguru>=0.7.0
+rank-bm25
