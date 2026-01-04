@@ -1,5 +1,5 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sagents.utils.logger import logger
+from loguru import logger
 from service.kdb import KdbService
 
 scheduler: AsyncIOScheduler | None = None

@@ -1,5 +1,5 @@
 from core import config
-from sagents.utils.logger import logger
+from loguru import logger
 
 from .client.db import close_db_client, init_db_client
 from .client.es import close_es_client, init_es_client
