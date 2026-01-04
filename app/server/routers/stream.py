@@ -114,6 +114,7 @@ def _create_model_client(request_config: dict, server_args: StartupConfig):
 
 
 def _create_tool_proxy(request: StreamRequest):
+    from sagents.tool.tool_proxy import ToolProxy
     """创建工具代理"""
     if not request.available_tools:
         return ToolProxy(get_tool_manager(), [])
@@ -123,7 +124,6 @@ def _create_tool_proxy(request: StreamRequest):
     # 如果request.multi_agent 是true，要确保request.available_tools没有 complete_task 这个工具
     if request.multi_agent and "complete_task" in request.available_tools:
         request.available_tools.remove("complete_task")
-    from sagents.tool.tool_proxy import ToolProxy
 
     tool_proxy = ToolProxy(get_tool_manager(), request.available_tools)
     return tool_proxy
