@@ -125,12 +125,8 @@ def _setup_stream_service(request: StreamRequest):
     """设置流式服务，返回(stream_service, session_id)"""
     session_id = request.session_id or str(uuid.uuid4())
     if session_id in global_vars.get_all_active_sessions_service_map():
-        return SageHTTPException(
-            status_code=500, detail="会话正在运行中，请使用不同的会话ID"
-        )
-    # 清理LLM模型配置
-    if request.llm_model_config:
-        request.llm_model_config = _clean_llm_model_config(request.llm_model_config)
+        raise SageHTTPException(status_code=500, detail="会话正在运行中，请使用不同的会话ID")
+    request.llm_model_config = _clean_llm_model_config(request.llm_model_config or {})
     server_args = get_startup_config()
     model_client = _create_model_client(request.llm_model_config, server_args)
     llm_model_config = _build_llm_model_config(request.llm_model_config, server_args)
