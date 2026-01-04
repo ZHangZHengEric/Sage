@@ -5,6 +5,7 @@
 """
 
 import os
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import models
@@ -167,7 +168,81 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
             error_detail=f"Conversation '{conversation_id}' not found",
         )
 
-    messages = [m.to_dict() for m in get_session_messages(conversation_id)]
+    messages = []
+    for m in get_session_messages(conversation_id):
+        result = m.to_dict()
+
+        # 处理大内容的特殊情况
+        content = result.get('content', '')
+        show_content = result.get('show_content', '')
+
+        # 清理show_content中的base64图片数据，避免JSON过大，但保留content中的base64
+        if isinstance(show_content, str) and 'data:image' in show_content:
+            try:
+                # 如果show_content是JSON字符串，解析并清理
+                if show_content.strip().startswith('{'):
+                    show_content_data = json.loads(show_content)
+                    if isinstance(show_content_data, dict) and 'results' in show_content_data:
+                        if isinstance(show_content_data['results'], list):
+                            for item in show_content_data['results']:
+                                if isinstance(item, dict) and 'image' in item:
+                                    if item['image'] and isinstance(item['image'], str) and item['image'].startswith('data:image'):
+                                        item['image'] = '[BASE64_IMAGE_REMOVED_FOR_DISPLAY]'
+                    result['show_content'] = json.dumps(show_content_data, ensure_ascii=False)
+                else:
+                    # 如果不是JSON，直接使用正则表达式清理
+                    import re
+                    result['show_content'] = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[BASE64_IMAGE_REMOVED_FOR_DISPLAY]', show_content)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"清理 show_content 失败: {e}")
+                # 如果清理失败，使用正则表达式移除base64数据
+                import re
+                result['show_content'] = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[BASE64_IMAGE_REMOVED_FOR_DISPLAY]', show_content)
+
+        # 特殊处理工具调用结果，避免JSON嵌套问题
+        if result.get('role') == 'tool' and isinstance(content, str):
+            try:
+                # 尝试解析content中的JSON数据
+                if content.strip().startswith('{'):
+                    parsed_content = json.loads(content)
+
+                    # 检查是否是嵌套的JSON结构
+                    if isinstance(parsed_content, dict) and 'content' in parsed_content:
+                        inner_content = parsed_content['content']
+                        if isinstance(inner_content, str) and inner_content.strip().startswith('{'):
+                            try:
+                                # 解析内层JSON，这通常是实际的工具结果
+                                tool_data = json.loads(inner_content)
+
+                                # 清理工具结果中的大数据，避免JSON过大
+                                if isinstance(tool_data, dict) and 'results' in tool_data:
+                                    if isinstance(tool_data['results'], list):
+                                        for item in tool_data['results']:
+                                            if isinstance(item, dict):
+                                                # 限制文本字段长度，但保留所有字段
+                                                for field in ['snippet', 'description', 'content']:
+                                                    if field in item and isinstance(item[field], str):
+                                                        if len(item[field]) > 1000:
+                                                            item[field] = item[field][:1000] + '...[TRUNCATED]'
+
+                                # 直接使用解析后的数据
+                                result['content'] = tool_data
+                            except json.JSONDecodeError:
+                                # 内层解析失败，使用外层数据
+                                result['content'] = parsed_content
+                        else:
+                            # 内层不是JSON字符串，直接使用
+                            result['content'] = parsed_content
+                    else:
+                        # 不是嵌套结构，直接使用
+                        result['content'] = parsed_content
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"解析工具结果JSON失败: {e}")
+                # 保持原始字符串
+                pass
+
+        messages.append(result)
     return {
         "conversation_id": conversation_id,
         "messages": messages,
