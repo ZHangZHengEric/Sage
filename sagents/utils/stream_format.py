@@ -45,6 +45,12 @@ def merge_stream_response_to_non_stream_response(chunks):
             func["arguments"] += tc.function.arguments or ""
     if finish_reason is None:
         finish_reason = "stop"
+    if id_ is None:
+        id_ = "stream-merge-empty"
+    if created_ is None:
+        created_ = 0
+    if model_ is None:
+        model_ = "unknown"
     return ChatCompletion(
         id=id_,
         object="chat.completion",          # ← 关键修复
