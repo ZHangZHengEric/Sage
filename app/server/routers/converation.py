@@ -53,7 +53,6 @@ async def interrupt(session_id: str, request: InterruptRequest = None):
     """中断指定会话"""
     message = request.message if request else "用户请求中断"
     data = await interrupt_session(session_id, message)
-    logger.info(f"会话 {session_id} 中断成功")
     return await Response.succ(message=f"会话 {session_id} 已中断", data=data)
 
 
