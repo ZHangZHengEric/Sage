@@ -167,9 +167,10 @@ class SAgent:
         try:
             _end_time = time.time()
             _total_ms = int((_end_time - _start_time) * 1000)
-            logger.info(f"SAgent: 会话 {session_id} 完整执行耗时 {_total_ms} ms")
+            logger.info(
+                f"SAgent: 会话 {session_id} 完整执行耗时 {_total_ms} ms", session_id)
         except Exception as _e:
-            logger.error(f"SAgent: 统计总耗时出错: {_e}\n{traceback.format_exc()}")
+            logger.error(f"SAgent: 统计总耗时出错: {_e}\n{traceback.format_exc()}", session_id)
 
     async def run_stream_internal(self,
                                   input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
@@ -261,7 +262,7 @@ class SAgent:
                     if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
                         session_context.message_manager.add_messages(message)
                 logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
-                
+
                 # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
                 session_context.set_history_context()
 
@@ -424,9 +425,9 @@ class SAgent:
             # 清理会话，防止内存泄漏
             try:
                 delete_session_context(session_id or "")
-                logger.info(f"SAgent: 已清理会话 {session_id}")
+                logger.info(f"SAgent: 已清理会话 {session_id}", session_id)
             except Exception as cleanup_error:
-                logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
+                logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}", session_id)
 
     async def _execute_multi_agent_workflow(self,
                                             session_context: SessionContext,
