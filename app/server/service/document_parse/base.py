@@ -5,7 +5,7 @@ from typing import Any, Dict
 import models
 
 from sagents.tool.file_parser.file_parser import FileParser
-from sagents.utils.logger import logger
+from loguru import logger
 
 
 class BaseParser:

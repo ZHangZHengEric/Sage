@@ -16,7 +16,7 @@ from service.kb.es.doc import (
 from service.kb.search_result_post_process import SearchResultPostProcessTool
 from pydantic import BaseModel
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 
 class DocumentInput(BaseModel):

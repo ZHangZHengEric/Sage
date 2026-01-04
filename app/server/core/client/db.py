@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sagents.utils.logger import logger
+from loguru import logger
 
 
 class SessionManager:
