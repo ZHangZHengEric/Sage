@@ -30,9 +30,11 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).bind(
-            logger_name=record.name
-        ).log(level, record.getMessage())
+        payload = {"logger_name": record.name}
+        if hasattr(record, "session_id"):
+            payload["session_id"] = record.session_id
+
+        logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(level, record.getMessage())
 
 
 def init_logging(log_name="app", log_level="DEBUG"):
@@ -45,7 +47,7 @@ def init_logging(log_name="app", log_level="DEBUG"):
     """
 
     _format = (
-        "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - [{extra[request_id]}] - [{file.name}:{line}] - "
+        "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - [{extra[request_id]}] - [{extra[session_id]}] - [{file.name}:{line}] - "
         "{message}"
     )
 
@@ -54,6 +56,8 @@ def init_logging(log_name="app", log_level="DEBUG"):
     # Configure patcher to automatically inject request_id
     def patcher(record):
         record["extra"]["request_id"] = get_request_id()
+        if "session_id" not in record["extra"]:
+            record["extra"]["session_id"] = "NO_SESSION"
 
     logger.configure(patcher=patcher)
 
@@ -78,7 +82,7 @@ def init_logging(log_name="app", log_level="DEBUG"):
     access_log_enabled = True
     if access_log_enabled:
         # 添加专门的访问日志文件
-        access_format = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - [{extra[request_id]}] - [{file.name}:{line}] - {message}"
+        access_format = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - [{extra[request_id]}] - [{extra[session_id]}] - [{file.name}:{line}] - {message}"
         access_params = {
             "rotation": "10MB",
             "retention": 10,
@@ -116,3 +120,13 @@ def init_logging(log_name="app", log_level="DEBUG"):
         logging_logger = logging.getLogger(logger_name)
         logging_logger.handlers = [InterceptHandler()]
         logging_logger.propagate = False
+
+    # 接管 sagents 的日志
+    try:
+        # 确保 sagents logger 已初始化，以便我们可以替换其 handlers
+        import sagents.utils.logger
+        sage_logger = logging.getLogger("sage")
+        sage_logger.handlers = [InterceptHandler()]
+        sage_logger.propagate = False
+    except ImportError:
+        pass
