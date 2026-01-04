@@ -24,6 +24,17 @@ import os
 import sys
 from .mcp_proxy import McpProxy
 
+_GLOBAL_TOOL_MANAGER: Optional["ToolManager"] = None
+
+
+def get_tool_manager() -> Optional["ToolManager"]:
+    return _GLOBAL_TOOL_MANAGER
+
+
+def set_tool_manager(tm: Optional["ToolManager"]) -> None:
+    global _GLOBAL_TOOL_MANAGER
+    _GLOBAL_TOOL_MANAGER = tm
+
 
 class ToolManager:
     def __init__(self, is_auto_discover=True):
@@ -42,6 +53,14 @@ class ToolManager:
             #     asyncio.run(self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path))
             # else:
             #     logger.debug("In testing environment, skipping MCP tool discovery")
+
+    @classmethod
+    def get_instance(cls, is_auto_discover: bool = True) -> "ToolManager":
+        tm = get_tool_manager()
+        if tm is None:
+            tm = ToolManager(is_auto_discover=is_auto_discover)
+            set_tool_manager(tm)
+        return tm
 
     def discover_tools_from_path(self, path: str):
         """Discover and register tools from a custom path
