@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional
 from core.config import StartupConfig
 from openai import AsyncOpenAI
-from sagents.utils.logger import logger
+from loguru import logger
 
 MODEL_CLIENT: Optional[AsyncOpenAI] = None
 MODEL_NAME: Optional[str] = None
