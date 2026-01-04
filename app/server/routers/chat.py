@@ -14,14 +14,13 @@ from core.exceptions import SageHTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from service.sage_stream_service import SageStreamService
-from core.config import StartupConfig
+from core.config import StartupConfig, get_startup_config
 from sagents.utils.logger import logger
 import models
 from core.client.llm import get_chat_client
 import core.globals as global_vars
 from core.render import Response
 
-import config
 
 # 创建路由器
 chat_router = APIRouter()
@@ -132,7 +131,7 @@ def _setup_stream_service(request: StreamRequest):
     # 清理LLM模型配置
     if request.llm_model_config:
         request.llm_model_config = _clean_llm_model_config(request.llm_model_config)
-    server_args = config.get_startup_config()
+    server_args = get_startup_config()
     model_client = _create_model_client(request.llm_model_config, server_args)
     llm_model_config = _build_llm_model_config(request.llm_model_config, server_args)
     max_model_len = request.llm_model_config.get(
