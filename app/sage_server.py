@@ -446,7 +446,7 @@ default_model_client: Optional[AsyncOpenAI] = None
 async def initialize_tool_manager():
     """异步初始化工具管理器"""
     # 创建工具管理器实例，但不自动发现工具
-    manager = ToolManager(is_auto_discover=False)
+    manager = ToolManager.get_instance(is_auto_discover=False)
     
     # 手动进行基础工具发现
     manager._auto_discover_tools()
