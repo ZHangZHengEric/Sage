@@ -8,12 +8,12 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from core import config
-import core.globals as global_vars
 import models
 from core.exceptions import SageHTTPException
 from core.client.llm import get_chat_client
 
 from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool.tool_manager import get_tool_manager
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.logger import logger
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
@@ -140,11 +140,11 @@ async def auto_generate_agent(
 
     if available_tools:
         logger.info(f"使用指定的工具列表: {available_tools}")
-        tool_proxy = ToolProxy(global_vars.get_tool_manager(), available_tools)
+        tool_proxy = ToolProxy(get_tool_manager(), available_tools)
         tool_manager_or_proxy = tool_proxy
     else:
         logger.info("使用完整的工具管理器")
-        tool_manager_or_proxy = global_vars.get_tool_manager()
+        tool_manager_or_proxy = get_tool_manager()
 
     agent_config = await auto_gen_func.generate_agent_config(
         agent_description=agent_description,
