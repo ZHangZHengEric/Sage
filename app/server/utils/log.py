@@ -33,7 +33,10 @@ class InterceptHandler(logging.Handler):
         payload = {"logger_name": record.name}
         if hasattr(record, "session_id"):
             payload["session_id"] = record.session_id
-
+        if hasattr(record, "caller_filename"):
+            payload["file.name"] = record.caller_filename
+        if hasattr(record, "caller_lineno"):
+            payload["line"] = record.caller_lineno
         logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(level, record.getMessage())
 
 
@@ -58,6 +61,12 @@ def init_logging(log_name="app", log_level="DEBUG"):
         record["extra"]["request_id"] = get_request_id()
         if "session_id" not in record["extra"]:
             record["extra"]["session_id"] = "NO_SESSION"
+        
+        # Override file.name and line if provided in extra (e.g. from InterceptHandler)
+        if "file.name" in record["extra"]:
+            record["file"].name = record["extra"]["file.name"]
+        if "line" in record["extra"]:
+            record["line"] = record["extra"]["line"]
 
     logger.configure(patcher=patcher)
 
