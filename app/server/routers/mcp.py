@@ -42,7 +42,6 @@ async def add(req: MCPServerRequest, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    logger.info(f"开始添加MCP server: {req.name}")
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     server_name = await add_mcp_server(
