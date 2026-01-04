@@ -24,11 +24,8 @@ async def interrupt_session(
     """中断指定会话，返回数据字典"""
     session_context = get_session_context(session_id)
     if not session_context:
-        raise SageHTTPException(
-            status_code=404,
-            detail="服务未配置或不可用",
-            error_detail=f"Session '{session_id}' not found or already ended",
-        )
+        logger.info(f"会话 {session_id} 不存在或者已完成")
+        return {"session_id": session_id}
 
     session_context.status = SessionStatus.INTERRUPTED
     logger.info(f"会话 {session_id} 中断成功")
