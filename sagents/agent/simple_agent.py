@@ -4,7 +4,7 @@ from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext, get_session_context
+from sagents.context.session_context import SessionContext, get_session_context, SessionStatus
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_config import AgentToolSpec
 from sagents.utils.prompt_manager import PromptManager
@@ -35,6 +35,8 @@ class SimpleAgent(AgentBase):
                          tool_manager: Optional[ToolManager] = None,
                          session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         logger.info(f"SimpleAgent: 开始流式直接执行，会话ID: {session_id}")
+        if self._should_abort_due_to_session(session_id, session_context):
+            return
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix', language=session_context.get_language())
@@ -265,12 +267,16 @@ class SimpleAgent(AgentBase):
             List[MessageChunk]: 执行结果消息块
         """
 
+        if self._should_abort_due_to_session(session_id, session_context):
+            return
         all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
         max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
         logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         while True:
+            if self._should_abort_due_to_session(session_id, session_context):
+                break
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
 
@@ -321,11 +327,21 @@ class SimpleAgent(AgentBase):
                 # 任务暂停，返回一个超长的错误消息块
                 yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？", type=MessageType.ERROR.value)]
                 break
-
+            if self._should_abort_due_to_session(session_id, session_context):
+                break
             # 检查任务是否完成
             if await self._is_task_complete(messages_input, session_id, session_context):
                 logger.info("SimpleAgent: 任务完成，终止执行")
                 break
+
+    def _should_abort_due_to_session(self, session_id: Optional[str], session_context: SessionContext) -> bool:
+        if session_id and get_session_context(session_id) is None:
+            logger.info("SimpleAgent: 跳过执行，session上下文不存在或已中断")
+            return True
+        if session_context.status == SessionStatus.INTERRUPTED:
+            logger.info("SimpleAgent: 跳过执行，session上下文状态为中断")
+            return True
+        return False
 
     async def _call_llm_and_process_response(self,
                                              messages_input: List[MessageChunk],
