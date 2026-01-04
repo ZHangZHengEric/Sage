@@ -14,7 +14,7 @@ import models
 from core.exceptions import SageHTTPException
 from core.render import Response
 from core.config import StartupConfig
-from core.client.llm import get_chat_client
+from sagents.model import get_chat_client
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
