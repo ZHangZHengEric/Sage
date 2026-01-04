@@ -34,7 +34,7 @@ class ToolBase:
         return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法。
-        
+
         新增：
         - description_i18n: 工具描述的多语言字典，例如 {"zh": "读取文件", "en": "Read file"}
         - param_description_i18n: 参数描述的多语言字典，形如 {param_name: {lang: text}}
