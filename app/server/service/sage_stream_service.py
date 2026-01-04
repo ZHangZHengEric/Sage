@@ -81,8 +81,8 @@ class SageStreamService:
         else:
             self.preset_max_loop_count = None
 
-#         "deepThinking": false,
-#   "multiAgent": false,
+        #         "deepThinking": false,
+        #   "multiAgent": false,
         # 设置deepThinking
         if "deepThinking" in self.preset_running_config:
             self.preset_deep_thinking = self.preset_running_config['deepThinking']
@@ -285,15 +285,14 @@ class SageStreamService:
             logger.info(f"🏁 流式处理完成，总共处理了 {chunk_count} 个块")
 
         except GeneratorExit:
-            logger.warning(f"🔌 process_stream: 客户端断开连接，会话ID: {session_id}")
-            logger.warning("🔍 GeneratorExit 详情: 客户端在流式处理过程中断开了连接")
-            logger.warning(f"📋 GeneratorExit 堆栈跟踪: {traceback.format_exc()}")
-            # 重新抛出GeneratorExit，让上层处理
+            logger.warning(
+                "🔍 GeneratorExit 客户端断开连接，会话ID: {session_id} 详情: 客户端在流式处理过程中断开了连接"
+            )
             raise
         except Exception as e:
-            logger.error(f"❌ 流式处理异常: {e}")
-            logger.error(f"🔍 异常类型: {type(e).__name__}")
-            logger.error(f"📋 异常详情: {traceback.format_exc()}")
+            logger.error(
+                f"❌ 流式处理异常，异常类型：「{type(e).__name__}」，详情: {traceback.format_exc()}"
+            )
             error_result = {
                 'type': 'error',
                 'content': f"处理失败: {str(e)}",
