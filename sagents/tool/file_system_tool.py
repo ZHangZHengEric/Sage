@@ -13,7 +13,6 @@ from typing import Dict, Any, Optional, List
 
 from .tool_base import ToolBase
 from sagents.utils.logger import logger
-import pandas as pd
 class FileSystemError(Exception):
     """文件系统异常"""
     pass
@@ -757,6 +756,7 @@ class FileSystemTool(ToolBase):
             return {"status": "error", "message": "输入的CSV文件不存在"}
         
         # 读取CSV文件
+        import pandas as pd
         df = pd.read_csv(csv_file_path)
         
         # 写入Excel文件
