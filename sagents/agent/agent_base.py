@@ -5,7 +5,7 @@ from sagents.utils.logger import logger
 from sagents.utils.stream_format import merge_stream_response_to_non_stream_response
 from sagents.tool.tool_config import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
-from sagents.context.session_context import get_session_context, SessionContext
+from sagents.context.session_context import get_session_context, SessionContext, SessionStatus
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
 import traceback
@@ -128,6 +128,11 @@ class AgentBase(ABC):
         """
         logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
 
+        if session_id:
+            sc_now = get_session_context(session_id)
+            if sc_now is None or sc_now.status == SessionStatus.INTERRUPTED:
+                logger.info(f"{self.__class__.__name__}: 跳过模型调用，session上下文不存在或已中断，会话ID: {session_id}")
+                return
         # 确定最终的模型配置
         final_config = {**self.model_config}
         if model_config_override:
@@ -207,8 +212,7 @@ class AgentBase(ABC):
             # 将次请求记录在session context 中的llm调用记录中
             logger.info(f"{step_name}: 调用语言模型进行流式生成，耗时: {time.time() - start_request_time},返回{len(all_chunks)}个chunk")
             if session_id:
-                # 调用seesion manager 中获取llm logger，然后记录请求以及完整的响应
-                session_context = get_session_context(session_id)
+                session_context = get_session_context(session_id) if session_id else None
 
                 llm_request = {
                     "step_name": step_name,
@@ -222,7 +226,10 @@ class AgentBase(ABC):
                     logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
                     logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
                     llm_response = None
-                session_context.add_llm_request(llm_request, llm_response)
+                if session_context:
+                    session_context.add_llm_request(llm_request, llm_response)
+                else:
+                    logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
     def prepare_unified_system_message(self,
                                        session_id: Optional[str] = None,
