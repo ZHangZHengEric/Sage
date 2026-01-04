@@ -100,7 +100,7 @@ class MemoryExtractionAgent(AgentBase):
 
         # 在现有的记忆中，判断是否要删除重复的旧的记忆
         if session_context.user_memory_manager:
-            existing_memories = session_context.user_memory_manager.get_system_memories(session_id)
+            existing_memories = await session_context.user_memory_manager.get_system_memories(session_id)
 
             # 调用模型判断是否要删除重复的旧记忆
             duplicate_keys = await self._check_and_delete_duplicate_memories(existing_memories, session_id or "", session_context)
