@@ -17,7 +17,7 @@ from service.agent import (
     update_agent,
 )
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 # ============= Agent相关模型 =============
 

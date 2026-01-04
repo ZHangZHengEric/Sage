@@ -5,7 +5,7 @@ from typing import Dict, List
 import models
 
 from service.kb.knowledge_base import DocumentInput, DocumentService
-from sagents.utils.logger import logger
+from loguru import logger
 
 from .base import BaseParser
 

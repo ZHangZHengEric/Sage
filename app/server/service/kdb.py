@@ -15,7 +15,7 @@ from service.kb.knowledge_base import DocumentService
 from fastapi import UploadFile
 from utils.id import gen_id
 
-from sagents.utils.logger import logger
+from loguru import logger
 from service.document_parse import get_document_parser
 
 DEFAULT_BATCH_SIZE = 5

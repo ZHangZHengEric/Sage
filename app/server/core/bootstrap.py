@@ -1,7 +1,7 @@
 import json
 import os
 from core import config
-from sagents.utils.logger import logger
+from loguru import logger
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 
 async def initialize_tool_manager():

@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 from core.lifecycle import (
     close_clients,
