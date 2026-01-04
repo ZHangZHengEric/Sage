@@ -286,7 +286,7 @@ class SageStreamService:
 
         except GeneratorExit:
             logger.warning(
-                "🔍 GeneratorExit 客户端断开连接，会话ID: {session_id} 详情: 客户端在流式处理过程中断开了连接"
+                "🔍 GeneratorExit 客户端断开连接， 详情: 客户端在流式处理过程中断开了连接"
             )
             raise
         except Exception as e:
