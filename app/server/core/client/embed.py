@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List, Optional
 from core.config import StartupConfig
 from openai import AsyncOpenAI
-from sagents.utils.logger import logger
+from loguru import logger
 
 EMBED_CLIENT: Optional[AsyncOpenAI] = None
 EMBED_MODEL: Optional[str] = None

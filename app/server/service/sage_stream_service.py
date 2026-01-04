@@ -15,7 +15,7 @@ from openai import AsyncOpenAI
 from sagents.sagents import SAgent
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_proxy import ToolProxy
-from sagents.utils.logger import logger
+from loguru import logger
 
 
 class SageStreamService:
@@ -282,7 +282,7 @@ class SageStreamService:
                 # 在每个块之后让出控制权，避免阻塞事件循环
                 await asyncio.sleep(0)
 
-            logger.info(f"🏁 流式处理完成，总共处理了 {chunk_count} 个块", session_id)
+            logger.info(f"sessionId={session_id} 🏁 流式处理完成，总共处理了 {chunk_count} 个块")
 
         except GeneratorExit:
             logger.warning(
@@ -291,8 +291,7 @@ class SageStreamService:
             raise
         except Exception as e:
             logger.error(
-                f"❌ 流式处理异常，异常类型：「{type(e).__name__}」，详情: {traceback.format_exc()}",
-                session_id
+                f"sessionId={session_id} ❌ 流式处理异常，异常类型：「{type(e).__name__}」，详情: {traceback.format_exc()}"
             )
             error_result = {
                 'type': 'error',

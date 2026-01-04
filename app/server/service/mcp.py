@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import models
 from core.exceptions import SageHTTPException
 
-from sagents.utils.logger import logger
+from loguru import logger
 from sagents.tool.tool_manager import get_tool_manager
 
 

@@ -15,7 +15,7 @@ from core.client.llm import get_chat_client
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_manager import get_tool_manager
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
-from sagents.utils.logger import logger
+from loguru import logger
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 
 # ================= 工具函数 =================

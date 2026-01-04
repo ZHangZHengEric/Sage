@@ -15,7 +15,7 @@ from sagents.context.session_context import (
     get_session_context,
     get_session_messages,
 )
-from sagents.utils.logger import logger
+from loguru import logger
 
 
 async def interrupt_session(
