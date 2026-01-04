@@ -80,7 +80,7 @@ def register_middlewares(app):
     async def request_logging_middleware(request: Request, call_next):
         """请求日志中间件，记录请求信息和用户名称"""
         # 生成请求ID
-        request_id = f"request_{uuid.uuid4().hex[:12]}"
+        request_id = f"{uuid.uuid4().hex[:12]}"
 
 
         # 使用bind创建带有上下文的logger实例，避免全局状态污染
