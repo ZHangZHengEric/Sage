@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from service.sage_stream_service import SageStreamService
 from core.config import StartupConfig, get_startup_config
-from sagents.utils.logger import logger
+from loguru import logger
 import models
 from core.client.llm import get_chat_client
 from sagents.tool.tool_manager import get_tool_manager
@@ -233,37 +233,6 @@ async def _create_conversation_title(request):
     return conversation_title
 
 
-async def _save_conversation_if_needed(
-    session_id, request, message_collector, message_order
-):
-    conversation_dao = models.ConversationDao()
-    """如果需要，保存新会话"""
-    messages = []
-    existing_conversation = await conversation_dao.get_by_session_id(session_id)
-    if not existing_conversation:
-        conversation_title = await _create_conversation_title(request)
-        await conversation_dao.save_conversation(
-            user_id=request.user_id or "default_user",
-            agent_id=request.agent_id or "default_agent",
-            agent_name=request.agent_name or "Sage Assistant",
-            messages=[],
-            session_id=session_id,
-            title=conversation_title,
-        )
-        logger.info(f"创建新会话: {session_id}, 标题: {conversation_title}")
-    else:
-        messages = existing_conversation.messages
-    for message_id in message_order:
-        if message_id in message_collector:
-            merged_message = message_collector[message_id]
-            # 添加消息到conversation
-            messages.append(merged_message)
-    await conversation_dao.update_conversation_messages(session_id, messages)
-    logger.info(
-        f"成功按顺序保存 {len(message_collector)} 条消息到现有conversation {session_id}"
-    )
-
-
 async def _ensure_conversation(session_id: str, request: StreamRequest) -> None:
     conversation_dao = models.ConversationDao()
     existing_conversation = await conversation_dao.get_by_session_id(session_id)
@@ -334,7 +303,7 @@ async def chat(request: ChatRequest, http_request: Request):
 
     session_id = inner_request.session_id or str(uuid.uuid4())
     inner_request.session_id = session_id
-    logger.info(f"Server: 请求参数: {inner_request}", session_id)
+    logger.info(f"sessionId={session_id} Server: 请求参数: {inner_request}")
     lock = get_session_run_lock(session_id)
     acquired = False
     if lock.locked():
@@ -367,7 +336,7 @@ async def chat(request: ChatRequest, http_request: Request):
             # 准备和格式化消息
             messages = _prepare_messages(inner_request.messages)
 
-            logger.info(f"开始流式处理，会话ID: {session_id}", session_id)
+            logger.info(f"sessionId={session_id} 开始流式处理")
             await _ensure_conversation(session_id, inner_request)
 
             # 添加流处理计数器和连接状态跟踪
@@ -433,16 +402,15 @@ async def chat(request: ChatRequest, http_request: Request):
                 else last_activity_time
             )
             logger.info(
-                f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s",
-                session_id,
+                f"sessionId={session_id} ✅ 完成流式处理: 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s"
             )
             yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
         finally:
-            logger.info("流处理结束，清理会话资源", session_id)
+            logger.info(f"sessionId={session_id} 流处理结束，清理会话资源")
             if acquired and lock.locked():
                 lock.release()
             delete_session_run_lock(session_id)
-            logger.info(f"会话 {session_id} 资源已清理", session_id)
+            logger.info(f"sessionId={session_id} 资源已清理")
 
     return StreamingResponse(generate_stream(), media_type="text/plain")

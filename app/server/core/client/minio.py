@@ -6,7 +6,7 @@ import json
 
 from core import config
 from core.exceptions import SageHTTPException
-from sagents.utils.logger import logger
+from loguru import logger
 
 MINIO_CLIENT: Optional["Minio"] = None
 

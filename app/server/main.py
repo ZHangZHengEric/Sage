@@ -25,6 +25,8 @@ for m in ("websockets", "uvicorn"):
 import uvicorn
 from core import config
 from application import create_fastapi_app
+from utils.log import init_logging
+
 
 
 def start_server(cfg: config.StartupConfig):
@@ -49,6 +51,7 @@ def start_server(cfg: config.StartupConfig):
 
 def main():
     try:
+        init_logging(log_name="sage-server")
         cfg = config.init_startup_config()
         start_server(cfg)
         return 0
