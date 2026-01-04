@@ -6,6 +6,8 @@ import traceback
 from functools import wraps
 from docstring_parser import parse,DocstringStyle
 from .tool_config import ToolSpec
+import os
+import time
 
 class ToolBase:
     _tools: Dict[str, ToolSpec] = {}  # Class-level registry
@@ -32,7 +34,7 @@ class ToolBase:
         return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法。
-        
+
         新增：
         - description_i18n: 工具描述的多语言字典，例如 {"zh": "读取文件", "en": "Read file"}
         - param_description_i18n: 参数描述的多语言字典，形如 {param_name: {lang: text}}
@@ -44,9 +46,13 @@ class ToolBase:
                 logger.info(f"Tool {func.__name__} is disabled, not registering")
                 return func
             logger.info(f"Applying tool decorator to {func.__name__} in {cls.__name__}")
+            _profile = os.environ.get("SAGENTS_PROFILING_TOOL_DECORATOR", "").lower() in ("1", "true", "yes")
+            _t_total_start = time.perf_counter() if _profile else None
             # Parse full docstring using docstring_parser
             docstring_text = inspect.getdoc(func) or ""
+            _t_parse_start = time.perf_counter() if _profile else None
             parsed_docstring = parse(docstring_text,style=DocstringStyle.GOOGLE)
+            _t_parse_end = time.perf_counter() if _profile else None
             
             # Use parsed description if available
             parsed_description = parsed_docstring.short_description or ""
@@ -54,6 +60,7 @@ class ToolBase:
                 parsed_description += "\n" + parsed_docstring.long_description
             
             # Extract parameters from signature
+            _t_sig_start = time.perf_counter() if _profile else None
             sig = inspect.signature(func)
             parameters = {}
             required = []
@@ -132,6 +139,7 @@ class ToolBase:
                     required.append(name)
                 
                 parameters[name] = param_info
+            _t_params_end = time.perf_counter() if _profile else None
 
             # Always use function name as tool name
             tool_name = func.__name__
@@ -141,6 +149,7 @@ class ToolBase:
 
             # 处理返回结构：优先使用传入的 return_data，其次从 docstring 的 Returns 提取描述
             spec_return_data: Optional[Dict[str, Any]] = None
+            _t_returns_start = time.perf_counter() if _profile else None
             try:
                 if return_data and isinstance(return_data, dict):
                     # 复制以避免外部引用被修改
@@ -170,6 +179,7 @@ class ToolBase:
             except Exception:
                 # 不影响注册
                 pass
+            _t_returns_end = time.perf_counter() if _profile else None
 
             spec = ToolSpec(
                 name=tool_name,
@@ -181,6 +191,20 @@ class ToolBase:
                 return_data=spec_return_data,
                 return_properties_i18n=return_properties_i18n or None,
             )
+            if _profile:
+                _t_total_end = time.perf_counter()
+                try:
+                    logger.info(
+                        f"Tool decorator timing {tool_name}: parse={((_t_parse_end or 0)-(_t_parse_start or 0)):.3f}s, "
+                        f"sig_params={((_t_params_end or 0)-(_t_sig_start or 0)):.3f}s, "
+                        f"returns={((_t_returns_end or 0)-(_t_returns_start or 0)):.3f}s, "
+                        f"total={((_t_total_end or 0)-(_t_total_start or 0)):.3f}s"
+                    )
+                except Exception:
+                    try:
+                        logger.error(traceback.format_exc())
+                    except Exception:
+                        pass
             
             @wraps(func)
             def wrapper(*args, **kwargs):
