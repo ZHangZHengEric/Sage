@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Union
 from core.config import StartupConfig
 from elasticsearch import AsyncElasticsearch, helpers
 from core.client.embed import EMBEDDING_DIMS
-from sagents.utils.logger import logger
+from loguru import logger
 
 ES_CLIENT: Optional[AsyncElasticsearch] = None
 

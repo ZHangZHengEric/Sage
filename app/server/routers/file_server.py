@@ -14,7 +14,7 @@ from core.render import Response
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 # 创建路由器
 file_server_router = APIRouter()

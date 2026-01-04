@@ -16,7 +16,7 @@ from service.mcp import (
     remove_mcp_server,
 )
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
