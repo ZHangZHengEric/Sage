@@ -3,7 +3,7 @@ from loguru import logger
 
 from .client.db import close_db_client, init_db_client
 from .client.es import close_es_client, init_es_client
-from .client.llm import close_chat_client, init_chat_client
+from sagents.model import close_chat_client, init_chat_client
 from .client.embed import close_embed_client, init_embed_client
 from .client.minio import close_minio_client, init_minio_client
 from .bootstrap import (
@@ -28,7 +28,11 @@ async def initialize_clients():
         logger.error(f"MinIO 初始化失败: {e}")
 
     try:
-        chat_client = await init_chat_client(cfg)
+        chat_client = await init_chat_client(
+            api_key=cfg.default_llm_api_key,
+            base_url=cfg.default_llm_api_base_url,
+            model_name=cfg.default_llm_model_name,
+        )
         if chat_client is not None:
             logger.info("LLM Chat 客户端已初始化")
     except Exception as e:
