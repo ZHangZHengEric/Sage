@@ -116,7 +116,7 @@ def _create_model_client(request_config: dict, server_args: StartupConfig):
 def _create_tool_proxy(request: StreamRequest):
     """创建工具代理"""
     if not request.available_tools:
-        return get_tool_manager()
+        return ToolProxy(get_tool_manager(), [])
 
     logger.info(f"初始化工具代理，可用工具: {request.available_tools}")
 
