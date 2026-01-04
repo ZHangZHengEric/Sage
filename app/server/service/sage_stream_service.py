@@ -128,7 +128,6 @@ class SageStreamService:
             system_prefix=self.preset_system_prefix,
             workspace=workspace if workspace.endswith('/') else workspace+'/',
             memory_root=memory_root,
-            max_model_len=self.default_llm_max_model_len
         )
         self.tool_manager = tool_manager
         if self.preset_available_tools:
