@@ -296,7 +296,7 @@ class SessionContext:
         if new_system_context:
             self.system_context.update(new_system_context)
 
-    def add_llm_request(self, request: Dict[str, Any], response: Dict[str, Any]):
+    def add_llm_request(self, request: Dict[str, Any], response: Optional[Dict[str, Any]]):
         """添加LLM请求"""
         self.llm_requests_logs.append({
             "request": request,
@@ -310,10 +310,15 @@ class SessionContext:
         tokens_info = {"total_info": {}, "per_step_info": []}
         for llm_request in self.llm_requests_logs:
             response_dict = self._make_serializable(llm_request['response'])
+            if not isinstance(response_dict, dict):
+                continue
             if 'usage' in response_dict:
-                step_info = {"step_name": llm_request['request']['step_name'], "usage": response_dict['usage']}
+                step_info = {
+                    "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
+                    "usage": response_dict.get("usage"),
+                }
                 tokens_info["per_step_info"].append(step_info)
-                if response_dict['usage']:
+                if response_dict.get('usage'):
                     for key, value in response_dict['usage'].items():
                         if isinstance(value, int) or isinstance(value, float):
                             if key not in tokens_info["total_info"]:
@@ -503,7 +508,7 @@ _session_run_locks: Dict[str, asyncio.Lock] = {}
 def get_session_context(session_id: str) -> Optional[SessionContext]:
     """获取会话上下文"""
     if session_id not in _active_sessions:
-        logger.error(f"SessionContext: 会话 {session_id} 不存在")
+        logger.debug(f"SessionContext: 会话 {session_id} 不存在")
         return None
     return _active_sessions[session_id]
 
