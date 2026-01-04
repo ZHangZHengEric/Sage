@@ -10,7 +10,7 @@ from core.render import Response
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 # 创建路由器
 tool_router = APIRouter(prefix="/api/tools")

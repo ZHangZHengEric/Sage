@@ -20,7 +20,7 @@ from service.conversation import (
     resolve_download_path,
 )
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 # ============= 会话相关模型 =============
 

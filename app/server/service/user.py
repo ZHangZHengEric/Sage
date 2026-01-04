@@ -9,7 +9,7 @@ from argon2 import exceptions as argon2_exceptions
 from core.exceptions import SageHTTPException
 from utils.id import gen_id
 
-from sagents.utils.logger import logger
+from loguru import logger
 
 ph = PasswordHasher()
 
