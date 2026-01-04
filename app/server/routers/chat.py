@@ -16,7 +16,7 @@ from service.sage_stream_service import SageStreamService
 from core.config import StartupConfig, get_startup_config
 from loguru import logger
 import models
-from core.client.llm import get_chat_client
+from sagents.model import get_chat_client
 from sagents.tool.tool_manager import get_tool_manager
 from sagents.context.session_context import (
     SessionStatus,
