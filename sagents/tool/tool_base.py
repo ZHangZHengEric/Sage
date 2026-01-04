@@ -32,7 +32,7 @@ class ToolBase:
         return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法。
-
+        
         新增：
         - description_i18n: 工具描述的多语言字典，例如 {"zh": "读取文件", "en": "Read file"}
         - param_description_i18n: 参数描述的多语言字典，形如 {param_name: {lang: text}}
@@ -198,15 +198,27 @@ class ToolBase:
             func.__objclass__ = cls
             
             # Register in class registry
-            if not hasattr(func, '_is_classmethod'):
-                # For instance methods, register in class registry
-                if not hasattr(cls, '_tools'):
-                    cls._tools = {}
-                cls._tools[tool_name] = spec
+            # DEPRECATED: Registration is now handled by __init_subclass__ to avoid shared registry issues
+            # if not hasattr(func, '_is_classmethod'):
+            #     # For instance methods, register in class registry
+            #     if not hasattr(cls, '_tools'):
+            #         cls._tools = {}
+            #     cls._tools[tool_name] = spec
             
             logger.debug(f"Registered tool to toolbase: {tool_name}")
             return wrapper
         return decorator
+
+    def __init_subclass__(cls, **kwargs):
+        """Initialize subclass and register its tools"""
+        super().__init_subclass__(**kwargs)
+        # Create a fresh registry for the subclass
+        cls._tools = {}
+        # Register tools defined in this subclass
+        for name, value in cls.__dict__.items():
+            if hasattr(value, '_tool_spec'):
+                cls._tools[value._tool_spec.name] = value._tool_spec
+                logger.debug(f"Registered tool {value._tool_spec.name} to {cls.__name__}")
 
     @classmethod
     def get_tools(cls) -> Dict[str, ToolSpec]:
