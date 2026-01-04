@@ -2,14 +2,12 @@ import json
 import os
 from core import config
 from sagents.utils.logger import logger
-from .globals import get_tool_manager, set_tool_manager
+from sagents.tool.tool_manager import ToolManager, set_tool_manager
 
 async def initialize_tool_manager():
     """初始化工具管理器"""
-    from sagents.tool.tool_manager import ToolManager
     try:
-        tool_manager_instance = ToolManager()
-        set_tool_manager(tool_manager_instance)
+        tool_manager_instance = ToolManager.get_instance()
         return tool_manager_instance
     except Exception as e:
         logger.error(f"工具管理器初始化失败: {e}")
@@ -90,9 +88,7 @@ async def initialize_db_tables():
 
 async def close_tool_manager():
     """关闭工具管理器"""
-    tool_manager = get_tool_manager()
-    if tool_manager:
-        set_tool_manager(None)
+    set_tool_manager(None)
 
 
 async def validate_and_disable_mcp_servers():
@@ -108,12 +104,12 @@ async def validate_and_disable_mcp_servers():
     servers = await mcp_dao.get_list()
     removed_count = 0
     registered_count = 0
+    tm = ToolManager.get_instance()
     for srv in servers:
         if srv.config.get("disabled", True):
             logger.info(f"MCP server {srv.name} 已禁用，跳过验证")
             continue
         logger.info(f"开始刷新MCP server: {srv.name}")
-        tm = get_tool_manager()
         server_config = srv.config
         success = await tm.register_mcp_server(srv.name, srv.config)
         if success:
