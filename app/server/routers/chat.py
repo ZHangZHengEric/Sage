@@ -2,11 +2,10 @@
 流式聊天接口路由模块
 """
 
-import json
-import uuid
 import asyncio
-import traceback
+import json
 import time
+import uuid
 from typing import Dict, Any, Optional, List, Union
 from fastapi import APIRouter, Request
 from openai import AsyncOpenAI
@@ -18,8 +17,13 @@ from core.config import StartupConfig, get_startup_config
 from sagents.utils.logger import logger
 import models
 from core.client.llm import get_chat_client
-import core.globals as global_vars
-from core.render import Response
+from sagents.tool.tool_manager import get_tool_manager
+from sagents.context.session_context import (
+    SessionStatus,
+    delete_session_run_lock,
+    get_session_context,
+    get_session_run_lock,
+)
 
 
 # 创建路由器
@@ -108,7 +112,7 @@ def _create_model_client(request_config: dict, server_args: StartupConfig):
 def _create_tool_proxy(request: StreamRequest):
     """创建工具代理"""
     if not request.available_tools:
-        return global_vars.get_tool_manager()
+        return get_tool_manager()
 
     logger.info(f"初始化工具代理，可用工具: {request.available_tools}")
 
@@ -117,15 +121,14 @@ def _create_tool_proxy(request: StreamRequest):
         request.available_tools.remove("complete_task")
     from sagents.tool.tool_proxy import ToolProxy
 
-    tool_proxy = ToolProxy(global_vars.get_tool_manager(), request.available_tools)
+    tool_proxy = ToolProxy(get_tool_manager(), request.available_tools)
     return tool_proxy
 
 
 def _setup_stream_service(request: StreamRequest):
     """设置流式服务，返回(stream_service, session_id)"""
     session_id = request.session_id or str(uuid.uuid4())
-    if session_id in global_vars.get_all_active_sessions_service_map():
-        raise SageHTTPException(status_code=500, detail="会话正在运行中，请使用不同的会话ID")
+    request.session_id = session_id
     request.llm_model_config = _clean_llm_model_config(request.llm_model_config or {})
     server_args = get_startup_config()
     model_client = _create_model_client(request.llm_model_config, server_args)
@@ -145,13 +148,6 @@ def _setup_stream_service(request: StreamRequest):
         memory_root=server_args.memory_root,
         max_model_len=max_model_len,
     )
-
-    all_active_sessions_service_map = global_vars.get_all_active_sessions_service_map()
-    all_active_sessions_service_map[session_id] = {
-        "stream_service": stream_service,
-        "session_id": session_id,
-    }
-    global_vars.set_all_active_sessions_service_map(all_active_sessions_service_map)
     return stream_service, session_id
 
 
@@ -268,6 +264,21 @@ async def _save_conversation_if_needed(
     )
 
 
+async def _ensure_conversation(session_id: str, request: StreamRequest) -> None:
+    conversation_dao = models.ConversationDao()
+    existing_conversation = await conversation_dao.get_by_session_id(session_id)
+    if not existing_conversation:
+        conversation_title = await _create_conversation_title(request)
+        await conversation_dao.save_conversation(
+            user_id=request.user_id or "default_user",
+            agent_id=request.agent_id or "default_agent",
+            agent_name=request.agent_name or "Sage Assistant",
+            messages=[],
+            session_id=session_id,
+            title=conversation_title,
+        )
+
+
 class ChatRequest(BaseModel):
     messages: List[Message]
     session_id: Optional[str] = None
@@ -320,9 +331,34 @@ async def chat(request: ChatRequest, http_request: Request):
             inner_request.system_prefix = agent.config.get("systemPrefix", "")
         else:
             raise SageHTTPException(status_code=400, detail=f"Agent 不存在")
-    logger.info(f"Server: 请求参数: {inner_request}")
-    # 设置流式服务
-    stream_service, session_id = _setup_stream_service(inner_request)
+
+    session_id = inner_request.session_id or str(uuid.uuid4())
+    inner_request.session_id = session_id
+    logger.info(f"Server: 请求参数: {inner_request}", session_id)
+    lock = get_session_run_lock(session_id)
+    acquired = False
+    if lock.locked():
+        ctx = get_session_context(session_id)
+        if not ctx or ctx.status != SessionStatus.INTERRUPTED:
+            raise SageHTTPException(
+                status_code=409,
+                detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID",
+            )
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=30)
+        acquired = True
+    except asyncio.TimeoutError:
+        raise SageHTTPException(
+            status_code=409,
+            detail="会话正在清理中，请稍后重试",
+        )
+
+    try:
+        stream_service, session_id = _setup_stream_service(inner_request)
+    except Exception:
+        if acquired and lock.locked():
+            lock.release()
+        raise
 
     # 生成流式响应
     async def generate_stream():
@@ -331,7 +367,8 @@ async def chat(request: ChatRequest, http_request: Request):
             # 准备和格式化消息
             messages = _prepare_messages(inner_request.messages)
 
-            logger.info(f"开始流式处理，会话ID: {session_id}")
+            logger.info(f"开始流式处理，会话ID: {session_id}", session_id)
+            await _ensure_conversation(session_id, inner_request)
 
             # 添加流处理计数器和连接状态跟踪
             stream_counter = 0
@@ -379,20 +416,7 @@ async def chat(request: ChatRequest, http_request: Request):
                 # 跳过发送token_usage消息
                 if yield_result["type"] == "token_usage":
                     continue
-                # 处理JSON传输
-                try:
-                    yield json.dumps(yield_result, ensure_ascii=False) + "\n"
-                except Exception as e:
-                    logger.error(f"JSON序列化失败: {e}")
-                    # 创建错误响应
-                    error_data = {
-                        "type": "error",
-                        "message_id": result.get("message_id", "error"),
-                        "content": f"数据处理错误: {str(e)}",
-                        "original_size": len(str(result)),
-                        "error": True,
-                    }
-                    yield json.dumps(error_data, ensure_ascii=False) + "\n"
+                yield json.dumps(yield_result, ensure_ascii=False) + "\n"
 
                 await asyncio.sleep(0.01)  # 避免过快发送
 
@@ -409,39 +433,16 @@ async def chat(request: ChatRequest, http_request: Request):
                 else last_activity_time
             )
             logger.info(
-                f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s"
+                f"✅ 完成流式处理: 会话 {session_id}, 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s",
+                session_id,
             )
             yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
-            # 保存会话和消息到数据库
-            await _save_conversation_if_needed(
-                session_id, inner_request, message_collector, message_order
-            )
-
-        except GeneratorExit as ge:
-            import sys
-
-            disconnect_msg = f"🔌 [GENERATOR_EXIT] 客户端断开连接，生成器被关闭 - 会话ID: {session_id}, 时间: {time.time()}"
-            logger.error(disconnect_msg)
-            logger.error(
-                f"📊 [GENERATOR_EXIT] 流处理统计: 已处理 {stream_counter if 'stream_counter' in locals() else 0} 个流结果"
-            )
-            # 强制刷新日志缓冲区
-            sys.stderr.flush()
-
-        except Exception as e:
-            logger.error(f"流式处理异常: {e}")
-            logger.error(traceback.format_exc())
-            error_data = {"type": "error", "message": str(e), "session_id": session_id}
-            yield json.dumps(error_data, ensure_ascii=False) + "\n"
         finally:
-            logger.info("流处理结束，清理会话资源")
-            # 清理会话资源
-            all_active_sessions_service_map = (
-                global_vars.get_all_active_sessions_service_map()
-            )
-            if session_id in all_active_sessions_service_map:
-                del all_active_sessions_service_map[session_id]
-            logger.info(f"会话 {session_id} 资源已清理")
+            logger.info("流处理结束，清理会话资源", session_id)
+            if acquired and lock.locked():
+                lock.release()
+            delete_session_run_lock(session_id)
+            logger.info(f"会话 {session_id} 资源已清理", session_id)
 
     return StreamingResponse(generate_stream(), media_type="text/plain")

@@ -4,7 +4,7 @@
 
 from typing import Any, Dict, Optional
 
-import core.globals as global_vars
+from sagents.tool.tool_manager import get_tool_manager
 from core.exceptions import SageHTTPException
 from core.render import Response
 from fastapi import APIRouter
@@ -26,7 +26,7 @@ async def exec_tool(request: ExecToolRequest):
     """执行工具"""
     logger.info(f"执行工具请求: {request}")
 
-    tool_manager = global_vars.get_tool_manager()
+    tool_manager = get_tool_manager()
     if not tool_manager:
         raise SageHTTPException(
             status_code=500,
@@ -72,7 +72,7 @@ async def get_tools(type: Optional[str] = None):
     """
     tools = []
 
-    tm = global_vars.get_tool_manager()
+    tm = get_tool_manager()
     if tm:
         available_tools = tm.list_tools_with_type()
 
