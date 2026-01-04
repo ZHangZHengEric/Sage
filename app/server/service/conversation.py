@@ -9,9 +9,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import models
 from core.exceptions import SageHTTPException
-from core.globals import get_all_active_sessions_service_map
 
-from sagents.context.session_context import get_session_context
+from sagents.context.session_context import (
+    SessionStatus,
+    get_session_context,
+    get_session_messages,
+)
 from sagents.utils.logger import logger
 
 
@@ -19,62 +22,44 @@ async def interrupt_session(
     session_id: str, message: str = "用户请求中断"
 ) -> Dict[str, Any]:
     """中断指定会话，返回数据字典"""
-    session_info = get_all_active_sessions_service_map().get(session_id)
-    if not session_info:
+    session_context = get_session_context(session_id)
+    if not session_context:
         raise SageHTTPException(
             status_code=404,
-            detail="会话不存在",
-            error_detail=f"Session '{session_id}' not found",
-        )
-
-    stream_service = session_info.get("stream_service")
-    if not stream_service:
-        raise SageHTTPException(
-            status_code=503,
             detail="服务未配置或不可用",
-            error_detail="Stream service not configured or unavailable",
-        )
-
-    success = stream_service.interrupt_session(session_id, message)
-    if not success:
-        raise SageHTTPException(
-            status_code=404,
-            detail=f"会话 {session_id} 不存在或已结束",
             error_detail=f"Session '{session_id}' not found or already ended",
         )
 
+    session_context.status = SessionStatus.INTERRUPTED
     logger.info(f"会话 {session_id} 中断成功")
     return {"session_id": session_id}
 
 
 async def get_session_status(session_id: str) -> Dict[str, Any]:
     """获取指定会话的状态"""
-    session_info = get_all_active_sessions_service_map().get(session_id)
-    if not session_info:
+    session_context = get_session_context(session_id)
+    if not session_context:
         raise SageHTTPException(
             status_code=404,
             detail=f"会话 {session_id} 已完成或者不存在",
             error_detail=f"Session '{session_id}' completed or not found",
         )
 
-    stream_service = session_info.get("stream_service")
-    tasks_status = stream_service.sage_controller.get_tasks_status(session_id)
+    tasks_status = session_context.task_manager.to_dict()
     logger.info(f"获取会话 {session_id} 任务数量：{len(tasks_status.get('tasks', []))}")
     return {"session_id": session_id, "tasks_status": tasks_status}
 
 
 async def get_file_workspace(session_id: str) -> Dict[str, Any]:
     """获取指定会话的文件工作空间内容"""
-    session_info = get_all_active_sessions_service_map().get(session_id)
-    if not session_info:
+    session_context = get_session_context(session_id)
+    if not session_context:
         return {
             "session_id": session_id,
             "files": [],
             "agent_workspace": None,
             "message": f"会话 {session_id} 已完成或者不存在",
         }
-
-    session_context = get_session_context(session_id)
     workspace_path = session_context.agent_workspace
 
     if not workspace_path or not os.path.exists(workspace_path):
@@ -185,7 +170,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
             error_detail=f"Conversation '{conversation_id}' not found",
         )
 
-    messages = conversation.messages if isinstance(conversation.messages, list) else []
+    messages = [m.to_dict() for m in get_session_messages(conversation_id)]
     return {
         "conversation_id": conversation_id,
         "messages": messages,

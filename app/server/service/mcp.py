@@ -6,11 +6,11 @@ MCP 业务处理模块
 
 from typing import Any, Dict, List, Optional
 
-import core.globals as global_vars
 import models
 from core.exceptions import SageHTTPException
 
 from sagents.utils.logger import logger
+from sagents.tool.tool_manager import get_tool_manager
 
 
 def _build_server_config(
@@ -60,7 +60,7 @@ async def add_mcp_server(
     server_config = _build_server_config(
         name, protocol, streamable_http_url, sse_url, api_key, disabled
     )
-    tm = global_vars.get_tool_manager()
+    tm = get_tool_manager()
     success = await tm.register_mcp_server(name, server_config)
     if not success:
         raise SageHTTPException(
@@ -84,7 +84,7 @@ async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServ
 async def remove_mcp_server(server_name: str, user_id: Optional[str] = None) -> str:
     """删除 MCP 服务器，返回 server_name"""
     logger.info(f"开始删除MCP server: {server_name}")
-    tm = global_vars.get_tool_manager()
+    tm = get_tool_manager()
 
     dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
@@ -111,7 +111,7 @@ async def remove_mcp_server(server_name: str, user_id: Optional[str] = None) -> 
 async def toggle_mcp_server(server_name: str) -> (bool, str):
     """切换 MCP 服务器启用/禁用状态，返回 (disabled, status_text)"""
     logger.info(f"开始切换MCP server状态: {server_name}")
-    tm = global_vars.get_tool_manager()
+    tm = get_tool_manager()
 
     dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
@@ -146,7 +146,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
 async def refresh_mcp_server(server_name: str) -> str:
     """刷新 MCP 服务器连接，返回是否成功"""
     logger.info(f"开始刷新MCP server: {server_name}")
-    tm = global_vars.get_tool_manager()
+    tm = get_tool_manager()
     dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:

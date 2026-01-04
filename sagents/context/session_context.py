@@ -1,5 +1,6 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 import time
+import asyncio
 import threading
 from typing import Dict, Any, Optional, List
 from enum import Enum
@@ -496,6 +497,7 @@ class SessionContext:
 
 # 全局会话上下文管理
 _active_sessions: Dict[str, SessionContext] = {}
+_session_run_locks: Dict[str, asyncio.Lock] = {}
 
 
 def get_session_context(session_id: str) -> Optional[SessionContext]:
@@ -506,12 +508,64 @@ def get_session_context(session_id: str) -> Optional[SessionContext]:
     return _active_sessions[session_id]
 
 
+def _get_workspace_root() -> str:
+    workspace_root = (
+        os.environ.get("SAGE_WORKSPACE_PATH")
+        or os.environ.get("PREFIX_FILE_WORKSPACE")
+        or os.path.abspath("agent_workspace")
+    )
+    return os.path.abspath(workspace_root)
+
+
+def get_session_messages(session_id: str) -> List[MessageChunk]:
+    workspace_root = _get_workspace_root()
+    messages_path = os.path.join(workspace_root, session_id, "messages.json")
+    if not os.path.exists(messages_path):
+        return []
+    try:
+        with open(messages_path, "r", encoding="utf-8") as f:
+            raw_messages = json.load(f)
+    except Exception as e:
+        logger.error(f"SessionContext: 读取 messages.json 失败: {e}")
+        return []
+
+    if not isinstance(raw_messages, list):
+        return []
+
+    messages: List[MessageChunk] = []
+    for msg in raw_messages:
+        if isinstance(msg, MessageChunk):
+            messages.append(msg)
+            continue
+        if isinstance(msg, dict):
+            try:
+                messages.append(MessageChunk.from_dict(msg))
+            except Exception:
+                continue
+    return messages
+
+
 def init_session_context(session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, memory_root: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None) -> SessionContext:
     """初始化会话上下文"""
     if session_id in _active_sessions:
         return _active_sessions[session_id]
     _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, memory_root, context_budget_config=context_budget_config)
     return _active_sessions[session_id]
+
+
+def get_session_run_lock(session_id: str) -> asyncio.Lock:
+    if session_id not in _session_run_locks:
+        _session_run_locks[session_id] = asyncio.Lock()
+    return _session_run_locks[session_id]
+
+
+def delete_session_run_lock(session_id: str):
+    lock = _session_run_locks.get(session_id)
+    if not lock:
+        return
+    if lock.locked():
+        return
+    del _session_run_locks[session_id]
 
 
 def delete_session_context(session_id: str):
