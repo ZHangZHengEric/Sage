@@ -111,7 +111,8 @@ async def list(http_request: Request):
         agent_id = agent.agent_id
         agent_resp = convert_config_to_agent(agent_id, agent.config)
         agents_data.append(agent_resp.model_dump())
-    logger.info(f"成功获取 {len(agents_data)} 个Agent配置")
+    # 根据agent名称排序
+    agents_data.sort(key=lambda x: x["name"])
     return await Response.succ(
         data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
     )
