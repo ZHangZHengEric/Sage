@@ -288,6 +288,7 @@ async def chat(request: ChatRequest, http_request: Request):
         agent_dao = models.AgentConfigDao()
         agent = await agent_dao.get_by_id(request.agent_id)
         if agent and agent.config:
+            inner_request.agent_id = request.agent_id
             inner_request.agent_name = agent.name or "Sage Assistant"
             inner_request.llm_model_config = agent.config.get("llmConfig", {})
             inner_request.available_tools = agent.config.get("availableTools", [])
