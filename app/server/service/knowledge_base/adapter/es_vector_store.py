@@ -1,7 +1,7 @@
 from typing import List
-from sagents.rag.interface.vector_store import VectorStore
-from sagents.rag.schema import Document, Chunk, SearchResult
-from sagents.rag.post_process import SearchResultPostProcessTool
+from sagents.retrieve_engine.interface.vector_store import VectorStore
+from sagents.retrieve_engine.schema import Document, Chunk
+from sagents.retrieve_engine.post_process import SearchResultPostProcessTool
 from app.server.service.knowledge_base.adapter.es_repository import (
     EsChunk,
     EsDocument,
