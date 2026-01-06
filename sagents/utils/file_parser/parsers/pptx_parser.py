@@ -4,16 +4,22 @@ PPTX文件解析器
 """
 
 import traceback
+import os
+import subprocess
 from typing import Dict, Any
 from pptx import Presentation
 from .base_parser import BaseFileParser, ParseResult
+from sagents.utils.logger import logger
 
 
 class PPTXParser(BaseFileParser):
     """PPTX文件解析器"""
     
-    SUPPORTED_EXTENSIONS = ['.pptx']
-    SUPPORTED_MIME_TYPES = ['application/vnd.openxmlformats-officedocument.presentationml.presentation']
+    SUPPORTED_EXTENSIONS = ['.pptx', '.ppt']
+    SUPPORTED_MIME_TYPES = [
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint'
+    ]
     
     def parse(self, file_path: str, skip_validation: bool = False) -> ParseResult:
         """
@@ -32,9 +38,24 @@ class PPTXParser(BaseFileParser):
         if not skip_validation and not self.can_parse(file_path):
             return self.create_error_result(f"不支持的文件类型: {file_path}", file_path)
         
+        temp_pptx_path = None
+        
         try:
+            # 检查文件扩展名
+            ext = os.path.splitext(file_path)[1].lower()
+            
+            # 如果是PPT文件，先转换为PPTX
+            if ext == '.ppt':
+                try:
+                    temp_pptx_path = self._convert_ppt_to_pptx(file_path)
+                    target_path = temp_pptx_path
+                except Exception as e:
+                    return self.create_error_result(f"PPT转换失败: {str(e)}", file_path)
+            else:
+                target_path = file_path
+                
             # 加载演示文稿
-            prs = Presentation(file_path)
+            prs = Presentation(target_path)
             
             # 提取文本内容
             text_parts = []
@@ -48,6 +69,19 @@ class PPTXParser(BaseFileParser):
                 for shape in slide.shapes:
                     if hasattr(shape, "text") and shape.text.strip():
                         slide_content.append(shape.text.strip())
+                    # 处理表格
+                    if shape.has_table:
+                        table = shape.table
+                        table_text = []
+                        for row in table.rows:
+                            row_text = []
+                            for cell in row.cells:
+                                if cell.text.strip():
+                                    row_text.append(cell.text.strip())
+                            if row_text:
+                                table_text.append(' | '.join(row_text))
+                        if table_text:
+                            slide_content.append('\\n'.join(table_text))
                 
                 if slide_content:
                     slide_text += "\\n".join(slide_content)
@@ -84,10 +118,52 @@ class PPTXParser(BaseFileParser):
             
         except Exception as e:
             error_msg = f"PPTX解析失败: {str(e)}"
-            print(error_msg)
+            logger.error(error_msg)
             traceback.print_exc()
             return self.create_error_result(error_msg, file_path)
+        finally:
+            # 清理临时文件
+            if temp_pptx_path and os.path.exists(temp_pptx_path):
+                try:
+                    os.remove(temp_pptx_path)
+                except Exception:
+                    pass
     
+    def _convert_ppt_to_pptx(self, file_path: str) -> str:
+        """
+        使用LibreOffice将PPT转换为PPTX
+        """
+        pptx_output_path = file_path + 'x'
+        
+        # 检查libreoffice是否安装
+        try:
+            subprocess.run(['libreoffice', '--version'], check=True, capture_output=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            raise Exception("LibreOffice未安装或不在PATH中，无法转换PPT文件")
+            
+        logger.info(f"尝试使用LibreOffice将PPT转换为PPTX: {file_path} -> {pptx_output_path}")
+        
+        command = [
+            'libreoffice',
+            '--headless',
+            '--convert-to', 'pptx',
+            '--outdir', os.path.dirname(file_path),
+            file_path
+        ]
+        
+        result = subprocess.run(command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"LibreOffice转换错误: {result.stderr}")
+            raise Exception(f"LibreOffice转换失败: {result.stderr}")
+            
+        if not os.path.exists(pptx_output_path):
+            # 有时候输出文件名可能不同，尝试根据文件名猜测
+            # 这里简单处理，假设如果上面的check通过，文件应该存在
+             raise Exception(f"转换后的文件未找到: {pptx_output_path}")
+             
+        return pptx_output_path
+
     def _extract_pptx_metadata(self, prs: Any, slide_texts: list) -> Dict[str, Any]:
         """
         提取PPTX特定元数据
