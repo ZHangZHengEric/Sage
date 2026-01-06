@@ -258,9 +258,14 @@ class SAgent:
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
                 logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                all_message_ids = [m.message_id for m in session_context.message_manager.messages]
                 for message in initial_messages:
-                    if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
+                    if message.message_id not in all_message_ids:
                         session_context.message_manager.add_messages(message)
+                    else:
+                        # 如果message 存在，更新，以新的message 为准
+                        session_context.message_manager.update_messages(message)
+
                 logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
 
                 # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
