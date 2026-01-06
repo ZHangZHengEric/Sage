@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import re
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 
-class DocumentSplit:
+class ChineseRecursiveTextSplitter:
+    """
+    Split text based on punctuation and length constraints.
+    Renamed from DocumentSplit to better reflect its functionality (Chinese punctuation aware).
+    """
     def __init__(self):
         pass
 

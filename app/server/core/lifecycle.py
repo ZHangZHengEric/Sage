@@ -3,7 +3,7 @@ from loguru import logger
 
 from .client.db import close_db_client, init_db_client
 from .client.es import close_es_client, init_es_client
-from sagents.model import close_chat_client, init_chat_client
+from .client.chat import close_chat_client, init_chat_client
 from .client.embed import close_embed_client, init_embed_client
 from .client.minio import close_minio_client, init_minio_client
 from .bootstrap import (
@@ -39,7 +39,17 @@ async def initialize_clients():
         logger.error(f"LLM Chat 初始化失败: {e}")
 
     try:
-        embed_client = await init_embed_client(cfg)
+        api_key = cfg.embed_api_key or cfg.default_llm_api_key
+        base_url = cfg.embed_base_url or cfg.default_llm_api_base_url
+        model = cfg.embed_model or cfg.default_llm_model_name or "text-embedding-3-large"
+        dims = int(cfg.embed_dims or 1024)
+
+        embed_client = await init_embed_client(
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model,
+            dims=dims
+        )
         if embed_client is not None:
             logger.info("Embedding 客户端已初始化")
     except Exception as e:

@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 
-from starlette.routing import BaseRoute
 
 from .knwoledge_base import kdb_mcp
 from fastapi import FastAPI
