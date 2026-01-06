@@ -1,19 +1,34 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import models
 
-from sagents.tool.file_parser.file_parser import FileParser
+from sagents.utils.file_parser import FileParser
 from loguru import logger
+
+if TYPE_CHECKING:
+    from service.knowledge_base.knowledge_base import DocumentInput
 
 
 class BaseParser:
-    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> None:
+    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> List[str]:
+        """
+        清理旧文档
+        Returns:
+            List[str]: 需要删除的文档ID列表
+        """
         logger.info(f"[Parser] clear_old: index_name={index_name}, doc_id={doc.id}")
+        return []
 
-    async def process(self, index_name: str, doc: models.KdbDoc) -> None:
+    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File | None = None) -> List["DocumentInput"]:
+        """
+        处理文档
+        Returns:
+            List[DocumentInput]: 解析后的文档列表，由调用方负责插入
+        """
         logger.info(f"[Parser] process: index_name={index_name}, doc_id={doc.id}")
+        return []
 
     async def convert_file_to_text(
         self,
