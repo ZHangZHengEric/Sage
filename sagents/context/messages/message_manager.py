@@ -85,6 +85,21 @@ class MessageManager:
         }
         
         logger.info(f"MessageManager: 初始化完成，会话ID: {self.session_id}")
+    
+    def update_messages(self, messages: Union[MessageChunk, List[MessageChunk]]) -> None:
+        """
+        根据message 的id 来更新消息列表
+        
+        Args:
+            messages: 消息列表
+        """
+        if isinstance(messages, MessageChunk):
+            messages = [messages]
+        for message in messages:
+            for i, old_message in enumerate(self.messages):
+                if old_message.id == message.id:
+                    self.messages[i] = message
+                    break
 
     def set_active_start_index(self, index: Optional[int]) -> None:
         """
@@ -136,6 +151,7 @@ class MessageManager:
             'split_result': split_result,
             'current_query': current_query
         }
+    
     
 
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk]], agent_name: Optional[str] = None) -> bool:
