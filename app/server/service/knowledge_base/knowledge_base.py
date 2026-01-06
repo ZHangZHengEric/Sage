@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Type
 
-from sagents.rag.manager import KnowledgeManager
-from sagents.rag.schema import Document as SagentsDocument
+from sagents.retrieve_engine.manager import KnowledgeManager
+from sagents.retrieve_engine.schema import Document as SagentsDocument
 from app.server.service.knowledge_base.adapter.es_vector_store import EsVectorStore
 from app.server.service.knowledge_base.adapter.server_embedding_adapter import ServerEmbeddingAdapter
 from app.server.service.knowledge_base.parser.base import BaseParser
