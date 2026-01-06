@@ -4,9 +4,6 @@ from sagents.retrieve_engine.interface.vector_store import VectorStore
 from sagents.retrieve_engine.interface.embedding import EmbeddingModel
 from sagents.retrieve_engine.interface.splitter import BaseSplitter
 from sagents.retrieve_engine.splitter import DefaultSplitter
-import logging
-
-logger = logging.getLogger(__name__)
 
 class KnowledgeManager:
     """
@@ -63,7 +60,6 @@ class KnowledgeManager:
 
         # 3. Store
         await self.vector_store.add_documents(collection_name, documents)
-        logger.info(f"Added {len(documents)} documents with {len(chunks_to_embed)} chunks to collection {collection_name}")
 
     async def search(self, collection_name: str, query: str, top_k: int = 5) -> List[Chunk]:
         """
