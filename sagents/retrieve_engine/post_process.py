@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Set
 
 from sagents.retrieve_engine.schema import SearchResult, Chunk
-
-logger = logging.getLogger(__name__)
 
 
 class SearchResultPostProcessTool:
