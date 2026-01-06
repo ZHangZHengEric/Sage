@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 
 from .tool_base import ToolBase
 from sagents.utils.logger import logger
-from sagents.utils.file_parser.file_parser import FileParser
+from sagents.utils.file_parser import FileParser
 
 class FileParserTool(ToolBase):
     """文件解析工具集"""

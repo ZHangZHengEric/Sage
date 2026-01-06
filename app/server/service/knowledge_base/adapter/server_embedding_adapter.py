@@ -1,5 +1,5 @@
 from typing import List
-from sagents.rag.interface.embedding import EmbeddingModel
+from sagents.retrieve_engine.interface.embedding import EmbeddingModel
 from app.server.core.client.embed import get_embed_client
 
 class ServerEmbeddingAdapter(EmbeddingModel):
@@ -9,7 +9,7 @@ class ServerEmbeddingAdapter(EmbeddingModel):
     """
     async def embed_documents(self, texts: List[str]) -> List[List[float]]:
         client = get_embed_client()
-        return await client.embed_documents(texts)
+        return await client.batch_embed_query(texts)
 
     async def embed_query(self, text: str) -> List[float]:
         client = get_embed_client()
