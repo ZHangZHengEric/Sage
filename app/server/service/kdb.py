@@ -11,12 +11,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import models
 from core.exceptions import SageHTTPException
 from core.client.minio import upload_kdb_file
-from service.kb.knowledge_base import DocumentService
+from service.knowledge_base import DocumentService
 from fastapi import UploadFile
 from utils.id import gen_id
 
 from loguru import logger
-from service.document_parse import get_document_parser
 
 DEFAULT_BATCH_SIZE = 5
 
@@ -114,7 +113,7 @@ class KdbService:
         if user_id and kdb.user_id and kdb.user_id != user_id:
             raise SageHTTPException(status_code=403, detail="forbidden")
         result = await DocumentService().doc_search(kdb.get_index_name(), query, top_k)
-        return result
+        return result.get("search_results", [])
 
     # ==== 文档相关 ====
     async def doc_list(
@@ -299,16 +298,8 @@ class KdbService:
                 )
                 logger.error(f"文件不存在 - FileId: {doc.source_id}")
                 return
-            parser = get_document_parser(doc.data_source)
-            if parser is None:
-                await self.kdb_doc_dao.update_status_and_retry(
-                    doc.id, models.KdbDocStatus.FAILED
-                )
-                logger.error(f"不支持的文档类型: {doc.data_source}")
-                return
-            await parser.clear_old(kdb.get_index_name(), doc)
-            # 3. 调用文档解析器处理文档
-            await parser.process(kdb.get_index_name(), doc, file)
+            # 3. 调用 DocumentService 同步文档（包含清理旧数据和处理新数据）
+            await DocumentService().sync_document(kdb.get_index_name(), doc, file, data_source=doc.data_source)
             # 调用知识库入库接口，
             await self.kdb_doc_dao.update_status(doc.id, models.KdbDocStatus.SUCCESS)
             logger.info(f"处理文档成功 - DocId: {doc.id}, docName: {doc.doc_name}")
