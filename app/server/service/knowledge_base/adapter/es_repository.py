@@ -15,12 +15,12 @@ from core.client.es import (
 from core.client.es import (
     search as es_search,
 )
-from sagents.rag.schema import Chunk, Document
+from sagents.retrieve_engine.schema import Chunk, Document
 
 
 class EsChunk(Chunk):
     """
-    ES 存储的分块数据模型，继承自 sagents.rag.schema.Chunk
+    ES 存储的分块数据模型，继承自 sagents.retrieve_engine.schema.Chunk
     对应索引: {index_name}_doc
     """
     # 继承字段: id, content, document_id, embedding, metadata, score
@@ -62,7 +62,7 @@ class EsChunk(Chunk):
 
 class EsDocument(Document):
     """
-    ES 存储的完整文档模型，继承自 sagents.rag.schema.Document
+    ES 存储的完整文档模型，继承自 sagents.retrieve_engine.schema.Document
     对应索引: {index_name}_doc_full
     """
     # 继承字段: id, content, metadata, chunks
