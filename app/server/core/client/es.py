@@ -1,8 +1,8 @@
 from typing import Any, Dict, List, Optional, Union
 
-from core.config import StartupConfig
+from core.config import StartupConfig, get_startup_config
+
 from elasticsearch import AsyncElasticsearch, helpers
-from core.client.embed import EMBEDDING_DIMS
 from loguru import logger
 
 ES_CLIENT: Optional[AsyncElasticsearch] = None
@@ -74,7 +74,14 @@ def dims() -> int:
     """
     返回向量维度
     """
-    return EMBEDDING_DIMS
+    try:
+        cfg = get_startup_config()
+        if cfg and cfg.embed_dims:
+            return cfg.embed_dims
+        # Fallback to default if config not ready or dims not set
+        return 1024
+    except Exception:
+        return 1024
 
 
 async def _index_exists(client: AsyncElasticsearch, index_name: str) -> bool:
