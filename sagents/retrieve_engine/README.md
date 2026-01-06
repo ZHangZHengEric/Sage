@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```
-sagents/rag/
+sagents/retrieve_engine/
 ├── interface/           # 接口定义 (ABC)
 │   ├── embedding.py     # Embedding 模型抽象基类
 │   ├── splitter.py      # 文档切分器抽象基类
@@ -33,9 +33,9 @@ sagents/rag/
 
 ```python
 from typing import List
-from sagents.rag.interface.vector_store import VectorStore
-from sagents.rag.interface.embedding import EmbeddingModel
-from sagents.rag.schema import Document, Chunk
+from sagents.retrieve_engine.interface.vector_store import VectorStore
+from sagents.retrieve_engine.interface.embedding import EmbeddingModel
+from sagents.retrieve_engine.schema import Document, Chunk
 
 class MyVectorStore(VectorStore):
     async def create_collection(self, collection_name: str):
@@ -73,8 +73,8 @@ class MyEmbeddingModel(EmbeddingModel):
 
 ```python
 import asyncio
-from sagents.rag.manager import KnowledgeManager
-from sagents.rag.splitter import DefaultSplitter
+from sagents.retrieve_engine.manager import KnowledgeManager
+from sagents.retrieve_engine.splitter import DefaultSplitter
 
 async def main():
     # 1. 初始化组件
@@ -112,8 +112,8 @@ if __name__ == "__main__":
 如果你有多个检索源（例如同时使用了向量检索和关键词检索），可以使用 `SearchResultPostProcessTool` 进行结果融合。
 
 ```python
-from sagents.rag.post_process import SearchResultPostProcessTool
-from sagents.rag.schema import SearchResult
+from sagents.retrieve_engine.post_process import SearchResultPostProcessTool
+from sagents.retrieve_engine.schema import SearchResult
 
 # 假设你有两组检索结果
 results_vector = [...] # List[SearchResult] from vector search
