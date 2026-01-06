@@ -1,9 +1,9 @@
 from typing import List, Optional
-from sagents.rag.schema import Document, Chunk
-from sagents.rag.interface.vector_store import VectorStore
-from sagents.rag.interface.embedding import EmbeddingModel
-from sagents.rag.interface.splitter import BaseSplitter
-from sagents.rag.splitter import DefaultSplitter
+from sagents.retrieve_engine.schema import Document, Chunk
+from sagents.retrieve_engine.interface.vector_store import VectorStore
+from sagents.retrieve_engine.interface.embedding import EmbeddingModel
+from sagents.retrieve_engine.interface.splitter import BaseSplitter
+from sagents.retrieve_engine.splitter import DefaultSplitter
 import logging
 
 logger = logging.getLogger(__name__)
