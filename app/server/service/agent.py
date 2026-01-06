@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from core import config
 import models
 from core.exceptions import SageHTTPException
-from sagents.model import get_chat_client
+from core.client.chat import get_chat_client
 
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_manager import get_tool_manager

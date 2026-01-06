@@ -19,4 +19,4 @@ _parsers: Dict[str, Type[BaseParser]] = {
 
 def get_document_parser(data_source: str) -> Optional[BaseParser]:
     cls = _parsers.get(data_source)
-    return cls() if cls else None
+    return cls() if cls else CommonParser()

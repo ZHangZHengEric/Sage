@@ -1,4 +1,13 @@
-from sagents.context.session_context import SessionContext, init_session_context, SessionStatus, get_session_context, delete_session_context, list_active_sessions
+from sagents.context.session_context import (
+    SessionContext,
+    init_session_context,
+    SessionStatus,
+    get_session_context,
+    delete_session_context,
+    list_active_sessions,
+    get_session_run_lock,
+    delete_session_run_lock
+)
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.tasks.task_base import TaskStatus
 from sagents.utils.session_local import session_manager
@@ -429,6 +438,15 @@ class SAgent:
 
             # 清理会话，防止内存泄漏
             try:
+                # 清理会话锁
+                try:
+                    lock = get_session_run_lock(session_id)
+                    if lock and lock.locked():
+                        lock.release()
+                    delete_session_run_lock(session_id)
+                except Exception as e:
+                    logger.error(f"SAgent: 清理会话锁 {session_id} 时出错: {e}")
+
                 delete_session_context(session_id or "")
                 logger.info(f"SAgent: 已清理会话 {session_id}", session_id)
             except Exception as cleanup_error:
