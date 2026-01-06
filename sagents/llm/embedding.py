@@ -2,11 +2,10 @@ from __future__ import annotations
 from typing import List, Optional
 from openai import AsyncOpenAI
 from sagents.utils.logger import logger
-from sagents.rag.interface.embedding import EmbeddingModel
 
-class OpenAIEmbedding(EmbeddingModel):
+class OpenAIEmbedding:
     """
-    OpenAI Embedding 客户端封装，实现 EmbeddingModel 接口
+    OpenAI Embedding 客户端封装
     """
     def __init__(
         self, 
@@ -23,7 +22,7 @@ class OpenAIEmbedding(EmbeddingModel):
             self.client = AsyncOpenAI(api_key=api_key)
         
 
-    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    async def batch_embed_query(self, texts: List[str]) -> List[List[float]]:
         """
         批量生成向量
         """
@@ -49,7 +48,7 @@ class OpenAIEmbedding(EmbeddingModel):
         """
         生成单个查询向量
         """
-        res = await self.embed_documents([text])
+        res = await self.batch_embed_query([text])
         if not res:
             raise RuntimeError("Failed to embed query")
         return res[0]
