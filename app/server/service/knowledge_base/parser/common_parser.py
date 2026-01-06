@@ -1,46 +1,33 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import models
 
-from service.kb.knowledge_base import DocumentInput, DocumentService
 from loguru import logger
 
 from .base import BaseParser
 
-ALLOW_ATTACH_FILE_EXTS = {
-    ".doc",
-    ".docx",
-    ".pdf",
-    ".txt",
-    ".json",
-    ".eml",
-    ".ppt",
-    ".pptx",
-    ".xlsx",
-    ".xls",
-    ".csv",
-    ".md",
-}
+if TYPE_CHECKING:
+    from service.knowledge_base.knowledge_base import DocumentInput
 
 
 class CommonParser(BaseParser):
-    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> None:
+    async def clear_old(self, index_name: str, doc: models.KdbDoc) -> List[str]:
         ids: List[str] = [doc.id]
         md = doc.meta_data or {}
         atts = md.get("attachments")
         if isinstance(atts, list):
             ids.extend(atts)
         logger.info(
-            f"[CommonParser] 清理旧文档开始：索引={index_name}，ID数量={len(ids)}"
+            f"[CommonParser] 计划清理旧文档：索引={index_name}，ID数量={len(ids)}"
         )
-        await DocumentService().doc_document_delete(index_name, ids)
-        logger.info(
-            f"[CommonParser] 清理旧文档完成：索引={index_name}，已删除ID数量={len(ids)}"
-        )
+        return ids
 
-    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File):
+    async def process(self, index_name: str, doc: models.KdbDoc, file: models.File) -> List["DocumentInput"]:
+        # Lazy import to avoid circular dependency at runtime
+        from service.knowledge_base.knowledge_base import DocumentInput
+        
         file_dao = models.FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
         text, _ = await self.convert_file_to_text(file.path)
@@ -82,7 +69,8 @@ class CommonParser(BaseParser):
                         metadata=metadata,
                     )
                 )
-        await DocumentService().doc_document_insert(index_name, docs)
+        
         logger.info(
-            f"[CommonParser] 处理完成：索引={index_name}，插入文档数={len(docs)}"
+            f"[CommonParser] 处理完成：索引={index_name}，生成文档数={len(docs)}"
         )
+        return docs
