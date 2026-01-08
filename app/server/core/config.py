@@ -47,6 +47,12 @@ class StartupConfig:
     default_llm_max_model_len: int = 54000
     default_llm_top_p: float = 0.9
     default_llm_presence_penalty: float = 0.0
+
+    # Context Budget Defaults
+    context_history_ratio: float = 0.2
+    context_active_ratio: float = 0.3
+    context_max_new_message_ratio: float = 0.5
+    context_recent_turns: int = 0
     
     jwt_key: str = "123"
     jwt_expire_hours: int = 24
@@ -83,6 +89,12 @@ class ENV:
     DEFAULT_LLM_MAX_MODEL_LEN = "SAGE_DEFAULT_LLM_MAX_MODEL_LEN"
     DEFAULT_LLM_TOP_P = "SAGE_DEFAULT_LLM_TOP_P"
     DEFAULT_LLM_PRESENCE_PENALTY = "SAGE_DEFAULT_LLM_PRESENCE_PENALTY"
+
+    # Context Budget
+    CONTEXT_HISTORY_RATIO = "SAGE_CONTEXT_HISTORY_RATIO"
+    CONTEXT_ACTIVE_RATIO = "SAGE_CONTEXT_ACTIVE_RATIO"
+    CONTEXT_MAX_NEW_MESSAGE_RATIO = "SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO"
+    CONTEXT_RECENT_TURNS = "SAGE_CONTEXT_RECENT_TURNS"
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
@@ -232,6 +244,26 @@ def create_argument_parser():
         "--default_llm_presence_penalty",
         type=float,
         help=f"默认LLM API Presence Penalty (环境变量: {ENV.DEFAULT_LLM_PRESENCE_PENALTY})",
+    )
+    parser.add_argument(
+        "--context_history_ratio",
+        type=float,
+        help=f"历史消息比例 (环境变量: {ENV.CONTEXT_HISTORY_RATIO})",
+    )
+    parser.add_argument(
+        "--context_active_ratio",
+        type=float,
+        help=f"活跃消息比例 (环境变量: {ENV.CONTEXT_ACTIVE_RATIO})",
+    )
+    parser.add_argument(
+        "--context_max_new_message_ratio",
+        type=float,
+        help=f"新消息最大比例 (环境变量: {ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO})",
+    )
+    parser.add_argument(
+        "--context_recent_turns",
+        type=int,
+        help=f"最近对话轮数 (环境变量: {ENV.CONTEXT_RECENT_TURNS})",
     )
     parser.add_argument(
         "--port",
@@ -432,6 +464,26 @@ def build_startup_config() -> StartupConfig:
             args.default_llm_presence_penalty,
             ENV.DEFAULT_LLM_PRESENCE_PENALTY,
             StartupConfig.default_llm_presence_penalty,
+        ),
+        context_history_ratio=pick_float(
+            args.context_history_ratio,
+            ENV.CONTEXT_HISTORY_RATIO,
+            StartupConfig.context_history_ratio,
+        ),
+        context_active_ratio=pick_float(
+            args.context_active_ratio,
+            ENV.CONTEXT_ACTIVE_RATIO,
+            StartupConfig.context_active_ratio,
+        ),
+        context_max_new_message_ratio=pick_float(
+            args.context_max_new_message_ratio,
+            ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
+            StartupConfig.context_max_new_message_ratio,
+        ),
+        context_recent_turns=pick_int(
+            args.context_recent_turns,
+            ENV.CONTEXT_RECENT_TURNS,
+            StartupConfig.context_recent_turns,
         ),
         embed_api_key=pick_str(
             args.embedding_api_key, ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
