@@ -405,52 +405,54 @@ class SAgent:
                 session_context.message_manager.add_messages(message_chunks)
                 yield message_chunks
         finally:
-            # 保存会话状态到文件
-            logger.info("run_stream finally save context info")
             try:
-                session_context.save()
-            except Exception as save_error:
-                logger.error(f"traceback: {traceback.format_exc()}")
-                logger.error(f"SAgent: 保存会话状态 {session_id} 时出错: {save_error}")
-
-            # 在删除会话上下文前，获取 token_usage 信息并作为特殊 MessageChunk 返回
-            try:
-                if session_context:
-                    token_usage = session_context.get_tokens_usage_info()
-                    if token_usage:
-                        # 创建包含 token_usage 信息的特殊 MessageChunk
-                        token_usage_chunk = MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content="",
-                            message_type=MessageType.TOKEN_USAGE.value,
-                            metadata={
-                                "token_usage": token_usage,
-                                "session_id": session_id
-                            }
-                        )
-                        logger.info(f"SAgent: 生成 token_usage MessageChunk，会话 {session_id}: {token_usage}")
-                        yield [token_usage_chunk]
-                    else:
-                        logger.warning(f"SAgent: 会话 {session_id} 没有 token_usage 信息")
-            except Exception as token_error:
-                logger.error(f"SAgent: 生成会话 {session_id} 的 token_usage MessageChunk 时出错: {token_error}")
-                logger.error(f"traceback: {traceback.format_exc()}")
-
-            # 清理会话，防止内存泄漏
-            try:
-                # 清理会话锁
+                # 保存会话状态到文件
+                logger.info("run_stream finally save context info")
                 try:
-                    lock = get_session_run_lock(session_id)
-                    if lock and lock.locked():
-                        await lock.release()
-                    delete_session_run_lock(session_id)
-                except Exception as e:
-                    logger.error(f"SAgent: 清理会话锁 {session_id} 时出错: {e}")
+                    session_context.save()
+                except Exception as save_error:
+                    logger.error(f"traceback: {traceback.format_exc()}")
+                    logger.error(f"SAgent: 保存会话状态 {session_id} 时出错: {save_error}")
 
-                delete_session_context(session_id or "")
-                logger.info(f"SAgent: 已清理会话 {session_id}", session_id)
-            except Exception as cleanup_error:
-                logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}", session_id)
+                # 在删除会话上下文前，获取 token_usage 信息并作为特殊 MessageChunk 返回
+                try:
+                    if session_context:
+                        token_usage = session_context.get_tokens_usage_info()
+                        if token_usage:
+                            # 创建包含 token_usage 信息的特殊 MessageChunk
+                            token_usage_chunk = MessageChunk(
+                                role=MessageRole.ASSISTANT.value,
+                                content="",
+                                message_type=MessageType.TOKEN_USAGE.value,
+                                metadata={
+                                    "token_usage": token_usage,
+                                    "session_id": session_id
+                                }
+                            )
+                            logger.info(f"SAgent: 生成 token_usage MessageChunk，会话 {session_id}: {token_usage}")
+                            yield [token_usage_chunk]
+                        else:
+                            logger.warning(f"SAgent: 会话 {session_id} 没有 token_usage 信息")
+                except Exception as token_error:
+                    logger.error(f"SAgent: 生成会话 {session_id} 的 token_usage MessageChunk 时出错: {token_error}")
+                    logger.error(f"traceback: {traceback.format_exc()}")
+
+            finally:
+                # 清理会话，防止内存泄漏
+                try:
+                    # 清理会话锁
+                    try:
+                        lock = get_session_run_lock(session_id)
+                        if lock and lock.locked():
+                            await lock.release()
+                        delete_session_run_lock(session_id)
+                    except Exception as e:
+                        logger.error(f"SAgent: 清理会话锁 {session_id} 时出错: {e}")
+
+                    delete_session_context(session_id or "")
+                    logger.info(f"SAgent: 已清理会话 {session_id}", session_id)
+                except Exception as cleanup_error:
+                    logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}", session_id)
 
     async def _execute_multi_agent_workflow(self,
                                             session_context: SessionContext,
