@@ -143,7 +143,7 @@ async def _prepare_session(request: StreamRequest):
              raise SageHTTPException(status_code=409, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
-        await asyncio.wait_for(lock.acquire(), timeout=30)
+        await asyncio.wait_for(lock.acquire(), timeout=10)
         acquired = True
     except asyncio.TimeoutError:
          raise SageHTTPException(status_code=409, detail="会话正在清理中，请稍后重试")
