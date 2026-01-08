@@ -10,7 +10,7 @@ import tempfile
 import hashlib
 import time
 import urllib.parse
-import requests
+import httpx
 import re
 import chardet
 import traceback
@@ -174,7 +174,7 @@ class FileHandler:
     """文件处理器，支持本地文件和网络文件下载"""
 
     @staticmethod
-    def get_file_path(file_path_or_url: str, is_url: bool, timeout: int = 30) -> str:
+    async def get_file_path(file_path_or_url: str, is_url: bool, timeout: int = 30) -> str:
         """获取文件路径，如果是URL则下载到临时目录，保持原文件名"""
         try:
             if is_url:
@@ -189,28 +189,29 @@ class FileHandler:
                 if not filename or "." not in filename:
                     # 尝试从Content-Disposition头获取文件名
                     try:
-                        response = requests.head(file_path_or_url, timeout=timeout)
-                        content_disposition = response.headers.get(
-                            "Content-Disposition", ""
-                        )
-                        if "filename=" in content_disposition:
-                            filename = content_disposition.split("filename=")[1].strip(
-                                '"'
+                        async with httpx.AsyncClient(timeout=timeout) as client:
+                            response = await client.head(file_path_or_url)
+                            content_disposition = response.headers.get(
+                                "Content-Disposition", ""
                             )
-                        else:
-                            filename = f"downloaded_file_{int(time.time())}"
+                            if "filename=" in content_disposition:
+                                filename = content_disposition.split("filename=")[1].strip(
+                                    '"'
+                                )
+                            else:
+                                filename = f"downloaded_file_{int(time.time())}"
                     except Exception:
                         filename = f"downloaded_file_{int(time.time())}"
 
                 temp_file_path = os.path.join(temp_dir, filename)
 
                 # 下载文件
-                response = requests.get(file_path_or_url, timeout=timeout, stream=True)
-                response.raise_for_status()
-
-                with open(temp_file_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream('GET', file_path_or_url) as response:
+                        response.raise_for_status()
+                        with open(temp_file_path, "wb") as f:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                f.write(chunk)
 
                 return temp_file_path
             else:
@@ -551,7 +552,7 @@ class FileParser:
             is_url = validation_result["is_url"]
 
             # 获取文件路径（如果是URL则下载）
-            file_path = FileHandler.get_file_path(file_path_or_url, is_url, timeout)
+            file_path = await FileHandler.get_file_path(file_path_or_url, is_url, timeout)
             if is_url:
                 temp_file_path = file_path  # 记录临时文件路径用于清理
 
