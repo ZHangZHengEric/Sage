@@ -449,8 +449,8 @@ class SAgent:
                     except Exception as e:
                         logger.error(f"SAgent: 清理会话锁 {session_id} 时出错: {e}")
 
-                    delete_session_context(session_id or "")
                     logger.info(f"SAgent: 已清理会话 {session_id}", session_id)
+                    delete_session_context(session_id or "")
                 except Exception as cleanup_error:
                     logger.error(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}", session_id)
 

@@ -253,7 +253,9 @@ class Logger:
                 from sagents.context.session_context import get_session_context
                 session_context = get_session_context(session_id)
                 if not session_context:
-                    return self.session_loggers[session_id]
+                    # 如果找不到session上下文，无法创建文件handler，直接返回(可能只输出到console)
+                    self.session_loggers[session_id] = session_logger
+                    return session_logger
                 session_workspace = session_context.session_workspace
 
                 # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
