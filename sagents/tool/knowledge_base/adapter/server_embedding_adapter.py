@@ -1,6 +1,6 @@
 from typing import List
 from sagents.retrieve_engine.interface.embedding import EmbeddingModel
-from app.server.core.client.embed import get_embed_client
+from core.client.embed import get_embed_client
 
 class ServerEmbeddingAdapter(EmbeddingModel):
     """
