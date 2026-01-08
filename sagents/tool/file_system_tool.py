@@ -5,11 +5,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 import urllib.parse
-import requests
+import httpx
 import platform
 import re
 import chardet
 from typing import Dict, Any, Optional, List
+import asyncio
 
 from .tool_base import ToolBase
 from sagents.utils.logger import logger
@@ -146,7 +147,7 @@ class FileSystemTool(ToolBase):
             "max_size_mb": {"zh": "最大读取文件大小（MB）", "en": "Maximum file size to read (MB)", "pt": "Tamanho máximo do arquivo para leitura (MB)"}
         }
     )
-    def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 20, 
+    async def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 20, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
         """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
 
@@ -173,8 +174,8 @@ class FileSystemTool(ToolBase):
             
             file_path = validation["resolved_path"]
             
-            # 获取文件信息
-            file_info = FileMetadata.get_file_info(file_path)
+            # 获取文件信息 (run in thread because it might detect encoding)
+            file_info = await asyncio.to_thread(FileMetadata.get_file_info, file_path)
             if not file_info["exists"]:
                 return {"status": "error", "message": "文件不存在"}
             
@@ -193,8 +194,11 @@ class FileSystemTool(ToolBase):
                 encoding = file_info.get("encoding", "utf-8")
             
             # 读取文件内容
-            with open(file_path, 'r', encoding=encoding) as f:
-                lines = f.readlines()
+            def read_file_lines():
+                with open(file_path, 'r', encoding=encoding) as f:
+                    return f.readlines()
+
+            lines = await asyncio.to_thread(read_file_lines)
             
             # 处理行范围
             total_lines = len(lines)
@@ -251,7 +255,7 @@ class FileSystemTool(ToolBase):
             "encoding": {"zh": "文件编码", "en": "File encoding", "pt": "Codificação do arquivo"}
         }
     )
-    def file_write(self, file_path: str, content: str, mode: str = "overwrite", 
+    async def file_write(self, file_path: str, content: str, mode: str = "overwrite", 
                    encoding: str = "utf-8") -> Dict[str, Any]:
         """智能文件写入工具
 
@@ -293,8 +297,10 @@ class FileSystemTool(ToolBase):
             elif mode == "prepend":
                 write_mode = 'w'
                 if path.exists():
-                    with open(file_path, 'r', encoding=encoding) as f:
-                        existing_content = f.read()
+                    def read_existing():
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            return f.read()
+                    existing_content = await asyncio.to_thread(read_existing)
                     final_content = content + existing_content
                 else:
                     final_content = content
@@ -303,12 +309,17 @@ class FileSystemTool(ToolBase):
             
             # 写入文件
             write_start_time = time.time()
-            with open(file_path, write_mode, encoding=encoding) as f:
-                f.write(final_content)
+            
+            def write_file():
+                with open(file_path, write_mode, encoding=encoding) as f:
+                    f.write(final_content)
+            
+            await asyncio.to_thread(write_file)
+            
             write_time = time.time() - write_start_time
             
             # 获取文件信息
-            file_info = FileMetadata.get_file_info(file_path)
+            file_info = await asyncio.to_thread(FileMetadata.get_file_info, file_path)
             
             result: Dict[str, Any] = {
                 "status": "success",
@@ -563,7 +574,7 @@ class FileSystemTool(ToolBase):
             "working_dir": {"zh": "保存文件的目录", "en": "Directory to save the file", "pt": "Diretório para salvar o arquivo"}
         }
     )
-    def download_file_from_url(self, url: str, working_dir: str) -> Dict[str, Any]:
+    async def download_file_from_url(self, url: str, working_dir: str) -> Dict[str, Any]:
         """从URL下载文件并保存到指定目录
 
         Args:
@@ -585,12 +596,15 @@ class FileSystemTool(ToolBase):
             
             # 发起HTTP请求下载文件
             download_start_time = time.time()
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                content = response.content
+            
             download_time = time.time() - download_start_time
             
             # 获取文件大小
-            content_length = len(response.content)
+            content_length = len(content)
             content_size_mb = content_length / (1024 * 1024)
             
             # 解码URL并获取文件名
@@ -614,8 +628,7 @@ class FileSystemTool(ToolBase):
             
             # 保存文件
             save_start_time = time.time()
-            with open(file_path, 'wb') as f:
-                f.write(response.content)
+            await asyncio.to_thread(lambda: open(file_path, 'wb').write(content))
             save_time = time.time() - save_start_time
             
             # 验证文件是否保存成功
@@ -641,9 +654,9 @@ class FileSystemTool(ToolBase):
                 "operation_id": operation_id
             }
             
-        except requests.exceptions.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             return {"status": "error", "message": f"HTTP错误: {e.response.status_code}"}
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             return {"status": "error", "message": f"网络请求失败: {str(e)}"}
         except Exception as e:
             logger.error(f"💥 下载异常 [{operation_id}] - 错误: {str(e)}")

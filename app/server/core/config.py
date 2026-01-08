@@ -45,7 +45,9 @@ class StartupConfig:
     default_llm_max_tokens: int = 4096
     default_llm_temperature: float = 0.2
     default_llm_max_model_len: int = 54000
-
+    default_llm_top_p: float = 0.9
+    default_llm_presence_penalty: float = 0.0
+    
     jwt_key: str = "123"
     jwt_expire_hours: int = 24
     refresh_token_secret: str = "123"
@@ -79,6 +81,8 @@ class ENV:
     DEFAULT_LLM_MAX_TOKENS = "SAGE_DEFAULT_LLM_MAX_TOKENS"
     DEFAULT_LLM_TEMPERATURE = "SAGE_DEFAULT_LLM_TEMPERATURE"
     DEFAULT_LLM_MAX_MODEL_LEN = "SAGE_DEFAULT_LLM_MAX_MODEL_LEN"
+    DEFAULT_LLM_TOP_P = "SAGE_DEFAULT_LLM_TOP_P"
+    DEFAULT_LLM_PRESENCE_PENALTY = "SAGE_DEFAULT_LLM_PRESENCE_PENALTY"
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
@@ -219,8 +223,16 @@ def create_argument_parser():
         type=int,
         help=f"默认LLM 最大上下文 (环境变量: {ENV.DEFAULT_LLM_MAX_MODEL_LEN})",
     )
-
-
+    parser.add_argument(
+        "--default_llm_top_p",
+        type=float,
+        help=f"默认LLM API Top P (环境变量: {ENV.DEFAULT_LLM_TOP_P})",
+    )
+    parser.add_argument(
+        "--default_llm_presence_penalty",
+        type=float,
+        help=f"默认LLM API Presence Penalty (环境变量: {ENV.DEFAULT_LLM_PRESENCE_PENALTY})",
+    )
     parser.add_argument(
         "--port",
         type=int,
@@ -410,6 +422,16 @@ def build_startup_config() -> StartupConfig:
             args.default_llm_max_model_len,
             ENV.DEFAULT_LLM_MAX_MODEL_LEN,
             StartupConfig.default_llm_max_model_len,
+        ),
+        default_llm_top_p=pick_float(
+            args.default_llm_top_p,
+            ENV.DEFAULT_LLM_TOP_P,
+            StartupConfig.default_llm_top_p,
+        ),
+        default_llm_presence_penalty=pick_float(
+            args.default_llm_presence_penalty,
+            ENV.DEFAULT_LLM_PRESENCE_PENALTY,
+            StartupConfig.default_llm_presence_penalty,
         ),
         embed_api_key=pick_str(
             args.embedding_api_key, ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
