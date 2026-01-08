@@ -6,6 +6,7 @@ from typing import Optional
 
 from core.exceptions import SageHTTPException
 from core.config import StartupConfig
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -79,6 +80,10 @@ class SessionManager:
                     self._engine = create_async_engine(
                         url,
                         future=True,
+                        pool_size=20,
+                        max_overflow=10,
+                        pool_recycle=3600,
+                        pool_pre_ping=True,
                         json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
                         json_deserializer=json.loads,
                     )
@@ -91,6 +96,10 @@ class SessionManager:
                     self._engine = create_async_engine(
                         url,
                         future=True,
+                        pool_size=20,
+                        max_overflow=10,
+                        pool_recycle=3600,
+                        pool_pre_ping=True,
                         json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
                         json_deserializer=json.loads,
                     )
@@ -102,12 +111,35 @@ class SessionManager:
                     expire_on_commit=False,
                 )
 
+                # 立即验证连接
+                if self._engine_name == "mysql":
+                    try:
+                        async with self._engine.connect() as conn:
+                            await conn.execute(text("SELECT 1"))
+                    except Exception as e:
+                        logger.error(f"MySQL 连接验证失败: {e}")
+                        raise e
+
                 logger.debug(f"数据库连接初始化完成 ({self._engine_name})")
 
         except Exception as e:
-            logger.error(f"数据库初始化失败: {e}")
+            err_msg = str(e)
+            logger.error(f"数据库初始化失败: {err_msg}")
+            
+            # 提供更友好的错误提示
+            hint = ""
+            if "Name or service not known" in err_msg or "gaierror" in err_msg or "Can't connect to MySQL server" in err_msg:
+                hint = "可能是数据库 Host 配置错误，请检查 mysql_host"
+            elif "Access denied" in err_msg:
+                hint = "可能是数据库用户名或密码错误"
+            elif "Connection refused" in err_msg:
+                hint = "可能是数据库端口错误或服务未启动"
+                
+            if hint:
+                logger.error(f"提示: {hint}")
+
             raise SageHTTPException(
-                status_code=500, detail="数据库初始化失败", error_detail=str(e)
+                status_code=500, detail="数据库初始化失败", error_detail=f"{err_msg} | {hint}"
             )
 
     async def close(self):
