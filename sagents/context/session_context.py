@@ -1,6 +1,5 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 import time
-import asyncio
 import threading
 from typing import Dict, Any, Optional, List
 from enum import Enum
@@ -11,6 +10,7 @@ from sagents.context.session_memory.session_memory_manager import SessionMemoryM
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
 from sagents.utils.logger import logger
+from sagents.utils.lock_manager import lock_manager, UnifiedLock
 import json
 import os
 import datetime
@@ -502,7 +502,6 @@ class SessionContext:
 
 # 全局会话上下文管理
 _active_sessions: Dict[str, SessionContext] = {}
-_session_run_locks: Dict[str, asyncio.Lock] = {}
 
 
 def get_session_context(session_id: str) -> Optional[SessionContext]:
@@ -558,19 +557,12 @@ def init_session_context(session_id: str, user_id: Optional[str] = None, workspa
     return _active_sessions[session_id]
 
 
-def get_session_run_lock(session_id: str) -> asyncio.Lock:
-    if session_id not in _session_run_locks:
-        _session_run_locks[session_id] = asyncio.Lock()
-    return _session_run_locks[session_id]
+def get_session_run_lock(session_id: str) -> UnifiedLock:
+    return lock_manager.get_lock(session_id)
 
 
 def delete_session_run_lock(session_id: str):
-    lock = _session_run_locks.get(session_id)
-    if not lock:
-        return
-    if lock.locked():
-        return
-    del _session_run_locks[session_id]
+    lock_manager.delete_lock_ref(session_id)
 
 
 def delete_session_context(session_id: str):
