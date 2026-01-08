@@ -7,7 +7,7 @@ Workflow Extractor - 从messages中提取workflow的工具类
 import json
 import traceback
 from typing import Dict, List, Any, Optional
-import requests
+import httpx
 from datetime import datetime
 
 
@@ -335,7 +335,8 @@ class WorkflowExtractor:
                 "max_tokens": 2000
             }
             
-            response = requests.post(url, headers=self.headers, json=data, timeout=30)
+            with httpx.Client() as client:
+                response = client.post(url, headers=self.headers, json=data, timeout=30)
             response.raise_for_status()
             
             result = response.json()
