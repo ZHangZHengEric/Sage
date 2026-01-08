@@ -78,6 +78,7 @@ class SageStreamService:
         system_context=None,
         available_workflows=None,
         force_summary=False,
+        context_budget_config=None,
     ):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
@@ -96,6 +97,7 @@ class SageStreamService:
                     system_context=system_context,
                     available_workflows=available_workflows,
                     force_summary=force_summary,
+                    context_budget_config=context_budget_config,
                 )
 
                 async for chunk in stream_result:
@@ -169,6 +171,16 @@ async def _generate_stream_lines(
     stream_counter = 0
     last_activity_time = time.time()
 
+    # 从配置获取 context_budget_config
+    server_config = get_startup_config()
+    context_budget_config = {
+        'max_model_len': server_config.default_llm_max_model_len,
+        'history_ratio': server_config.context_history_ratio,
+        'active_ratio': server_config.context_active_ratio,
+        'max_new_message_ratio': server_config.context_max_new_message_ratio,
+        'recent_turns': server_config.context_recent_turns
+    }
+
     async for result in stream_service.process_stream(
         messages=messages,
         session_id=session_id,
@@ -180,6 +192,7 @@ async def _generate_stream_lines(
         system_context=getattr(request, "system_context", None),
         available_workflows=getattr(request, "available_workflows", None),
         force_summary=getattr(request, "force_summary", False),
+        context_budget_config=context_budget_config,
     ):
         stream_counter += 1
         current_time = time.time()
