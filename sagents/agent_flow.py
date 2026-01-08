@@ -11,6 +11,7 @@ from sagents.tool.tool_proxy import ToolProxy
 import uuid
 from typing import Dict, Any, Optional, Union
 from sagents.utils.logger import logger
+from sagents.utils.session_local import session_manager
 
 
 class AgentFlow:
@@ -25,7 +26,8 @@ class AgentFlow:
                          session_id: Optional[str] = None,
                          user_id: Optional[str] = None,
                          system_context: Optional[Dict[str, Any]] = None,
-                         available_workflows: Optional[Dict[str, Any]] = {}) -> AsyncGenerator[List[MessageChunk], None]:
+                         available_workflows: Optional[Dict[str, Any]] = {},
+                         context_budget_config: Optional[Dict[str, Any]] = None) -> AsyncGenerator[List[MessageChunk], None]:
         """
         运行智能体流程，返回消息流
         Args:
@@ -35,43 +37,77 @@ class AgentFlow:
             user_id: 用户ID
             system_context: 系统上下文
             available_workflows: 可用工作流列表
+            context_budget_config: 上下文预算配置
 
         Returns:
             消息流
         """
         try:
-            session_id = session_id or str(uuid.uuid4())
+            # 初始化会话
             # 初始化该session 的context 管理器
-            session_context = init_session_context(session_id, user_id=user_id, workspace_root=self.workspace, memory_root=self.memory_root)
-            if system_context:
-                logger.info(f"SAgent: 设置了system_context参数: {list(system_context.keys())}")
-                session_context.add_and_update_system_context(system_context)
+            session_id = session_id or str(uuid.uuid4())
+            session_context = init_session_context(
+                session_id=session_id,
+                user_id=user_id or "",
+                workspace_root=self.workspace,
+                memory_root=self.memory_root or "",
+                context_budget_config=context_budget_config
+            )
+            with session_manager.session_context(session_id):
+                logger.info(f"开始流式工作流，会话ID: {session_id}")
+                # 设置agent配置信息到SessionContext
+                session_context.set_agent_config(
+                    model=None,
+                    model_config={},
+                    system_prefix=None,
+                    workspace=self.workspace,
+                    memory_root=self.memory_root or "",
+                    available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
+                    system_context=system_context or {},
+                    available_workflows=available_workflows or {},
+                    deep_thinking=False,
+                    multi_agent=False,
+                    more_suggest=False,
+                    max_loop_count=10
+                )
 
-            if available_workflows:
-                if len(available_workflows.keys()) > 0:
-                    logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                    session_context.candidate_workflows = available_workflows
+                if system_context:
+                    logger.info(f"SAgent: 设置了system_context参数: {system_context}")
+                    session_context.add_and_update_system_context(system_context)
 
-            session_context.status = SessionStatus.RUNNING
-            initial_messages = self._prepare_initial_messages(input_messages)
+                if available_workflows:
+                    if len(available_workflows.keys()) > 0:
+                        logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                        session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
-            # 尝试初始化记忆
-            session_context.init_user_memory_manager(tool_manager)
+                session_context.status = SessionStatus.RUNNING
+                initial_messages = self._prepare_initial_messages(input_messages)
 
-            for message in initial_messages:
-                if message.message_id not in [m.message_id for m in session_context.message_manager.messages]:
-                    session_context.message_manager.add_messages(message)
+                # 尝试初始化记忆
+                session_context.init_user_memory_manager(tool_manager)
 
-            for agent in self.agent_list:
-                async for message_chunks in self._execute_agent_phase(
+                # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
+                logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                all_message_ids = [m.message_id for m in session_context.message_manager.messages]
+                for message in initial_messages:
+                    if message.message_id not in all_message_ids:
+                        session_context.message_manager.add_messages(message)
+                    else:
+                        # 如果message 存在，更新，以新的message 为准
+                        session_context.message_manager.update_messages(message)
+
+                logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
+
+                # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
+                session_context.set_history_context()
+
+                # 调用内部执行逻辑
+                async for chunk in self.run_stream_internal(
                     session_context=session_context,
                     tool_manager=tool_manager,
-                    session_id=session_id,
-                    agent=agent,
-                    phase_name=agent.agent_name
+                    session_id=session_id
                 ):
-                    session_context.message_manager.add_messages(message_chunks)
-                    yield message_chunks
+                    yield chunk
 
         except Exception:
             logger.error(f"SAgent: 运行智能体流程时出错: {traceback.format_exc()}")
@@ -88,6 +124,34 @@ class AgentFlow:
                 logger.info(f"SAgent: 已清理会话 {session_id}")
             except Exception as cleanup_error:
                 logger.warning(f"SAgent: 清理会话 {session_id} 时出错: {cleanup_error}")
+
+    async def run_stream_internal(self,
+                                  session_context: SessionContext,
+                                  tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
+                                  session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
+        """
+        内部运行逻辑，负责具体的 Agent 调度
+        """
+        for agent in self.agent_list:
+            async for message_chunks in self._execute_agent_phase(
+                session_context=session_context,
+                tool_manager=tool_manager,
+                session_id=session_id,
+                agent=agent,
+                phase_name=agent.agent_name
+            ):
+                # 过滤需要保存的消息：只保存属于当前会话的消息（session_id一致或为None）
+                # 这样可以防止子Agent的流式消息（具有不同的session_id）被错误地添加到父Agent的历史记录中
+                # 但所有消息都会被yield出去，以支持前端的流式展示
+                messages_to_save = [
+                    msg for msg in message_chunks
+                    if msg.session_id is None or msg.session_id == session_id
+                ]
+
+                if messages_to_save:
+                    session_context.message_manager.add_messages(messages_to_save)
+                
+                yield message_chunks
 
     async def _execute_agent_phase(self,
                                    session_context: SessionContext,
