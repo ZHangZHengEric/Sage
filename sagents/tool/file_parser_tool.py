@@ -11,11 +11,10 @@ from sagents.utils.file_parser import FileParser
 
 class FileParserTool(ToolBase):
     """文件解析工具集"""
-    
+
     def __init__(self):
         logger.debug("Initializing FileParserTool")
         super().__init__()
-
 
     @ToolBase.tool(
         description_i18n={
@@ -34,7 +33,7 @@ class FileParserTool(ToolBase):
         self, 
         input_file_path: str, 
         start_index: int = 0, 
-        max_length: int = 5000,
+        max_length: int = 500000,
         include_metadata: bool = True
     ) -> Dict[str, Any]:
         """读取本地存储下的非文本文件，例如pdf，docx，doc，ppt，pptx，xlsx，xls，csv等文件，返回Markdown的文本数据
@@ -48,17 +47,17 @@ class FileParserTool(ToolBase):
         Returns:
             Dict[str, Any]: 包含提取文本和相关信息的字典
         """
-        if max_length > 5000:
-            max_length = 5000
+        if max_length > 500000:
+            max_length = 500000
         start_time = time.time()
         operation_id = hashlib.md5(f"extract_{input_file_path}_{time.time()}".encode()).hexdigest()[:8]
         logger.info(f"📄 extract_text_from_file开始执行 [{operation_id}] - 文件: {input_file_path}")
         logger.info(f"🔧 参数: start_index={start_index}, max_length={max_length}, include_metadata={include_metadata}")
-        
+
         try:
             # 使用 Core Utils 中的 FileParser
             parser = FileParser()
-            
+
             # FileParser.extract_text_from_file 返回的格式:
             # {
             #     "text": "...",
@@ -71,7 +70,7 @@ class FileParserTool(ToolBase):
             #     "success": False,
             #     "error": "..."
             # }
-            
+
             def run_async_in_thread():
                 # 在新线程中创建新的事件循环
                 new_loop = asyncio.new_event_loop()
@@ -93,7 +92,7 @@ class FileParserTool(ToolBase):
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async_in_thread)
                 result = future.result()
-            
+
             if not result.get("success"):
                 error_time = time.time() - start_time
                 error_msg = result.get("error", "未知错误")
@@ -105,18 +104,18 @@ class FileParserTool(ToolBase):
                     "execution_time": error_time,
                     "operation_id": operation_id
                 }
-            
+
             # 成功
             extracted_text = result.get("text", "")
             metadata = result.get("metadata", {})
-            
+
             # 过滤掉不需要的元数据，如果 include_metadata 为 False
             if not include_metadata:
                 metadata = {}
-            
+
             execution_time = time.time() - start_time
             logger.info(f"✅ 文件解析成功 [{operation_id}] - 原始文本长度: {len(extracted_text)}, 解析耗时: {execution_time:.2f}秒")
-            
+
             return {
                 "success": True,
                 "text": extracted_text,
@@ -125,7 +124,7 @@ class FileParserTool(ToolBase):
                 "execution_time": execution_time,
                 "operation_id": operation_id
             }
-            
+
         except Exception as e:
             error_time = time.time() - start_time
             logger.error(f"❌ 系统异常 [{operation_id}] - 错误: {str(e)}, 耗时: {error_time:.2f}秒")
