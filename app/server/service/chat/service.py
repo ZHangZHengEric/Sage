@@ -163,7 +163,7 @@ async def _generate_stream_lines(
     session_id: str,
     mode: str,
 ):
-    messages = prepare_messages(request.messages)
+    messages = _prepare_messages(request.messages)
     await _ensure_conversation(session_id, request)
 
     stream_counter = 0
