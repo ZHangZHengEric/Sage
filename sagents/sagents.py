@@ -442,7 +442,7 @@ class SAgent:
                 try:
                     lock = get_session_run_lock(session_id)
                     if lock and lock.locked():
-                        lock.release()
+                        await lock.release()
                     delete_session_run_lock(session_id)
                 except Exception as e:
                     logger.error(f"SAgent: 清理会话锁 {session_id} 时出错: {e}")
