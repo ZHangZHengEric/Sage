@@ -20,7 +20,7 @@ class BaseDao:
     def __init__(self):
         try:
             loop = asyncio.get_running_loop()
-            from core.client.db import get_global_db
+            from ..core.client.db import get_global_db
 
             self._db_task = loop.create_task(get_global_db())
         except RuntimeError:
@@ -33,7 +33,7 @@ class BaseDao:
         if self._db_task is not None:
             self.db = await self._db_task
             return self.db
-        from core.client.db import get_global_db
+        from ..core.client.db import get_global_db
 
         self.db = await get_global_db()
         return self.db
