@@ -1,6 +1,6 @@
 import json
 import os
-from core import config
+from .core import config
 from loguru import logger
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 
@@ -18,7 +18,7 @@ async def _should_initialize_data() -> bool:
     cfg = config.get_startup_config()
     if cfg and cfg.db_type == "memory":
         return True
-    import models
+    from . import models
 
     mcp_server_dao = models.MCPServerDao()
     mcp_servers = await mcp_server_dao.get_list()
@@ -34,7 +34,7 @@ async def _load_preset_mcp_config(config_path: str):
     with open(config_path, "r", encoding="utf-8") as f:
         config_data = json.load(f)
     mcp_servers = config_data.get("mcpServers", {})
-    import models
+    from . import models
 
     mcp_server_dao = models.MCPServerDao()
     for name, server_config in mcp_servers.items():
@@ -48,7 +48,7 @@ async def _load_preset_agent_config(config_path: str):
         return
     with open(config_path, "r", encoding="utf-8") as f:
         config_data = json.load(f)
-    import models
+    from . import models
 
     agent_config_dao = models.AgentConfigDao()
     if "systemPrefix" in config_data or "systemContext" in config_data:
@@ -78,10 +78,10 @@ async def initialize_db_data():
 
 
 async def initialize_db_tables():
-    from core.client.db import get_global_db
+    from .core.client.db import get_global_db
     db = await get_global_db()
     async with db._engine.begin() as conn:
-        import models
+        from . import models
         await conn.run_sync(models.Base.metadata.create_all)
     logger.debug("数据库自动建表完成")
 
@@ -98,7 +98,7 @@ async def validate_and_disable_mcp_servers():
     - 若注册抛出异常或失败，则从数据库中删除该服务器；
     - 若之前有部分注册的工具，尝试从 ToolManager 中移除。
     """
-    import models
+    from . import models
 
     mcp_dao = models.MCPServerDao()
     servers = await mcp_dao.get_list()

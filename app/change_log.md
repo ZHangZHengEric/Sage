@@ -1,5 +1,18 @@
 # Sage Examples 修改日志
 
+## 2026-01-09 14:45:00 - 更新 Sage Server 部署文档与构建脚本
+
+**修改内容：**
+- **更新 README_SERVER.md**：
+  - 补充本地源码部署指南（非容器化启动方式）
+  - 完善环境变量与命令行参数的配置说明对照表
+  - 修正 Docker 运行示例中的端口映射
+- **服务端重构为模块化启动**：
+  - 修改 `app/server/docker/Dockerfile`，使用 `python -m app.server.main` 启动以解决相对导入问题
+  - 修改 `app/build_exec/build_server.py`，生成临时入口脚本以支持模块化打包
+
+**修改时间：** 2026-01-09 14:45:00
+
 ## 2025-12-30 12:00:00 - 新增 Web 前端与 Server 后端服务
 
 **修改内容：**

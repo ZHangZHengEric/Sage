@@ -6,15 +6,15 @@ import asyncio
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from core.client.chat import get_chat_client
-from core.exceptions import SageHTTPException
-from core.render import Response
+from ..core.client.chat import get_chat_client
+from ..core.exceptions import SageHTTPException
+from ..core.render import Response
 
 # 导入新模型
-from schemas.chat import ChatRequest, StreamRequest
+from ..schemas.chat import ChatRequest, StreamRequest
 
 # 导入辅助函数
-from service.chat import (
+from ..service.chat import (
     populate_request_from_agent_config,
     run_chat_session,
     run_async_chat_task,
