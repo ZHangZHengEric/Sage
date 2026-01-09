@@ -1,6 +1,6 @@
 import time
 
-from core.render import Response
+from ..core.render import Response
 from fastapi import APIRouter
 
 # 创建路由器
