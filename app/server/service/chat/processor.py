@@ -3,7 +3,7 @@ import uuid
 import re
 from typing import Dict, Any, List, Union
 from loguru import logger
-from schemas.chat import Message
+from ...schemas.chat import Message
 
 class ContentProcessor:
     """消息内容处理器"""

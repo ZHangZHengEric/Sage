@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-import models
-from core.exceptions import SageHTTPException
-from core.client.minio import upload_kdb_file
-from service.knowledge_base import DocumentService
+from .. import models
+from ..core.exceptions import SageHTTPException
+from ..core.client.minio import upload_kdb_file
+from ..service.knowledge_base import DocumentService
 from fastapi import UploadFile
-from utils.id import gen_id
+from ..utils.id import gen_id
 
 from loguru import logger
 

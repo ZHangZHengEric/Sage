@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, TYPE_CHECKING
 
-import models
+from .... import models
 
 from sagents.utils.file_parser import FileParser
 from loguru import logger
 
 if TYPE_CHECKING:
-    from service.knowledge_base.knowledge_base import DocumentInput
+    from ..knowledge_base import DocumentInput
 
 
 class BaseParser:

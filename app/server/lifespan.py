@@ -4,14 +4,14 @@ from fastapi import FastAPI
 
 from loguru import logger
 
-from core.lifecycle import (
+from .core.lifecycle import (
     close_clients,
     initialize_clients,
     initialize_data,
     initialize_mcp,
 )
-from jobs.scheduler import init_scheduler, shutdown_scheduler
-from mcp_routers import mcp_lifespan
+from .jobs.scheduler import init_scheduler, shutdown_scheduler
+from .mcp_routers import mcp_lifespan
 
 # =========================
 # 初始化 / 清理逻辑

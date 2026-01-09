@@ -6,8 +6,8 @@ MCP 业务处理模块
 
 from typing import Any, Dict, List, Optional
 
-import models
-from core.exceptions import SageHTTPException
+from .. import models
+from ..core.exceptions import SageHTTPException
 
 from loguru import logger
 from sagents.tool.tool_manager import get_tool_manager

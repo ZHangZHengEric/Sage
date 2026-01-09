@@ -3,7 +3,7 @@ Router module that exports all routers for the agent platform server.
 """
 
 from .agent import agent_router
-from .converation import conversation_router
+from .conversation import conversation_router
 from .file_server import file_server_router
 from .kdb import kdb_router
 from .mcp import mcp_router

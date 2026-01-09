@@ -4,8 +4,8 @@ from datetime import datetime
 import io
 import json
 
-from core import config
-from core.exceptions import SageHTTPException
+from ...core import config
+from ...core.exceptions import SageHTTPException
 from loguru import logger
 
 MINIO_CLIENT: Optional["Minio"] = None
@@ -101,7 +101,7 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     if not client or not bucket or not public_base:
         raise SageHTTPException(status_code=400, detail="MinIO 未配置或未初始化")
 
-    from utils.file import split_file_name
+    from ...utils.file import split_file_name
 
     origin, ext = split_file_name(base_name)
     object_name = f"{origin}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"

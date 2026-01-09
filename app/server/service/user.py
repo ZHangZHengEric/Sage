@@ -1,13 +1,13 @@
 import time
 from typing import Optional, Tuple
 
-from core import config
+from ..core import config
 import jwt
-import models
+from .. import models
 from argon2 import PasswordHasher
 from argon2 import exceptions as argon2_exceptions
-from core.exceptions import SageHTTPException
-from utils.id import gen_id
+from ..core.exceptions import SageHTTPException
+from ..utils.id import gen_id
 
 from loguru import logger
 
@@ -50,32 +50,6 @@ def _gen_tokens(user: models.User) -> Tuple[str, str, int]:
         refresh_claims, cfg.refresh_token_secret, algorithm="HS256"
     )
     return access_token, refresh_token, exp_seconds
-
-
-def parse_access_token(token: str) -> Optional[dict]:
-    cfg = config.get_startup_config()
-    try:
-        claims = jwt.decode(token, cfg.jwt_key, algorithms=["HS256"])
-        return claims
-    except jwt.ExpiredSignatureError:
-        raise SageHTTPException(
-            status_code=401, detail="登录过期", error_detail="token expired"
-        )
-    except Exception:
-        raise SageHTTPException(
-            status_code=401, detail="Token非法", error_detail="invalid token"
-        )
-
-
-def parse_refresh_token(token: str) -> Optional[dict]:
-    cfg = config.get_startup_config()
-    try:
-        claims = jwt.decode(token, cfg.refresh_token_secret, algorithms=["HS256"])
-        return claims
-    except Exception:
-        raise SageHTTPException(
-            status_code=401, detail="Token非法", error_detail="invalid refresh token"
-        )
 
 
 async def register_user(
