@@ -6,11 +6,11 @@ import math
 import os
 from typing import List, Optional
 
-from core.render import Response
+from ..core.render import Response
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from service.conversation import (
+from ..service.conversation import (
     delete_conversation,
     get_conversation_messages,
     get_conversations_paginated,
