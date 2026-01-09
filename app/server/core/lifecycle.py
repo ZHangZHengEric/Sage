@@ -1,4 +1,4 @@
-from core import config
+from ..core import config
 from loguru import logger
 
 from .client.db import close_db_client, init_db_client
@@ -6,7 +6,7 @@ from .client.es import close_es_client, init_es_client
 from .client.chat import close_chat_client, init_chat_client
 from .client.embed import close_embed_client, init_embed_client
 from .client.minio import close_minio_client, init_minio_client
-from .bootstrap import (
+from ..bootstrap import (
     initialize_db_data,
     initialize_db_tables,
     initialize_tool_manager,
