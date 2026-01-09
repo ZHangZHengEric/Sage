@@ -1,6 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
-from service.kdb import KdbService
+from ..service.kdb import KdbService
 
 scheduler: AsyncIOScheduler | None = None
 

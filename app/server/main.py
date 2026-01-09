@@ -23,9 +23,9 @@ for m in ("websockets", "uvicorn"):
     warnings.filterwarnings("ignore", category=DeprecationWarning, module=m)
 
 import uvicorn
-from core import config
-from application import create_fastapi_app
-from utils.log import init_logging
+from .core import config
+from .application import create_fastapi_app
+from .utils.log import init_logging
 
 
 
