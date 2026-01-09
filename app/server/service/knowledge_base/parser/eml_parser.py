@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, TYPE_CHECKING
 
-import models
-from utils.id import gen_id
+from .... import models
+from ....utils.id import gen_id
 
-from core.client.minio import upload_kdb_file
+from ....core.client.minio import upload_kdb_file
 from loguru import logger
 
 from .base import BaseParser
 
 if TYPE_CHECKING:
-    from service.knowledge_base.knowledge_base import DocumentInput
+    from ..knowledge_base import DocumentInput
 
 ALLOW_ATTACH_FILE_EXTS = {
     ".doc",
@@ -42,7 +43,7 @@ class EmlParser(BaseParser):
 
     async def process(self, index_name: str, doc: models.KdbDoc, file: models.File) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
-        from service.knowledge_base.knowledge_base import DocumentInput
+        from ..knowledge_base import DocumentInput
         
         file_dao = models.FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")

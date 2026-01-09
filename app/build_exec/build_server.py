@@ -125,10 +125,22 @@ class ServerBuilder:
         ]
 
         # -------------------------------
-        # 入口文件：app/server/main.py
+        # 入口文件：生成临时入口脚本以支持模块化导入
         # -------------------------------
-        entry = "app/server/main.py"
-        cmd.append(entry)
+        entry_script_name = "run_server_entry.py"
+        entry_path = self.project_root / entry_script_name
+        
+        print(f"📝 生成临时入口文件: {entry_path}")
+        with open(entry_path, "w", encoding="utf-8") as f:
+            f.write("import sys\n")
+            f.write("import os\n")
+            f.write("sys.path.insert(0, os.path.abspath('.'))\n")
+            f.write("from app.server.main import main\n")
+            f.write("\n")
+            f.write("if __name__ == '__main__':\n")
+            f.write("    sys.exit(main())\n")
+
+        cmd.append(str(entry_path))
 
         print("▶️ PyInstaller 命令:")
         print(" ".join(cmd))
@@ -136,13 +148,20 @@ class ServerBuilder:
         try:
             subprocess.run(cmd, capture_output=True, text=True, check=True)
             print("🎉 PyInstaller 构建成功")
-            return True
+            result = True
 
         except subprocess.CalledProcessError as e:
             print("❌ PyInstaller 构建失败")
             print("🟥 错误输出:")
             print(e.stderr)
-            return False
+            result = False
+            
+        finally:
+            if entry_path.exists():
+                os.remove(entry_path)
+                print(f"🗑️ 已清理临时入口文件: {entry_path}")
+                
+        return result
 
     # -------------------------------
     # 总构建流程
