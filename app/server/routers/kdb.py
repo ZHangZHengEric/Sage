@@ -1,88 +1,106 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from core.render import Response
+from ..core.render import Response
 from fastapi import APIRouter, Body, File, Form, Query, Request, UploadFile
-from service.kdb import KdbService
+from ..service.kdb import KdbService
+from ..schemas.base import BaseResponse
+from ..schemas.kdb import (
+    KdbAddRequest,
+    KdbAddResponse,
+    KdbUpdateRequest,
+    KdbInfoResponse,
+    KdbRetrieveRequest,
+    KdbRetrieveResponse,
+    KdbListResponse,
+    KdbListItem,
+    KdbIdRequest,
+    KdbDocListResponse,
+    KdbDocListItem,
+    KdbDocInfoResponse,
+    KdbDocAddByFilesResponse,
+    KdbDocTaskProcessResponse,
+    KdbDocTaskRedoRequest,
+    SuccessResponse,
+)
 
 kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])
 
 
 # ===== KDB Management =====
-@kdb_router.post("/add")
+@kdb_router.post("/add", response_model=BaseResponse[KdbAddResponse])
 async def kdb_add(
     http_request: Request,
-    name: str = Body(...),
-    type: str = Body(...),
-    intro: Optional[str] = Body(""),
-    language: Optional[str] = Body(""),
+    req: KdbAddRequest,
 ):
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     kdb_id = await svc.add(
-        name=name, type=type, intro=intro, language=language, user_id=user_id
+        name=req.name, 
+        type=req.type, 
+        intro=req.intro, 
+        language=req.language, 
+        user_id=user_id
     )
-    return await Response.succ(data={"kdb_id": kdb_id})
+    return await Response.succ(data=KdbAddResponse(kdb_id=kdb_id))
 
 
-@kdb_router.post("/update")
-async def kdb_update(
-    kdb_id: str = Body(...),
-    name: str = Body(""),
-    intro: str = Body(""),
-    kdb_setting: Dict[str, Any] | None = Body(None),
-):
+@kdb_router.post("/update", response_model=BaseResponse[SuccessResponse])
+async def kdb_update(req: KdbUpdateRequest):
     svc = KdbService()
-    await svc.update(kdb_id=kdb_id, name=name, intro=intro, kdb_setting=kdb_setting)
-    return await Response.succ(data={"success": True})
+    await svc.update(
+        kdb_id=req.kdb_id, 
+        name=req.name, 
+        intro=req.intro, 
+        kdb_setting=req.kdb_setting
+    )
+    return await Response.succ(data=SuccessResponse(success=True))
 
 
-@kdb_router.get("/info")
+@kdb_router.get("/info", response_model=BaseResponse[KdbInfoResponse])
 async def kdb_info(kdb_id: str = Query(...)):
     svc = KdbService()
     obj = await svc.info(kdb_id)
     if not obj:
         now_ts = int(datetime.now().timestamp())
         return await Response.succ(
-            data={
-                "kdbId": kdb_id,
-                "name": "",
-                "intro": "",
-                "createdAt": now_ts,
-                "updatedAt": now_ts,
-                "kdbSetting": None,
-            }
+            data=KdbInfoResponse(
+                kdbId=kdb_id,
+                name="",
+                intro="",
+                createdAt=now_ts,
+                updatedAt=now_ts,
+                kdbSetting=None,
+            )
         )
     return await Response.succ(
-        data={
-            "kdbId": obj.id,
-            "name": obj.name,
-            "intro": obj.intro,
-            "createdAt": int(obj.created_at.timestamp()),
-            "updatedAt": int(obj.updated_at.timestamp()),
-            "kdbSetting": obj.setting,
-        }
+        data=KdbInfoResponse(
+            kdbId=obj.id,
+            name=obj.name,
+            intro=obj.intro,
+            createdAt=int(obj.created_at.timestamp()),
+            updatedAt=int(obj.updated_at.timestamp()),
+            kdbSetting=obj.setting,
+        )
     )
 
 
-@kdb_router.post("/retrieve")
+@kdb_router.post("/retrieve", response_model=BaseResponse[KdbRetrieveResponse])
 async def kdb_retrieve(
     http_request: Request,
-    kdb_id: str = Body(...),
-    query: str = Body(...),
-    top_k: int = Body(10),
+    req: KdbRetrieveRequest,
 ):
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     result = await svc.retrieve(
-        kdb_id=kdb_id, query=query, top_k=top_k, user_id=user_id
+        kdb_id=req.kdb_id, query=req.query, top_k=req.top_k, user_id=user_id
     )
-    return await Response.succ(data=result)
+    return await Response.succ(data=KdbRetrieveResponse(results=result))
 
 
-@kdb_router.get("/list")
+@kdb_router.get("/list", response_model=BaseResponse[KdbListResponse])
 async def kdb_list(
     http_request: Request,
     query_name: str = Query(""),
@@ -101,47 +119,47 @@ async def kdb_list(
         user_id=user_id,
     )
     out_list = [
-        {
-            "id": k.id,
-            "name": k.name,
-            "index_name": k.get_index_name(),
-            "intro": k.intro,
-            "createTime": k.created_at.isoformat(),
-            "dataSource": k.data_type,
-            "docNum": counts.get(k.id, 0),
-            "cover": "",
-            "defaultColor": True,
-            "creator": None,
-            "type": None,
-        }
+        KdbListItem(
+            id=k.id,
+            name=k.name,
+            index_name=k.get_index_name(),
+            intro=k.intro,
+            createTime=k.created_at.isoformat(),
+            dataSource=k.data_type,
+            docNum=counts.get(k.id, 0),
+            cover="",
+            defaultColor=True,
+            creator=None,
+            type=None,
+        )
         for k in items
     ]
-    return await Response.succ(data={"list": out_list, "total": total})
+    return await Response.succ(data=KdbListResponse(list=out_list, total=total))
 
 
-@kdb_router.delete("/delete/{kdb_id}")
+@kdb_router.delete("/delete/{kdb_id}", response_model=BaseResponse[SuccessResponse])
 async def kdb_delete(kdb_id: str):
     svc = KdbService()
     await svc.delete(kdb_id)
-    return await Response.succ(data={"success": True})
+    return await Response.succ(data=SuccessResponse(success=True))
 
 
-@kdb_router.post("/clear")
-async def kdb_clear(kdb_id: str = Body(...)):
+@kdb_router.post("/clear", response_model=BaseResponse[SuccessResponse])
+async def kdb_clear(req: KdbIdRequest):
     svc = KdbService()
-    await svc.clear(kdb_id)
-    return await Response.succ(data={"success": True})
+    await svc.clear(req.kdb_id)
+    return await Response.succ(data=SuccessResponse(success=True))
 
 
-@kdb_router.post("/redo_all")
-async def kdb_redo_all(kdb_id: str = Body(...)):
+@kdb_router.post("/redo_all", response_model=BaseResponse[SuccessResponse])
+async def kdb_redo_all(req: KdbIdRequest):
     svc = KdbService()
-    await svc.redo_all(kdb_id)
-    return await Response.succ(data={"success": True})
+    await svc.redo_all(req.kdb_id)
+    return await Response.succ(data=SuccessResponse(success=True))
 
 
 # ===== KDB Doc =====
-@kdb_router.get("/doc/list")
+@kdb_router.get("/doc/list", response_model=BaseResponse[KdbDocListResponse])
 async def kdb_doc_list(
     http_request: Request,
     kdb_id: str = Query(...),
@@ -164,39 +182,39 @@ async def kdb_doc_list(
         user_id=user_id,
     )
     items = [
-        {
-            "id": d.id,
-            "doc_name": d.doc_name,
-            "status": d.status,
-            "create_time": d.created_at.isoformat(),
-            "metadata": d.meta_data,
-            "task_id": d.task_id,
-        }
+        KdbDocListItem(
+            id=d.id,
+            doc_name=d.doc_name,
+            status=d.status,
+            create_time=d.created_at.isoformat(),
+            metadata=d.meta_data,
+            task_id=d.task_id,
+        )
         for d in docs
     ]
-    return await Response.succ(data={"list": items, "total": total})
+    return await Response.succ(data=KdbDocListResponse(list=items, total=total))
 
 
-@kdb_router.get("/doc/info/{doc_id}")
+@kdb_router.get("/doc/info/{doc_id}", response_model=BaseResponse[Optional[KdbDocInfoResponse]])
 async def kdb_doc_info(doc_id: str):
     svc = KdbService()
     d = await svc.doc_info(doc_id=doc_id)
     if not d:
-        return await Response.succ(data={})
+        return await Response.succ(data=None)
     return await Response.succ(
-        data={
-            "id": d.id,
-            "type": d.data_source,
-            "dataName": d.doc_name,
-            "status": d.status,
-            "createTime": d.created_at.isoformat(),
-            "metadata": d.meta_data,
-            "taskId": d.task_id,
-        }
+        data=KdbDocInfoResponse(
+            id=d.id,
+            type=d.data_source,
+            dataName=d.doc_name,
+            status=d.status,
+            createTime=d.created_at.isoformat(),
+            metadata=d.meta_data,
+            taskId=d.task_id,
+        )
     )
 
 
-@kdb_router.post("/doc/add_by_files")
+@kdb_router.post("/doc/add_by_files", response_model=BaseResponse[KdbDocAddByFilesResponse])
 async def kdb_doc_add_by_files(
     http_request: Request,
     kdb_id: str = Form(...),
@@ -209,43 +227,43 @@ async def kdb_doc_add_by_files(
     task_id = await svc.doc_add_by_upload_files(
         kdb_id=kdb_id, files=files, override=override, user_id=user_id
     )
-    return await Response.succ(data={"taskId": task_id})
+    return await Response.succ(data=KdbDocAddByFilesResponse(taskId=task_id))
 
 
-@kdb_router.delete("/doc/delete/{doc_id}")
+@kdb_router.delete("/doc/delete/{doc_id}", response_model=BaseResponse[SuccessResponse])
 async def kdb_doc_delete(doc_id: str):
     svc = KdbService()
     await svc.doc_delete(doc_id=doc_id)
-    return await Response.succ(data={"success": True})
+    return await Response.succ(data=SuccessResponse(success=True))
 
 
-@kdb_router.put("/doc/redo/{doc_id}")
+@kdb_router.put("/doc/redo/{doc_id}", response_model=BaseResponse[SuccessResponse])
 async def kdb_doc_redo(doc_id: str):
     svc = KdbService()
     await svc.doc_redo(doc_id=doc_id)
-    return await Response.succ(data={"success": True})
+    return await Response.succ(data=SuccessResponse(success=True))
 
 
-@kdb_router.get("/doc/task_process")
+@kdb_router.get("/doc/task_process", response_model=BaseResponse[KdbDocTaskProcessResponse])
 async def kdb_doc_task_process(kdb_id: str = Query(...), task_id: str = Query(...)):
     svc = KdbService()
     success, fail, in_progress, waiting, total, task_process = await svc.task_process(
         kdb_id=kdb_id, task_id=task_id
     )
     return await Response.succ(
-        data={
-            "success": success,
-            "fail": fail,
-            "inProgress": in_progress,
-            "waiting": waiting,
-            "total": total,
-            "taskProcess": task_process,
-        }
+        data=KdbDocTaskProcessResponse(
+            success=success,
+            fail=fail,
+            inProgress=in_progress,
+            waiting=waiting,
+            total=total,
+            taskProcess=task_process,
+        )
     )
 
 
-@kdb_router.post("/doc/task_redo")
-async def kdb_doc_task_redo(kdb_id: str = Body(...), task_id: str = Body(...)):
+@kdb_router.post("/doc/task_redo", response_model=BaseResponse[SuccessResponse])
+async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest):
     svc = KdbService()
-    await svc.task_redo(kdb_id=kdb_id, task_id=task_id)
-    return await Response.succ(data={"success": True})
+    await svc.task_redo(kdb_id=req.kdb_id, task_id=req.task_id)
+    return await Response.succ(data=SuccessResponse(success=True))

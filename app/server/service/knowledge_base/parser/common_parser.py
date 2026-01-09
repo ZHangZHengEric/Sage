@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from typing import Dict, List, TYPE_CHECKING
 
-import models
+from .... import models
 
 from loguru import logger
 
 from .base import BaseParser
 
 if TYPE_CHECKING:
-    from service.knowledge_base.knowledge_base import DocumentInput
+    from ..knowledge_base import DocumentInput
+
+from .eml_parser import ALLOW_ATTACH_FILE_EXTS
 
 
 class CommonParser(BaseParser):
@@ -26,7 +28,7 @@ class CommonParser(BaseParser):
 
     async def process(self, index_name: str, doc: models.KdbDoc, file: models.File) -> List["DocumentInput"]:
         # Lazy import to avoid circular dependency at runtime
-        from service.knowledge_base.knowledge_base import DocumentInput
+        from ..knowledge_base import DocumentInput
         
         file_dao = models.FileDao()
         logger.info(f"[CommonParser] 处理开始：索引={index_name}, 文档ID={doc.id}")
