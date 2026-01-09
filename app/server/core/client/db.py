@@ -4,8 +4,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from core.exceptions import SageHTTPException
-from core.config import StartupConfig
+from ...core.exceptions import SageHTTPException
+from ...core.config import StartupConfig
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -96,9 +96,7 @@ class SessionManager:
                     self._engine = create_async_engine(
                         url,
                         future=True,
-                        pool_size=20,
-                        max_overflow=10,
-                        pool_recycle=3600,
+
                         pool_pre_ping=True,
                         json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
                         json_deserializer=json.loads,

@@ -5,11 +5,11 @@ import traceback
 import os
 import json
 from loguru import logger
-from schemas.chat import StreamRequest
+from ...schemas.chat import StreamRequest
 
 from sagents.sagents import SAgent
-from core.config import get_startup_config
-from core.exceptions import SageHTTPException
+from ...core.config import get_startup_config
+from ...core.exceptions import SageHTTPException
 
 from .utils import (
     create_tool_proxy,
