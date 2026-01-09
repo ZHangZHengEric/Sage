@@ -27,4 +27,9 @@ def create_fastapi_app() -> FastAPI:
 
     # 注册 MCP 路由
     register_mcp_routes(app)
+
+    @app.get("/active")
+    def active():
+        return "Service is available."
+
     return app
