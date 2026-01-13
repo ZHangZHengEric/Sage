@@ -1,8 +1,13 @@
-from .service import run_chat_session, run_async_chat_task
+from .service import (
+    run_async_chat_task, 
+    prepare_session, 
+    execute_chat_session
+)
 from .manager import populate_request_from_agent_config
 
 __all__ = [
-    "run_chat_session",
     "run_async_chat_task",
+    "prepare_session",
+    "execute_chat_session",
     "populate_request_from_agent_config",
 ]
