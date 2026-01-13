@@ -5,6 +5,7 @@ import asyncio
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
@@ -16,13 +17,59 @@ from ..schemas.chat import ChatRequest, StreamRequest
 # 导入辅助函数
 from ..service.chat import (
     populate_request_from_agent_config,
-    run_chat_session,
+    prepare_session,
+    execute_chat_session,
     run_async_chat_task,
 )
+from ..service.conversation import interrupt_session
+from sagents.context.session_context import delete_session_run_lock
 
 
 # 创建路由器
 chat_router = APIRouter()
+
+
+async def stream_with_disconnect_check(
+    generator, 
+    request: Request,
+    lock: asyncio.Lock,
+    session_id: str
+):
+    """
+    Wrap the generator to monitor client disconnection.
+    If client disconnects, stop the generator (which triggers its finally block).
+    """
+    try:
+        async for chunk in generator:
+            if await request.is_disconnected():
+                logger.info(f"Session {session_id}: Client disconnection detected")
+                # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
+                raise GeneratorExit
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit) as e:
+        logger.info(f"Session {session_id}: Client disconnected ({type(e).__name__})")
+        
+        # 标记会话中断，让内部逻辑有机会感知并处理
+        try:
+            await interrupt_session(session_id, "客户端断开连接")
+        except Exception as ex:
+            logger.error(f"Error interrupting session {session_id}: {ex}")
+            
+        # 重新抛出异常，确保生成器正确关闭
+        raise e
+    except Exception as e:
+        logger.error(f"Stream generator error: {e}")
+        raise e
+    finally:
+        # 清理资源
+        logger.info(f"sessionId={session_id} 流处理结束，清理会话资源")
+        try:
+            if lock.locked():
+                await lock.release()
+            delete_session_run_lock(session_id)
+            logger.info(f"sessionId={session_id} 资源已清理")
+        except Exception as e:
+            logger.error(f"Error releasing resources for session {session_id}: {e}")
 
 
 def validate_and_prepare_request(
@@ -51,7 +98,7 @@ def validate_and_prepare_request(
 async def chat(request: ChatRequest, http_request: Request):
     """流式聊天接口"""
     validate_and_prepare_request(request, http_request)
-    
+
     # 构建 StreamRequest
     inner_request = StreamRequest(
         messages=request.messages,
@@ -60,11 +107,18 @@ async def chat(request: ChatRequest, http_request: Request):
         system_context=request.system_context,
         agent_id=request.agent_id,
     )
-    
+
     await populate_request_from_agent_config(inner_request, require_agent_id=True)
 
+    session_id, stream_service, lock = await prepare_session(inner_request)
+
     return StreamingResponse(
-        run_chat_session(inner_request, mode="chat"),
+        stream_with_disconnect_check(
+            execute_chat_session(inner_request, "chat", session_id, stream_service),
+            http_request,
+            lock,
+            session_id
+        ),
         media_type="text/plain"
     )
 
@@ -76,8 +130,15 @@ async def stream_chat(request: StreamRequest, http_request: Request):
     
     await populate_request_from_agent_config(request, require_agent_id=False)
     
+    session_id, stream_service, lock = await prepare_session(request)
+
     return StreamingResponse(
-        run_chat_session(request, mode="stream"),
+        stream_with_disconnect_check(
+            execute_chat_session(request, "stream", session_id, stream_service),
+            http_request,
+            lock,
+            session_id
+        ),
         media_type="text/plain"
     )
 
