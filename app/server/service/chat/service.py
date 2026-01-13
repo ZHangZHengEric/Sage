@@ -82,54 +82,48 @@ class SageStreamService:
     ):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
-
         try:
-            try:
-                stream_result = self.sage_engine.run_stream(
-                    input_messages=messages,
-                    tool_manager=self.tool_manager,
-                    session_id=session_id,
-                    user_id=user_id,
-                    deep_thinking=deep_thinking,
-                    max_loop_count=max_loop_count,
-                    multi_agent=multi_agent,
-                    more_suggest=more_suggest,
-                    system_context=system_context,
-                    available_workflows=available_workflows,
-                    force_summary=force_summary,
-                    context_budget_config=context_budget_config,
-                )
+            stream_result = self.sage_engine.run_stream(
+                input_messages=messages,
+                tool_manager=self.tool_manager,
+                session_id=session_id,
+                user_id=user_id,
+                deep_thinking=deep_thinking,
+                max_loop_count=max_loop_count,
+                multi_agent=multi_agent,
+                more_suggest=more_suggest,
+                system_context=system_context,
+                available_workflows=available_workflows,
+                force_summary=force_summary,
+                context_budget_config=context_budget_config,
+            )
 
-                async for chunk in stream_result:
-                    if not isinstance(chunk, (list, tuple)):
-                        continue
-                    for message in chunk:
-                        result = message.to_dict()
-                        result['session_id'] = session_id
-                        result['timestamp'] = time.time()
+            async for chunk in stream_result:
+                if not isinstance(chunk, (list, tuple)):
+                    continue
+                for message in chunk:
+                    result = message.to_dict()
+                    result['session_id'] = session_id
+                    result['timestamp'] = time.time()
 
-                        result = ContentProcessor.clean_content(result)
+                    result = ContentProcessor.clean_content(result)
 
-                        yield result
+                    yield result
 
-                logger.info(f"sessionId={session_id} 🏁 流式处理完成")
+            logger.info(f"sessionId={session_id} 🏁 流式处理完成")
 
-            except Exception as e:
-                logger.error(f"❌ 流式处理异常: {traceback.format_exc()}")
-                error_result = {
-                    'type': 'error',
-                    'content': f"处理失败: {str(e)}",
-                    'role': 'assistant',
-                    'message_id': str(uuid.uuid4()),
-                    'session_id': session_id,
-                }
-                yield error_result
+        except Exception as e:
+            logger.error(f"❌ 流式处理异常: {traceback.format_exc()}")
+            error_result = {
+                'type': 'error',
+                'content': f"处理失败: {str(e)}",
+                'role': 'assistant',
+                'message_id': str(uuid.uuid4()),
+                'session_id': session_id,
+            }
+            yield error_result
 
-        except GeneratorExit:
-            logger.warning("🔍 客户端断开连接")
-            raise
-
-async def _prepare_session(request: StreamRequest):
+async def prepare_session(request: StreamRequest):
     """准备会话：获取锁并初始化服务"""
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
@@ -236,6 +230,25 @@ async def _generate_stream_lines(
     )
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
+async def execute_chat_session(
+    request: StreamRequest,
+    mode: str,
+    session_id: str,
+    stream_service: SageStreamService,
+):
+    """
+    执行聊天会话逻辑（仅生成流，不处理锁释放）
+    """
+    # 2. 生成流
+    async for line in _generate_stream_lines(
+        stream_service=stream_service,
+        request=request,
+        session_id=session_id,
+        mode=mode,
+    ):
+        yield line
+
+
 async def run_chat_session(
     request: StreamRequest,
     mode: str,
@@ -244,15 +257,14 @@ async def run_chat_session(
     运行聊天会话，封装了准备、执行和资源清理的完整生命周期
     """
     # 1. 准备会话（获取锁、初始化服务）
-    session_id, stream_service, lock = await _prepare_session(request)
+    session_id, stream_service, lock = await prepare_session(request)
     
     try:
-        # 2. 生成流
-        async for line in _generate_stream_lines(
-            stream_service=stream_service,
+        async for line in execute_chat_session(
             request=request,
-            session_id=session_id,
             mode=mode,
+            session_id=session_id,
+            stream_service=stream_service,
         ):
             yield line
     finally:
@@ -262,6 +274,8 @@ async def run_chat_session(
             await lock.release()
         delete_session_run_lock(session_id)
         logger.info(f"sessionId={session_id} 资源已清理")
+
+
 
 async def _execute_chat_task(
     request: StreamRequest,
@@ -325,7 +339,7 @@ async def _execute_chat_task(
 
 async def run_async_chat_task(request: StreamRequest) -> str:
     """提交异步聊天任务，返回 session_id"""
-    session_id, stream_service, lock = await _prepare_session(request)
+    session_id, stream_service, lock = await prepare_session(request)
     asyncio.create_task(
         _execute_chat_task(request, session_id, stream_service, lock)
     )
