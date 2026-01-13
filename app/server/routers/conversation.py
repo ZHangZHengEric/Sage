@@ -136,7 +136,7 @@ async def list_conversations(
     has_prev = page > 1
 
     result = {
-        "list": [item.dict() for item in conversation_items],
+        "list": [item.model_dump() for item in conversation_items],
         "total": total_count,
         "page": page,
         "page_size": page_size,
