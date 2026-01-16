@@ -6,10 +6,90 @@
 
 - 🧠 **智能记忆管理**：支持偏好、经验、上下文等多种记忆类型
 - 🔍 **智能搜索**：根据关键词和类型快速检索相关记忆
-- 💾 **多种存储后端**：支持本地文件、MCP工具、混合模式
+- 💾 **多种存储后端**：
+    - **本地文件**：轻量级 JSON 存储
+    - **向量数据库**：基于 Embedding 的语义检索（支持 Chroma, Milvus 等，需适配 VectorStore 接口）
+    - **MCP 工具**：通过 MCP 协议集成的外部记忆服务
 - 🛠️ **工具化接口**：提供大模型可调用的记忆工具
 - 📊 **统计分析**：记忆使用统计和分析功能
 - 🔒 **数据安全**：支持备份和恢复功能
+
+## 架构说明
+
+模块采用分层架构设计：
+
+```
+sagents/context/user_memory/
+├── __init__.py          # 统一导出模块
+├── manager.py           # UserMemoryManager：核心业务逻辑
+├── interfaces.py        # IMemoryDriver：驱动接口定义
+├── schemas.py           # MemoryEntry, MemoryType：数据模型
+├── extractor.py         # MemoryExtractor：记忆提取服务
+└── drivers/             # 存储后端实现
+    ├── tool.py          # ToolMemoryDriver：本地文件/MCP工具驱动
+    └── vector.py        # VectorMemoryDriver：向量数据库驱动
+```
+
+## 调用链路
+
+系统中的记忆调用链路如下，以 `ToolMemoryDriver` 为例：
+
+1.  **环境配置 (SessionContext)**：
+    *   `SessionContext` 在初始化时，如果提供了 `memory_root`，会自动设置 `MEMORY_ROOT_PATH` 环境变量。
+
+2.  **可用性检查 (ToolMemoryDriver)**：
+    *   `ToolMemoryDriver.is_available()` 检查 `MEMORY_ROOT_PATH` 是否设置。
+    *   如果没有设置，记忆功能标记为不可用，后续调用将被跳过。
+
+3.  **业务触发**：
+    *   **Agent** (通过 `manage_core_memory` 工具) 或 **MemoryExtractor** (后台任务) 发起记忆操作请求。
+
+4.  **管理层 (UserMemoryManager)**：
+    *   接收请求，调用 `driver.is_available()` 确认功能状态。
+    *   若可用，调用 Driver 的 `remember` / `recall` / `forget` 方法。
+
+5.  **驱动层 (ToolMemoryDriver)**：
+    *   将业务请求转换为标准的 Tool 调用参数。
+    *   通过 `ToolManager.run_tool_async` 调用底层工具。
+
+6.  **工具层 (MemoryTool)**：
+    *   接收调用请求。
+    *   通过 `os.getenv('MEMORY_ROOT_PATH')` 获取存储路径。
+    *   执行实际的文件读写操作（如读写 `memories.json`）。
+
+```mermaid
+sequenceDiagram
+    participant Agent/Extractor
+    participant UserMemoryManager
+    participant ToolMemoryDriver
+    participant ToolManager
+    participant SessionContext
+    participant MemoryTool
+    participant FileSystem
+
+    Note over SessionContext: Init: set env MEMORY_ROOT_PATH
+    Note over ToolMemoryDriver: Check env MEMORY_ROOT_PATH
+
+    Agent/Extractor->>UserMemoryManager: remember(key, content...)
+    UserMemoryManager->>ToolMemoryDriver: is_available()
+    
+    alt is available
+        ToolMemoryDriver-->>UserMemoryManager: True
+        UserMemoryManager->>ToolMemoryDriver: remember(user_id, key, content...)
+        ToolMemoryDriver->>ToolManager: run_tool_async('remember_user_memory', ...)
+        ToolManager->>MemoryTool: remember_user_memory(...)
+        MemoryTool->>MemoryTool: os.getenv('MEMORY_ROOT_PATH')
+        MemoryTool->>FileSystem: write to memories.json
+        FileSystem-->>MemoryTool: success
+        MemoryTool-->>ToolManager: result
+        ToolManager-->>ToolMemoryDriver: result
+        ToolMemoryDriver-->>UserMemoryManager: result
+        UserMemoryManager-->>Agent/Extractor: result
+    else is not available
+        ToolMemoryDriver-->>UserMemoryManager: False
+        UserMemoryManager-->>Agent/Extractor: Error/Skipped
+    end
+```
 
 ## 快速开始
 
@@ -18,133 +98,84 @@
 ```python
 from sagents.context.user_memory import UserMemoryManager, MemoryType
 
-# 创建记忆管理器
-memory_manager = UserMemoryManager(
-    user_id="eric_zz",
-    memory_root="user_memories"
-)
+# 1. 自动使用 ToolMemoryDriver (需配合 ToolManager)
+# memory_manager = UserMemoryManager(user_id="eric_zz", tool_manager=tool_manager)
 
-# 设置用户偏好
-memory_manager.set_preference("language", "zh-CN")
-memory_manager.set_preference("response_style", "详细")
+# 2. 或者注入自定义 Driver (例如向量存储)
+# from sagents.context.user_memory import VectorMemoryDriver
+# driver = VectorMemoryDriver(vector_store, embedding_model)
+# memory_manager = UserMemoryManager(user_id="eric_zz", driver=driver)
 
 # 添加经验记录
-memory_manager.add_memory(
+await memory_manager.remember(
+    memory_key="docker_issue_001",
     content="Docker容器启动失败：检查端口占用，重启Docker服务",
-    memory_type=MemoryType.EXPERIENCE,
-    tags=["docker", "故障排除"],
-    importance=0.8
+    memory_type="experience",
+    tags="docker,故障排除"
 )
 
 # 搜索相关记忆
-results = memory_manager.search_memories("docker")
-for result in results:
-    print(f"找到记忆: {result['content']}")
+result_str = await memory_manager.recall("docker")
+print(result_str)
 ```
 
-### 在 SessionContext 中使用
+### 在 SessionContext 中集成
+
+在 Reagent 框架中，通常通过 `SessionContext` 初始化记忆管理。`memory_root` 会自动配置为环境变量。
 
 ```python
 from sagents.context.session_context import init_session_context
-from sagents.context.user_memory import MemoryBackend
 
 # 创建带记忆功能的会话
 session_context = init_session_context(
     session_id="session_123",
     user_id="eric_zz",
     workspace_root="/path/to/workspace",
-    memory_backend=MemoryBackend.LOCAL_FILE,
-    memory_config={
-        "memory_root": "user_memories",
-        "auto_backup": True,
-        "max_memories": 5000
-    }
+    # 指定记忆存储根目录（用于本地文件存储）
+    memory_root="/path/to/user_memories",
+    context_budget_config={...}
 )
 
-# 使用记忆功能
-session_context.user_memory.set_preference("coding_style", "简洁")
-session_context.save_user_experience(
-    title="解决Python导入问题",
-    content="检查PYTHONPATH环境变量设置",
-    tags=["python", "环境配置"]
-)
+# 访问记忆管理器
+if session_context.user_memory_manager:
+    # 获取系统级记忆摘要
+    summary = await session_context.user_memory_manager.get_system_memories_summary(session_id="session_123")
+    print(summary)
 ```
 
-### Agent 中使用记忆工具
+## 存储后端配置
 
-```python
-from sagents.context.user_memory import create_memory_tools_for_agent
+### 1. 本地文件存储 (ToolMemoryDriver)
 
-class MyAgent:
-    def __init__(self, session_context):
-        self.session_context = session_context
-        self.memory_tools = create_memory_tools_for_agent(
-            session_context.user_memory
-        )
-    
-    def process_user_input(self, user_input):
-        # 大模型可以主动调用记忆工具
-        if "我喜欢" in user_input:
-            # 记录用户偏好
-            self.memory_tools["remember_user_preference"](
-                "preference_key", "preference_value", "描述"
-            )
-        
-        if "问题" in user_input:
-            # 搜索相似经验
-            similar = self.memory_tools["recall_similar_experience"](user_input)
-            return similar
-```
+这是默认的存储方式，适用于单机环境。
+
+*   **配置方式**：在 `init_session_context` 时传入 `memory_root` 参数。`SessionContext` 会自动将其设置为环境变量 `MEMORY_ROOT_PATH`。
+*   **存储结构**：
+    ```
+    {memory_root}/
+    └── {user_id}/
+        └── memories.json     # 记忆数据文件
+    ```
+*   **工作原理**：`ToolMemoryDriver` 会通过 `sagents.tool.memory_tool` 进行文件读写操作。
+
+### 2. 向量数据库存储 (VectorMemoryDriver)
+
+适用于需要大规模语义检索的场景。
+
+*   **配置方式**：需要手动实例化 `VectorMemoryDriver` 并注入到 `UserMemoryManager`。
+*   **依赖**：需要实现 `sagents.retrieve_engine` 中的 `VectorStore` 和 `EmbeddingModel` 接口。
 
 ## 记忆类型
 
-- **PREFERENCE**: 用户偏好（语言、风格、习惯等）
-- **EXPERIENCE**: 个人经验（解决方案、学习记录等）
-- **PATTERN**: 行为模式（操作习惯、工作流程等）
-- **CONTEXT**: 个人上下文（项目信息、目标等）
-- **NOTE**: 个人备注（重要信息、提醒等）
-- **BOOKMARK**: 个人书签（有用链接、资源等）
-
-## 存储后端
-
-### 本地文件存储 (LOCAL_FILE)
-
-```python
-memory_manager = UserMemoryManager(
-    user_id="user_id",
-    memory_root="user_memories",
-    backend=MemoryBackend.LOCAL_FILE
-)
-```
-
-存储结构：
-```
-user_memories/
-├── eric_zz/
-│   ├── profile.json      # 用户配置
-│   ├── memories.json     # 记忆数据
-│   ├── index.json        # 索引文件
-│   └── backup/           # 备份文件
-└── global_index.json     # 全局索引
-```
-
-### MCP 工具存储 (MCP_TOOL)
-
-```python
-memory_manager = UserMemoryManager(
-    user_id="user_id",
-    backend=MemoryBackend.MCP_TOOL
-)
-```
-
-### 混合模式 (HYBRID)
-
-```python
-memory_manager = UserMemoryManager(
-    user_id="user_id",
-    backend=MemoryBackend.HYBRID
-)
-```
+- **preference**: 用户偏好（语言、风格、习惯等）
+- **experience**: 个人经验（解决方案、学习记录等）
+- **requirement**: 用户明确要求
+- **persona**: 用户人设/背景
+- **constraint**: 约束条件
+- **pattern**: 行为模式
+- **context**: 个人上下文
+- **note**: 个人备注
+- **bookmark**: 个人书签
 
 ## 智能搜索策略
 
@@ -162,73 +193,11 @@ memory_manager = UserMemoryManager(
 
 ### UserMemoryManager
 
-#### 基础操作
-- `get(key, default=None)`: 获取记忆值
-- `set(key, value, memory_type)`: 设置记忆值
-- `delete(key)`: 删除记忆
-- `exists(key)`: 检查记忆是否存在
-
-#### 便捷方法
-- `get_preference(key, default=None)`: 获取用户偏好
-- `set_preference(key, value)`: 设置用户偏好
-- `add_memory(content, memory_type, tags, importance)`: 添加新记忆
-- `search_memories(query, memory_type=None)`: 搜索记忆
-
-#### 管理功能
-- `get_memory_stats()`: 获取统计信息
-- `backup_memories(backup_path=None)`: 备份记忆
-- `restore_memories(backup_path)`: 恢复记忆
-
-### MemoryTools
-
-大模型可调用的工具方法：
-
-- `remember_user_preference(key, value, description)`: 记住用户偏好
-- `save_solution(problem, solution, tags, importance)`: 保存解决方案
-- `recall_similar_experience(situation, limit)`: 回忆相似经验
-- `note_user_context(context_type, context_info)`: 记录用户上下文
-- `get_user_preference(key, default)`: 获取用户偏好
-- `search_memories_by_tags(tags, memory_type, limit)`: 按标签搜索
-- `get_memory_summary()`: 获取记忆摘要
-- `backup_user_memories()`: 备份用户记忆
-
-## 测试
-
-运行测试以验证功能：
-
-```python
-from sagents.context.user_memory.test_memory import run_all_tests
-
-run_all_tests()
-```
-
-## 配置选项
-
-```python
-# 记忆配置示例
-memory_config = {
-    "memory_root": "user_memories",     # 存储根目录
-    "auto_backup": True,                # 自动备份
-    "max_memories": 10000,              # 最大记忆数量
-    "compression_enabled": False,       # 是否启用压缩
-    "backup_interval": 86400            # 备份间隔（秒）
-}
-```
-
-## 最佳实践
-
-1. **合理设置重要性评分**：重要的记忆设置较高的 importance 值
-2. **使用有意义的标签**：便于后续搜索和分类
-3. **定期备份**：启用自动备份或定期手动备份
-4. **控制记忆数量**：设置合理的 max_memories 限制
-5. **结构化存储**：使用层级键名组织相关记忆
-
-## 注意事项
-
-- 记忆数据以 JSON 格式存储，确保内容可序列化
-- 大量记忆可能影响搜索性能，建议定期清理
-- 备份文件包含敏感信息，注意安全保护
-- MCP 工具后端需要相应的 MCP 服务器支持
+*   `remember(memory_key, content, memory_type, tags, ...)`: 记住记忆
+*   `recall(query, limit, ...)`: 语义检索记忆
+*   `forget(memory_key, ...)`: 删除记忆
+*   `get_system_memories(session_id)`: 获取系统级记忆（偏好、人设等）
+*   `get_system_memories_summary(session_id)`: 获取格式化的系统记忆摘要
 
 ## 作者
 
