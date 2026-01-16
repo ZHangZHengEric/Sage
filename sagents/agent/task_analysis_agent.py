@@ -11,7 +11,6 @@ import uuid
 class TaskAnalysisAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix')
         self.agent_name = "TaskAnalysisAgent"
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
         logger.info("TaskAnalysisAgent 初始化完成")
