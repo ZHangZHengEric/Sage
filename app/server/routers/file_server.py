@@ -8,9 +8,9 @@ import mimetypes
 import os
 from pathlib import Path
 
-from core import config
-from core.exceptions import SageHTTPException
-from core.render import Response
+from ..core import config
+from ..core.exceptions import SageHTTPException
+from ..core.render import Response
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 

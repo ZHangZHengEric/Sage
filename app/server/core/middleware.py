@@ -11,11 +11,11 @@ from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from core import config
-from service.user import parse_access_token
+from .auth import parse_access_token
 from .exceptions import SageHTTPException
 from .render import Response
-from utils.context import set_request_context
+from .config import get_startup_config
+from ..utils.context import set_request_context
 # 白名单 API 路径
 WHITELIST_API_PATHS = frozenset(
     {
@@ -98,7 +98,7 @@ def register_middlewares(app):
 
         return response
 
-    cfg = config.get_startup_config()
+    cfg = get_startup_config()
     if cfg and cfg.no_auth:
         return
 

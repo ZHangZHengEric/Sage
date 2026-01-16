@@ -1,9 +1,9 @@
 from fastapi import FastAPI
-from core.middleware import register_middlewares
-from core.exceptions import register_exception_handlers
-from routers import register_routes as register_chat_routes
-from mcp_routers import register_routes as register_mcp_routes
-from lifespan import app_lifespan
+from .core.middleware import register_middlewares
+from .core.exceptions import register_exception_handlers
+from .routers import register_routes as register_chat_routes
+from .mcp_routers import register_routes as register_mcp_routes
+from .lifespan import app_lifespan
 
 def create_fastapi_app() -> FastAPI:
     """创建并配置 FastAPI 应用"""
