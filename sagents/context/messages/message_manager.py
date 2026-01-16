@@ -97,7 +97,7 @@ class MessageManager:
             messages = [messages]
         for message in messages:
             for i, old_message in enumerate(self.messages):
-                if old_message.id == message.id:
+                if old_message.message_id == message.message_id:
                     self.messages[i] = message
                     break
 
