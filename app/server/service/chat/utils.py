@@ -3,8 +3,8 @@ import json
 from typing import Dict, Any, AsyncGenerator, List, Tuple
 from loguru import logger
 from openai import AsyncOpenAI
-from core.config import StartupConfig
-from core.client.chat import get_chat_client
+from ...core.config import StartupConfig
+from ...core.client.chat import get_chat_client
 
 
 def initialize_chat_resources(request_llm_config: dict, server_args: StartupConfig) -> Tuple[Any, Dict[str, Any]]:

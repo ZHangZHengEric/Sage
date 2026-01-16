@@ -39,4 +39,4 @@ RUN mkdir -p /app/agent_workspace /app/logs
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT [ "python", "app/server/main.py" ]
+ENTRYPOINT [ "python", "-m", "app.server.main" ]

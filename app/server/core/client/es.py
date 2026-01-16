@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 
-from core.config import StartupConfig, get_startup_config
+from ...core.config import StartupConfig, get_startup_config
 
 from elasticsearch import AsyncElasticsearch, helpers
 from loguru import logger
