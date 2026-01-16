@@ -17,8 +17,8 @@ class TaskAnalysisAgent(AgentBase):
         logger.info("TaskAnalysisAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        # 重新获取系统前缀，使用正确的语言
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix', language=session_context.get_language())
+        # 重新获取系统前缀，使用正确的语言，不能用init的，会有并发问题
+        current_system_prefix = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix', language=session_context.get_language())
         
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
@@ -59,7 +59,7 @@ class TaskAnalysisAgent(AgentBase):
         )]
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

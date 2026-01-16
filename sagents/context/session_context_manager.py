@@ -90,6 +90,3 @@ class SessionContextManager:
 
 # 全局实例
 session_manager = SessionContextManager()
-
-# 为了向后兼容，保留原来的名称
-session_local = session_manager
