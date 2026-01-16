@@ -9,6 +9,12 @@ from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
+# from sagents.context.tasks.task_manager import TaskManager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.context.user_memory.manager import UserMemoryManager
+
 from sagents.utils.logger import logger
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
 import json
@@ -27,29 +33,19 @@ class SessionStatus(Enum):
 
 
 class SessionContext:
-    def __init__(self, session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, memory_root: Optional[str] = None,
-                 context_budget_config: Optional[Dict[str, Any]] = None):
+
+    def __init__(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        workspace_root: Optional[str] = None,
+        context_budget_config: Optional[Dict[str, Any]] = None,
+        user_memory_manager: Optional['UserMemoryManager'] = None,
+    ):
         self.session_id = session_id
         self.user_id = user_id
         self.llm_requests_logs: List[Dict[str, Any]] = []           # 大模型的请求记录
         self.workspace_root = workspace_root  # agent 的工作空间
-        self.memory_root: Optional[str] = None
-
-        # 根据传入的memory_root参数设置环境变量
-        if memory_root is not None:
-            # 确保是绝对路径
-            memory_root = os.path.abspath(memory_root)
-            logger.info(f"初始化系统变量MEMORY_ROOT_PATH={memory_root}")
-            os.environ['MEMORY_ROOT_PATH'] = memory_root
-            self.memory_root = memory_root
-            # 判断路径是否存在
-            if not os.path.exists(self.memory_root):
-                os.makedirs(self.memory_root)
-        else:
-            # 如果传入None，则移除环境变量（禁用本地记忆）
-            os.environ.pop('MEMORY_ROOT_PATH', None)
-            self.memory_root = None
-            
         self.session_workspace = None      # agent 该会话的工作空间，保存日志等信息
         self.agent_workspace = None         # agent 该会话的工作空间，保存执行过程中产生的内容
         self.thread_id = threading.get_ident()
@@ -66,8 +62,8 @@ class SessionContext:
         # Agent配置信息存储
         self.agent_config: Dict[str, Any] = {}  # 存储agent的配置信息，包括模型配置、系统前缀等
 
-        # 初始化UserMemoryManager
-        self.user_memory_manager = None
+        self.user_memory_manager = user_memory_manager
+        self.tool_manager = None # 存储工具管理器
 
         self.init_more()
 
@@ -127,30 +123,33 @@ class SessionContext:
         Args:
             tool_manager: 工具管理器实例
         """
+        self.tool_manager = tool_manager
+
         if self.user_id is None:
             return
 
-        # 初始化UserMemoryManager
-        if self.user_memory_manager is None:
+        # 使用已注入的UserMemoryManager
+        if self.user_memory_manager:
             try:
-                from sagents.context.user_memory import UserMemoryManager
-                self.user_memory_manager = UserMemoryManager(self.user_id, tool_manager)
-                logger.info(f"SessionContext: 初始化UserMemoryManager成功，用户ID: {self.user_id}")
-                if self.user_memory_manager.memory_disabled:
-                    logger.info(f"SessionContext: UserMemoryManager已禁用，用户ID: {self.user_id}")
-                    self.user_memory_manager = None
+                # 检查是否可用
+                if not self.user_memory_manager.is_enabled(tool_manager):
+                    logger.info(f"SessionContext: UserMemoryManager不可用，用户ID: {self.user_id}")
+                    # 注意：这里我们不将 self.user_memory_manager 置为 None，
+                    # 因为它可能是一个全局实例，只是当前没有可用的driver。
+                    # 或者我们可以保留它，但在使用时会检查。
                 else:
+                    logger.info(f"SessionContext: UserMemoryManager已启用，用户ID: {self.user_id}")
                     # user_memory_manager 初始化成功，需要在system context添加对于 记忆使用的说明和要求
                     self.system_context['长期记忆的要求'] = self.user_memory_manager.get_user_memory_usage_description()
                     # 自动查询系统级记忆并注入到system_context
-                    self._load_system_memories(tool_manager)
+                    import asyncio
+                    asyncio.create_task(self._load_system_memories(tool_manager))
 
             except Exception as e:
                 logger.error(f"SessionContext: 初始化UserMemoryManager失败: {e}")
-                self.user_memory_manager = None
+                # self.user_memory_manager = None # 不要置空全局实例
 
     def set_agent_config(self, model: Optional[str] = None, model_config: Optional[dict] = None, system_prefix: Optional[str] = None,
-                         workspace: Optional[str] = None, memory_root: Optional[str] = None,
                          available_tools: Optional[list] = None, system_context: Optional[dict] = None,
                          available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
                          multi_agent: Optional[bool] = None, more_suggest: bool = False,
@@ -161,8 +160,7 @@ class SessionContext:
             model: 模型名称或OpenAI客户端实例
             model_config: 模型配置
             system_prefix: 系统前缀
-            workspace: 工作空间路径
-            memory_root: 记忆根目录
+
             available_tools: 可用工具列表
             system_context: 系统上下文
             available_workflows: 可用工作流
@@ -225,7 +223,11 @@ class SessionContext:
 
         try:
             # 通过UserMemoryManager获取系统级记忆
-            system_memories = await self.user_memory_manager.get_system_memories(self.session_id)
+            system_memories = await self.user_memory_manager.get_system_memories(
+                user_id=self.user_id,
+                session_id=self.session_id,
+                tool_manager=tool_manager
+            )
 
             if system_memories:
                 # 格式化记忆内容并注入到system_context
@@ -243,24 +245,28 @@ class SessionContext:
     def refresh_system_memories(self):
         """刷新系统级记忆"""
         if self.user_memory_manager:
-            self._load_system_memories()
+            import asyncio
+            asyncio.create_task(self._load_system_memories(self.tool_manager))
             logger.info("系统级记忆已刷新")
 
-    def get_system_memories_summary(self) -> str:
+    async def get_system_memories_summary(self) -> str:
         """获取系统级记忆摘要
 
         Returns:
             系统级记忆的摘要字符串
         """
-        if not self.user_memory_manager:
+        if not self.user_memory_manager or not self.user_id:
             return ""
 
         try:
-            return self.user_memory_manager.get_system_memories_summary(self.session_id)
+            return await self.user_memory_manager.get_system_memories_summary(
+                user_id=self.user_id,
+                session_id=self.session_id,
+                tool_manager=self.tool_manager
+            )
         except Exception as e:
             logger.error(f"获取系统级记忆摘要失败: {e}")
             return ""
-
 
     def match_language(self, response_language: str) -> str:
         """根据 response_language 匹配语言"""
@@ -303,7 +309,6 @@ class SessionContext:
             "response": response,
             "timestamp": time.time(),
         })
-
 
     def get_tokens_usage_info(self):
         """获取tokens使用信息"""
@@ -435,12 +440,12 @@ class SessionContext:
             except (TypeError, ValueError):
                 # 不可序列化的值，转换为字符串
                 return str(obj)
-    
+
     def _serialize_messages_for_context(self, messages: List[MessageChunk]) -> str:
         """序列化消息列表为系统上下文格式的字符串（私有方法）"""
         # 获取当前语言设置
         language = self.get_language()
-        
+
         # 从PromptManager获取多语言文本
         explanation = prompt_manager.get_prompt(
             "history_messages_explanation",
@@ -452,7 +457,7 @@ class SessionContext:
                 "=== 相关历史对话上下文 ===\n"
             )
         )
-        
+
         # 获取消息格式模板
         message_format_template = prompt_manager.get_prompt(
             "history_message_format",
@@ -460,7 +465,7 @@ class SessionContext:
             language=language,
             default="[Memory {index}] ({time}): {content}"
         )
-        
+
         messages_str_list = []
         for idx, msg in enumerate(messages):
             content = msg.get_content()
@@ -468,10 +473,10 @@ class SessionContext:
             local_time = utc_time.astimezone()
             time_str = local_time.strftime('%Y-%m-%d %H:%M:%S %z')
             messages_str_list.append(message_format_template.format(index=idx + 1, time=time_str, content=content))
-        
+
         messages_content = "\n".join(messages_str_list)
         return explanation + messages_content
-    
+
     def set_history_context(self) -> None:
         """准备并设置历史上下文到 system_context
 
@@ -493,7 +498,7 @@ class SessionContext:
             # 4. 序列化为字符串并插入到system_context
             history_messages_str = self._serialize_messages_for_context(history_messages)
             self.system_context['history_messages'] = history_messages_str
-        
+
         logger.info(
             f"SessionContext: 历史上下文准备完成 - "
             f"检索历史消息{len(history_messages)}条消息到system_context"
@@ -549,11 +554,11 @@ def get_session_messages(session_id: str) -> List[MessageChunk]:
     return messages
 
 
-def init_session_context(session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, memory_root: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None) -> SessionContext:
+def init_session_context(session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None, user_memory_manager: Optional[Any] = None) -> SessionContext:
     """初始化会话上下文"""
     if session_id in _active_sessions:
         return _active_sessions[session_id]
-    _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, memory_root, context_budget_config=context_budget_config)
+    _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, context_budget_config=context_budget_config, user_memory_manager=user_memory_manager)
     return _active_sessions[session_id]
 
 
