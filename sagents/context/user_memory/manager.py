@@ -20,7 +20,12 @@ class UserMemoryManager:
     以user_id为索引，自动选择最佳的记忆工具实现。
     """
 
-    def __init__(self, driver: Optional[IMemoryDriver] = None, model: Any = None, memory_root: Optional[str] = None):
+    def __init__(
+        self,
+        driver: Optional[IMemoryDriver] = None,
+        model: Any = None,
+        memory_root: str = "/workspace/user_memories",
+    ):
         """
         初始化用户记忆管理器
         
@@ -36,9 +41,9 @@ class UserMemoryManager:
 
         self.driver = driver
         if not self.driver:
-            logger.info("UserMemoryManager initialized without default driver")
+            logger.info("UserMemoryManager 初始化完成，使用默认驱动, ToolMemoryDriver")
         else:
-            logger.info("UserMemoryManager initialized with custom driver")
+            logger.info(f"UserMemoryManager 初始化完成，使用自定义驱动: {self.driver.__class__.__name__}    ")
 
         # 初始化记忆提取器
         self.extractor = MemoryExtractor(model) if model else None
@@ -50,10 +55,10 @@ class UserMemoryManager:
         """
         if self.driver:
             return self.driver
-        
+
         if tool_manager:
             return ToolMemoryDriver(tool_manager)
-            
+
         return None
 
     def is_enabled(self, tool_manager: Any = None) -> bool:
@@ -110,7 +115,7 @@ class UserMemoryManager:
 
             # 构建简化的记忆条目
             memory_line = f"{i}. 【{memory.key}】{memory.content} ({created_time})"
-            
+
             formatted_lines.append(memory_line)
             formatted_lines.append("")  # 空行分隔
 
@@ -180,10 +185,10 @@ class UserMemoryManager:
                 session_id=session_id,
                 session_context=session_context
             )
-            
+
             if not memory_entries:
                 return f"未找到与 '{query}' 相关的记忆。"
-                
+
             # 格式化为大模型友好的字符串
             return self._format_memories_for_llm(memory_entries)
 
@@ -264,7 +269,7 @@ class UserMemoryManager:
                         if formatted_memories:
                             system_memories[memory_type] = "\n".join(formatted_memories)
                             logger.debug(f"获取了 {len(memories)} 条 {memory_type} 类型的系统记忆")
-                            
+
                 except Exception as e:
                     logger.error(traceback.format_exc())
                     logger.warning(f"查询 {memory_type} 类型记忆失败: {e}")
