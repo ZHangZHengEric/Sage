@@ -16,7 +16,7 @@ def _auto_import_prompt_modules():
     import glob
     
     prompt_modules = {}
-    prompts_dir = Path(__file__).parent.parent / "agent" / "prompts"
+    prompts_dir = Path(__file__).parent.parent / "prompts"
     
     try:
         # 获取所有.py文件（排除__init__.py）
@@ -28,7 +28,7 @@ def _auto_import_prompt_modules():
                 
             try:
                 # 动态导入模块
-                module_name = f"sagents.agent.prompts.{file_name}"
+                module_name = f"sagents.prompts.{file_name}"
                 module = importlib.import_module(module_name)
                 
                 # 获取模块的AGENT_IDENTIFIER
