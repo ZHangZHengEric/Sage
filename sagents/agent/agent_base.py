@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
 import json
+import uuid
 from sagents.utils.logger import logger
 from sagents.tool.tool_config import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
