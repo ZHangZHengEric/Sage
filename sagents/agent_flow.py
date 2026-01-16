@@ -2,7 +2,7 @@
 
 import traceback
 from typing import List, AsyncGenerator
-from sagents.agent.agent_base import AgentBase
+from sagents.agent import AgentBase
 from sagents.context.session_context import SessionContext, delete_session_context, init_session_context
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.messages.message import MessageChunk
@@ -11,7 +11,7 @@ from sagents.tool.tool_proxy import ToolProxy
 import uuid
 from typing import Dict, Any, Optional, Union
 from sagents.utils.logger import logger
-from sagents.utils.session_local import session_manager
+from sagents.context.session_context_manager import session_manager
 
 
 class AgentFlow:
@@ -50,7 +50,6 @@ class AgentFlow:
                 session_id=session_id,
                 user_id=user_id or "",
                 workspace_root=self.workspace,
-                memory_root=self.memory_root or "",
                 context_budget_config=context_budget_config
             )
             with session_manager.session_context(session_id):
@@ -60,8 +59,6 @@ class AgentFlow:
                     model=None,
                     model_config={},
                     system_prefix=None,
-                    workspace=self.workspace,
-                    memory_root=self.memory_root or "",
                     available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
                     system_context=system_context or {},
                     available_workflows=available_workflows or {},

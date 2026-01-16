@@ -37,7 +37,7 @@ class TaskRewriteAgent(AgentBase):
         prompt = rewrite_template.format(dialogue_history=dialogue_history, latest_request=latest_request)
         message_id = str(uuid.uuid4())
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
