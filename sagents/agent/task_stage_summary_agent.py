@@ -16,10 +16,9 @@ import datetime
 class TaskStageSummaryAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix")
         self.agent_name = "StageSummaryAgent"
-        self.agent_description = "任务执行阶段性总结智能体，专门负责生成任务执行的阶段性总结"
-        logger.info("StageSummaryAgent 初始化完成")
+        self.agent_description = "阶段总结智能体，专门负责对当前阶段的执行情况进行总结"
+        logger.info("TaskStageSummaryAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取带有正确语言的prompt
