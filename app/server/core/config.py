@@ -25,7 +25,7 @@ class StartupConfig:
     no_auth: bool = True  # 无认证模式，根据入参用户id获取数据
 
     # DB
-    db_type: str = "memory"  # file | memory | mysql
+    db_type: str = "file"  # file | memory | mysql
     db_path: str = "./data/"  # file 模式为目录；memory 为忽略；mysql 支持 DSN/JSON/ENV
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 3306
