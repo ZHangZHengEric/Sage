@@ -23,7 +23,7 @@ class TaskStageSummaryAgent(AgentBase):
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取带有正确语言的prompt
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
+        current_system_prefix = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
 
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
@@ -87,7 +87,7 @@ class TaskStageSummaryAgent(AgentBase):
         )
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

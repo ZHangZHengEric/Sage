@@ -10,34 +10,36 @@ from sagents.context.session_context import (
 )
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.tasks.task_base import TaskStatus
-from sagents.utils.session_local import session_manager
+from sagents.context.session_context_manager import session_manager
 from sagents.utils.logger import logger
-from sagents.agent.task_router_agent import TaskRouterAgent
-from sagents.agent.memory_extraction_agent import MemoryExtractionAgent
-from sagents.agent.task_rewrite_agent import TaskRewriteAgent
-from sagents.agent.query_suggest_agent import QuerySuggestAgent
-from sagents.agent.task_completion_judge_agent import TaskCompletionJudgeAgent
-from sagents.agent.workflow_select_agent import WorkflowSelectAgent
-from sagents.agent.task_stage_summary_agent import TaskStageSummaryAgent
-from sagents.agent.task_summary_agent import TaskSummaryAgent
-from sagents.agent.task_planning_agent import TaskPlanningAgent
-from sagents.agent.task_obversation_agent import TaskObservationAgent
-from sagents.agent.task_executor_agent import TaskExecutorAgent
-from sagents.agent.task_decompose_agent import TaskDecomposeAgent
-from sagents.agent.task_analysis_agent import TaskAnalysisAgent
-from sagents.agent.simple_agent import SimpleAgent
-from sagents.agent.agent_base import AgentBase
+from sagents.agent import (
+    TaskRouterAgent,
+    TaskRewriteAgent,
+    QuerySuggestAgent,
+    TaskCompletionJudgeAgent,
+    WorkflowSelectAgent,
+    TaskStageSummaryAgent,
+    TaskSummaryAgent,
+    TaskPlanningAgent,
+    TaskObservationAgent,
+    TaskExecutorAgent,
+    TaskDecomposeAgent,
+    TaskAnalysisAgent,
+    SimpleAgent,
+    AgentBase
+)
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.tool.tool_manager import ToolManager
+from sagents.context.user_memory import UserMemoryManager
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator
 import time
 import traceback
 import uuid
 import os
 import sys
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# from sagents.agent.simple_agent_v2 import SimpleAgent
 
 
 class SAgent:
@@ -63,67 +65,29 @@ class SAgent:
         self.model_config = model_config
         self.system_prefix = system_prefix
         self.workspace = workspace
-        self.memory_root = memory_root  # 如果为None则不使用本地记忆工具
-        self._init_agents()
+
+        # 初始化全局用户记忆管理器（服务端粒度）
+        self.user_memory_manager = UserMemoryManager(model=self.model, memory_root=memory_root)
+
+        # 初始化所有智能体
+        self.simple_agent = SimpleAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_analysis_agent = TaskAnalysisAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_decompose_agent = TaskDecomposeAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_executor_agent = TaskExecutorAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_observation_agent = TaskObservationAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_completion_judge_agent = TaskCompletionJudgeAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_planning_agent = TaskPlanningAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_summary_agent = TaskSummaryAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_stage_summary_agent = TaskStageSummaryAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.workflow_select_agent = WorkflowSelectAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.query_suggest_agent = QuerySuggestAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_rewrite_agent = TaskRewriteAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        self.task_router_agent = TaskRouterAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        
+        # MemoryExtractor 不是 AgentBase 的子类，单独处理
+        # self.memory_extractor = MemoryExtractor(self.model)
 
         logger.info("SAgent: 智能体控制器初始化完成")
-
-    def _init_agents(self) -> None:
-        """
-        初始化所有必需的智能体
-
-        使用共享的模型实例为所有智能体进行初始化。
-        """
-        logger.debug("SAgent: 初始化各类智能体")
-
-        # self.simple_agent = SimpleAgent(
-        #     self.model, self.model_config, system_prefix=self.system_prefix
-        # )
-        self.simple_agent = SimpleAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_analysis_agent = TaskAnalysisAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_decompose_agent = TaskDecomposeAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_executor_agent = TaskExecutorAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_observation_agent = TaskObservationAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_completion_judge_agent = TaskCompletionJudgeAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-
-        self.task_planning_agent = TaskPlanningAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_summary_agent = TaskSummaryAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_stage_summary_agent = TaskStageSummaryAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.workflow_select_agent = WorkflowSelectAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.query_suggest_agent = QuerySuggestAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_rewrite_agent = TaskRewriteAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.memory_extraction_agent = MemoryExtractionAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-        self.task_router_agent = TaskRouterAgent(
-            self.model, self.model_config, system_prefix=self.system_prefix
-        )
-
-        logger.info("SAgent: 所有智能体初始化完成")
 
     async def run_stream(self,
                          input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
@@ -224,10 +188,10 @@ class SAgent:
             session_id = session_id or str(uuid.uuid4())
             session_context = init_session_context(
                 session_id=session_id,
-                user_id=user_id or "",
+                user_id=user_id,
                 workspace_root=self.workspace,
-                memory_root=self.memory_root or "",
-                context_budget_config=context_budget_config
+                context_budget_config=context_budget_config,
+                user_memory_manager=self.user_memory_manager
             )
             with session_manager.session_context(session_id):
                 logger.info(f"开始流式工作流，会话ID: {session_id}")
@@ -236,11 +200,9 @@ class SAgent:
                     model=self.model,
                     model_config=self.model_config,
                     system_prefix=self.system_prefix,
-                    workspace=self.workspace,
-                    memory_root=self.memory_root or "",
                     available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
-                    system_context=system_context or {},
-                    available_workflows=available_workflows or {},
+                    system_context=system_context,
+                    available_workflows=available_workflows,
                     deep_thinking=deep_thinking if isinstance(deep_thinking, bool) else False,
                     multi_agent=multi_agent if isinstance(multi_agent, bool) else False,
                     more_suggest=more_suggest,
@@ -252,18 +214,14 @@ class SAgent:
                     session_context.add_and_update_system_context(system_context)
 
                 if available_workflows:
-                    if len(available_workflows.keys()) > 0:
-                        logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                        session_context.workflow_manager.load_workflows_from_dict(available_workflows)
+                    logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                    session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
                 session_context.status = SessionStatus.RUNNING
                 initial_messages = self._prepare_initial_messages(input_messages)
 
                 # 尝试初始化记忆
                 session_context.init_user_memory_manager(tool_manager)
-
-                # print(f"initial_messages: {initial_messages}")
-                # print(f"session_context.message_manager.messages: {session_context.message_manager.messages}")
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
                 logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
@@ -377,18 +335,17 @@ class SAgent:
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks
 
+                # 异步执行记忆提取，不阻塞主流程
                 logger.debug("SAgent: 检查是否需要提取记忆")
                 if session_context.user_memory_manager:
-                    logger.debug("SAgent: 开始记忆提取")
-                    async for message_chunks in self._execute_agent_phase(
-                        session_context=session_context,
-                        tool_manager=tool_manager,
-                        session_id=session_id,
-                        agent=self.memory_extraction_agent,
-                        phase_name="记忆提取"
-                    ):
-                        session_context.message_manager.add_messages(message_chunks)
-                        # yield message_chunks
+                    logger.debug("SAgent: 启动异步记忆提取任务")
+                    # 创建异步任务，不等待其完成
+                    asyncio.create_task(
+                        session_context.user_memory_manager.extract_and_save(
+                            session_context=session_context,
+                            session_id=session_id
+                        )
+                    )
 
                 # 检查最终状态，如果不是中断状态则标记为完成
                 if session_context.status != SessionStatus.INTERRUPTED:
@@ -549,9 +506,6 @@ class SAgent:
             List[MessageChunk]: 准备好的消息列表
         """
         logger.debug("SAgent: 准备初始消息")
-        # 先检查input_message 格式以及类型
-        if not isinstance(input_messages, list):
-            raise ValueError("input_messages 必须是列表类型")
         # 检查每个消息的格式
         for msg in input_messages:
             if not isinstance(msg, (dict, MessageChunk)):
