@@ -432,7 +432,7 @@ class SAgent:
                                             session_context: SessionContext,
                                             tool_manager: Optional[Any],
                                             session_id: str,
-                                            max_loop_count: int) -> AsyncGenerator[List[MessageChunk], None]:
+                                            max_loop_count: int = 10) -> AsyncGenerator[List[MessageChunk], None]:
         # 执行任务分解
         async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_decompose_agent, "任务分解"):
             yield chunk
