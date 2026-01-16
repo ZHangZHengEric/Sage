@@ -13,7 +13,6 @@ import json
 class TaskCompletionJudgeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_completion_judge_system_prefix')
         self.agent_name = "CompletionJudgeAgent"
         self.agent_description = "完成判断智能体，专门负责判断任务是否完成"
         logger.info("TaskCompletionJudgeAgent 初始化完成")
