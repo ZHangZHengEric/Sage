@@ -205,9 +205,6 @@ class SAgent:
                     logger.info(f"SAgent: 设置了system_context参数: {system_context}")
                     session_context.add_and_update_system_context(system_context)
 
-                # 2. 尝试初始化记忆 (这将更新 session_context.system_context 中的用户偏好)
-                await session_context.init_user_memory_context()
-
                 # 3. 加载工作流
                 if available_workflows:
                     logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
@@ -272,6 +269,9 @@ class SAgent:
                             yield message_chunks
                     else:
                         session_context.add_and_update_system_context({'workflow_guidance': session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())})
+
+                # 2. 尝试初始化记忆 (这将更新 session_context.system_context 中的用户偏好)
+                await session_context.init_user_memory_context()
 
                 # 当deep_thinking 或者 multi_agent 为None，其一为none时，调用task router
                 if deep_thinking is None or multi_agent is None:

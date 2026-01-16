@@ -38,7 +38,7 @@ class SessionContext:
         self,
         session_id: str,
         user_id: Optional[str] = None,
-        workspace_root: Optional[str] = None,
+        workspace_root: str = "",
         context_budget_config: Optional[Dict[str, Any]] = None,
         user_memory_manager: Optional['UserMemoryManager'] = None,
         tool_manager: Optional[Any] = None,
@@ -46,8 +46,6 @@ class SessionContext:
         self.session_id = session_id
         self.user_id = user_id
         self.llm_requests_logs: List[Dict[str, Any]] = []           # 大模型的请求记录
-        self.session_workspace = None      # agent 该会话的工作空间，保存日志等信息
-        self.agent_workspace = None         # agent 该会话的工作空间，保存执行过程中产生的内容
         self.thread_id = threading.get_ident()
         self.start_time = time.time()
         self.end_time = None
@@ -129,9 +127,6 @@ class SessionContext:
                 # 检查是否可用
                 if not self.user_memory_manager.is_enabled():
                     logger.info(f"SessionContext: UserMemoryManager不可用，用户ID: {self.user_id}")
-                    # 注意：这里我们不将 self.user_memory_manager 置为 None，
-                    # 因为它可能是一个全局实例，只是当前没有可用的driver。
-                    # 或者我们可以保留它，但在使用时会检查。
                 else:
                     logger.info(f"SessionContext: UserMemoryManager已启用，用户ID: {self.user_id}")
                     # user_memory_manager 初始化成功，需要在system context添加对于 记忆使用的说明和要求
@@ -462,7 +457,7 @@ class SessionContext:
         messages_str_list = []
         for idx, msg in enumerate(messages):
             content = msg.get_content()
-            utc_time = datetime.datetime.fromtimestamp(msg.timestamp, tz=datetime.timezone.utc)
+            utc_time = datetime.datetime.fromtimestamp(msg.timestamp or time.time(), tz=datetime.timezone.utc)
             local_time = utc_time.astimezone()
             time_str = local_time.strftime('%Y-%m-%d %H:%M:%S %z')
             messages_str_list.append(message_format_template.format(index=idx + 1, time=time_str, content=content))
@@ -547,7 +542,7 @@ def get_session_messages(session_id: str) -> List[MessageChunk]:
     return messages
 
 
-def init_session_context(session_id: str, user_id: Optional[str] = None, workspace_root: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None, user_memory_manager: Optional[Any] = None, tool_manager: Optional[Any] = None) -> SessionContext:
+def init_session_context(session_id: str, workspace_root: str, user_id: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None, user_memory_manager: Optional[Any] = None, tool_manager: Optional[Any] = None) -> SessionContext:
     """初始化会话上下文"""
     if session_id in _active_sessions:
         # 如果提供了tool_manager，更新现有会话的tool_manager
