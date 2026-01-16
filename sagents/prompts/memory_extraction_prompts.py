@@ -7,7 +7,7 @@
 """
 
 # Agent标识符 - 标识这个prompt文件对应的agent类型
-AGENT_IDENTIFIER = "MemoryExtractionAgent"
+AGENT_IDENTIFIER = "MemoryExtractor"
 
 # 记忆提取系统前缀
 memory_extraction_system_prefix = {
