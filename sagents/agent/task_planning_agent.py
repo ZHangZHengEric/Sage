@@ -14,7 +14,6 @@ import uuid
 class TaskPlanningAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_planning_system_prefix')
         self.agent_name = "PlanningAgent"
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
         logger.info("PlanningAgent 初始化完成")
