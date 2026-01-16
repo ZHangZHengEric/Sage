@@ -647,7 +647,7 @@ class TaskManager:
             )
             return status_failed.format(error=str(e))
 
-    def get_all_tasks_summary(self) -> str:
+    async def get_all_tasks_summary(self) -> str:
         status_info = {
             "total_tasks": len(self.tasks),
             "tasks": []
@@ -685,7 +685,7 @@ class TaskManager:
             # 读取文档内容
             if task_status["result_documents"]:
                 logger.info(f"TaskSummaryAgent: 读取 {len(task_status['result_documents'])} 个文档内容")
-                task_status["result_documents"] = self._read_document_contents(cast(List[Any], task_status["result_documents"]))
+                task_status["result_documents"] = await self._read_document_contents(cast(List[Any], task_status["result_documents"]))
             
             cast(List[Any], status_info["tasks"]).append(task_status)
             logger.info(f"TaskSummaryAgent: 第 {i+1} 个任务处理完成")
@@ -693,12 +693,13 @@ class TaskManager:
         result_json = json.dumps(status_info, ensure_ascii=False, indent=2)
         return result_json
 
-    def _read_document_contents(self, documents: List[Any]) -> List[Dict[str, Any]]:
+    async def _read_document_contents(self, documents: List[Any]) -> List[Dict[str, Any]]:
         document_contents = []
         for i, doc in enumerate(documents):
+            file_read_result = await FileSystemTool().file_read(doc,end_line=100)
             doc_content = {
                 "path":doc,
-                "content":FileSystemTool().file_read(doc,end_line=100)
+                "content":file_read_result
             }
             document_contents.append(doc_content)
         return document_contents
