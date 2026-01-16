@@ -214,7 +214,7 @@ class Logger:
         """尝试获取当前session id"""
         try:
             # 优先从session上下文管理器获取
-            from sagents.utils.session_local import session_manager
+            from sagents.context.session_context_manager import session_manager
             session_id = session_manager.get_session_id()
             if session_id:
                 return session_id
