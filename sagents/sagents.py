@@ -109,7 +109,7 @@ class SAgent:
         # 统计耗时：首个非空 show_content 与完整执行总耗时
         _start_time = time.time()
         _first_show_time = None
-
+        session_id = session_id or str(uuid.uuid4())
         # 调用内部方法执行流式处理，对结果进行过滤
         async for message_chunks in self.run_stream_internal(
             input_messages=input_messages,
@@ -150,9 +150,9 @@ class SAgent:
             logger.error(f"SAgent: 统计总耗时出错: {_e}\n{traceback.format_exc()}", session_id)
 
     async def run_stream_internal(self,
+                                  session_id: str,
                                   input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
                                   tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
-                                  session_id: Optional[str] = None,
                                   user_id: Optional[str] = None,
                                   deep_thinking: Optional[Union[bool, str]] = None,
                                   max_loop_count: int = 10,
@@ -189,7 +189,6 @@ class SAgent:
         try:
             # 初始化会话
             # 初始化该session 的context 管理器
-            session_id = session_id or str(uuid.uuid4())
             session_context = init_session_context(
                 session_id=session_id,
                 user_id=user_id,
@@ -557,8 +556,8 @@ class SAgent:
     def list_active_sessions(self) -> List[Dict[str, Any]]:
         return list_active_sessions()
 
-    def cleanup_session(self, session_id: str) -> bool:
-        return delete_session_context(session_id)
+    def cleanup_session(self, session_id: str):
+        delete_session_context(session_id)
 
     def save_session(self, session_id: str) -> bool:
         # 保存会话状态到文件
