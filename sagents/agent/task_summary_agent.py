@@ -33,7 +33,7 @@ class TaskSummaryAgent(AgentBase):
             history_messages = message_manager.extract_all_context_messages(recent_turns=3)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
-        task_manager_status_and_results = task_manager.get_all_tasks_summary()
+        task_manager_status_and_results = await task_manager.get_all_tasks_summary()
 
         completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(task_manager_status_and_results)))
         completed_actions_messages.append(message_manager.get_last_observation_message())

@@ -54,6 +54,9 @@ class AgentFlow:
             )
             with session_manager.session_context(session_id):
                 logger.info(f"开始流式工作流，会话ID: {session_id}")
+
+                # 尝试初始化记忆
+                session_context.init_user_memory_context()
                 # 设置agent配置信息到SessionContext
                 session_context.set_agent_config(
                     model=None,
@@ -79,9 +82,6 @@ class AgentFlow:
 
                 session_context.status = SessionStatus.RUNNING
                 initial_messages = self._prepare_initial_messages(input_messages)
-
-                # 尝试初始化记忆
-                session_context.init_user_memory_manager(tool_manager)
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
                 logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
@@ -147,7 +147,7 @@ class AgentFlow:
 
                 if messages_to_save:
                     session_context.message_manager.add_messages(messages_to_save)
-                
+
                 yield message_chunks
 
     async def _execute_agent_phase(self,
