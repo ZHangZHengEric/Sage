@@ -10,7 +10,6 @@ import re
 import uuid
 import traceback
 from typing import List, Dict, Any, Optional, Union, cast
-from openai import AsyncOpenAI
 
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext
@@ -22,7 +21,7 @@ from sagents.utils.prompt_manager import PromptManager
 class MemoryExtractor:
     """记忆提取服务"""
 
-    def __init__(self, model: AsyncOpenAI):
+    def __init__(self, model: Any):
         """
         初始化记忆提取器
         
@@ -139,7 +138,7 @@ class MemoryExtractor:
 
             # 调用LLM
             response = await self.model.chat.completions.create(
-                model="gpt-4o", # 优先使用更智能的模型进行提取，或者使用默认配置
+                model=self.model.model_name,
                 messages=messages,
                 response_format={"type": "json_object"}
             )
