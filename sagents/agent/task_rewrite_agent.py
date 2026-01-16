@@ -14,7 +14,6 @@ import uuid
 class TaskRewriteAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt("TaskRewriteAgent", "task_rewrite_system_prefix", "zh", "")
         self.agent_name = "TaskRewriteAgent"
         self.agent_description = "任务请求重写智能体，专门负责重写用户的请求"
         logger.info("TaskRewriteAgent 初始化完成")
