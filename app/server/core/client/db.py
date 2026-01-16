@@ -4,8 +4,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from core.exceptions import SageHTTPException
-from core.config import StartupConfig
+from ...core.exceptions import SageHTTPException
+from ...core.config import StartupConfig
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
