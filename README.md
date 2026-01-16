@@ -39,7 +39,7 @@ git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 pip install -r requirements.txt
 # For Web UI
-pip install -r app/fastapi_react_demo/requirements.txt
+pip install -r app/server/requirements.txt
 ```
 
 ### Running Sage
@@ -49,8 +49,10 @@ pip install -r app/fastapi_react_demo/requirements.txt
 streamlit run app/sage_demo.py -- \
   --default_llm_api_key YOUR_API_KEY \
   --default_llm_model deepseek-chat \
-  --default_llm_base_url https://api.deepseek.com
+  --default_llm_api_base_url https://api.deepseek.com
 ```
+
+> If you get "ModuleNotFoundError: No module named 'sagents'", set PYTHONPATH: `export PYTHONPATH=/path/to/your/Sage:$PYTHONPATH`
 
 **Command Line Interface (CLI)**:
 ```bash
