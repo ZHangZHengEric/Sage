@@ -5,9 +5,12 @@
 ## 功能特性
 
 - 🧠 **智能记忆管理**：支持偏好、经验、上下文等多种记忆类型
-- 🔍 **智能搜索**：根据关键词和类型快速检索相关记忆
+- � **自动提取与更新**：
+    - **异步提取**：在对话过程中后台异步提取潜在记忆，不阻塞主流程
+    - **智能去重**：自动检测重复记忆，合并更新，保持记忆库精简
+- �🔍 **智能搜索**：根据关键词和类型快速检索相关记忆
 - 💾 **多种存储后端**：
-    - **本地文件**：轻量级 JSON 存储
+    - **本地文件**：轻量级 JSON 存储（默认）
     - **向量数据库**：基于 Embedding 的语义检索（支持 Chroma, Milvus 等，需适配 VectorStore 接口）
     - **MCP 工具**：通过 MCP 协议集成的外部记忆服务
 - 🛠️ **工具化接口**：提供大模型可调用的记忆工具
@@ -24,72 +27,63 @@ sagents/context/user_memory/
 ├── manager.py           # UserMemoryManager：核心业务逻辑
 ├── interfaces.py        # IMemoryDriver：驱动接口定义
 ├── schemas.py           # MemoryEntry, MemoryType：数据模型
-├── extractor.py         # MemoryExtractor：记忆提取服务
+├── extractor.py         # MemoryExtractor：记忆提取与去重服务
 └── drivers/             # 存储后端实现
     ├── tool.py          # ToolMemoryDriver：本地文件/MCP工具驱动
     └── vector.py        # VectorMemoryDriver：向量数据库驱动
 ```
 
-## 调用链路
+## 核心流程
 
-系统中的记忆调用链路如下，以 `ToolMemoryDriver` 为例：
+### 1. 记忆调用链路 (以 ToolMemoryDriver 为例)
 
 1.  **环境配置 (SessionContext)**：
-    *   `SessionContext` 在初始化时，如果提供了 `memory_root`，会自动设置 `MEMORY_ROOT_PATH` 环境变量。
+    *   `SessionContext` 初始化时，若提供 `memory_root`，自动设置 `MEMORY_ROOT_PATH` 环境变量。
+    *   初始化 `UserMemoryManager` 并注入 `SessionContext`。
 
-2.  **可用性检查 (ToolMemoryDriver)**：
-    *   `ToolMemoryDriver.is_available()` 检查 `MEMORY_ROOT_PATH` 是否设置。
-    *   如果没有设置，记忆功能标记为不可用，后续调用将被跳过。
+2.  **可用性检查**：
+    *   `ToolMemoryDriver.is_available()` 检查 `MEMORY_ROOT_PATH` 及必需工具是否存在。
 
-3.  **业务触发**：
-    *   **Agent** (通过 `manage_core_memory` 工具) 或 **MemoryExtractor** (后台任务) 发起记忆操作请求。
+3.  **系统记忆注入**：
+    *   `SessionContext` 启动时自动调用 `UserMemoryManager.get_system_memories()`。
+    *   加载 `preference`, `requirement`, `persona`, `constraint` 等关键记忆并注入 `system_context`。
 
-4.  **管理层 (UserMemoryManager)**：
-    *   接收请求，调用 `driver.is_available()` 确认功能状态。
-    *   若可用，调用 Driver 的 `remember` / `recall` / `forget` 方法。
-
-5.  **驱动层 (ToolMemoryDriver)**：
-    *   将业务请求转换为标准的 Tool 调用参数。
-    *   通过 `ToolManager.run_tool_async` 调用底层工具。
-
-6.  **工具层 (MemoryTool)**：
-    *   接收调用请求。
-    *   通过 `os.getenv('MEMORY_ROOT_PATH')` 获取存储路径。
-    *   执行实际的文件读写操作（如读写 `memories.json`）。
+4.  **业务触发**：
+    *   **Agent** 通过 `remember/recall/forget` 工具主动操作。
+    *   **UserMemoryManager** 统一调度 Driver 执行操作。
 
 ```mermaid
 sequenceDiagram
-    participant Agent/Extractor
+    participant Agent
     participant UserMemoryManager
     participant ToolMemoryDriver
     participant ToolManager
-    participant SessionContext
     participant MemoryTool
     participant FileSystem
 
-    Note over SessionContext: Init: set env MEMORY_ROOT_PATH
-    Note over ToolMemoryDriver: Check env MEMORY_ROOT_PATH
-
-    Agent/Extractor->>UserMemoryManager: remember(key, content...)
-    UserMemoryManager->>ToolMemoryDriver: is_available()
-    
-    alt is available
-        ToolMemoryDriver-->>UserMemoryManager: True
-        UserMemoryManager->>ToolMemoryDriver: remember(user_id, key, content...)
-        ToolMemoryDriver->>ToolManager: run_tool_async('remember_user_memory', ...)
-        ToolManager->>MemoryTool: remember_user_memory(...)
-        MemoryTool->>MemoryTool: os.getenv('MEMORY_ROOT_PATH')
-        MemoryTool->>FileSystem: write to memories.json
-        FileSystem-->>MemoryTool: success
-        MemoryTool-->>ToolManager: result
-        ToolManager-->>ToolMemoryDriver: result
-        ToolMemoryDriver-->>UserMemoryManager: result
-        UserMemoryManager-->>Agent/Extractor: result
-    else is not available
-        ToolMemoryDriver-->>UserMemoryManager: False
-        UserMemoryManager-->>Agent/Extractor: Error/Skipped
-    end
+    Agent->>UserMemoryManager: recall(query)
+    UserMemoryManager->>ToolMemoryDriver: recall(query)
+    ToolMemoryDriver->>ToolManager: run_tool_async('recall_user_memory', ...)
+    ToolManager->>MemoryTool: recall_user_memory(...)
+    MemoryTool->>FileSystem: read memories.json
+    FileSystem-->>MemoryTool: data
+    MemoryTool-->>ToolManager: result
+    ToolManager-->>ToolMemoryDriver: result
+    ToolMemoryDriver-->>UserMemoryManager: MemoryEntry[]
+    UserMemoryManager-->>Agent: formatted string
 ```
+
+### 2. 自动记忆提取流程
+
+系统会在对话过程中（通常在流式响应结束后）触发异步记忆提取任务：
+
+1.  **触发**：`SAgent` 在主流程结束后调用 `UserMemoryManager.extract_and_save()`。
+2.  **提取**：`MemoryExtractor` 获取最近对话历史（默认10轮）。
+3.  **分析**：调用 LLM (`gpt-4o`) 分析对话，提取新的记忆点。
+4.  **去重与保存**：
+    *   对新提取的记忆进行内部去重。
+    *   调用 `remember` 保存新记忆。
+    *   **冲突检测**：检查新记忆与现有系统记忆是否重复，自动删除旧的重复记忆。
 
 ## 快速开始
 
@@ -99,15 +93,16 @@ sequenceDiagram
 from sagents.context.user_memory import UserMemoryManager, MemoryType
 
 # 1. 自动使用 ToolMemoryDriver (需配合 ToolManager)
-# memory_manager = UserMemoryManager(user_id="eric_zz", tool_manager=tool_manager)
+# memory_manager = UserMemoryManager(memory_root="/path/to/memories")
 
 # 2. 或者注入自定义 Driver (例如向量存储)
 # from sagents.context.user_memory import VectorMemoryDriver
 # driver = VectorMemoryDriver(vector_store, embedding_model)
-# memory_manager = UserMemoryManager(user_id="eric_zz", driver=driver)
+# memory_manager = UserMemoryManager(driver=driver)
 
 # 添加经验记录
 await memory_manager.remember(
+    user_id="eric_zz",
     memory_key="docker_issue_001",
     content="Docker容器启动失败：检查端口占用，重启Docker服务",
     memory_type="experience",
@@ -115,31 +110,37 @@ await memory_manager.remember(
 )
 
 # 搜索相关记忆
-result_str = await memory_manager.recall("docker")
+result_str = await memory_manager.recall(user_id="eric_zz", query="docker")
 print(result_str)
 ```
 
 ### 在 SessionContext 中集成
 
-在 Reagent 框架中，通常通过 `SessionContext` 初始化记忆管理。`memory_root` 会自动配置为环境变量。
+在 Reagent 框架中，通常通过 `SessionContext` 初始化记忆管理。
 
 ```python
 from sagents.context.session_context import init_session_context
+from sagents.context.user_memory import UserMemoryManager
+
+# 全局初始化 Manager
+global_memory_manager = UserMemoryManager(memory_root="/path/to/user_memories")
 
 # 创建带记忆功能的会话
 session_context = init_session_context(
     session_id="session_123",
     user_id="eric_zz",
     workspace_root="/path/to/workspace",
-    # 指定记忆存储根目录（用于本地文件存储）
-    memory_root="/path/to/user_memories",
+    user_memory_manager=global_memory_manager, # 注入管理器
     context_budget_config={...}
 )
 
 # 访问记忆管理器
 if session_context.user_memory_manager:
     # 获取系统级记忆摘要
-    summary = await session_context.user_memory_manager.get_system_memories_summary(session_id="session_123")
+    summary = await session_context.user_memory_manager.get_system_memories_summary(
+        user_id="eric_zz", 
+        session_id="session_123"
+    )
     print(summary)
 ```
 
@@ -149,20 +150,20 @@ if session_context.user_memory_manager:
 
 这是默认的存储方式，适用于单机环境。
 
-*   **配置方式**：在 `init_session_context` 时传入 `memory_root` 参数。`SessionContext` 会自动将其设置为环境变量 `MEMORY_ROOT_PATH`。
+*   **配置方式**：初始化 `UserMemoryManager` 时传入 `memory_root`。
 *   **存储结构**：
     ```
     {memory_root}/
     └── {user_id}/
         └── memories.json     # 记忆数据文件
     ```
-*   **工作原理**：`ToolMemoryDriver` 会通过 `sagents.tool.memory_tool` 进行文件读写操作。
+*   **工作原理**：通过 `sagents.tool.memory_tool` 进行文件读写。
 
 ### 2. 向量数据库存储 (VectorMemoryDriver)
 
 适用于需要大规模语义检索的场景。
 
-*   **配置方式**：需要手动实例化 `VectorMemoryDriver` 并注入到 `UserMemoryManager`。
+*   **配置方式**：手动实例化 `VectorMemoryDriver` 并注入到 `UserMemoryManager`。
 *   **依赖**：需要实现 `sagents.retrieve_engine` 中的 `VectorStore` 和 `EmbeddingModel` 接口。
 
 ## 记忆类型
@@ -193,11 +194,11 @@ if session_context.user_memory_manager:
 
 ### UserMemoryManager
 
-*   `remember(memory_key, content, memory_type, tags, ...)`: 记住记忆
-*   `recall(query, limit, ...)`: 语义检索记忆
-*   `forget(memory_key, ...)`: 删除记忆
-*   `get_system_memories(session_id)`: 获取系统级记忆（偏好、人设等）
-*   `get_system_memories_summary(session_id)`: 获取格式化的系统记忆摘要
+*   `remember(user_id, memory_key, content, ...)`: 记住记忆
+*   `recall(user_id, query, limit, ...)`: 语义检索记忆
+*   `forget(user_id, memory_key, ...)`: 删除记忆
+*   `get_system_memories(user_id, ...)`: 获取系统级记忆（偏好、人设等）
+*   `extract_and_save(session_context, session_id)`: 触发异步记忆提取
 
 ## 作者
 
