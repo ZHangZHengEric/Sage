@@ -119,8 +119,6 @@ class SessionContext:
     async def init_user_memory_context(self):
         """初始化用户记忆
         """
-        self.tool_manager = tool_manager
-
         if self.user_id is None:
             logger.info("SessionContext: 用户ID为空，无法初始化用户记忆")
             return
