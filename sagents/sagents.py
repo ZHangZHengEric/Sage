@@ -59,16 +59,20 @@ class SAgent:
             model_config: 模型配置参数
             system_prefix: 系统前缀提示
             workspace: 工作空间根目录，默认为 /tmp/sage
-            memory_root: 记忆存储根目录，默认为 workspace/user_memories
+            memory_root: 记忆存储根目录
         """
         self.model = model
         self.model_config = model_config
         self.system_prefix = system_prefix
         self.workspace = workspace
 
-        # 初始化全局用户记忆管理器（服务端粒度）
-        self.user_memory_manager = UserMemoryManager(model=self.model, memory_root=memory_root)
-
+        # 初始化全局用户记忆管理器
+        if memory_root:
+            self.user_memory_manager = UserMemoryManager(model=self.model, memory_root=memory_root)
+        else:
+            logger.info("SAgent: 未指定记忆存储根目录，将禁用用户记忆功能")
+            self.user_memory_manager = None
+        
         # 初始化所有智能体
         self.simple_agent = SimpleAgent(self.model, self.model_config, system_prefix=self.system_prefix)
         self.task_analysis_agent = TaskAnalysisAgent(self.model, self.model_config, system_prefix=self.system_prefix)
@@ -191,17 +195,32 @@ class SAgent:
                 user_id=user_id,
                 workspace_root=self.workspace,
                 context_budget_config=context_budget_config,
-                user_memory_manager=self.user_memory_manager
+                user_memory_manager=self.user_memory_manager,
+                tool_manager=tool_manager
             )
             with session_manager.session_context(session_id):
                 logger.info(f"开始流式工作流，会话ID: {session_id}")
-                # 设置agent配置信息到SessionContext
+
+                # 1. 设置传入的 system_context
+                if system_context:
+                    logger.info(f"SAgent: 设置了system_context参数: {system_context}")
+                    session_context.add_and_update_system_context(system_context)
+
+                # 2. 尝试初始化记忆 (这将更新 session_context.system_context 中的用户偏好)
+                await session_context.init_user_memory_context()
+
+                # 3. 加载工作流
+                if available_workflows:
+                    logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
+                    session_context.workflow_manager.load_workflows_from_dict(available_workflows)
+
+                # 4. 设置agent配置信息到SessionContext (此时 system_context 已是最新的)
                 session_context.set_agent_config(
                     model=self.model,
                     model_config=self.model_config,
                     system_prefix=self.system_prefix,
                     available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
-                    system_context=system_context,
+                    system_context=session_context.system_context, # 使用最新的完整上下文
                     available_workflows=available_workflows,
                     deep_thinking=deep_thinking if isinstance(deep_thinking, bool) else False,
                     multi_agent=multi_agent if isinstance(multi_agent, bool) else False,
@@ -209,19 +228,8 @@ class SAgent:
                     max_loop_count=max_loop_count
                 )
 
-                if system_context:
-                    logger.info(f"SAgent: 设置了system_context参数: {system_context}")
-                    session_context.add_and_update_system_context(system_context)
-
-                if available_workflows:
-                    logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
-                    session_context.workflow_manager.load_workflows_from_dict(available_workflows)
-
                 session_context.status = SessionStatus.RUNNING
                 initial_messages = self._prepare_initial_messages(input_messages)
-
-                # 尝试初始化记忆
-                session_context.init_user_memory_manager(tool_manager)
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
                 logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
@@ -336,9 +344,9 @@ class SAgent:
                         yield message_chunks
 
                 # 异步执行记忆提取，不阻塞主流程
-                logger.debug("SAgent: 检查是否需要提取记忆")
+                logger.info("SAgent: 检查是否需要提取记忆")
                 if session_context.user_memory_manager:
-                    logger.debug("SAgent: 启动异步记忆提取任务")
+                    logger.info("SAgent: 启动异步记忆提取任务")
                     # 创建异步任务，不等待其完成
                     asyncio.create_task(
                         session_context.user_memory_manager.extract_and_save(
