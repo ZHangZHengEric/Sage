@@ -47,7 +47,7 @@ class ToolMemoryDriver(IMemoryDriver):
                 self._available = False
             else:
                 self._available = True
-                logger.info(f"记忆驱动验证成功，可用工具: {required_tools}")
+                logger.debug(f"记忆驱动验证成功，可用工具: {required_tools}")
 
         except Exception as e:
             logger.error(f"记忆工具验证失败: {e}")
