@@ -88,9 +88,6 @@ class SAgent:
         self.task_rewrite_agent = TaskRewriteAgent(self.model, self.model_config, system_prefix=self.system_prefix)
         self.task_router_agent = TaskRouterAgent(self.model, self.model_config, system_prefix=self.system_prefix)
         
-        # MemoryExtractor 不是 AgentBase 的子类，单独处理
-        # self.memory_extractor = MemoryExtractor(self.model)
-
         logger.info("SAgent: 智能体控制器初始化完成")
 
     async def run_stream(self,

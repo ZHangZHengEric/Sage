@@ -30,95 +30,17 @@ class MemoryExtractor:
         """
         self.model = model
 
-    async def extract_and_save(self, session_context: SessionContext, session_id: str):
-        """提取并保存记忆（异步任务入口）
+    async def extract_memories(self, recent_message_str: str, session_id: str, session_context: SessionContext) -> List[Dict]:
+        """从对话历史中提取潜在的系统级记忆
         
         Args:
-            session_context: 会话上下文
+            recent_message_str: 最近的对话历史字符串
             session_id: 会话ID
+            session_context: 会话上下文
+            
+        Returns:
+            提取到的记忆列表
         """
-        try:
-            logger.info(f"MemoryExtractor: 开始后台记忆提取任务, session_id: {session_id}")
-            
-            # 获取最近的对话历史
-            # 优化：只获取一次，使用最近的10轮对话，确保上下文足够但不过长
-            message_manager = session_context.message_manager
-            recent_messages = message_manager.extract_all_context_messages(recent_turns=10, last_turn_user_only=False)
-            recent_messages_str = MessageManager.convert_messages_to_str(recent_messages)
-            
-            # 1. 提取记忆
-            extracted_memories = await self.extract_memories_from_conversation(
-                recent_messages_str, 
-                session_id, 
-                session_context
-            )
-            
-            if not extracted_memories:
-                logger.info("MemoryExtractor: 未提取到新记忆")
-                return
-
-            # 2. 保存新记忆
-            memory_manager = session_context.user_memory_manager
-            user_id = session_context.user_id
-            
-            if not memory_manager or not user_id:
-                logger.warning("MemoryExtractor: user_memory_manager或user_id未初始化，跳过保存")
-                return
-
-            # 内部去重
-            deduplicated_memories = self.deduplicate_memories(extracted_memories)
-            
-            for memory in deduplicated_memories:
-                try:
-                    await memory_manager.remember(
-                        user_id=user_id,
-                        memory_key=memory['key'],
-                        content=memory['content'],
-                        memory_type=memory['type'],
-                        tags=memory.get('tags', []),
-                        session_id=session_id,
-                        session_context=session_context,
-                        tool_manager=session_context.tool_manager
-                    )
-                    logger.debug(f"MemoryExtractor: 已保存记忆 {memory['key']}")
-                except Exception as e:
-                    logger.error(f"MemoryExtractor: 保存记忆失败 {memory.get('key')}: {e}")
-
-            # 3. 检查并删除重复的旧记忆
-            # 获取现有系统级记忆
-            existing_memories = await memory_manager.get_system_memories(
-                user_id=user_id,
-                session_id=session_id, 
-                session_context=session_context,
-                tool_manager=session_context.tool_manager
-            )
-            
-            if existing_memories:
-                duplicate_keys = await self._check_and_delete_duplicate_memories(
-                    existing_memories, 
-                    session_id, 
-                    session_context
-                )
-                
-                # 删除重复的旧记忆
-                for key in duplicate_keys:
-                    await memory_manager.forget(
-                        user_id=user_id,
-                        memory_key=key, 
-                        session_id=session_id, 
-                        session_context=session_context,
-                        tool_manager=session_context.tool_manager
-                    )
-                    
-                logger.info(f"MemoryExtractor: 任务完成。提取 {len(deduplicated_memories)} 条，删除 {len(duplicate_keys)} 条重复")
-            else:
-                logger.info(f"MemoryExtractor: 任务完成。提取 {len(deduplicated_memories)} 条")
-
-        except Exception as e:
-            logger.error(f"MemoryExtractor: 记忆提取任务异常: {e}\n{traceback.format_exc()}")
-
-    async def extract_memories_from_conversation(self, recent_message_str: str, session_id: str, session_context: SessionContext) -> List[Dict]:
-        """从对话历史中提取潜在的系统级记忆"""
         if not recent_message_str:
             return []
             
@@ -153,8 +75,17 @@ class MemoryExtractor:
             logger.error(f"MemoryExtractor: LLM调用失败: {e}")
             return []
 
-    async def _check_and_delete_duplicate_memories(self, existing_memories: Dict, session_id: str, session_context: SessionContext) -> List[str]:
-        """检查并删除重复的旧记忆"""
+    async def identify_duplicates(self, existing_memories: Dict, session_id: str, session_context: SessionContext) -> List[str]:
+        """检查并识别重复的旧记忆
+        
+        Args:
+            existing_memories: 现有的系统级记忆字典
+            session_id: 会话ID
+            session_context: 会话上下文
+            
+        Returns:
+            需要删除的重复记忆key列表
+        """
         if not existing_memories:
             return []
             
@@ -162,9 +93,6 @@ class MemoryExtractor:
             lang = session_context.get_language()
             
             # 格式化现有记忆用于Prompt
-            # existing_memories 是 dict {type: content_str}
-            # 我们需要把它传给 prompt
-            
             system_message = self._prepare_system_message(session_context, session_id)
             dedup_prompt = PromptManager().get_agent_prompt_auto('memory_deduplication_template', language=lang).format(
                 existing_memories=json.dumps(existing_memories, ensure_ascii=False)
@@ -176,7 +104,7 @@ class MemoryExtractor:
             ]
             
             response = await self.model.chat.completions.create(
-                model="gpt-4o",
+                model=self.model.model_name,
                 messages=messages,
                 response_format={"type": "json_object"}
             )
