@@ -145,6 +145,8 @@ class AgentBase(ABC):
             final_config.update(model_config_override)
 
         model_name = cast(str, final_config.pop('model')) if 'model' in final_config else "gpt-3.5-turbo"
+        # 移除不是OpenAI API标准参数的配置项
+        final_config.pop('max_model_len', None)
         all_chunks = []
 
         try:

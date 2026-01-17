@@ -20,8 +20,6 @@ from ..utils.context import set_request_context
 WHITELIST_API_PATHS = frozenset(
     {
         "/api/health",
-        "/api/stream",
-        "/api/stream/submit_task",
         "/api/stream/task_messages",
         "/api/user/login",
         "/api/user/register",
