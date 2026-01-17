@@ -297,12 +297,14 @@ class StreamingHandler:
         # 准备preset配置参数
         system_context = None
         available_workflows = None
-        max_loop_count = None
+        max_loop_count = 10  # 默认值
 
         if self.component_manager:
             system_context = self.component_manager.preset_system_context
             available_workflows = self.component_manager.preset_available_workflows
-            max_loop_count = self.component_manager.preset_max_loop_count
+            # 如果配置中有指定，则使用配置的值
+            if self.component_manager.preset_max_loop_count is not None:
+                max_loop_count = self.component_manager.preset_max_loop_count
 
         try:
             async for chunk in self.controller.run_stream(
