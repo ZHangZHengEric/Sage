@@ -13,6 +13,7 @@ from .interfaces import IMemoryDriver
 from .drivers.tool import ToolMemoryDriver
 from .extractor import MemoryExtractor
 from sagents.context.messages.message_manager import MessageManager
+from sagents.tool.tool_manager import get_tool_manager
 
 
 class UserMemoryManager:
@@ -58,21 +59,23 @@ class UserMemoryManager:
         if self.driver:
             return self.driver
 
-        if tool_manager:
-            return ToolMemoryDriver(tool_manager)
+        # 优先使用全局ToolManager
+        tm = get_tool_manager()
+        if tm:
+            return ToolMemoryDriver(tm)
 
         return None
 
     def _get_active_driver(self, tool_manager: Any = None) -> Optional[IMemoryDriver]:
         """获取可用的记忆驱动，如果不可用则返回None"""
-        driver = self._get_driver(tool_manager)
+        driver = self._get_driver()
         if driver and driver.is_available():
             return driver
         return None
 
     def is_enabled(self, tool_manager: Any = None) -> bool:
         """检查记忆功能是否可用"""
-        return self._get_active_driver(tool_manager) is not None
+        return self._get_active_driver() is not None
 
     def get_user_memory_usage_description(self) -> str:
         """获取用户记忆的使用说明"""
@@ -98,8 +101,7 @@ class UserMemoryManager:
                 memory_type=memory['type'],
                 tags=memory.get('tags', []),
                 session_id=session_id,
-                session_context=session_context,
-                tool_manager=session_context.tool_manager
+                session_context=session_context
             )
         except Exception as e:
             logger.error(f"UserMemoryManager: 保存记忆失败 {memory.get('key')}: {e}")
@@ -129,7 +131,7 @@ class UserMemoryManager:
             return
 
         # 提前检查记忆功能是否可用，避免浪费LLM token
-        if not self.is_enabled(session_context.tool_manager):
+        if not self.is_enabled():
             logger.info("UserMemoryManager: 记忆功能不可用（未配置存储或MCP服务），跳过提取")
             return
 
@@ -176,8 +178,7 @@ class UserMemoryManager:
             existing_memories = await self.get_system_memories(
                 user_id=user_id,
                 session_id=session_id, 
-                session_context=session_context,
-                tool_manager=session_context.tool_manager
+                session_context=session_context
             )
             
             if existing_memories:
@@ -250,7 +251,7 @@ class UserMemoryManager:
         Returns:
             操作结果描述
         """
-        driver = self._get_active_driver(tool_manager)
+        driver = self._get_active_driver()
         if not driver:
             logger.warning("记忆功能已禁用：未配置记忆存储路径且无可用的MCP记忆服务")
             return
@@ -284,7 +285,7 @@ class UserMemoryManager:
         Returns:
             格式化的记忆字符串，便于大模型理解和使用
         """
-        driver = self._get_active_driver(tool_manager)
+        driver = self._get_active_driver()
         if not driver:
             return "记忆功能已禁用：未配置记忆存储路径且无可用的MCP记忆服务"
 
@@ -446,5 +447,5 @@ class UserMemoryManager:
         Returns:
             系统级记忆的摘要字符串
         """
-        system_memories = await self.get_system_memories(user_id, session_id=session_id, tool_manager=tool_manager)
+        system_memories = await self.get_system_memories(user_id, session_id=session_id)
         return self.format_system_memories_for_context(system_memories)
