@@ -84,7 +84,6 @@ class MemoryTool(ToolBase):
         不在初始化时获取环境变量，而是在使用时动态获取
         """
         super().__init__()
-        logger.info("MemoryTool initialized, will get memory_root dynamically from environment")
 
     def _validate_memory_data(self, memory_key: Optional[str] = None, content: Optional[str] = None,
                               tags: Optional[List[str]] = None, memories: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
