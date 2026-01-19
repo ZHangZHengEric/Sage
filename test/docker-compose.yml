@@ -43,7 +43,7 @@ services:
     volumes:
       - ./stress.py:/app/stress.py
     working_dir: /app
-    command: sh -c "pip install aiohttp -i https://mirrors.aliyun.com/pypi/simple/ && python -u stress.py --url http://sage-server:8080/api/stream --requests 600 --qps 60"
+    command: sh -c "pip install aiohttp -i https://mirrors.aliyun.com/pypi/simple/ && python -u stress.py --url http://sage-server:8080/api/stream --requests 600 --concurrency 30"
     depends_on:
       - sage-server
 
