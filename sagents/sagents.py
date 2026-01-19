@@ -364,7 +364,6 @@ class SAgent:
 
         except Exception as e:
             # 标记会话错误
-            logger.error(f"traceback: {traceback.format_exc()}")
             session_context.status = SessionStatus.ERROR
             async for message_chunks in self._handle_workflow_error(e):
                 session_context.message_manager.add_messages(message_chunks)

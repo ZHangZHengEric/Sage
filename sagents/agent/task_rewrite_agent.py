@@ -1,4 +1,3 @@
-
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, AsyncGenerator, Optional
@@ -16,7 +15,7 @@ class TaskRewriteAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "TaskRewriteAgent"
         self.agent_description = "任务请求重写智能体，专门负责重写用户的请求"
-        logger.info("TaskRewriteAgent 初始化完成")
+        logger.debug("TaskRewriteAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言

@@ -16,7 +16,7 @@ class TaskPlanningAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "PlanningAgent"
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
-        logger.info("PlanningAgent 初始化完成")
+        logger.debug("PlanningAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言

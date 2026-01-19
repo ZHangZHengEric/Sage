@@ -28,7 +28,7 @@ class StreamRequest(BaseChatRequest):
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
     deep_thinking: Optional[bool] = None
-    max_loop_count: Optional[int] = None
+    max_loop_count: Optional[int] = 10
     multi_agent: Optional[bool] = None
     more_suggest: Optional[bool] = None
     available_workflows: Optional[Dict[str, List[str]]] = None

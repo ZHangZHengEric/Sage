@@ -28,7 +28,7 @@ class SimpleAgent(AgentBase):
         self.max_loop_count = 10
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
-        logger.info(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
+        logger.debug(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
 
     async def run_stream(self, session_context: SessionContext,
                          tool_manager: Optional[ToolManager] = None,

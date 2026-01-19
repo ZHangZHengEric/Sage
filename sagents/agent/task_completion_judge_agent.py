@@ -15,12 +15,12 @@ class TaskCompletionJudgeAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "CompletionJudgeAgent"
         self.agent_description = "完成判断智能体，专门负责判断任务是否完成"
-        logger.info("TaskCompletionJudgeAgent 初始化完成")
+        logger.debug("TaskCompletionJudgeAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_completion_judge_system_prefix', language=session_context.get_language())
-        
+
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
@@ -83,7 +83,7 @@ class TaskCompletionJudgeAgent(AgentBase):
             task_manager = task_manager
         ):
             yield result
-        
+
     def _finalize_task_completion_judge_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
         """
         最终化任务完成判断结果
@@ -94,7 +94,7 @@ class TaskCompletionJudgeAgent(AgentBase):
             session_context.audit_status["completion_status"] = response_json["completion_status"]
             session_context.audit_status["finish_percent"] = response_json["finish_percent"]
             yield []
-            
+
         except Exception as e:
             logger.error(f"TaskCompletionJudgeAgent: 解析任务完成判断结果时发生错误: {str(e)}")
             logger.error(f"TaskCompletionJudgeAgent: 原始XML内容: {all_content}")
@@ -106,13 +106,13 @@ class TaskCompletionJudgeAgent(AgentBase):
                 message_type=MessageType.OBSERVATION.value
             )]
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
-        
+
         logger.debug("TaskCompletionJudgeAgent: 转换XML内容为JSON格式")
         try:
             # 提取analysis
             analysis = xlm_content.split('<completion_status>')[1].split('</completion_status>')[0].strip()
             finish_percent = xlm_content.split('<finish_percent>')[1].split('</finish_percent>')[0].strip()
-            
+
             # 构建响应JSON - 只保留简化后的字段
             response_json = {
                 "completion_status": analysis,
@@ -120,7 +120,7 @@ class TaskCompletionJudgeAgent(AgentBase):
             }            
             logger.debug(f"ObservationAgent: XML转JSON完成: {response_json}")
             return response_json
-            
+
         except Exception as e:
             logger.error(f"ObservationAgent: XML转JSON失败: {str(e)}")
             raise

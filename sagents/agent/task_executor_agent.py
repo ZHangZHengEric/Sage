@@ -18,7 +18,7 @@ class TaskExecutorAgent(AgentBase):
         self.agent_description = """
 TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，来执行任务。
 """
-        logger.info("TaskExecutorAgent 初始化完成")
+        logger.debug("TaskExecutorAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取模板和系统前缀，使用正确的语言
