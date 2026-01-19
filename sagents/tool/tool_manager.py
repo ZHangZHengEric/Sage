@@ -548,7 +548,6 @@ class ToolManager:
             error_msg = (
                 f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
             )
-            logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(
                 error_msg, tool_name, "EXECUTION_ERROR", error_detail
             )

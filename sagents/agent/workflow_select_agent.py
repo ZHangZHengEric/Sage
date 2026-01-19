@@ -1,4 +1,3 @@
-
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, AsyncGenerator, Optional
@@ -18,7 +17,7 @@ class WorkflowSelectAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "WorkflowSelectAgent"
         self.agent_description = "工作流选择智能体，专门负责根据用户需求选择最合适的工作流"
-        logger.info("WorkflowSelectAgent 初始化完成")
+        logger.debug("WorkflowSelectAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
