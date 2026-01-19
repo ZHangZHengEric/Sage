@@ -99,6 +99,30 @@ python -m app.server.main \
   --default_llm_api_key "your_api_key"
 ```
 
+## 性能测试结果
+
+以下是 `test-load-generator-1` 的评估报告：
+
+```text
+Starting load test with 600 total requests...
+Target QPS: 60.0
+Target: http://sage-server:8080/api/stream
+Timeout: 600s
+Waiting for server to be ready...
+Server ready after 5.03s
+Ensuring Mock MCP is registered...
+Add MCP result: 500, trying refresh...
+Refresh Mock MCP status: 200
+Waiting for 'get_weather' tool to be available...
+Tool 'get_weather' is available after 0.01s
+
+=== Load Test Results ===
+Total Requests: 600
+Successful (200 OK): 600
+Failed: 0
+Success Rate: 100.00%
+```
+
 > **注意**：请确保在 Sage 项目根目录下执行命令，以便正确解析模块路径。
 
 ---

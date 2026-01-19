@@ -1,4 +1,3 @@
-
 from sagents.utils.prompt_manager import PromptManager
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -17,12 +16,12 @@ class TaskObservationAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "ObservationAgent"
         self.agent_description = "观测智能体，专门负责基于当前状态生成下一步执行计划"
-        logger.info("TaskObservationAgent 初始化完成")
+        logger.debug("TaskObservationAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_observation_system_prefix', language=session_context.get_language())
-        
+
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
 
@@ -81,7 +80,7 @@ class TaskObservationAgent(AgentBase):
                     # 判断delta_content的类型
                     tag_type = self._judge_delta_content_type(delta_content_all, all_content, tag_type=['analysis','completed_task_ids','pending_task_ids','failed_task_ids'])
                     all_content += delta_content_char
-                    
+
                     if tag_type == 'unknown':
                         unknown_content = delta_content_all
                         continue
@@ -96,7 +95,7 @@ class TaskObservationAgent(AgentBase):
                                     show_content='\n\n',
                                     message_type=MessageType.OBSERVATION.value
                                 )]
-                            
+
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
                                 content='',
@@ -126,7 +125,7 @@ class TaskObservationAgent(AgentBase):
             # 更新TaskManager中的任务状态
             if task_manager:
                 self._update_task_manager_status(task_manager, response_json)
-            
+
             # 创建最终结果消息（不需要usage信息，因为这是转换过程）
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
@@ -135,9 +134,9 @@ class TaskObservationAgent(AgentBase):
                 show_content='\n',
                 message_type=MessageType.OBSERVATION.value
             )
-            
+
             yield [result_message]
-            
+
         except Exception as e:
             logger.error(f"ObservationAgent: 解析观察结果时发生错误: {str(e)}")
             logger.error(f"ObservationAgent: 原始XML内容: {all_content}")
@@ -149,12 +148,12 @@ class TaskObservationAgent(AgentBase):
                 message_type=MessageType.OBSERVATION.value
             )]
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
-        
+
         logger.debug("ObservationAgent: 转换XML内容为JSON格式")
         try:
             # 提取analysis
             analysis = xlm_content.split('<analysis>')[1].split('</analysis>')[0].strip()
-            
+
             # 提取completed_task_ids
             completed_task_ids: List[str] = []
             if '<completed_task_ids>' in xlm_content and '</completed_task_ids>' in xlm_content:
@@ -163,7 +162,7 @@ class TaskObservationAgent(AgentBase):
                     completed_task_ids = json.loads(completed_task_ids_str) if completed_task_ids_str else []
                 except Exception:
                     completed_task_ids = []
-            
+
             # 提取pending_task_ids
             pending_task_ids: List[str] = []
             if '<pending_task_ids>' in xlm_content and '</pending_task_ids>' in xlm_content:
@@ -172,7 +171,7 @@ class TaskObservationAgent(AgentBase):
                     pending_task_ids = json.loads(pending_task_ids_str) if pending_task_ids_str else []
                 except Exception:
                     pending_task_ids = []
-            
+
             # 提取failed_task_ids
             failed_task_ids: List[str] = []
             if '<failed_task_ids>' in xlm_content and '</failed_task_ids>' in xlm_content:
@@ -181,7 +180,7 @@ class TaskObservationAgent(AgentBase):
                     failed_task_ids = json.loads(failed_task_ids_str) if failed_task_ids_str else []
                 except Exception:
                     failed_task_ids = []
-            
+
             # 构建响应JSON - 只保留简化后的字段
             response_json = {
                 "analysis": analysis,
@@ -189,10 +188,10 @@ class TaskObservationAgent(AgentBase):
                 "pending_task_ids": pending_task_ids,
                 "failed_task_ids": failed_task_ids
             }
-                        
+
             logger.debug(f"ObservationAgent: XML转JSON完成: {response_json}")
             return response_json
-            
+
         except Exception as e:
             logger.error(f"ObservationAgent: XML转JSON失败: {str(e)}")
             raise
@@ -209,7 +208,7 @@ class TaskObservationAgent(AgentBase):
                     if hasattr(task_manager, 'update_task_status'):
                         task_manager.update_task_status(task_id, TaskStatus.COMPLETED)
                         logger.info(f"ObservationAgent: 已将任务 {task_id} 标记为完成")
-                        
+
                         # 尝试更新任务的执行结果
                         task = task_manager.get_task(task_id)
                         if task and hasattr(task_manager, 'complete_task'):
@@ -229,7 +228,7 @@ class TaskObservationAgent(AgentBase):
                         logger.warning("ObservationAgent: TaskManager没有update_task_status方法")
                 except Exception as e:
                     logger.warning(f"ObservationAgent: 更新任务 {task_id} 状态为完成时出错: {str(e)}")
-            
+
             # 更新失败的任务状态
             for task_id in failed_task_ids:
                 try:
@@ -240,7 +239,7 @@ class TaskObservationAgent(AgentBase):
                         logger.warning("ObservationAgent: TaskManager没有update_task_status方法")
                 except Exception as e:
                     logger.warning(f"ObservationAgent: 更新任务 {task_id} 状态为失败时出错: {str(e)}")
-            
+
             logger.info(f"ObservationAgent: 任务状态更新完成，完成任务: {completed_task_ids}，失败任务: {failed_task_ids}")
         except Exception as e:
             logger.error(f"ObservationAgent: 更新TaskManager任务状态时发生错误: {str(e)}")

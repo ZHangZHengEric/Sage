@@ -10,6 +10,7 @@ from ...schemas.chat import StreamRequest
 from sagents.sagents import SAgent
 from ...core.config import get_startup_config
 from ...core.exceptions import SageHTTPException
+from ...utils.async_utils import create_safe_task
 
 from .utils import (
     create_tool_proxy,
@@ -80,6 +81,8 @@ class SageStreamService:
         force_summary=False,
         context_budget_config=None,
     ):
+        if max_loop_count is None:
+            max_loop_count = 10
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
         try:
@@ -276,7 +279,6 @@ async def run_chat_session(
         logger.info(f"sessionId={session_id} 资源已清理")
 
 
-
 async def _execute_chat_task(
     request: StreamRequest,
     session_id: str,
@@ -340,7 +342,8 @@ async def _execute_chat_task(
 async def run_async_chat_task(request: StreamRequest) -> str:
     """提交异步聊天任务，返回 session_id"""
     session_id, stream_service, lock = await prepare_session(request)
-    asyncio.create_task(
-        _execute_chat_task(request, session_id, stream_service, lock)
+    create_safe_task(
+        _execute_chat_task(request, session_id, stream_service, lock),
+        name=f"chat_task_{session_id}"
     )
     return session_id

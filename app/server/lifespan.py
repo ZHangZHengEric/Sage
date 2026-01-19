@@ -12,7 +12,7 @@ from .core.lifecycle import (
 )
 from .jobs.scheduler import init_scheduler, shutdown_scheduler
 from .mcp_routers import mcp_lifespan
-
+from .utils.async_utils import create_safe_task
 # =========================
 # 初始化 / 清理逻辑
 # =========================
@@ -44,21 +44,6 @@ async def cleanup_system():
     # 关闭第三方客户端
     await close_clients()
 
-
-
-# =========================
-# 安全的后台任务包装
-# =========================
-
-
-def create_safe_task(coro, name: str):
-    async def runner():
-        try:
-            await coro
-        except Exception:
-            logger.error(f"后台任务执行失败: {name}")
-
-    return asyncio.create_task(runner(), name=name)
 
 
 # =========================
