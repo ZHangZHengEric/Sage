@@ -19,7 +19,7 @@ class TaskRouterAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "TaskRouterAgent"
         self.agent_description = "任务路由智能体，专门负责根据用户的任务描述路由到合适的智能体"
-        logger.info("TaskRouterAgent 初始化完成")
+        logger.debug("TaskRouterAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager

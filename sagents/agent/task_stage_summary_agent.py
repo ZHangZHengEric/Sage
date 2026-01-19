@@ -18,7 +18,7 @@ class TaskStageSummaryAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "StageSummaryAgent"
         self.agent_description = "阶段总结智能体，专门负责对当前阶段的执行情况进行总结"
-        logger.info("TaskStageSummaryAgent 初始化完成")
+        logger.debug("TaskStageSummaryAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取带有正确语言的prompt
@@ -231,12 +231,12 @@ class TaskStageSummaryAgent(AgentBase):
                 language=language,
                 default="文件路径:"
             )
-            
+
             formatted_docs = []
             for i, file_info in enumerate(generated_files, 1):
                 doc_info = f"{i}. {file_path_label_text} {file_info['path']}"
                 formatted_docs.append(doc_info)
-            
+
             summary_text = PromptManager().get_prompt(
                 'generated_documents_summary',
                 agent='common',

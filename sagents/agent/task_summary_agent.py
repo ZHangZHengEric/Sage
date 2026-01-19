@@ -1,4 +1,3 @@
-
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, AsyncGenerator, Optional
@@ -16,7 +15,7 @@ class TaskSummaryAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "TaskSummaryAgent"
         self.agent_description = "任务总结智能体，专门负责生成任务执行的总结报告"
-        logger.info("TaskSummaryAgent 初始化完成")
+        logger.debug("TaskSummaryAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager

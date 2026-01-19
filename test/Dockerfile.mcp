@@ -1,0 +1,5 @@
+FROM docker.m.daocloud.io/python:3.11-slim
+RUN pip install "mcp" fastapi uvicorn sse-starlette -i https://mirrors.aliyun.com/pypi/simple/
+COPY mock_mcp.py /app/mock_mcp.py
+WORKDIR /app
+CMD ["python", "mock_mcp.py"]
