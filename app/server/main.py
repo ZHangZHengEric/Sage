@@ -18,15 +18,12 @@ from dotenv import load_dotenv
 # 指定加载的 .env 文件（保持不动）
 load_dotenv(".env")
 
-import warnings
-for m in ("websockets", "uvicorn"):
-    warnings.filterwarnings("ignore", category=DeprecationWarning, module=m)
 
 import uvicorn
-from .core import config
-from .application import create_fastapi_app
-from .utils.log import init_logging
 
+from .application import create_fastapi_app
+from .core import config
+from .utils.log import init_logging
 
 
 def start_server(cfg: config.StartupConfig):
@@ -40,7 +37,7 @@ def start_server(cfg: config.StartupConfig):
         app=create_fastapi_app,
         host=getattr(cfg, "host", "0.0.0.0"),
         port=cfg.port,
-        log_level=getattr(cfg, "log_level", "debug"),
+        log_config=None,
         reload=getattr(cfg, "reload", False),
         factory=True,
     )
@@ -51,8 +48,10 @@ def start_server(cfg: config.StartupConfig):
 
 def main():
     try:
-        init_logging(log_name="sage-server")
         cfg = config.init_startup_config()
+        init_logging(
+            log_name="sage-server", log_level=getattr(cfg, "log_level", "INFO")
+        )
         start_server(cfg)
         return 0
     except KeyboardInterrupt:

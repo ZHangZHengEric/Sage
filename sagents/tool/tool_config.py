@@ -40,6 +40,11 @@ class ToolSpec:
     param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None # 参数描述多语言映射 param -> {lang: text}
 
 @dataclass
+class SageMcpToolSpec(ToolSpec):
+    """Spec for built-in MCP tools (annotated with @sage_mcp_tool)"""
+    pass
+
+@dataclass
 class AgentToolSpec:
     name: str
     description: str

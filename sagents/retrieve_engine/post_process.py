@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
-from sagents.retrieve_engine.schema import SearchResult, Chunk
+from sagents.retrieve_engine.schema import SearchResult
 
 
 class SearchResultPostProcessTool:
@@ -66,15 +66,15 @@ class SearchResultPostProcessTool:
             rrf_score = 0.0
             base_result = data["result"]
             
-            # Re-implementing logic similar to original:
-            # Weighted by how many sources found this chunk
-            doc_frequency = len(data["sources"]) / len(search_sources)
+            # # Re-implementing logic similar to original:
+            # # Weighted by how many sources found this chunk
+            # doc_frequency = len(data["sources"]) / len(search_sources)
             
             for source in search_sources:
                 # If not found in this source, rank is essentially infinite (or very low)
                 # Original logic: len(items) + 1
                 rank = data["rankings"].get(source, len(results_by_source[source]) + 1)
-                norm_score = data["normalized_scores"].get(source, 0.0)
+                # norm_score = data["normalized_scores"].get(source, 0.0)
                 
                 # Original logic included "document_frequency_in_source" which was doc freq of doc_id in that source.
                 # Here we simplify to use the chunk's score directly.
@@ -137,7 +137,7 @@ class SearchResultPostProcessTool:
                     score=current_res.score
                 )
                 
-                current_start = current_chunk.metadata.get("start", 0)
+                # current_start = current_chunk.metadata.get("start", 0)
                 current_end = current_chunk.metadata.get("end", 0)
                 
                 j = i + 1

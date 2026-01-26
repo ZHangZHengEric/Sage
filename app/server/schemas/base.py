@@ -1,6 +1,7 @@
-from typing import Generic, TypeVar, Optional
-from pydantic import BaseModel
 import time
+from typing import Generic, Optional, TypeVar
+
+from pydantic import BaseModel
 
 T = TypeVar("T")
 

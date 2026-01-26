@@ -1,11 +1,9 @@
 import asyncio
-import json
 import time
 import uuid
 import argparse
 import aiohttp
 import statistics
-from typing import List, Dict
 
 # =====================
 # Configuration
