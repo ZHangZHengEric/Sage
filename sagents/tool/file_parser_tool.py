@@ -1,22 +1,17 @@
-import os
 import time
 import hashlib
 import asyncio
 import concurrent.futures
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
-from .tool_base import ToolBase
+from .tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.file_parser import FileParser
 
-class FileParserTool(ToolBase):
+class FileParserTool:
     """文件解析工具集"""
 
-    def __init__(self):
-        logger.debug("Initializing FileParserTool")
-        super().__init__()
-
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "从非文本文件中提取Markdown文本（含PDF/Office/CSV等）",
             "en": "Extract Markdown text from non-text files (PDF/Office/CSV)",

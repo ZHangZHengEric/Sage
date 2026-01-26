@@ -26,8 +26,7 @@ from openai import AsyncOpenAI
 
 from sagents.context.messages.message_manager import MessageManager
 from sagents.sagents import SAgent
-from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
 
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
@@ -186,7 +185,7 @@ class ComponentManager:
         tool_manager = ToolManager(is_auto_discover=False)
 
         # 手动进行基础工具发现
-        tool_manager._auto_discover_tools()
+        tool_manager.discover_tools_from_path()
 
         # 设置 MCP 配置路径
         if self.mcp_config:

@@ -152,7 +152,6 @@ import { useRouter } from 'vue-router'
 
 const endpoint = (
   import.meta.env.VITE_SAGE_API_BASE_URL ||
-  import.meta.env.VITE_BACKEND_ENDPOINT ||
   ''
 ).replace(/\/+$/, '')
 

@@ -1,8 +1,7 @@
 import traceback
-from typing import Any, Dict, List, Optional, Generator, Union
+from typing import Any, Dict, List, Optional, Generator
 import json
 import uuid
-from copy import deepcopy
 
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -141,39 +140,6 @@ class CommonAgent(AgentBase):
                 message_type=MessageType.DO_SUBTASK_RESULT.value
             )]
             yield output_messages
-
-    def _handle_tool_calls_chunk(self,
-                                 chunk,
-                                 tool_calls: Dict[str, Any],
-                                 last_tool_call_id: str) -> None:
-        """
-        处理工具调用数据块
-
-        Args:
-            chunk: LLM响应块
-            tool_calls: 工具调用字典
-            last_tool_call_id: 最后的工具调用ID
-        """
-        for tool_call in chunk.choices[0].delta.tool_calls:
-            if tool_call.id is not None and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id
-
-            if last_tool_call_id not in tool_calls:
-                logger.info(f"CommonAgent: 检测到新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                tool_calls[last_tool_call_id] = {
-                    'id': last_tool_call_id,
-                    'type': tool_call.type,
-                    'function': {
-                        'name': tool_call.function.name or "",
-                        'arguments': tool_call.function.arguments if tool_call.function.arguments else ""
-                    }
-                }
-            else:
-                if tool_call.function.name:
-                    logger.info(f"CommonAgent: 更新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                    tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
-                if tool_call.function.arguments:
-                    tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
 
     def _handle_tool_calls(self,
                            tool_calls: Dict[str, Any],

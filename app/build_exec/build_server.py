@@ -32,8 +32,8 @@ class ServerBuilder:
         "pdfplumber", "html2text", "openpyxl", "pypandoc",
         "python-docx", "markdown", "python-pptx", "PyMuPDF",
         "tqdm", "unstructured", "numpy", "pandas", "pyarrow",
-        "loguru", "asyncio_mqtt", "websockets", "python-daemon",
-        "daemon.pidfile"
+        "loguru", "asyncio_mqtt", "websockets"
+       
     ]
 
     # -------------------------------

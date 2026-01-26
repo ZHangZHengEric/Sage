@@ -1,5 +1,7 @@
 import asyncio
+
 from loguru import logger
+
 
 def create_safe_task(coro, name: str):
     """

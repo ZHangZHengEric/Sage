@@ -27,6 +27,9 @@ analysis_template = {
 当前有以下的工具可以使用：
 {available_tools}
 
+当前有以下的技能可以使用：
+{available_skills}
+
 请按照以下步骤进行分析：
 首先，我需要站在用户的角度来理解用户的最新的核心需求。从对话中可以提取哪些关键信息？用户真正想要实现的目标是什么？
 
@@ -62,6 +65,10 @@ Agent Description and Requirements
 The following tools are currently available:
 {available_tools}
 
+The following skills are currently available:
+{available_skills}
+
+
 Please analyze according to the following steps:
 First, I need to understand the user's latest core needs from the user's perspective. What key information can be extracted from the dialogue? What is the user's real goal?
 
@@ -96,6 +103,9 @@ Descrição e Requisitos do Agente
 
 As seguintes ferramentas estão atualmente disponíveis:
 {available_tools}
+
+As seguintes habilidades estão atualmente disponíveis:
+{available_skills}
 
 Por favor, analise de acordo com as seguintes etapas:
 Primeiro, preciso entender as necessidades centrais mais recentes do usuário a partir da perspectiva do usuário. Que informações-chave podem ser extraídas do diálogo? Qual é o objetivo real que o usuário deseja alcançar?

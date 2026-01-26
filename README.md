@@ -23,8 +23,9 @@
 ## ✨ **Key Features**
 
 - 🧠 **Intelligent Task Decomposition**: Automatically breaks down complex problems with dependency tracking.
-- 🔄 **Agent Orchestration**: Seamless coordination between specialized agents (Planning, Execution, Observation, Summary).
-- 🛠️ **Extensible Tool System**: Plugin-based architecture supporting **MCP Servers** and auto-discovery.
+- 🔄 **Agent Orchestration**: Seamless coordination between specialized agents (Planning, Execution, Observation, Summary, Rewrite, Router).
+- 🛠️ **Extensible Tool System**: Plugin-based architecture supporting **MCP Servers** (Model Context Protocol) and auto-discovery.
+- 👁️ **Full Observability**: Integrated **Jaeger** distributed tracing to visualize agent thought processes and execution paths.
 - ⚡ **Dual Modes**: **Deep Research** for analysis and **Rapid Execution** for speed.
 - 📊 **Context Management**: Advanced **Context Budget** controls for precise token optimization (v0.9.7+).
 - 🌐 **Modern UI**: Vue3 + FastAPI web interface with real-time streaming and visualization.
@@ -66,11 +67,11 @@ python app/sage_cli.py \
 
 The modern web application is now structured as `app/server` (Backend) and `app/web` (Frontend).
 
-**Deploy with Docker Compose**:
+**Deploy with Docker Compose (Recommended)**:
 ```bash
 docker-compose up -d
 ```
-Access the application at `http://localhost:30051`.
+Access the application at `http://localhost:30051` (Web) / `http://localhost:30050/docs` (API).
 
 ## 🤖 **Supported Models**
 
@@ -103,7 +104,11 @@ graph LR
 
 ## 📚 **Documentation**
 
-- [**Full Documentation**](docs/README.md)
+- [**Full Documentation Home**](docs/README.md)
+- [**Server Deployment Guide**](docs/SERVER_DEPLOYMENT.md) - Docker & Source deployment
+- [**Examples Usage Guide**](docs/EXAMPLES_USAGE.md) - CLI, Web, & API Server
+- [**Changelog**](docs/CHANGELOG.md) - Latest updates & history
+- [**Agent Framework Architecture**](docs/ARCHITECTURE.md)
 - [**API Reference**](docs/API_REFERENCE.md)
 - [**Configuration Guide**](docs/CONFIGURATION.md)
 - [**Tool Development**](docs/TOOL_DEVELOPMENT.md)

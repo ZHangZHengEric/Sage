@@ -1,8 +1,12 @@
 import json
 import os
-from .core import config
+
 from loguru import logger
+
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
+from sagents.skills import SkillManager, set_skill_manager
+from .core import config
+
 
 async def initialize_tool_manager():
     """初始化工具管理器"""
@@ -12,6 +16,16 @@ async def initialize_tool_manager():
     except Exception as e:
         logger.error(f"工具管理器初始化失败: {e}")
         return None
+
+async def initialize_skill_manager():
+    """初始化技能管理器"""
+    try:
+        skill_manager_instance = SkillManager.get_instance()
+        return skill_manager_instance
+    except Exception as e:
+        logger.error(f"技能管理器初始化失败: {e}")
+        return None
+
 
 
 async def _should_initialize_data() -> bool:
@@ -89,6 +103,13 @@ async def initialize_db_tables():
 async def close_tool_manager():
     """关闭工具管理器"""
     set_tool_manager(None)
+
+
+
+async def close_skill_manager():
+    """关闭技能管理器"""
+    set_skill_manager(None)
+
 
 
 async def validate_and_disable_mcp_servers():

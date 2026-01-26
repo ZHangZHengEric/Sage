@@ -1,4 +1,5 @@
 from typing import Optional
+
 from sagents.llm.embedding import OpenAIEmbedding
 from sagents.utils.logger import logger
 

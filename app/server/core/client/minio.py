@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Optional
-from datetime import datetime
+
 import io
 import json
+from datetime import datetime
+from typing import Optional
+
+from loguru import logger
 
 from ...core import config
 from ...core.exceptions import SageHTTPException
-from loguru import logger
 
 MINIO_CLIENT: Optional["Minio"] = None
 

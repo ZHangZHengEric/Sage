@@ -3,9 +3,10 @@
 """
 
 import argparse
+import json
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 # ===== 全局启动参数（统一存放于此） =====
 _GLOBAL_STARTUP_CONFIG: Optional[Any] = None
@@ -17,7 +18,6 @@ class StartupConfig:
 
     # Server
     port: int = 8080
-    pid_file: str = "sage_stream.pid"
     logs_dir: str = "logs"
     workspace: str = "agent_workspace"
     memory_root: Optional[str] = None
@@ -40,6 +40,7 @@ class StartupConfig:
 
     # LLM defaults
     default_llm_api_key: str = ""
+    extra_llm_configs: Optional[List[Dict[str, str]]] = None
     default_llm_api_base_url: str = "https://api.deepseek.com/v1"
     default_llm_model_name: str = "deepseek-chat"
     default_llm_max_tokens: int = 4096
@@ -78,10 +79,14 @@ class StartupConfig:
     minio_bucket_name: Optional[str] = None
     minio_public_base_url: Optional[str] = None
 
+    # Trace
+    trace_jaeger_endpoint: Optional[str] = None
+
 
 class ENV:
     # 新版 LLM 相关
     DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
+    EXTRA_LLM_CONFIGS = "SAGE_EXTRA_LLM_CONFIGS"
     DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
     DEFAULT_LLM_MODEL_NAME = "SAGE_DEFAULT_LLM_MODEL_NAME"
     DEFAULT_LLM_MAX_TOKENS = "SAGE_DEFAULT_LLM_MAX_TOKENS"
@@ -96,6 +101,9 @@ class ENV:
     CONTEXT_MAX_NEW_MESSAGE_RATIO = "SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO"
     CONTEXT_RECENT_TURNS = "SAGE_CONTEXT_RECENT_TURNS"
 
+    # Trace
+    TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
+
     # 服务器与运行配置
     PORT = "SAGE_PORT"
     PRESET_MCP_CONFIG = "SAGE_MCP_CONFIG_PATH"
@@ -103,8 +111,6 @@ class ENV:
     WORKSPACE = "SAGE_WORKSPACE_PATH"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
     MEMORY_ROOT = "SAGE_MEMORY_ROOT"
-    DAEMON = "SAGE_DAEMON"
-    PID_FILE = "SAGE_PID_FILE"
     FORCE_SUMMARY = "SAGE_FORCE_SUMMARY"
     NO_AUTH = "SAGE_NO_AUTH"
 
@@ -203,6 +209,29 @@ def pick_bool(arg_flag: bool, env_name: str, default: bool = False) -> bool:
     return True if arg_flag else env_bool(env_name, default)
 
 
+def pick_str_list(
+    arg_val: Optional[str], env_name: str, default: Optional[list[str]] = None
+) -> Optional[list[str]]:
+    val_str = pick_str(arg_val, env_name)
+    if val_str:
+        return [x.strip() for x in val_str.split(",") if x.strip()]
+    return default
+
+
+def pick_json_list(
+    arg_val: Optional[str], env_name: str, default: Optional[List[Dict[str, str]]] = None
+) -> Optional[List[Dict[str, str]]]:
+    val_str = pick_str(arg_val, env_name)
+    if val_str:
+        try:
+            val = json.loads(val_str)
+            if isinstance(val, list):
+                return val
+        except json.JSONDecodeError:
+            pass
+    return default
+
+
 def create_argument_parser():
     """创建命令行参数解析器，支持环境变量，优先级：指定入参 > 环境变量 > 默认值"""
     parser = argparse.ArgumentParser(description="Sage Stream Service")
@@ -211,6 +240,10 @@ def create_argument_parser():
     parser.add_argument(
         "--default_llm_api_key",
         help=f"默认LLM API Key (环境变量: {ENV.DEFAULT_LLM_API_KEY})",
+    )
+    parser.add_argument(
+        "--extra_llm_configs",
+        help=f"额外的LLM配置列表 (JSON字符串), 如: '[{{\"api_key\":\"...\", \"base_url\":\"...\", \"model_name\":\"...\"}}]' (环境变量: {ENV.EXTRA_LLM_CONFIGS})",
     )
     parser.add_argument(
         "--default_llm_api_base_url",
@@ -291,10 +324,7 @@ def create_argument_parser():
         help=f"记忆存储根目录（可选） (环境变量: {ENV.MEMORY_ROOT})",
     )
 
-    parser.add_argument(
-        "--pid-file",
-        help=f"PID文件路径 (环境变量: {ENV.PID_FILE})",
-    )
+
     parser.add_argument(
         "--force_summary",
         action="store_true",
@@ -365,6 +395,12 @@ def create_argument_parser():
         help=f"MinIO Public Base URL (环境变量: {ENV.MINIO_PUBLIC_BASE_URL})",
     )
 
+    # Trace 配置
+    parser.add_argument(
+        "--trace_jaeger_endpoint",
+        help=f"Jaeger OTLP Endpoint (http/grpc), e.g. http://localhost:4317 (环境变量: {ENV.TRACE_JAEGER_ENDPOINT})",
+    )
+
     # 数据库相关参数
     parser.add_argument(
         "--db_type",
@@ -393,7 +429,6 @@ def build_startup_config() -> StartupConfig:
 
     cfg = StartupConfig(
         port=pick_int(args.port, ENV.PORT, StartupConfig.port),
-        pid_file=pick_str(args.pid_file, ENV.PID_FILE, StartupConfig.pid_file),
         logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
         workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
         memory_root=pick_str(
@@ -429,6 +464,11 @@ def build_startup_config() -> StartupConfig:
             args.default_llm_api_key,
             ENV.DEFAULT_LLM_API_KEY,
             StartupConfig.default_llm_api_key,
+        ),
+        extra_llm_configs=pick_json_list(
+            args.extra_llm_configs,
+            ENV.EXTRA_LLM_CONFIGS,
+            StartupConfig.extra_llm_configs,
         ),
         default_llm_api_base_url=pick_str(
             args.default_llm_api_base_url,
@@ -528,6 +568,11 @@ def build_startup_config() -> StartupConfig:
             args.minio_public_base_url,
             ENV.MINIO_PUBLIC_BASE_URL,
             StartupConfig.minio_public_base_url,
+        ),
+        trace_jaeger_endpoint=pick_str(
+            args.trace_jaeger_endpoint,
+            ENV.TRACE_JAEGER_ENDPOINT,
+            StartupConfig.trace_jaeger_endpoint,
         ),
     )
     # 规范化路径

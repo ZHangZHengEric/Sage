@@ -4,10 +4,9 @@ import traceback
 from typing import List, AsyncGenerator
 from sagents.agent import AgentBase
 from sagents.context.session_context import SessionContext, delete_session_context, init_session_context
-from sagents.tool.tool_manager import ToolManager
+from sagents.tool import ToolManager, ToolProxy
 from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionStatus
-from sagents.tool.tool_proxy import ToolProxy
 import uuid
 from typing import Dict, Any, Optional, Union
 from sagents.utils.logger import logger

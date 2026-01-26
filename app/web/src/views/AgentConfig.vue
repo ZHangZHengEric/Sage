@@ -84,7 +84,7 @@
       </el-button>
     </div>
 
-    <AgentEdit :visible="currentView !== 'list'" :agent="editingAgent" :tools="tools" @save="handleSaveAgent"
+    <AgentEdit :visible="currentView !== 'list'" :agent="editingAgent" :tools="tools" :skills="skills" @save="handleSaveAgent"
       @update:visible="handleCloseEdit" />
   </div>
 
@@ -128,6 +128,7 @@ import { agentAPI } from '../api/agent.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
 import { toolAPI } from '../api/tool.js'
+import { skillAPI } from '../api/skill.js'
 import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
 
 // State
@@ -135,6 +136,7 @@ const agents = ref([])
 const loading = ref(false)
 const error = ref(null)
 const tools = ref([])
+const skills = ref([])
 const showCreationModal = ref(false)
 const currentView = ref('list') // 'list', 'create', 'edit', 'view'
 const editingAgent = ref(null)
@@ -150,6 +152,7 @@ const { t } = useLanguage()
 onMounted(async () => {
   await loadAgents()
   await loadAvailableTools()
+  await loadAvailableSkills()
 })
 
 
@@ -164,6 +167,20 @@ const loadAvailableTools = async () => {
     }
   } catch (error) {
     console.error('Failed to load available tools:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadAvailableSkills = async () => {
+  try {
+    loading.value = true
+    const response = await skillAPI.getSkills()
+    if (response.skills) {
+      skills.value = response.skills
+    }
+  } catch (error) {
+    console.error('Failed to load available skills:', error)
   } finally {
     loading.value = false
   }
@@ -262,6 +279,7 @@ const handleExport = (agent) => {
     maxLoopCount: agent.maxLoopCount,
     llmConfig: agent.llmConfig,
     availableTools: agent.availableTools,
+    availableSkills: agent.availableSkills,
     systemContext: agent.systemContext,
     availableWorkflows: agent.availableWorkflows,
     exportTime: new Date().toISOString(),
@@ -317,6 +335,7 @@ const handleImport = () => {
           multiAgent: importedConfig.multiAgent || false,
           maxLoopCount: importedConfig.maxLoopCount || 10,
           availableTools: importedConfig.availableTools || [],
+          availableSkills: importedConfig.availableSkills || [],
           systemContext: importedConfig.systemContext || {},
           availableWorkflows: importedConfig.availableWorkflows || {}
         }
@@ -348,7 +367,8 @@ const handleBlankConfig = (selectedTools = []) => {
   showCreationModal.value = false
   // 切换到创建视图，并预填可用工具
   editingAgent.value = {
-    availableTools: Array.isArray(selectedTools) ? selectedTools : []
+    availableTools: Array.isArray(selectedTools) ? selectedTools : [],
+    availableSkills: []
   }
   currentView.value = 'create'
 }
@@ -409,7 +429,8 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
       ...agentConfig,
       availableTools: (Array.isArray(selectedTools) && selectedTools.length > 0)
         ? selectedTools
-        : (agentConfig.availableTools || [])
+        : (agentConfig.availableTools || []),
+      availableSkills: agentConfig.availableSkills || []
     }
 
     console.log('🎉 智能配置生成完成，总耗时:', Date.now() - startTime, 'ms')
@@ -456,9 +477,7 @@ const openUsageModal = async (agent) => {
 }
 
 const backendEndpoint = (
-  import.meta.env.VITE_SAGE_API_BASE_URL ||
-  import.meta.env.VITE_BACKEND_ENDPOINT ||
-  ''
+  import.meta.env.VITE_SAGE_API_BASE_URL || ''
 ).replace(/\/+$/, '')
 
 const generateUsageCodes = (agent) => {
@@ -475,6 +494,7 @@ const generateUsageCodes = (agent) => {
     available_workflows: agent.availableWorkflows || {},
     llm_model_config: agent.llmConfig || null,
     available_tools: agent.availableTools || [],
+    available_skills: agent.availableSkills || []
   }
 
   const jsonStr = JSON.stringify(body, null, 2)

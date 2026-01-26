@@ -111,7 +111,7 @@ class AgentBase(ABC):
                 all_tool_call_ids_from_tool.append(msg['tool_call_id'])
         for msg in messages:
             if msg.get('role') == MessageRole.ASSISTANT.value and 'tool_calls' in msg:
-                tool_calls = msg['tool_calls']
+                tool_calls = msg['tool_calls'] or []
                 # 如果tool_calls 里面的id 没有在其他的role 为tool 的消息中出现，就移除这个消息
                 if any(tool_call['id'] not in all_tool_call_ids_from_tool for tool_call in tool_calls):
                     continue
@@ -147,6 +147,8 @@ class AgentBase(ABC):
         model_name = cast(str, final_config.pop('model')) if 'model' in final_config else "gpt-3.5-turbo"
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop('max_model_len', None)
+        final_config.pop('api_key', None)
+        final_config.pop('base_url', None)
         all_chunks = []
 
         try:
@@ -162,7 +164,6 @@ class AgentBase(ABC):
                     serializable_messages.append(msg.to_dict())
                 else:
                     serializable_messages.append(msg)
-
             # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
             serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
             # print("serializable_messages:",serializable_messages)

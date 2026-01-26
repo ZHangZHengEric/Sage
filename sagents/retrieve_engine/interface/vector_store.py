@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List
-from sagents.retrieve_engine.schema import Document, Chunk, SearchResult
+from sagents.retrieve_engine.schema import Document, Chunk
 
 class VectorStore(ABC):
     """

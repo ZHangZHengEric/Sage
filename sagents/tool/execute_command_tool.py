@@ -2,7 +2,7 @@
 """
 Execute Command Tool
 
-基于 ToolBase 架构实现的命令执行工具，提供与 mcp_servers/execute_command/execute_command.py 相同的功能。
+基于 Tool 注解实现的命令执行工具，提供与 mcp_servers/execute_command/execute_command.py 相同的功能。
 具备完善的安全机制和错误处理。
 """
 
@@ -17,7 +17,7 @@ import hashlib
 import traceback
 from typing import Dict, List, Any, Optional, Tuple
 
-from .tool_base import ToolBase
+from .tool_base import tool
 from sagents.utils.logger import logger
 
 class SecurityManager:
@@ -117,7 +117,7 @@ class ProcessManager:
         for process_id in finished_processes:
             self.remove_process(process_id)
 
-class ExecuteCommandTool(ToolBase):
+class ExecuteCommandTool:
     """命令执行工具集"""
     
     def __init__(self):
@@ -125,9 +125,8 @@ class ExecuteCommandTool(ToolBase):
         # 先初始化必要的组件，再调用父类初始化
         self.security_manager = SecurityManager(False)
         self.process_manager = ProcessManager()
-        super().__init__()
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "在指定目录执行Shell命令，含安全检查与超时控制",
             "en": "Execute a shell command with safety checks and timeout",
@@ -301,7 +300,7 @@ class ExecuteCommandTool(ToolBase):
             # 清理已完成的进程
             self.process_manager.cleanup_finished_processes()
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "在临时文件中运行Python代码，可选依赖安装",
             "en": "Run Python code in a temp file, optionally install deps",
@@ -460,7 +459,7 @@ class ExecuteCommandTool(ToolBase):
                 except Exception as e:
                     logger.warning(f"⚠️ 删除临时文件失败: {str(e)}")
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "检查系统命令是否可用及其路径",
             "en": "Check whether system commands are available and their paths",

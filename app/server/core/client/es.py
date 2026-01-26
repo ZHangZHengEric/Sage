@@ -1,9 +1,9 @@
-from typing import Any, Dict, List, Optional, Union
-
-from ...core.config import StartupConfig, get_startup_config
+from typing import Any, Dict, List, Optional
 
 from elasticsearch import AsyncElasticsearch, helpers
 from loguru import logger
+
+from ...core.config import StartupConfig, get_startup_config
 
 ES_CLIENT: Optional[AsyncElasticsearch] = None
 

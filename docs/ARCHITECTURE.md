@@ -26,10 +26,12 @@ This document provides a comprehensive overview of Sage Multi-Agent Framework's 
 - [Agent Workflow](#-agent-workflow)
 - [Token Tracking System](#-token-tracking-system)
 - [Message Flow](#-message-flow)
+- [Memory System](#-memory-system)
 - [Tool System](#-tool-system)
+- [Skill System](#-skill-system)
 - [Error Handling & Recovery](#-error-handling--recovery)
 - [Configuration System](#-configuration-system)
-- [Performance Monitoring](#-performance-monitoring)
+- [Observability & Performance Monitoring](#-observability--performance-monitoring)
 - [Extension Points](#-extension-points)
 
 ## 🎯 Core Design Principles
@@ -105,6 +107,7 @@ graph TB
         EXC[Exception Handling<br/>🔄 Auto Recovery]
         LLM[LLM Providers<br/>🤖 Multi-API]
         CACHE[Caching Layer<br/>💾 Performance]
+        TRACE[Tracing<br/>🔍 Jaeger]
     end
     
     UI --> AC
@@ -134,6 +137,7 @@ graph TB
     AC --> EXC
     AC --> LLM
     AC --> CACHE
+    AC --> TRACE
     
     TT -.-> TA
     TT -.-> TDA
@@ -189,17 +193,25 @@ class AgentController:
 - **Load Balancing**: Intelligent tool selection and request distribution
 - **Task Decomposition**: New specialized agent for intelligent task breakdown
 
-### Agent Hierarchy (Enhanced v0.9)
+### Agent Hierarchy (Enhanced v2.1)
 
 ```mermaid
 classDiagram
     AgentBase <|-- TaskAnalysisAgent
     AgentBase <|-- TaskDecomposeAgent
-    AgentBase <|-- PlanningAgent
-    AgentBase <|-- ExecutorAgent
-    AgentBase <|-- ObservationAgent
+    AgentBase <|-- TaskPlanningAgent
+    AgentBase <|-- TaskExecutorAgent
+    AgentBase <|-- TaskObservationAgent
     AgentBase <|-- TaskSummaryAgent
-    AgentBase <|-- DirectExecutorAgent
+    AgentBase <|-- TaskStageSummaryAgent
+    AgentBase <|-- TaskCompletionJudgeAgent
+    AgentBase <|-- TaskRewriteAgent
+    AgentBase <|-- TaskRouterAgent
+    AgentBase <|-- WorkflowSelectAgent
+    AgentBase <|-- QuerySuggestAgent
+    AgentBase <|-- SkillSelectAgent
+    AgentBase <|-- SkillExecutorAgent
+    AgentBase <|-- SimpleAgent
     
     class AgentBase {
         +token_stats: Dict
@@ -207,21 +219,6 @@ classDiagram
         +run(messages, tool_manager)
         +run_stream(messages, tool_manager)
         +prepare_unified_system_message()
-    }
-    
-    class TaskAnalysisAgent {
-        +SYSTEM_PREFIX_DEFAULT: str
-        +analyze_task()
-    }
-    
-    class TaskDecomposeAgent {
-        +SYSTEM_PREFIX_DEFAULT: str
-        +decompose_task()
-    }
-    
-    class PlanningAgent {
-        +SYSTEM_PREFIX_DEFAULT: str
-        +create_plan()
     }
 ```
 
@@ -301,7 +298,15 @@ class TokenTracker:
 - **Success Rates**: Reliability metrics
 - **Cost per Operation**: Economic efficiency
 
-### Tool System Architecture (Enhanced)
+## 🧠 Memory System
+
+Sage introduces an advanced memory system supporting long-term and short-term memory management to enhance agent context coherence.
+
+- **Short-term Memory**: Manages current session context window, automatically handling Token limits.
+- **Long-term Memory**: Stores historical interactions and key information based on Vector DB, supporting semantic retrieval.
+- **Memory Manager**: Responsible for memory storage, retrieval, update, and forgetting strategies.
+
+## 🛠️ Tool System
 
 ```mermaid
 graph TB

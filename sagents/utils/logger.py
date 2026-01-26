@@ -100,7 +100,6 @@ class Logger:
 
     def _cleanup_old_logs(self):
         """清理一个月前的日志文件"""
-        cleanup_start_time = datetime.now()
         deleted_count = 0
         total_size_deleted = 0
 
@@ -149,16 +148,8 @@ class Logger:
                     # 删除单个文件失败不影响整体功能
                     print(f"[LOG CLEANUP] Failed to delete log file {log_file}: {e}")
 
-            # 记录清理统计信息
-            cleanup_duration = (datetime.now() - cleanup_start_time).total_seconds()
-            if deleted_count > 0:
-                print(f"[LOG CLEANUP] Cleanup completed: {deleted_count} files deleted, {total_size_deleted} bytes freed, took {cleanup_duration:.2f}s")
-            else:
-                print(f"[LOG CLEANUP] Cleanup completed: No old files found to delete, took {cleanup_duration:.2f}s")
-
-        except Exception as e:
+        except Exception:
             # 清理失败不影响logger的主要功能
-            print(f"[LOG CLEANUP] Failed to cleanup old logs: {e}")
             import traceback
             traceback.print_exc()
 
@@ -173,9 +164,6 @@ class Logger:
             self._cleanup_timer = threading.Timer(self._cleanup_interval, self._periodic_cleanup_task)
             self._cleanup_timer.daemon = True  # 设置为守护线程，主程序退出时自动结束
             self._cleanup_timer.start()
-
-            next_cleanup_time = datetime.now() + timedelta(seconds=self._cleanup_interval)
-            print(f"[LOG CLEANUP] Periodic cleanup scheduled, next run at: {next_cleanup_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         except Exception as e:
             print(f"[LOG CLEANUP] Failed to start periodic cleanup: {e}")
@@ -218,18 +206,6 @@ class Logger:
             session_id = session_manager.get_session_id()
             if session_id:
                 return session_id
-
-            # fallback: 尝试从session_context模块获取（保持向后兼容）
-            import sagents.context.session_context as session_module
-
-            # 获取当前线程ID
-            import threading
-            current_thread_id = threading.get_ident()
-
-            # 遍历所有活跃session，找到匹配的线程ID
-            for session_id, session_context in session_module._active_sessions.items():
-                if hasattr(session_context, 'thread_id') and session_context.thread_id == current_thread_id:
-                    return session_id
 
             return None
         except Exception:
@@ -282,7 +258,17 @@ class Logger:
         stack = inspect.stack()
         if len(stack) >= 3:
             caller_frame = stack[2][0]
-            filename = os.path.basename(caller_frame.f_code.co_filename)
+            try:
+                # 尝试使用相对路径，并只保留最后两层
+                rel_path = os.path.relpath(caller_frame.f_code.co_filename, os.getcwd())
+                parts = rel_path.split(os.sep)
+                if len(parts) > 2:
+                    filename = os.path.join(*parts[-2:])
+                else:
+                    filename = rel_path
+            except Exception:
+                # 如果失败（例如在不同驱动器上），回退到basename
+                filename = os.path.basename(caller_frame.f_code.co_filename)
             lineno = caller_frame.f_lineno
         else:
             filename = 'unknown.py'

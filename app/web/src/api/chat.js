@@ -54,7 +54,7 @@ export const chatAPI = {
    * @returns {Promise<Response>} 流式响应
    */
   streamChat: async (messageData, abortController = null) => {
-    return await baseAPI.postStream('/api/stream', messageData, {
+    return await baseAPI.postStream('/api/web-stream', messageData, {
       signal: abortController
     })
   },

@@ -7,6 +7,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from sagents.context.session_context import delete_session_run_lock
+
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
 from ..core.render import Response
@@ -15,15 +17,13 @@ from ..core.render import Response
 from ..schemas.chat import ChatRequest, StreamRequest
 
 # 导入辅助函数
-from ..service.chat import (
+from ..services.chat import (
+    execute_chat_session,
     populate_request_from_agent_config,
     prepare_session,
-    execute_chat_session,
     run_async_chat_task,
 )
-from ..service.conversation import interrupt_session
-from sagents.context.session_context import delete_session_run_lock
-
+from ..services.conversation import interrupt_session
 
 # 创建路由器
 chat_router = APIRouter()
@@ -46,9 +46,7 @@ async def stream_with_disconnect_check(
                 # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
                 raise GeneratorExit
             yield chunk
-    except (asyncio.CancelledError, GeneratorExit) as e:
-        logger.info(f"Session {session_id}: Client disconnected ({type(e).__name__})")
-        
+    except (asyncio.CancelledError, GeneratorExit) as e:        
         # 标记会话中断，让内部逻辑有机会感知并处理
         try:
             await interrupt_session(session_id, "客户端断开连接")
@@ -61,6 +59,14 @@ async def stream_with_disconnect_check(
         logger.error(f"Stream generator error: {e}")
         raise e
     finally:
+        # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
+        # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
+        try:
+            if hasattr(generator, 'aclose'):
+                await generator.aclose()
+        except Exception as e:
+            logger.warning(f"Error closing generator for session {session_id}: {e}")
+
         # 清理资源
         logger.info(f"sessionId={session_id} 流处理结束，清理会话资源")
         try:
@@ -127,9 +133,9 @@ async def chat(request: ChatRequest, http_request: Request):
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
-    
+
     await populate_request_from_agent_config(request, require_agent_id=False)
-    
+
     session_id, stream_service, lock = await prepare_session(request)
 
     return StreamingResponse(
@@ -140,6 +146,26 @@ async def stream_chat(request: StreamRequest, http_request: Request):
             session_id
         ),
         media_type="text/plain"
+    )
+
+
+@chat_router.post("/api/web-stream")
+async def stream_chat_web(request: StreamRequest, http_request: Request):
+    """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
+    validate_and_prepare_request(request, http_request)
+
+    await populate_request_from_agent_config(request, require_agent_id=False)
+
+    session_id, stream_service, lock = await prepare_session(request)
+
+    return StreamingResponse(
+        stream_with_disconnect_check(
+            execute_chat_session(request, "stream", session_id, stream_service),
+            http_request,
+            lock,
+            session_id,
+        ),
+        media_type="text/plain",
     )
 
 

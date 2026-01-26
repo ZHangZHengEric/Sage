@@ -1,7 +1,6 @@
 import asyncio
 import json
 import time
-import random
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 import uvicorn
