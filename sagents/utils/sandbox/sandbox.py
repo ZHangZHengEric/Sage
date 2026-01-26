@@ -158,6 +158,24 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
         if install_cmd:
             _run_install_cmd(install_cmd, stdout_capture, stderr_capture, env=env)
 
+        # 自动配置 NODE_PATH 以支持全局安装的 npm 包
+        try:
+            import subprocess
+            npm_proc = subprocess.run(
+                ['npm', 'root', '-g'],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=working_dir
+            )
+            if npm_proc.returncode == 0:
+                global_modules = npm_proc.stdout.strip()
+                if global_modules:
+                    current_path = env.get('NODE_PATH', '')
+                    env['NODE_PATH'] = f"{global_modules}{os.pathsep}{current_path}" if current_path else global_modules
+        except Exception:
+            pass
+
         _apply_limits(limits, restrict_files=False)
         
         # Prepare sys.argv
@@ -209,6 +227,10 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
                 with open(script_path, 'r', encoding='utf-8') as f:
                     script_content = f.read()
                 
+                # Ensure script directory is in sys.path for local imports
+                if script_dir not in sys.path:
+                    sys.path.insert(0, script_dir)
+
                 global_ns = {'__name__': '__main__', '__file__': script_path}
                 exec(script_content, global_ns)
             

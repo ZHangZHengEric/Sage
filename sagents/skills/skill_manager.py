@@ -284,6 +284,8 @@ class SkillManager:
             base_path = skill.path
             
             if agent_workspace:
+                # Ensure agent_workspace is absolute
+                agent_workspace = os.path.abspath(agent_workspace)
                 workspace_path = self.prepare_skill_in_workspace(name, agent_workspace)
                 if workspace_path:
                     base_path = workspace_path
@@ -294,6 +296,7 @@ class SkillManager:
             if normalized_resource_name.startswith(f"{name}/"):
                 normalized_resource_name = normalized_resource_name[len(f"{name}/"):]
 
+            # If resource_name is already absolute, os.path.join will use it directly
             resource_path = os.path.join(base_path, normalized_resource_name)
             if os.path.exists(resource_path):
                 return resource_path
