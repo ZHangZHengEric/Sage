@@ -1,12 +1,11 @@
 import os
-import json
-from typing import List, Optional
+from typing import List, Optional, Union
 from sagents.utils.sandbox.sandbox import Sandbox
-from sagents.skills.skill_manager import SkillManager
+from sagents.skills import SkillManager, SkillProxy
 from sagents.utils.logger import logger
 
 class SkillTools:
-    def __init__(self, skill_manager: SkillManager, agent_workspace: Optional[str] = None):
+    def __init__(self, skill_manager: Union[SkillManager, SkillProxy], agent_workspace: Optional[str] = None):
         self.skill_manager = skill_manager
         self.agent_workspace = agent_workspace
 
@@ -31,10 +30,10 @@ class SkillTools:
         skill_schema = self.skill_manager.skills.get(skill_name)
         if not skill_schema:
             return f"Error: Skill '{skill_name}' not found or has no instructions."
-
+        
         # Prepare skill in workspace if workspace is set
         if self.agent_workspace:
-            self.skill_manager.prepare_skill_in_workspace(skill_name, self.agent_workspace)
+            skill_schema.path = self.skill_manager.prepare_skill_in_workspace(skill_name, self.agent_workspace)
 
         instructions = skill_schema.instructions
         if not instructions:
@@ -42,32 +41,11 @@ class SkillTools:
 
         # Append available resources for visibility
         res_summary = ""
-        
-        # Helper to sanitize paths (avoid absolute paths)
-        def sanitize_resources(resources):
-            if not resources:
-                return {}
-            # Return {rel_path: "skills/<skill_name>/<rel_path>"}
-            return {k: f"skills/{skill_name}/{k}" for k in resources.keys()}
 
         # Use XML format as defined in the prompt
-        if skill_schema.scripts or skill_schema.references or skill_schema.resources:
-            if skill_schema.scripts:
-                scripts_safe = sanitize_resources(skill_schema.scripts)
-                scripts_json = json.dumps(scripts_safe, ensure_ascii=False, indent=2)
-                res_summary += f"\n<SCRIPT_CONTEXT>\n{scripts_json}\n</SCRIPT_CONTEXT>\n"
-            
-            if skill_schema.references:
-                refs_safe = sanitize_resources(skill_schema.references)
-                refs_json = json.dumps(refs_safe, ensure_ascii=False, indent=2)
-                res_summary += f"\n<REFERENCE_CONTEXT>\n{refs_json}\n</REFERENCE_CONTEXT>\n"
-                
-            if skill_schema.resources:
-                resources_safe = sanitize_resources(skill_schema.resources)
-                resources_json = json.dumps(resources_safe, ensure_ascii=False, indent=2)
-                # Note: prompt doesn't explicitly have RESOURCE_CONTEXT in the main block but it is good to provide
-                res_summary += f"\n<RESOURCE_CONTEXT>\n{resources_json}\n</RESOURCE_CONTEXT>\n"
-            
+        if skill_schema.file_list:
+             res_summary += f"\n<FILE_LIST>\n{skill_schema.file_list}\n</FILE_LIST>\n"
+      
         return f"<SKILL_MD_CONTEXT>\n{instructions}\n</SKILL_MD_CONTEXT>\n{res_summary}"
 
     def run_skill_script(self, skill_name: str, script_path: str, args: List[str] = [], install_cmd: str = None) -> str:
@@ -97,55 +75,15 @@ class SkillTools:
         """
         full_path = file_path
         if self.agent_workspace:
-            # Convert to absolute path if it's not already
             if not os.path.isabs(file_path):
                  full_path = os.path.join(self.agent_workspace, file_path)
-            
-            # Verify the path is within the workspace (optional safety, but good practice)
-            # abs_workspace = os.path.abspath(self.agent_workspace)
-            # abs_file_path = os.path.abspath(full_path)
-            # if not abs_file_path.startswith(abs_workspace):
-            #     return f"Error: File path must be within the agent workspace: {self.agent_workspace}"
-        
         try:
-            # Create directories if needed
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
             return f"Success: File '{full_path}' written."
         except Exception as e:
             return f"Error writing file: {e}"
-
-    def edit_temp_file(self, file_path: str, old_str: str, new_str: str) -> str:
-        """
-        编辑指定路径的临时文件内容 (Search & Replace)。
-        """
-        full_path = file_path
-        if self.agent_workspace:
-            if not os.path.isabs(file_path):
-                 full_path = os.path.join(self.agent_workspace, file_path)
-        
-        path = full_path
-        
-        if not os.path.exists(path):
-            return f"Error: File '{path}' not found."
-            
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-            
-            if old_str not in content:
-                return f"Error: old_str not found in file '{file_path}'."
-                
-            # Perform replacement (replace one occurrence to be safe/precise)
-            new_content = content.replace(old_str, new_str, 1)
-            
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-                
-            return f"Success: File '{file_path}' updated."
-        except Exception as e:
-            return f"Error editing file: {e}"
 
     @staticmethod
     def get_tool_definitions() -> List[dict]:

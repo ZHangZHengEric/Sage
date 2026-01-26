@@ -50,20 +50,11 @@ class TaskPlanningAgent(AgentBase):
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
-
-        skill_manager = session_context.skill_manager
-        if skill_manager and skill_manager.list_skills():
-            available_skills_name = skill_manager.get_skill_description_lines(style="analysis" )
-        else:
-            available_skills_name = []
-        available_skills_str = (", ".join(available_skills_name) if available_skills_name else "无可用技能")
-
         prompt = PromptManager().get_agent_prompt_auto('planning_template', language=session_context.get_language()).format(
             task_description=task_description_messages_str,
             task_manager_status=task_manager_status,
             completed_actions=completed_actions_messages_str,
             available_tools_str=available_tools_str,
-            available_skills_str=available_skills_str, # Add skills to prompt
             agent_description=self.system_prefix
         )
         llm_request_message = [
