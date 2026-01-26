@@ -393,7 +393,9 @@ class Sandbox:
             if result['status'] == 'success':
                 return result['result']
             else:
-                raise SandboxError(f"Error in sandboxed module: {result.get('error')}\n{result.get('traceback')}")
+                output = result.get('output')
+                output_block = f"\n{output}" if output else ""
+                raise SandboxError(f"Error in sandboxed module: {result.get('error')}\n{result.get('traceback')}{output_block}")
         else:
             if process.exitcode is not None and process.exitcode != 0:
                 raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
@@ -418,7 +420,9 @@ class Sandbox:
             if result['status'] == 'success':
                 return result['result']
             else:
-                raise SandboxError(f"Error in sandboxed script: {result.get('error')}\n{result.get('traceback')}")
+                output = result.get('output')
+                output_block = f"\n{output}" if output else ""
+                raise SandboxError(f"Error in sandboxed script: {result.get('error')}\n{result.get('traceback')}{output_block}")
         else:
             if process.exitcode is not None and process.exitcode != 0:
                 raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
@@ -442,7 +446,9 @@ class Sandbox:
             if result['status'] == 'success':
                 return result['result']
             else:
-                raise SandboxError(f"Execution failed: {result.get('error')}\n{result.get('traceback')}")
+                output = result.get('output')
+                output_block = f"\n{output}" if output else ""
+                raise SandboxError(f"Execution failed: {result.get('error')}\n{result.get('traceback')}{output_block}")
         else:
             if process.exitcode != 0:
                 raise SandboxError(f"Process terminated abnormally. Exit code: {process.exitcode}")
