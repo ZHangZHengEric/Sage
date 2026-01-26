@@ -70,6 +70,10 @@ class SkillProxy:
         self._check_skill_available(name)
         return self.skill_manager.get_skill_instructions(name)
 
-    def get_skill_resource_path(self, name: str, resource_name: str) -> Optional[str]:
+    def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
         self._check_skill_available(name)
-        return self.skill_manager.get_skill_resource_path(name, resource_name)
+        return self.skill_manager.get_skill_resource_path(name, resource_name, agent_workspace)
+
+    def prepare_skill_in_workspace(self, skill_name: str, agent_workspace: str) -> Optional[str]:
+        self._check_skill_available(skill_name)
+        return self.skill_manager.prepare_skill_in_workspace(skill_name, agent_workspace)
