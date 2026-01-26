@@ -52,7 +52,7 @@ class SkillExecutorAgent(AgentBase):
         step1_last_tool_call_id: Optional[str] = None
 
         load_skill_def = next((t for t in all_skill_tool_defs if t["function"]["name"] == "load_skill"), None)
-
+        message_id = str(uuid.uuid4())
         async for chunk in self._call_llm_streaming(
             messages=chain_messages,
             session_id=session_id,
@@ -87,7 +87,7 @@ class SkillExecutorAgent(AgentBase):
                         content=delta.content,
                         message_type=MessageType.SKILL_SELECT_RESULT.value,
                         type=MessageType.SKILL_SELECT_RESULT.value,
-                        message_id=str(uuid.uuid4()),
+                        message_id=message_id,
                         show_content=delta.content,
                     )
                 ]
@@ -277,8 +277,8 @@ class SkillExecutorAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content="",
-                            message_type=MessageType.EMPTY.value,
-                            type=MessageType.EMPTY.value,
+                            message_type=MessageType.GUIDE.value,
+                            type=MessageType.GUIDE.value,
                             message_id=content_message_id,
                             show_content="",
                         )
@@ -289,8 +289,8 @@ class SkillExecutorAgent(AgentBase):
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content=delta.content,
-                            message_type=MessageType.SKILL_OBSERVATION.value,
-                            type=MessageType.SKILL_OBSERVATION.value,
+                            message_type=MessageType.GUIDE.value,
+                            type=MessageType.GUIDE.value,
                             message_id=content_message_id,
                             show_content=delta.content,
                         )
@@ -319,7 +319,8 @@ class SkillExecutorAgent(AgentBase):
                         content=assistant_msg.content,
                         tool_calls=tool_calls_dicts,
                         message_id=str(uuid.uuid4()),
-                        message_type=MessageType.TOOL_CALL.value,
+                        message_type=MessageType.GUIDE.value,
+                        type=MessageType.GUIDE.value,
                     )
                 ]
 
@@ -342,8 +343,8 @@ class SkillExecutorAgent(AgentBase):
                             content=str(result),
                             tool_call_id=tool_call.id,
                             message_id=str(uuid.uuid4()),
-                            type=MessageType.TOOL_CALL_RESULT.value,
-                            message_type=MessageType.TOOL_CALL_RESULT.value,
+                            type=MessageType.GUIDE.value,
+                            message_type=MessageType.GUIDE.value,
                             show_content=str(result),
                         )
                     ]
