@@ -17,8 +17,7 @@ import traceback
 from typing import Dict, Any, List, Union, Optional
 from datetime import datetime
 
-from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
 
 

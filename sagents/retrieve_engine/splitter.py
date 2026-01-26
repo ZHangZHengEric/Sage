@@ -1,8 +1,6 @@
-from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from sagents.retrieve_engine.text_splitter import ChineseRecursiveTextSplitter
 from sagents.retrieve_engine.interface.splitter import BaseSplitter
-from sagents.retrieve_engine.schema import Chunk, Document
 
 class DefaultSplitter(BaseSplitter):
     """

@@ -6,8 +6,7 @@
 
 """
 
-import uuid
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any
 from datetime import datetime
 from sagents.utils.logger import logger
 from ..interfaces import IMemoryDriver

@@ -5,17 +5,18 @@
 import re
 import uuid
 from typing import Tuple
-from loguru import logger
 
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from loguru import logger
 
+from ..utils.context import set_request_context
 from .auth import parse_access_token
+from .config import get_startup_config
 from .exceptions import SageHTTPException
 from .render import Response
-from .config import get_startup_config
-from ..utils.context import set_request_context
+
 # 白名单 API 路径
 WHITELIST_API_PATHS = frozenset(
     {

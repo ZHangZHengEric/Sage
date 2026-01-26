@@ -3,7 +3,6 @@ SQLAlchemy 基础设施
 
 """
 
-import asyncio
 from typing import Any, Optional, Sequence, Type
 
 from sqlalchemy import delete, func, select, update

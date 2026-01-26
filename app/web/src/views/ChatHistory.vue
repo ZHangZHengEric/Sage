@@ -156,15 +156,18 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
-import { useLanguage } from '../utils/i18n.js'
-import { exportToHTML, exportToMarkdown } from '../utils/exporter.js'
-import { agentAPI } from '../api/agent.js'
-import { chatAPI } from '../api/chat.js'
+import { useLanguage } from '@/utils/i18n.js'
+import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
+import { agentAPI } from '@/api/agent.js'
+import { chatAPI } from '@/api/chat.js'
 
 // Define emits
 const emit = defineEmits(['select-conversation'])
+
+const router = useRouter()
 
 // Get data from stores with null checks
 const agents = ref([])
@@ -234,9 +237,11 @@ const handlePageSizeChange = (size) => {
 
 // Methods
 const handleSelectConversation = (conversation) => {
-  chatAPI.getConversationMessages(conversation.session_id).then(response => {
-    conversation.messages = response.messages || []
-    emit('select-conversation', conversation)
+  router.push({
+    path: '/agent/chat',
+    query: {
+      session_id: conversation.session_id
+    }
   })
 }
 

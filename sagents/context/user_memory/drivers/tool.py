@@ -5,26 +5,25 @@
 """
 
 import json
-import traceback
 import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sagents.utils.logger import logger
 from ..interfaces import IMemoryDriver
 from ..schemas import MemoryEntry, MemoryType
-
 class ToolMemoryDriver(IMemoryDriver):
     """基于ToolManager的记忆驱动实现"""
-    
-    def __init__(self, tool_manager: Any):
+
+    def __init__(self):
         """
         Args:
             tool_manager: 工具管理器实例
         """
-        self.tool_manager = tool_manager
+        from sagents.tool.tool_manager import get_tool_manager
+        self.tool_manager = get_tool_manager()
         self._available = False
         self._check_availability()
-        
+
     def _check_availability(self):
         """检查记忆工具是否可用"""
         try:
@@ -32,16 +31,16 @@ class ToolMemoryDriver(IMemoryDriver):
                 self._available = False
                 logger.warning("ToolManager 未初始化，记忆驱动不可用")
                 return
-                
+
             # 检查必需的记忆工具是否可用
             required_tools = ['remember_user_memory', 'recall_user_memory', 'forget_user_memory']
             missing_tools = []
-            
+
             all_tools = self.tool_manager.list_all_tools_name()
             for tool_name in required_tools:
                 if tool_name not in all_tools:
                     missing_tools.append(tool_name)
-                            
+
             if missing_tools:
                 logger.error(f"部分记忆工具不可用: {missing_tools}")
                 self._available = False
@@ -58,18 +57,18 @@ class ToolMemoryDriver(IMemoryDriver):
         # 基础检查：工具管理器是否初始化
         if not self._available:
             return False
-            
+
         # 环境变量检查：如果没有设置MEMORY_ROOT_PATH，视为不可用
         # 这确保了UserMemoryManager能正确感知记忆功能状态
         if os.getenv('MEMORY_ROOT_PATH') is None:
             return False
-            
+
         return True
 
     async def remember(self, user_id: str, memory_key: str, content: str, memory_type: str, tags: str, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> str:
         if not self._available:
             return "记忆功能不可用"
-            
+
         try:
             return await self.tool_manager.run_tool_async(
                 tool_name='remember_user_memory',
@@ -88,7 +87,7 @@ class ToolMemoryDriver(IMemoryDriver):
     async def forget(self, user_id: str, memory_key: str, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> str:
         if not self._available:
             return "记忆功能不可用"
-            
+
         try:
             return await self.tool_manager.run_tool_async(
                 tool_name='forget_user_memory',
@@ -118,14 +117,14 @@ class ToolMemoryDriver(IMemoryDriver):
                     'access_count': memory_data.get('access_count', 0),
                     'version': memory_data.get('version', 1)
                 }
-                
+
                 # 尝试转换 memory_type 字符串为枚举
                 if 'memory_type' in memory_data:
                     try:
                         entry_data['memory_type'] = MemoryType(memory_data['memory_type'])
                     except ValueError:
                         pass # 保持默认或处理错误
-                        
+
                 entries.append(MemoryEntry(**entry_data))
             except Exception as e:
                 logger.warning(f"转换记忆条目失败: {e}, 数据: {memory_data}")
@@ -142,7 +141,7 @@ class ToolMemoryDriver(IMemoryDriver):
                 except json.JSONDecodeError:
                     # 如果不是JSON，可能直接是错误信息或空
                     return []
-                    
+
                 if 'content' in outer_data and isinstance(outer_data['content'], str):
                     # 解析嵌套的JSON字符串 (MCP工具常见返回格式)
                     try:
@@ -164,7 +163,7 @@ class ToolMemoryDriver(IMemoryDriver):
 
             if content_data.get('success', False):
                 return content_data.get('memories', [])
-            
+
             return []
 
         except Exception as e:
@@ -174,7 +173,7 @@ class ToolMemoryDriver(IMemoryDriver):
     async def recall(self, user_id: str, query: str, limit: int, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> List[MemoryEntry]:
         if not self._available:
             return []
-            
+
         try:
             result = await self.tool_manager.run_tool_async(
                 tool_name='recall_user_memory',
@@ -184,7 +183,7 @@ class ToolMemoryDriver(IMemoryDriver):
                 query=query,
                 limit=limit
             )
-            
+
             memories_data = self._parse_tool_result(result)
             return self._convert_memories_to_entries(memories_data)
 
@@ -195,7 +194,7 @@ class ToolMemoryDriver(IMemoryDriver):
     async def recall_by_type(self, user_id: str, memory_type: str, query: str, limit: int, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> List[MemoryEntry]:
         if not self._available:
             return []
-            
+
         try:
             result = await self.tool_manager.run_tool_async(
                 tool_name='recall_user_memory_by_type',
@@ -206,7 +205,7 @@ class ToolMemoryDriver(IMemoryDriver):
                 query=query,
                 limit=limit
             )
-            
+
             memories_data = self._parse_tool_result(result)
             return self._convert_memories_to_entries(memories_data)
 

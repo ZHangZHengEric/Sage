@@ -1,28 +1,30 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
+
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from ..core.render import Response
-from fastapi import APIRouter, Body, File, Form, Query, Request, UploadFile
-from ..service.kdb import KdbService
 from ..schemas.base import BaseResponse
 from ..schemas.kdb import (
     KdbAddRequest,
     KdbAddResponse,
-    KdbUpdateRequest,
-    KdbInfoResponse,
-    KdbRetrieveRequest,
-    KdbRetrieveResponse,
-    KdbListResponse,
-    KdbListItem,
-    KdbIdRequest,
-    KdbDocListResponse,
-    KdbDocListItem,
-    KdbDocInfoResponse,
     KdbDocAddByFilesResponse,
+    KdbDocInfoResponse,
+    KdbDocListItem,
+    KdbDocListResponse,
     KdbDocTaskProcessResponse,
     KdbDocTaskRedoRequest,
+    KdbIdRequest,
+    KdbInfoResponse,
+    KdbListItem,
+    KdbListResponse,
+    KdbRetrieveRequest,
+    KdbRetrieveResponse,
+    KdbUpdateRequest,
     SuccessResponse,
 )
+from ..services.kdb import KdbService
+from sagents.tool.mcp_tool_base import sage_mcp_tool
 
 kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])
 
@@ -267,3 +269,7 @@ async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest):
     svc = KdbService()
     await svc.task_redo(kdb_id=req.kdb_id, task_id=req.task_id)
     return await Response.succ(data=SuccessResponse(success=True))
+
+@sage_mcp_tool()
+async def retrieve_on_zavixai_db(index_name: str, query: str, top_k: int = 5):
+    return await DocumentService().doc_search(index_name, query, top_k)

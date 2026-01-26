@@ -3,7 +3,7 @@ services:
     restart: always
     build:
       context: .
-      dockerfile: app/server/docker/Dockerfile
+      dockerfile: docker/Dockerfile
     image: sage-server:v1.0
     container_name: sage-server
     volumes:
@@ -28,6 +28,7 @@ services:
     environment:
       TZ: 'Asia/Shanghai'
       SAGE_API_BASE_URL: http://${HOST_IP}:30050
+      SAGE_TRACE_JAEGER_URL: http://${HOST_IP}:30056
     depends_on:
       - sage-server
     mem_limit: 512m
@@ -92,5 +93,17 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    mem_limit: 1g
+    cpus: 0.5
+  sage-jaeger:
+    image:  docker.m.daocloud.io/jaegertracing/all-in-one:1.76.0
+    container_name: sage-jaeger
+    restart: always
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "30056:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
     mem_limit: 1g
     cpus: 0.5

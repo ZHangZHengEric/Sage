@@ -84,8 +84,6 @@ class LockManager:
                         f"Failed to connect to Redis: {e}. Falling back to memory locks."
                     )
                     self.use_redis = False
-        else:
-            logger.info("LockManager initialized with Memory locks")
 
     def get_lock(self, key: str) -> UnifiedLock:
         """获取锁实例"""

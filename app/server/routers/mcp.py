@@ -6,17 +6,17 @@ MCP (Model Context Protocol) 相关路由
 
 from typing import Any, Dict, List, Optional
 
-from ..core.render import Response
 from fastapi import APIRouter, Request
+from loguru import logger
 from pydantic import BaseModel
-from ..service.mcp import (
+
+from ..core.render import Response
+from ..services.mcp import (
     add_mcp_server,
     list_mcp_servers,
     refresh_mcp_server,
     remove_mcp_server,
 )
-
-from loguru import logger
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])

@@ -53,44 +53,116 @@ graph TD
 
 ## 🌍 环境变量
 
-### 核心设置
+### 服务与运行设置
 
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `OPENAI_API_KEY` | string | None | 模型访问的 OpenAI API 密钥 |
-| `SAGE_DEBUG` | boolean | false | 启用调试日志 |
-| `SAGE_ENVIRONMENT` | string | "production" | 运行时环境 (development/production) |
-| `SAGE_LOG_LEVEL` | string | "INFO" | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
-| `SAGE_CONFIG_PATH` | string | "./config" | 配置文件路径 |
+| `SAGE_PORT` | integer | 8080 | 服务端口 |
+| `SAGE_LOGS_DIR_PATH` | string | "logs" | 日志目录 |
+| `SAGE_WORKSPACE_PATH` | string | "agent_workspace" | 工作空间目录 |
+| `SAGE_MEMORY_ROOT` | string | None | 记忆存储根目录（可选） |
+| `SAGE_FORCE_SUMMARY` | boolean | false | 是否强制生成总结 |
+| `SAGE_NO_AUTH` | boolean | true | 是否关闭认证（根据 user_id 获取数据） |
+| `SAGE_MCP_CONFIG_PATH` | string | "mcp_setting.json" | MCP 配置文件路径 |
+| `SAGE_PRESET_RUNNING_CONFIG_PATH` | string | "agent_setting.json" | 预设运行配置文件路径 |
 
-### 模型设置
-
-| 变量 | 类型 | 默认值 | 描述 |
-|------|------|--------|------|
-| `SAGE_MODEL_NAME` | string | "gpt-3.5-turbo" | 默认模型名称 |
-| `SAGE_BASE_URL` | string | None | 自定义 API 基础 URL |
-| `SAGE_MAX_TOKENS` | integer | 4096 | 每个请求的最大标记数 |
-| `SAGE_TEMPERATURE` | float | 0.7 | 模型温度 (0-1) |
-| `SAGE_TIMEOUT` | integer | 60 | 请求超时秒数 |
-
-### 智能体设置
+### LLM 默认配置
 
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `SAGE_MAX_ITERATIONS` | integer | 10 | 最大智能体迭代次数 |
-| `SAGE_DEEP_THINKING` | boolean | true | 默认启用任务分析 |
-| `SAGE_DEEP_RESEARCH` | boolean | true | 默认在流式模式中启用深度研究 |
-| `SAGE_SUMMARY_MODE` | boolean | true | 默认生成总结 |
-| `SAGE_STREAMING` | boolean | false | 默认启用流式输出 |
+| `SAGE_DEFAULT_LLM_API_KEY` | string | "" | 默认 LLM API Key |
+| `SAGE_EXTRA_LLM_CONFIGS` | string | None | 额外 LLM 配置列表（JSON 字符串） |
+| `SAGE_DEFAULT_LLM_API_BASE_URL` | string | "https://api.deepseek.com/v1" | 默认 LLM API Base URL |
+| `SAGE_DEFAULT_LLM_MODEL_NAME` | string | "deepseek-chat" | 默认 LLM 模型名称 |
+| `SAGE_DEFAULT_LLM_MAX_TOKENS` | integer | 4096 | 最大生成 Token 数 |
+| `SAGE_DEFAULT_LLM_TEMPERATURE` | float | 0.2 | 温度参数 (0.0 - 1.0) |
+| `SAGE_DEFAULT_LLM_MAX_MODEL_LEN` | integer | 54000 | 最大上下文长度 |
+| `SAGE_DEFAULT_LLM_TOP_P` | float | 0.9 | Top P 采样参数 |
+| `SAGE_DEFAULT_LLM_PRESENCE_PENALTY` | float | 0.0 | 存在惩罚参数 |
 
-### 工具设置
+### 上下文预算
 
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `SAGE_TOOLS_PATH` | string | "./agents/tool" | 工具目录路径 |
-| `SAGE_MCP_SERVERS_PATH` | string | "./mcp_servers" | MCP 服务器配置路径 |
-| `SAGE_TOOL_TIMEOUT` | integer | 30 | 工具执行超时 |
-| `SAGE_MAX_CONCURRENT_TOOLS` | integer | 5 | 最大并行工具执行数 |
+| `SAGE_CONTEXT_HISTORY_RATIO` | float | 0.2 | 历史消息占总上下文的比例 |
+| `SAGE_CONTEXT_ACTIVE_RATIO` | float | 0.3 | 活跃消息占总上下文的比例 |
+| `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` | float | 0.5 | 新消息最大比例 |
+| `SAGE_CONTEXT_RECENT_TURNS` | integer | 0 | 包含最近 N 轮对话 |
+
+### 数据库设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_DB_TYPE` | string | "file" | 数据库类型（file/memory/mysql） |
+| `SAGE_DB_PATH` | string | "./data/" | 数据库文件路径（file 模式） |
+
+### MySQL 设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_MYSQL_HOST` | string | "127.0.0.1" | MySQL 地址 |
+| `SAGE_MYSQL_PORT` | integer | 3306 | MySQL 端口 |
+| `SAGE_MYSQL_USER` | string | "root" | MySQL 用户名 |
+| `SAGE_MYSQL_PASSWORD` | string | "sage.1234" | MySQL 密码 |
+| `SAGE_MYSQL_DATABASE` | string | "sage" | MySQL 数据库 |
+
+### 认证与令牌
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_JWT_KEY` | string | "123" | JWT 密钥 |
+| `SAGE_JWT_EXPIRE_HOURS` | integer | 24 | JWT 过期小时数 |
+| `SAGE_REFRESH_TOKEN_SECRET` | string | "123" | Refresh Token 密钥 |
+
+### Embedding 设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_EMBEDDING_API_KEY` | string | None | Embedding API Key |
+| `SAGE_EMBEDDING_BASE_URL` | string | None | Embedding Base URL |
+| `SAGE_EMBEDDING_MODEL` | string | "text-embedding-3-large" | Embedding 模型名称 |
+| `SAGE_EMBEDDING_DIMS` | integer | 1024 | Embedding 向量维度 |
+
+### Elasticsearch 设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_ELASTICSEARCH_URL` | string | None | Elasticsearch URL |
+| `SAGE_ELASTICSEARCH_API_KEY` | string | None | Elasticsearch API Key |
+| `SAGE_ELASTICSEARCH_USERNAME` | string | None | Elasticsearch 用户名 |
+| `SAGE_ELASTICSEARCH_PASSWORD` | string | None | Elasticsearch 密码 |
+
+### MinIO 设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_MINIO_ENDPOINT` | string | None | MinIO Endpoint |
+| `SAGE_MINIO_ACCESS_KEY` | string | None | MinIO Access Key |
+| `SAGE_MINIO_SECRET_KEY` | string | None | MinIO Secret Key |
+| `SAGE_MINIO_SECURE` | boolean | false | 是否使用 https |
+| `SAGE_MINIO_BUCKET_NAME` | string | None | MinIO Bucket |
+| `SAGE_MINIO_PUBLIC_BASE_URL` | string | None | MinIO 公网访问地址 |
+
+### Trace 设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_TRACE_JAEGER_ENDPOINT` | string | None | Jaeger OTLP Endpoint |
+
+### Knowledge Base MCP 设置
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `SAGE_KB_MCP_URL` | string | None | Knowledge Base MCP 接口地址 |
+| `SAGE_KB_MCP_API_KEY` | string | None | Knowledge Base MCP API Key |
+
+### 旧版 LLM 环境变量
+
+| 变量 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `LLM_API_KEY` | string | None | 旧版 LLM API Key 兜底 |
+| `LLM_API_BASE_URL` | string | None | 旧版 LLM API Base URL 兜底 |
+| `LLM_MODEL_NAME` | string | None | 旧版 LLM 模型名称兜底 |
 
 ### 示例 .env 文件
 
@@ -98,28 +170,34 @@ graph TD
 # Sage 配置的 .env 文件
 
 # API 配置
-OPENAI_API_KEY=sk-your-openai-api-key-here
-SAGE_BASE_URL=https://api.openai.com/v1
+SAGE_DEFAULT_LLM_API_KEY=sk-your-api-key-here
+SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
+SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 
 # 模型设置
-SAGE_MODEL_NAME=gpt-4
-SAGE_MAX_TOKENS=8192
-SAGE_TEMPERATURE=0.3
+SAGE_DEFAULT_LLM_MAX_TOKENS=8192
+SAGE_DEFAULT_LLM_TEMPERATURE=0.3
+SAGE_DEFAULT_LLM_TOP_P=0.9
+SAGE_DEFAULT_LLM_MAX_MODEL_LEN=54000
 
 # 智能体行为
-SAGE_DEEP_THINKING=true
-SAGE_DEEP_RESEARCH=true
-SAGE_SUMMARY_MODE=true
-SAGE_MAX_ITERATIONS=15
+SAGE_CONTEXT_HISTORY_RATIO=0.2
+SAGE_CONTEXT_ACTIVE_RATIO=0.3
+SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO=0.5
+SAGE_CONTEXT_RECENT_TURNS=6
 
-# 开发设置
-SAGE_DEBUG=true
-SAGE_ENVIRONMENT=development
-SAGE_LOG_LEVEL=DEBUG
+# 运行设置
+SAGE_PORT=8080
+SAGE_WORKSPACE_PATH=./agent_workspace
+SAGE_LOGS_DIR_PATH=./logs
+SAGE_DB_TYPE=file
+SAGE_DB_PATH=./data/
 
-# 工具设置
-SAGE_TOOLS_PATH=/custom/tools:/default/tools
-SAGE_TOOL_TIMEOUT=60
+# 存储设置
+SAGE_EMBEDDING_MODEL=text-embedding-3-large
+SAGE_MINIO_ENDPOINT=http://127.0.0.1:9000
+SAGE_MINIO_ACCESS_KEY=minioadmin
+SAGE_MINIO_SECRET_KEY=minioadmin
 ```
 
 ## 📁 配置文件
@@ -183,6 +261,13 @@ debug:
   profile: false
   trace_calls: false
   save_conversations: false
+
+# 链路追踪配置
+trace:
+  enabled: true
+  exporter: "jaeger"  # 支持 jaeger, zipkin, console
+  sample_rate: 1.0    # 采样率 0.0-1.0
+  service_name: "sage-agent"
 ```
 
 ### 模型特定配置 (config/models.yaml)
@@ -229,6 +314,16 @@ providers:
     base_url: "https://api.deepseek.com/v1"
     models: ["deepseek-chat", "deepseek-coder"]
     rate_limit: 100
+
+  # 多模型代理池配置
+  llm_pool:
+    strategy: "round_robin"  # 轮询 (round_robin) 或 权重 (weighted)
+    fallback: true          # 启用故障转移
+    models:
+      - name: "gpt-4"
+        weight: 1.0
+      - name: "claude-3-opus"
+        weight: 0.8
 ```
 
 ### 工具配置 (config/tools.yaml)

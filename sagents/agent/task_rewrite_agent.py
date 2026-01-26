@@ -19,7 +19,12 @@ class TaskRewriteAgent(AgentBase):
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt("TaskRewriteAgent", "task_rewrite_system_prefix", session_context.get_language(), "")
+        current_system_prefix = PromptManager().get_agent_prompt(
+            "TaskRewriteAgent",
+            "task_rewrite_system_prefix",
+            session_context.get_language(),
+            "",
+        )
 
         message_manager = session_context.message_manager
         history_messages = message_manager.extract_all_context_messages(recent_turns=3)
