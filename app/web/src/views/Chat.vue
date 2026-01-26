@@ -5,6 +5,9 @@
         <el-select v-model="selectedAgentId" class="agent-select" @change="handleAgentChange">
           <el-option v-for="agent in (agents || [])" :key="agent.id" :label="agent.name" :value="agent.id" />
         </el-select>
+        <el-button type="text" @click="showTrace = !showTrace" title="Trace Workflow">
+          <Activity :size="16" />
+        </el-button>
         <el-button type="text" @click="showSettings = !showSettings" :title="t('chat.settings')">
           <Settings :size="16" />
         </el-button>
@@ -41,6 +44,8 @@
       <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles" :workspace-path="workspacePath"
         @download-file="downloadFile" @close="showWorkspace = false" />
 
+      <WorkflowPanel v-if="showTrace && currentSessionId" :session-id="currentSessionId" @close="showTrace = false" />
+
       <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
         @config-change="updateConfig" @close="showSettings = false" />
     </div>
@@ -52,8 +57,9 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Bot, Settings } from 'lucide-vue-next'
+import { Bot, Settings, Activity } from 'lucide-vue-next'
 
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
@@ -61,6 +67,7 @@ import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import TaskStatusPanel from '@/components/chat/TaskStatusPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
+import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
 
 import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
@@ -76,6 +83,7 @@ const props = defineProps({
 })
 
 const { t } = useLanguage()
+const route = useRoute()
 
 // 状态管理
 const messagesEndRef = ref(null)
@@ -84,6 +92,7 @@ const showSettings = ref(false)
 const showToolDetails = ref(false)
 const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
+const showTrace = ref(false)
 const selectedToolExecution = ref(null)
 const toolResult = ref(null)
 
@@ -177,7 +186,6 @@ const toggleTaskExpanded = (taskId) => {
   // 更新任务和工作空间数据
   const updateTaskAndWorkspace = (sessionId, reason = 'unknown') => {
     if (sessionId) {
-      fetchTaskStatus(sessionId);
       fetchWorkspaceFiles(sessionId);
     }
   };
@@ -197,6 +205,42 @@ const createSession = () => {
     const sessionId = `session_${Date.now()}`;
     currentSessionId.value = sessionId;
     return sessionId;
+  };
+
+  // 处理会话加载
+  const handleSessionLoad = async (sessionId) => {
+    if (!sessionId) return;
+    
+    currentSessionId.value = sessionId;
+    isLoading.value = true;
+    
+    try {
+      // 获取会话消息
+      const res = await chatAPI.getConversationMessages(sessionId);
+      if (res && res.messages) {
+        // 加载消息
+        messages.value = res.messages;
+        if (res.conversation_info) {
+          // 如果有 conversation_info，可以在这里恢复其他状态
+          // 比如选中的 agent
+          if (res.conversation_info.agent_id) {
+            const agent = agents.value.find(a => a.id === res.conversation_info.agent_id);
+            if (agent) {
+              selectAgent(agent);
+            }
+          }
+        }
+      }
+      
+      // 恢复任务状态和工作空间
+      await updateTaskAndWorkspace(sessionId);
+      
+    } catch (e) {
+      console.error('加载会话失败:', e);
+      ElMessage.error(t('chat.loadConversationError') || 'Failed to load conversation');
+    } finally {
+      isLoading.value = false;
+    }
   };
 
   // 更新配置
@@ -532,6 +576,12 @@ const handleAgentChange = async (agentId) => {
 
 
 // 加载conversation数据
+const resetChat = () => {
+  clearMessages()
+  clearTaskAndWorkspace()
+  createSession()
+}
+
 const loadConversationData = async (conversation) => {
   try {
     // 清除当前消息
@@ -763,30 +813,25 @@ const sendMessageApi = async ({
 
 // 生命周期
 onMounted(async () => {
-  console.log('🚀 Chat组件已挂载，开始加载智能体列表');
-  await loadAgents()
-
-  // 检查是否有传递的conversation数据
-  if (props.selectedConversation) {
-    console.log('📝 加载指定的会话数据');
-    await loadConversationData(props.selectedConversation)
-  } else {
-    // 智能体的选择由 watch 监听器处理，这里只需要等待
-    // 如果没有当前会话，创建新会话（延迟执行，等待智能体选择完成）
-    nextTick(async () => {
-      if (!currentSessionId.value && selectedAgent.value) {
-        console.log('🆕 创建新会话');
-        await createSession()
-      }
-    })
+  // 1. 获取Agent列表
+  try {
+    const res = await agentAPI.getAgents();
+    agents.value = res || [];
+    restoreSelectedAgent(agents.value);
+  } catch (e) {
+    console.error('获取Agent列表失败:', e);
   }
   
-  // 初始化时滚动到底部
-  nextTick(() => {
-    shouldAutoScroll.value = true
-    scrollToBottom(true)
-  })
-})
+  // 2. 检查URL参数是否有session_id
+  const routeSessionId = route.query.session_id;
+  if (routeSessionId) {
+      console.log('🔗 从路由加载会话:', routeSessionId);
+      await handleSessionLoad(routeSessionId);
+  } else {
+      // 如果没有session_id，创建一个新的
+      createSession();
+  }
+});
 
 // 组件卸载时清理
 onUnmounted(() => {
@@ -803,12 +848,30 @@ watch(() => agents.value, (newAgents) => {
     }
   });
 
-// 监听selectedConversation变化
+  // 监听selectedConversation变化
 watch(() => props.selectedConversation, async (newConversation) => {
   if (newConversation && agents.value.length > 0) {
     await loadConversationData(newConversation)
+  } else if (!newConversation) {
+    // 如果没有选中的会话，重置聊天状态
+    resetChat()
   }
 }, { immediate: false })
+
+// 监听路由参数变化
+watch(() => route.query.session_id, (newSessionId) => {
+  // 如果ID相同，不做处理
+  if (newSessionId === currentSessionId.value) return;
+  
+  if (newSessionId) {
+    console.log('🔗 路由session_id变化，加载会话:', newSessionId);
+    handleSessionLoad(newSessionId);
+  } else {
+    // 路由参数被清空（例如点击了新对话），重置聊天
+    console.log('🔗 路由session_id被清空，重置聊天');
+    resetChat();
+  }
+});
 
 // 监听消息变化，智能滚动到底部
 watch(messages, () => {

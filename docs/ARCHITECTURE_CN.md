@@ -104,6 +104,7 @@ graph TB
         EXC[异常处理<br/>🔄 自动恢复]
         LLM[LLM提供商<br/>🤖 多API]
         CACHE[缓存层<br/>💾 性能]
+        TRACE[链路追踪<br/>🔍 Jaeger]
     end
     
     UI --> AC
@@ -132,6 +133,7 @@ graph TB
     AC --> EXC
     AC --> LLM
     AC --> CACHE
+    AC --> TRACE
     
     TT -.-> TA
     TT -.-> PA
@@ -183,57 +185,73 @@ class AgentController:
 - **熔断器**: 自动故障检测和恢复
 - **负载均衡**: 智能工具选择和请求分发
 
-### 智能体层次结构（重构版v2.0）
+### 智能体层次结构（增强版v2.1）
+
+Sage 框架采用细粒度的智能体协作模式，除了核心的规划和执行智能体外，还引入了多种辅助智能体以提升任务处理的准确性和灵活性。
 
 ```mermaid
 classDiagram
     AgentBase <|-- TaskAnalysisAgent
-    AgentBase <|-- PlanningAgent
-    AgentBase <|-- ExecutorAgent
-    AgentBase <|-- ObservationAgent
+    AgentBase <|-- TaskDecomposeAgent
+    AgentBase <|-- TaskPlanningAgent
+    AgentBase <|-- TaskExecutorAgent
+    AgentBase <|-- TaskObservationAgent
     AgentBase <|-- TaskSummaryAgent
-    AgentBase <|-- DirectExecutorAgent
+    AgentBase <|-- TaskStageSummaryAgent
+    AgentBase <|-- TaskCompletionJudgeAgent
+    AgentBase <|-- TaskRewriteAgent
+    AgentBase <|-- TaskRouterAgent
+    AgentBase <|-- WorkflowSelectAgent
+    AgentBase <|-- QuerySuggestAgent
+    AgentBase <|-- SkillSelectAgent
+    AgentBase <|-- SkillExecutorAgent
+    AgentBase <|-- SimpleAgent
     
     class AgentBase {
         +token_stats: Dict
         +performance_metrics: Dict
         +run(messages, tool_manager)
         +run_stream(messages, tool_manager)
-        +_track_token_usage(response, step_name)
-        +_track_streaming_token_usage(chunks, step_name)
-        +get_token_stats()
-        +reset_token_stats()
-        +_handle_error_generic(error, context)
     }
     
-    class TaskAnalysisAgent {
-        +analyze_requirements()
-        +extract_objectives()
-        +assess_complexity()
-        +determine_execution_strategy()
+    class TaskDecomposeAgent {
+        +decompose_complex_tasks()
+        +generate_subtasks()
+    }
+
+    class TaskRewriteAgent {
+        +optimize_user_query()
+        +clarify_intent()
     }
     
-    class PlanningAgent {
-        +decompose_tasks()
-        +identify_dependencies()
-        +create_execution_plan()
-        +optimize_resource_allocation()
+    class WorkflowSelectAgent {
+        +select_best_workflow()
+        +route_execution_path()
     }
-    
-    class ExecutorAgent {
-        +execute_plan()
-        +call_tools_with_retry()
-        +handle_tool_results()
-        +manage_concurrent_execution()
-    }
-    
-    class ObservationAgent {
-        +monitor_progress()
-        +detect_completion()
-        +identify_failures()
-        +suggest_corrections()
+
+    class SkillExecutorAgent {
+        +execute_specialized_skills()
+        +handle_domain_tasks()
     }
 ```
+
+**核心智能体角色：**
+
+1.  **TaskAnalysisAgent (任务分析)**: 负责深入理解用户需求，提取关键信息。
+2.  **TaskDecomposeAgent (任务分解)**: 将复杂目标拆解为可执行的子任务序列。
+3.  **TaskPlanningAgent (任务规划)**: 管理任务依赖关系，制定执行路线图。
+4.  **TaskExecutorAgent (任务执行)**: 负责具体的工具调用和动作执行。
+5.  **TaskObservationAgent (任务观察)**: 监控执行结果，验证是否符合预期。
+6.  **TaskSummaryAgent (任务总结)**: 汇总最终结果，生成用户友好的回答。
+
+**辅助与增强智能体：**
+
+*   **TaskRewriteAgent**: 优化用户输入，使其更适合 LLM 处理。
+*   **WorkflowSelectAgent**: 根据任务类型动态选择最佳执行工作流（如 React, PEO 等）。
+*   **TaskRouterAgent**: 将特定任务路由到最擅长的处理单元。
+*   **SkillSelectAgent / SkillExecutorAgent**: 负责特定领域技能（Skill）的检索与执行。
+*   **QuerySuggestAgent**: 在对话中生成后续问题建议，引导用户深入探索。
+*   **TaskCompletionJudgeAgent**: 智能判断任务是否真正完成，避免过早终止。
 
 ## 📊 Token跟踪系统
 

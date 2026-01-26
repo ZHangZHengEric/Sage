@@ -1,7 +1,10 @@
 from typing import Optional
+
 import jwt
+
 from . import config
 from .exceptions import SageHTTPException
+
 
 def parse_access_token(token: str) -> Optional[dict]:
     cfg = config.get_startup_config()

@@ -6,11 +6,13 @@ import math
 import os
 from typing import List, Optional
 
-from ..core.render import Response
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
+from loguru import logger
 from pydantic import BaseModel
-from ..service.conversation import (
+
+from ..core.render import Response
+from ..services.conversation import (
     delete_conversation,
     get_conversation_messages,
     get_conversations_paginated,
@@ -19,8 +21,6 @@ from ..service.conversation import (
     interrupt_session,
     resolve_download_path,
 )
-
-from loguru import logger
 
 # ============= 会话相关模型 =============
 

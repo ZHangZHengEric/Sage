@@ -1,9 +1,11 @@
-import sys
-import os
 import logging
+import os
+import re
+import sys
+from pathlib import Path
+
 from loguru import logger
 
-from pathlib import Path
 from .context import get_request_id
 
 
@@ -25,8 +27,14 @@ class InterceptHandler(logging.Handler):
             level = "DEBUG"
 
         # Find caller from where originated the logged message
-        frame, depth = logging.currentframe(), 2
-        while frame.f_code.co_filename == logging.__file__:
+        frame = logging.currentframe()
+        depth = 1
+        
+        # Skip the InterceptHandler.emit frame itself
+        if frame:
+             frame = frame.f_back
+
+        while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back
             depth += 1
 
@@ -49,20 +57,34 @@ def init_logging(log_name="app", log_level="DEBUG"):
         log_level (str, optional): The minimum logging level. Defaults to "DEBUG".
     """
 
-    _format = (
-        "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - [{extra[request_id]}] - [{extra[session_id]}] - [{file.name}:{line}] - "
-        "{message}"
-    )
-
     logger.remove()  # Remove default handler
 
-    # Configure patcher to automatically inject request_id
+    # Configure patcher to automatically inject request_id and process path
     def patcher(record):
+        # Request ID
         record["extra"]["request_id"] = get_request_id()
-        if "session_id" not in record["extra"]:
-            record["extra"]["session_id"] = "NO_SESSION"
+        # Message normalization
+        if "message" in record and isinstance(record["message"], str):
+            record["message"] = re.sub(r"\s+", " ", record["message"]).strip()
         
-        # Override file.name and line if provided in extra (e.g. from InterceptHandler)
+        # Relative Path Handling
+        # 1. Try to get path from InterceptHandler (file.name) or original record path
+        file_path = record["extra"].get("file.name")
+        if not file_path:
+            file_path = record["file"].path
+
+        # 2. Convert to relative path
+        try:
+            rel_path = os.path.relpath(file_path, os.getcwd())
+            parts = rel_path.split(os.sep)
+            if len(parts) > 2:
+                rel_path = os.path.join(*parts[-2:])
+        except Exception:
+            rel_path = os.path.basename(file_path) # Fallback to basename
+
+        record["extra"]["rel_path"] = rel_path
+
+        # Override file.name and line if provided in extra (for InterceptHandler compatibility)
         if "file.name" in record["extra"]:
             record["file"].name = record["extra"]["file.name"]
         if "line" in record["extra"]:
@@ -70,14 +92,30 @@ def init_logging(log_name="app", log_level="DEBUG"):
 
     logger.configure(patcher=patcher)
 
-    logger.add(sys.stdout, level="INFO", format=_format)
+    def formatting_func(record):
+        fmt = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - "
+
+        # Relative Path
+        fmt += "[{extra[rel_path]}:{line}] "
+
+        # Conditional Request ID
+        if (
+            record["extra"].get("request_id")
+            and record["extra"].get("request_id") != "background"
+        ):
+            fmt += "[{extra[request_id]}] "
+        fmt += "- {message} "
+        fmt += "\n{exception}"
+        return fmt
+
+    logger.add(sys.stdout, level=log_level, format=formatting_func)
 
     params = {
-        "rotation": "20MB",
+        "rotation": "100MB",
         "retention": 20,
         "compression": "zip",
         "encoding": "utf8",
-        "format": _format,
+        "format": formatting_func,
     }
     LOG_PATH = "./logs"
     if not os.path.exists(LOG_PATH):
@@ -91,13 +129,12 @@ def init_logging(log_name="app", log_level="DEBUG"):
     access_log_enabled = True
     if access_log_enabled:
         # 添加专门的访问日志文件
-        access_format = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - [{extra[request_id]}] - [{extra[session_id]}] - [{file.name}:{line}] - {message}"
         access_params = {
             "rotation": "10MB",
             "retention": 10,
             "compression": "zip",
             "encoding": "utf8",
-            "format": access_format,
+            "format": formatting_func,
         }
         logger.add(
             Path(LOG_PATH) / f"{log_name}_access.log",
@@ -107,35 +144,19 @@ def init_logging(log_name="app", log_level="DEBUG"):
             or record["extra"].get("logger_name") == "uvicorn.access",
             **access_params,
         )
-
-    # 拦截标准日志并转发到 Loguru
-    # 使用 INFO 级别以减少内部库的调试日志
+    # 拦截标准日志
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
-    # 接管 FastAPI 相关 logger
+
+
+    # 接管 FastAPI 和 sagents 日志
     fastapi_loggers = [
         "fastapi",
         "fastapi.app",
         "fastapi.middleware",
-        # 如果有其他模块也可以添加
+        "uvicorn.access",
+        "sage",
     ]
-
     for logger_name in fastapi_loggers:
         logging_logger = logging.getLogger(logger_name)
         logging_logger.handlers = [InterceptHandler()]
         logging_logger.propagate = False
-        
-    # 显式接管 uvicorn 的日志记录器
-    for logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
-        logging_logger = logging.getLogger(logger_name)
-        logging_logger.handlers = [InterceptHandler()]
-        logging_logger.propagate = False
-
-    # 接管 sagents 的日志
-    try:
-        # 确保 sagents logger 已初始化，以便我们可以替换其 handlers
-        import sagents.utils.logger
-        sage_logger = logging.getLogger("sage")
-        sage_logger.handlers = [InterceptHandler()]
-        sage_logger.propagate = False
-    except ImportError:
-        pass

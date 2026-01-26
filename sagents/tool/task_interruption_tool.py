@@ -2,15 +2,12 @@
 任务完成工具
 """
 from typing import Dict, Any, List, Optional
-from .tool_base import ToolBase
+from .tool_base import tool
 
-class TaskInterruptionTool(ToolBase):
+class TaskInterruptionTool:
     """任务中断工具"""
     
-    def __init__(self):
-        super().__init__()
-    
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "追问以收集完成任务所需信息",
             "en": "Ask follow-up questions to gather needed info",
@@ -39,7 +36,7 @@ class TaskInterruptionTool(ToolBase):
             "follow_up": follow_up
         }
 
-    # @ToolBase.tool()
+    # @tool()
     def complete_task(self) -> Dict[str, Any]:
         """
         The complete_task tool is used to signal that the task has been successfully completed.

@@ -90,6 +90,12 @@
               <el-option v-for="tool in props.tools" :key="tool.name" :label="tool.name" :value="tool.name" />
             </el-select>
           </el-form-item>
+          <el-form-item :label="t('agent.availableSkills')">
+            <el-select v-model="formData.availableSkills" multiple :placeholder="t('agent.selectSkills')"
+              style="width: 100%">
+              <el-option v-for="skill in props.skills" :key="skill" :label="skill" :value="skill" />
+            </el-select>
+          </el-form-item>
           <!-- 系统上下文 -->
           <el-divider content-position="left">{{ t('agent.systemContext') }}</el-divider>
 
@@ -271,6 +277,10 @@ const props = defineProps({
   tools: {
     type: Array,
     default: () => []
+  },
+  skills: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -315,6 +325,7 @@ const defaultFormData = () => ({
     model: ''
   },
   availableTools: [],
+  availableSkills: [],
   systemContext: {},
   availableWorkflows: {}
 })

@@ -35,12 +35,22 @@ class TaskAnalysisAgent(AgentBase):
             recent_message_str = MessageManager.convert_messages_to_str(recent_message)
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
+
+        # 获取skills metadata
+        skill_manager = session_context.skill_manager
+        if skill_manager and skill_manager.list_skills():
+            available_skills_name = skill_manager.get_skill_description_lines(style="analysis")
+        else:
+            available_skills_name = []
+
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
-        logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools_name)}")
+        available_skills_str = ", ".join(available_skills_name) if available_skills_name else "无可用技能"
+        logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools_name)}, 可用技能数量: {len(available_skills_name)}")
 
         prompt = PromptManager().get_agent_prompt_auto('analysis_template', language=session_context.get_language()).format(
             conversation=recent_message_str,
             available_tools=available_tools_str,
+            available_skills=available_skills_str,
             agent_description = self.system_prefix
         )
 

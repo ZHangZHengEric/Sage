@@ -308,12 +308,12 @@ Register a single tool.
 def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec]) -> bool:
 ```
 
-##### `register_tool_class()`
+##### `discover_tools_from_path()`
 
-Register all tools from a ToolBase subclass.
+Auto-import modules and register functions decorated with tool().
 
 ```python
-def register_tool_class(self, tool_class: Type[ToolBase]) -> bool:
+def discover_tools_from_path(self, path: Optional[str] = None) -> None:
 ```
 
 ##### `run_tool()`
@@ -346,17 +346,16 @@ def get_openai_tools(self) -> List[Dict[str, Any]]:
 
 ## 🔧 Tool Development
 
-### ToolBase
+### Tool Decorator
 
-Base class for creating custom tools.
+Function decorator for creating custom tools without inheritance.
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 
-class CustomTool(ToolBase):
-    @ToolBase.tool()
+class CustomTool:
+    @tool()
     def my_tool(self, param1: str, param2: int = 10) -> Dict[str, Any]:
-        """Tool description here"""
         return {"result": f"Processed {param1} with {param2}"}
 ```
 
@@ -527,7 +526,7 @@ server_params = StdioServerParameters(
 For HTTP-based MCP servers:
 
 ```python
-from agents.tool.tool_base import SseServerParameters
+from sagents.tool.tool_config import SseServerParameters
 
 server_params = SseServerParameters(
     url="https://your-mcp-server.com/sse"

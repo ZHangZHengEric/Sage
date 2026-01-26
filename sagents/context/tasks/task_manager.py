@@ -2,7 +2,6 @@ from typing import Dict, List, Optional, Any, cast
 import json
 import datetime
 from .task_base import TaskBase
-from sagents.tool.file_system_tool import FileSystemTool
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import prompt_manager
 class TaskManager:
@@ -12,7 +11,7 @@ class TaskManager:
     负责管理多个任务的生命周期，包括创建、更新、状态查询、依赖管理等。
     支持任务进度统计和结果索引功能。
     """
-    
+
     def __init__(self, session_id: Optional[str] = None):
         """
         初始化任务管理器
@@ -39,21 +38,21 @@ class TaskManager:
         # 强制使用顺序编号作为task_id，覆盖TaskBase可能生成的UUID
         task.task_id = str(self.next_task_number)
         self.next_task_number += 1
-        
+
         # 检查ID冲突（理论上不会发生，但保险起见）
         while task.task_id in self.tasks:
             task.task_id = str(self.next_task_number)
             self.next_task_number += 1
-        
+
         # 更新title以反映新的task_id
         if not task.title or task.title.startswith("Task "):
             task.title = f"Task {task.task_id}"
-        
+
         self.tasks[task.task_id] = task
         self._add_history_entry(task.task_id, 'added', {
             'task': task.to_summary_dict()
         })
-        
+
         return task.task_id
 
     def add_tasks_batch(self, tasks: List[TaskBase]) -> List[str]:
@@ -70,12 +69,12 @@ class TaskManager:
         for task in tasks:
             task_id = self.add_task(task)
             task_ids.append(task_id)
-        
+
         self._add_history_entry("batch", 'batch_added', {
             'count': len(tasks),
             'task_ids': task_ids
         })
-        
+
         return task_ids
 
     def get_task(self, task_id: str) -> Optional[TaskBase]:
@@ -103,21 +102,21 @@ class TaskManager:
         """
         if task_id not in self.tasks:
             return False
-        
+
         task = self.tasks[task_id]
         updated_fields = {}
-        
+
         for key, value in kwargs.items():
             if hasattr(task, key):
                 old_value = getattr(task, key)
                 setattr(task, key, value)
                 updated_fields[key] = {'old': old_value, 'new': value}
-        
+
         if updated_fields:
             self._add_history_entry(task_id, 'updated', {
                 'changes': updated_fields
             })
-        
+
         return True
 
     def update_task_status(self, task_id: str, status) -> bool:
@@ -133,16 +132,16 @@ class TaskManager:
         """
         if task_id not in self.tasks:
             return False
-        
+
         task = self.tasks[task_id]
         old_status = task.status
         task.status = status
-        
+
         self._add_history_entry(task_id, 'status_updated', {
             'old_status': old_status.value if hasattr(old_status, 'value') else str(old_status),
             'new_status': status.value if hasattr(status, 'value') else str(status)
         })
-        
+
         return True
 
     def start_task(self, task_id: str, assigned_to: Optional[str] = None) -> bool:
@@ -159,13 +158,13 @@ class TaskManager:
         task = self.get_task(task_id)
         if not task:
             return False
-        
+
         task.start_execution(assigned_to)
         self._add_history_entry(task_id, 'started', {
             'assigned_to': assigned_to,
             'start_time': task.start_time
         })
-        
+
         return True
 
     def complete_task(self, task_id: str, result: Any = None, 
@@ -184,14 +183,14 @@ class TaskManager:
         task = self.get_task(task_id)
         if not task:
             return False
-        
+
         task.complete_execution(result, execution_details)
         self._add_history_entry(task_id, 'completed', {
             'result_type': type(result).__name__ if result else None,
             'end_time': task.end_time,
             'duration': task.get_execution_duration()
         })
-        
+
         return True
 
     def fail_task(self, task_id: str, error_message: str, 
@@ -210,13 +209,13 @@ class TaskManager:
         task = self.get_task(task_id)
         if not task:
             return False
-        
+
         task.fail_execution(error_message, execution_details)
         self._add_history_entry(task_id, 'failed', {
             'error': error_message,
             'end_time': task.end_time
         })
-        
+
         return True
 
     def get_tasks_by_status(self, status) -> List[TaskBase]:
@@ -230,7 +229,7 @@ class TaskManager:
             List[TaskBase]: 匹配状态的任务列表
         """
         from .task_base import TaskStatus
-        
+
         # 处理不同类型的status参数
         target_status: Any
         if isinstance(status, str):
@@ -241,7 +240,7 @@ class TaskManager:
                 target_status = status
         else:
             target_status = status
-        
+
         return [task for task in self.tasks.values() if task.status == target_status]
 
     def get_ready_tasks(self) -> List[TaskBase]:
@@ -254,14 +253,14 @@ class TaskManager:
         from .task_base import TaskStatus
         completed_task_ids = set(task.task_id for task in self.tasks.values() 
                                 if task.status == TaskStatus.COMPLETED)
-        
+
         ready_tasks = []
         for task in self.tasks.values():
             # 检查任务是否处于待执行状态且依赖已满足
             if (task.status == TaskStatus.PENDING and 
                 set(task.dependencies).issubset(completed_task_ids)):
                 ready_tasks.append(task)
-        
+
         # 按优先级排序
         def get_priority_value(task: TaskBase) -> int:
             p = task.priority
@@ -303,18 +302,18 @@ class TaskManager:
                 'completion_rate': 0.0,
                 'success_rate': 0.0
             }
-        
+
         from .task_base import TaskStatus
         status_counts: Dict[Any, int] = {}
         for task in self.tasks.values():
             status_counts[task.status] = status_counts.get(task.status, 0) + 1
-        
+
         completed = status_counts.get(TaskStatus.COMPLETED, 0)
         failed = status_counts.get(TaskStatus.FAILED, 0)
         in_progress = status_counts.get(TaskStatus.IN_PROGRESS, 0)
         pending = status_counts.get(TaskStatus.PENDING, 0)
         finished_tasks = completed + failed
-        
+
         return {
             'total_tasks': total_tasks,
             'completed_tasks': completed,
@@ -349,13 +348,13 @@ class TaskManager:
         completed_tasks = self.get_tasks_by_status(TaskStatus.COMPLETED)
         failed_tasks = self.get_tasks_by_status(TaskStatus.FAILED)
         in_progress_tasks = self.get_tasks_by_status(TaskStatus.IN_PROGRESS)
-        
+
         # 收集关键执行信息
         total_files_created = 0
         total_tools_used = set()
         total_tokens_used = 0
         key_results = []
-        
+
         for task in completed_tasks + failed_tasks:
             if task.execution_details:
                 total_files_created += len(task.execution_details.get('output_files', []))
@@ -366,19 +365,19 @@ class TaskManager:
                             total_tools_used.add(tool_call.get('tool_name', 'unknown'))
                         else:
                             total_tools_used.add(str(tool_call))
-                
+
                 # 统计token使用量
                 metrics = task.execution_details.get('metrics', {})
                 if isinstance(metrics, dict):
                     total_tokens_used += metrics.get('tokens_used', 0)
-                
+
                 if task.result:
                     key_results.append({
                         'task_id': task.task_id,
                         'description': task.description[:100],
                         'result_type': type(task.result).__name__
                     })
-        
+
         return {
             'session_id': self.session_id,
             'progress': self.get_progress_stats(),
@@ -415,15 +414,15 @@ class TaskManager:
         # 获取分配给该Agent的任务
         assigned_tasks = [task for task in self.tasks.values() 
                          if task.assigned_to == agent_name]
-        
+
         # 获取该Agent可能感兴趣的任务（基于类型匹配）
         relevant_statuses = ['pending', 'in_progress', 'completed']
         relevant_tasks = [task for task in self.tasks.values() 
                          if getattr(task.status, 'value', str(task.status)) in relevant_statuses]
-        
+
         # 获取下一个可用任务
         next_task = self.get_next_task()
-        
+
         return {
             'agent_name': agent_name,
             'assigned_tasks': [task.to_summary_dict() for task in assigned_tasks],
@@ -455,19 +454,16 @@ class TaskManager:
                     logger.debug(f"StageSummaryAgent: 任务 {task.task_id} result_documents={result_documents}, result_summary='{result_summary}', has_documents={has_documents}, has_summary_text={has_summary_text}, has_valid_summary={has_valid_summary}")
                 else:
                     has_valid_summary = bool(execution_summary_value)
-            
+
             if not has_valid_summary:
                 tasks_to_summarize.append(task)
                 logger.info(f"StageSummaryAgent: 任务 {task.task_id} 需要总结")
             else:
                 logger.info(f"StageSummaryAgent: 任务 {task.task_id} 已有总结，跳过")
-        
+
         logger.info(f"StageSummaryAgent: 最终需要总结的任务数量: {len(tasks_to_summarize)}")
-        
+
         return tasks_to_summarize
-
-
-
 
     def get_all_tasks(self) -> List[TaskBase]:
         """
@@ -493,18 +489,18 @@ class TaskManager:
         """
         completed_tasks = self.get_tasks_by_status('completed')
         cleared_count = 0
-        
+
         for task in completed_tasks:
             # 保存摘要到历史
             self._add_history_entry(task.task_id, 'archived', {
                 'summary': task.to_summary_dict(),
                 'archived_time': datetime.datetime.now().isoformat()
             })
-            
+
             # 从活跃任务中移除
             del self.tasks[task.task_id]
             cleared_count += 1
-        
+
         return cleared_count
 
     def to_dict(self) -> Dict[str, Any]:
@@ -552,13 +548,13 @@ class TaskManager:
         manager.created_time = data.get('created_time', manager.created_time)
         manager.next_task_number = data.get('next_task_number', 1)
         manager.task_history = data.get('task_history', [])
-        
+
         # 重建任务对象
         tasks_data = data.get('tasks', {})
         for task_id, task_data in tasks_data.items():
             task = TaskBase.from_dict(task_data)
             manager.tasks[task_id] = task
-        
+
         return manager
 
     @classmethod
@@ -611,7 +607,7 @@ class TaskManager:
                     default="任务管理器中暂无任务"
                 )
                 return no_tasks
-            
+
             # 构建简化的状态描述
             contains_tasks = prompt_manager.get_prompt(
                 'task_manager_contains_tasks',
@@ -620,14 +616,14 @@ class TaskManager:
                 default=f"任务管理器包含 {len(all_tasks)} 个任务："
             )
             status_lines = [contains_tasks.format(count=len(all_tasks))]
-            
+
             task_info_template = prompt_manager.get_prompt(
                 'task_manager_task_info',
                 agent='common',
                 language=language,
                 default="- 任务ID: {task_id}, 描述: {description}, 状态: {status}"
             )
-            
+
             for task in all_tasks:
                 status_info = task_info_template.format(
                     task_id=task.task_id,
@@ -635,9 +631,9 @@ class TaskManager:
                     status=task.status.value
                 )
                 status_lines.append(status_info)
-            
+
             return "\n".join(status_lines)
-            
+
         except Exception as e:
             status_failed = prompt_manager.get_prompt(
                 'task_manager_status_failed',
@@ -673,7 +669,7 @@ class TaskManager:
                 result_summary = str(execution_summary)
             else:
                 result_summary = ""
-            
+
             task_status = {
                 "task_id": getattr(task, 'task_id', 'N/A'),
                 "status": getattr(task.status, 'value', str(getattr(task, 'status', 'N/A'))) if hasattr(task, 'status') else str(getattr(task, 'status', 'N/A')),
@@ -681,29 +677,29 @@ class TaskManager:
                 "result_documents": result_documents,
                 "result_summary": result_summary,
             }
-            
+
             # 读取文档内容
             if task_status["result_documents"]:
                 logger.info(f"TaskSummaryAgent: 读取 {len(task_status['result_documents'])} 个文档内容")
                 task_status["result_documents"] = await self._read_document_contents(cast(List[Any], task_status["result_documents"]))
-            
+
             cast(List[Any], status_info["tasks"]).append(task_status)
             logger.info(f"TaskSummaryAgent: 第 {i+1} 个任务处理完成")
-            
+
         result_json = json.dumps(status_info, ensure_ascii=False, indent=2)
         return result_json
 
     async def _read_document_contents(self, documents: List[Any]) -> List[Dict[str, Any]]:
         document_contents = []
         for i, doc in enumerate(documents):
-            file_read_result = await FileSystemTool().file_read(doc,end_line=100)
+            from sagents.tool.file_system_tool import file_read_core
+            file_read_result = await file_read_core(doc,end_line=100)
             doc_content = {
                 "path":doc,
                 "content":file_read_result
             }
             document_contents.append(doc_content)
         return document_contents
-
 
     def get_compact_status_description(self) -> str:
         """
@@ -716,28 +712,28 @@ class TaskManager:
             all_tasks = self.get_all_tasks()
             if not all_tasks:
                 return "暂无任务"
-            
+
             stats = self.get_progress_stats()
-            
+
             # 构建紧凑描述
             status_info = f"任务总数: {stats['total_tasks']} | "
             status_info += f"已完成: {stats['completed_tasks']} | "
             status_info += f"进行中: {stats['in_progress_tasks']} | "
             status_info += f"待执行: {stats['pending_tasks']}"
-            
+
             if stats['failed_tasks'] > 0:
                 status_info += f" | 失败: {stats['failed_tasks']}"
-            
+
             status_info += f" | 完成率: {stats['completion_rate']:.1f}%"
-            
+
             # 添加当前活动任务信息
             in_progress_tasks = self.get_tasks_by_status('in_progress')
             if in_progress_tasks:
                 current_task = in_progress_tasks[0]  # 假设只有一个任务在执行
                 status_info += f" | 当前执行: {current_task.task_id}"
-            
+
             return status_info
-            
+
         except Exception as e:
             return f"状态获取失败: {str(e)}"
 
@@ -754,7 +750,7 @@ class TaskManager:
         task = self.get_task(task_id)
         if not task:
             return f"任务ID {task_id} 不存在"
-        
+
         try:
             status_info = f"任务 {task.task_id} 详细信息：\n"
             status_info += f"- 标题: {task.title}\n"
@@ -762,16 +758,16 @@ class TaskManager:
             status_info += f"- 状态: {task.status.value}\n"
             status_info += f"- 优先级: {task.priority.value}\n"
             status_info += f"- 类型: {task.type}\n"
-            
+
             if task.dependencies:
                 status_info += f"- 依赖任务: {', '.join(task.dependencies)}\n"
-            
+
             if task.assigned_to:
                 status_info += f"- 执行者: {task.assigned_to}\n"
-            
+
             if task.estimated_duration:
                 status_info += f"- 预计时长: {task.estimated_duration}秒\n"
-            
+
             # 时间信息
             status_info += f"- 创建时间: {task.created_time}\n"
             if task.start_time:
@@ -781,7 +777,7 @@ class TaskManager:
                 duration = task.get_execution_duration()
                 if duration:
                     status_info += f"- 执行耗时: {duration:.2f}秒\n"
-            
+
             # 执行详情
             if task.execution_details:
                 details = task.execution_details
@@ -793,14 +789,14 @@ class TaskManager:
                     status_info += f"- 错误数: {len(details['errors'])}\n"
                 if details.get('warnings'):
                     status_info += f"- 警告数: {len(details['warnings'])}\n"
-            
+
             # 结果信息
             if task.result:
                 result_type = type(task.result).__name__
                 status_info += f"- 执行结果类型: {result_type}\n"
-            
+
             return status_info.rstrip()
-            
+
         except Exception as e:
             return f"获取任务 {task_id} 状态失败: {str(e)}"
 

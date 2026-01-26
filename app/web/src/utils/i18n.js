@@ -139,6 +139,8 @@ export const zhCN = {
   'agent.descriptionLength': '描述长度不能超过200个字符',
   'agent.systemPrefixRequired': '请输入系统提示词',
   'agent.moreSuggest': '更多建议',
+  'agent.availableSkills': '可用技能',
+  'agent.selectSkills': '选择可用技能',
 
   // 通用
   'common.on': '开',
@@ -610,6 +612,8 @@ export const enUS = {
   'agent.systemPrefixRequired': 'Please enter system prompt',
   'agent.moreSuggest': 'More Suggestions',
   'agent.availableTools': 'Available Tools',
+  'agent.availableSkills': 'Available Skills',
+  'agent.selectSkills': 'Select available skills',
   'agent.toolsCount': '',
   'agent.tools': 'Tools',
   'agent.save': 'Save',

@@ -1,19 +1,16 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
 import time
 import threading
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
+from sagents.skills import SkillProxy, SkillManager
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
-# from sagents.context.tasks.task_manager import TaskManager
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from sagents.context.user_memory.manager import UserMemoryManager
+from sagents.context.user_memory.manager import UserMemoryManager
 
 from sagents.utils.logger import logger
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
@@ -40,8 +37,9 @@ class SessionContext:
         user_id: Optional[str] = None,
         workspace_root: str = "",
         context_budget_config: Optional[Dict[str, Any]] = None,
-        user_memory_manager: Optional['UserMemoryManager'] = None,
+        user_memory_manager: Optional[UserMemoryManager] = None,
         tool_manager: Optional[Any] = None,
+        skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
     ):
         self.session_id = session_id
         self.user_id = user_id
@@ -62,6 +60,7 @@ class SessionContext:
 
         self.user_memory_manager = user_memory_manager
         self.tool_manager = tool_manager # 存储工具管理器
+        self.skill_manager = skill_manager
 
         self.init_more(workspace_root)
 
@@ -113,7 +112,6 @@ class SessionContext:
                     self.message_manager.add_messages(MessageChunk(**message_item))
                 logger.info(f"已经成功加载{len(messages)}条历史消息")
 
-
     async def init_user_memory_context(self):
         """初始化用户记忆
         """
@@ -142,7 +140,7 @@ class SessionContext:
                          available_tools: Optional[list] = None, system_context: Optional[dict] = None,
                          available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
                          multi_agent: Optional[bool] = None, more_suggest: bool = False,
-                         max_loop_count: int = 10, **kwargs):
+                         max_loop_count: int = 10):
         """设置agent配置信息
 
         Args:
@@ -157,7 +155,6 @@ class SessionContext:
             multi_agent: 多智能体模式
             more_suggest: 更多建议模式
             max_loop_count: 最大循环次数
-            **kwargs: 其他配置参数
         """
         # 生成与preset_running_agent_config.json格式一致的配置
         current_time = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
@@ -170,18 +167,6 @@ class SessionContext:
                 "maxTokens": model_config.get("max_tokens", ""),
                 "temperature": model_config.get("temperature", "")
             }
-
-        # 尝试从model参数（OpenAI客户端）中提取API key和base URL
-        if model and hasattr(model, 'api_key') and hasattr(model, 'base_url'):
-            try:
-                # 从OpenAI客户端实例中提取配置信息
-                if hasattr(model, 'api_key') and model.api_key:
-                    llm_config["api_key"] = model.api_key
-                if hasattr(model, 'base_url') and model.base_url:
-                    llm_config["base_url"] = str(model.base_url)
-                logger.debug("SessionContext: 从OpenAI客户端提取API配置信息")
-            except Exception as e:
-                logger.warning(f"SessionContext: 提取API配置信息失败: {e}")
 
         self.agent_config = {
             "id": str(int(time.time() * 1000)),  # 使用时间戳作为ID
@@ -542,14 +527,30 @@ def get_session_messages(session_id: str) -> List[MessageChunk]:
     return messages
 
 
-def init_session_context(session_id: str, workspace_root: str, user_id: Optional[str] = None, context_budget_config: Optional[Dict[str, Any]] = None, user_memory_manager: Optional[Any] = None, tool_manager: Optional[Any] = None) -> SessionContext:
+def init_session_context(
+    session_id: str,
+    workspace_root: str,
+    user_id: Optional[str] = None,
+    context_budget_config: Optional[Dict[str, Any]] = None,
+    user_memory_manager: Optional[Any] = None,
+    tool_manager: Optional[Any] = None,
+    skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
+) -> SessionContext:
     """初始化会话上下文"""
     if session_id in _active_sessions:
         # 如果提供了tool_manager，更新现有会话的tool_manager
         if tool_manager:
             _active_sessions[session_id].tool_manager = tool_manager
         return _active_sessions[session_id]
-    _active_sessions[session_id] = SessionContext(session_id, user_id, workspace_root, context_budget_config=context_budget_config, user_memory_manager=user_memory_manager, tool_manager=tool_manager)
+    _active_sessions[session_id] = SessionContext(
+        session_id,
+        user_id,
+        workspace_root,
+        context_budget_config=context_budget_config,
+        user_memory_manager=user_memory_manager,
+        tool_manager=tool_manager,
+        skill_manager=skill_manager,
+    )
     return _active_sessions[session_id]
 
 

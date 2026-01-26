@@ -20,6 +20,9 @@ Welcome to the comprehensive documentation for Sage Multi-Agent Framework v0.9 -
 | [📖 API Reference](API_REFERENCE.html) | [📖 API 参考](API_REFERENCE_CN.html) |
 | [🎯 Examples & Use Cases](EXAMPLES.html) | [🎯 示例和用例](EXAMPLES_CN.html) |
 | [⚙️ Configuration Reference](CONFIGURATION.html) | [⚙️ 配置参考](CONFIGURATION_CN.html) |
+| [🚀 Server Deployment Guide](SERVER_DEPLOYMENT.html) | [🚀 Server 部署指南](SERVER_DEPLOYMENT_CN.html) |
+| [📖 Examples Usage Guide](EXAMPLES_USAGE.html) | [📖 示例使用指南](EXAMPLES_USAGE_CN.html) |
+| [📅 Changelog](CHANGELOG.html) | [📅 更新日志](CHANGELOG_CN.html) |
 
 {: .note }
 > **选择语言 / Choose Language**: 所有文档都提供中英文双语版本。All documentation is available in both Chinese and English.
@@ -234,13 +237,12 @@ await tool_manager.register_mcp_server("custom_server", {
 
 ### Custom Tool Development
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 
-class CustomTool(ToolBase):
-    @ToolBase.tool()
+class CustomTool:
+    @tool()
     def analyze_data(self, data: str, format: str = "json") -> dict:
         """Custom data analysis tool"""
-        # Implementation here
         return {"result": "analysis_complete"}
 ```
 

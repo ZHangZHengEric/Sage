@@ -268,45 +268,30 @@ print(f"\n✅ 流式处理完成！最终token计数: {total_tokens}")
 
 ```python
 # custom_tools/advanced_weather_tool.py
-from agents.tool.tool_base import ToolBase
-from typing import Dict, Any, Optional
-import requests
+from sagents.tool.tool_base import tool
+from typing import Dict, Any
 import time
 
-@ToolBase.register_tool
-class WeatherAnalysisTool(ToolBase):
+class WeatherAnalysisTool:
     """带缓存和验证的高级天气分析工具"""
-    
-    def __init__(self):
-        super().__init__(
-            name="weather_analysis",
-            description="获取带预测和趋势的全面天气分析",
-            parameters={
-                "city": {
-                    "type": "string",
-                    "description": "城市名称",
-                    "required": True
-                },
-                "days": {
-                    "type": "integer",
-                    "description": "预测天数 (1-7)",
-                    "minimum": 1,
-                    "maximum": 7,
-                    "default": 3
-                },
-                "include_trends": {
-                    "type": "boolean",
-                    "description": "包含历史趋势分析",
-                    "default": False
-                }
-            }
-        )
-    
-    def execute(self, 
-                city: str, 
-                days: int = 3,
-                include_trends: bool = False,
-                **kwargs) -> Dict[str, Any]:
+
+    @tool(
+        description_i18n={
+            "zh": "获取带预测和趋势的全面天气分析",
+            "en": "Get comprehensive weather analysis with forecasts and trends"
+        },
+        param_description_i18n={
+            "city": {"zh": "城市名称", "en": "Name of the city"},
+            "days": {"zh": "预测天数 (1-7)", "en": "Number of forecast days (1-7)"},
+            "include_trends": {"zh": "包含历史趋势分析", "en": "Include historical trends analysis"}
+        }
+    )
+    def weather_analysis(
+        self,
+        city: str,
+        days: int = 3,
+        include_trends: bool = False
+    ) -> Dict[str, Any]:
         """执行带增强错误处理的天气分析"""
         start_time = time.time()
         

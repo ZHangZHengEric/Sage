@@ -17,6 +17,8 @@ from .manager import UserMemoryManager
 from .interfaces import IMemoryDriver
 from .drivers.tool import ToolMemoryDriver
 from .drivers.vector import VectorMemoryDriver
+from .extractor import MemoryExtractor
+
 
 __all__ = [
     'MemoryType',
@@ -25,7 +27,8 @@ __all__ = [
     'UserMemoryManager',
     'IMemoryDriver',
     'ToolMemoryDriver',
-    'VectorMemoryDriver'
+    'VectorMemoryDriver',
+    'MemoryExtractor'
 ]
 
 __version__ = '1.0.0'

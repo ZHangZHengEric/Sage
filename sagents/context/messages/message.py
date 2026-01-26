@@ -37,6 +37,11 @@ class MessageType(Enum):
     TOOL_CALL = "tool_call"
     TOOL_CALL_RESULT = "tool_call_result"  # 兼容现有代码
     
+    # 技能相关
+    SKILL_SELECT_RESULT = "skill_select_result"
+    SKILL_EXECUTION_RESULT = "skill_execution_result"
+    SKILL_OBSERVATION = "skill_observation"
+    SKILL_MISS = "skill_miss"
     # 其他类型
     THINKING = "thinking"
     ERROR = "error"

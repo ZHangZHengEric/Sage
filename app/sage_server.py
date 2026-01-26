@@ -30,15 +30,12 @@ print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sagents.context.session_context import get_session_context
 from sagents.sagents import SAgent
-from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.logger import logger
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
 from sagents.utils.evaluations.checkpoint_generation import CheckpointGenerationAgent
 from sagents.utils.evaluations.score_evaluation import AgentScoreEvaluator
-
-
 
 
 parser = argparse.ArgumentParser(description="Sage Stream Service")
@@ -442,21 +439,20 @@ tool_manager: Optional[ToolManager] = None
 default_model_client: Optional[AsyncOpenAI] = None
 
 
-
 async def initialize_tool_manager():
     """异步初始化工具管理器"""
     # 创建工具管理器实例，但不自动发现工具
     manager = ToolManager.get_instance(is_auto_discover=False)
-    
+
     # 手动进行基础工具发现
-    manager._auto_discover_tools()
-    
+    manager.discover_tools_from_path()
+
     # 设置 MCP 配置路径
     manager._mcp_setting_path = os.environ.get('SAGE_MCP_CONFIG_PATH', 'mcp_setting.json')
-    
+
     # 异步发现 MCP 工具
     await manager._discover_mcp_tools(mcp_setting_path=manager._mcp_setting_path)
-    
+
     return manager
 
 async def initialize_system(server_args):
@@ -1121,7 +1117,7 @@ async def interrupt_session(session_id: str, request: Optional[InterruptRequest]
         logger.error(f"中断会话失败: {e}")
         raise HTTPException(status_code=500, detail=f"中断会话失败: {str(e)}")
 
-# 获取指定seesion id 的当前的任务管理器中的任务状态信息 
+# 获取指定seesion id 的当前的任务管理器中的任务状态信息
 @app.post("/api/sessions/{session_id}/tasks_status")
 async def get_session_status(session_id: str):
     """获取指定会话的状态"""
@@ -1481,7 +1477,7 @@ async def optimize_system_prompt(request: SystemPromptOptimizeRequest, response:
             success=False,
             message=f"系统提示词优化失败: {str(e)}"
         )
-        
+
 def get_agent_config_tools(availableTools):
     tools = []
     for tool_name in availableTools:
@@ -1577,7 +1573,7 @@ async def evaluate_agent_result(request: ScoreEvaluationRequest, response: Respo
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"评估Agent结果失败: {str(e)}")
 
-        
+
 try:
     from fastapi.middleware.wsgi import WSGIMiddleware
     from wsgidav.wsgidav_app import WsgiDAVApp
@@ -1604,7 +1600,6 @@ try:
         app.mount("/webdav", WSGIMiddleware(webdav_app))
 except Exception as e:
     logger.warning(f"WebDAV 挂载失败: {str(e)}, 请检查ENABLE_DEBUG_WEBDAV环境变量是否设置为True")
-
 
 
 if __name__ == "__main__":

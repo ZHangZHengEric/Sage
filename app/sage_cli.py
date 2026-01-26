@@ -15,8 +15,7 @@ from rich.console import Console
 from sagents.context.messages.message import MessageChunk, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.sagents import SAgent
-from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_proxy import ToolProxy
+from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
 from sagents.utils.streaming_message_box import (
     StreamingMessageBox,

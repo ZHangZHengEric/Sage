@@ -14,7 +14,7 @@ import traceback
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from datetime import datetime
-from .tool_base import ToolBase
+from .tool_base import tool
 from sagents.utils.logger import logger
 
 try:
@@ -74,7 +74,7 @@ except ImportError:
 """
 
 
-class MemoryTool(ToolBase):
+class MemoryTool:
     """记忆管理工具 - 简化的记忆操作接口（以user_id为索引）"""
 
     def __init__(self):
@@ -83,7 +83,6 @@ class MemoryTool(ToolBase):
 
         不在初始化时获取环境变量，而是在使用时动态获取
         """
-        super().__init__()
 
     def _validate_memory_data(self, memory_key: Optional[str] = None, content: Optional[str] = None,
                               tags: Optional[List[str]] = None, memories: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
@@ -493,7 +492,7 @@ class MemoryTool(ToolBase):
         matches.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         return matches[:limit]
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "记录用户记忆条目",
             "en": "Record a user memory entry",
@@ -589,7 +588,7 @@ class MemoryTool(ToolBase):
             logger.error(f"记录记忆失败 {user_id}: {e}")
             return self._format_response(False, "记录记忆失败", error=str(e))
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "按类型检索用户记忆",
             "en": "Recall user memories by type",
@@ -700,7 +699,7 @@ class MemoryTool(ToolBase):
             logger.error(f"按类型搜索记忆失败 {user_id}: {e}")
             return self._format_response(False, "搜索记忆失败", error=str(e))
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "根据关键词搜索用户记忆",
             "en": "Search user memories by keywords",
@@ -782,7 +781,7 @@ class MemoryTool(ToolBase):
             logger.error(f"搜索记忆失败 {user_id}: {e}")
             return self._format_response(False, "搜索记忆失败", error=str(e))
 
-    @ToolBase.tool(
+    @tool(
         description_i18n={
             "zh": "删除指定的用户记忆",
             "en": "Delete a specific user memory",

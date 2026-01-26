@@ -23,7 +23,6 @@ class SimpleAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
 
-        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix')
         # 最大循环次数常量
         self.max_loop_count = 10
         self.agent_name = "SimpleAgent"
@@ -38,7 +37,9 @@ class SimpleAgent(AgentBase):
             return
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
-        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix', language=session_context.get_language())
+        current_system_prefix = PromptManager().get_agent_prompt_auto(
+            "agent_custom_system_prefix", language=session_context.get_language()
+        )
 
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
@@ -54,7 +55,11 @@ class SimpleAgent(AgentBase):
         # 准备工具列表
         tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
         # 将system 加入到到messages中
-        system_message = self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix, language=session_context.get_language())
+        system_message = self.prepare_unified_system_message(
+            session_id,
+            custom_prefix=current_system_prefix,
+            language=session_context.get_language(),
+        )
         history_messages.insert(0, system_message)
         async for chunk in self._execute_loop(
             messages_input=history_messages,
@@ -146,7 +151,7 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            return result['task_interrupted']
+            return result.get('task_interrupted', False)
         except json.JSONDecodeError:
             logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
             return False
@@ -187,12 +192,19 @@ class SimpleAgent(AgentBase):
             # 准备消息
             clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
 
+            # 重新获取agent_custom_system_prefix以支持动态语言切换
+            current_system_prefix = PromptManager().get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language())
+
             # 生成提示
             tool_suggestion_template = PromptManager().get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
             prompt = tool_suggestion_template.format(
                 session_id=session_id,
                 available_tools_str=available_tools_str,
-                agent_config=self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix, language=session_context.get_language()).content,
+                agent_config=self.prepare_unified_system_message(
+                    session_id,
+                    custom_prefix=current_system_prefix,
+                    language=session_context.get_language(),
+                ).content,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
 
@@ -442,39 +454,6 @@ class SimpleAgent(AgentBase):
                 message_type=MessageType.DO_SUBTASK_RESULT.value
             )]
             yield (output_messages, False)
-
-    def _handle_tool_calls_chunk(self,
-                                 chunk,
-                                 tool_calls: Dict[str, Any],
-                                 last_tool_call_id: str) -> None:
-        """
-        处理工具调用数据块
-
-        Args:
-            chunk: LLM响应块
-            tool_calls: 工具调用字典
-            last_tool_call_id: 最后的工具调用ID
-        """
-        for tool_call in chunk.choices[0].delta.tool_calls:
-            if tool_call.id is not None and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id
-
-            if last_tool_call_id not in tool_calls:
-                logger.info(f"SimpleAgent: 检测到新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                tool_calls[last_tool_call_id] = {
-                    'id': last_tool_call_id,
-                    'type': tool_call.type,
-                    'function': {
-                        'name': tool_call.function.name or "",
-                        'arguments': tool_call.function.arguments if tool_call.function.arguments else ""
-                    }
-                }
-            else:
-                if tool_call.function.name:
-                    logger.info(f"SimpleAgent: 更新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                    tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
-                if tool_call.function.arguments:
-                    tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],

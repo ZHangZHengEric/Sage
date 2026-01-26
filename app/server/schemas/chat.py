@@ -1,5 +1,7 @@
-from typing import List, Dict, Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
+
 from pydantic import BaseModel
+
 
 class Message(BaseModel):
     role: str
@@ -35,6 +37,7 @@ class StreamRequest(BaseChatRequest):
     llm_model_config: Optional[Dict[str, Any]] = None
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
+    available_skills: Optional[List[str]] = None
     force_summary: Optional[bool] = False
 
 

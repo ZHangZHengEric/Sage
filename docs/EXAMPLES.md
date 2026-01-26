@@ -144,12 +144,12 @@ result = controller.run(messages, tool_manager, deep_research=True)
 ### Calculator Tool (Built-in Example)
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 
-class Calculator(ToolBase):
+class Calculator:
     """A collection of mathematical calculation tools"""
     
-    @ToolBase.tool()
+    @tool()
     def calculate(self, expression: str) -> dict:
         """
         Evaluate a mathematical expression
@@ -167,7 +167,7 @@ class Calculator(ToolBase):
         except Exception as e:
             return {"error": str(e), "expression": expression, "status": "error"}
 
-    @ToolBase.tool()
+    @tool()
     def factorial(self, n: int) -> dict:
         """
         Calculate the factorial of a number
@@ -188,13 +188,13 @@ class Calculator(ToolBase):
 ### Custom API Tool
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 import requests
 
-class APITool(ToolBase):
+class APITool:
     """Example API integration tool"""
     
-    @ToolBase.tool()
+    @tool()
     def fetch_data(self, url: str, method: str = "GET") -> dict:
         """
         Fetch data from an API endpoint

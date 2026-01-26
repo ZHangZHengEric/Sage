@@ -1,17 +1,16 @@
-from typing import Optional
+
+from fastapi import APIRouter, Request
 
 from ..core.render import Response
-from fastapi import APIRouter, Request
 from ..schemas.base import BaseResponse
 from ..schemas.user import (
-    RegisterRequest, 
-    RegisterResponse, 
-    LoginRequest, 
-    LoginResponse, 
-    UserInfoResponse
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    RegisterResponse,
+    UserInfoResponse,
 )
-from ..service.user import login_user, register_user
-
+from ..services.user import login_user, register_user
 
 user_router = APIRouter(prefix="/api/user", tags=["User"])
 

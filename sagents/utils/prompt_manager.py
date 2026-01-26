@@ -135,8 +135,7 @@ class PromptManager:
                 # 提取agent名称（去掉_PROMPTS_PT后缀），保持原始大小写
                 agent_name = module_key[:-11]  # 去掉"_PROMPTS_PT"
                 self.agent_prompts_pt[agent_name] = module_content
-        
-        logger.info(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个")
+        print(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个")
     
     
     def get_prompt(self, key: str, default: Optional[str] = None, agent: Optional[str] = None, language: str = 'zh') -> str:
@@ -311,6 +310,11 @@ class PromptManager:
                     # 跳过PromptManager自身
                     if class_name == 'PromptManager':
                         continue
+                    if class_name == 'AgentRuntime':
+                        # 如果是AgentRuntime包装的，尝试获取内部agent的类名
+                        agent_runtime = caller_locals['self']
+                        if hasattr(agent_runtime, 'agent'):
+                            class_name = agent_runtime.agent.__class__.__name__
                     # 直接返回类名，不进行格式转换
                     logger.debug(f"自动获取到类名: {class_name}")
                     return class_name

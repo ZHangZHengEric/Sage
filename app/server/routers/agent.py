@@ -4,10 +4,11 @@ Agent 相关路由
 
 from typing import Any, Dict, List, Optional
 
-from ..core.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from ..service.agent import (
+
+from ..core.render import Response
+from ..services.agent import (
     auto_generate_agent,
     create_agent,
     delete_agent,
@@ -16,8 +17,6 @@ from ..service.agent import (
     optimize_system_prompt,
     update_agent,
 )
-
-from loguru import logger
 
 # ============= Agent相关模型 =============
 
@@ -29,6 +28,7 @@ class AgentConfigDTO(BaseModel):
     systemContext: Optional[Dict[str, Any]] = None
     availableWorkflows: Optional[Dict[str, List[str]]] = None
     availableTools: Optional[List[str]] = None
+    availableSkills: Optional[List[str]] = None
     maxLoopCount: Optional[int] = 10
     deepThinking: Optional[bool] = False
     llmConfig: Optional[Dict[str, Any]] = None
@@ -60,6 +60,7 @@ def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfi
         availableWorkflows=config.get("availableWorkflows")
         or config.get("available_workflows"),
         availableTools=config.get("availableTools") or config.get("available_tools"),
+        availableSkills=config.get("availableSkills") or config.get("available_skills"),
         maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
@@ -78,6 +79,7 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "systemContext": agent.systemContext,
         "availableWorkflows": agent.availableWorkflows,
         "availableTools": agent.availableTools,
+        "availableSkills": agent.availableSkills,
         "maxLoopCount": agent.maxLoopCount,
         "deepThinking": agent.deepThinking,
         "multiAgent": agent.multiAgent,
