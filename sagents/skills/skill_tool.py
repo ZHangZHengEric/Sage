@@ -97,16 +97,22 @@ class SkillTools:
         """
         full_path = file_path
         if self.agent_workspace:
-            if os.path.isabs(file_path):
-                return f"Error: Absolute paths are not allowed. Please use a path relative to the workspace."
-            full_path = os.path.join(self.agent_workspace, file_path)
+            # Convert to absolute path if it's not already
+            if not os.path.isabs(file_path):
+                 full_path = os.path.join(self.agent_workspace, file_path)
+            
+            # Verify the path is within the workspace (optional safety, but good practice)
+            # abs_workspace = os.path.abspath(self.agent_workspace)
+            # abs_file_path = os.path.abspath(full_path)
+            # if not abs_file_path.startswith(abs_workspace):
+            #     return f"Error: File path must be within the agent workspace: {self.agent_workspace}"
         
         try:
             # Create directories if needed
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            return f"Success: File '{file_path}' written."
+            return f"Success: File '{full_path}' written."
         except Exception as e:
             return f"Error writing file: {e}"
 
@@ -116,14 +122,13 @@ class SkillTools:
         """
         full_path = file_path
         if self.agent_workspace:
-            if os.path.isabs(file_path):
-                return f"Error: Absolute paths are not allowed. Please use a path relative to the workspace."
-            full_path = os.path.join(self.agent_workspace, file_path)
+            if not os.path.isabs(file_path):
+                 full_path = os.path.join(self.agent_workspace, file_path)
         
         path = full_path
         
         if not os.path.exists(path):
-            return f"Error: File '{file_path}' not found."
+            return f"Error: File '{path}' not found."
             
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -166,7 +171,7 @@ class SkillTools:
                         "type": "object",
                         "properties": {
                             "skill_name": {"type": "string", "description": "技能名称"},
-                            "file_path": {"type": "string", "description": "文件相对路径 (如 'forms.md')"},
+                            "file_path": {"type": "string", "description": "文件路径 (推荐使用绝对路径)"},
                         },
                         "required": ["skill_name", "file_path"],
                     },
@@ -181,7 +186,7 @@ class SkillTools:
                         "type": "object",
                         "properties": {
                             "skill_name": {"type": "string", "description": "技能名称"},
-                            "script_path": {"type": "string", "description": "工作空间内的脚本相对路径"},
+                            "script_path": {"type": "string", "description": "工作空间内的脚本路径 (推荐使用绝对路径)"},
                             "args": {"type": "array", "items": {"type": "string"}, "description": "脚本参数列表"},
                             "install_cmd": {"type": "string", "description": "运行脚本前需要执行的依赖安装命令 (例如 'pip install pandas' 或 'npm install')"},
                         },
@@ -193,11 +198,11 @@ class SkillTools:
                 "type": "function",
                 "function": {
                     "name": "write_temp_file",
-                    "description": "在指定路径创建或覆盖临时文件（请使用相对路径）。",
+                    "description": "在指定路径创建或覆盖临时文件（推荐使用绝对路径）。",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "file_path": {"type": "string", "description": "文件路径 (请使用相对路径)"},
+                            "file_path": {"type": "string", "description": "文件路径 (推荐使用绝对路径)"},
                             "content": {"type": "string", "description": "文件内容"},
                         },
                         "required": ["file_path", "content"],

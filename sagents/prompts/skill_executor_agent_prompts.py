@@ -32,8 +32,8 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
 3. **错误处理**: 如果工具执行出错，请不要直接放弃。分析错误信息，尝试修正参数或路径，然后重试。
 4. **最终输出**: 当任务完成时，请生成一个清晰的观察结果（Observation），总结你所做的工作和最终结果。
 5. **语言**: 请始终使用中文回答。
-6. **文件路径**: `read_skill_file`，`write_temp_file`，`run_skill_script` 仅支持相对路径，文件路径应相对于工作空间根目录。
-7. **依赖管理**: `run_skill_script` 可以执行任何在 SCRIPT_CONTEXT 中定义的脚本，需要提供所有依赖项的安装命令。
+6. **文件路径**: `read_skill_file`，`write_temp_file`，`run_skill_script` 请使用绝对路径。
+7. **依赖管理**: `run_skill_script` 可以执行任何在 SCRIPT_CONTEXT 中定义的脚本，需要在参数重提供所有依赖项的安装命令。
 8. **脚本安全**: 所有脚本都在沙箱环境中执行，不能执行系统命令或访问敏感文件。
 
 ## 限制
@@ -70,7 +70,7 @@ Before executing each step, please follow this thinking process:
 2. **Tool Usage**: Use the provided tools to interact with the file system or run scripts.
 3. **Error Handling**: If a tool execution fails, do not give up immediately. Analyze the error message, try to correct parameters or paths, and retry.
 4. **Final Output**: When the task is completed, generate a clear Observation summarizing what you have done and the final result.
-5. **File Paths**: `write_temp_file` and `edit_temp_file` only support relative paths, which should be relative to the workspace root directory.
+5. **File Paths**: `write_temp_file` and `edit_temp_file` use absolute paths.
 6. **Dependencies**: `run_skill_script` can execute any script defined in SCRIPT_CONTEXT, but you need to provide installation commands for all dependencies.
 7. **Script Safety**: All scripts run in a sandbox environment, cannot execute system commands or access sensitive files.
 
@@ -90,12 +90,12 @@ Do your best to fulfill all requirements in the Core Instructions.
 ## Fluxo de Execução (Processo de Pensamento)
 Antes de executar cada etapa, siga este processo de pensamento:
 1. **Analisar**: Entenda a etapa atual da instrução e o contexto recente.
-2.88→2. **Planejar**: Decida a próxima ação. Use `read_skill_file` para recuperar informações. Use `write_temp_file` ou `edit_temp_file` para modificar arquivos. Use `run_skill_script` para executar lógica.
+2. **Planejar**: Decida a próxima ação. Use `read_skill_file` para recuperar informações. Use `write_temp_file` ou `edit_temp_file` para modificar arquivos. Use `run_skill_script` para executar lógica.
 3. **Executar**: Chame a ferramenta apropriada.
 4. **Observar**: Verifique a saída da ferramenta. Se for bem-sucedido, prossiga. Se falhar, analise a causa e tente corrigir.
 5. **Verificar**: Certifique-se de que todas as etapas da instrução foram concluídas.
-7. **Gerenciamento de Dependências**: `run_skill_script` pode executar qualquer script definido em SCRIPT_CONTEXT, mas você precisa fornecer comandos de instalação para todas as dependências.
-8. **Segurança de Scripts**: Todos os scripts são executados em um ambiente de sandbox, não podem executar comandos de sistema ou acessar arquivos sensíveis.
+6. **Gerenciamento de Dependências**: `run_skill_script` pode executar qualquer script definido em SCRIPT_CONTEXT, mas você precisa fornecer comandos de instalação para todas as dependências.
+7. **Segurança de Scripts**: Todos os scripts são executados em um ambiente de sandbox, não podem executar comandos de sistema ou acessar arquivos sensíveis.
 
 
 ## Notas
@@ -104,6 +104,7 @@ Antes de executar cada etapa, siga este processo de pensamento:
 3. **Tratamento de Erros**: Se a execução de uma ferramenta falhar, não desista imediatamente. Analise a mensagem de erro, tente corrigir parâmetros ou caminhos e tente novamente.
 4. **Saída Final**: Quando a tarefa for concluída, gere uma Observação clara resumindo o que você fez e o resultado final.
 5. **Idioma**: Por favor, responda sempre em português.
+6. **Caminhos de Arquivo**: `write_temp_file` e `edit_temp_file` usam caminhos absolutos.
 
 ## Objetivo
 Faça o seu melhor para cumprir todos os requisitos nas Instruções Principais.
