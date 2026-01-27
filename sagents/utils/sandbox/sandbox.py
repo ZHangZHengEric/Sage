@@ -151,14 +151,19 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
         if os.path.exists(working_dir):
             os.chdir(working_dir)
 
+        # Setup isolated environment
+        _setup_sandbox_env(working_dir, env)
+
         normalized_requirements = _normalize_requirements(requirements)
         if normalized_requirements:
-            _install_requirements(normalized_requirements, stdout_capture, stderr_capture)
+            _install_requirements(normalized_requirements, stdout_capture, stderr_capture, env=env)
             
         if install_cmd:
             _run_install_cmd(install_cmd, stdout_capture, stderr_capture, env=env)
 
-        # 自动配置 NODE_PATH 以支持全局安装的 npm 包
+        # 自动配置 NODE_PATH 以支持全局安装的 npm 包 (Retain logic but adapt to new env if needed, though _setup_sandbox_env handles PATH)
+        # Note: _setup_sandbox_env sets NPM_CONFIG_PREFIX, so `npm install -g` goes there.
+        # We still check for NODE_PATH compatibility just in case.
         try:
             import subprocess
             npm_proc = subprocess.run(
@@ -191,11 +196,50 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
                         ['node', script_path, *args],
                         capture_output=True,
                         text=True,
-                        cwd=script_dir,
+                        cwd=working_dir,
                         env=env
                     )
                 except FileNotFoundError:
                     raise Exception("Node.js environment not found, please install Node.js first (Node.js 环境未找到，请先安装 Node.js)")
+
+                if result.stdout:
+                    stdout_capture.write(result.stdout)
+                if result.stderr:
+                    stderr_capture.write(result.stderr)
+                if result.returncode != 0:
+                    raise Exception(f"Script exited with code {result.returncode}")
+            elif extension == '.py':
+                import subprocess
+                python_exec = sys.executable or 'python3'
+                try:
+                    result = subprocess.run(
+                        [python_exec, script_path, *args],
+                        capture_output=True,
+                        text=True,
+                        cwd=working_dir,
+                        env=env
+                    )
+                except FileNotFoundError:
+                    raise Exception("Python environment not found, please install Python first (Python 环境未找到，请先安装 Python)")
+
+                if result.stdout:
+                    stdout_capture.write(result.stdout)
+                if result.stderr:
+                    stderr_capture.write(result.stderr)
+                if result.returncode != 0:
+                    raise Exception(f"Script exited with code {result.returncode}")
+            elif extension == '.go':
+                import subprocess
+                try:
+                    result = subprocess.run(
+                        ['go', 'run', script_path, *args],
+                        capture_output=True,
+                        text=True,
+                        cwd=working_dir,
+                        env=env
+                    )
+                except FileNotFoundError:
+                    raise Exception("Go environment not found, please install Go first (Go 环境未找到，请先安装 Go)")
 
                 if result.stdout:
                     stdout_capture.write(result.stdout)
@@ -211,7 +255,7 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
                         [shell_cmd, script_path, *args],
                         capture_output=True,
                         text=True,
-                        cwd=script_dir,
+                        cwd=working_dir,
                         env=env
                     )
                 except FileNotFoundError:
@@ -226,8 +270,7 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
             else:
                 with open(script_path, 'r', encoding='utf-8') as f:
                     script_content = f.read()
-                
-                # Ensure script directory is in sys.path for local imports
+
                 if script_dir not in sys.path:
                     sys.path.insert(0, script_dir)
 
@@ -250,15 +293,83 @@ def _restricted_script_execution(script_path: str, args: list, requirements: Opt
             'output': stdout_capture.getvalue() + stderr_capture.getvalue()
         })
 
+def _restricted_shell_execution(command: str, result_queue: multiprocessing.Queue, limits: Dict[str, Any], cwd: Optional[str] = None):
+    """
+    Internal function to run shell command in a separate process.
+    """
+    import io
+    import subprocess
+    from contextlib import redirect_stdout, redirect_stderr
+    
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    
+    env = os.environ.copy()
+    env['npm_config_registry'] = 'https://registry.npmmirror.com'
+    env['PLAYWRIGHT_DOWNLOAD_HOST'] = 'https://npmmirror.com/mirrors/playwright/'
+
+    try:
+        working_dir = cwd if cwd else os.getcwd()
+        if os.path.exists(working_dir):
+            os.chdir(working_dir)
+            
+        # Setup isolated environment
+        _setup_sandbox_env(working_dir, env)
+            
+        _apply_limits(limits, restrict_files=False)
+        
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=working_dir,
+            env=env
+        )
+        
+        if result.stdout:
+            stdout_capture.write(result.stdout)
+        if result.stderr:
+            stderr_capture.write(result.stderr)
+            
+        if result.returncode != 0:
+             raise Exception(f"Command exited with code {result.returncode}")
+             
+        result_queue.put({
+            'status': 'success', 
+            'result': stdout_capture.getvalue() + stderr_capture.getvalue()
+        })
+        
+    except Exception as e:
+        result_queue.put({
+            'status': 'error', 
+            'error': str(e), 
+            'traceback': traceback.format_exc(),
+            'output': stdout_capture.getvalue() + stderr_capture.getvalue()
+        })
+
 def _restricted_module_execution(module_path: str, func_name: str, requirements: Optional[list], args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, limits: Dict[str, Any]):
     """
     Internal function to run code from a module in a separate process with resource limits.
     """
     import importlib.util
     try:
+        # For module execution, we assume the module's directory is the working directory for env setup
+        working_dir = os.path.dirname(os.path.abspath(module_path))
+        
+        # Setup env (though we can't easily change os.environ for the current process effectively for importlib 
+        # if libraries are already loaded, but we can update sys.path)
+        env = os.environ.copy()
+        _setup_sandbox_env(working_dir, env)
+        
+        # Add isolated pylibs to sys.path
+        pylibs_dir = env.get('PIP_TARGET')
+        if pylibs_dir and pylibs_dir not in sys.path:
+            sys.path.insert(0, pylibs_dir)
+            
         normalized_requirements = _normalize_requirements(requirements)
         if normalized_requirements:
-            _install_requirements(normalized_requirements, None, None)
+            _install_requirements(normalized_requirements, None, None, env=env)
             _apply_limits(limits, restrict_files=False)
         else:
             _apply_limits(limits)
@@ -339,17 +450,46 @@ def _normalize_requirements(requirements: Optional[list]) -> List[str]:
         raise Exception("requirements 必须是字符串列表")
     return [r.strip() for r in requirements if isinstance(r, str) and r.strip()]
 
-def _install_requirements(requirements: List[str], stdout_capture: Optional[Any], stderr_capture: Optional[Any]):
+def _setup_sandbox_env(working_dir: str, env: Dict[str, str]):
+    """
+    Setup isolated environment variables for the sandbox.
+    """
+    # Node.js isolation
+    npm_global_dir = os.path.join(working_dir, ".npm_global")
+    npm_bin_dir = os.path.join(npm_global_dir, "bin")
+    env['NPM_CONFIG_PREFIX'] = npm_global_dir
+    
+    # Python isolation
+    # We use PIP_TARGET to install packages into a local directory
+    # and add it to PYTHONPATH.
+    pylibs_dir = os.path.join(working_dir, ".pylibs")
+    env['PIP_TARGET'] = pylibs_dir
+    
+    # Update PATH and PYTHONPATH
+    current_path = env.get('PATH', '')
+    env['PATH'] = f"{npm_bin_dir}{os.pathsep}{pylibs_dir}/bin{os.pathsep}{current_path}"
+    
+    current_pythonpath = env.get('PYTHONPATH', '')
+    env['PYTHONPATH'] = f"{pylibs_dir}{os.pathsep}{working_dir}{os.pathsep}{current_pythonpath}"
+
+def _install_requirements(requirements: List[str], stdout_capture: Optional[Any], stderr_capture: Optional[Any], env: Optional[Dict[str, str]] = None):
     if not requirements:
         return
     import subprocess
     python_exec = sys.executable or "python3"
     mirror = "https://mirrors.aliyun.com/pypi/simple"
+    
+    install_env = env or os.environ.copy()
+    
     for requirement in requirements:
+        # Note: If env contains PIP_TARGET, pip will automatically use it.
+        cmd = [python_exec, "-m", "pip", "install", requirement, "-i", mirror]
+        
         result = subprocess.run(
-            [python_exec, "-m", "pip", "install", requirement, "-i", mirror],
+            cmd,
             capture_output=True,
-            text=True
+            text=True,
+            env=install_env
         )
         if stdout_capture is not None and result.stdout:
             stdout_capture.write(result.stdout)
@@ -445,6 +585,32 @@ class Sandbox:
                 output = result.get('output')
                 output_block = f"\n{output}" if output else ""
                 raise SandboxError(f"Error in sandboxed script: {result.get('error')}\n{result.get('traceback')}{output_block}")
+        else:
+            if process.exitcode is not None and process.exitcode != 0:
+                raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
+            raise SandboxError("Sandboxed process died unexpectedly")
+
+    def run_shell_command(self, command: str, cwd: Optional[str] = None) -> str:
+        """
+        Run a raw shell command in the sandbox.
+        """
+        result_queue = multiprocessing.Queue()
+        process = multiprocessing.Process(
+            target=_restricted_shell_execution, 
+            args=(command, result_queue, self.limits, cwd)
+        )
+        
+        process.start()
+        process.join()
+        
+        if not result_queue.empty():
+            result = result_queue.get()
+            if result['status'] == 'success':
+                return result['result']
+            else:
+                output = result.get('output')
+                output_block = f"\n{output}" if output else ""
+                raise SandboxError(f"Error in sandboxed command: {result.get('error')}\n{result.get('traceback')}{output_block}")
         else:
             if process.exitcode is not None and process.exitcode != 0:
                 raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
