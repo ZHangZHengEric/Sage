@@ -208,3 +208,33 @@ class SkillManager:
             if os.path.exists(resource_path):
                 return resource_path
         return None
+
+    def get_skill_file_list(self, name: str, agent_workspace: Optional[str] = None) -> List[str]:
+        """
+        Get a list of relative paths for all files in the skill.
+        e.g., ["scripts/script.py", "data/config.json"]
+        """
+        skill = self.skills.get(name)
+        if not skill:
+            return []
+        
+        base_path = skill.path
+        if agent_workspace:
+            # Ensure agent_workspace is absolute
+            agent_workspace = os.path.abspath(agent_workspace)
+            workspace_path = self.prepare_skill_in_workspace(name, agent_workspace)
+            if workspace_path:
+                base_path = workspace_path
+        
+        file_list = []
+        if os.path.exists(base_path):
+            for root, _, files in os.walk(base_path):
+                for file in files:
+                    if file.startswith('.') or file == 'SKILL.md':
+                        continue
+                    abs_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(abs_path, base_path)
+                    # Normalize to forward slashes
+                    rel_path = rel_path.replace("\\", "/")
+                    file_list.append(rel_path)
+        return sorted(file_list)

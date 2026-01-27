@@ -471,6 +471,9 @@ def _setup_sandbox_env(working_dir: str, env: Dict[str, str]):
     
     current_pythonpath = env.get('PYTHONPATH', '')
     env['PYTHONPATH'] = f"{pylibs_dir}{os.pathsep}{working_dir}{os.pathsep}{current_pythonpath}"
+    
+    # Set non-interactive mode for apt-get
+    env['DEBIAN_FRONTEND'] = 'noninteractive'
 
 def _install_requirements(requirements: List[str], stdout_capture: Optional[Any], stderr_capture: Optional[Any], env: Optional[Dict[str, str]] = None):
     if not requirements:

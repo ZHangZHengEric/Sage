@@ -78,3 +78,7 @@ class SkillProxy:
     def prepare_skill_in_workspace(self, skill_name: str, agent_workspace: str) -> Optional[str]:
         self._check_skill_available(skill_name)
         return self.skill_manager.prepare_skill_in_workspace(skill_name, agent_workspace)
+
+    def get_skill_file_list(self, name: str, agent_workspace: Optional[str] = None) -> List[str]:
+        self._check_skill_available(name)
+        return self.skill_manager.get_skill_file_list(name, agent_workspace)
