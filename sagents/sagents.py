@@ -346,13 +346,12 @@ class SAgent:
                 else:
                     # 直接执行模式：可选的任务分析 + 直接执行
                     logger.info("SAgent: 开始简化工作流")
-                    async for message_chunks in self._execute_skill_agent_phase(
-                        session_context=session_context,
-                        tool_manager=tool_manager,
-                        session_id=session_id,
-                    ):
-                        session_context.message_manager.add_messages(message_chunks)
-                        yield message_chunks
+                    
+                    # 技能执行
+                    if session_context.skill_manager and len(session_context.skill_manager.list_skills()) > 0:
+                        async for message_chunks in self._execute_agent_phase(session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.skill_executor_agent, phase_name="技能处理"):
+                            session_context.message_manager.add_messages(message_chunks)
+                            yield message_chunks
 
                     # 无论技能是否执行，SimpleAgent 都作为通用的 Responder 运行。
                     # 如果技能已执行，Context 中会有 Skill_Observation 将根据 Skill_Observation 生成最终回复。
@@ -495,38 +494,7 @@ class SAgent:
             yield chunk
 
         logger.info(f"SAgent: {phase_name} 阶段完成")
-
-    async def _execute_skill_agent_phase(
-        self, session_context: SessionContext, tool_manager: Optional[Any], session_id: str, execution_status: Optional[Dict[str, bool]] = None
-    ) -> AsyncGenerator[List[MessageChunk], None]:
-        """
-        执行技能阶段
-        """
-        # 检查中断
-        if session_context.status == SessionStatus.INTERRUPTED:
-            logger.info(f"SAgent: 技能阶段被中断，会话ID: {session_id}")
-            return
-
-        if not session_context.skill_manager or len(session_context.skill_manager.list_skills()) == 0:
-            return
-
-        async for message_chunks in self._execute_agent_phase(
-            session_context=session_context,
-            tool_manager=tool_manager,
-            session_id=session_id,
-            agent=self.skill_executor_agent,
-            phase_name="技能执行",
-        ):
-            # 在每个块之间检查中断
-            if session_context.status == SessionStatus.INTERRUPTED:
-                logger.info(f"SAgent: 技能执行 阶段在块处理中被中断，会话ID: {session_id}")
-                return
-            session_context.message_manager.add_messages(message_chunks)
-            yield message_chunks
-
-        if execution_status is not None:
-            execution_status["executed"] = True
-
+    
     def _prepare_initial_messages(self, input_messages: Union[List[Dict[str, Any]], List[MessageChunk]]) -> List[MessageChunk]:
         """
         准备初始消息

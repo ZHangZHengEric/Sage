@@ -56,11 +56,12 @@ class SkillProxy:
 
     def get_skill_description_lines(
         self,
-        style: str = "analysis",
     ) -> List[str]:
         skill_names = self.list_skills()
         filtered = [name for name in skill_names if name in self._available_skills]
-        return self.skill_manager.get_skill_description_lines(filtered, style=style)
+        return self.skill_manager.get_skill_description_lines(filtered)
+
+
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
         self._check_skill_available(name)

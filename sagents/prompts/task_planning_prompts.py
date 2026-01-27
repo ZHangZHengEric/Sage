@@ -35,18 +35,14 @@ planning_template = {
 ## 可用工具
 {available_tools_str}
 
-## 可用技能 (High Level Capabilities)
-{available_skills_str}
-
 ## 规划规则
 1. 根据我们的当前任务以及近期完成工作，为了达到逐步完成任务管理器的未完成子任务或者完整的任务，清晰描述接下来要执行的具体的任务名称。
-2. 如果任务匹配某个可用技能，请在描述中明确提及使用该技能（例如：“使用 PythonSkill 进行...”）。
-3. 确保接下来的任务可执行且可衡量
-4. 优先使用现有工具和技能
-5. 设定明确的成功标准
-6. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
-7. required_tools至少包含5个可能需要的工具的名称，最多10个。
-8. expected_output预期结果描述，不要要求太详细，只需要描述主要的结果即可。
+2. 确保接下来的任务可执行且可衡量
+3. 优先使用现有工具
+4. 设定明确的成功标准
+5. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
+6. required_tools至少包含5个可能需要的工具的名称，最多10个。
+7. expected_output预期结果描述，不要要求太详细，只需要描述主要的结果即可。
 
 ## 输出格式
 ```
@@ -80,17 +76,13 @@ planning_template = {
 ## Available Tools
 {available_tools_str}
 
-## Available Skills (High Level Capabilities)
-{available_skills_str}
-
 ## Planning Rules
 1. Based on our current tasks and recently completed work, clearly describe the specific task name to be executed next.
-2. If a task matches an Available Skill, explicitly mention using that skill in the description (e.g., "Use PythonSkill to...").
-3. Ensure the next task is executable and measurable.
-4. Prioritize using existing tools and skills.
-5. Set clear success criteria.
-6. Only output XML in the following format, do not output other content, do not output ```, <tag> markers must be on separate lines
-7. required_tools should include at least 5 and at most 10 possible tool names needed.
+2. Ensure the next task is executable and measurable.
+3. Prioritize using existing tools.
+4. Set clear success criteria.
+5. Only output XML in the following format, do not output other content, do not output ```, <tag> markers must be on separate lines
+6. required_tools should include at least 5 and at most 10 possible tool names needed.
 
 ## Output Format
 ```
@@ -121,8 +113,6 @@ How to verify completion, one paragraph without line breaks
 ## Trabalho Concluído Recentemente
 {completed_actions}
 
-## Ferramentas Disponíveis
-{available_tools_str}
 
 ## Regras de Planejamento
 1. Com base em nossas tarefas atuais e no trabalho concluído recentemente, descreva claramente o nome específico da tarefa a ser executada em seguida para completar gradualmente as subtarefas não concluídas ou tarefas completas no gerenciador de tarefas.

@@ -1,6 +1,8 @@
 from typing import List, Dict, Any, Optional, AsyncGenerator, Union, cast
 import json
 import uuid
+from copy import deepcopy
+
 from sagents.agent.agent_base import AgentBase
 from sagents.context.session_context import SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
@@ -13,7 +15,12 @@ from sagents.skills.skill_tool import SkillTools
 
 class SkillExecutorAgent(AgentBase):
 
-    def __init__(self, model: Any = None, model_config: Dict[str, Any] = {}, system_prefix: str = ""):
+    def __init__(
+        self,
+        model: Any = None,
+        model_config: Dict[str, Any] = {},
+        system_prefix: str = "",
+    ):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "SkillExecutorAgent"
         self.agent_description = "SkillExecutorAgent: 负责按需加载和执行技能。"
@@ -30,18 +37,22 @@ class SkillExecutorAgent(AgentBase):
                     pass
 
             if not isinstance(args, dict):
-                logger.warning(f"SkillExecutorAgent: Tool arguments parsed to non-dict ({type(args)}). args_str={args_str}")
+                logger.warning(
+                    f"SkillExecutorAgent: Tool arguments parsed to non-dict ({type(args)}). args_str={args_str}"
+                )
                 return {}
             return args
         except Exception as e:
-            logger.warning(f"SkillExecutorAgent: Failed to parse tool arguments: {e}. args_str={args_str}")
+            logger.warning(
+                f"SkillExecutorAgent: Failed to parse tool arguments: {e}. args_str={args_str}"
+            )
             return {}
 
     async def _select_skill(
         self,
         session_id: Optional[str],
         chain_step: int,
-        chain_messages: List[Dict[str, Any]],
+        select_messages: List[Dict[str, Any]],
         all_skill_tool_defs: List[Dict[str, Any]],
         tool_map: Dict[str, Any],
         selection_result: Dict[str, Any],
@@ -51,74 +62,74 @@ class SkillExecutorAgent(AgentBase):
         step1_tool_calls: Dict[str, Any] = {}
         step1_last_tool_call_id: Optional[str] = None
 
-        load_skill_def = next((t for t in all_skill_tool_defs if t["function"]["name"] == "load_skill"), None)
-        message_id = str(uuid.uuid4())
+        load_skill_def = next(
+            (t for t in all_skill_tool_defs if t["function"]["name"] == "load_skill"),
+            None,
+        )
+        content_message_id = str(uuid.uuid4())
         async for chunk in self._call_llm_streaming(
-            messages=chain_messages,
+            messages=select_messages,
             session_id=session_id,
             step_name=f"skill_executor_select_{chain_step}",
-            model_config_override={"tools": [load_skill_def] if load_skill_def else [], "tool_choice": "auto"},
+            model_config_override={
+                "tools": [load_skill_def] if load_skill_def else [],
+                "tool_choice": "auto",
+            },
         ):
-            if chunk is None: continue
-            if chunk.choices is None or len(chunk.choices) == 0: continue
+            if chunk is None:
+                continue
+            if chunk.choices is None or len(chunk.choices) == 0:
+                continue
 
-            step1_chunks.append(chunk)
             delta = chunk.choices[0].delta
 
             if delta.tool_calls:
-                self._handle_tool_calls_chunk(chunk, step1_tool_calls, step1_last_tool_call_id or "")
+                self._handle_tool_calls_chunk(
+                    chunk, step1_tool_calls, step1_last_tool_call_id or ""
+                )
                 for tc in delta.tool_calls:
-                    if tc.id: step1_last_tool_call_id = tc.id
+                    if tc.id:
+                        step1_last_tool_call_id = tc.id
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
                         content="",
                         message_type=MessageType.EMPTY.value,
                         type=MessageType.EMPTY.value,
-                        message_id=str(uuid.uuid4()),
+                        message_id=content_message_id,
                         show_content="",
                     )
                 ]
-
             if delta.content:
-                yield [
-                    MessageChunk(
-                        role=MessageRole.ASSISTANT.value,
-                        content=delta.content,
-                        message_type=MessageType.SKILL_SELECT_RESULT.value,
-                        type=MessageType.SKILL_SELECT_RESULT.value,
-                        message_id=message_id,
-                        show_content=delta.content,
-                    )
-                ]
+                msg_chunk = MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=delta.content,
+                    message_type=MessageType.SKILL_SELECT_RESULT.value,
+                    type=MessageType.SKILL_SELECT_RESULT.value,
+                    message_id=content_message_id,
+                    show_content=delta.content,
+                )
+                yield [msg_chunk]
+                step1_chunks.append(deepcopy(msg_chunk))
 
-        step1_response = self.merge_stream_response_to_non_stream_response(step1_chunks)
-        if not step1_response or not step1_response.choices:
-            return
-
-        step1_assistant_msg = step1_response.choices[0].message
-        chain_messages.append(step1_assistant_msg.model_dump())
+        select_messages = MessageManager.merge_new_messages_to_old_messages(
+            cast(List[Union[MessageChunk, Dict[str, Any]]], step1_chunks),
+            cast(List[Union[MessageChunk, Dict[str, Any]]], select_messages),
+        )
+        step1_chunks = []
 
         if not step1_tool_calls:
             logger.info("SkillExecutorAgent: No skill selected.")
             return
 
-        # Handle Tool Calls
-        tool_calls_dicts = list(step1_tool_calls.values())
-        yield [
-            MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content=step1_assistant_msg.content,
-                tool_calls=tool_calls_dicts,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TOOL_CALL.value,
-            )
-        ]
-
         selected_skill_name = None
         skill_instructions = None
 
-        for tool_call in tool_calls_dicts:
+        for tool_call in list(step1_tool_calls.values()):
+            output_messages = self._create_tool_call_message(tool_call)
+            yield output_messages
+            select_messages.extend(deepcopy(output_messages))
+
             func_name = tool_call["function"]["name"]
             args = self._safe_parse_args(tool_call["function"]["arguments"])
 
@@ -151,8 +162,14 @@ class SkillExecutorAgent(AgentBase):
                     )
                 ]
                 skill_instructions = result
-                chain_messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": confirmation_content})
-        
+                select_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": confirmation_content,
+                    }
+                )
+
         selection_result["skill_name"] = selected_skill_name
         selection_result["instructions"] = skill_instructions
 
@@ -160,7 +177,7 @@ class SkillExecutorAgent(AgentBase):
         self,
         messages_input: List[Union[MessageChunk, Dict[str, Any]]],
         session_id: Optional[str],
-        language: str
+        language: str,
     ) -> bool:
         if not messages_input:
             return False
@@ -181,24 +198,31 @@ class SkillExecutorAgent(AgentBase):
 
         last_user_index = None
         for i, message in enumerate(message_chunks):
-            if message.role == MessageRole.USER.value and (message.type == MessageType.NORMAL.value or message.message_type == MessageType.NORMAL.value):
+            if message.role == MessageRole.USER.value and (
+                message.type == MessageType.NORMAL.value
+                or message.message_type == MessageType.NORMAL.value
+            ):
                 last_user_index = i
         if last_user_index is not None:
             messages_for_complete = message_chunks[last_user_index:]
         else:
             messages_for_complete = message_chunks
-        clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
+        clean_messages = MessageManager.convert_messages_to_dict_for_request(
+            messages_for_complete
+        )
 
-        task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=language)
+        task_complete_template = PromptManager().get_agent_prompt_auto(
+            "task_complete_template", language=language
+        )
         prompt = task_complete_template.format(
             session_id=session_id or "",
-            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
         )
-        messages_input = [{'role': 'user', 'content': prompt}]
+        messages_input = [{"role": "user", "content": prompt}]
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             session_id=session_id,
-            step_name="skill_task_complete_judge"
+            step_name="skill_task_complete_judge",
         )
         all_content = ""
         async for chunk in response:
@@ -209,7 +233,7 @@ class SkillExecutorAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            return result.get('task_interrupted', False)
+            return result.get("task_interrupted", False)
         except json.JSONDecodeError:
             logger.warning("SkillExecutorAgent: 解析任务完成判断响应时JSON解码错误")
             return False
@@ -227,139 +251,148 @@ class SkillExecutorAgent(AgentBase):
         tool_map: Dict[str, Any],
         execution_result: Dict[str, Any],
     ) -> AsyncGenerator[List[MessageChunk], None]:
-
         skill_metadata = skill_manager.get_skill_metadata(skill_name) or {}
-
-        # Use relative path for skill_path in prompt to avoid leaking absolute paths
-        skill_path = f"skills/{skill_name}"
-
         instruction_prompt_template = PromptManager().get_agent_prompt_auto(
             "INSTRUCTION_SKILL_EXECUTION_PROMPT", language=language
         )
         execution_system_prompt = instruction_prompt_template.format(
             skill_name=skill_metadata.get("name", skill_name),
             skill_description=skill_metadata.get("description", ""),
-            skill_path=skill_path,
+            skill_path=skill_metadata.get("path", ""),
             instructions=skill_instructions,
         )
-        execution_system_message = self.prepare_unified_system_message(session_id=session_id, language=language, system_prefix_override=execution_system_prompt)
+        execution_system_message = self.prepare_unified_system_message(
+            session_id=session_id,
+            language=language,
+            system_prefix_override=execution_system_prompt,
+        )
 
         exec_messages = [execution_system_message]
         if len(chain_messages) > 1:
-            exec_messages.extend(chain_messages[1:])
+           for msg in chain_messages[1:]:
+            if isinstance(msg, dict):
+                exec_messages.append(MessageChunk.from_dict(msg))
+            else:  # 假设是 MessageChunk
+                exec_messages.append(msg)
 
-        tool_definitions_for_llm = [t for t in all_skill_tool_defs if t["function"]["name"] != "load_skill"]
+        tool_definitions_for_llm = [
+            t for t in all_skill_tool_defs if t["function"]["name"] != "load_skill"
+        ]
 
-        max_steps = 10
+        loop_count = 0
         skill_completed = False
-        final_summary = None
-        for step in range(max_steps):
+        while not skill_completed and loop_count < 20:
+            if exec_messages[-1].role != MessageRole.TOOL.value:
+                loop_count += 1
             content_message_id = str(uuid.uuid4())
-            chunks = []
-            tool_calls: Dict[str, Any] = {}
+            step2_chunks = []
+            step2_tool_calls: Dict[str, Any] = {}
             last_tool_call_id: Optional[str] = None
 
             async for chunk in self._call_llm_streaming(
                 messages=exec_messages,
                 session_id=session_id,
-                step_name=f"skill_executor_step_{chain_step}_{step}",
-                model_config_override={"tools": tool_definitions_for_llm, "tool_choice": "auto"},
+                step_name=f"skill_executor_step_{chain_step}_{loop_count}",
+                model_config_override={
+                    "tools": tool_definitions_for_llm,
+                    "tool_choice": "auto",
+                },
             ):
-                chunks.append(chunk)
-                if chunk is None or chunk.choices is None or len(chunk.choices) == 0: continue
-
+                if chunk is None or chunk.choices is None or len(chunk.choices) == 0:
+                    continue
                 delta = chunk.choices[0].delta
                 if delta.tool_calls:
-                    self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
+                    self._handle_tool_calls_chunk(
+                        chunk, step2_tool_calls, last_tool_call_id or ""
+                    )
                     for tc in delta.tool_calls:
-                        if tc.id: last_tool_call_id = tc.id
+                        if tc.id:
+                            last_tool_call_id = tc.id
                     yield [
                         MessageChunk(
                             role=MessageRole.ASSISTANT.value,
                             content="",
-                            message_type=MessageType.GUIDE.value,
-                            type=MessageType.GUIDE.value,
+                            message_type=MessageType.EMPTY.value,
+                            type=MessageType.EMPTY.value,
                             message_id=content_message_id,
                             show_content="",
                         )
                     ]
 
                 if delta.content:
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.ASSISTANT.value,
-                            content=delta.content,
-                            message_type=MessageType.GUIDE.value,
-                            type=MessageType.GUIDE.value,
-                            message_id=content_message_id,
-                            show_content=delta.content,
-                        )
-                    ]
+                    msg_chunk = MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=delta.content,
+                        message_type=MessageType.GUIDE.value,
+                        type=MessageType.GUIDE.value,
+                        message_id=content_message_id,
+                        show_content=delta.content,
+                    )
+                    yield [msg_chunk]
+                    step2_chunks.append(deepcopy(msg_chunk))
 
-            response = self.merge_stream_response_to_non_stream_response(chunks)
-            if not response or not response.choices:
+            exec_messages = MessageManager.merge_new_messages_to_old_messages(
+                cast(List[Union[MessageChunk, Dict[str, Any]]], step2_chunks),
+                cast(List[Union[MessageChunk, Dict[str, Any]]], exec_messages),
+            )
+            step2_chunks = []
+
+            for tool_call in list(step2_tool_calls.values()):
+                output_messages = self._create_tool_call_message(tool_call)
+                yield output_messages
+                exec_messages.extend(deepcopy(output_messages))
+
+                func_name = tool_call["function"]["name"]
+                args = self._safe_parse_args(tool_call["function"]["arguments"])
+
+                result = ""
+                if func_name in tool_map:
+                    try:
+                        result = tool_map[func_name](**args)
+                    except Exception as e:
+                        result = f"Error executing {func_name}: {e}"
+                else:
+                    result = f"Error: Tool '{func_name}' not found"
+                msg_chunk =  MessageChunk(
+                        role=MessageRole.TOOL.value,
+                        content=str(result),
+                        tool_call_id=tool_call["id"],
+                        message_id=str(uuid.uuid4()),
+                        type=MessageType.TOOL_CALL_RESULT.value,
+                        message_type=MessageType.TOOL_CALL_RESULT.value,
+                        show_content=str(result),
+                    )
+                yield [msg_chunk]
+                exec_messages.append(deepcopy(msg_chunk))
+            skill_completed = await self._is_skill_complete(
+                exec_messages, session_id, language
+            )
+            if skill_completed:
                 break
-
-            assistant_msg = response.choices[0].message
-            exec_messages.append(assistant_msg.model_dump())
-            chain_messages.append(assistant_msg.model_dump())
-
-            if assistant_msg.tool_calls:
-                tool_calls_dicts = []
-                for tc in assistant_msg.tool_calls:
-                    tool_calls_dicts.append({
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments}
-                    })
-
+        # 额外调用一次llm总结
+        final_summary = ""
+        content_message_id = str(uuid.uuid4())
+        async for chunk in self._call_llm_streaming(
+            messages=exec_messages,
+            session_id=session_id,
+            step_name=f"skill_executor_step_{chain_step}_summary",
+            model_config_override={"tools": [], "tool_choice": "auto"},
+        ):
+            if chunk is None or chunk.choices is None or len(chunk.choices) == 0:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                final_summary += delta.content
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=assistant_msg.content,
-                        tool_calls=tool_calls_dicts,
-                        message_id=str(uuid.uuid4()),
-                        message_type=MessageType.GUIDE.value,
-                        type=MessageType.GUIDE.value,
+                        content=delta.content,
+                        message_type=MessageType.SKILL_OBSERVATION.value,
+                        type=MessageType.SKILL_OBSERVATION.value,
+                        message_id=content_message_id,
+                        show_content=delta.content,
                     )
                 ]
-
-                for tool_call in assistant_msg.tool_calls:
-                    func_name = tool_call.function.name
-                    args = self._safe_parse_args(tool_call.function.arguments)
-
-                    result = ""
-                    if func_name in tool_map:
-                        try:
-                            result = tool_map[func_name](**args)
-                        except Exception as e:
-                            result = f"Error executing {func_name}: {e}"
-                    else:
-                        result = f"Error: Tool '{func_name}' not found"
-
-                    yield [
-                        MessageChunk(
-                            role=MessageRole.TOOL.value,
-                            content=str(result),
-                            tool_call_id=tool_call.id,
-                            message_id=str(uuid.uuid4()),
-                            type=MessageType.GUIDE.value,
-                            message_type=MessageType.GUIDE.value,
-                            show_content=str(result),
-                        )
-                    ]
-
-                    tool_msg = {"role": "tool", "tool_call_id": tool_call.id, "content": str(result)}
-                    exec_messages.append(tool_msg)
-                    chain_messages.append(tool_msg)
-
-            skill_completed = await self._is_skill_complete(exec_messages, session_id, language)
-            if skill_completed:
-                if assistant_msg.content:
-                    final_summary = assistant_msg.content
-                logger.info(f"SkillExecutorAgent: Skill '{skill_name}' completed.")
-                break
-
         execution_result["summary"] = final_summary
 
     async def run_stream(
@@ -372,7 +405,7 @@ class SkillExecutorAgent(AgentBase):
         skill_manager = session_context.skill_manager
         language = session_context.get_language()
         if not skill_manager:
-            logger.warning("SkillExecutorAgent: 未找到 SkillManager")
+            logger.error("SkillExecutorAgent: 未找到 SkillManager")
             yield [
                 MessageChunk(
                     role=MessageRole.ASSISTANT.value,
@@ -385,7 +418,9 @@ class SkillExecutorAgent(AgentBase):
             ]
             return
 
-        skill_tools = SkillTools(skill_manager, agent_workspace=session_context.agent_workspace)
+        skill_tools = SkillTools(
+            skill_manager, agent_workspace=session_context.agent_workspace
+        )
         all_skill_tool_defs = SkillTools.get_tool_definitions()
 
         tool_map = {
@@ -393,44 +428,46 @@ class SkillExecutorAgent(AgentBase):
             "read_skill_file": skill_tools.read_skill_file,
             "run_skill_script": skill_tools.run_skill_script,
             "write_temp_file": skill_tools.write_temp_file,
-            "edit_temp_file": skill_tools.edit_temp_file,
         }
-        prompt_template = PromptManager().get_agent_prompt_auto("SKILL_EXECUTOR_SELECT_PROMPT", language=session_context.get_language())
-        system_prompt = prompt_template.format(available_skills="\n".join(skill_manager.get_skill_description_lines(style="planner")))
-        # 3.
-        chain_messages = [{"role": "system", "content": system_prompt}]
-        # Add Context
-        context_messages = session_context.message_manager.extract_all_context_messages(recent_turns=10, last_turn_user_only=False)
-        chain_messages.extend([msg.to_dict() for msg in context_messages])
+        prompt_template = PromptManager().get_agent_prompt_auto(
+            "SKILL_EXECUTOR_SELECT_PROMPT", language=session_context.get_language()
+        )
+        system_prompt = prompt_template.format(
+            available_skills="\n".join(skill_manager.get_skill_description_lines())
+        )
+        select_messages = [{"role": "system", "content": system_prompt}]
+        context_messages = session_context.message_manager.extract_all_context_messages(
+            recent_turns=10, last_turn_user_only=False
+        )
+        select_messages.extend([msg.to_dict() for msg in context_messages])
 
         # --- Outer Loop: 多技能支持，最多执行 max_chain_steps 步 ---
         max_chain_steps = 5
         final_summary = None
 
         for chain_step in range(max_chain_steps):
-            logger.info(f"SkillExecutorAgent: 链式执行第 {chain_step+1}/{max_chain_steps} 步")
+            logger.info(
+                f"SkillExecutorAgent: 链式执行第 {chain_step+1}/{max_chain_steps} 步"
+            )
 
             # 阶段一：技能意图识别选择 (Skill Selection)
             selection_result = {}
             async for chunk in self._select_skill(
-                session_id=session_id, 
-                chain_step=chain_step, 
-                chain_messages=chain_messages, 
-                all_skill_tool_defs=all_skill_tool_defs, 
-                tool_map=tool_map, 
-                selection_result=selection_result
+                session_id=session_id,
+                chain_step=chain_step,
+                select_messages=select_messages,
+                all_skill_tool_defs=all_skill_tool_defs,
+                tool_map=tool_map,
+                selection_result=selection_result,
             ):
                 yield chunk
 
             selected_skill_name = selection_result.get("skill_name")
             skill_instructions = selection_result.get("instructions")
-
-            # If NO tool call, it means the agent decided to finish (or just talk)
             if not selected_skill_name:
                 logger.info("SkillExecutorAgent: No skill selected, finishing chain.")
                 return
-
-            if not skill_instructions or str(skill_instructions).startswith("Error"):
+            if not skill_instructions:
                 yield [
                     MessageChunk(
                         role=MessageRole.ASSISTANT.value,
@@ -443,14 +480,14 @@ class SkillExecutorAgent(AgentBase):
                 # Break chain on error
                 break
 
-            # Phase 2: Execution Loop for Selected Skill
+            # 阶段二：技能执行 (Skill Execution)
             execution_result = {}
             async for chunk in self._execute_skill(
                 session_id=session_id,
                 chain_step=chain_step,
                 skill_name=selected_skill_name,
                 skill_instructions=skill_instructions,
-                chain_messages=chain_messages,
+                chain_messages=select_messages,
                 skill_manager=skill_manager,
                 language=language,
                 all_skill_tool_defs=all_skill_tool_defs,

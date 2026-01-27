@@ -40,27 +40,17 @@ class SkillManager:
     def list_skills(self) -> List[str]:
         return list(self.skills.keys())
 
-    def get_skill_description_lines(self, skills: Optional[Union[List[str], Dict[str, Any], str]] = None, style: str = "analysis") -> List[str]:
+    def get_skill_description_lines(self, skills: Optional[List[str]] = None) -> List[str]:
         if skills is None:
             skill_names = self.list_skills()
-        elif isinstance(skills, dict):
-            skill_names = list(skills.keys())
         elif isinstance(skills, list):
             skill_names = skills
-        elif isinstance(skills, str):
-            skill_names = [skills]
-        else:
-            skill_names = []
-
         lines = []
         for name in skill_names:
             metadata = self.get_skill_metadata(name)
             if not metadata:
                 continue
-            if style == "planner":
-                lines.append(f"- {metadata['name']}: {metadata['description']}")
-            else:
-                lines.append(f"{metadata['name']} (Skill: {metadata['description']})")
+            lines.append(f"- {metadata['name']}: {metadata['description']}")
         return lines
 
     def _load_skills_from_workspace(self):
@@ -72,80 +62,42 @@ class SkillManager:
             if os.path.isdir(skill_path):
                 self._load_skill_from_dir(skill_path)
 
-    def _scan_skill_resources(self, skill_path: str) -> Dict[str, Dict[str, str]]:
-        """
-        Scan skill directory for resources.
-        Returns:
-            {
-                "files": {...},
-                "scripts": {...},
-                "references": {...}
-                "resources": {...}
-            }
-        """
-        resources = {
-            "files": {},
-            "scripts": {},
-            "references": {},
-            "resources": {}
-        }
+    def _generate_file_tree(self, path: str, root_path: Optional[str] = None, prefix: str = "") -> str:
+        if root_path is None:
+            root_path = path
+            
+        lines = []
+        try:
+            items = sorted(os.listdir(path))
+        except OSError:
+            return ""
+            
+        # Filter items
+        items = [i for i in items if not i.startswith('.') and i != 'SKILL.md']
         
-        for root, _, files in os.walk(skill_path):
-            for file in files:
-                abs_path = os.path.join(root, file)
-                rel_path = os.path.relpath(abs_path, skill_path)
+        for item in items:
+            full_path = os.path.join(path, item)
+            
+            if os.path.isdir(full_path):
+                lines.append(f"{prefix}- {item}/")
+                lines.append(self._generate_file_tree(full_path, root_path, prefix + "  "))
+            else:
+                lines.append(f"{prefix}- {item}")
                 
-                # Skip hidden files and SKILL.md/manifest itself
-                if file.startswith('.') or file in ['SKILL.md']:
-                    continue
-                    
-                resources["files"][rel_path] = abs_path
-                
-                # Categorize
-                if file.endswith(('.py', '.sh', '.bat', '.js')):
-                    resources["scripts"][file] = abs_path
-                elif file.endswith(('.txt', '.pdf', '.md', '.json', '.csv')):
-                    resources["references"][file] = abs_path
-                else:
-                    resources["resources"][file] = abs_path
-                    
-        return resources
+        return "\n".join(lines)
 
     def _validate_skill_metadata(self, metadata: Dict[str, Any], skill_path: str) -> bool:
-        if not isinstance(metadata, dict):
-            logger.warning(f"SkillManager: {skill_path} SKILL.md 元数据格式无效")
-            return False
         name = metadata.get("name")
         description = metadata.get("description")
         if not name or not description:
             logger.warning(f"SkillManager: {skill_path} SKILL.md 缺少必要的元数据 (name, description)")
-            return False
-        if len(str(name)) > 64:
-            logger.warning(f"SkillManager: {skill_path} name 超过 64 字符")
-            return False
-        if len(str(description)) > 1024:
-            logger.warning(f"SkillManager: {skill_path} description 超过 1024 字符")
-            return False
-        allowed_tools = metadata.get("allowed-tools", metadata.get("allowed_tools", []))
-        if allowed_tools is not None and not isinstance(allowed_tools, list):
-            logger.warning(f"SkillManager: {skill_path} allowed_tools 必须是列表")
-            return False
-        disable_model_invocation = metadata.get("disable-model-invocation", metadata.get("disable_model_invocation", False))
-        if disable_model_invocation is not None and not isinstance(disable_model_invocation, bool):
-            logger.warning(f"SkillManager: {skill_path} disable_model_invocation 必须是布尔值")
-            return False
-        requirements = metadata.get("requirements", [])
-        if requirements is not None and not isinstance(requirements, list):
-            logger.warning(f"SkillManager: {skill_path} requirements 必须是列表")
             return False
         return True
 
     def _load_skill_from_dir(self, skill_path: str):
         """
         Load a skill from a directory.
-        Only SKILL.md  is supported.
         """
-        # 1. Check for SKILL.md
         skill_md_path = os.path.join(skill_path, "SKILL.md")
         if os.path.exists(skill_md_path):
             try:
@@ -168,62 +120,20 @@ class SkillManager:
                 description = metadata.get("description", "")
                 
                 if name:
-                    # Scan resources
-                    resources = self._scan_skill_resources(skill_path)
-                    
+                    file_list = self._generate_file_tree(skill_path)
                     schema = SkillSchema(
                         name=name,
                         description=description,
                         path=skill_path,
-                        metadata=metadata,
                         instructions=content,
-                        files=resources["files"],
-                        scripts=resources["scripts"],
-                        references=resources["references"],
-                        resources=resources["resources"],
-                        version=str(metadata.get("version", "latest")),
-                        author=metadata.get("author"),
-                        tags=metadata.get("tags", []),
-                        allowed_tools=metadata.get("allowed-tools", metadata.get("allowed_tools", [])) or [],
-                        disable_model_invocation=bool(metadata.get("disable-model-invocation", metadata.get("disable_model_invocation", False))),
-                        requirements=metadata.get("requirements", []) or []
+                        file_list=file_list, 
                     )
-                    
                     self.skills[name] = schema
                     logger.info(f"SkillManager: 已加载技能: {name}")
+                    logger.debug(f"SkillManager: 技能 {name} 元数据: {metadata}")
                     return
             except Exception as e:
                 logger.error(f"SkillManager: 从 {skill_path} 加载 SKILL.md 失败: {e}")
-
-        # 2. Check for manifest.yaml/json (Legacy/PythonSkill)
-        manifest_path = os.path.join(skill_path, "manifest.yaml")
-        if not os.path.exists(manifest_path):
-            manifest_path = os.path.join(skill_path, "manifest.json")
-        
-        if not os.path.exists(manifest_path):
-            return
-
-        try:
-            with open(manifest_path, 'r', encoding='utf-8') as f:
-                if manifest_path.endswith('.yaml'):
-                    manifest = yaml.safe_load(f)
-                else:
-                    manifest = json.load(f)
-            
-            name = manifest.get("name")
-            description = manifest.get("description", "")
-            entry_point = manifest.get("entry_point")
-            
-            if not name or not entry_point:
-                logger.warning(f"SkillManager: {skill_path} 中的清单无效: 缺少 name 或 entry_point")
-                return
-
-            skill = PythonSkill(name, description, skill_path, manifest, entry_point)
-            self.skills[name] = skill
-            logger.info(f"SkillManager: 已加载 PythonSkill: {name}")
-
-        except Exception as e:
-            logger.error(f"SkillManager: 从 {skill_path} 加载技能失败: {e}")
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
         """
@@ -234,7 +144,6 @@ class SkillManager:
             return {
                 "name": skill.name,
                 "description": skill.description,
-                "metadata": skill.metadata,
                 "path": skill.path
             }
         return None
@@ -244,9 +153,7 @@ class SkillManager:
         Level 2: Get skill instructions (SKILL.md content).
         """
         skill = self.skills.get(name)
-        if skill and hasattr(skill, 'get_content'):
-            return skill.get_content()
-        return ""
+        return skill.instructions or ""
 
     def prepare_skill_in_workspace(self, skill_name: str, agent_workspace: str) -> Optional[str]:
         """
