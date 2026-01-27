@@ -39,7 +39,7 @@ class TaskAnalysisAgent(AgentBase):
         # 获取skills metadata
         skill_manager = session_context.skill_manager
         if skill_manager and skill_manager.list_skills():
-            available_skills_name = skill_manager.get_skill_description_lines(style="analysis")
+            available_skills_name = skill_manager.get_skill_description_lines()
         else:
             available_skills_name = []
 
