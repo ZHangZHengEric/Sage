@@ -330,7 +330,7 @@ class SkillExecutorAgent(AgentBase):
             messages=messages,
             session_id=session_context.session_id,
             step_name="skill_plan_generation",
-            model_config_override={},
+            model_config_override={"temperature": 0.2},
             content_message_type=MessageType.SKILL_EXECUTION_PLAN.value,
             tool_calls=step_tool_calls,
         ):
