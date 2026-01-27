@@ -28,7 +28,7 @@ class SkillExecutorAgent(AgentBase):
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info(f"SkillExecutorAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], message_manager.messages))}")
-        history_messages = message_manager.extract_all_context_messages(recent_turns=20, last_turn_user_only=False)
+        history_messages = message_manager.extract_all_context_messages(recent_turns=20, last_turn_user_only=True)
         logger.info(
             f"SkillExecutorAgent: 获取历史消息的条数:{len(history_messages)}，历史消息的content长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages))}"
         )
@@ -51,7 +51,9 @@ class SkillExecutorAgent(AgentBase):
             yield chunk
 
         selected_skill_name = selection_result.get("skill_name")
-
+        if not selected_skill_name:
+            logger.warning(f"SkillExecutorAgent: 未选择任何技能。")
+            return
         # 阶段二：技能执行
         async for chunk in self._execute_skill(
             session_id=session_id,
@@ -279,26 +281,26 @@ class SkillExecutorAgent(AgentBase):
             match = re.search(r"<plan>(.*?)</plan>", xml_content, re.DOTALL)
             if match:
                 xml_content = match.group(1)
-            
+
             steps = []
             # Naive regex parsing for <step>...</step>
             step_pattern = re.compile(r"<step>(.*?)</step>", re.DOTALL)
             for step_match in step_pattern.finditer(xml_content):
                 step_content = step_match.group(1)
                 step_info = {}
-                
+
                 id_match = re.search(r"<id>(.*?)</id>", step_content)
                 if id_match:
                     step_info["id"] = id_match.group(1).strip()
-                    
+
                 instruction_match = re.search(r"<instruction>(.*?)</instruction>", step_content, re.DOTALL)
                 if instruction_match:
                     step_info["instruction"] = instruction_match.group(1).strip()
-                    
+
                 intent_match = re.search(r"<intent>(.*?)</intent>", step_content, re.DOTALL)
                 if intent_match:
                     step_info["intent"] = intent_match.group(1).strip()
-                
+
                 if step_info.get("instruction"):
                     steps.append(step_info)
             return steps
@@ -388,7 +390,7 @@ class SkillExecutorAgent(AgentBase):
             async for chunk in self._generate_execution_plan(session_context, sandbox_skill_info, history_messages, plan_steps):
                 yield chunk
 
-            execute_system_prompt = (PromptManager().get_agent_prompt_auto("INSTRUCTION_SKILL_EXECUTION_PROMPT", language=session_context.get_language())
+            execute_system_prompt_prefix = (PromptManager().get_agent_prompt_auto("INSTRUCTION_SKILL_EXECUTION_PROMPT", language=session_context.get_language())
                 .format(
                     skill_name=sandbox_skill_info.get("name", ""),
                     skill_description=sandbox_skill_info.get("description", ""),
@@ -396,6 +398,12 @@ class SkillExecutorAgent(AgentBase):
                     instructions=sandbox_skill_info.get("instructions", ""),
                     plan_steps=json.dumps(plan_steps, ensure_ascii=False, indent=4),
                 )
+            )
+            # 将system 加入到到messages中
+            execute_system_prompt = self.prepare_unified_system_message(
+                session_id,
+                custom_prefix=execute_system_prompt_prefix,
+                language=session_context.get_language(),
             )
             tool_definitions_for_llm = skill_tools.get_execute_tool_definitions()
             # 执行的system message
