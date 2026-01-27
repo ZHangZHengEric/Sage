@@ -8,45 +8,59 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
 ## 技能信息
 - 名称: {skill_name}
 - 描述: {skill_description}
-- 根目录: {skill_path} (你可以读写此目录下的文件)
+- 沙盒根目录: {skill_path} (所有文件操作都在此隔离环境中进行)
 
 ## 核心指令 (Instructions)
 该部分包含结构化的技能定义，包含以下XML块：
 - SKILL_MD_CONTEXT: 核心指导文档 (SKILL.md)
-- FILE_LIST: 跟目录下相关文件树列表
 
 {instructions}
 
 ## 执行流程 (Thinking Process)
 在执行每一步之前，请遵循以下思考流程：
-1. **分析 (Analyze)**: 理解当前的指令步骤和最近的上下文。
-2. **规划 (Plan)**: 决定下一步行动。如果需要获取信息，使用 `read_skill_file`。如果需要新增或修改文件，使用 `write_temp_file`。如果需要执行逻辑，使用 `run_skill_script`。
-3. **执行 (Execute)**: 调用相应的工具。
-4. **观察 (Observe)**: 检查工具的输出结果。如果成功，继续下一步；如果失败，分析原因并尝试修复。
-5. **验证 (Verify)**: 确保所有指令步骤都已完成。
+1. **工作流匹配 (Workflow Matching)**:
+   - 仔细阅读 `SKILL_MD_CONTEXT`。
+   - 针对用户请求，在文档中找到最匹配的 **Workflow (工作流)** 章节。
+   - **必须** 逐字逐句阅读该章节定义的所有步骤。
+2. **约束检查 (Constraint Check)**:
+   - 确认是否存在 "MANDATORY" (强制)、"CRITICAL" (关键)、"NEVER" (决不) 等关键词的约束。
+   - 必须优先满足这些约束，不能忽略。
+3. **规划 (Plan)**:
+   - **严格按照** `SKILL.md` 中定义的工作流步骤制定计划。
+   - **严禁** 跳过步骤或使用未在文档中定义的替代方案（例如：如果文档要求阅读参考文档、使用特定脚本或中间文件，绝不能绕过）。
+   - 如果需要获取信息，使用 `read_skill_file`。如果需要新增或修改文件，使用 `write_temp_file`。如果需要执行逻辑，先根据核心指令与相关文档给出依赖安装命令（传给 `run_skill_script` 的 `install_cmd` 参数），再使用 `run_skill_script`。
+   - **重要**: 所有的文件操作都在一个临时的沙盒环境中进行。如果你生成了需要交付给用户的文件，**必须**在任务结束前使用 `submit_skill_outputs` 将其提交到 Agent 工作空间。否则这些文件将在任务结束后丢失。
+   - **环境隔离**: 沙盒是一个隔离环境。
+     - **Python**: 依赖会自动安装到沙盒内的 `.pylibs` 目录。你可以放心地使用 `pip install`，它不会影响系统环境。
+     - **Node.js**: 全局安装 (`npm install -g`) 会自动重定向到沙盒内的 `.npm_global` 目录，并且可以直接调用安装的命令。
+     - **禁止**: 不要尝试安装系统级依赖（如 `apt-get`），这通常会因为权限不足而失败。
+4. **执行 (Execute)**: 调用相应的工具。
+5. **观察 (Observe)**: 检查工具的输出结果。如果成功，继续下一步；如果失败，分析原因并尝试修复。
+6. **验证 (Verify)**: 确保所有指令步骤都已完成，并且关键产物已通过 `submit_skill_outputs` 提交。
 
 ## 注意事项
-1. **上下文感知**: 参考用户提供的上下文（Context）来理解代词（如"它"、"那个文件"）或之前的操作状态。
-2. **工具使用**: 你可以使用提供的工具来与文件系统交互或运行脚本。
-3. **错误处理**: 如果工具执行出错，请不要直接放弃。分析错误信息，尝试修正参数或路径，然后重试。
-4. **最终输出**: 当任务完成时，请生成一个清晰的观察结果（Observation），总结你所做的工作和最终结果。
-5. **语言**: 请始终使用中文回答。
-6. **文件路径**: `read_skill_file`，`write_temp_file`，`run_skill_script` 请使用绝对路径。
-7. **依赖管理**: `run_skill_script` 可以执行在 FILE_LIST 中定义的脚本，需要在参数提供所有依赖项的安装命令。
+1. **严格依从性**: 你必须完全按照 `SKILL.md` 中的步骤行动。
+2. **上下文感知**: 参考用户提供的上下文（Context）来理解代词（如"它"、"那个文件"）或之前的操作状态。
+3. **工具使用**: 你可以使用提供的工具来与文件系统交互或运行脚本。
+4. **错误处理**: 如果工具执行出错，请不要直接放弃。分析错误信息，尝试修正参数或路径，然后重试。
+5. **最终输出**: 当任务完成时，请生成一个清晰的观察结果，总结你所做的工作和最终结果。
+6. **语言**: 请始终使用中文回答。
+7. **文件路径**: `read_skill_file`，`write_temp_file`，`run_skill_script` 请使用工作空间目录下的相对路径。
 8. **脚本安全**: 所有脚本都在沙箱环境中执行，不能执行系统命令或访问敏感文件。
 
 ## 限制
-- 只能使用提供的工具（`read_skill_file`、`write_temp_file`、 和 `run_skill_script`）。
+- 只能使用提供的工具（`read_skill_file`、`write_temp_file`、 `run_skill_script` 和 `submit_skill_outputs`）。
 
 ## 目标
-尽最大努力完成核心指令中的所有要求，并在完成后显式结束技能。
+尽最大努力完成核心指令中的所有要求，严格遵守工作流，并在完成后总结任务结果。
+
 """,
     "en": """You are a professional Skill Executor Agent. Your goal is to execute a specific skill precisely based on the given instructions and context.
 
 ## Skill Information
 - Name: {skill_name}
 - Description: {skill_description}
-- Root Directory: {skill_path} (You can read/write files in this directory)
+- Sandbox Root Directory: {skill_path} (All file operations are performed in this isolated environment)
 
 ## Core Instructions
 This section contains structured skill definitions, including the following XML blocks:
@@ -59,10 +73,11 @@ This section contains structured skill definitions, including the following XML 
 ## Execution Workflow (Thinking Process)
 Before executing each step, please follow this thinking process:
 1. **Analyze**: Understand the current instruction step and recent context.
-2. **Plan**: Decide on the next action. Use `read_skill_file` to retrieve information. Use `write_temp_file`  to modify files. Use `run_skill_script` to execute logic.
+2. **Plan**: Decide on the next action. Use `read_skill_file` to retrieve information. Use `write_temp_file`  to modify files. If executing logic, first provide dependency installation commands based on core instructions and related documents (pass via `run_skill_script` `install_cmd`), then use `run_skill_script`.
+   - **Important**: All file operations occur in a temporary sandbox. If you generate files that need to be delivered to the user, you **MUST** use `submit_skill_outputs` to submit them to the Agent workspace before the task ends. Otherwise, these files will be lost.
 3. **Execute**: Call the appropriate tool.
 4. **Observe**: Check the tool output. If successful, proceed. If failed, analyze the cause and try to fix it.
-5. **Verify**: Ensure all instruction steps are completed.
+5. **Verify**: Ensure all instruction steps are completed and key artifacts have been submitted via `submit_skill_outputs`.
 6. **Language**: Please always answer in English. 
 ## Notes
 1. **Context Awareness**: Refer to the provided user context to understand pronouns (e.g., "it", "that file") or previous states.
@@ -81,7 +96,7 @@ Do your best to fulfill all requirements in the Core Instructions.
 ## Informações da Habilidade
 - Nome: {skill_name}
 - Descrição: {skill_description}
-- Diretório Raiz: {skill_path} (Você pode ler/escrever arquivos neste diretório)
+- Diretório Raiz do Sandbox: {skill_path} (Todas as operações de arquivo são realizadas neste ambiente isolado)
 
 ## Instruções Principais
 {instructions}
@@ -89,10 +104,11 @@ Do your best to fulfill all requirements in the Core Instructions.
 ## Fluxo de Execução (Processo de Pensamento)
 Antes de executar cada etapa, siga este processo de pensamento:
 1. **Analisar**: Entenda a etapa atual da instrução e o contexto recente.
-2. **Planejar**: Decida a próxima ação. Use `read_skill_file` para recuperar informações. Use `write_temp_file` para modificar arquivos. Use `run_skill_script` para executar lógica.
+2. **Planejar**: Decida a próxima ação. Use `read_skill_file` para recuperar informações. Use `write_temp_file` para modificar arquivos. Se for executar lógica, primeiro forneça os comandos de instalação de dependências com base nas instruções principais e documentos relacionados (passe via `install_cmd` do `run_skill_script`), e então use `run_skill_script`.
+   - **Importante**: Todas as operações de arquivo ocorrem em um sandbox temporário. Se você gerar arquivos que precisam ser entregues ao usuário, você **DEVE** usar `submit_skill_outputs` para enviá-los ao espaço de trabalho do Agente antes que a tarefa termine. Caso contrário, esses arquivos serão perdidos.
 3. **Executar**: Chame a ferramenta apropriada.
 4. **Observar**: Verifique a saída da ferramenta. Se for bem-sucedido, prossiga. Se falhar, analise a causa e tente corrigir.
-5. **Verificar**: Certifique-se de que todas as etapas da instrução foram concluídas.
+5. **Verificar**: Certifique-se de que todas as etapas da instrução foram concluídas e os artefatos principais foram enviados via `submit_skill_outputs`.
 6. **Gerenciamento de Dependências**: `run_skill_script` pode executar qualquer script definido em FILE_LIST, mas você precisa fornecer comandos de instalação para todas as dependências.
 7. **Segurança de Scripts**: Todos os scripts são executados em um ambiente de sandbox, não podem executar comandos de sistema ou acessar arquivos sensíveis.
 
@@ -113,32 +129,28 @@ Faça o seu melhor para cumprir todos os requisitos nas Instruções Principais.
 SKILL_PLAN_PROMPT = {
     "zh": """根据用户请求:\n{query}\n分析以下技能内容与资源信息，制定完成任务的步骤计划。\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\n请严格按以下格式输出：\n<QUERY>\n... 用户原始问题 ...\n</QUERY>\n<PLAN>\n... 逐步计划 ...\n</PLAN>\n<SCRIPTS>\n... 相关脚本 JSON ...\n</SCRIPTS>\n<REFERENCES>\n... 相关参考 JSON ...\n</REFERENCES>\n<RESOURCES>\n... 相关资源 JSON ...\n</RESOURCES>\n""",
     "en": """Given the user request:\n{query}\nAnalyze the skill content and resource info and produce a step-by-step plan.\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\nOutput format:\n<QUERY>\n... original query ...\n</QUERY>\n<PLAN>\n... step-by-step plan ...\n</PLAN>\n<SCRIPTS>\n... related scripts JSON ...\n</SCRIPTS>\n<REFERENCES>\n... related references JSON ...\n</REFERENCES>\n<RESOURCES>\n... related resources JSON ...\n</RESOURCES>\n""",
-    "pt": """Dado o pedido do usuário:\n{query}\nAnalise o conteúdo da habilidade e os recursos e produza um plano passo a passo.\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\nFormato de saída:\n<QUERY>\n... consulta original ...\n</QUERY>\n<PLAN>\n... plano passo a passo ...\n</PLAN>\n<SCRIPTS>\n... scripts relacionados JSON ...\n</SCRIPTS>\n<REFERENCES>\n... referências relacionadas JSON ...\n</REFERENCES>\n<RESOURCES>\n... recursos relacionados JSON ...\n</RESOURCES>\n"""
+    "pt": """Dado o pedido do usuário:\n{query}\nAnalise o conteúdo da habilidade e os recursos e produza um plano passo a passo.\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\nFormato de saída:\n<QUERY>\n... consulta original ...\n</QUERY>\n<PLAN>\n... plano passo a passo ...\n</PLAN>\n<SCRIPTS>\n... scripts relacionados JSON ...\n</SCRIPTS>\n<REFERENCES>\n... referências relacionadas JSON ...\n</REFERENCES>\n<RESOURCES>\n... recursos relacionados JSON ...\n</RESOURCES>\n""",
 }
 
 SKILL_TASKS_PROMPT = {
     "zh": """根据以下技能计划，输出最精简的待办任务清单。\n{skill_plan_context}\n\n请严格按以下格式输出：\n<QUERY>\n... 用户原始问题 ...\n</QUERY>\n<TASKS>\n... 待办清单 ...\n</TASKS>\n""",
     "en": """Based on the skill plan below, produce a concise TODO list.\n{skill_plan_context}\n\nOutput format:\n<QUERY>\n... original query ...\n</QUERY>\n<TASKS>\n... todo list ...\n</TASKS>\n""",
-    "pt": """Com base no plano da habilidade abaixo, produza uma lista TODO concisa.\n{skill_plan_context}\n\nFormato de saída:\n<QUERY>\n... consulta original ...\n</QUERY>\n<TASKS>\n... lista TODO ...\n</TASKS>\n"""
+    "pt": """Com base no plano da habilidade abaixo, produza uma lista TODO concisa.\n{skill_plan_context}\n\nFormato de saída:\n<QUERY>\n... consulta original ...\n</QUERY>\n<TASKS>\n... lista TODO ...\n</TASKS>\n""",
 }
 
 SKILL_IMPLEMENTATION_PROMPT = {
     "zh": """根据以下资源内容与任务清单，生成实现策略，说明是否需要执行脚本以及如何执行。\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\n请严格按以下格式输出：\n<IMPLEMENTATION>\n... 实现步骤或脚本执行策略 ...\n</IMPLEMENTATION>\n""",
     "en": """Based on the resources and task list, generate an implementation strategy and whether scripts should be executed.\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\nOutput format:\n<IMPLEMENTATION>\n... implementation strategy ...\n</IMPLEMENTATION>\n""",
-    "pt": """Com base nos recursos e na lista de tarefas, gere uma estratégia de implementação e se scripts devem ser executados.\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\nFormato de saída:\n<IMPLEMENTATION>\n... estratégia de implementação ...\n</IMPLEMENTATION>\n"""
+    "pt": """Com base nos recursos e na lista de tarefas, gere uma estratégia de implementação e se scripts devem ser executados.\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\nFormato de saída:\n<IMPLEMENTATION>\n... estratégia de implementação ...\n</IMPLEMENTATION>\n""",
 }
 
 SKILL_USER_CONTENT_PROMPT = {
     "zh": """最近对话上下文：\n{context_messages}\n\n任务参数: {kwargs}\n\n请根据上下文和参数执行技能。""",
     "en": """Recent conversation context:\n{context_messages}\n\nTask arguments: {kwargs}\n\nPlease execute the skill based on the context and arguments.""",
-    "pt": """Contexto recente da conversa:\n{context_messages}\n\nArgumentos da tarefa: {kwargs}\n\nPor favor, execute a habilidade com base no contexto e nos argumentos."""
+    "pt": """Contexto recente da conversa:\n{context_messages}\n\nArgumentos da tarefa: {kwargs}\n\nPor favor, execute a habilidade com base no contexto e nos argumentos.""",
 }
 
-SKILL_USER_CONTENT_SIMPLE_PROMPT = {
-    "zh": """执行技能指令。""",
-    "en": """Execute skill instructions.""",
-    "pt": """Execute as instruções da habilidade."""
-}
+SKILL_USER_CONTENT_SIMPLE_PROMPT = {"zh": """执行技能指令。""", "en": """Execute skill instructions.""", "pt": """Execute as instruções da habilidade."""}
 
 SKILL_EXECUTOR_SELECT_PROMPT = {
     "zh": """你是技能编排专家。你的任务是分析用户需求，通过组合和执行多个技能来完成复杂的任务。
@@ -182,7 +194,7 @@ Think step by step to ensure each selected skill advances the task.
 4. **Finalizar**: Se a tarefa for concluída ou nenhuma habilidade corresponder, responda com o resultado final diretamente sem chamar nenhuma ferramenta.
 
 Pense passo a passo para garantir que cada habilidade selecionada avance a tarefa.
-"""
+""",
 }
 
 # 任务完成判断模板

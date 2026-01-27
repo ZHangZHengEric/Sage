@@ -23,7 +23,7 @@ async def run_demo():
         "model": os.getenv("SAGE_DEFAULT_LLM_MODEL_NAME", "gpt-4o"),
         "api_key": os.getenv("SAGE_DEFAULT_LLM_API_KEY"),
         "base_url": os.getenv("SAGE_DEFAULT_LLM_API_BASE_URL"),
-        "temperature": 0.0
+        "temperature": 0.2
     }
 
     print(f"Initializing LLM with model: {model_config['model']}")
