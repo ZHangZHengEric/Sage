@@ -77,6 +77,7 @@ async def run_demo():
             message_type=MessageType.NORMAL.value
         )
     ]
+    from collections import defaultdict
 
     # 3. Run Agent Stream
     import uuid
@@ -91,18 +92,27 @@ async def run_demo():
         deep_thinking=False, # Disable deep thinking to go straight to execution
         multi_agent=False    # Use simplified workflow
     ):
+
+        buffers = defaultdict(list)
+        last_message_id = None
         for chunk in chunks:
-            # Print relevant output
-            if chunk.role == MessageRole.ASSISTANT.value:
-                if chunk.show_content:
-                    print(f"[Assistant]: {chunk.show_content}")
-                elif chunk.tool_calls:
-                    print(f"[Tool Call]: {chunk.tool_calls}")
-                elif chunk.content:
-                    # Filter out some noise if needed
-                    pass
+            msg_id = chunk.message_id
+
+            # 只处理有内容的 assistant 输出
+            if chunk.role == MessageRole.ASSISTANT.value and chunk.show_content:
+                # 如果 message_id 变了，先把上一条打出来
+                if last_message_id is not None and msg_id != last_message_id:
+                    print("".join(buffers[last_message_id]))
+                    buffers[last_message_id].clear()
+
+                buffers[msg_id].append(chunk.show_content)
+                last_message_id = msg_id
             elif chunk.role == MessageRole.TOOL.value:
-                print(f"[Tool Output]: {chunk.content[:200]}..." if len(chunk.content) > 200 else f"[Tool Output]: {chunk.content}")
+                print(f"[Tool Output]: {chunk.content[:1000]}..." if len(chunk.content) > 200 else f"[Tool Output]: {chunk.content}")
+
+        # 打印最后一条
+        if last_message_id and buffers[last_message_id]:
+            print("".join(buffers[last_message_id]))
 
     print("\n=== Demo Completed ===")
 

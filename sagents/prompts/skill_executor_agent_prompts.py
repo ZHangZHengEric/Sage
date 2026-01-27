@@ -12,9 +12,15 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
 
 ## 核心指令 (Instructions)
 该部分包含结构化的技能定义，包含以下XML块：
-- SKILL_MD_CONTEXT: 核心指导文档 (SKILL.md)
+- SKILL_MD_CONTEXT: 核心指导文档 (SKILL.md)，其中包含了技能执行的详细步骤和**相关文件路径**。
 
+<SKILL_MD_CONTEXT>
 {instructions}
+</SKILL_MD_CONTEXT>
+
+## 参照规划 (Refer to Planning)
+该部分是基于用户根据给定的技能文档和用户对话历史，制定一个分步骤的执行计划，用于参照执行。
+{plan_steps}
 
 ## 执行流程 (Thinking Process)
 在执行每一步之前，请遵循以下思考流程：
@@ -28,13 +34,14 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
 3. **规划 (Plan)**:
    - **严格按照** `SKILL.md` 中定义的工作流步骤制定计划。
    - **严禁** 跳过步骤或使用未在文档中定义的替代方案（例如：如果文档要求阅读参考文档、使用特定脚本或中间文件，绝不能绕过）。
+   - **引用文件位置**: 在生成脚本或执行命令时，必须注意 `SKILL.md` 中提及的文件的**相对位置**。通常情况下，这些文件相对于**沙盒根目录**。请确保生成的代码能够正确引用这些文件。
    - 如果需要获取信息，使用 `read_skill_file`。如果需要新增或修改文件，使用 `write_temp_file`。如果需要执行逻辑，先根据核心指令与相关文档给出依赖安装命令（传给 `run_skill_script` 的 `install_cmd` 参数），再使用 `run_skill_script`。
    - **重要**: 所有的文件操作都在一个临时的沙盒环境中进行。如果你生成了需要交付给用户的文件，**必须**在任务结束前使用 `submit_skill_outputs` 将其提交到 Agent 工作空间。否则这些文件将在任务结束后丢失。
    - **环境隔离**: 沙盒是一个隔离环境。
      - **Python**: 依赖会自动安装到沙盒内的 `.pylibs` 目录。你可以放心地使用 `pip install`，它不会影响系统环境。
       - **Node.js**: 全局安装 (`npm install -g`) 会自动重定向到沙盒内的 `.npm_global` 目录，并且可以直接调用安装的命令。
       - **浏览器/Browser**: 如果使用浏览器自动化（如 Playwright/Puppeteer/Selenium），**必须**指定 `--user-data-dir` 为沙盒目录下的子目录，禁止使用系统默认的用户数据目录，否则会因权限不足而失败。
-      - **禁止**: 不要尝试安装系统级依赖（如 `apt-get`），这通常会因为权限不足而失败。
+      - **系统依赖**: 支持使用 `apt-get install` 安装系统依赖。**不要添加sudo**，否则会因权限不足而失败。
 4. **执行 (Execute)**: 调用相应的工具。
 5. **观察 (Observe)**: 检查工具的输出结果。如果成功，继续下一步；如果失败，分析原因并尝试修复。
 6. **验证 (Verify)**: 确保所有指令步骤都已完成，并且关键产物已通过 `submit_skill_outputs` 提交。
@@ -87,7 +94,7 @@ Before executing each step, please follow this thinking process:
 4. **Final Output**: When the task is completed, generate a clear Observation summarizing what you have done and the final result.
 5. **File Paths**: `write_temp_file` use absolute paths.
 6. **Dependencies**: `run_skill_script` can execute any script defined in FILE_LIST, but you need to provide installation commands for all dependencies.
-7. **Script Safety**: All scripts run in a sandbox environment, cannot execute system commands or access sensitive files.
+7. **Script Safety**: All scripts run in a sandbox environment. System commands (like `apt-get`) are supported but require appropriate permissions.
 
 ## Goal
 Do your best to fulfill all requirements in the Core Instructions.
@@ -111,7 +118,7 @@ Antes de executar cada etapa, siga este processo de pensamento:
 4. **Observar**: Verifique a saída da ferramenta. Se for bem-sucedido, prossiga. Se falhar, analise a causa e tente corrigir.
 5. **Verificar**: Certifique-se de que todas as etapas da instrução foram concluídas e os artefatos principais foram enviados via `submit_skill_outputs`.
 6. **Gerenciamento de Dependências**: `run_skill_script` pode executar qualquer script definido em FILE_LIST, mas você precisa fornecer comandos de instalação para todas as dependências.
-7. **Segurança de Scripts**: Todos os scripts são executados em um ambiente de sandbox, não podem executar comandos de sistema ou acessar arquivos sensíveis.
+7. **Segurança de Scripts**: Todos os scripts são executados em um ambiente de sandbox. Comandos do sistema (como `apt-get`) são suportados, mas exigem permissões apropriadas.
 
 
 ## Notas
@@ -127,32 +134,6 @@ Faça o seu melhor para cumprir todos os requisitos nas Instruções Principais.
 """,
 }
 
-SKILL_PLAN_PROMPT = {
-    "zh": """根据用户请求:\n{query}\n分析以下技能内容与资源信息，制定完成任务的步骤计划。\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\n请严格按以下格式输出：\n<QUERY>\n... 用户原始问题 ...\n</QUERY>\n<PLAN>\n... 逐步计划 ...\n</PLAN>\n<SCRIPTS>\n... 相关脚本 JSON ...\n</SCRIPTS>\n<REFERENCES>\n... 相关参考 JSON ...\n</REFERENCES>\n<RESOURCES>\n... 相关资源 JSON ...\n</RESOURCES>\n""",
-    "en": """Given the user request:\n{query}\nAnalyze the skill content and resource info and produce a step-by-step plan.\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\nOutput format:\n<QUERY>\n... original query ...\n</QUERY>\n<PLAN>\n... step-by-step plan ...\n</PLAN>\n<SCRIPTS>\n... related scripts JSON ...\n</SCRIPTS>\n<REFERENCES>\n... related references JSON ...\n</REFERENCES>\n<RESOURCES>\n... related resources JSON ...\n</RESOURCES>\n""",
-    "pt": """Dado o pedido do usuário:\n{query}\nAnalise o conteúdo da habilidade e os recursos e produza um plano passo a passo.\n{skill_md_context}\n{reference_context}\n{FILE_LIST}\n{resource_context}\n\nFormato de saída:\n<QUERY>\n... consulta original ...\n</QUERY>\n<PLAN>\n... plano passo a passo ...\n</PLAN>\n<SCRIPTS>\n... scripts relacionados JSON ...\n</SCRIPTS>\n<REFERENCES>\n... referências relacionadas JSON ...\n</REFERENCES>\n<RESOURCES>\n... recursos relacionados JSON ...\n</RESOURCES>\n""",
-}
-
-SKILL_TASKS_PROMPT = {
-    "zh": """根据以下技能计划，输出最精简的待办任务清单。\n{skill_plan_context}\n\n请严格按以下格式输出：\n<QUERY>\n... 用户原始问题 ...\n</QUERY>\n<TASKS>\n... 待办清单 ...\n</TASKS>\n""",
-    "en": """Based on the skill plan below, produce a concise TODO list.\n{skill_plan_context}\n\nOutput format:\n<QUERY>\n... original query ...\n</QUERY>\n<TASKS>\n... todo list ...\n</TASKS>\n""",
-    "pt": """Com base no plano da habilidade abaixo, produza uma lista TODO concisa.\n{skill_plan_context}\n\nFormato de saída:\n<QUERY>\n... consulta original ...\n</QUERY>\n<TASKS>\n... lista TODO ...\n</TASKS>\n""",
-}
-
-SKILL_IMPLEMENTATION_PROMPT = {
-    "zh": """根据以下资源内容与任务清单，生成实现策略，说明是否需要执行脚本以及如何执行。\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\n请严格按以下格式输出：\n<IMPLEMENTATION>\n... 实现步骤或脚本执行策略 ...\n</IMPLEMENTATION>\n""",
-    "en": """Based on the resources and task list, generate an implementation strategy and whether scripts should be executed.\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\nOutput format:\n<IMPLEMENTATION>\n... implementation strategy ...\n</IMPLEMENTATION>\n""",
-    "pt": """Com base nos recursos e na lista de tarefas, gere uma estratégia de implementação e se scripts devem ser executados.\n{script_contents}\n{reference_contents}\n{resource_contents}\n{skill_tasks_context}\n\nFormato de saída:\n<IMPLEMENTATION>\n... estratégia de implementação ...\n</IMPLEMENTATION>\n""",
-}
-
-SKILL_USER_CONTENT_PROMPT = {
-    "zh": """最近对话上下文：\n{context_messages}\n\n任务参数: {kwargs}\n\n请根据上下文和参数执行技能。""",
-    "en": """Recent conversation context:\n{context_messages}\n\nTask arguments: {kwargs}\n\nPlease execute the skill based on the context and arguments.""",
-    "pt": """Contexto recente da conversa:\n{context_messages}\n\nArgumentos da tarefa: {kwargs}\n\nPor favor, execute a habilidade com base no contexto e nos argumentos.""",
-}
-
-SKILL_USER_CONTENT_SIMPLE_PROMPT = {"zh": """执行技能指令。""", "en": """Execute skill instructions.""", "pt": """Execute as instruções da habilidade."""}
-
 SKILL_EXECUTOR_SELECT_PROMPT = {
     "zh": """你是技能编排专家。你的任务是分析用户需求，通过组合和执行多个技能来完成复杂的任务。
 
@@ -161,10 +142,9 @@ SKILL_EXECUTOR_SELECT_PROMPT = {
 </available_skills>
 
 ## 工作流程
-1. **分析**: 根据当前的对话历史和用户目标，决定下一步需要执行哪个技能。
-2. **选择**: 使用 `load_skill(skill_name)` 加载选定技能的指令。
-3. **循环**: 技能执行完毕后，你将获得执行结果的摘要。根据结果，你可以继续选择下一个技能，或者结束任务。
-4. **结束**: 如果任务已完成或没有匹配的技能，请直接回复最终结果，不要调用任何工具。
+1. **分析**: 根据当前的对话历史和用户目标，决定下一步需要执行哪**一个**技能（每次仅选择一个）。
+2. **选择**: 口语化的表达选择该技能的原因，并使用 `load_skill(skill_name)` 加载选定技能的指令。
+3. **结束**: 如果任务已完成或没有匹配的技能，请直接回复最终结果，不要调用任何工具。
 
 请一步一步思考，确保每个被选中的技能都能推动任务的进展。
 """,
@@ -175,10 +155,9 @@ SKILL_EXECUTOR_SELECT_PROMPT = {
 </available_skills>
 
 ## Workflow
-1. **Analyze**: Based on the current conversation history and user goals, decide which skill to execute next.
-2. **Select**: Use `load_skill(skill_name)` to load the instructions for the selected skill.
-3. **Loop**: After a skill execution finishes, you will receive a summary of the results. Based on the results, you can select the next skill or finish the task.
-4. **Finish**: If the task is completed or no skills match, reply with the final result directly without calling any tools.
+1. **Analyze**: Based on the current conversation history and user goals, decide which **single** skill to execute next.
+2. **Select**: State the reason for your choice, and use `load_skill(skill_name)` to load the instructions for the selected skill.
+3. **Finish**: If the task is completed or no skills match, reply with the final result directly without calling any tools.
 
 Think step by step to ensure each selected skill advances the task.
 """,
@@ -189,10 +168,9 @@ Think step by step to ensure each selected skill advances the task.
 </available_skills>
 
 ## Fluxo de Trabalho
-1. **Analisar**: Com base no histórico de conversas atual e nos objetivos do usuário, decida qual habilidade executar a seguir.
-2. **Selecionar**: Use `load_skill(skill_name)` para carregar as instruções da habilidade selecionada.
-3. **Loop**: Após a conclusão da execução de uma habilidade, você receberá um resumo dos resultados. Com base nos resultados, você pode selecionar a próxima habilidade ou finalizar a tarefa.
-4. **Finalizar**: Se a tarefa for concluída ou nenhuma habilidade corresponder, responda com o resultado final diretamente sem chamar nenhuma ferramenta.
+1. **Analisar**: Com base no histórico de conversas atual e nos objetivos do usuário, decida qual **única** habilidade executar a seguir.
+2. **Selecionar**: Explique o motivo da sua escolha e use `load_skill(skill_name)` para carregar as instruções da habilidade selecionada.
+3. **Finalizar**: Se a tarefa for concluída ou nenhuma habilidade corresponder, responda com o resultado final diretamente sem chamar nenhuma ferramenta.
 
 Pense passo a passo para garantir que cada habilidade selecionada avance a tarefa.
 """,
@@ -302,4 +280,111 @@ ou
 }}
 ```
 O motivo deve ser o mais simples possível, no máximo 20 caracteres""",
+}
+
+SKILL_GENERATION_PLAN_PROMPT = {
+    "zh": """你是一个专业的技能规划专家。你的目标是根据给定的技能文档和用户对话历史，制定一个精确的、分步骤的执行计划。
+
+## 技能信息
+- 名称: {skill_name}
+- 描述: {skill_description}
+
+## 核心指令 (Instructions)
+{instructions}
+
+## 用户对话历史
+{messages}
+
+请分析核心指令和用户对话历史，将任务分解为一系列逻辑清晰、可执行的步骤。
+每个步骤应该包含具体的行动指令。
+- 如果步骤涉及执行脚本命令，**必须**在该步骤的指令中同时包含依赖安装命令（如 pip install xxx）和脚本运行命令。
+- 如果行动指令中引用或参考了技能文件夹中的文件，**必须**强调确认文件是否存在，以及明确文件的具体位置。
+
+## 输出格式
+请直接输出 XML 格式的计划，不要包含 markdown 代码块标记或其他文本。用中文回答，格式如下：
+
+<plan>
+    <step>
+        <id>1</id>
+        <instruction>这里写具体的执行指令，例如：安装依赖 numpy，然后运行脚本 xxx</instruction>
+        <intent>这里写该步骤的目的</intent>
+    </step>
+    <step>
+        <id>2</id>
+        <instruction>...</instruction>
+        <intent>...</intent>
+    </step>
+    ...
+</plan>
+""",
+    "en": """You are a professional Skill Planning Expert. Your goal is to create a precise, step-by-step execution plan based on the given skill documentation and user request.
+
+## Skill Information
+- Name: {skill_name}
+- Description: {skill_description}
+
+## Core Instructions
+{instructions}
+
+## User Request
+{user_request}
+
+## Task
+Please analyze the core instructions and user request, and break the task down into a series of logical, executable steps.
+Each step should contain specific action instructions.
+- If a step involves executing script commands, you **MUST** include both the dependency installation command (e.g., pip install xxx) and the script execution command in the same step's instruction.
+- If the action instruction references files in the skill folder, you **MUST** emphasize checking if the file exists and explicitly state its location.
+
+## Output Format
+Please output the plan directly in XML format, without markdown code block markers or other text. Format as follows:
+
+<plan>
+    <step>
+        <id>1</id>
+        <instruction>Specific execution instruction here, e.g., Install dependency numpy, then run script xxx</instruction>
+        <intent>Purpose of this step</intent>
+    </step>
+    <step>
+        <id>2</id>
+        <instruction>...</instruction>
+        <intent>...</intent>
+    </step>
+    ...
+</plan>
+""",
+    "pt": """Você é um Especialista em Planejamento de Habilidades. Seu objetivo é criar um plano de execução passo a passo preciso com base na documentação da habilidade e na solicitação do usuário.
+
+## Informações da Habilidade
+- Nome: {skill_name}
+- Descrição: {skill_description}
+
+## Instruções Principais
+{instructions}
+
+## Solicitação do Usuário
+{user_request}
+
+## Tarefa
+Analise as instruções principais e a solicitação do usuário e divida a tarefa em uma série de etapas lógicas e executáveis.
+Cada etapa deve conter instruções de ação específicas.
+- Se uma etapa envolver a execução de comandos de script, você **DEVE** declarar explicitamente as dependências de ambiente (por exemplo, pacotes pip ou bibliotecas do sistema a serem instalados) na instrução.
+- Se a instrução de ação referenciar arquivos na pasta de habilidades, você **DEVE** enfatizar a verificação se o arquivo existe e declarar explicitamente sua localização.
+
+## Formato de Saída
+Por favor, envie o plano diretamente no formato XML, sem marcadores de bloco de código markdown ou outro texto. Formato da seguinte forma:
+
+<plan>
+    <step>
+        <id>1</id>
+        <instruction>Instrução de execução específica aqui, por exemplo, Instalar dependência numpy, então executar script xxx</instruction>
+        <intent>Objetivo desta etapa</intent>
+    </step>
+    <step>
+        <id>2</id>
+        <instruction>...</instruction>
+        <intent>...</intent>
+    </step>
+    ...
+</plan>
+""",
 }
