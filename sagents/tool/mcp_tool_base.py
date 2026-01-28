@@ -2,7 +2,7 @@ from typing import Optional, Union, get_origin, get_args
 from functools import wraps
 import inspect
 from docstring_parser import parse
-from .tool_config import SageMcpToolSpec
+from .tool_schema import SageMcpToolSpec
 
 # Global registry for discovered MCP tools
 _DISCOVERED_MCP_TOOLS = {}
@@ -135,22 +135,22 @@ def sage_mcp_tool(
 
     def decorator(func):
         tool_name = name or func.__name__
-        
+
         # Parse docstring
         docstring = func.__doc__ or ""
         parsed_docstring = parse(docstring)
         tool_desc = description or parsed_docstring.short_description or ""
         if parsed_docstring.long_description:
             tool_desc += "\n" + parsed_docstring.long_description
-            
+
         # Parse parameters
         sig = inspect.signature(func)
         parameters = {}
         required = []
-        
+
         # Map docstring params
         doc_params = {p.arg_name: p.description for p in parsed_docstring.params}
-        
+
         type_mapping = {
             str: "string",
             int: "integer",
@@ -163,10 +163,10 @@ def sage_mcp_tool(
         for param_name, param in sig.parameters.items():
             if param_name == "self" or param_name == "cls":
                 continue
-                
+
             param_type = "string"  # default
             detailed_schema = {}
-            
+
             if param.annotation != inspect.Parameter.empty:
                 param_type = get_json_schema_type(param.annotation, type_mapping)
                 detailed_schema = get_detailed_schema(param.annotation, type_mapping)
@@ -176,27 +176,27 @@ def sage_mcp_tool(
                 "description": doc_params.get(param_name, ""),
             }
             param_info.update(detailed_schema)
-            
+
             # Handle defaults
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
             else:
                 pass
-                
+
             parameters[param_name] = param_info
 
         # Handle return data
         spec_return_data = None
         if return_data:
-             spec_return_data = return_data
+            spec_return_data = return_data
         else:
             returns_obj = getattr(parsed_docstring, "returns", None)
             if returns_obj and (returns_obj.description or returns_obj.return_type_name):
-                 spec_return_data = {
+                spec_return_data = {
                     "type": "object",
                     "description": (returns_obj.description or "").strip(),
                 }
-        
+
         spec = SageMcpToolSpec(
             name=tool_name,
             description=tool_desc,
@@ -210,9 +210,9 @@ def sage_mcp_tool(
         )
 
         # Store ToolSpec on the function
-        func._tool_spec = spec
+        func._mcp_tool_spec = spec
         func._is_sagents_mcp_tool = True
-        
+
         # Add to global registry
         module_name = func.__module__
         if module_name not in _DISCOVERED_MCP_TOOLS:
@@ -222,9 +222,9 @@ def sage_mcp_tool(
         @wraps(func)
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
-            
-        wrapper._tool_spec = spec
+
+        wrapper._mcp_tool_spec = spec
         wrapper._is_sagents_mcp_tool = True
-        
+
         return wrapper
     return decorator

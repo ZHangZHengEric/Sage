@@ -5,7 +5,7 @@ import yaml
 import shutil
 
 from sagents.utils.logger import logger
-from sagents.skills.schema import SkillSchema
+from sagents.skills.skill_schema import SkillSchema
 
 _GLOBAL_SKILL_MANAGER: Optional["SkillManager"] = None
 
@@ -23,6 +23,7 @@ class SkillManager:
     Manages the discovery, registration, and loading of skills.
     """
     def __init__(self, skill_dirs: List[str] = None):
+        logger.info("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.skill_workspace = os.path.join(base_dir, "skill_workspace")
@@ -65,25 +66,25 @@ class SkillManager:
     def _generate_file_tree(self, path: str, root_path: Optional[str] = None, prefix: str = "") -> str:
         if root_path is None:
             root_path = path
-            
+
         lines = []
         try:
             items = sorted(os.listdir(path))
         except OSError:
             return ""
-            
+
         # Filter items
         items = [i for i in items if not i.startswith('.') and i != 'SKILL.md']
-        
+
         for item in items:
             full_path = os.path.join(path, item)
-            
+
             if os.path.isdir(full_path):
                 lines.append(f"{prefix}- {item}/")
                 lines.append(self._generate_file_tree(full_path, root_path, prefix + "  "))
             else:
                 lines.append(f"{prefix}- {item}")
-                
+
         return "\n".join(lines)
 
     def _validate_skill_metadata(self, metadata: Dict[str, Any], skill_path: str) -> bool:
@@ -103,7 +104,7 @@ class SkillManager:
             try:
                 with open(skill_md_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
+
                 # Parse frontmatter
                 metadata = {}
                 if content.startswith("---"):
@@ -111,14 +112,14 @@ class SkillManager:
                     if len(parts) >= 3:
                         yaml_content = parts[1]
                         metadata = yaml.safe_load(yaml_content)
-                
+
                 # Validation for Claude Code Skills format
                 # Must have name, description
                 if not self._validate_skill_metadata(metadata, skill_path):
                     return
                 name = metadata.get("name")
                 description = metadata.get("description", "")
-                
+
                 if name:
                     file_list = self._generate_file_tree(skill_path)
                     schema = SkillSchema(
@@ -129,11 +130,10 @@ class SkillManager:
                         file_list=file_list, 
                     )
                     self.skills[name] = schema
-                    logger.info(f"SkillManager: 已加载技能: {name}")
-                    logger.debug(f"SkillManager: 技能 {name} 元数据: {metadata}")
+                    logger.info(f"Successfully registered new skill: {name}")
                     return
             except Exception as e:
-                logger.error(f"SkillManager: 从 {skill_path} 加载 SKILL.md 失败: {e}")
+                logger.error(f"Failed to load skill from {skill_path}: {e}")
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
         """
@@ -163,10 +163,10 @@ class SkillManager:
         skill = self.skills.get(skill_name)
         if not skill:
             return None
-        
+
         # Target path: workspace/skills/<skill_name>
         target_dir = os.path.join(agent_workspace, "skills", skill_name)
-        
+
         # Always copy to ensure fresh state or update if needed
         # Using dirs_exist_ok=True to allow overwriting/merging
         try:
@@ -174,11 +174,11 @@ class SkillManager:
                 shutil.copytree(skill.path, target_dir, dirs_exist_ok=True, symlinks=False)
                 logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
             else:
-                 pass
+                pass
         except Exception as e:
             logger.error(f"Failed to copy skill {skill_name} to workspace: {e}")
             return None
-            
+
         return target_dir
 
     def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
@@ -189,7 +189,7 @@ class SkillManager:
         skill = self.skills.get(name)
         if skill:
             base_path = skill.path
-            
+
             if agent_workspace:
                 # Ensure agent_workspace is absolute
                 agent_workspace = os.path.abspath(agent_workspace)
@@ -217,7 +217,7 @@ class SkillManager:
         skill = self.skills.get(name)
         if not skill:
             return []
-        
+
         base_path = skill.path
         if agent_workspace:
             # Ensure agent_workspace is absolute
@@ -225,7 +225,7 @@ class SkillManager:
             workspace_path = self.prepare_skill_in_workspace(name, agent_workspace)
             if workspace_path:
                 base_path = workspace_path
-        
+
         file_list = []
         if os.path.exists(base_path):
             for root, _, files in os.walk(base_path):

@@ -24,6 +24,7 @@ from ..schemas.kdb import (
     SuccessResponse,
 )
 from ..services.kdb import KdbService
+from ..services.knowledge_base import DocumentService
 from sagents.tool.mcp_tool_base import sage_mcp_tool
 
 kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])

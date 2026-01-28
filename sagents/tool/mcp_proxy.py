@@ -7,7 +7,7 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import TextContent
 
-from .tool_config import (
+from .tool_schema import (
     McpToolSpec,
     SseServerParameters,
     StdioServerParameters,
