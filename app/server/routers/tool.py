@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter
 from loguru import logger
 from pydantic import BaseModel
-
 from sagents.tool.tool_manager import get_tool_manager
 
 from ..core.exceptions import SageHTTPException

@@ -2,7 +2,6 @@ import itertools
 from typing import Dict, List, Optional
 
 from openai import AsyncOpenAI
-
 from sagents.llm.chat import OpenAIChat
 from sagents.utils.logger import logger
 

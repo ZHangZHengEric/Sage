@@ -68,7 +68,7 @@ async def init_minio_client(
 
     if not endpoint or not ak or not sk or not bucket:
         logger.warning(
-            f"MinIO 参数不足，未初始化 endpoint={endpoint}, bucket={bucket}, access_key={ak}, secret_key={sk}"
+            f"MinIO 参数不足，跳过初始化"
         )
         return None
 

@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from sagents.tool.mcp_tool_base import sage_mcp_tool
 
 from ..core.render import Response
 from ..schemas.base import BaseResponse
@@ -25,7 +26,6 @@ from ..schemas.kdb import (
 )
 from ..services.kdb import KdbService
 from ..services.knowledge_base import DocumentService
-from sagents.tool.mcp_tool_base import sage_mcp_tool
 
 kdb_router = APIRouter(prefix="/api/knowledge-base", tags=["KDB"])
 
