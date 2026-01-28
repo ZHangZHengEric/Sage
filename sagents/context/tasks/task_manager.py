@@ -692,7 +692,7 @@ class TaskManager:
     async def _read_document_contents(self, documents: List[Any]) -> List[Dict[str, Any]]:
         document_contents = []
         for i, doc in enumerate(documents):
-            from sagents.tool.file_system_tool import file_read_core
+            from sagents.tool.impl.file_system_tool import file_read_core
             file_read_result = await file_read_core(doc,end_line=100)
             doc_content = {
                 "path":doc,
