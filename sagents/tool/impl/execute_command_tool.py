@@ -17,7 +17,7 @@ import hashlib
 import traceback
 from typing import Dict, List, Any, Optional, Tuple
 
-from .tool_base import tool
+from ..tool_base import tool
 from sagents.utils.logger import logger
 
 class SecurityManager:

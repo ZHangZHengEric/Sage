@@ -8,7 +8,7 @@ import re
 from typing import Dict, Any, Optional, List
 import asyncio
 
-from .tool_base import tool
+from ..tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.file_system_utils import SecurityValidator, FileMetadata, file_read_core
 class FileSystemError(Exception):

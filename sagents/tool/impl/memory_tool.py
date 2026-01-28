@@ -14,7 +14,7 @@ import traceback
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from datetime import datetime
-from .tool_base import tool
+from ..tool_base import tool
 from sagents.utils.logger import logger
 
 try:

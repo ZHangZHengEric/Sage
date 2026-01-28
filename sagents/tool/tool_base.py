@@ -5,7 +5,7 @@ import traceback
 from functools import wraps
 import copy
 from docstring_parser import parse, DocstringStyle
-from .tool_config import ToolSpec
+from .tool_schema import ToolSpec
 import os
 import time
 
