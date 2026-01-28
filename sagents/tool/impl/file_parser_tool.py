@@ -4,7 +4,7 @@ import asyncio
 import concurrent.futures
 from typing import Dict, Any
 
-from .tool_base import tool
+from ..tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.file_parser import FileParser
 

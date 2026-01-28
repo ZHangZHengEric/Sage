@@ -2,7 +2,7 @@
 任务完成工具
 """
 from typing import Dict, Any, List, Optional
-from .tool_base import tool
+from ..tool_base import tool
 
 class TaskInterruptionTool:
     """任务中断工具"""

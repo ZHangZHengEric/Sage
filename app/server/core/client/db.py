@@ -66,7 +66,7 @@ class SessionManager:
         if self.db_type == "file":
             os.makedirs(self.db_path, exist_ok=True)
             self.db_file = os.path.join(self.db_path, "agent_platform.db")
-            logger.info(f"使用文件数据库: {self.db_file}")
+            logger.info(f"使用file数据库, 数据地址: {self.db_file}")
         elif self.db_type == "memory":
             self.db_file = ":memory:"
             logger.info("使用内存数据库")

@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Optional, Union
 from .tool_base import _DISCOVERED_TOOLS
-from .tool_config import (
+from .mcp_tool_base import _DISCOVERED_MCP_TOOLS
+from .tool_schema import (
     convert_spec_to_openai_format,
     ToolSpec,
     McpToolSpec,
@@ -76,18 +77,17 @@ def _raise_innermost_exception(exc: BaseException) -> None:
 
 
 class ToolManager:
-    def __init__(self, is_auto_discover=True, mcp_servers_path: Optional[str] = None):
+    def __init__(self, is_auto_discover=True):
         """初始化工具管理器"""
         logger.info("Initializing ToolManager")
 
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]] = {}
         self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
         self._mcp_setting_path = None
-        self.mcp_servers_path = Path(mcp_servers_path) if mcp_servers_path else None
 
         if is_auto_discover:
             self.discover_tools_from_path()
-            self._discover_builtin_mcp_tools()
+            self.discover_builtin_mcp_tools_from_path()
             # self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
             # # 在测试环境中，我们不希望自动发现MCP工具
             # if not os.environ.get('TESTING'):
@@ -109,59 +109,72 @@ class ToolManager:
         logger.info("Asynchronously initializing ToolManager")
         await self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path)
 
-    def _discover_builtin_mcp_tools(self):
-        """Discover and register built-in MCP tools from mcp_servers directory"""
-        try:
-            from .mcp_tool_base import _DISCOVERED_MCP_TOOLS
-        except ImportError:
-            logger.warning("Could not import mcp_tool decorator registry")
-            return
+    def _discover_import_path(self, path=None, root_package="sagents"):
+        package_path = Path(path) if path else Path(__file__).parent
+        package_path = package_path.resolve()
 
-        # Determine mcp_servers path
-        if self.mcp_servers_path:
-            mcp_servers_path = self.mcp_servers_path
+        # Find root_package in path to determine sys.path and full package name
+        current = package_path
+        parts = []
+        root_found = False
+        sys_path_dir = None
+
+        while True:
+            parts.insert(0, current.name)
+            if current.name == root_package:
+                root_found = True
+                sys_path_dir = current.parent
+                break
+            if current.parent == current:  # Reached root
+                break
+            current = current.parent
+
+        if not root_found:
+            # Fallback: treat package_path as the root package
+            logger.warning(f"Root package '{root_package}' not found in path {package_path}. Using {package_path.name} as root.")
+            sys_path_dir = package_path.parent
+            full_package_name = package_path.name
         else:
-            # Fallback to default relative path
-            # Assumes .../sagents/tool/tool_manager.py
+            full_package_name = ".".join(parts)
+
+        # Add to sys.path
+        if sys_path_dir:
+            sys_path_str = str(sys_path_dir)
+            if sys_path_str not in sys.path:
+                sys.path.append(sys_path_str)
+
+        logger.info(f"Discovering tools from package_path: {package_path}, module prefix: {full_package_name}")
+        import importlib
+        # 遍历 .py 文件
+        for py_file in package_path.rglob("*.py"):
+            if py_file.name.startswith(("test_", "__")):
+                continue
+            # 相对路径 + 模块名
+            rel_parts = py_file.relative_to(package_path).with_suffix("").parts
+            module_name = ".".join([full_package_name, *rel_parts])
+            try:
+                importlib.import_module(module_name)
+            except Exception as e:
+                logger.warning(f"Failed to import {module_name}: {e}")
+
+    def discover_builtin_mcp_tools_from_path(self, path: Optional[str] = None):
+        """Discover and register built-in MCP tools from mcp_servers directory"""
+        if path:
+            self._discover_import_path(path=path, root_package="mcp_servers")
+        else:
             root_path = Path(__file__).parent.parent.parent
             mcp_servers_path = root_path / "mcp_servers"
-
-        if not mcp_servers_path.exists():
-            logger.warning(f"mcp_servers path not found: {mcp_servers_path}")
-            return
-
-        logger.info(f"Discovering built-in MCP tools from {mcp_servers_path}")
-
-        # Add mcp_servers to sys.path to allow imports
-        str_mcp_servers_path = str(mcp_servers_path)
-        if str_mcp_servers_path not in sys.path:
-            sys.path.append(str_mcp_servers_path)
-
-        # Scan for python files
-        import importlib
-
-        # Scan subdirectories in mcp_servers
-        for item in mcp_servers_path.iterdir():
-            if item.is_dir():
-                # Check for python files inside
-                for subitem in item.glob("*.py"):
-                    if subitem.name.startswith("test_") or subitem.name.startswith("__"):
-                        continue
-
-                    module_name = f"{item.name}.{subitem.stem}"
-                    try:
-                        logger.debug(f"Importing module: {module_name}")
-                        importlib.import_module(module_name)
-                    except Exception as e:
-                        logger.warning(f"Failed to import {module_name}: {e}")
-                        pass
+            if not mcp_servers_path.exists():
+                logger.warning(f"mcp_servers path not found: {mcp_servers_path}")
+            else:
+                self._discover_import_path(path=mcp_servers_path, root_package="mcp_servers")
 
         # Register discovered tools
         count = 0
         for module_name, funcs in _DISCOVERED_MCP_TOOLS.items():
             for func in funcs:
-                if hasattr(func, '_tool_spec'):
-                    self.register_tool(func._tool_spec)
+                if hasattr(func, '_mcp_tool_spec'):
+                    self.register_tool(func._mcp_tool_spec)
                     count += 1
 
         logger.info(f"Registered {count} built-in MCP tools")
@@ -171,31 +184,16 @@ class ToolManager:
         Args:
             path: Optional custom path to scan for tools. If None, uses package directory.
         """
-        package_path = Path(path) if path else Path(__file__).parent
-        sys_package_path = package_path.parent
-        # 自动推断完整包名（如 sagents.tool）
-        pkg_parts = []
-        p = package_path
-        while p.name != "sagents" and p.parent != p:
-            pkg_parts.insert(0, p.name)
-            p = p.parent
-        if p.name == "sagents":
-            pkg_parts.insert(0, "sagents")
-        full_package_name = ".".join(pkg_parts)
-        logger.info(f"Discovering tools from package_path: {package_path}")
-        # 需要将package_path 加入sys.path
-        if str(sys_package_path) not in sys.path:
-            sys.path.append(str(sys_package_path))
-        import importlib
-        for subitem in package_path.rglob("*.py"):
-            if subitem.name.startswith("test_") or subitem.name.startswith("__"):
-                continue
-            rel = subitem.relative_to(package_path).with_suffix("")
-            module_name = ".".join([full_package_name, *rel.parts])
+        if path:
+            self._discover_import_path(path=path, root_package="sagents")
+        else:
+            # 默认情况：导入 sagents.tool.impl 包
+            # 依赖 impl/__init__.py 自动导入所有子模块
             try:
-                importlib.import_module(module_name)
-            except Exception as e:
-                logger.warning(f"Failed to import {module_name}: {e}")
+                from . import impl
+            except ImportError as e:
+                logger.warning(f"Failed to import impl package: {e}")
+
         count = 0
         for funcs in _DISCOVERED_TOOLS.values():
             for func in funcs:
@@ -223,11 +221,7 @@ class ToolManager:
                             func.__objclass__ = target
                 if self.register_tool(tool_spec):
                     count += 1
-        logger.info(f"Registered {count} tools from package_path: {package_path}")
-        # 将package_path 从sys.path 中移除
-        if str(sys_package_path) in sys.path:
-            sys.path.remove(str(sys_package_path))
-            logger.debug(f"Removed package path from sys.path: {sys_package_path}")
+        logger.info(f"Registered {count} tools from package_path")
 
     def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]):
         """Register a tool specification with priority-based replacement
@@ -238,7 +232,6 @@ class ToolManager:
         3. SageMcpToolSpec (Built-in MCP tools)
         4. ToolSpec (Local tools)
         """
-        logger.debug(f"Registering tool: {tool_spec.name}")
 
         if tool_spec.name in self.tools:
             existing_tool = self.tools[tool_spec.name]
