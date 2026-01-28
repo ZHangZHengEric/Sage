@@ -66,10 +66,10 @@ class SessionManager:
         if self.db_type == "file":
             os.makedirs(self.db_path, exist_ok=True)
             self.db_file = os.path.join(self.db_path, "agent_platform.db")
-            logger.info(f"使用file数据库, 数据地址: {self.db_file}")
+            logger.debug(f"使用file数据库, 数据地址: {self.db_file}")
         elif self.db_type == "memory":
             self.db_file = ":memory:"
-            logger.info("使用内存数据库")
+            logger.debug("使用内存数据库")
         elif self.db_type == "mysql":
             self._engine_name = "mysql"
             self.db_file = None
@@ -81,9 +81,7 @@ class SessionManager:
                 "database": cfg.mysql_database,
                 "charset": cfg.mysql_charset,
             }
-            logger.info(
-                f"使用MySQL数据库: {self.mysql_config.get('host')}:{self.mysql_config.get('port')} / {self.mysql_config.get('database')}"
-            )
+            logger.debug(f"使用MySQL数据库: {self.mysql_config.get('host')}:{self.mysql_config.get('port')} / {self.mysql_config.get('database')}")
         else:
             raise SageHTTPException(
                 status_code=400,
