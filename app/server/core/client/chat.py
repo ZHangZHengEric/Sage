@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from openai import AsyncOpenAI
 from sagents.llm.chat import OpenAIChat
-from sagents.utils.logger import logger
+from  loguru import logger
 
 _CHAT_CLIENT: Optional[OpenAIChat] = None
 _CHAT_CLIENTS: List[OpenAIChat] = []
