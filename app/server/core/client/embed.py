@@ -1,7 +1,7 @@
 from typing import Optional
 
 from sagents.llm.embedding import OpenAIEmbedding
-from sagents.utils.logger import logger
+from loguru import logger
 
 _EMBED_CLIENT: Optional[OpenAIEmbedding] = None
 
