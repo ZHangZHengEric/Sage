@@ -214,7 +214,9 @@ class Logger:
 
     def _get_session_logger(self, session_id: str) -> logging.Logger:
         """获取或创建session专用的logger"""
-        if session_id not in self.session_loggers:
+        if session_id in self.session_loggers:
+            session_logger = self.session_loggers[session_id]
+        else:
             # 创建session专用logger
             session_logger = logging.getLogger(f'sage_session_{session_id}')
             session_logger.setLevel(logging.DEBUG)
@@ -223,34 +225,35 @@ class Logger:
             # 清除可能存在的handlers
             if session_logger.handlers:
                 session_logger.handlers.clear()
+            
+            self.session_loggers[session_id] = session_logger
 
+        # 检查是否已经有FileHandler
+        has_file_handler = any(isinstance(h, logging.FileHandler) for h in session_logger.handlers)
+        
+        # 如果没有FileHandler，尝试添加
+        if not has_file_handler:
             try:
                 # 获取session workspace路径
                 from sagents.context.session_context import get_session_context
                 session_context = get_session_context(session_id)
-                if not session_context:
-                    # 如果找不到session上下文，无法创建文件handler，直接返回(可能只输出到console)
-                    self.session_loggers[session_id] = session_logger
-                    return session_logger
-                session_workspace = session_context.session_workspace
+                if session_context:
+                    session_workspace = session_context.session_workspace
 
-                # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
-                session_log_file = os.path.join(session_workspace, f'session_{session_id}.log')
-                # 使用FileHandler的追加模式，而不是RotatingFileHandler
-                session_file_handler = logging.FileHandler(session_log_file, mode='a', encoding='utf-8')
-                session_file_handler.setLevel(logging.DEBUG)
-                session_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
-                session_file_handler.setFormatter(session_format)
+                    # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
+                    session_log_file = os.path.join(session_workspace, f'session_{session_id}.log')
+                    # 使用FileHandler的追加模式，而不是RotatingFileHandler
+                    session_file_handler = logging.FileHandler(session_log_file, mode='a', encoding='utf-8')
+                    session_file_handler.setLevel(logging.DEBUG)
+                    session_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
+                    session_file_handler.setFormatter(session_format)
 
-                session_logger.addHandler(session_file_handler)
-
+                    session_logger.addHandler(session_file_handler)
             except Exception as e:
                 # 如果无法创建session专用日志文件，记录错误但不影响主要功能
                 print(f"Warning: Failed to create session log file for {session_id}: {e}")
 
-            self.session_loggers[session_id] = session_logger
-
-        return self.session_loggers[session_id]
+        return session_logger
 
     def _log(self, level, message, explicit_session_id: Optional[str] = None, **kwargs):
         # Get caller frame info to include filename and line number
