@@ -6,7 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from .context import get_request_id
+from ..core.context import get_request_id
 
 
 class InterceptHandler(logging.Handler):
