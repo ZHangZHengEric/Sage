@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Type
 
 from loguru import logger
 from pydantic import BaseModel
-
 from sagents.retrieve_engine.manager import KnowledgeManager
 from sagents.retrieve_engine.schema import Document as SagentsDocument
 

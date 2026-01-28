@@ -9,12 +9,11 @@ from .file_server import file_server_router
 from .kdb import kdb_router
 from .mcp import mcp_router
 from .oss import oss_router
+from .skill import skill_router
 from .system import system_router
 from .tool import tool_router
 from .trace import trace_router
 from .user import user_router
-from .skill import skill_router
-
 
 # Export all routers for easy import
 __all__ = [

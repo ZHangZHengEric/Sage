@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from ..utils.context import set_request_context
+from .context import set_request_context
 from .auth import parse_access_token
 from .config import get_startup_config
 from .exceptions import SageHTTPException

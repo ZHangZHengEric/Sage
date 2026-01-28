@@ -4,7 +4,6 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-
 from sagents.retrieve_engine.interface.vector_store import VectorStore
 from sagents.retrieve_engine.post_process import SearchResultPostProcessTool
 from sagents.retrieve_engine.schema import Chunk, Document, SearchResult

@@ -6,7 +6,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from ..core.render import Response
+from .render import Response
 
 # ============= 自定义异常类 =============
 

@@ -6,7 +6,6 @@ import asyncio
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
-
 from sagents.context.session_context import delete_session_run_lock
 
 from ..core.client.chat import get_chat_client

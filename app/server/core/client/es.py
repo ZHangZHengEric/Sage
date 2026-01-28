@@ -37,7 +37,7 @@ async def init_es_client(
 
     if not base:
         logger.warning(
-            f"Elasticsearch 参数不足，未初始化 base={base}, api_key={api_key}, username={username}, password={'***' if password else None}"
+            f"Elasticsearch 参数不足，跳过初始化"
         )
         return None
 

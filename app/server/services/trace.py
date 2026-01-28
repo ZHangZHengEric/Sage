@@ -1,15 +1,60 @@
 import asyncio
+import datetime
+import typing
 from typing import Any, Dict, List
 
 from loguru import logger
-from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.trace import format_span_id, format_trace_id
 
-from ..core import config
 from ..models.trace import TraceDao, TraceSpan
+
+
+class SageSpanExporter(SpanExporter):
+    def export(self, spans: typing.Sequence[ReadableSpan]) -> SpanExportResult:
+        service = TraceService.get_instance()
+
+        span_dicts = []
+        for span in spans:
+            ctx = span.get_span_context()
+            parent = span.parent
+
+            start_dt = datetime.datetime.fromtimestamp(span.start_time / 1e9)
+            end_dt = datetime.datetime.fromtimestamp(span.end_time / 1e9)
+
+            span_dict = {
+                "name": span.name,
+                "context": {
+                    "trace_id": format_trace_id(ctx.trace_id),
+                    "span_id": format_span_id(ctx.span_id),
+                },
+                "kind": str(span.kind),
+                "parent_id": format_span_id(parent.span_id) if parent else None,
+                "start_time": start_dt,
+                "end_time": end_dt,
+                "status": {
+                    "status_code": span.status.status_code.name,
+                    "description": span.status.description,
+                },
+                "attributes": dict(span.attributes) if span.attributes else {},
+                "events": [
+                    {
+                        "name": event.name,
+                        "timestamp": datetime.datetime.fromtimestamp(event.timestamp / 1e9).isoformat(),
+                        "attributes": dict(event.attributes) if event.attributes else {},
+                    }
+                    for event in span.events
+                ],
+                "resource": dict(span.resource.attributes) if span.resource else {},
+            }
+            span_dicts.append(span_dict)
+
+        service.enqueue_spans(span_dicts)
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        pass
 
 
 class TraceService:
@@ -43,7 +88,6 @@ class TraceService:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
-        logger.info("TraceService worker stopped")
 
     def enqueue_spans(self, spans: List[Dict[str, Any]]):
         if not self._running:
@@ -102,57 +146,3 @@ class TraceService:
 
         if trace_spans:
             await self.dao.save_spans(trace_spans)
-
-
-async def initialize_trace_system():
-    """初始化Trace系统"""
-    cfg = config.get_startup_config()
-    
-    # Check if Trace Provider is already initialized to prevent overwriting
-    if isinstance(trace.get_tracer_provider(), TracerProvider):
-        logger.info("Trace 系统已初始化")
-    else:
-        try:
-            from .trace_exporter import SageSpanExporter
-            
-            resource = Resource(attributes={
-                SERVICE_NAME: "sage-server"
-            })
-            provider = TracerProvider(resource=resource)
-
-            # 1. Internal Exporter (for Workflow Panel) - Optional
-            processor = BatchSpanProcessor(SageSpanExporter())
-            provider.add_span_processor(processor)
-
-            # 2. OTLP Exporter (for Jaeger/external)
-            if cfg and cfg.trace_jaeger_endpoint:
-                otlp_exporter = OTLPSpanExporter(endpoint=cfg.trace_jaeger_endpoint, insecure=True)
-                otlp_processor = BatchSpanProcessor(otlp_exporter)
-                provider.add_span_processor(otlp_processor)
-
-            # Set global provider
-            trace.set_tracer_provider(provider)
-
-            # Start TraceService worker
-            await TraceService.get_instance().start()
-            logger.info("Trace 系统已初始化")
-        except Exception as e:
-            logger.error(f"Trace 系统初始化失败: {e}")
-
-
-async def close_trace_system():
-    """关闭Trace系统"""
-    # 1. Shutdown Trace Provider (Flush spans)
-    provider = trace.get_tracer_provider()
-    if isinstance(provider, TracerProvider):
-        try:
-            provider.shutdown()
-            logger.info("Trace Provider 已关闭")
-        except Exception as e:
-            logger.error(f"Trace Provider 关闭失败: {e}")
-
-    # 2. Stop Trace Service (Drain queue to DB)
-    try:
-        await TraceService.get_instance().stop()
-    finally:
-        logger.info("Trace Service 已关闭")
