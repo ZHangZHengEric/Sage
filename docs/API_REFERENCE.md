@@ -526,7 +526,7 @@ server_params = StdioServerParameters(
 For HTTP-based MCP servers:
 
 ```python
-from sagents.tool.tool_config import SseServerParameters
+from sagents.tool.tool_schema import SseServerParameters
 
 server_params = SseServerParameters(
     url="https://your-mcp-server.com/sse"
