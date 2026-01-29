@@ -93,7 +93,19 @@
           <el-form-item :label="t('agent.availableSkills')">
             <el-select v-model="formData.availableSkills" multiple :placeholder="t('agent.selectSkills')"
               style="width: 100%">
-              <el-option v-for="skill in props.skills" :key="skill" :label="skill" :value="skill" />
+              <el-option 
+                v-for="skill in props.skills" 
+                :key="skill.name || skill" 
+                :label="skill.name || skill" 
+                :value="skill.name || skill"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>{{ skill.name || skill }}</span>
+                  <span v-if="skill.description" style="color: #909399; font-size: 12px; margin-left: 10px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                    {{ skill.description }}
+                  </span>
+                </div>
+              </el-option>
             </el-select>
           </el-form-item>
           <!-- 系统上下文 -->
