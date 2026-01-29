@@ -3,7 +3,7 @@ services:
     restart: always
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.server
     image: sage-server:v1.0
     container_name: sage-server
     volumes:
@@ -19,8 +19,8 @@ services:
   sage-web:
     restart: always
     build:
-      context: ./app/web/
-      dockerfile: docker/Dockerfile
+      context: .
+      dockerfile: docker/Dockerfile.web
     image: sage-web:v1.0
     container_name: sage-web
     ports:
