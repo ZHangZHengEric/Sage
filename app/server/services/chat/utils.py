@@ -30,7 +30,7 @@ def resolve_llm_config(request_llm_config: dict, server_args: StartupConfig) -> 
     elif server_args.default_llm_presence_penalty is not None:
         final_model_config["presence_penalty"] = float(server_args.default_llm_presence_penalty)
     client_params = {
-        "use_default_client": not raw_config,
+        "use_default_client": not (raw_config.get("apiKey") or raw_config.get("baseUrl")),
         "api_key": raw_config.get("apiKey", server_args.default_llm_api_key),
         "base_url": raw_config.get("baseUrl", server_args.default_llm_api_base_url),
     }
@@ -39,8 +39,8 @@ def resolve_llm_config(request_llm_config: dict, server_args: StartupConfig) -> 
 
 def create_model_client(client_params: Dict[str, Any], model_name: str) -> Any:
     if client_params.get("use_default_client"):
-        logger.info("使用默认模型客户端")
-        return get_chat_client()
+        logger.info(f"使用默认模型客户端 pool for model: {model_name}")
+        return get_chat_client(model_name=model_name)
     api_key = client_params.get("api_key")
     base_url = client_params.get("base_url")
     logger.info(f"初始化自定义模型客户端: model={model_name}, base_url={base_url}")

@@ -92,6 +92,15 @@ const predefinedServices = ref([
     ]
   },
   {
+    id: 'cat_skills',
+    key: 'skills',
+    nameKey: 'sidebar.skillLibrary',
+    icon: '⚡',
+    children: [
+      { id: 'svc_skills', nameKey: 'sidebar.skillLibrary', url: 'Skills', isInternal: true }
+    ]
+  },
+  {
     id: 'cat3',
     key: 'knowledge_base',
     nameKey: 'sidebar.knowledgeBase',

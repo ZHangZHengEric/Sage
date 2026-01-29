@@ -40,7 +40,7 @@ class StartupConfig:
 
     # LLM defaults
     default_llm_api_key: str = ""
-    extra_llm_configs: Optional[List[Dict[str, str]]] = None
+    extra_llm_configs: Optional[Dict[str, List[Dict[str, str]]]] = None
     default_llm_api_base_url: str = "https://api.deepseek.com/v1"
     default_llm_model_name: str = "deepseek-chat"
     default_llm_max_tokens: int = 4096
@@ -232,6 +232,20 @@ def pick_json_list(
     return default
 
 
+def pick_json_dict_list(
+    arg_val: Optional[str], env_name: str, default: Optional[Dict[str, List[Dict[str, str]]]] = None
+) -> Optional[Dict[str, List[Dict[str, str]]]]:
+    val_str = pick_str(arg_val, env_name)
+    if val_str:
+        try:
+            val = json.loads(val_str)
+            if isinstance(val, dict):
+                return val
+        except json.JSONDecodeError:
+            pass
+    return default
+
+
 def create_argument_parser():
     """创建命令行参数解析器，支持环境变量，优先级：指定入参 > 环境变量 > 默认值"""
     parser = argparse.ArgumentParser(description="Sage Stream Service")
@@ -243,7 +257,7 @@ def create_argument_parser():
     )
     parser.add_argument(
         "--extra_llm_configs",
-        help=f"额外的LLM配置列表 (JSON字符串), 如: '[{{\"api_key\":\"...\", \"base_url\":\"...\", \"model_name\":\"...\"}}]' (环境变量: {ENV.EXTRA_LLM_CONFIGS})",
+        help=f"额外的LLM配置字典 (JSON字符串), 如: '{{\"model_name\": [{{\"api_key\":\"...\", \"base_url\":\"...\"}}]}}' (环境变量: {ENV.EXTRA_LLM_CONFIGS})",
     )
     parser.add_argument(
         "--default_llm_api_base_url",
@@ -465,7 +479,7 @@ def build_startup_config() -> StartupConfig:
             ENV.DEFAULT_LLM_API_KEY,
             StartupConfig.default_llm_api_key,
         ),
-        extra_llm_configs=pick_json_list(
+        extra_llm_configs=pick_json_dict_list(
             args.extra_llm_configs,
             ENV.EXTRA_LLM_CONFIGS,
             StartupConfig.extra_llm_configs,

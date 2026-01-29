@@ -5,6 +5,7 @@ import ToolsPage from '../views/Tool.vue'
 import HistoryPage from '../views/ChatHistory.vue'
 import McpsPage from '../views/Mcp.vue'
 import KnowledgeBasePage from '../views/KnowledgeBase.vue'
+import SkillLibraryPage from '../views/SkillLibrary.vue'
 import ApiAgentChatPage from '../views/ApiAgentChat.vue'
 
 const routes = [
@@ -62,6 +63,14 @@ const routes = [
     component: () => import('../views/KnowledgeBaseDetail.vue'),
     meta: {
       title: 'knowledgeBase.title'
+    }
+  },
+  {
+    path: '/agent/skills',
+    name: 'Skills',
+    component: SkillLibraryPage,
+    meta: {
+      title: 'skills.title'
     }
   },
   {
