@@ -66,8 +66,8 @@ def create_tool_proxy(available_tools: List[str], multi_agent: bool):
     return tool_proxy
 
 def create_skill_proxy(available_skills: List[str]):
-    from sagents.skills.skill_manager import get_skill_manager
-    from sagents.skills.skill_proxy import SkillProxy
+    from sagents.skill.skill_manager import get_skill_manager
+    from sagents.skill.skill_proxy import SkillProxy
     if not available_skills:
         return SkillProxy(get_skill_manager(), [])
 

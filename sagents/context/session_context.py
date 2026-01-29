@@ -7,7 +7,7 @@ from enum import Enum
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_memory.session_memory_manager import SessionMemoryManager
-from sagents.skills import SkillProxy, SkillManager
+from sagents.skill import SkillProxy, SkillManager
 from sagents.utils.prompt_manager import prompt_manager
 from sagents.context.workflows import WorkflowManager
 from sagents.context.user_memory.manager import UserMemoryManager

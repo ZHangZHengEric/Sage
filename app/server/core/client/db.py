@@ -156,6 +156,36 @@ class SessionManager:
                     try:
                         async with self._engine.connect() as conn:
                             await conn.execute(text("SELECT 1"))
+                    except OperationalError as e:
+                        # 错误码 1049: Unknown database
+                        if "1049" in str(e) or "Unknown database" in str(e):
+                            logger.warning(f"数据库 '{database}' 不存在，尝试自动创建...")
+                            try:
+                                # 创建临时连接用于创建数据库
+                                # 不指定数据库名进行连接
+                                admin_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/?charset={charset}"
+                                admin_engine = create_async_engine(
+                                    admin_url,
+                                    isolation_level="AUTOCOMMIT",
+                                    future=True
+                                )
+                                
+                                async with admin_engine.connect() as admin_conn:
+                                    # 创建数据库
+                                    await admin_conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {charset}"))
+                                    logger.info(f"数据库 '{database}' 创建成功")
+                                
+                                await admin_engine.dispose()
+                                
+                                # 再次验证原连接
+                                async with self._engine.connect() as conn:
+                                    await conn.execute(text("SELECT 1"))
+                            except Exception as create_e:
+                                logger.error(f"自动创建数据库失败: {create_e}")
+                                raise e  # 抛出原始连接错误
+                        else:
+                            logger.error(f"MySQL 连接验证失败: {e}")
+                            raise e
                     except Exception as e:
                         logger.error(f"MySQL 连接验证失败: {e}")
                         raise e

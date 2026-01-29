@@ -3,7 +3,7 @@
 """
 
 from fastapi import APIRouter
-from sagents.skills.skill_manager import get_skill_manager
+from sagents.skill.skill_manager import get_skill_manager
 
 from ..core.render import Response
 

@@ -39,10 +39,12 @@ class MessageType(Enum):
 
     # 技能相关
     SKILL_SELECT_RESULT = "skill_select_result"
-    SKILL_EXECUTION_PLAN = "skill_execution_plan"
-    SKILL_EXECUTION_RESULT = "skill_execution_result"
+    SKILL_EXEC_PLAN = "skill_exec_plan"
+    SKILL_EXEC_TOOL_CALL = "skill_exec_tool_call"
+    SKILL_EXEC_TOOL_CALL_RESULT = "skill_exec_tool_call_result"
+    SKILL_EXEC_RESULT = "skill_exec_result"
+
     SKILL_OBSERVATION = "skill_observation"
-    SKILL_MISS = "skill_miss"
     # 其他类型
     THINKING = "thinking"
     ERROR = "error"

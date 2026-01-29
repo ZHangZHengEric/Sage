@@ -30,7 +30,7 @@ from sagents.agent import (
     AgentBase,
 )
 from sagents.tool import ToolManager, ToolProxy
-from sagents.skills import SkillManager, SkillProxy
+from sagents.skill import SkillManager, SkillProxy
 from sagents.context.user_memory import UserMemoryManager, MemoryExtractor
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, AgentRuntime, ObservableAsyncOpenAI
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator

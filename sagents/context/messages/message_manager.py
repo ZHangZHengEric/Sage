@@ -172,6 +172,10 @@ class MessageManager:
                 if message.role == MessageRole.SYSTEM.value:
                     self.stats['system_messages_rejected'] += 1
                     continue
+                # 过滤skill 中间类型消息
+                if message.type in [MessageType.SKILL_EXEC_PLAN.value, MessageType.SKILL_EXEC_TOOL_CALL.value, MessageType.SKILL_EXEC_TOOL_CALL_RESULT.value, MessageType.SKILL_EXEC_RESULT.value]:
+                    self.stats['filtered_messages'] += 1
+                    continue
                 # 过滤 show_content 以及content 以及 tool_calls 都是空字符串或者None的消息
                 if not message.show_content and not message.content and not message.tool_calls:
                     self.stats['filtered_messages'] += 1
