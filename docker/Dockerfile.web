@@ -1,0 +1,96 @@
+# syntax=docker/dockerfile:1
+
+# --- Build stage: use Node 22 to satisfy Vite requirements ---
+FROM docker.m.daocloud.io/node:22-alpine AS builder
+WORKDIR /app
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
+
+# Install dependencies
+COPY ./app/web .
+
+RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
+
+RUN npm run build
+
+# --- Runtime stage: serve static files with Nginx ---
+FROM docker.m.daocloud.io/nginx:1.27-alpine
+
+# Copy custom nginx config
+COPY <<EOF /etc/nginx/conf.d/default.conf
+server {
+  listen 80;
+  server_name _;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Basic security headers
+  add_header X-Content-Type-Options nosniff;
+  add_header X-Frame-Options SAMEORIGIN;
+  add_header X-XSS-Protection "1; mode=block";
+
+  gzip on;
+  gzip_min_length 1k;
+  gzip_comp_level 6;
+  gzip_types text/plain
+      application/javascript
+      application/x-javascript
+      text/css
+      application/xml
+      text/javascript
+      application/x-httpd-php
+      image/jpeg
+      image/gif
+      image/png;
+  gzip_vary on;
+  gzip_disable "MSIE [1-6]\.";
+  client_max_body_size 512m;
+  client_body_buffer_size 20m;
+  proxy_connect_timeout 30000s;
+  proxy_send_timeout    30000s;
+  proxy_read_timeout    30000s;
+  send_timeout          30000s;
+  proxy_buffer_size 512k;
+  proxy_buffers 4  1024k;
+  proxy_busy_buffers_size 1024k;
+  proxy_cache off;
+  proxy_buffering off;
+  chunked_transfer_encoding on;
+  tcp_nopush on;
+  tcp_nodelay on;
+  keepalive_timeout 30000;
+
+  # Serve static files with caching
+  location /assets/ {
+    try_files \$uri =404;
+    expires 7d;
+    add_header Cache-Control "public, max-age=604800";
+  }
+
+  # SPA fallback
+  location / {
+    try_files \$uri \$uri/ /index.html;
+  }
+
+  location /prod-api/api/ {
+      rewrite "^/prod-api/(.*)$" /\$1 break;
+      proxy_pass http://sage-server:8080;
+      proxy_set_header Host \$host;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_connect_timeout 300s;
+      proxy_send_timeout 300s;
+      proxy_read_timeout 300s;
+  }
+}
+EOF
+
+# Copy build output to Nginx html directory
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+# Simple healthcheck to ensure Nginx responds
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/ || exit 1

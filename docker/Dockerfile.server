@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com
 COPY . .
 
 # 创建工作空间目录 & 日志目录
-RUN mkdir -p /app/agent_workspace /app/logs
+RUN mkdir -p /app/agent_workspace /app/logs /app/skills
 
 # 设置环境变量
 ENV PYTHONPATH=/app
