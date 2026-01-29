@@ -2,7 +2,7 @@ import os
 import shutil
 from typing import List, Optional, Union
 from sagents.utils.sandbox.sandbox import Sandbox
-from sagents.skills import SkillManager, SkillProxy
+from sagents.skill import SkillManager, SkillProxy
 from sagents.utils.logger import logger
 
 class SkillTools:

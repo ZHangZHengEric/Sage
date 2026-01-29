@@ -5,7 +5,7 @@ import yaml
 import shutil
 
 from sagents.utils.logger import logger
-from sagents.skills.skill_schema import SkillSchema
+from sagents.skill.skill_schema import SkillSchema
 
 _GLOBAL_SKILL_MANAGER: Optional["SkillManager"] = None
 
@@ -26,7 +26,7 @@ class SkillManager:
         logger.info("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.skill_workspace = os.path.join(base_dir, "skill_workspace")
+        self.skill_workspace = os.path.join(base_dir, "skills")
         self.skill_dirs = list(dict.fromkeys((skill_dirs or []) + [self.skill_workspace]))
         self._load_skills_from_workspace()
 
