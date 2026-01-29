@@ -11,10 +11,9 @@ from sagents.agent.agent_base import AgentBase
 from sagents.context.session_context import SessionContext
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
-from sagents.skills import SkillProxy, SkillManager
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
-from sagents.skills.skill_tool import SkillTools
+from sagents.skill.skill_tool import SkillTools
 
 
 class SkillExecutorAgent(AgentBase):
@@ -154,8 +153,8 @@ class SkillExecutorAgent(AgentBase):
             content=str(result),
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
-            type=MessageType.TOOL_CALL_RESULT.value,
-            message_type=MessageType.TOOL_CALL_RESULT.value,
+            type=MessageType.SKILL_EXEC_TOOL_CALL_RESULT.value,
+            message_type=MessageType.SKILL_EXEC_TOOL_CALL_RESULT.value,
             show_content=str(result),
         )
 
@@ -333,7 +332,7 @@ class SkillExecutorAgent(AgentBase):
             session_id=session_context.session_id,
             step_name="skill_plan_generation",
             model_config_override={"temperature": 0.2},
-            content_message_type=MessageType.SKILL_EXECUTION_PLAN.value,
+            content_message_type=MessageType.SKILL_EXEC_PLAN.value,
             tool_calls=step_tool_calls,
         ):
             yield chunk
@@ -430,7 +429,7 @@ class SkillExecutorAgent(AgentBase):
                         "temperature": 0.2,
                         "tool_choice": "auto",
                     },
-                    content_message_type=MessageType.SKILL_EXECUTION_RESULT.value,
+                    content_message_type=MessageType.SKILL_EXEC_RESULT.value,
                     tool_calls=step_tool_calls,
                 ):
                     non_empty_chunks = [c for c in chunks if (c.message_type != MessageType.EMPTY.value)]
@@ -440,6 +439,9 @@ class SkillExecutorAgent(AgentBase):
 
                 for tool_call in list(step_tool_calls.values()):
                     output_messages = self._create_tool_call_message(tool_call)
+                    # skill的tool call 不存储
+                    output_messages[0].message_type = MessageType.SKILL_EXEC_TOOL_CALL.value
+                    output_messages[0].type = MessageType.SKILL_EXEC_TOOL_CALL.value
                     yield output_messages
                     all_new_response_chunks.extend(deepcopy(output_messages))
                     func_name = tool_call["function"]["name"]
