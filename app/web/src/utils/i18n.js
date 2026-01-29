@@ -63,6 +63,7 @@ export const zhCN = {
   'sidebar.knowledgeBase': '知识库',
   'sidebar.sessions': '会话历史',
   'sidebar.toolsList': '工具列表',
+  'sidebar.skillLibrary': '技能库',
   'sidebar.mcpsManage': 'MCP 管理',
   'sidebar.knowledgeBaseManage': '知识库管理',
   'sidebar.langToggleZh': '中 / En',
@@ -270,6 +271,23 @@ export const zhCN = {
   'tools.source.basic': '基础工具',
   'tools.source.builtin': '内置工具',
   'tools.source.system': '系统工具',
+
+  // 技能库
+  'skills.title': '技能库',
+  'skills.subtitle': '管理和扩展Agent的技能',
+  'skills.search': '搜索技能...',
+  'skills.import': '导入技能',
+  'skills.upload': '上传 ZIP',
+  'skills.urlImport': '从 URL 导入',
+  'skills.urlPlaceholder': '请输入 ZIP 下载链接',
+  'skills.cancel': '取消',
+  'skills.confirm': '确认',
+  'skills.noSkills': '未找到技能',
+  'skills.noSkillsDesc': '尝试调整搜索条件或导入新技能',
+  'skills.files': '文件列表',
+  'skills.viewFiles': '查看文件',
+  'skills.delete': '删除',
+  'skills.deleteConfirm': '确定要删除技能 "{name}" 吗？',
 
   // MCP服务器相关
   'tools.Tools': '工具',
@@ -742,6 +760,23 @@ export const enUS = {
   'tools.source.basic': 'Basic Tools',
   'tools.source.builtin': 'Built-in Tools',
   'tools.source.system': 'System Tools',
+
+  // Skill Library
+  'skills.title': 'Skill Library',
+  'skills.subtitle': 'Manage and extend Agent skills',
+  'skills.search': 'Search skills...',
+  'skills.import': 'Import Skill',
+  'skills.upload': 'Upload ZIP',
+  'skills.urlImport': 'Import from URL',
+  'skills.urlPlaceholder': 'Enter ZIP URL',
+  'skills.cancel': 'Cancel',
+  'skills.confirm': 'Confirm',
+  'skills.noSkills': 'No Skills Found',
+  'skills.noSkillsDesc': 'Try adjusting your search or import a new skill',
+  'skills.files': 'Files',
+  'skills.viewFiles': 'View Files',
+  'skills.delete': 'Delete',
+  'skills.deleteConfirm': 'Are you sure you want to delete skill "{name}"?',
 
   // MCP Server related
   'tools.Tools': 'Internal Tools',
