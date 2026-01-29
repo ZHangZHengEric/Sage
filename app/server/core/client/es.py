@@ -99,15 +99,9 @@ def _common_settings() -> Dict[str, Any]:
     return {
         "similarity": {"my_similarity": {"type": "BM25", "b": 0.5, "k1": 2.0}},
         "analysis": {
-            "filter": {
-                "jieba_stop": {
-                    "type": "stop",
-                    "stopwords_path": "stopwords/stopwords.txt",
-                }
-            },
             "analyzer": {
                 "my_ana": {
-                    "filter": ["lowercase", "jieba_stop"],
+                    "filter": ["lowercase"],
                     "tokenizer": "ik_max_word",
                 }
             },

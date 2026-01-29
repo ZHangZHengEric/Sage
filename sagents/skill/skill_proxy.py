@@ -1,8 +1,8 @@
 from typing import Any, Dict, List, Optional, Union
 
 from sagents.utils.logger import logger
-from sagents.skills.skill_manager import SkillManager
-from sagents.skills.skill_schema import SkillSchema
+from sagents.skill.skill_manager import SkillManager
+from sagents.skill.skill_schema import SkillSchema
 
 class SkillProxy:
     """
