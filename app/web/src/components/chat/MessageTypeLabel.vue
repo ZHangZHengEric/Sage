@@ -41,7 +41,7 @@ const labelText = computed(() => {
 <style scoped>
 .message-type-label {
   display: inline-block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -52,37 +52,37 @@ const labelText = computed(() => {
 
 /* 用户标签样式 */
 .message-type-label.user {
-  background: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.9);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 /* 助手标签样式 */
 .message-type-label.assistant {
-  background: #f0f2f5;
-  color: #666;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 /* 错误标签样式 */
 .message-type-label.error {
-  background: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.9);
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
 }
 
 /* 工具调用标签样式 */
 .message-type-label.tool_call {
-  background: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.9);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 /* 工具执行标签样式 */
 .message-type-label.tool_execution {
-  background: #f0f2f5;
-  color: #666;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 /* 系统标签样式 */
 .message-type-label.system {
-  background: #f0f2f5;
-  color: #666;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 </style>

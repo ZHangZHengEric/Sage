@@ -1,124 +1,124 @@
 <template>
-  <div class="add-mcp-view">
-    <div class="tool-detail-content">
-      <form @submit.prevent="handleSubmit" class="add-mcp-form">
-        <div class="tool-section">
-          <h3>
-            <Database :size="20" />
+  <div class="w-full h-full p-4 overflow-y-auto">
+    <div class="max-w-2xl mx-auto">
+      <form @submit.prevent="handleSubmit" class="space-y-8 pb-10">
+        <!-- Basic Info -->
+        <div class="space-y-4">
+          <h3 class="flex items-center gap-2 text-lg font-semibold">
+            <Database class="w-5 h-5" />
             {{ t('tools.basicInfo') }}
           </h3>
 
-          <div class="form-group">
-            <label for="name">{{ t('tools.serverName') }}</label>
-            <input 
+          <div class="space-y-2">
+            <Label for="name">{{ t('tools.serverName') }}</Label>
+            <Input 
               id="name" 
               v-model="form.name" 
               type="text" 
               :placeholder="t('tools.enterServerName')" 
               required
-              class="form-input" 
             />
           </div>
         </div>
 
-        <div class="tool-section">
-          <h3>
-            <Code :size="20" />
+        <!-- Protocol Config -->
+        <div class="space-y-4">
+          <h3 class="flex items-center gap-2 text-lg font-semibold">
+            <Code class="w-5 h-5" />
             {{ t('tools.protocolConfig') }}
           </h3>
 
-          <div class="form-group">
-            <label for="protocol">{{ t('tools.protocol') }}</label>
-            <select id="protocol" v-model="form.protocol" required class="form-select">
-              <option value="stdio">stdio</option>
-              <option value="sse">SSE</option>
-              <option value="streamable_http">Streamable HTTP</option>
-            </select>
+          <div class="space-y-2">
+            <Label>{{ t('tools.protocol') }}</Label>
+            <Select v-model="form.protocol" required>
+              <SelectTrigger>
+                <SelectValue placeholder="Select protocol" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="stdio">stdio</SelectItem>
+                <SelectItem value="sse">SSE</SelectItem>
+                <SelectItem value="streamable_http">Streamable HTTP</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          <!-- stdio 协议配置 -->
-          <div v-if="form.protocol === 'stdio'">
-            <div class="form-group">
-              <label for="command">{{ t('tools.command') }}</label>
-              <input 
+          <!-- stdio -->
+          <div v-if="form.protocol === 'stdio'" class="space-y-4 animate-in slide-in-from-top-2 duration-200">
+            <div class="space-y-2">
+              <Label for="command">{{ t('tools.command') }}</Label>
+              <Input 
                 id="command" 
                 v-model="form.command" 
                 type="text" 
                 :placeholder="t('tools.enterCommand')"
                 required 
-                class="form-input" 
               />
             </div>
 
-            <div class="form-group">
-              <label for="args">{{ t('tools.arguments') }}</label>
-              <input 
+            <div class="space-y-2">
+              <Label for="args">{{ t('tools.arguments') }}</Label>
+              <Input 
                 id="args" 
                 v-model="form.args" 
                 type="text" 
                 :placeholder="t('tools.enterArguments')"
-                class="form-input" 
               />
             </div>
           </div>
 
-          <!-- SSE 协议配置 -->
-          <div v-if="form.protocol === 'sse'">
-            <div class="form-group">
-              <label for="sse_url">{{ t('tools.sseUrl') }}</label>
-              <input 
-                id="sse_url" 
-                v-model="form.sse_url" 
-                type="url" 
-                :placeholder="t('tools.enterSseUrl')" 
-                required
-                class="form-input" 
-              />
-            </div>
+          <!-- SSE -->
+          <div v-if="form.protocol === 'sse'" class="space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <Label for="sse_url">{{ t('tools.sseUrl') }}</Label>
+            <Input 
+              id="sse_url" 
+              v-model="form.sse_url" 
+              type="url" 
+              :placeholder="t('tools.enterSseUrl')" 
+              required
+            />
           </div>
 
-          <!-- Streamable HTTP 协议配置 -->
-          <div v-if="form.protocol === 'streamable_http'">
-            <div class="form-group">
-              <label for="streamable_http_url">{{ t('tools.streamingHttpUrl') }}</label>
-              <input 
-                id="streamable_http_url" 
-                v-model="form.streamable_http_url" 
-                type="url"
-                :placeholder="t('tools.enterStreamingHttpUrl')" 
-                required 
-                class="form-input" 
-              />
-            </div>
+          <!-- Streamable HTTP -->
+          <div v-if="form.protocol === 'streamable_http'" class="space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <Label for="streamable_http_url">{{ t('tools.streamingHttpUrl') }}</Label>
+            <Input 
+              id="streamable_http_url" 
+              v-model="form.streamable_http_url" 
+              type="url"
+              :placeholder="t('tools.enterStreamingHttpUrl')" 
+              required 
+            />
           </div>
         </div>
 
-        <div class="tool-section">
-          <h3>
-            <Globe :size="20" />
+        <!-- Additional Info -->
+        <div class="space-y-4">
+          <h3 class="flex items-center gap-2 text-lg font-semibold">
+            <Globe class="w-5 h-5" />
             {{ t('tools.additionalInfo') }}
           </h3>
 
-          <div class="form-group">
-            <label for="description">{{ t('tools.description') }}</label>
-            <textarea 
+          <div class="space-y-2">
+            <Label for="description">{{ t('tools.description') }}</Label>
+            <Textarea 
               id="description" 
               v-model="form.description" 
               :placeholder="t('tools.enterDescription')"
               rows="4" 
-              class="form-textarea"
-            ></textarea>
+              class="resize-y min-h-[100px]"
+            />
           </div>
         </div>
 
-        <div class="form-actions">
-          <button type="button" class="btn-secondary" @click="$emit('cancel')">
+        <!-- Actions -->
+        <div class="flex justify-center gap-4 pt-6 border-t">
+          <Button type="button" variant="outline" @click="$emit('cancel')">
             {{ t('tools.cancel') }}
-          </button>
-          <button type="submit" class="btn-primary" :disabled="loading">
-            <Loader2 v-if="loading" :size="16" class="animate-spin" />
+          </Button>
+          <Button type="submit" :disabled="loading">
+            <Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
             {{ loading ? t('tools.adding') : t('tools.add') }}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -126,9 +126,20 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { reactive } from 'vue'
 import { Database, Code, Globe, Loader2 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 // Props
 const props = defineProps({
@@ -196,146 +207,3 @@ defineExpose({
   resetForm
 })
 </script>
-
-<style scoped>
-.add-mcp-view {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  padding-bottom: 40px;
-  overflow-y: auto;
-  max-height: calc(100vh - 50px);
-}
-
-.tool-detail-content {
-  width: 100%;
-  max-width: 600px;
-  margin: 0 auto;
-}
-
-.add-mcp-form {
-  width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.tool-section {
-  margin-bottom: 32px;
-}
-
-.tool-section h3 {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  max-width: 500px;
-  margin: 0 auto 16px;
-}
-
-.form-group label {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1f2937;
-  text-align: center;
-}
-
-.form-input,
-.form-select,
-.form-textarea {
-  padding: 12px 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #1f2937;
-  background: #ffffff;
-  transition: all 0.2s ease;
-  text-align: center;
-}
-
-.form-input:focus,
-.form-select:focus,
-.form-textarea:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.form-textarea {
-  resize: vertical;
-  min-height: 100px;
-  text-align: left;
-}
-
-.form-actions {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-  margin: 32px auto 0;
-  padding-top: 24px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.btn-secondary {
-  padding: 12px 24px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #1f2937;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-secondary:hover {
-  border-color: #667eea;
-  color: #667eea;
-}
-
-.btn-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
-  border: none;
-  border-radius: 8px;
-  background: #667eea;
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #5a6fd8;
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-</style>

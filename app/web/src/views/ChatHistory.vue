@@ -2,33 +2,38 @@
   <div class="history-page">
     <div class="conversations-container">
       <div class="search-filter-row">
-        <div class="search-box">
-          <el-input
-            v-model="searchTerm"
-            :placeholder="t('history.search')"
-            class="search-input"
+        <div class="relative w-full max-w-sm flex-1">
+          <Input 
+            v-model="searchTerm" 
+            :placeholder="t('history.search')" 
+            class="pl-9"
           />
-        <Search :size="16" class="search-icon" />
+          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
         </div>
         
         <div class="filter-controls">
-          <el-select v-model="filterAgent" class="filter-select">
-            <el-option :label="t('history.all')" value="all" />
-            <el-option
-              v-for="agent in agents"
-              :key="agent.id"
-              :label="agent.name"
-              :value="agent.id"
-            />
-          </el-select>
+          <Select v-model="filterAgent">
+            <SelectTrigger class="w-[140px]">
+              <SelectValue :placeholder="t('history.all')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{{ t('history.all') }}</SelectItem>
+              <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
+                {{ agent.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
           
-          <el-select v-model="sortBy" class="sort-select">
-            <el-option :label="t('history.sortByDate')" value="date" />
-            <el-option :label="t('history.sortByTitle')" value="title" />
-            <el-option :label="t('history.sortByMessages')" value="messages" />
-          </el-select>
-          
-
+          <Select v-model="sortBy">
+            <SelectTrigger class="w-[140px]">
+              <SelectValue :placeholder="t('history.sortByDate')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="date">{{ t('history.sortByDate') }}</SelectItem>
+              <SelectItem value="title">{{ t('history.sortByTitle') }}</SelectItem>
+              <SelectItem value="messages">{{ t('history.sortByMessages') }}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <div class="conversations-list">
@@ -88,31 +93,41 @@
             </div>
             
             <div class="conversation-actions">
-              <el-button
-                type="primary"
-                size="small"
+              <Button
+                variant="default"
+                size="icon"
+                class="h-8 w-8"
                 @click.stop="handleShareConversation(conversation)"
                 :title="t('history.share')"
               >
-                <Share :size="16" />
-              </el-button>
+                <Share class="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>
       </div>
           
     <!-- 分页组件 -->
-    <div v-if="totalCount > 0" class="pagination-container">
-      <el-pagination
-        :current-page="currentPage"
-        :page-size="pageSize"
-        :page-sizes="[5, 10, 20, 50]"
-        :total="totalCount"
-        :background="true"
-        layout="total, sizes, prev, pager, next, jumper"
-        @current-change="handlePageChange"
-        @size-change="handlePageSizeChange"
-      />
+    <div v-if="totalCount > 0" class="flex items-center justify-center gap-4 py-4">
+      <Button 
+        variant="outline" 
+        size="sm" 
+        :disabled="currentPage <= 1" 
+        @click="handlePageChange(currentPage - 1)"
+      >
+        Previous
+      </Button>
+      <span class="text-sm text-muted-foreground">
+        Page {{ currentPage }} of {{ Math.ceil(totalCount / pageSize) }}
+      </span>
+      <Button 
+        variant="outline" 
+        size="sm" 
+        :disabled="currentPage * pageSize >= totalCount" 
+        @click="handlePageChange(currentPage + 1)"
+      >
+        Next
+      </Button>
     </div>
     </div>
 
@@ -123,34 +138,35 @@
     </div>
     
     <!-- 分享模态框 -->
-    <el-dialog
-      v-model="showShareModal"
-      :title="t('history.shareTitle')"
-      width="500px"
-    >
-      <div class="modal-body">
-        <p>{{ t('history.exportFormat') }}</p>
-        <div class="export-options">
-          <el-button
-            type="primary"
-            class="export-btn"
-            @click="handleExportToMarkdown"
-          >
-            {{ t('history.exportMarkdown') }}
-          </el-button>
-          <el-button
-            class="export-btn"
-            @click="handleExportToHTML"
-          >
-            {{ t('history.exportHTML') }}
-          </el-button>
+    <Dialog :open="showShareModal" @update:open="showShareModal = $event">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('history.shareTitle') }}</DialogTitle>
+          <DialogDescription>{{ t('history.exportFormat') }}</DialogDescription>
+        </DialogHeader>
+        <div class="py-4">
+          <div class="flex gap-4">
+            <Button
+              class="flex-1"
+              @click="handleExportToMarkdown"
+            >
+              {{ t('history.exportMarkdown') }}
+            </Button>
+            <Button
+              class="flex-1"
+              variant="outline"
+              @click="handleExportToHTML"
+            >
+              {{ t('history.exportHTML') }}
+            </Button>
+          </div>
+          <div class="mt-4 p-4 bg-muted/50 rounded-md text-sm">
+            <p class="mb-2"><strong>{{ t('history.conversationTitle') }}</strong>: {{ shareConversation?.title }}</p>
+            <p><strong>{{ t('history.messageCount') }}</strong>: {{ getVisibleMessageCount() }} {{ t('history.visibleMessages') }}</p>
+          </div>
         </div>
-        <div class="export-info">
-          <p><strong>{{ t('history.conversationTitle') }}</strong>{{ shareConversation?.title }}</p>
-          <p><strong>{{ t('history.messageCount') }}</strong>{{ getVisibleMessageCount() }} {{ t('history.visibleMessages') }}</p>
-        </div>
-      </div>
-    </el-dialog>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -158,11 +174,30 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy } from 'lucide-vue-next'
-import { ElMessage } from 'element-plus'
+import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
 import { agentAPI } from '@/api/agent.js'
 import { chatAPI } from '@/api/chat.js'
+
+// UI Components
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 // Define emits
 const emit = defineEmits(['select-conversation'])
@@ -214,7 +249,7 @@ const loadConversationsPaginated = async () => {
     paginatedConversations.value = response.list || []
     totalCount.value = response.total || 0
   } catch (error) {
-    ElMessage.error('加载对话列表失败')
+    toast.error('加载对话列表失败')
     paginatedConversations.value = []
     totalCount.value = 0
   } finally {
@@ -295,7 +330,7 @@ const copySessionId = async (conversation) => {
   try {
     if (navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
-      ElMessage.success('session_id已复制')
+      toast.success('session_id已复制')
       return
     }
   } catch (_) {}
@@ -308,9 +343,9 @@ const copySessionId = async (conversation) => {
     textarea.select()
     document.execCommand('copy')
     document.body.removeChild(textarea)
-    ElMessage.success('session_id已复制')
+    toast.success('session_id已复制')
   } catch (e) {
-    ElMessage.error('复制失败')
+    toast.error('复制失败')
   }
 }
 
@@ -361,7 +396,7 @@ const handleExportToMarkdown = () => {
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
   exportToMarkdown(shareConversation.value, getAgentName(shareConversation.value.agent_id), visibleMessages)
   showShareModal.value = false
-  ElMessage.success('Markdown文件已导出')
+  toast.success('Markdown文件已导出')
 }
 
 const handleExportToHTML = () => {
@@ -373,7 +408,7 @@ const handleExportToHTML = () => {
   const visibleMessages = formatMessageForExport(shareConversation.value.messages)
   exportToHTML(shareConversation.value, visibleMessages)
   showShareModal.value = false
-  ElMessage.success('HTML文件已导出')
+  toast.success('HTML文件已导出')
 }
 
 // 监听搜索、过滤和排序条件的变化

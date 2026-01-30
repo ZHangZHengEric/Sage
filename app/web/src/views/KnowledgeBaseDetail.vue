@@ -1,124 +1,196 @@
 <template>
-  <div class="knowledge-base-detail">
-    <div class="header">
-      <div class="header-left">
-        <h2 class="title">{{ kbInfo.name || 'Knowledge Base' }}</h2>
-        <p class="intro">{{ kbInfo.intro || t('knowledgeBase.noDescription') }}</p>
-      </div>
-      <div class="header-right">
-        <button class="btn-link" @click="goBack">{{ t('knowledgeBase.backToList') }}</button>
-      </div>
-    </div>
-
-    <div class="tabs">
-      <button :class="['tab', { active: activeTab === 'documents' }]" @click="activeTab = 'documents'">{{
-        t('knowledgeBase.documents') }}</button>
-      <button :class="['tab', { active: activeTab === 'recall' }]" @click="activeTab = 'recall'">召回测试</button>
-      <button :class="['tab', { active: activeTab === 'settings' }]" @click="activeTab = 'settings'">设置</button>
-    </div>
-
-    <div class="tab-content" v-if="activeTab === 'documents'">
-      <div class="doc-filter">
-        <input v-model="docQueryName" class="form-input" placeholder="关键词" />
-        <button class="btn-primary" :disabled="docLoading" @click="loadDocs">查询</button>
-        <input ref="fileInputRef" type="file" multiple style="display:none" @change="onFileChange"
-          accept=".doc,.docx,.pdf,.txt,.json,.eml,.ppt,.pptx,.xlsx,.xls,.csv,.md" />
-        <button class="btn-primary ml-auto" :disabled="docLoading" @click="triggerSelectFiles">上传文件</button>
-      </div>
-      <div class="doc-list">
-        <table class="doc-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>状态</th>
-              <th>创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="d in docList" :key="d.id">
-              <td>{{ d.doc_name }}</td>
-              <td>
-                <div class="status-cell" :title="statusText(d.status)">
-                  <Clock v-if="d.status === 0" :size="16" class="status-icon pending" />
-                  <Loader v-else-if="d.status === 1" :size="16" class="status-icon processing spin" />
-                  <CheckCircle v-else-if="d.status === 2" :size="16" class="status-icon success" />
-                  <XCircle v-else-if="d.status === 3" :size="16" class="status-icon failed" />
-                  <span v-else>{{ statusText(d.status) }}</span>
-                </div>
-              </td>
-              <td>{{ formatTime(d.create_time) }}</td>
-              <td>
-                <div class="action-cell">
-                  <button class="icon-btn danger" :disabled="docLoading" @click="deleteDoc(d)" title="删除">
-                    <Trash2 :size="16" />
-                  </button>
-                  <button class="icon-btn primary" :disabled="docLoading" @click="redoDoc(d)" title="重做">
-                    <RotateCcw :size="16" />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="pager">
-          <span class="total">{{ t('common.total') }}: {{ docTotal }}</span>
-          <button class="btn" :disabled="docPageNo <= 1 || docLoading" @click="prevPage">上一页</button>
-          <span>{{ docPageNo }} / {{ totalPages }}</span>
-          <button class="btn" :disabled="docPageNo >= totalPages || docLoading" @click="nextPage">下一页</button>
+  <div class="container py-6 space-y-6 max-w-7xl mx-auto min-h-screen">
+    <!-- Header -->
+    <div class="flex flex-col space-y-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+           <Button variant="ghost" size="icon" @click="goBack" class="mr-2 -ml-2">
+             <ArrowLeft class="h-4 w-4" />
+           </Button>
+           <h2 class="text-2xl font-bold tracking-tight">{{ kbInfo.name || 'Knowledge Base' }}</h2>
         </div>
       </div>
+      <p class="text-muted-foreground ml-10">{{ kbInfo.intro || t('knowledgeBase.noDescription') }}</p>
     </div>
 
-    <div class="tab-content" v-else-if="activeTab === 'recall'">
-      <div class="recall-ops">
-        <input v-model="recallQuery" class="form-input" placeholder="输入问题或关键词" />
-        <button class="btn-primary" :disabled="recallLoading" @click="runRecall">查询</button>
-      </div>
-      <div class="recall-list">
-        <ul class="recall-items">
-          <li v-for="r in recallResults" :key="makeRecallKey(r)" class="recall-item">
-            <div class="recall-head">
-              <div class="recall-title">{{ r.title }}</div>
-              <div class="recall-meta">Score: {{ (r.score ?? 0).toFixed(4) }} </div>
+    <Tabs v-model="activeTab" class="w-full">
+      <TabsList class="grid w-full grid-cols-3 max-w-[400px]">
+        <TabsTrigger value="documents">{{ t('knowledgeBase.documents') }}</TabsTrigger>
+        <TabsTrigger value="recall">召回测试</TabsTrigger>
+        <TabsTrigger value="settings">设置</TabsTrigger>
+      </TabsList>
+      
+      <!-- Documents Tab -->
+      <TabsContent value="documents" class="space-y-4 mt-6">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div class="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm">
+            <Input 
+              v-model="docQueryName" 
+              placeholder="搜索文档..." 
+              class="h-9"
+              @keyup.enter="loadDocs"
+            />
+            <Button size="sm" @click="loadDocs" :disabled="docLoading">查询</Button>
+          </div>
+          
+          <div class="flex items-center gap-2">
+             <input ref="fileInputRef" type="file" multiple style="display:none" @change="onFileChange"
+              accept=".doc,.docx,.pdf,.txt,.json,.eml,.ppt,.pptx,.xlsx,.xls,.csv,.md" />
+             <Button size="sm" @click="triggerSelectFiles" :disabled="docLoading">
+               <Upload class="mr-2 h-4 w-4" />
+               上传文件
+             </Button>
+          </div>
+        </div>
+
+        <div class="rounded-md border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>名称</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>创建时间</TableHead>
+                <TableHead class="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="d in docList" :key="d.id">
+                <TableCell class="font-medium">{{ d.doc_name }}</TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-2" :title="statusText(d.status)">
+                    <Clock v-if="d.status === 0" class="h-4 w-4 text-muted-foreground" />
+                    <Loader2 v-else-if="d.status === 1" class="h-4 w-4 text-primary animate-spin" />
+                    <CheckCircle2 v-else-if="d.status === 2" class="h-4 w-4 text-green-500" />
+                    <XCircle v-else-if="d.status === 3" class="h-4 w-4 text-destructive" />
+                    <span class="text-sm text-muted-foreground">{{ statusText(d.status) }}</span>
+                  </div>
+                </TableCell>
+                <TableCell>{{ formatTime(d.create_time) }}</TableCell>
+                <TableCell class="text-right">
+                  <div class="flex justify-end gap-2">
+                    <Button variant="ghost" size="icon" class="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10" @click="redoDoc(d)" title="重做">
+                      <RotateCcw class="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" @click="deleteDoc(d)" title="删除">
+                      <Trash2 class="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="docList.length === 0">
+                 <TableCell colspan="4" class="h-32 text-center text-muted-foreground">
+                   暂无文档
+                 </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-end space-x-2 py-4">
+           <div class="text-sm text-muted-foreground mr-4">
+             {{ t('common.total') }}: {{ docTotal }}
+           </div>
+           <Button
+            variant="outline"
+            size="sm"
+            :disabled="docPageNo <= 1 || docLoading"
+            @click="prevPage"
+          >
+            上一页
+          </Button>
+          <div class="text-sm font-medium w-16 text-center">
+             {{ docPageNo }} / {{ totalPages }}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="docPageNo >= totalPages || docLoading"
+            @click="nextPage"
+          >
+            下一页
+          </Button>
+        </div>
+      </TabsContent>
+      
+      <!-- Recall Tab -->
+      <TabsContent value="recall" class="space-y-6 mt-6">
+        <div class="flex gap-4">
+           <Input v-model="recallQuery" placeholder="输入问题或关键词进行召回测试..." class="max-w-xl" @keyup.enter="runRecall" />
+           <Button @click="runRecall" :disabled="recallLoading">
+             <Search class="mr-2 h-4 w-4" />
+             查询
+           </Button>
+        </div>
+
+        <div class="space-y-4">
+           <Card v-for="r in recallResults" :key="makeRecallKey(r)" class="overflow-hidden">
+             <CardHeader class="pb-2 bg-muted/20">
+               <div class="flex justify-between items-start">
+                 <CardTitle class="text-base font-medium truncate pr-4">{{ r.title }}</CardTitle>
+                 <Badge variant="outline" class="bg-background">Score: {{ (r.score ?? 0).toFixed(4) }}</Badge>
+               </div>
+             </CardHeader>
+             <CardContent class="pt-4">
+               <div class="text-sm leading-relaxed">
+                 <ReactMarkdown :content="r.doc_content" />
+               </div>
+             </CardContent>
+           </Card>
+           
+           <div v-if="recallResults.length === 0 && !recallLoading" class="text-center py-12 text-muted-foreground bg-muted/10 rounded-lg border border-dashed">
+             暂无召回结果，请尝试搜索
+           </div>
+        </div>
+      </TabsContent>
+
+      <!-- Settings Tab -->
+      <TabsContent value="settings" class="mt-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>知识库设置</CardTitle>
+            <CardDescription>管理知识库的基本信息</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="grid gap-2">
+              <Label for="kb-name">{{ t('knowledgeBase.name') }}</Label>
+              <Input id="kb-name" v-model="editForm.name" />
             </div>
-            <div class="recall-snippet">
-              <ReactMarkdown :content="r.doc_content" />
+            <div class="grid gap-2">
+              <Label for="kb-intro">{{ t('knowledgeBase.description') }}</Label>
+              <Textarea id="kb-intro" v-model="editForm.intro" rows="4" />
             </div>
-
-          </li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="tab-content" v-else>
-      <form class="settings-form" @submit.prevent="saveSettings">
-        <div class="form-group">
-          <label class="form-label">{{ t('knowledgeBase.name') }}</label>
-          <input v-model="editForm.name" class="form-input" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ t('knowledgeBase.description') }}</label>
-          <textarea v-model="editForm.intro" rows="3" class="form-textarea"></textarea>
-        </div>
-        <div class="actions">
-          <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? t('common.save') : t('common.save')
-            }}</button>
-          <button type="button" class="btn-danger" :disabled="saving" @click="confirmDelete">{{ t('common.delete')
-            }}</button>
-        </div>
-      </form>
-    </div>
+          </CardContent>
+          <CardFooter class="flex justify-between border-t bg-muted/20 pt-4">
+            <Button variant="destructive" @click="confirmDelete" :disabled="saving">
+               {{ t('common.delete') }}
+            </Button>
+            <Button @click="saveSettings" :disabled="saving">
+              {{ saving ? '保存中...' : t('common.save') }}
+            </Button>
+          </CardFooter>
+        </Card>
+      </TabsContent>
+    </Tabs>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Trash2, RotateCcw, Clock, Loader, CheckCircle, XCircle } from 'lucide-vue-next'
+import { Trash2, RotateCcw, Clock, Loader2, CheckCircle2, XCircle, ArrowLeft, Upload, Search } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
+
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 
 const { t } = useLanguage()
 const route = useRoute()
@@ -333,323 +405,3 @@ const statusText = (s) => {
   }
 }
 </script>
-
-<style scoped>
-.knowledge-base-detail {
-  padding: 24px;
-}
-
-.header {
-  background: white;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.header-right {
-  display: flex;
-  align-items: flex-start;
-}
-
-.title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.intro {
-  margin: 8px 0 0 0;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.btn-link {
-  background: none;
-  border: none;
-  color: #667eea;
-  cursor: pointer;
-  margin-bottom: 8px;
-}
-
-.tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.tab {
-  padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: white;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.tab.active {
-  background: #667eea;
-  color: white;
-  border-color: #667eea;
-}
-
-.tab-content {
-  background: white;
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.placeholder {
-  color: rgba(0, 0, 0, 0.6);
-}
-
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-   width: 50%;
-
-}
-
-.form-label {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.form-input,
-.form-textarea {
-  padding: 10px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-primary {
-  background: #667eea;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.btn-danger {
-  background: #ef4444;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.doc-ops {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: start;
-  margin-bottom: 12px;
-}
-
-.doc-filter {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.doc-list {
-  overflow: auto;
-}
-
-.doc-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.doc-table th,
-.doc-table td {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-  padding: 8px;
-  text-align: left;
-}
-
-.action-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.icon-btn:hover:not(:disabled) {
-  background: rgba(102, 126, 234, 0.2);
-  transform: scale(1.05);
-}
-
-.icon-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.icon-btn.danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-
-.icon-btn.danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.2);
-}
-
-.icon-btn.primary {
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-}
-
-.pager {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 12px;
-  justify-content: center;
-}
-
-.btn {
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  background: white;
-  border-radius: 6px;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-
-.recall-ops {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.recall-items {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.recall-item {
-  padding: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
-}
-
-.recall-head {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.recall-title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recall-meta {
-  color: rgba(218, 12, 12, 0.875);
-  font-size: 14px;
-}
-
-.recall-snippet {
-  margin-top: 6px;
-  border: 1px solid rgba(32, 199, 37, 0.809);
-  border-radius: 8px;
-  padding: 8px;
-}
-
-.recall-expanded {
-  margin-top: 8px;
-}
-
-.recall-section {
-  margin-top: 8px;
-}
-
-.recall-subtitle {
-  font-size: 12px;
-  color: rgba(0, 0, 0, 0.6);
-  margin-bottom: 4px;
-}
-
-:deep(.recall-highlight) {
-  color: #ef4444;
-}
-
-.status-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.status-icon {
-  display: inline-flex;
-}
-
-.status-icon.pending {
-  color: #9ca3af;
-}
-
-.status-icon.processing {
-  color: #667eea;
-}
-
-.status-icon.success {
-  color: #10b981;
-}
-
-.status-icon.failed {
-  color: #ef4444;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-</style>

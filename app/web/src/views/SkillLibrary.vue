@@ -1,146 +1,166 @@
 <template>
-  <div class="skill-page">
-    <div class="header-section">
-      <div class="header-content">
-        <h1 class="page-title">{{ t('skills.title') }}</h1>
-        <p class="page-subtitle">{{ t('skills.subtitle') }}</p>
-      </div>
-      <div class="header-actions">
-        <el-button type="primary" @click="showImportModal = true">
-          <el-icon class="el-icon--left"><Plus /></el-icon>
+  <div class="h-screen w-full bg-background p-6">
+    <div class="flex h-full flex-col space-y-6">
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-4 border-b">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">{{ t('skills.title') }}</h1>
+          <p class="text-muted-foreground">{{ t('skills.subtitle') }}</p>
+        </div>
+        <Button @click="showImportModal = true">
+          <Plus class="mr-2 h-4 w-4" />
           {{ t('skills.import') }}
-        </el-button>
+        </Button>
       </div>
-    </div>
 
-    <div class="list-content" v-loading="loading">
-      <div class="filter-tabs-row">
-        <div class="search-box">
-          <el-input
-            v-model="searchTerm"
-            :placeholder="t('skills.search')"
-            prefix-icon="Search"
-            clearable
-            class="search-input"
+      <!-- Search -->
+      <div class="flex items-center justify-between">
+        <div class="relative w-full max-w-sm">
+          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input 
+            v-model="searchTerm" 
+            :placeholder="t('skills.search')" 
+            class="pl-9"
           />
         </div>
       </div>
 
-      <div class="skills-section">
-        <div v-if="filteredSkills.length > 0" class="skills-grid">
-          <div v-for="skill in filteredSkills" :key="skill.name" class="skill-card-wrapper">
-            <el-card class="skill-card" shadow="hover">
-              <div class="skill-header">
-                <div class="skill-icon">
-                  <Box :size="24" />
-                </div>
-                <div class="skill-info">
-                  <h3 class="skill-name">{{ skill.name }}</h3>
-                  <el-tooltip
-                    :content="skill.description || t('skills.noDescription')"
-                    placement="top"
-                    :show-after="500"
-                  >
-                    <p class="skill-description">
-                      {{ skill.description || t('skills.noDescription') }}
-                    </p>
-                  </el-tooltip>
-                </div>
+      <!-- Content -->
+      <ScrollArea class="flex-1 -mr-4 pr-4">
+        <div v-if="filteredSkills.length > 0" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <Card 
+            v-for="skill in filteredSkills" 
+            :key="skill.name" 
+            class="transition-all hover:shadow-md hover:-translate-y-0.5 group"
+          >
+            <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-2">
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Box class="h-5 w-5" />
               </div>
-              
-              <div class="skill-footer">
-                <div class="skill-path" :title="skill.path">
-                  <el-icon><Folder /></el-icon>
-                  <span>{{ getFolderName(skill.path) }}</span>
-                </div>
+              <div class="space-y-1 overflow-hidden flex-1">
+                <CardTitle class="text-base truncate" :title="skill.name">
+                  {{ skill.name }}
+                </CardTitle>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <CardDescription class="line-clamp-2 text-xs cursor-help">
+                        {{ skill.description || t('skills.noDescription') }}
+                      </CardDescription>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p class="max-w-xs text-sm">{{ skill.description || t('skills.noDescription') }}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
-            </el-card>
-          </div>
+            </CardHeader>
+            <CardContent>
+              <div class="flex items-center pt-4 border-t mt-2 text-xs text-muted-foreground" :title="skill.path">
+                <Folder class="mr-1 h-3.5 w-3.5" />
+                <span class="truncate">{{ getFolderName(skill.path) }}</span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <el-empty
-          v-else
-          :description="t('skills.noSkillsDesc')"
-        >
-          <template #image>
-            <Box :size="60" style="color: var(--el-text-color-secondary)" />
-          </template>
-        </el-empty>
-      </div>
+        <div v-else class="flex flex-col items-center justify-center py-12 text-center">
+          <div class="rounded-full bg-muted p-4">
+            <Box class="h-8 w-8 text-muted-foreground" />
+          </div>
+          <h3 class="mt-4 text-lg font-semibold">{{ t('skills.noSkillsDesc') }}</h3>
+        </div>
+      </ScrollArea>
     </div>
 
     <!-- Import Modal -->
-    <el-dialog
-      v-model="showImportModal"
-      :title="t('skills.import')"
-      width="500px"
-      destroy-on-close
-    >
-      <el-tabs v-model="importMode" class="import-tabs">
-        <el-tab-pane :label="t('skills.upload')" name="upload">
-          <div class="upload-section">
-            <el-upload
-              class="upload-demo"
-              drag
-              action="#"
-              :auto-upload="false"
-              :on-change="handleFileChange"
-              :limit="1"
-              :show-file-list="true"
-              accept=".zip"
-              ref="uploadRef"
+    <Dialog v-model:open="showImportModal">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('skills.import') }}</DialogTitle>
+          <DialogDescription>
+            Import skills via ZIP file upload or from a URL.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <Tabs v-model="importMode" class="w-full">
+          <TabsList class="grid w-full grid-cols-2">
+            <TabsTrigger value="upload">{{ t('skills.upload') }}</TabsTrigger>
+            <TabsTrigger value="url">{{ t('skills.urlImport') }}</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="upload" class="space-y-4 pt-4">
+            <div 
+              class="border-2 border-dashed rounded-lg p-8 text-center hover:bg-muted/50 transition-colors cursor-pointer"
+              @click="$refs.fileInput.click()"
+              @drop.prevent="handleDrop"
+              @dragover.prevent
             >
-              <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-              <div class="el-upload__text">
-                Drop file here or <em>click to upload</em>
-              </div>
-              <template #tip>
-                <div class="el-upload__tip">
-                  Only .zip files are allowed
+              <input 
+                type="file" 
+                ref="fileInput" 
+                class="hidden" 
+                accept=".zip" 
+                @change="handleFileChange"
+              >
+              <div class="flex flex-col items-center justify-center gap-2">
+                <Upload class="h-8 w-8 text-muted-foreground" />
+                <div v-if="selectedFile" class="text-sm font-medium text-primary">
+                  {{ selectedFile.name }}
                 </div>
-              </template>
-            </el-upload>
-          </div>
-        </el-tab-pane>
-        <el-tab-pane :label="t('skills.urlImport')" name="url">
-          <div class="url-section">
-            <el-input
-              v-model="importUrl"
-              :placeholder="t('skills.urlPlaceholder')"
-              clearable
-            >
-              <template #prepend>HTTPS</template>
-            </el-input>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
+                <div v-else class="text-sm text-muted-foreground">
+                  Drop file here or <span class="text-primary hover:underline">click to upload</span>
+                </div>
+                <p class="text-xs text-muted-foreground mt-1">Only .zip files are allowed</p>
+              </div>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="url" class="space-y-4 pt-4">
+            <div class="flex items-center space-x-2">
+              <span class="text-sm font-medium text-muted-foreground">HTTPS</span>
+              <Input 
+                v-model="importUrl" 
+                :placeholder="t('skills.urlPlaceholder')"
+                class="flex-1"
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
 
-      <div v-if="importError" class="error-message">
-        {{ importError }}
-      </div>
+        <div v-if="importError" class="text-sm text-destructive font-medium">
+          {{ importError }}
+        </div>
 
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showImportModal = false">{{ t('skills.cancel') }}</el-button>
-          <el-button type="primary" @click="handleImport" :loading="importing" :disabled="isImportDisabled">
+        <DialogFooter>
+          <Button variant="outline" @click="showImportModal = false">{{ t('skills.cancel') }}</Button>
+          <Button type="primary" @click="handleImport" :disabled="isImportDisabled || importing">
+            <Loader2 v-if="importing" class="mr-2 h-4 w-4 animate-spin" />
             {{ t('skills.confirm') }}
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Box } from 'lucide-vue-next'
-import { Plus, Search, Folder, UploadFilled } from '@element-plus/icons-vue'
+import { Box, Search, Folder, Plus, Upload, Loader2 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { skillAPI } from '../api/skill.js'
-import { ElMessage } from 'element-plus'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
+// Composables
 const { t } = useLanguage()
 
+// State
 const skills = ref([])
 const loading = ref(false)
 const searchTerm = ref('')
@@ -150,8 +170,9 @@ const selectedFile = ref(null)
 const importUrl = ref('')
 const importing = ref(false)
 const importError = ref('')
-const uploadRef = ref(null)
+const fileInput = ref(null)
 
+// Computed
 const filteredSkills = computed(() => {
   if (!searchTerm.value.trim()) return skills.value
   const query = searchTerm.value.toLowerCase()
@@ -169,6 +190,7 @@ const isImportDisabled = computed(() => {
   }
 })
 
+// API Methods
 const loadSkills = async () => {
   try {
     loading.value = true
@@ -178,7 +200,6 @@ const loadSkills = async () => {
     }
   } catch (error) {
     console.error('Failed to load skills:', error)
-    ElMessage.error(t('skills.loadError') || 'Failed to load skills')
   } finally {
     loading.value = false
   }
@@ -190,14 +211,22 @@ const getFolderName = (path) => {
   return parts[parts.length - 1]
 }
 
-const handleFileChange = (uploadFile) => {
-  const file = uploadFile.raw
+const handleFileChange = (event) => {
+  const file = event.target.files[0]
+  processFile(file)
+}
+
+const handleDrop = (event) => {
+  const file = event.dataTransfer.files[0]
+  processFile(file)
+}
+
+const processFile = (file) => {
   if (file) {
     if (!file.name.endsWith('.zip')) {
       importError.value = 'Only ZIP files are supported'
-      ElMessage.warning('Only ZIP files are supported')
-      uploadRef.value.clearFiles()
       selectedFile.value = null
+      if (fileInput.value) fileInput.value.value = ''
       return
     }
     selectedFile.value = file
@@ -208,26 +237,29 @@ const handleFileChange = (uploadFile) => {
 const handleImport = async () => {
   importing.value = true
   importError.value = ''
-  
+
   try {
     if (importMode.value === 'upload') {
       if (!selectedFile.value) return
-      await skillAPI.uploadSkill(selectedFile.value)
+      
+      const formData = new FormData()
+      formData.append('file', selectedFile.value)
+      
+      await skillAPI.uploadSkill(formData)
     } else {
       if (!importUrl.value) return
-      await skillAPI.importSkillFromUrl(importUrl.value)
+      await skillAPI.importSkillFromUrl({ url: importUrl.value })
     }
     
-    // Success
-    ElMessage.success(t('skills.importSuccess') || 'Skill imported successfully')
+    // Refresh list and close modal
+    await loadSkills()
     showImportModal.value = false
     selectedFile.value = null
     importUrl.value = ''
-    if (uploadRef.value) uploadRef.value.clearFiles()
-    loadSkills() // Reload list
+    if (fileInput.value) fileInput.value.value = ''
   } catch (error) {
+    console.error('Import failed:', error)
     importError.value = error.message || 'Import failed'
-    ElMessage.error(error.message || 'Import failed')
   } finally {
     importing.value = false
   }
@@ -237,149 +269,3 @@ onMounted(() => {
   loadSkills()
 })
 </script>
-
-<style scoped>
-.skill-page {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 24px;
-  overflow: hidden;
-  background-color: var(--el-bg-color);
-}
-
-.header-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin: 0;
-}
-
-.page-subtitle {
-  color: var(--el-text-color-secondary);
-  margin: 4px 0 0;
-  font-size: 14px;
-}
-
-.list-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.filter-tabs-row {
-  display: flex;
-  margin-bottom: 20px;
-}
-
-.search-box {
-  width: 300px;
-}
-
-.skills-section {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.skills-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
-  padding-bottom: 24px;
-}
-
-.skill-card-wrapper {
-  height: 100%;
-}
-
-.skill-card {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  transition: all 0.3s;
-  cursor: pointer;
-}
-
-.skill-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--el-box-shadow);
-}
-
-.skill-header {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.skill-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-
-.skill-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.skill-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin: 0 0 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.skill-description {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.5;
-}
-
-.skill-footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--el-border-color-lighter);
-}
-
-.skill-path {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-}
-
-.error-message {
-  margin-top: 12px;
-  color: var(--el-color-danger);
-  font-size: 13px;
-}
-
-.upload-section, .url-section {
-  padding: 10px 0;
-}
-</style>

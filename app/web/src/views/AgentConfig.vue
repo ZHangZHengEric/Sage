@@ -1,128 +1,159 @@
 <template>
- <div class="agent-config-page">
-    <div v-if="currentView === 'list'" class="page-header">
-    <div class="page-actions">
-      <el-button type="default" @click="handleImport">
-        <Upload :size="16" />
-        {{ t('agent.import') }}
-      </el-button>
-      <el-button type="primary" @click="handleCreateAgent">
-        <Plus :size="16" />
-        {{ t('agent.create') }}
-      </el-button>
+  <div class="h-full w-full p-6 overflow-y-auto">
+    <!-- List View -->
+    <div v-if="currentView === 'list'" class="space-y-6 animate-in fade-in duration-500">
+      <div class="flex justify-end gap-3">
+        <Button variant="outline" @click="handleImport">
+          <Upload class="mr-2 h-4 w-4" />
+          {{ t('agent.import') }}
+        </Button>
+        <Button @click="handleCreateAgent">
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('agent.create') }}
+        </Button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <Card v-for="agent in agents" :key="agent.id" class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+          <CardHeader class="pb-4">
+            <div class="flex items-start gap-4">
+              <div class="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
+                <Bot class="h-6 w-6" />
+              </div>
+              <div class="space-y-1 overflow-hidden flex-1">
+                <CardTitle class="text-lg leading-tight truncate" :title="agent.name">
+                  {{ agent.name }}
+                </CardTitle>
+                <CardDescription class="line-clamp-2 min-h-[2.5rem]">
+                  {{ agent.description }}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          
+          <CardContent class="flex-1 pb-4">
+             <div class="space-y-3 text-sm">
+                <div class="flex justify-between">
+                   <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
+                   <span class="font-medium truncate max-w-[120px]" :title="agent.llmConfig?.model">{{ agent.llmConfig?.model || t('agent.defaultModel') }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                   <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
+                   <Badge :variant="getConfigBadgeVariant(agent.deepThinking)">{{ getConfigBadgeText(agent.deepThinking) }}</Badge>
+                </div>
+                <div class="flex justify-between items-center">
+                   <span class="text-muted-foreground">{{ t('agent.multiAgent') }}:</span>
+                   <Badge :variant="getConfigBadgeVariant(agent.multiAgent)">{{ getConfigBadgeText(agent.multiAgent) }}</Badge>
+                </div>
+                <div class="flex justify-between">
+                   <span class="text-muted-foreground">{{ t('agent.availableTools') }}:</span>
+                   <span>{{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}</span>
+                </div>
+             </div>
+          </CardContent>
+
+          <CardFooter class="pt-4 border-t bg-muted/20 flex flex-wrap gap-2 justify-end">
+            <Button variant="ghost" size="icon" @click="openUsageModal(agent)" :title="t('agent.usage')">
+              <Settings class="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
+              <Edit class="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
+              <Download class="h-4 w-4" />
+            </Button>
+            <Button 
+              v-if="agent.id !== 'default'" 
+              variant="ghost" 
+              size="icon" 
+              class="text-destructive hover:text-destructive hover:bg-destructive/10"
+              @click="handleDelete(agent)" 
+              :title="t('agent.delete')"
+            >
+              <Trash2 class="h-4 w-4" />
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
+
+    <!-- Edit/Create View -->
+    <div v-else class="space-y-6 animate-in slide-in-from-right-10 duration-300">
+       <div class="flex items-center justify-between">
+         <h3 class="text-2xl font-bold tracking-tight">
+           {{ currentView === 'edit' ? t('agent.editTitle') : t('agent.createTitle') }}
+         </h3>
+         <Button variant="outline" @click="handleBackToList">
+           ← {{ t('tools.backToList') }}
+         </Button>
+       </div>
+       
+       <AgentEdit 
+         :visible="currentView !== 'list'" 
+         :agent="editingAgent" 
+         :tools="tools" 
+         :skills="skills" 
+         @save="handleSaveAgent"
+         @update:visible="handleCloseEdit" 
+       />
+    </div>
+
+    <!-- Usage Dialog -->
+    <Dialog :open="showUsageModal" @update:open="showUsageModal = $event">
+      <DialogContent class="sm:max-w-[800px]">
+        <DialogHeader>
+          <DialogTitle>{{ usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例' }}</DialogTitle>
+          <DialogDescription>
+            不同的会话要替换session_id为不同值。system_context 根据真实值替换
+          </DialogDescription>
+        </DialogHeader>
+        
+        <Tabs v-model="usageActiveTab" class="w-full">
+          <TabsList class="grid w-full grid-cols-4">
+            <TabsTrigger value="curl">cURL</TabsTrigger>
+            <TabsTrigger value="python">Python</TabsTrigger>
+            <TabsTrigger value="go">Go</TabsTrigger>
+            <TabsTrigger value="java">Java</TabsTrigger>
+          </TabsList>
+          
+          <div class="mt-4 relative group">
+             <Button 
+               size="icon" 
+               variant="ghost" 
+               class="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-muted/50 hover:bg-muted"
+               @click="copyUsageCode"
+             >
+               <Copy class="h-4 w-4" />
+             </Button>
+             <ScrollArea class="h-[400px] w-full rounded-md border p-4 bg-muted/30">
+               <ReactMarkdown :content="usageCodeMarkdown" />
+             </ScrollArea>
+          </div>
+        </Tabs>
+        
+        <DialogFooter>
+           <Button variant="outline" @click="copyUsageCode">复制</Button>
+           <Button @click="showUsageModal = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    
+    <!-- Agent Creation Option Modal -->
+    <AgentCreationOption 
+      :isOpen="showCreationModal" 
+      :tools="tools" 
+      @create-blank="handleBlankConfig"
+      @create-smart="handleSmartConfig" 
+      @close="showCreationModal = false" 
+    />
 
   </div>
-
-  <!-- 列表视图 -->
-  <div v-if="currentView === 'list'" class="agents-grid">
-    <div v-for="agent in agents" :key="agent.id" class="agent-card">
-      <div class="agent-header">
-        <div class="agent-avatar">
-          <Bot :size="24" />
-        </div>
-        <div class="agent-info">
-          <h3 class="agent-name">{{ agent.name }}</h3>
-          <p class="agent-description">{{ agent.description }}</p>
-        </div>
-      </div>
-
-      <div class="agent-config">
-        <div class="config-item">
-          <span class="config-label">{{ t('agent.model') }}:</span>
-          <span class="config-value">
-            {{ agent.llmConfig?.model || t('agent.defaultModel') }}
-          </span>
-        </div>
-        <div class="config-item">
-          <span class="config-label">{{ t('agent.deepThinking') }}:</span>
-          <span :class="['config-badge', getConfigBadgeClass(agent.deepThinking)]">
-            {{ getConfigBadgeText(agent.deepThinking) }}
-          </span>
-        </div>
-        <div class="config-item">
-          <span class="config-label">{{ t('agent.multiAgent') }}:</span>
-          <span :class="['config-badge', getConfigBadgeClass(agent.multiAgent)]">
-            {{ getConfigBadgeText(agent.multiAgent) }}
-          </span>
-        </div>
-        <div class="config-item">
-          <span class="config-label">{{ t('agent.availableTools') }}:</span>
-          <span class="config-value">
-            {{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}
-          </span>
-        </div>
-      </div>
-
-      <div class="agent-actions">
-          <el-button type="default" class="action-icon" @click="openUsageModal(agent)">
-            <Settings :size="16" />
-            示例
-          </el-button>
-        <el-button type="default" @click="handleEditAgent(agent)">
-          <Edit :size="16" />
-          {{ t('agent.edit') }}
-        </el-button>
-        <el-button type="default" @click="handleExport(agent)" :title="t('agent.export')">
-          <Download :size="16" />
-          {{ t('agent.export') }}
-        </el-button>
-        <el-button v-if="agent.id !== 'default'" type="danger" @click="handleDelete(agent)">
-          <Trash2 :size="16" />
-          {{ t('agent.delete') }}
-        </el-button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Agent编辑/创建视图 -->
-  <div v-else>
-    <div class="view-header">
-      <h3 class="form-title">{{ currentView === 'edit' ? t('agent.editTitle') : t('agent.createTitle') }}</h3>
-      <el-button @click="handleBackToList" type="default">
-        ← {{ t('tools.backToList') }}
-      </el-button>
-    </div>
-
-    <AgentEdit :visible="currentView !== 'list'" :agent="editingAgent" :tools="tools" :skills="skills" @save="handleSaveAgent"
-      @update:visible="handleCloseEdit" />
-  </div>
-
-  <!-- Agent创建模态框 -->
-  <AgentCreationOption :isOpen="showCreationModal" :tools="tools" @create-blank="handleBlankConfig"
-    @create-smart="handleSmartConfig" @close="showCreationModal = false" />
-
-  <!-- 调用示例弹框 -->
-  <el-dialog v-model="showUsageModal" :title="usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例'" width="60%">
-    <div class="usage-header">
-      <el-tabs v-model="usageActiveTab">
-        <el-tab-pane label="cURL" name="curl" />
-        <el-tab-pane label="Python" name="python" />
-        <el-tab-pane label="Go" name="go" />
-        <el-tab-pane label="Java" name="java" />
-      </el-tabs>
-      <el-button type="danger" plain class="usage-warning-btn">不同的会话要替换session_id为不同值。system_context 根据真实值替换</el-button>
-    </div>
-    <div class="usage-code">
-      <button class="copy-icon-btn" @click="copyUsageCode" title="复制">
-        <Copy :size="16" />
-      </button>
-      <ReactMarkdown :content="usageCodeMarkdown" />
-    </div>
-    <template #footer>
-      <div class="dialog-footer">
-        <el-button @click="copyUsageCode">复制</el-button>
-        <el-button type="primary" @click="showUsageModal = false">关闭</el-button>
-      </div>
-    </template>
-  </el-dialog>
-</div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { toast } from 'vue-sonner'
 import { Plus, Edit, Trash2, Bot, Settings, Download, Upload, Copy } from 'lucide-vue-next'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
@@ -130,6 +161,14 @@ import AgentEdit from '../components/AgentEdit.vue'
 import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
 import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
+
+// UI Components
+import { Button } from '@/components/ui/button'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 // State
 const agents = ref([])
@@ -228,9 +267,9 @@ const removeAgent = async (agentId) => {
     throw err
   }
 }
-const getConfigBadgeClass = (value) => {
-  if (value === null) return 'auto'
-  return value ? 'enabled' : 'disabled'
+const getConfigBadgeVariant = (value) => {
+  if (value === null) return 'secondary' // auto
+  return value ? 'default' : 'outline' // enabled : disabled
 }
 
 const getConfigBadgeText = (value) => {
@@ -240,29 +279,19 @@ const getConfigBadgeText = (value) => {
 
 const handleDelete = async (agent) => {
   if (agent.id === 'default') {
-    ElMessage.warning(t('agent.defaultCannotDelete'))
+    alert(t('agent.defaultCannotDelete'))
     return
   }
 
-  try {
-    await ElMessageBox.confirm(
-      t('agent.deleteConfirm').replace('{name}', agent.name),
-      t('common.confirm'),
-      {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning'
-      }
-    )
+  const confirmed = window.confirm(t('agent.deleteConfirm').replace('{name}', agent.name))
+  if (!confirmed) return
 
-    // 使用本地的removeAgent方法
+  try {
     await removeAgent(agent.id)
-    ElMessage.success(t('agent.deleteSuccess').replace('{name}', agent.name))
+    toast.success(t('agent.deleteSuccess').replace('{name}', agent.name))
   } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除agent失败:', error)
-      ElMessage.error(t('agent.deleteError'))
-    }
+    console.error('删除agent失败:', error)
+    toast.error(t('agent.deleteError'))
   }
 }
 
@@ -321,7 +350,7 @@ const handleImport = () => {
 
         // 验证必要字段
         if (!importedConfig.name) {
-          ElMessage.error(t('agent.importMissingName'))
+          alert(t('agent.importMissingName'))
           return
         }
 
@@ -345,7 +374,7 @@ const handleImport = () => {
         currentView.value = 'edit'
 
       } catch (error) {
-        ElMessage.error(t('agent.importError'))
+        alert(t('agent.importError'))
         console.error('Import error:', error)
       }
     }
@@ -400,13 +429,13 @@ const handleSaveAgent = async (agentData) => {
     editingAgent.value = null
 
     if (agentData.id) {
-      ElMessage.success(t('agent.updateSuccess').replace('{name}', agentData.name))
+      toast.success(t('agent.updateSuccess').replace('{name}', agentData.name))
     } else {
-      ElMessage.success(t('agent.createSuccess').replace('{name}', agentData.name))
+      toast.success(t('agent.createSuccess').replace('{name}', agentData.name))
     }
   } catch (error) {
     console.error('保存agent失败:', error)
-    ElMessage.error(t('agent.saveError'))
+    toast.error(t('agent.saveError'))
   }
 }
 
@@ -438,7 +467,7 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
     await saveAgent(newAgent)
     // 由父组件监听器中的回调驱动子组件关闭
     callbacks.onSuccess && callbacks.onSuccess()
-    ElMessage.success(t('agent.smartConfigSuccess').replace('{name}', newAgent.name))
+    toast.success(t('agent.smartConfigSuccess').replace('{name}', newAgent.name))
   } catch (error) {
     const duration = Date.now() - startTime
     console.error('❌ 智能配置生成失败，耗时:', duration, 'ms')
@@ -472,7 +501,7 @@ const openUsageModal = async (agent) => {
     showUsageModal.value = true
   } catch (e) {
     console.error('生成调用示例失败:', e)
-    ElMessage.error('生成调用示例失败')
+    toast.error('生成调用示例失败')
   }
 }
 
@@ -534,7 +563,7 @@ const generateUsageCodes = (agent) => {
     '    panic(err)',
     '  }',
     '  fmt.Println(resp.Status)',
-    '}',
+    '}'
   ].join('\n')
 
   const java = [
@@ -554,7 +583,7 @@ const generateUsageCodes = (agent) => {
     '    }',
     '    System.out.println(conn.getResponseCode());',
     '  }',
-    '}',
+    '}'
   ].join('\n')
 
   usageCodeMap.value.curl = '```bash\n' + curl + '\n```'
@@ -571,7 +600,7 @@ const copyUsageCode = async () => {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(raw)
-      ElMessage.success('代码已复制到剪贴板')
+      toast.success('代码已复制到剪贴板')
       return
     }
   } catch (_) {}
@@ -589,213 +618,13 @@ const copyUsageCode = async () => {
     const ok = document.execCommand('copy')
     document.body.removeChild(ta)
     if (ok) {
-      ElMessage.success('代码已复制到剪贴板')
+      toast.success('代码已复制到剪贴板')
     } else {
-      ElMessage.error('复制失败')
+      toast.error('复制失败')
     }
   } catch (e) {
     document.body.removeChild(ta)
-    ElMessage.error('复制失败')
+    toast.error('复制失败')
   }
 }
 </script>
-
-<style scoped>
-.agent-config-page {
-  padding: 1.5rem;
-  min-height: 100vh;
-  background: transparent;
-}
-
-.page-header {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 2rem;
-}
-
-
-.page-actions {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.agents-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 1.5rem;
-  border-radius: 12px;
-  padding: 1.5rem;
-  background: transparent;
-}
-
-.agent-card {
-  background: transparent;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  padding: 1.5rem;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.222);
-}
-
-.agent-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  transform: translateY(-2px);
-}
-
-.agent-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.agent-avatar {
-  width: 48px;
-  height: 48px;
-  background: #667eea;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-
-.agent-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-name {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #1f2937;
-  word-break: break-word;
-}
-
-.agent-description {
-  margin: 0;
-  color: #6b7280;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.agent-config {
-  margin-bottom: 1.5rem;
-}
-
-.config-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.config-item:last-child {
-  margin-bottom: 0;
-}
-
-.config-label {
-  font-size: 0.875rem;
-  color: #6b7280;
-  font-weight: 500;
-}
-
-.config-value {
-  font-size: 0.875rem;
-  color: #1f2937;
-}
-
-
-.agent-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.agent-actions .el-button {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-actions .action-icon {
-  flex: 0 0 auto;
-}
-
-
-
-.config-badge {
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
-.config-badge.auto {
-  background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
-}
-
-.config-badge.enabled {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-.config-badge.disabled {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-.view-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-
-}
-
-.usage-code {
-  margin-top: 12px;
-  position: relative;
-}
-
-.usage-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.usage-warning-btn {
-  white-space: nowrap;
-}
-
-.usage-code :deep(pre) {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.usage-code :deep(code) {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.copy-icon-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  border: none;
-  background: rgba(0,0,0,0.05);
-  border-radius: 6px;
-  padding: 6px;
-  cursor: pointer;
-}
-
-.copy-icon-btn:hover {
-  background: rgba(0,0,0,0.1);
-}
-
-</style>

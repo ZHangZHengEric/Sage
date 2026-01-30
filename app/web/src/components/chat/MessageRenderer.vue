@@ -1,29 +1,29 @@
 <template>
-  <div v-if="shouldRenderMessage">
+  <div v-if="shouldRenderMessage" class="flex flex-col gap-4 mb-4">
     <!-- 错误消息 -->
-    <div v-if="isErrorMessage" class="message error">
-      <div class="avatar-container">
+    <div v-if="isErrorMessage" class="flex flex-row gap-3 px-4">
+      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
         <MessageAvatar messageType="error" role="assistant" />
-        <MessageTypeLabel messageType="error" role="assistant" class="message-label" />
+        <MessageTypeLabel messageType="error" role="assistant" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
       </div>
-      <div class="error-bubble">
-          <div class="error-title">{{ t('error.title') }}</div>
-          <div class="error-message">{{ message.show_content || message.content || t('error.unknown') }}</div>
+      <div class="bg-destructive text-destructive-foreground rounded-2xl rounded-tl-sm px-4 py-3 max-w-[70%] shadow-sm overflow-hidden break-words">
+          <div class="font-semibold mb-1">{{ t('error.title') }}</div>
+          <div class="opacity-90">{{ message.show_content || message.content || t('error.unknown') }}</div>
       </div>
     </div>
 
     <!-- Token 使用消息 -->
-    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="message token-usage-message">
+    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="flex justify-center px-4">
       <TokenUsage :token-usage="tokenUsageData" />
     </div>
 
     <!-- 用户消息 -->
-    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="message user">
-      <div class="avatar-container">
+    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="flex flex-row-reverse gap-3 px-4">
+      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
-        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" class="message-label" />
+        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
       </div>
-      <div class="user-bubble">
+      <div class="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-3 max-w-[70%] shadow-md overflow-hidden break-words">
        <ReactMarkdown
             :content="formatMessageContent(message.content)"
           />
@@ -31,12 +31,12 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="message assistant">
-      <div class="avatar-container">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="flex flex-row gap-3 px-4">
+      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
         <MessageAvatar :messageType="message.message_type" role="assistant" />
-        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="message-label" />
+        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
       </div>
-      <div class="assistant-bubble">
+      <div class="bg-card text-card-foreground border rounded-2xl rounded-tl-sm px-4 py-3 max-w-[70%] shadow-sm overflow-hidden break-words">
         <ReactMarkdown
             :content="formatMessageContent(message.show_content)"
             :components="markdownComponents"
@@ -45,30 +45,28 @@
     </div>
 
     <!-- 工具调用按钮 -->
-    <div v-else-if="hasToolCalls" class="message-container">
-      <div class="message tool-calls">
-        <div class="avatar-container">
-          <MessageAvatar :messageType="message.message_type" role="assistant" />
-          <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="message-label" />
-        </div>
-        <div class="tool-calls-bubble">
+    <div v-else-if="hasToolCalls" class="flex flex-row gap-3 px-4 mb-4">
+      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
+        <MessageAvatar :messageType="message.message_type" role="assistant" />
+        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
+      </div>
+      <div class="bg-secondary/50 text-secondary-foreground border rounded-2xl rounded-tl-sm p-3 max-w-[70%] shadow-sm overflow-hidden break-words w-full sm:w-auto">
+        <div class="flex flex-col gap-2">
         <div
               v-for="(toolCall, index) in message.tool_calls"
               :key="toolCall.id || index"
-              class="tool-call-item"
+              class="flex items-center justify-between p-3 rounded-lg bg-background/50 hover:bg-background/80 transition-colors cursor-pointer border border-transparent hover:border-border"
               @click="handleToolClick(toolCall, getToolResult(toolCall))"
             >
-              <div class="tool-call-main">
-                <span class="tool-name">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
-                <span class="tool-status" :class="{ 'completed': getToolResult(toolCall), 'executing': !getToolResult(toolCall) }">
+              <div class="flex items-center gap-3 flex-1 min-w-0">
+                <span class="font-medium text-sm truncate">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
+                <Badge :variant="getToolResult(toolCall) ? 'default' : 'secondary'" class="text-[10px] h-5 px-2">
                   {{ getToolResult(toolCall) ? t('toolCall.completed') : t('toolCall.executing') }}
-                </span>
+                </Badge>
               </div>
-              <button class="tool-detail-button" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
+              <Button variant="ghost" size="icon" class="h-8 w-8 ml-2 shrink-0" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
+                <ChevronRight class="h-4 w-4" />
+              </Button>
             </div>
         </div>
       </div>
@@ -86,6 +84,9 @@ import ReactMarkdown from './ReactMarkdown.vue'
 import ReactECharts from './ReactECharts.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ChevronRight } from 'lucide-vue-next'
 
 const props = defineProps({
   message: {

@@ -1,93 +1,129 @@
 <template>
-  <div class="knowledge-base-page">
-
-    <!-- 搜索和筛选 -->
-    <div class="filters-section">
-
-      <div class="kb-actions">
-        <button class="btn-primary" @click="showAddKnowledgeBaseForm">
-          <Plus :size="16" />
-          {{ t('knowledgeBase.addKnowledgeBase') }}
-        </button>
+  <div class="container py-6 space-y-6 h-[calc(100vh-60px)]">
+    <!-- Header & Filters -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-card p-4 rounded-lg border shadow-sm" v-if="viewMode === 'list'">
+      <div class="relative w-full sm:w-80">
+        <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          v-model="searchTerm"
+          :placeholder="t('knowledgeBase.searchPlaceholder') || 'Search...'"
+          class="pl-9"
+        />
       </div>
+      
+      <Button @click="showAddKnowledgeBaseForm">
+        <Plus class="mr-2 h-4 w-4" />
+        {{ t('knowledgeBase.addKnowledgeBase') }}
+      </Button>
     </div>
 
-    <!-- 列表视图的过滤器和内容 -->
-    <div v-if="viewMode === 'list'" class="list-content">
-      <div class="kb-grid">
-        <div v-for="kb in filteredKnowledgeBases" :key="kb.id" class="kb-card" @click="goToDetail(kb)">
-          <!-- 卡片头部 -->
-          <div class="kb-header">
-            <div class="kb-icon" :class="getTypeIconClass(kb.dataSource)">
-              <BookOpen :size="24" />
-            </div>
-            <div class="kb-info">
-              <div class="kb-title-row">
-                <div class="kb-title-left">
-                  <h3 class="kb-name">{{ kb.name }}</h3>
-                  <div class="kb-index">
-                    <span class="index-name">{{ `${kb.index_name}` }}</span>
-                    <button class="index-copy-btn" @click.stop="copyIndexName(kb)">
-                      <Copy :size="14" />
-                      {{ t('common.copy') || '复制' }}
-                    </button>
+    <!-- List Content -->
+    <div v-if="viewMode === 'list'" class="space-y-6">
+      <!-- Grid -->
+      <div v-if="filteredKnowledgeBases.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <Card 
+          v-for="kb in filteredKnowledgeBases" 
+          :key="kb.id" 
+          class="cursor-pointer hover:shadow-md transition-all duration-300 group border-muted/60 hover:border-primary/50"
+          @click="goToDetail(kb)"
+        >
+          <CardHeader class="pb-3">
+            <div class="flex justify-between items-start">
+              <div class="flex items-center gap-3">
+                <div 
+                  class="p-2 rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300"
+                >
+                  <BookOpen class="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle class="text-base font-semibold leading-none mb-1.5">{{ kb.name }}</CardTitle>
+                  <div class="flex items-center gap-1.5 text-xs text-muted-foreground" @click.stop>
+                    <span class="truncate max-w-[120px] font-mono bg-muted px-1.5 py-0.5 rounded">{{ kb.index_name }}</span>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      class="h-5 w-5 hover:bg-muted text-muted-foreground"
+                      @click="copyIndexName(kb)"
+                    >
+                      <Copy class="h-3 w-3" />
+                    </Button>
                   </div>
                 </div>
-                <div class="kb-actions">
+              </div>
+              
+              <Badge 
+                :variant="kb.disabled ? 'secondary' : 'default'" 
+                class="capitalize"
+              >
+                {{ kb.disabled ? t('knowledgeBase.disabled') : t('knowledgeBase.enabled') }}
+              </Badge>
+            </div>
+          </CardHeader>
+          
+          <CardContent class="pb-3">
+            <p class="text-sm text-muted-foreground line-clamp-2 min-h-[2.5rem]">
+              {{ getSimpleDescription(kb) }}
+            </p>
+          </CardContent>
+          
+          <CardFooter class="pt-3 border-t bg-muted/20 flex justify-between items-center text-xs text-muted-foreground">
+             <div class="flex items-center gap-2">
+               <Badge variant="outline" class="bg-background/50">
+                 {{ getTypeName(kb.dataSource) }}
+               </Badge>
+             </div>
+             <div class="flex items-center gap-3">
+               <span class="flex items-center gap-1" :title="t('knowledgeBase.documents')">
+                 <FileText class="h-3.5 w-3.5" />
+                 {{ kb.docNum || 0 }}
+               </span>
+               <span class="flex items-center gap-1" :title="t('knowledgeBase.lastUpdated')">
+                 <Clock class="h-3.5 w-3.5" />
+                 {{ formatDate(kb.createTime) }}
+               </span>
+             </div>
+          </CardFooter>
+        </Card>
+      </div>
 
-                  <div class="kb-status-indicator" :class="{ disabled: kb.disabled }">
-                    <div class="status-dot"></div>
-                    <span class="status-text">{{ kb.disabled ? t('knowledgeBase.disabled') : t('knowledgeBase.enabled') }}</span>
-                  </div>
-                </div>
-              </div>
-              <p class="kb-description">
-                {{ getSimpleDescription(kb) }}
-              </p>
-            </div>
-          </div>
-          <!-- 类型信息 -->
-          <div class="kb-type-section">
-            <div class="type-badge" :class="kb.dataSource">
-              <span class="type-icon">{{ getTypeIcon(kb.dataSource) }}</span>
-              <span class="type-name">{{ getTypeName(kb.dataSource) }}</span>
-            </div>
-            <div class="type-details">
-              <div class="kb-stats">
-                <span class="stats-label">{{ t('knowledgeBase.documents') }}:</span>
-                <span class="stats-value">{{ kb.docNum || 0 }}</span>
-              </div>
-              <div class="kb-stats">
-                <span class="stats-label">{{ t('knowledgeBase.lastUpdated') }}:</span>
-                <span class="stats-value">{{ formatDate(kb.createTime) }}</span>
-              </div>
-            </div>
-          </div>
+      <!-- Empty State -->
+      <div v-else class="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in-95 duration-500">
+        <div class="bg-muted/30 p-6 rounded-full mb-6">
+          <BookOpen class="h-16 w-16 text-muted-foreground/40" />
         </div>
-      </div>
-      <div v-if="filteredKnowledgeBases.length === 0" class="empty-state">
-        <BookOpen :size="48" class="empty-icon" />
-        <h3>{{ t('knowledgeBase.noKnowledgeBases') }}</h3>
-        <p>{{ t('knowledgeBase.noKnowledgeBasesDesc') }}</p>
+        <h3 class="text-xl font-semibold text-foreground mb-2">{{ t('knowledgeBase.noKnowledgeBases') }}</h3>
+        <p class="text-muted-foreground max-w-sm">{{ t('knowledgeBase.noKnowledgeBasesDesc') }}</p>
+        <Button variant="outline" class="mt-6" @click="showAddKnowledgeBaseForm">
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('knowledgeBase.addKnowledgeBase') }}
+        </Button>
       </div>
     </div>
-    <!-- 知识库添加视图 -->
-    <KnowledgeBaseAdd 
-      v-if="viewMode === 'add-kb'" 
-      @success="handleKnowledgeBaseSuccess" 
-      @cancel="backToList"
-      ref="knowledgeBaseAddRef" 
-    />
+
+    <!-- Add View -->
+    <div v-if="viewMode === 'add-kb'" class="animate-in slide-in-from-right-10 duration-300">
+       <KnowledgeBaseAdd 
+        @success="handleKnowledgeBaseSuccess" 
+        @cancel="backToList"
+        ref="knowledgeBaseAddRef" 
+      />
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { BookOpen, Plus, RefreshCw, Copy } from 'lucide-vue-next'
+import { BookOpen, Plus, Copy, Search, FileText, Clock } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import KnowledgeBaseAdd from '../components/KnowledgeBaseAdd.vue'
+
+// UI Components
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 
 // Composables
 const { t } = useLanguage()
@@ -101,7 +137,6 @@ const knowledgeBases = ref([])
 const searchTerm = ref('')
 const viewMode = ref('list') // 'list', 'add-kb'
 const loading = ref(false)
-const refreshingKbs = ref(new Set())
 
 const filteredKnowledgeBases = computed(() => {
   if (!searchTerm.value.trim()) {
@@ -115,11 +150,6 @@ const filteredKnowledgeBases = computed(() => {
   )
 })
 
-const uniqueTypes = computed(() => {
-  const types = [...new Set(knowledgeBases.value.map(kb => kb.dataSource))]
-  return types
-})
-
 // API Methods
 const loadKnowledgeBases = async () => {
   try {
@@ -131,25 +161,27 @@ const loadKnowledgeBases = async () => {
     }
   } catch (error) {
     console.error('Failed to load knowledge bases:', error)
-    // 使用模拟数据作为后备
+    // Keep mock data for fallback/demo if API fails
     knowledgeBases.value = [
       {
         id: '1',
         name: '产品文档知识库',
-        type: 'document',
-        description: '包含所有产品相关的文档和说明',
-        document_count: 156,
-        updated_at: '2024-01-15T10:30:00Z',
-        disabled: false
+        dataSource: 'document',
+        intro: '包含所有产品相关的文档和说明',
+        docNum: 156,
+        createTime: '2024-01-15T10:30:00Z',
+        disabled: false,
+        index_name: 'prod_docs_v1'
       },
       {
         id: '2',
         name: '技术支持知识库',
-        type: 'document',
-        description: '常见问题解答和技术支持文档',
-        document_count: 89,
-        updated_at: '2024-01-14T15:45:00Z',
-        disabled: false
+        dataSource: 'qa',
+        intro: '常见问题解答和技术支持文档',
+        docNum: 89,
+        createTime: '2024-01-14T15:45:00Z',
+        disabled: true,
+        index_name: 'tech_support_v1'
       }
     ]
   } finally {
@@ -159,7 +191,6 @@ const loadKnowledgeBases = async () => {
 
 // Methods
 const showAddKnowledgeBaseForm = () => {
-  // 重置表单
   if (knowledgeBaseAddRef.value) {
     knowledgeBaseAddRef.value.resetForm()
   }
@@ -171,55 +202,33 @@ const handleKnowledgeBaseSuccess = async () => {
   backToList()
 }
 
-// 获取简化的知识库描述
+const backToList = () => {
+  viewMode.value = 'list'
+}
+
+const goToDetail = (kb) => {
+  if (!kb || !kb.id) return
+  router.push({ name: 'KnowledgeBaseDetail', params: { kdbId: kb.id } })
+}
+
 const getSimpleDescription = (kb) => {
   if (!kb) return t('knowledgeBase.noDescription')
   return kb.intro || t('knowledgeBase.noDescription')
 }
 
-// 获取类型图标类名
-const getTypeIconClass = (type) => {
-  switch (type?.toLowerCase()) {
-    case 'document':
-      return 'type-document'
-    case 'qa':
-      return 'type-qa'
-    case 'code':
-      return 'type-code'
-    default:
-      return 'type-default'
-  }
-}
-
-// 获取类型图标
-const getTypeIcon = (type) => {
-  switch (type?.toLowerCase()) {
-    case 'document':
-      return '📄'
-    case 'qa':
-      return '❓'
-    case 'code':
-      return '💻'
-    default:
-      return '📚'
-  }
-}
-
-// 获取类型名称
 const getTypeName = (type) => {
   switch (type?.toLowerCase()) {
     case 'document':
-      return t('knowledgeBase.documentType')
+      return t('knowledgeBase.documentType') || 'Document'
     case 'qa':
-      return t('knowledgeBase.qaType')
+      return t('knowledgeBase.qaType') || 'Q&A'
     case 'code':
-      return t('knowledgeBase.codeType')
+      return t('knowledgeBase.codeType') || 'Code'
     default:
-      return t('knowledgeBase.unknownType')
+      return t('knowledgeBase.unknownType') || 'Unknown'
   }
 }
 
-// 格式化日期
 const formatDate = (dateString) => {
   if (!dateString) return '-'
   const date = new Date(dateString)
@@ -232,419 +241,29 @@ const formatDate = (dateString) => {
   })
 }
 
-const backToList = () => {
-  viewMode.value = 'list'
-}
-
-const goToDetail = (kb) => {
-  if (!kb || !kb.id) return
-  router.push({ name: 'KnowledgeBaseDetail', params: { kdbId: kb.id } })
-}
-
 const copyIndexName = async (kb) => {
   const text = kb?.index_name || ''
+  if (!text) return
+  
   try {
     if (navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
       return
     }
   } catch (_) {}
+  
+  // Fallback
   const ta = document.createElement('textarea')
   ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
   document.body.appendChild(ta)
   ta.select()
   try { document.execCommand('copy') } catch (_) {}
   document.body.removeChild(ta)
 }
 
-// 生命周期
 onMounted(() => {
   loadKnowledgeBases()
 })
 </script>
-
-<style scoped>
-.knowledge-base-page {
-  padding: 1.5rem;
-  min-height: 100vh;
-  background: transparent;
-}
-
-/* 搜索和筛选区域样式 */
-.filters-section {
-  margin-bottom: 24px;
-  padding: 20px;
-  background: white;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.search-box {
-  position: relative;
-  max-width: 400px;
-}
-
-.search-input {
-  width: 100%;
-  padding: 12px 16px 12px 44px;
-  border: 2px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
-  font-size: 14px;
-  line-height: 1.5;
-  background: #fafafa;
-  transition: all 0.2s ease;
-  outline: none;
-}
-
-.search-input:focus {
-  border-color: #667eea;
-  background: white;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.search-input::placeholder {
-  color: rgba(0, 0, 0, 0.5);
-  font-weight: 400;
-}
-
-.search-box::before {
-  content: '🔍';
-  position: absolute;
-  left: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 16px;
-  color: rgba(0, 0, 0, 0.4);
-  pointer-events: none;
-  z-index: 1;
-}
-
-.list-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  max-height: calc(100vh - 120px);
-  background: white;
-}
-
-.kb-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.btn-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
-  background: #667eea;
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-primary:hover {
-  background: #5a6fd8;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 32px;
-  text-align: center;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.empty-icon {
-  margin-bottom: 16px;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #333333;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.kb-grid {
-  padding: 24px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 20px;
-}
-
-.kb-card {
-  background: white;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
-  padding: 20px;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.kb-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.kb-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.kb-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-
-.kb-icon.type-document {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.kb-icon.type-qa {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-}
-
-.kb-icon.type-code {
-  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-}
-
-.kb-icon.type-default {
-  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-}
-
-.kb-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.kb-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  gap: 12px;
-}
-
-.kb-title-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.kb-index {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.index-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 12px;
-  color: #555;
-  background: #f2f2f2;
-  border: 1px solid rgba(0,0,0,0.1);
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-
-.index-copy-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 6px;
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-  cursor: pointer;
-}
-
-.index-copy-btn:hover {
-  background: rgba(102, 126, 234, 0.2);
-}
-
-.kb-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.action-btn:hover:not(:disabled) {
-  background: rgba(102, 126, 234, 0.2);
-  transform: scale(1.05);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.refresh-btn .spinning {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.kb-name {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #333333;
-  word-break: break-word;
-}
-
-.kb-status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4ade80;
-}
-
-.kb-status-indicator.disabled .status-dot {
-  background: #ef4444;
-}
-
-.status-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.kb-description {
-  margin: 0;
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.7);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.kb-type-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.type-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  width: fit-content;
-}
-
-.type-badge.document {
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-  border: 1px solid rgba(102, 126, 234, 0.2);
-}
-
-.type-badge.qa {
-  background: rgba(79, 172, 254, 0.1);
-  color: #4facfe;
-  border: 1px solid rgba(79, 172, 254, 0.2);
-}
-
-.type-badge.code {
-  background: rgba(67, 233, 123, 0.1);
-  color: #43e97b;
-  border: 1px solid rgba(67, 233, 123, 0.2);
-}
-
-.type-icon {
-  font-size: 14px;
-}
-
-.type-name {
-  letter-spacing: 0.5px;
-}
-
-.type-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.kb-stats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.stats-label {
-  font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
-  min-width: 60px;
-}
-
-.stats-value {
-  color: #333333;
-  flex: 1;
-}
-</style>
