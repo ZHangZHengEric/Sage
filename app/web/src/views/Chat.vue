@@ -1,16 +1,24 @@
 <template>
   <div class="chat-page">
     <div class="chat-header">
-      <div class="chat-controls">
-        <el-select v-model="selectedAgentId" class="agent-select" @change="handleAgentChange">
-          <el-option v-for="agent in (agents || [])" :key="agent.id" :label="agent.name" :value="agent.id" />
-        </el-select>
-        <el-button type="text" @click="showTrace = !showTrace" title="Trace Workflow">
-          <Activity :size="16" />
-        </el-button>
-        <el-button type="text" @click="showSettings = !showSettings" :title="t('chat.settings')">
-          <Settings :size="16" />
-        </el-button>
+      <div class="chat-controls flex items-center gap-2">
+        <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
+          <SelectTrigger class="w-[200px]">
+            <SelectValue :placeholder="t('chat.selectAgent') || 'Select Agent'" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="agent in (agents || [])" :key="agent.id" :value="agent.id">
+              {{ agent.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        
+        <Button variant="ghost" size="icon" @click="showTrace = !showTrace" title="Trace Workflow">
+          <Activity class="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" @click="showSettings = !showSettings" :title="t('chat.settings')">
+          <Settings class="h-4 w-4" />
+        </Button>
       </div>
     </div>
     <div class="chat-container">
@@ -58,7 +66,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { toast } from 'vue-sonner'
 import { Bot, Settings, Activity } from 'lucide-vue-next'
 
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
@@ -68,6 +76,16 @@ import TaskStatusPanel from '@/components/chat/TaskStatusPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
 import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
+
+// UI Components
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
@@ -237,7 +255,7 @@ const createSession = () => {
       
     } catch (e) {
       console.error('加载会话失败:', e);
-      ElMessage.error(t('chat.loadConversationError') || 'Failed to load conversation');
+      toast.error(t('chat.loadConversationError') || 'Failed to load conversation');
     } finally {
       isLoading.value = false;
     }
@@ -559,7 +577,7 @@ const loadAgents = async () => {
     agents.value = response || []
   } catch (error) {
     console.error('Failed to load agents:', error)
-    ElMessage.error(t('chat.loadAgentsError'))
+    toast.error(t('chat.loadAgentsError'))
   }
 }
 
@@ -612,7 +630,7 @@ const loadConversationData = async (conversation) => {
 
   } catch (error) {
     console.error('Failed to load conversation data:', error)
-    ElMessage.error(t('chat.loadConversationError'))
+    toast.error(t('chat.loadConversationError'))
   }
 }
 
@@ -669,7 +687,7 @@ const handleSendMessage = async (content) => {
     })
   } catch (error) {
     console.error('❌ Chat.vue发送消息异常:', error);
-    ElMessage.error(t('chat.sendError'))
+    toast.error(t('chat.sendError'))
     isLoading.value = false
   }
 }
@@ -690,7 +708,7 @@ const downloadFile = async (filename) => {
     }
   } catch (error) {
     console.error('Failed to download file:', error)
-    ElMessage.error(t('chat.downloadError'))
+    toast.error(t('chat.downloadError'))
   }
 }
 

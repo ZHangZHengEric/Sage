@@ -1,92 +1,128 @@
 <template>
-<div class="mcp-page">
-      <!-- 列表视图的过滤器和内容 -->
-  <div v-if="viewMode === 'list'"  class="list-content">
-    <div  class="mcp-actions">
-        <button class="btn-primary" @click="showAddMcpForm">
-          <Plus :size="16" />
+  <div class="h-screen w-full bg-background p-6">
+    <!-- 列表视图 -->
+    <div v-if="viewMode === 'list'" class="flex h-full flex-col space-y-6">
+      <!-- 头部操作区 -->
+      <div class="flex items-center justify-between pb-4 border-b">
+        <div class="relative w-full max-w-sm">
+          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input 
+            v-model="searchTerm" 
+            :placeholder="t('tools.search')" 
+            class="pl-9"
+          />
+        </div>
+        <Button @click="showAddMcpForm">
+          <Plus class="mr-2 h-4 w-4" />
           {{ t('tools.addMcpServer') }}
-        </button>
-    </div>
-    <div class="mcp-grid">
-        <div v-for="server in filteredMcpServers" :key="server.name" class="mcp-card">
-          <!-- 卡片头部 -->
-          <div class="mcp-header">
-            <div class="mcp-icon" :class="getProtocolIconClass(server.protocol)">
-              <Database :size="24" />
-            </div>
-            <div class="mcp-info">
-              <div class="mcp-title-row">
-                <h3 class="mcp-name">{{ server.name }}</h3>
-                <div class="mcp-actions">
-                  <button 
-                    class="action-btn refresh-btn" 
-                    @click="handleRefreshMcp(server.name)"
-                    :disabled="loading"
-                    :title="t('tools.refresh')"
-                  >
-                    <RefreshCw :size="16" :class="{ 'spinning': refreshingServers.has(server.name) }" />
-                  </button>
-                  <button 
-                    class="action-btn delete-btn" 
-                    @click="handleDeleteMcp(server.name)"
-                    :disabled="loading"
-                    :title="t('tools.delete')"
-                  >
-                    <Trash2 :size="16" />
-                  </button>
-                  <div class="mcp-status-indicator" :class="{ disabled: server.disabled }">
-                    <div class="status-dot"></div>
-                    <span class="status-text">{{ server.disabled ? t('tools.disabled') : t('tools.enabled') }}</span>
+        </Button>
+      </div>
+
+      <!-- MCP服务器列表 -->
+      <ScrollArea class="flex-1">
+        <div class="space-y-6 pr-4">
+          <div v-if="filteredMcpServers.length > 0" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <Card 
+              v-for="server in filteredMcpServers" 
+              :key="server.name" 
+              class="transition-all hover:shadow-md hover:-translate-y-0.5"
+            >
+              <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-2">
+                <div 
+                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm"
+                  :class="getProtocolIconClass(server.protocol)"
+                >
+                  <Database class="h-5 w-5" />
+                </div>
+                <div class="space-y-1 overflow-hidden flex-1">
+                  <div class="flex items-center justify-between">
+                    <CardTitle class="text-base truncate" :title="server.name">
+                      {{ server.name }}
+                    </CardTitle>
+                    <div class="flex items-center gap-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        class="h-6 w-6" 
+                        :disabled="loading"
+                        :title="t('tools.refresh')"
+                        @click="handleRefreshMcp(server.name)"
+                      >
+                        <RefreshCw 
+                          class="h-3.5 w-3.5" 
+                          :class="{ 'animate-spin': refreshingServers.has(server.name) }" 
+                        />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        class="h-6 w-6 text-destructive hover:text-destructive" 
+                        :disabled="loading"
+                        :title="t('tools.delete')"
+                        @click="handleDeleteMcp(server.name)"
+                      >
+                        <Trash2 class="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <CardDescription class="line-clamp-2 text-xs">
+                    {{ getSimpleDescription(server) }}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div class="flex flex-col gap-2 pt-4 border-t mt-2">
+                  <div class="flex items-center justify-between">
+                    <Badge variant="outline" class="uppercase text-[10px] font-mono">
+                      {{ server.protocol?.toUpperCase() || 'UNKNOWN' }}
+                    </Badge>
+                    <div class="flex items-center gap-1.5">
+                      <div class="h-2 w-2 rounded-full" :class="server.disabled ? 'bg-muted-foreground' : 'bg-green-500'"></div>
+                      <span class="text-xs text-muted-foreground">{{ server.disabled ? t('tools.disabled') : t('tools.enabled') }}</span>
+                    </div>
+                  </div>
+                  
+                  <div class="text-xs text-muted-foreground font-mono truncate bg-muted/50 p-1.5 rounded">
+                    {{ getServerUrl(server) }}
                   </div>
                 </div>
-              </div>
-              <p class="mcp-description">
-                {{ getSimpleDescription(server) }}
-              </p>
-            </div>
+              </CardContent>
+            </Card>
           </div>
-          <!-- 协议信息 -->
-          <div class="mcp-protocol-section">
-            <div class="protocol-badge" :class="server.protocol">
-              <span class="protocol-icon">{{ getProtocolIcon(server.protocol) }}</span>
-              <span class="protocol-name">{{ server.protocol?.toUpperCase() || 'UNKNOWN' }}</span>
+
+          <div v-else class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="rounded-full bg-muted p-4">
+              <Wrench class="h-8 w-8 text-muted-foreground" />
             </div>
-            <div class="protocol-details">
-              <div v-if="server.streamable_http_url" class="connection-info">
-                <span class="connection-label">URL:</span>
-                <span class="connection-url">{{ server.streamable_http_url }}</span>
-              </div>
-              <div v-if="server.sse_url" class="connection-info">
-                <span class="connection-label">URL:</span>
-                <span class="connection-url">{{ server.sse_url }}</span>
-              </div>
-              <div v-if="server.command" class="connection-info">
-                <span class="connection-label">CMD:</span>
-                <span class="connection-url">{{ server.command }}</span>
-              </div>
-            </div>
+            <h3 class="mt-4 text-lg font-semibold">{{ t('tools.noMcpServers') }}</h3>
+            <p class="text-sm text-muted-foreground">{{ t('tools.noMcpServersDesc') }}</p>
           </div>
         </div>
+      </ScrollArea>
     </div>
-    <div v-if="filteredMcpServers.length === 0" class="empty-state">
-        <Wrench :size="48" class="empty-icon" />
-        <h3>{{ t('tools.noMcpServers') }}</h3>
-        <p>{{ t('tools.noMcpServersDesc') }}</p>
-      </div>
+
+    <!-- MCP服务器添加视图 -->
+    <McpServerAdd 
+      v-if="viewMode === 'add-mcp'" 
+      :loading="loading" 
+      @submit="handleMcpSubmit" 
+      @cancel="backToList"
+      ref="mcpServerAddRef" 
+    />
   </div>
-  <!-- MCP服务器添加视图 -->
-  <McpServerAdd v-if="viewMode === 'add-mcp'" :loading="loading" @submit="handleMcpSubmit" @cancel="backToList"
-    ref="mcpServerAddRef" />
-</div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench,Code, Database,  Cpu, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import McpServerAdd from '../components/McpServerAdd.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 // Composables
 const { t } = useLanguage()
@@ -157,6 +193,10 @@ const showAddMcpForm = () => {
   viewMode.value = 'add-mcp'
 }
 
+const backToList = () => {
+  viewMode.value = 'list'
+}
+
 const handleMcpSubmit = async (payload) => {
   loading.value = true
   try {
@@ -200,376 +240,32 @@ const handleDeleteMcp = async (serverName) => {
   }
 }
 
-// 新增方法：获取简化的服务器描述
-const getSimpleDescription = (server) => {
-  if (!server) return t('tools.noDescription')
-  return server.description
-}
-
-// 新增方法：获取协议图标类名
 const getProtocolIconClass = (protocol) => {
-  switch (protocol?.toLowerCase()) {
-    case 'sse':
-      return 'protocol-sse'
-    case 'streamable_http':
-      return 'protocol-http'
+  switch (protocol) {
     case 'stdio':
-      return 'protocol-stdio'
+      return 'bg-blue-500'
+    case 'sse':
+      return 'bg-green-500'
+    case 'streamable_http':
+      return 'bg-purple-500'
     default:
-      return 'protocol-default'
+      return 'bg-gray-500'
   }
 }
 
-// 新增方法：获取协议图标
-const getProtocolIcon = (protocol) => {
-  switch (protocol?.toLowerCase()) {
-    case 'sse':
-      return '⚡'
-    case 'streamable_http':
-      return '🌐'
-    case 'stdio':
-      return '💻'
-    default:
-      return '🔧'
-  }
+const getSimpleDescription = (server) => {
+  if (server.description) return server.description
+  return t('tools.noDescription')
 }
 
-
-const backToList = () => {
-  viewMode.value = 'list'
-  selectedTool.value = null
+const getServerUrl = (server) => {
+  if (server.streamable_http_url) return server.streamable_http_url
+  if (server.sse_url) return server.sse_url
+  if (server.command) return `${server.command} ${server.args || ''}`
+  return 'N/A'
 }
 
-// 生命周期
 onMounted(() => {
-  loadBasicTools()
   loadMcpServers()
 })
 </script>
-
-<style scoped>
-
-.mcp-page {
-  padding: 1.5rem;
-  min-height: 100vh;
-  background: transparent;
-}
-.list-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  max-height: calc(100vh - 120px);
-  background: white;
-}
-
-
-
-.mcp-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.btn-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
-  background: #667eea;
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-primary:hover {
-  background: #5a6fd8;
-}
-
-
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 32px;
-  text-align: center;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.empty-icon {
-  margin-bottom: 16px;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-
-
-.mcp-grid {
-  padding: 24px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 20px;
-}
-
-.mcp-card {
-  background: white;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
-  padding: 20px;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.mcp-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.mcp-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.mcp-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-
-.mcp-icon.protocol-sse {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.mcp-icon.protocol-http {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-}
-
-.mcp-icon.protocol-stdio {
-  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-}
-
-.mcp-icon.protocol-default {
-  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-}
-
-.mcp-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.mcp-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  gap: 12px;
-}
-
-.mcp-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.action-btn:hover:not(:disabled) {
-  background: rgba(102, 126, 234, 0.2);
-  transform: scale(1.05);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.refresh-btn .spinning {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.mcp-name {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #333333;
-  word-break: break-word;
-}
-
-.mcp-status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4ade80;
-}
-
-.mcp-status-indicator.disabled .status-dot {
-  background: #ef4444;
-}
-
-.status-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.mcp-description {
-  margin: 0;
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.7);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.mcp-protocol-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.protocol-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  width: fit-content;
-}
-
-.protocol-badge.sse {
-  background: rgba(102, 126, 234, 0.1);
-  color: #667eea;
-  border: 1px solid rgba(102, 126, 234, 0.2);
-}
-
-.protocol-badge.streamable_http {
-  background: rgba(79, 172, 254, 0.1);
-  color: #4facfe;
-  border: 1px solid rgba(79, 172, 254, 0.2);
-}
-
-.protocol-badge.stdio {
-  background: rgba(67, 233, 123, 0.1);
-  color: #43e97b;
-  border: 1px solid rgba(67, 233, 123, 0.2);
-}
-
-.protocol-icon {
-  font-size: 14px;
-}
-
-.protocol-name {
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.protocol-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.connection-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.connection-label {
-  font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
-  min-width: 40px;
-}
-
-.connection-url {
-  color: #333333;
-  font-family: monospace;
-  word-break: break-all;
-  flex: 1;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 32px;
-  text-align: center;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.empty-state h3 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #333333;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: rgba(0, 0, 0, 0.7);
-}
-</style>
