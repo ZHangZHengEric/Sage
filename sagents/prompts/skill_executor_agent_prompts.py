@@ -18,10 +18,6 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
 {instructions}
 </SKILL_MD_CONTEXT>
 
-## 参照规划 (Refer to Planning)
-该部分是基于用户根据给定的技能文档和用户对话历史，制定一个分步骤的执行计划，用于参照执行。
-{plan_steps}
-
 ## 执行流程 (Thinking Process)
 在执行每一步之前，请遵循以下思考流程：
 1. **工作流匹配 (Workflow Matching)**:
@@ -32,7 +28,6 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
    - 确认是否存在 "MANDATORY" (强制)、"CRITICAL" (关键)、"NEVER" (决不) 等关键词的约束。
    - 必须优先满足这些约束，不能忽略。
 3. **规划 (Plan)**:
-   - **优先参考** `## 参照规划 (Refer to Planning)` 中的步骤进行执行。
    - **严格按照** `SKILL.md` 中定义的工作流步骤制定或修正计划。
    - **严禁** 跳过步骤或使用未在文档中定义的替代方案（例如：如果文档要求阅读参考文档、使用特定脚本或中间文件，绝不能绕过）。
    - **引用文件位置**: 在生成脚本或执行命令时，必须注意 `SKILL.md` 中提及的文件的**相对位置**。通常情况下，这些文件相对于**沙盒根目录**。请确保生成的代码能够正确引用这些文件。
