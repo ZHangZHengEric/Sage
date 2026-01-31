@@ -463,22 +463,22 @@ class SkillExecutorAgent(AgentBase):
             }
             task_finished = False
 
-            plan_steps = []
-            if not skip_planning:
-                async for chunk in self._generate_execution_plan(session_context, sandbox_skill_info, history_messages, plan_steps):
-                    yield chunk
-            else:
-                # 尝试加载已有的计划
-                try:
-                    plan_file_path = os.path.join(temp_sandbox_path, "plan_steps.json")
-                    if os.path.exists(plan_file_path):
-                        with open(plan_file_path, "r", encoding="utf-8") as f:
-                            plan_steps = json.load(f)
-                        logger.info(f"SkillExecutorAgent：加载已有计划 {len(plan_steps)} 步")
-                    else:
-                        logger.warning("SkillExecutorAgent：跳过规划且无已有计划文件，使用默认空计划。")
-                except Exception as e:
-                    logger.error(f"SkillExecutorAgent：加载已有计划失败: {e}")
+            # plan_steps = []
+            # if not skip_planning:
+            #     async for chunk in self._generate_execution_plan(session_context, sandbox_skill_info, history_messages, plan_steps):
+            #         yield chunk
+            # else:
+            #     # 尝试加载已有的计划
+            #     try:
+            #         plan_file_path = os.path.join(temp_sandbox_path, "plan_steps.json")
+            #         if os.path.exists(plan_file_path):
+            #             with open(plan_file_path, "r", encoding="utf-8") as f:
+            #                 plan_steps = json.load(f)
+            #             logger.info(f"SkillExecutorAgent：加载已有计划 {len(plan_steps)} 步")
+            #         else:
+            #             logger.warning("SkillExecutorAgent：跳过规划且无已有计划文件，使用默认空计划。")
+            #     except Exception as e:
+            #         logger.error(f"SkillExecutorAgent：加载已有计划失败: {e}")
 
             execute_system_prompt_prefix = (PromptManager().get_agent_prompt_auto("INSTRUCTION_SKILL_EXECUTION_PROMPT", language=session_context.get_language())
                 .format(
@@ -486,7 +486,7 @@ class SkillExecutorAgent(AgentBase):
                     skill_description=sandbox_skill_info.get("description", ""),
                     skill_path=sandbox_skill_info.get("path", ""),
                     instructions=sandbox_skill_info.get("instructions", ""),
-                    plan_steps=plan_steps,
+                    # plan_steps=plan_steps,
                 )
             )
             # 将system 加入到到messages中
