@@ -32,7 +32,8 @@ INSTRUCTION_SKILL_EXECUTION_PROMPT = {
    - 确认是否存在 "MANDATORY" (强制)、"CRITICAL" (关键)、"NEVER" (决不) 等关键词的约束。
    - 必须优先满足这些约束，不能忽略。
 3. **规划 (Plan)**:
-   - **严格按照** `SKILL.md` 中定义的工作流步骤制定计划。
+   - **优先参考** `## 参照规划 (Refer to Planning)` 中的步骤进行执行。
+   - **严格按照** `SKILL.md` 中定义的工作流步骤制定或修正计划。
    - **严禁** 跳过步骤或使用未在文档中定义的替代方案（例如：如果文档要求阅读参考文档、使用特定脚本或中间文件，绝不能绕过）。
    - **引用文件位置**: 在生成脚本或执行命令时，必须注意 `SKILL.md` 中提及的文件的**相对位置**。通常情况下，这些文件相对于**沙盒根目录**。请确保生成的代码能够正确引用这些文件。
    - 如果需要获取信息，使用 `read_skill_file`。如果需要新增或修改文件，使用 `write_temp_file`。如果需要执行逻辑，先根据核心指令与相关文档给出依赖安装命令（传给 `run_skill_script` 的 `install_cmd` 参数），再使用 `run_skill_script`。
@@ -178,108 +179,54 @@ Pense passo a passo para garantir que cada habilidade selecionada avance a taref
 
 # 任务完成判断模板
 task_complete_template = {
-    "zh": """你要根据历史的对话以及用户的请求，判断是否需要中断执行任务。
+    "zh": """你要根据历史的对话以及用户的请求，判断当前任务的状态。
 
-## 是否中断执行任务判断规则
-1. 中断执行任务：
-  - 当你认为对话过程中，已有的回答结果已经满足回答用户的请求且不需要做更多的回答或者行动时，需要判断中断执行任务。
-  - 当你认为对话过程中，发生了异常情况，并且尝试了两次后，仍然无法继续执行任务时，需要判断中断执行任务。
-  - 当对话过程中，需要用户的确认或者输入时，需要判断中断执行任务。
+状态定义：
+- COMPLETED：用户最初的请求已完全满足。Assistant 已经提供了最终答案或结果。不需要进一步的行动。
+- WAIT_USER：Assistant 已经提供了回复，但需要用户的进一步输入、确认或澄清才能继续。或者 Assistant 提供了一个部分结果，正在等待用户反馈。
 
-2. 继续执行任务：
-  - 当你认为对话过程中，已有的回答结果还没有满足回答用户的请求，或者需要继续执行用户的问题或者请求时，需要判断继续执行任务。
-  - 当完成工具调用，但未进行工具调用的结果进行文字描述时，需要判断继续执行任务。因为用户看不到工具执行的结果。
-  - 当对话中，Assistant AI 最后表达要继续做一些其他的事情或者继续分析其他的内容，例如出现（等待工具调用，请稍等，等待生成，接下来，我将调用）等表达时，则判断继续执行任务。
+输出一个只包含 "status" 键的 JSON 对象：
+```json
+{{
+    "status": "COMPLETED" 或 "WAIT_USER"
+}}
+```
 
-## 输出内容一致对齐逻辑
-1. 如果reason 是等待工具调用，则task_interrupted是false
-
-## 用户的对话历史以及新的请求的执行过程
+用户的对话历史以及新的请求的执行过程：
 {messages}
+""",
+    "en": """Analyze the conversation history to determine the status of the current task.
 
-输出格式：
+Status definitions:
+- COMPLETED: The user's original request has been fully satisfied. The Assistant has provided the final answer or outcome. No further actions are needed.
+- WAIT_USER: The Assistant has provided a response but requires further input, confirmation, or clarification from the user to proceed. Or the Assistant has provided a partial result and is waiting for user feedback.
+
+Output a JSON object with a single key "status":
 ```json
 {{
-    "reason": "任务完成",
-    "task_interrupted": true
+    "status": "COMPLETED" or "WAIT_USER"
 }}
 ```
-或者
-```json
-{{
-    "reason": "等待工具调用",
-    "task_interrupted": false
-}}
-```
-reason尽可能简单，最多20个字符""",
-    "en": """You need to determine whether to interrupt task execution based on the conversation history and user's request.
 
-## Rules for Interrupting Task Execution
-1. Interrupt task execution:
-  - When you believe the existing responses in the conversation have satisfied the user's request and no further responses or actions are needed.
-  - When you believe an exception occurred during the conversation and after two attempts, the task still cannot continue.
-  - When user confirmation or input is needed during the conversation.
-
-2. Continue task execution:
-  - When you believe the existing responses in the conversation have not yet satisfied the user's request, or when the user's questions or requests need to continue being executed.
-  - When tool calls are completed but the results have not been described in text, continue task execution because users cannot see the tool execution results.
-  - When the Assistant AI expresses in the conversation that it will continue doing other things or continue analyzing other content, such as expressions like (waiting for tool call, please wait, waiting for generation, next, I will call), then continue task execution.
-
-## Output Content Consistency Logic
-1. If reason is "waiting for tool call", then task_interrupted is false
-
-## User's Conversation History and Request Execution Process
+Conversation History:
 {messages}
+""",
+    "pt": """Analise o histórico de conversas para determinar o status da tarefa atual.
 
-Output Format:
+Definições de status:
+- COMPLETED: A solicitação original do usuário foi totalmente atendida. O Assistente forneceu a resposta ou resultado final. Nenhuma outra ação é necessária.
+- WAIT_USER: O Assistente forneceu uma resposta, mas requer mais entrada, confirmação ou esclarecimento do usuário para prosseguir. Ou o Assistente forneceu um resultado parcial e está aguardando o feedback do usuário.
+
+Produza um objeto JSON com uma única chave "status":
 ```json
 {{
-    "reason": "Task completed",
-    "task_interrupted": true
+    "status": "COMPLETED" ou "WAIT_USER"
 }}
 ```
-or
-```json
-{{
-    "reason": "Waiting for tool call",
-    "task_interrupted": false
-}}
-```
-reason should be as simple as possible, maximum 20 characters""",
-    "pt": """Você precisa determinar se deve interromper a execução da tarefa com base no histórico de conversas e na solicitação do usuário.
 
-## Regras para Interromper a Execução da Tarefa
-1. Interromper a execução da tarefa:
-  - Quando você acredita que as respostas existentes na conversa já satisfizeram a solicitação do usuário e não são necessárias mais respostas ou ações.
-  - Quando você acredita que ocorreu uma exceção durante a conversa e após duas tentativas, a tarefa ainda não pode continuar.
-  - Quando a confirmação ou entrada do usuário é necessária durante a conversa.
-
-2. Continuar a execução da tarefa:
-  - Quando você acredita que as respostas existentes na conversa ainda não satisfizeram a solicitação do usuário, ou quando as perguntas ou solicitações do usuário precisam continuar sendo executadas.
-  - Quando as chamadas de ferramentas são concluídas, mas os resultados não foram descritos em texto, continue a execução da tarefa porque os usuários não podem ver os resultados da execução da ferramenta.
-  - Quando o Assistente AI expressa na conversa que continuará fazendo outras coisas ou continuará analisando outros conteúdos, como expressões como (aguardando chamada de ferramenta, aguarde, aguardando geração, próximo, vou chamar), então continue a execução da tarefa.
-
-## Lógica de Consistência do Conteúdo de Saída
-1. Se o motivo for "aguardando chamada de ferramenta", então task_interrupted é false
-
-## Histórico de Conversas do Usuário e Processo de Execução da Solicitação
+Histórico de Conversas:
 {messages}
-
-Formato de Saída:
-```json
-{{
-    "reason": "Tarefa concluída",
-    "task_interrupted": true
-}}
-```
-ou
-```json
-{{
-    "reason": "Aguardando chamada de ferramenta",
-    "task_interrupted": false
-}}
-```
-O motivo deve ser o mais simples possível, no máximo 20 caracteres""",
+""",
 }
 
 SKILL_GENERATION_PLAN_PROMPT = {
@@ -311,13 +258,11 @@ SKILL_GENERATION_PLAN_PROMPT = {
    - 每个步骤应该包含具体的行动指令。
     - 如果步骤涉及执行脚本命令，**必须**在该步骤的指令中同时包含依赖安装命令（如 pip install xxx）和脚本运行命令。
     - 如果行动指令中引用或参考了技能文件夹中的文件，**必须**强调确认文件是否存在，以及明确文件的具体位置。
-   - 如果步骤中有生成产物。最后一步一定是提取相关产物到工作目录。
+   - **如果步骤中有生成产物。最后一步一定是提取相关产物到工作目录**。
 
 ## 输出格式
-请先输出核心指令中匹配到的原文章节，然后再根据这些步骤制定输出 XML 格式的计划，不要包含 markdown 代码块标记或其他文本。用中文回答，格式如下：
-<content>
-这里是原文
-</content>
+请根据核心指令中匹配到的原文章节步骤制定输出 XML 格式的计划，不要包含 markdown 代码块标记或其他文本。用中文回答，格式如下：
+
 <plan>
     <step>
         <id>1</id>

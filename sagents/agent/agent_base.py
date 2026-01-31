@@ -337,7 +337,13 @@ class AgentBase(ABC):
                     system_prefix += no_files
                 else:
                     for root, dirs, files in os.walk(current_agent_workspace):
+                        # 过滤隐藏文件夹
+                        dirs[:] = [d for d in dirs if not d.startswith('.')]
+                        
                         for file_item in files:
+                            # 过滤隐藏文件
+                            if file_item.startswith('.'):
+                                continue
                             system_prefix += f"{os.path.join(root, file_item).replace(current_agent_workspace, '').lstrip('/')}\n"
                         for dir_item in dirs:
                             system_prefix += f"{os.path.join(root, dir_item).replace(current_agent_workspace, '').lstrip('/')}/\n"

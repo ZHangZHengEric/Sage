@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, AsyncGenerator, Union, cast
 import json
 import uuid
+import asyncio
 from copy import deepcopy
 import tempfile
 import shutil
@@ -23,21 +24,75 @@ class SkillExecutorAgent(AgentBase):
         self.agent_name = "SkillExecutorAgent"
         self.agent_description = "SkillExecutorAgent: 负责按需加载和执行技能。"
 
+    def _get_active_skill_from_history(self, messages: List[MessageChunk]) -> Optional[str]:
+        # 倒序遍历，找到最近的一次状态变更
+        for msg in reversed(messages):
+            if not msg.tool_calls:
+                continue
+
+            tool_calls = msg.tool_calls
+            if isinstance(tool_calls, list):
+                # 同一条消息可能有多个 tool call，通常按顺序执行，倒序遍历时应注意
+                # 这里假设一条消息里的 tool calls 顺序是从前到后的，
+                # 但我们是倒序遍历消息。对于同一条消息内的 tool calls，
+                # 如果我们想找“最后生效”的，应该看最后一个 tool call。
+                # 所以我们也倒序遍历 tool calls
+                for tc in reversed(tool_calls):
+                    func_name = ""
+                    args_str = ""
+                    if isinstance(tc, dict):
+                        func_name = tc.get("function", {}).get("name", "")
+                        args_str = tc.get("function", {}).get("arguments", "")
+                    else:
+                        try:
+                            func = getattr(tc, "function", None)
+                            if func:
+                                func_name = getattr(func, "name", "")
+                                args_str = getattr(func, "arguments", "")
+                        except Exception:
+                            pass
+
+                    if func_name == "load_skill":
+                        args = self._safe_parse_args(args_str)
+                        return args.get("skill_name")
+                    elif func_name == "unload_skill":
+                        return None
+        return None
+
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[Any] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info(f"SkillExecutorAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], message_manager.messages))}")
+        
+        # 使用全量消息检查技能状态，避免因上下文截断导致状态丢失
+        active_skill_name = self._get_active_skill_from_history(message_manager.messages)
+        
         history_messages = message_manager.extract_all_context_messages(recent_turns=20, last_turn_user_only=True)
         logger.info(
             f"SkillExecutorAgent: 获取历史消息的条数:{len(history_messages)}，历史消息的content长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages))}"
         )
+
+        # 检查是否有活跃的技能
+        if active_skill_name:
+            logger.info(f"SkillExecutorAgent: 检测到活跃技能 {active_skill_name}，跳过选择阶段，直接执行。")
+            # 阶段二：技能执行 (跳过规划)
+            async for chunk in self._execute_skill(
+                session_id=session_id,
+                history_messages=history_messages,
+                session_context=session_context,
+                selected_skill_name=active_skill_name,
+                skip_planning=True,
+            ):
+                yield chunk
+            return
+
         prompt_template = PromptManager().get_agent_prompt_auto("SKILL_EXECUTOR_SELECT_PROMPT", language=session_context.get_language())
         # 补充全部可选择的技能列表到system prompt
         select_system_prompt = prompt_template.format(available_skills="\n".join(session_context.skill_manager.get_skill_description_lines()))
 
         select_system_message = MessageChunk(role=MessageRole.SYSTEM.value, content=select_system_prompt, message_id=str(uuid.uuid4()), message_type=MessageType.SYSTEM.value)
-        # 拷贝一个新的列表，避免修改原列表
-        history_messages_for_select = deepcopy(history_messages)
+        # 拷贝一个新的列表，避免修改原列表（使用浅拷贝替代 deepcopy 以防递归错误）
+        history_messages_for_select = list(history_messages)
         history_messages_for_select.insert(0, select_system_message)
         # 阶段一：技能意图识别选择
         selection_result = {}
@@ -130,7 +185,7 @@ class SkillExecutorAgent(AgentBase):
                 )
                 yield [msg_chunk]
 
-    def _invoke_tool(
+    async def _invoke_tool(
         self,
         func_name: str,
         args: Dict[str, Any],
@@ -138,7 +193,9 @@ class SkillExecutorAgent(AgentBase):
     ) -> str:
         if func_name in tool_map:
             try:
-                return tool_map[func_name](**args)
+                if asyncio.iscoroutinefunction(tool_map[func_name]):
+                    return await tool_map[func_name](**args)
+                return await asyncio.to_thread(tool_map[func_name], **args)
             except Exception as e:
                 return f"Error executing {func_name}: {e}"
         return f"Error: Tool '{func_name}' not found"
@@ -216,14 +273,14 @@ class SkillExecutorAgent(AgentBase):
             yield [msg_chunk]
             selection_result["skill_name"] = selected_skill_name
 
-    async def _is_skill_complete(
+    async def _check_task_status(
         self,
         messages_input: List[Union[MessageChunk, Dict[str, Any]]],
         session_id: Optional[str],
-        language: str,
-    ) -> bool:
+        session_context: SessionContext,
+    ) -> str:
         if not messages_input:
-            return False
+            return "WAIT_USER"
         message_chunks: List[MessageChunk] = []
         for msg in messages_input:
             if isinstance(msg, MessageChunk):
@@ -234,10 +291,7 @@ class SkillExecutorAgent(AgentBase):
                 except Exception:
                     continue
         if not message_chunks:
-            return False
-        if message_chunks[-1].role == MessageRole.TOOL.value:
-            logger.info("messages_input[-1].role是 tool 调用结果，不是任务完成")
-            return False
+            return "WAIT_USER"
 
         last_user_index = None
         for i, message in enumerate(message_chunks):
@@ -249,16 +303,15 @@ class SkillExecutorAgent(AgentBase):
             messages_for_complete = message_chunks
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
 
-        task_complete_template = PromptManager().get_agent_prompt_auto("task_complete_template", language=language)
-        prompt = task_complete_template.format(
-            session_id=session_id or "",
-            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2),
-        )
-        messages_input = [{"role": "user", "content": prompt}]
+        status_prompt_template = PromptManager().get_agent_prompt_auto("task_complete_template", language=session_context.get_language())
+        messages_input = [
+            {"role": "system", "content": status_prompt_template.format(messages=json.dumps(clean_messages, ensure_ascii=False, indent=2))},
+        ]
         response = self._call_llm_streaming(
             messages=cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input),
             session_id=session_id,
-            step_name="skill_task_complete_judge",
+            step_name="skill_task_status_check",
+            model_config_override={"response_format": {"type": "json_object"}}
         )
         all_content = ""
         async for chunk in response:
@@ -269,10 +322,10 @@ class SkillExecutorAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            return result.get("task_interrupted", False)
-        except json.JSONDecodeError:
-            logger.warning("SkillExecutorAgent: 解析任务完成判断响应时JSON解码错误")
-            return False
+            return result.get("status", "WAIT_USER")
+        except Exception:
+            logger.warning("SkillExecutorAgent: 解析任务状态判断响应时出错")
+            return "WAIT_USER"
 
     def _parse_plan_xml(self, xml_content: str) -> List[Dict[str, str]]:
         try:
@@ -340,13 +393,34 @@ class SkillExecutorAgent(AgentBase):
                 full_content += chunk[0].content
 
         plan_steps = self._parse_plan_xml(full_content)
+        
+        # 强制添加提取产物的步骤
+        try:
+            next_id = 1
+            if plan_steps:
+                try:
+                    next_id = int(plan_steps[-1].get("id", "0")) + 1
+                except ValueError:
+                    next_id = len(plan_steps) + 1
+            
+            artifact_step = {
+                "id": str(next_id),
+                "instruction": "技能执行完毕。评估上文中的最终输出产物，并输出到用户工作空间(使用 submit_skill_outputs)。",
+                "intent": "确保产物提交"
+            }
+            plan_steps.append(artifact_step)
+            logger.info("SkillExecutorAgent：已强制添加产物提取步骤。")
+        except Exception as e:
+            logger.warning(f"SkillExecutorAgent：强制添加产物提取步骤失败: {e}")
+
         plan_output.extend(plan_steps)
         if len(plan_steps) == 0:
             logger.warning("SkillExecutorAgent：技能执行计划为空。尝试使用兜底策略执行。")
             plan_steps.append({"id": "1", "instruction": "基于用户请求执行技能指令。", "intent": "兜底策略"})
-            # 保存计划步骤到session_context.agent_workspace里面的文件
+            # 保存计划步骤到沙盒目录里的文件
         try:
-            plan_file_path = os.path.join(session_context.agent_workspace, "plan_steps.json")
+            sandbox_path = sandbox_skill_info.get("path", session_context.agent_workspace)
+            plan_file_path = os.path.join(sandbox_path, "plan_steps.json")
             with open(plan_file_path, "w", encoding="utf-8") as f:
                 json.dump(plan_steps, f, ensure_ascii=False, indent=4)
             logger.info(f"SkillExecutorAgent：技能执行计划已保存到 {plan_file_path}")
@@ -354,26 +428,30 @@ class SkillExecutorAgent(AgentBase):
             logger.error(f"SkillExecutorAgent：技能执行计划保存失败: {e}")
 
     async def _execute_skill(
-        self, session_id: Optional[str], history_messages: List[MessageChunk], session_context: SessionContext, selected_skill_name: str
+        self, session_id: Optional[str], history_messages: List[MessageChunk], session_context: SessionContext, selected_skill_name: str, skip_planning: bool = False
     ) -> AsyncGenerator[List[MessageChunk], None]:
         skill_manager = session_context.skill_manager
         skill_metadata = skill_manager.get_skill_metadata(selected_skill_name) or {}
 
-        # 创建独立环境的临时沙盒
-        temp_sandbox_path = tempfile.mkdtemp(prefix=f"skill_sandbox_{selected_skill_name}_")
-        logger.info(f"SkillExecutorAgent： 创建临时沙盒目录 {temp_sandbox_path}")
+        # 创建独立环境的临时沙盒 (使用固定路径以支持多轮对话)
+        temp_sandbox_path = os.path.join(session_context.agent_workspace, f"skill_sandbox_{selected_skill_name}")
+        logger.info(f"SkillExecutorAgent： 使用沙盒目录 {temp_sandbox_path}")
 
         try:
-            # 将skills的文件拷贝过去
-            skill_source_path = skill_metadata.get("path")
-            if skill_source_path and os.path.exists(skill_source_path):
-                try:
-                    # 递归拷贝所有内容到沙盒根目录
-                    shutil.copytree(skill_source_path, temp_sandbox_path, dirs_exist_ok=True)
-                    logger.info(f"拷贝技能 {selected_skill_name} 的文件到沙盒目录 {temp_sandbox_path}")
-                except Exception as e:
-                    logger.error(f"拷贝技能 {selected_skill_name} 的文件到沙盒目录 {temp_sandbox_path} 失败: {e}")
-                    return
+            if not os.path.exists(temp_sandbox_path):
+                os.makedirs(temp_sandbox_path, exist_ok=True)
+                # 将skills的文件拷贝过去
+                skill_source_path = skill_metadata.get("path")
+                if skill_source_path and os.path.exists(skill_source_path):
+                    try:
+                        # 递归拷贝所有内容到沙盒根目录
+                        shutil.copytree(skill_source_path, temp_sandbox_path, dirs_exist_ok=True)
+                        logger.info(f"拷贝技能 {selected_skill_name} 的文件到沙盒目录 {temp_sandbox_path}")
+                    except Exception as e:
+                        logger.error(f"拷贝技能 {selected_skill_name} 的文件到沙盒目录 {temp_sandbox_path} 失败: {e}")
+                        return
+            else:
+                logger.info(f"使用已存在的沙盒目录 {temp_sandbox_path}")
 
             sandbox_skill_info = {**skill_metadata, "path": temp_sandbox_path, "instructions": skill_manager.get_skill_instructions(selected_skill_name)+"\n技能相关文件的相对路径地址：\n".join(skill_manager.get_skill_file_list(selected_skill_name))}
             skill_tools = SkillTools(skill_manager, agent_workspace=session_context.agent_workspace, skill_workspace_path=temp_sandbox_path)
@@ -383,11 +461,24 @@ class SkillExecutorAgent(AgentBase):
                  "run_skill_script": skill_tools.run_skill_script,
                  "submit_skill_outputs": skill_tools.submit_skill_outputs,
             }
-            skill_completed = False
+            task_finished = False
 
             plan_steps = []
-            async for chunk in self._generate_execution_plan(session_context, sandbox_skill_info, history_messages, plan_steps):
-                yield chunk
+            if not skip_planning:
+                async for chunk in self._generate_execution_plan(session_context, sandbox_skill_info, history_messages, plan_steps):
+                    yield chunk
+            else:
+                # 尝试加载已有的计划
+                try:
+                    plan_file_path = os.path.join(temp_sandbox_path, "plan_steps.json")
+                    if os.path.exists(plan_file_path):
+                        with open(plan_file_path, "r", encoding="utf-8") as f:
+                            plan_steps = json.load(f)
+                        logger.info(f"SkillExecutorAgent：加载已有计划 {len(plan_steps)} 步")
+                    else:
+                        logger.warning("SkillExecutorAgent：跳过规划且无已有计划文件，使用默认空计划。")
+                except Exception as e:
+                    logger.error(f"SkillExecutorAgent：加载已有计划失败: {e}")
 
             execute_system_prompt_prefix = (PromptManager().get_agent_prompt_auto("INSTRUCTION_SKILL_EXECUTION_PROMPT", language=session_context.get_language())
                 .format(
@@ -395,23 +486,22 @@ class SkillExecutorAgent(AgentBase):
                     skill_description=sandbox_skill_info.get("description", ""),
                     skill_path=sandbox_skill_info.get("path", ""),
                     instructions=sandbox_skill_info.get("instructions", ""),
-                    plan_steps=json.dumps(plan_steps, ensure_ascii=False, indent=4),
+                    plan_steps=plan_steps,
                 )
             )
             # 将system 加入到到messages中
-            execute_system_prompt = self.prepare_unified_system_message(
+            execute_system = self.prepare_unified_system_message(
                 session_id,
                 custom_prefix=execute_system_prompt_prefix,
                 language=session_context.get_language(),
             )
             tool_definitions_for_llm = skill_tools.get_execute_tool_definitions()
             # 执行的system message
-            execute_system_message = MessageChunk(role=MessageRole.SYSTEM.value, content=execute_system_prompt, message_id=str(uuid.uuid4()), message_type=MessageType.SYSTEM.value)
-            history_messages.insert(0, execute_system_message.to_dict())
+            history_messages.insert(0, execute_system)
             all_new_response_chunks: List[MessageChunk] = []
 
             loop_count = 0
-            while not skill_completed and loop_count < 20:
+            while loop_count < 20:
                 loop_count += 1
 
                 # 合并消息
@@ -437,36 +527,70 @@ class SkillExecutorAgent(AgentBase):
                         all_new_response_chunks.extend(deepcopy(non_empty_chunks))
                     yield chunks
 
-                for tool_call in list(step_tool_calls.values()):
-                    output_messages = self._create_tool_call_message(tool_call)
-                    # skill的tool call 不存储
-                    output_messages[0].message_type = MessageType.SKILL_EXEC_TOOL_CALL.value
-                    output_messages[0].type = MessageType.SKILL_EXEC_TOOL_CALL.value
-                    yield output_messages
-                    all_new_response_chunks.extend(deepcopy(output_messages))
-                    func_name = tool_call["function"]["name"]
-                    args = self._safe_parse_args(tool_call["function"]["arguments"])
+                if step_tool_calls:
+                    for tool_call in list(step_tool_calls.values()):
+                        output_messages = self._create_tool_call_message(tool_call)
+                        # skill的tool call 不存储
+                        output_messages[0].message_type = MessageType.SKILL_EXEC_TOOL_CALL.value
+                        output_messages[0].type = MessageType.SKILL_EXEC_TOOL_CALL.value
+                        yield output_messages
+                        all_new_response_chunks.extend(deepcopy(output_messages))
+                        func_name = tool_call["function"]["name"]
+                        args = self._safe_parse_args(tool_call["function"]["arguments"])
 
-                    result = self._invoke_tool(func_name, args, tool_map)
-                    msg_chunk = self._build_tool_result_chunk(tool_call["id"], result)
-                    yield [msg_chunk]
-                    all_new_response_chunks.append(deepcopy(msg_chunk))
+                        result = await self._invoke_tool(func_name, args, tool_map)
+                        msg_chunk = self._build_tool_result_chunk(tool_call["id"], result)
+                        yield [msg_chunk]
+                        all_new_response_chunks.append(deepcopy(msg_chunk))
+                else:
+                    # 合并消息以进行状态检查
+                    history_messages = MessageManager.merge_new_messages_to_old_messages(
+                        cast(List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks), cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages)
+                    )
+                    all_new_response_chunks = []
 
-                history_messages = MessageManager.merge_new_messages_to_old_messages(
-                    cast(List[Union[MessageChunk, Dict[str, Any]]], all_new_response_chunks), cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages)
+                    status = await self._check_task_status(history_messages, session_id, session_context)
+                    if status == "COMPLETED":
+                        task_finished = True
+                        break
+                    elif status == "WAIT_USER":
+                        task_finished = False
+                        break
+
+            if task_finished:
+                final_summary = history_messages[len(history_messages) - 1].content
+                yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=final_summary, message_id=str(uuid.uuid4()), message_type=MessageType.SKILL_OBSERVATION.value)]
+                mock_message_id = str(uuid.uuid4())
+                # 任务完成，卸载技能
+                unload_msg1 = MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="",
+                    tool_calls=[{
+                        "id": mock_message_id,
+                        "type": "function",
+                        "function": {
+                            "name": "unload_skill",
+                            "arguments": "{}"
+                        }
+                    }],
+                    message_type=MessageType.TOOL_CALL.value
                 )
-                all_new_response_chunks = []
-
-                skill_completed = await self._is_skill_complete(history_messages, session_id, session_context.get_language())
-                if skill_completed:
-                    break
-            final_summary = history_messages[len(history_messages) - 1].content
-            yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=final_summary, message_id=str(uuid.uuid4()), message_type=MessageType.SKILL_OBSERVATION.value)]
+                yield [unload_msg1]
+                # 任务完成，卸载技能
+                unload_msg2 = MessageChunk(
+                    tool_call_id=mock_message_id,
+                    role=MessageRole.TOOL.value,
+                    content="卸载完成",
+                    message_type=MessageType.TOOL_CALL_RESULT.value
+                )
+                yield [unload_msg2]
+                 
+                try:
+                    shutil.rmtree(temp_sandbox_path)
+                    logger.info(f"Removed temp sandbox {temp_sandbox_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove temp sandbox: {e}")
 
         finally:
-            # 执行完成的时候，会删除这个沙盒下的所有东西
-            try:
-                shutil.rmtree(temp_sandbox_path)
-                logger.info(f"Removed temp sandbox {temp_sandbox_path}")
-            except Exception as e:
-                logger.warning(f"Failed to remove temp sandbox: {e}")
+            pass
+            pass

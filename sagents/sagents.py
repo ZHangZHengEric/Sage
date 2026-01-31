@@ -116,6 +116,35 @@ class SAgent:
             self.skill_executor_agent = AgentRuntime(self.skill_executor_agent, self.observability_manager)
         logger.info("SAgent: 智能体控制器初始化完成")
 
+    def _check_skill_active_state(self, session_context: SessionContext) -> bool:
+        """检查当前会话是否处于技能活跃模式"""
+        messages = session_context.message_manager.messages
+        # 倒序遍历，找到最近的一次状态变更
+        for msg in reversed(messages):
+            if not msg.tool_calls:
+                continue
+
+            tool_calls = msg.tool_calls
+            if isinstance(tool_calls, list):
+                # 倒序遍历 tool calls
+                for tc in reversed(tool_calls):
+                    func_name = ""
+                    if isinstance(tc, dict):
+                        func_name = tc.get("function", {}).get("name", "")
+                    else:
+                        try:
+                            func = getattr(tc, "function", None)
+                            if func:
+                                func_name = getattr(func, "name", "")
+                        except Exception:
+                            pass
+
+                    if func_name == "load_skill":
+                        return True
+                    elif func_name == "unload_skill":
+                        return False
+        return False
+
     async def run_stream(
         self,
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
@@ -248,7 +277,10 @@ class SAgent:
 
                 # 1. 设置传入的 system_context
                 if system_context:
-                    logger.info(f"SAgent: 设置了system_context参数: {system_context}")
+                    try:
+                        logger.info(f"SAgent: 设置了system_context参数 keys: {list(system_context.keys())}")
+                    except Exception:
+                        logger.info("SAgent: 设置了system_context参数 (content unprintable)")
                     session_context.add_and_update_system_context(system_context)
 
                 # 2. 尝试初始化记忆 (这将更新 session_context.system_context 中的用户偏好)
@@ -338,34 +370,35 @@ class SAgent:
                     ):
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks
+
+                # 技能执行逻辑
+                if session_context.skill_manager and len(session_context.skill_manager.list_skills()) > 0:
+                    async for message_chunks in self._execute_agent_phase(session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.skill_executor_agent, phase_name="技能处理"):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+
+                is_skill_active = self._check_skill_active_state(session_context)
+
                 # 2. 多智能体工作流阶段
-                if multi_agent:
-                    async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
-                        session_context.message_manager.add_messages(message_chunks)
-                        yield message_chunks
-                else:
-                    # 直接执行模式：可选的任务分析 + 直接执行
-                    logger.info("SAgent: 开始简化工作流")
-                    
-                    # 技能执行
-                    if session_context.skill_manager and len(session_context.skill_manager.list_skills()) > 0:
-                        async for message_chunks in self._execute_agent_phase(session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.skill_executor_agent, phase_name="技能处理"):
+                if not is_skill_active:
+                    if multi_agent:
+                        async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
+                            session_context.message_manager.add_messages(message_chunks)
+                            yield message_chunks
+                    else:
+                        # 直接执行模式：可选的任务分析 + 直接执行
+                        logger.info("SAgent: 开始简化工作流")
+
+                        async for message_chunks in self._execute_agent_phase(
+                            session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
+                        ):
                             session_context.message_manager.add_messages(message_chunks)
                             yield message_chunks
 
-                    # 无论技能是否执行，SimpleAgent 都作为通用的 Responder 运行。
-                    # 如果技能已执行，Context 中会有 Skill_Observation 将根据 Skill_Observation 生成最终回复。
-                    # 如果技能未执行，SimpleAgent 直接处理用户意图。
-                    async for message_chunks in self._execute_agent_phase(
-                        session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
-                    ):
-                        session_context.message_manager.add_messages(message_chunks)
-                        yield message_chunks
-
-                    if force_summary:
-                        async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
-                            session_context.message_manager.add_messages(message_chunks)
-                            yield message_chunks
+                        if force_summary:
+                            async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
+                                session_context.message_manager.add_messages(message_chunks)
+                                yield message_chunks
 
                 if more_suggest:
                     async for message_chunks in self._execute_agent_phase(
