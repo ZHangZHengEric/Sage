@@ -515,6 +515,7 @@ const generateUsageCodes = (agent) => {
       { role: 'user', content: '你好，请帮我处理一个任务' }
     ],
     session_id: 'demo-session',
+    memory_type: agent.memoryType || 'session',
     deep_thinking: agent.deepThinking ?? null,
     multi_agent: agent.multiAgent ?? null,
     max_loop_count: agent.maxLoopCount ?? 20,

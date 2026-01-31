@@ -81,7 +81,7 @@ class SageStreamService:
                 model_config=final_model_config,
                 system_prefix=request.system_prefix,
                 workspace=workspace,
-                memory_root=server_args.memory_root,
+                memory_type=request.memory_type,
             )
             _SAGENT_CACHE[cache_key] = self.sage_engine
 
@@ -119,7 +119,7 @@ class SageStreamService:
             "system_context": request.system_context,
             "force_summary": request.force_summary,
             "workspace": workspace,
-            "memory_root": server_args.memory_root,
+            "memory_type": request.memory_type,
         }
         return json.dumps(key_data, sort_keys=True, ensure_ascii=False)
 

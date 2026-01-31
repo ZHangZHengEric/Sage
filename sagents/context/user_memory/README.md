@@ -38,7 +38,7 @@ sagents/context/user_memory/
 ### 1. 记忆调用链路 (以 ToolMemoryDriver 为例)
 
 1.  **环境配置 (SessionContext)**：
-    *   `SessionContext` 初始化时，若提供 `memory_root`，自动设置 `MEMORY_ROOT_PATH` 环境变量。
+    *   `SessionContext` 初始化时，若提供 `workspace`，将自动推导 `MEMORY_ROOT_PATH`（`workspace/user_memory`），或优先使用 `MEMORY_ROOT_PATH` 环境变量。
     *   初始化 `UserMemoryManager` 并注入 `SessionContext`。
 
 2.  **可用性检查**：
@@ -93,7 +93,7 @@ sequenceDiagram
 from sagents.context.user_memory import UserMemoryManager, MemoryType
 
 # 1. 自动使用 ToolMemoryDriver (需配合 ToolManager)
-# memory_manager = UserMemoryManager(memory_root="/path/to/memories")
+# memory_manager = UserMemoryManager(workspace="/path/to/workspace")
 
 # 2. 或者注入自定义 Driver (例如向量存储)
 # from sagents.context.user_memory import VectorMemoryDriver

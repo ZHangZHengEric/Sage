@@ -193,7 +193,8 @@ Sage Server supports configuration via **Command Line Arguments** or **Environme
 | `--context_active_ratio` | `SAGE_CONTEXT_ACTIVE_RATIO` | `0.3` | Ratio of active messages to total context |
 | `--context_max_new_message_ratio` | `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` | `0.5` | Max ratio of new messages |
 | `--context_recent_turns` | `SAGE_CONTEXT_RECENT_TURNS` | `0` | Include recent N turns of dialogue |
-| `--memory_root` | `SAGE_MEMORY_ROOT` | - | Memory storage root directory (optional) |
+| `--memory_type` | `SAGE_MEMORY_TYPE` | `session` | Memory Type (session \| user) |
+| - | `MEMORY_ROOT_PATH` | - | Memory storage root directory (only effective when memory_type is user) |
 
 ### 4. Database Configuration
 

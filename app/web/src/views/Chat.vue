@@ -162,7 +162,6 @@ const fetchTaskStatus = async (sessionId) => {
     if (!sessionId) return;
     try {
       const data = await taskAPI.getWorkspaceFiles(sessionId);
-;
       workspaceFiles.value = data.files || [];
       workspacePath.value = data.agent_workspace;
     } catch (error) {
@@ -250,7 +249,7 @@ const createSession = () => {
         }
       }
       
-      // 恢复任务状态和工作空间
+      // 恢复工作空间
       await updateTaskAndWorkspace(sessionId);
       
     } catch (e) {

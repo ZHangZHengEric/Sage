@@ -53,7 +53,7 @@ class ComponentManager:
                  max_tokens: Optional[int] = None, temperature: Optional[float] = None,
                  max_model_len: Optional[int] = None, top_p: Optional[float] = None,
                  presence_penalty: Optional[float] = None,
-                 workspace: Optional[str] = None, memory_root: Optional[str] = None,
+                 workspace: Optional[str] = None, memory_type: Optional[str] = "session",
                  mcp_config: Optional[str] = None,
                  preset_running_config: Optional[str] = None, logs_dir: Optional[str] = None,
                  context_history_ratio: Optional[float] = None,
@@ -70,7 +70,7 @@ class ComponentManager:
         self.top_p = top_p
         self.presence_penalty = presence_penalty
         self.workspace = workspace or "workspace"
-        self.memory_root = memory_root
+        self.memory_type = memory_type
         self.context_history_ratio = float(context_history_ratio) if context_history_ratio is not None else None
         self.context_active_ratio = float(context_active_ratio) if context_active_ratio is not None else None
         self.context_max_new_message_ratio = float(context_max_new_message_ratio) if context_max_new_message_ratio is not None else None
@@ -232,7 +232,7 @@ class ComponentManager:
                 model_config,
                 system_prefix=self.system_prefix,
                 workspace=self.workspace,
-                memory_root=self.memory_root
+                memory_type=self.memory_type
             )
 
             return controller
@@ -497,7 +497,7 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
                  max_tokens: Optional[int] = None, temperature: Optional[float] = None,
                  max_model_len: Optional[int] = None, top_p: Optional[float] = None,
                  presence_penalty: Optional[float] = None,
-                 workspace: Optional[str] = None, memory_root: Optional[str] = None,
+                 workspace: Optional[str] = None, memory_type: Optional[str] = "session",
                  mcp_config: Optional[str] = None,
                  preset_running_config: Optional[str] = None, logs_dir: Optional[str] = None,
                  host: Optional[str] = None, port: Optional[int] = None,
@@ -533,7 +533,7 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
         'top_p': top_p,
         'presence_penalty': presence_penalty,
         'workspace': workspace,
-        'memory_root': memory_root,
+        'memory_type': memory_type,
         'mcp_config': mcp_config,
         'preset_running_config': preset_running_config,
         'logs_dir': logs_dir,
@@ -563,7 +563,7 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
                     top_p=top_p,
                     presence_penalty=presence_penalty,
                     workspace=workspace,
-                    memory_root=memory_root,
+                    memory_type=memory_type,
                     mcp_config=mcp_config,
                     preset_running_config=preset_running_config,
                     logs_dir=logs_dir,
@@ -659,13 +659,20 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--preset_running_config', default='',
                         help='预设配置，system_context，以及workflow，与接口中传过来的合并使用')
     parser.add_argument('--memory_root', default=None,
-                        help='记忆存储根目录（可选）')
+                        help='记忆存储根目录（已废弃，请使用 --memory_type）')
+    parser.add_argument('--memory_type', default='session',
+                        help='记忆类型: session | user')
 
     args = parser.parse_args()
 
     # 处理workspace路径
     if args.workspace:
         args.workspace = os.path.abspath(args.workspace)
+        
+    # 处理 memory_root 兼容性
+    if args.memory_root:
+        os.environ["MEMORY_ROOT_PATH"] = args.memory_root
+        print("WARNING: memory_root 参数已废弃，请使用 memory_type 参数。已自动设置 MEMORY_ROOT_PATH 环境变量。")
 
     return {
         'api_key': args.default_llm_api_key,
@@ -686,7 +693,7 @@ def parse_arguments() -> Dict[str, Any]:
         'workspace': args.workspace,
         'logs_dir': args.logs_dir,
         'preset_running_config': args.preset_running_config,
-        'memory_root': args.memory_root
+        'memory_type': args.memory_type
     }
 
 
@@ -708,7 +715,7 @@ def main():
             config['top_p'],
             config['presence_penalty'],
             config['workspace'],
-            config['memory_root'],
+            config['memory_type'],
             config['mcp_config'],
             config['preset_running_config'],
             config['logs_dir'],

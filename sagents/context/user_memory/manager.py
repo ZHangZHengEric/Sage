@@ -22,7 +22,7 @@ class UserMemoryManager:
 
     def __init__(
         self,
-        memory_root: str,
+        workspace: str,
         driver: Optional[IMemoryDriver] = None,
         model: Any = None,
     ):
@@ -32,12 +32,15 @@ class UserMemoryManager:
         Args:
             driver: 自定义的记忆驱动实例（可选，如果提供则优先使用）
             model: LLM模型实例（用于记忆提取）
-            memory_root: 记忆存储根目录
+            workspace: 工作空间根目录
         """
-        self.memory_root = memory_root
-        if self.memory_root:
+        self.memory_root = os.environ.get("MEMORY_ROOT_PATH")
+        if not self.memory_root:
+            self.memory_root = os.path.join(workspace, "user_memory")
             os.environ["MEMORY_ROOT_PATH"] = self.memory_root
-            logger.info(f"UserMemoryManager: 设置MEMORY_ROOT_PATH环境变量: {self.memory_root}")
+            logger.info(f"UserMemoryManager: 未设置MEMORY_ROOT_PATH，使用默认路径: {self.memory_root}")
+        else:
+            logger.info(f"UserMemoryManager: 使用环境变量MEMORY_ROOT_PATH: {self.memory_root}")
 
         self.driver = driver
         if not self.driver:

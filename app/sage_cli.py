@@ -249,6 +249,10 @@ if __name__ == '__main__':
             context_budget_config['recent_turns'] = config['context_recent_turns']
 
         # 初始化 SAgent
+        # 如果指定了 memory_root，则设置环境变量
+        if config['memory_root']:
+            os.environ["MEMORY_ROOT_PATH"] = config['memory_root']
+
         sagent = SAgent(
             model=client,
             model_config={
@@ -261,7 +265,7 @@ if __name__ == '__main__':
             },
             system_prefix=config['system_prefix'],
             workspace=config['workspace'],
-            memory_root=config['memory_root'],
+            memory_type=config['memory_type'],
         )
 
         # 调用 chat 函数
