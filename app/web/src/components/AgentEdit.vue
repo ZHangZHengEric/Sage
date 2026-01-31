@@ -21,6 +21,18 @@
             </div>
           </FormItem>
 
+          <FormItem :label="t('agent.memoryType')">
+             <Select v-model="formData.memoryType">
+               <SelectTrigger>
+                 <SelectValue />
+               </SelectTrigger>
+               <SelectContent>
+                 <SelectItem value="session">{{ t('agent.sessionMemory') }}</SelectItem>
+                 <SelectItem value="user">{{ t('agent.userMemory') }}</SelectItem>
+               </SelectContent>
+             </Select>
+          </FormItem>
+
           <div class="grid grid-cols-2 gap-4">
              <FormItem :label="t('agent.deepThinking')">
                 <Tabs :model-value="getSelectValue(formData.deepThinking)" @update:model-value="(v) => setSelectValue('deepThinking', v)" class="w-full">
@@ -331,16 +343,17 @@ const defaultFormData = () => ({
   deepThinking: null,
   multiAgent: null,
   moreSuggest: false,
+  memoryType: "session",
   maxLoopCount: 10,
   llmConfig: {
     apiKey: '',
     baseUrl: '',
     model: '',
-    maxTokens: null,
-    temperature: null,
-    topP: null,
-    presencePenalty: null,
-    maxModelLen: null
+    maxTokens: 4096,
+    temperature: 0.2,
+    topP: 0.9,
+    presencePenalty: 0.0,
+    maxModelLen: 54000
   },
   availableTools: [],
   availableSkills: [],

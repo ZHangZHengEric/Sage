@@ -142,3 +142,4 @@ async def populate_request_from_agent_config(
     _fill_if_none("more_suggest", agent.config.get("moreSuggest", False))
     _merge_dict("system_context", agent.config.get("systemContext", {}))
     _fill_if_none("system_prefix", agent.config.get("systemPrefix", ""))
+    _fill_if_none("memory_type", agent.config.get("memoryType", "session"))

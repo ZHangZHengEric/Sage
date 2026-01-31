@@ -7,6 +7,20 @@ description: "Sage 示例和服务器更新日志"
 
 # Sage Examples 修改日志
 
+## 2026-01-31 - 记忆配置逻辑更新
+
+**修改内容：**
+- **配置参数更新**：
+  - 将 `memory_root` 参数替换为 `memory_type` (session | user)。
+  - `memory_root` 参数已标记为废弃，但保留向后兼容性（自动设置 `MEMORY_ROOT_PATH` 环境变量）。
+- **环境变量支持**：
+  - 新增 `MEMORY_ROOT_PATH` 环境变量，用于指定用户记忆的存储路径。
+  - 默认路径逻辑：若未设置环境变量，则使用 workspace 下的 `user_memory` 目录。
+- **组件更新**：
+  - 更新了 `sage_cli.py`, `sage_demo.py`, `sage_server.py` 以支持新的记忆配置逻辑。
+
+**修改时间：** 2026-01-31
+
 ## 2026-01-25 - 支持注解方式定义工具
 
 **修改内容：**
@@ -79,7 +93,7 @@ description: "Sage 示例和服务器更新日志"
 **修复内容**:
 1. 在`_init_tool_manager`方法中添加mcp_config环境变量设置逻辑
 2. 在`__init__`方法中添加preset_running_config配置读取和system_prefix传递逻辑
-3. 在`_init_controller`方法中添加system_prefix和memory_root参数传递
+3. 在`_init_controller`方法中添加system_prefix和memory_type参数传递
 
 **测试结果**: 功能正常，参数解析和传递正确，与sage_server.py使用方式一致
 

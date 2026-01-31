@@ -56,7 +56,8 @@ parser.add_argument("--mcp-config", default="mcp_setting.json", help="MCP配置�
 parser.add_argument("--workspace", default="agent_workspace", help="工作空间目录")
 parser.add_argument("--logs-dir", default="logs", help="日志目录")
 parser.add_argument("--preset_running_config", default="", help="预设配置，system_context，以及workflow，与接口中传过来的合并使用")
-parser.add_argument("--memory_root", default=None, help="记忆存储根目录（可选）")
+parser.add_argument("--memory_root", default=None, help="记忆存储根目录（已废弃，请使用 --memory_type）")
+parser.add_argument("--memory_type", default="session", help="记忆类型: session | user")
 parser.add_argument("--daemon", action="store_true", help="以守护进程模式运行")
 parser.add_argument("--pid-file", default="sage_stream.pid", help="PID文件路径")
 parser.add_argument("--context_history_ratio", type=float, default=0.2,
@@ -86,6 +87,11 @@ elif server_args.default_llm_max_model_len < 8000:
 if server_args.workspace:
     server_args.workspace = os.path.abspath(server_args.workspace)
 os.environ['PREFIX_FILE_WORKSPACE'] = server_args.workspace if server_args.workspace.endswith('/') else server_args.workspace+'/'
+
+# 处理 memory_root 兼容性
+if server_args.memory_root:
+    os.environ["MEMORY_ROOT_PATH"] = server_args.memory_root
+    logger.warning("memory_root 参数已废弃，请使用 memory_type 参数。已自动设置 MEMORY_ROOT_PATH 环境变量。")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -126,7 +132,7 @@ class SageStreamService:
                         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
                         preset_running_config: Optional[Dict[str, Any]] = None,
                         workspace: Optional[str] = None,
-                        memory_root: Optional[str] = None,
+                        memory_type: Optional[str] = "session",
                         context_budget_config: Optional[Dict[str, Any]] = None):
         """
         初始化服务
@@ -230,7 +236,7 @@ class SageStreamService:
             model_config=model_config,
             system_prefix=self.preset_system_prefix,
             workspace=workspace if workspace.endswith('/') else workspace+'/',
-            memory_root=memory_root
+            memory_type=memory_type
         )
         self.tool_manager = tool_manager
         if self.preset_available_tools:
@@ -526,7 +532,7 @@ async def initialize_system(server_args):
                 tool_manager=tool_manager,
                 preset_running_config=preset_running_config,
                 workspace=server_args.workspace,
-                memory_root=server_args.memory_root,
+                memory_type=server_args.memory_type,
                 context_budget_config=context_budget_config
             )
             logger.info("默认 SageStreamService 初始化成功")
