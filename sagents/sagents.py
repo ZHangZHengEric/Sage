@@ -53,7 +53,7 @@ class SAgent:
     包括任务分析、规划、执行、观察和总结等阶段。
     """
 
-    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_root: Optional[str] = None, enable_obs: bool = True):
+    def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_type: str = "session", enable_obs: bool = True):
         """
         初始化智能体控制器
 
@@ -62,7 +62,7 @@ class SAgent:
             model_config: 模型配置参数
             system_prefix: 系统前缀提示
             workspace: 工作空间根目录，默认为 /tmp/sage
-            memory_root: 记忆存储根目录
+            memory_type: 记忆类型，默认为 "session" (会话记忆), 可选 "user" (用户记忆)
             enable_obs: 是否启用可观察性，默认为 True
         """
         self.model = model
@@ -70,10 +70,10 @@ class SAgent:
         self.system_prefix = system_prefix
         self.workspace = workspace
         # 初始化全局用户记忆管理器
-        if memory_root:
-            self.user_memory_manager = UserMemoryManager(model=self.model, memory_root=memory_root)
+        if memory_type == "user":
+            self.user_memory_manager = UserMemoryManager(model=self.model, workspace=workspace)
         else:
-            logger.info("SAgent: 未指定记忆存储根目录，将禁用用户记忆功能")
+            logger.info(f"SAgent: 记忆类型为 {memory_type}，将禁用用户记忆功能")
             self.user_memory_manager = None
         # 初始化所有智能体
         self.simple_agent = SimpleAgent(self.model, self.model_config, system_prefix=self.system_prefix)

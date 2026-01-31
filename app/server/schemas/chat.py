@@ -39,6 +39,8 @@ class StreamRequest(BaseChatRequest):
     available_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
     force_summary: Optional[bool] = False
+    memory_type: Optional[str] = "session"
+
 
 
 class ChatRequest(BaseChatRequest):
