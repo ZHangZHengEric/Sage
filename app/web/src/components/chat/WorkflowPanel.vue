@@ -1,17 +1,32 @@
 <template>
-  <div class="workflow-drawer">
-    <div class="drawer-header">
-      <h3>工作流追踪</h3>
-      <div class="header-right">
-        <button class="action-btn" @click="openTraceDetails">🔍 查看详情</button>
-        <button class="close-btn" @click="$emit('close')">×</button>
+  <div class="absolute top-0 right-0 w-[600px] h-full bg-background border-l border-border shadow-2xl z-50 flex flex-col">
+    <div class="flex items-center justify-between p-4 border-b border-border">
+      <h3 class="text-base font-semibold">工作流追踪</h3>
+      <div class="flex items-center gap-2">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          class="h-8 gap-2" 
+          @click="openTraceDetails"
+        >
+          <Search class="w-3.5 h-3.5" />
+          查看详情
+        </Button>
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          class="h-8 w-8" 
+          @click="$emit('close')"
+        >
+          <X class="w-4 h-4" />
+        </Button>
       </div>
     </div>
 
-    <div class="drawer-content" ref="containerRef">
-      <div v-if="loading" class="loading">Loading trace data...</div>
-      <div v-else-if="error" class="error">{{ error }}</div>
-      <div v-else-if="!treeData" class="no-data">No trace data</div>
+    <div class="flex-1 overflow-auto relative bg-muted/20" ref="containerRef">
+      <div v-if="loading" class="flex items-center justify-center h-full text-muted-foreground text-sm">Loading trace data...</div>
+      <div v-else-if="error" class="flex items-center justify-center h-full text-destructive text-sm">{{ error }}</div>
+      <div v-else-if="!treeData" class="flex items-center justify-center h-full text-muted-foreground text-sm">No trace data</div>
 
       <ReactECharts 
         v-else 
@@ -27,6 +42,8 @@
 import { ref, watch, computed, nextTick } from 'vue'
 import ReactECharts from './ReactECharts.vue'
 import { traceApi } from '@/api/trace'
+import { Button } from '@/components/ui/button'
+import { X, Search } from 'lucide-vue-next'
 
 const props = defineProps({
   sessionId: { type: String, required: true }
@@ -250,61 +267,5 @@ watch(treeData, () => {
 </script>
 
 <style scoped>
-.workflow-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 600px;
-  height: 100%;
-  background: #fff;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, .15);
-  display: flex;
-  flex-direction: column;
-}
-
-.drawer-header {
-  padding: 14px 18px;
-  border-bottom: 1px solid #eee;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-right {
-  display: flex;
-  gap: 12px;
-}
-
-.action-btn {
-  padding: 6px 12px;
-  border: 1px solid #dcdfe6;
-  background: #fff;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.close-btn {
-  font-size: 22px;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.drawer-content {
-  flex: 1;
-  overflow: auto;
-}
-
-.loading,
-.error,
-.no-data {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.error {
-  color: #f56c6c;
-}
+/* Removed custom styles in favor of Tailwind classes */
 </style>

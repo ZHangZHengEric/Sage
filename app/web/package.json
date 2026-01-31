@@ -9,14 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@element-plus/icons-vue": "^2.3.2",
     "@vueuse/core": "^13.9.0",
     "axios": "^1.12.2",
     "dompurify": "^3.3.0",
     "echarts": "^5.6.0",
-    "element-plus": "^2.11.4",
-    "lucide-vue-next": "^0.545.0",
     "js-cookie": "^3.0.5",
+    "lucide-vue-next": "^0.545.0",
     "marked": "^16.4.0",
     "pinia": "^3.0.3",
     "prismjs": "^1.30.0",
@@ -24,10 +22,19 @@
     "vue": "^3.5.22",
     "vue-echarts": "^6.7.3",
     "vue-markdown-render": "^2.3.0",
-    "vue-router": "^4.6.0"
+    "vue-router": "^4.6.0",
+    "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
+    "autoprefixer": "^10.4.23",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "postcss": "^8.5.6",
+    "radix-vue": "^1.9.17",
+    "tailwind-merge": "^3.4.0",
+    "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "vite": "^7.1.7"
   }
 }
