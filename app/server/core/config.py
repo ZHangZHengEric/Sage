@@ -21,6 +21,7 @@ class StartupConfig:
     logs_dir: str = "logs"
     workspace: str = "agent_workspace"
     memory_root: Optional[str] = None
+    memory_type: str = "session"  # session | user
     force_summary: bool = False
     no_auth: bool = True  # 无认证模式，根据入参用户id获取数据
 
@@ -111,6 +112,7 @@ class ENV:
     WORKSPACE = "SAGE_WORKSPACE_PATH"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
     MEMORY_ROOT = "SAGE_MEMORY_ROOT"
+    MEMORY_TYPE = "SAGE_MEMORY_TYPE"
     FORCE_SUMMARY = "SAGE_FORCE_SUMMARY"
     NO_AUTH = "SAGE_NO_AUTH"
 
@@ -333,12 +335,11 @@ def create_argument_parser():
         "--logs-dir",
         help=f"日志目录 (环境变量: {ENV.LOGS_DIR})",
     )
+
     parser.add_argument(
-        "--memory_root",
-        help=f"记忆存储根目录（可选） (环境变量: {ENV.MEMORY_ROOT})",
+        "--memory_type",
+        help=f"用户记忆类型: session | user (环境变量: {ENV.MEMORY_TYPE})",
     )
-
-
     parser.add_argument(
         "--force_summary",
         action="store_true",
@@ -445,8 +446,8 @@ def build_startup_config() -> StartupConfig:
         port=pick_int(args.port, ENV.PORT, StartupConfig.port),
         logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
         workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
-        memory_root=pick_str(
-            args.memory_root, ENV.MEMORY_ROOT, StartupConfig.memory_root
+        memory_type=pick_str(
+            args.memory_type, ENV.MEMORY_TYPE, StartupConfig.memory_type
         ),
         force_summary=pick_bool(
             args.force_summary, ENV.FORCE_SUMMARY, StartupConfig.force_summary
@@ -598,6 +599,8 @@ def build_startup_config() -> StartupConfig:
         os.makedirs(cfg.logs_dir, exist_ok=True)
     if cfg.db_type == "file" and cfg.db_path:
         cfg.db_path = os.path.abspath(cfg.db_path)
+    if cfg.memory_root:
+        os.environ["MEMORY_ROOT_PATH"] = cfg.memory_root
     return cfg
 
 

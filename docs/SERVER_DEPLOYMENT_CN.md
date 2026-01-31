@@ -178,7 +178,8 @@ Sage Server 支持通过 **命令行参数** 或 **环境变量** 进行配置�
 | `--context_active_ratio` | `SAGE_CONTEXT_ACTIVE_RATIO` | `0.3` | 活跃消息占总上下文的比例 |
 | `--context_max_new_message_ratio` | `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` | `0.5` | 新消息最大比例 |
 | `--context_recent_turns` | `SAGE_CONTEXT_RECENT_TURNS` | `0` | 包含最近 N 轮对话 |
-| `--memory_root` | `SAGE_MEMORY_ROOT` | - | 记忆存储根目录（可选） |
+| `--memory_type` | `SAGE_MEMORY_TYPE` | `session` | 记忆类型 (session \| user) |
+| - | `MEMORY_ROOT_PATH` | - | 记忆存储根目录 (仅当 memory_type 为 user 时生效) |
 
 ### 4. 数据库配置
 

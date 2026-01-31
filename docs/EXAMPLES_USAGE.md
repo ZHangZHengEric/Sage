@@ -135,7 +135,7 @@ python sage_cli.py \
 - `--no-multi-agent`: Disable multi-agent mode
 - `--workspace`: Workspace directory path
 - `--user_id`: User ID
-- `--memory_root`: Memory storage root directory
+- `--memory_type`: Memory Type (session | user)
 
 ### 2. sage_demo.py - Web Interface Demo Application
 
@@ -171,7 +171,7 @@ python sage_demo.py \
   --workspace ./workspace \
   --mcp_config ./mcp_setting.json \
   --preset_running_config ./preset_running_config.json \
-  --memory_root ./memory
+  --memory_type user
 ```
 
 **Main Parameters:**
@@ -215,7 +215,7 @@ python sage_server.py \
   --workspace ./sage_workspace \
   --mcp-config ./mcp_setting.json \
   --preset_running_config ./preset_running_config.json \
-  --memory_root ./memory \
+  --memory_type user \
   --logs-dir ./logs
 
 # Daemon Mode

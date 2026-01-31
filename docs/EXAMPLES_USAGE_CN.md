@@ -135,7 +135,7 @@ python sage_cli.py \
 - `--no-multi-agent`: 禁用多智能体模式
 - `--workspace`: 工作目录路径
 - `--user_id`: 用户ID
-- `--memory_root`: 记忆存储根目录
+- `--memory_type`: 记忆类型 (session | user)
 
 ### 2. sage_demo.py - Web界面演示应用
 
@@ -171,7 +171,7 @@ python sage_demo.py \
   --workspace ./workspace \
   --mcp_config ./mcp_setting.json \
   --preset_running_config ./preset_running_config.json \
-  --memory_root ./memory
+  --memory_type user
 ```
 
 **主要参数：**
@@ -215,7 +215,7 @@ python sage_server.py \
   --workspace ./sage_workspace \
   --mcp-config ./mcp_setting.json \
   --preset_running_config ./preset_running_config.json \
-  --memory_root ./memory \
+  --memory_type user \
   --logs-dir ./logs
 
 # 守护进程模式

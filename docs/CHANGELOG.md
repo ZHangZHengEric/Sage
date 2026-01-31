@@ -7,6 +7,20 @@ description: "Sage Examples and Server Changelog"
 
 # Sage Examples Changelog
 
+## 2026-01-31 - Memory Configuration Logic Update
+
+**Changes:**
+- **Configuration Parameter Update**:
+  - Replaced `memory_root` parameter with `memory_type` (session | user).
+  - `memory_root` parameter is deprecated but backward compatibility is maintained (automatically sets `MEMORY_ROOT_PATH` environment variable).
+- **Environment Variable Support**:
+  - Added `MEMORY_ROOT_PATH` environment variable to specify user memory storage path.
+  - Default path logic: If environment variable is not set, use `user_memory` directory under workspace.
+- **Component Updates**:
+  - Updated `sage_cli.py`, `sage_demo.py`, `sage_server.py` to support the new memory configuration logic.
+
+**Modification Time:** 2026-01-31
+
 ## 2026-01-25 - Support Defining Tools with Annotations
 
 **Changes:**
@@ -79,7 +93,7 @@ description: "Sage Examples and Server Changelog"
 **Fix**:
 1. Added `mcp_config` environment variable setting logic in `_init_tool_manager` method.
 2. Added `preset_running_config` configuration reading and `system_prefix` passing logic in `__init__` method.
-3. Added `system_prefix` and `memory_root` parameter passing in `_init_controller` method.
+3. Added `system_prefix` and `memory_type` parameter passing in `_init_controller` method.
 
 **Test Results**: Function works normally, parameters parsed and passed correctly, consistent with sage_server.py usage.
 
