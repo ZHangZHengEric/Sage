@@ -1,280 +1,282 @@
 <template>
-  <div class="agent-edit-container">
-    <el-form ref="formRef" :model="formData" :rules="rules" label-width="120px" label-position="left">
-      <div class="form-content">
-        <!-- 左侧：基本配置 -->
-        <div class="left-panel">
-          <el-form-item :label="t('agent.name')" prop="name">
-            <el-input v-model="formData.name" :placeholder="t('agent.namePlaceholder')"
-              :disabled="formData.id === 'default'" />
-          </el-form-item>
+  <div class="h-full bg-background border rounded-lg shadow-sm overflow-hidden flex flex-col">
+    <div class="flex-1 overflow-y-auto p-6">
+      <div class="flex flex-col lg:flex-row gap-6">
+        <!-- Left Panel: Basic Config -->
+        <div class="flex-1 space-y-6 min-w-0">
+          <FormItem :label="t('agent.name')" :error="errors.name" required>
+            <Input v-model="formData.name" :placeholder="t('agent.namePlaceholder')" :disabled="formData.id === 'default'" />
+          </FormItem>
 
-          <el-form-item :label="t('agent.description')" prop="description">
-            <el-input v-model="formData.description" type="textarea" :rows="3"
-              :placeholder="t('agent.descriptionPlaceholder')" />
-          </el-form-item>
+          <FormItem :label="t('agent.description')" :error="errors.description">
+            <Textarea v-model="formData.description" :rows="3" :placeholder="t('agent.descriptionPlaceholder')" class="resize-none" />
+          </FormItem>
 
-          <el-form-item :label="t('agent.systemPrefix')" prop="systemPrefix">
-            <div class="system-prefix-wrapper">
-              <el-input v-model="formData.systemPrefix" type="textarea" :rows="25"
-                :placeholder="t('agent.systemPrefixPlaceholder')" />
-              <el-button class="optimize-btn-inline" size="small"
-                         @click="openOptimizeModal" :disabled="isOptimizing">
+          <FormItem :label="t('agent.systemPrefix')" :error="errors.systemPrefix" required>
+            <div class="relative">
+              <Textarea v-model="formData.systemPrefix" :rows="20" :placeholder="t('agent.systemPrefixPlaceholder')" class="min-h-[400px] font-mono text-sm" />
+              <Button size="sm" variant="outline" class="absolute top-2 right-2 bg-background/80 backdrop-blur-sm shadow-sm" @click="openOptimizeModal" :disabled="isOptimizing">
                 优化系统提示词
-              </el-button>
+              </Button>
             </div>
-          </el-form-item>
+          </FormItem>
 
-          <el-row :gutter="20">
-            <el-col :span="12">
-              <el-form-item :label="t('agent.deepThinking')">
-                <el-select v-model="formData.deepThinking" :placeholder="t('agent.selectOption')">
-                  <el-option :label="t('agent.auto')" :value="null" />
-                  <el-option :label="t('agent.enabled')" :value="true" />
-                  <el-option :label="t('agent.disabled')" :value="false" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item :label="t('agent.multiAgent')">
-                <el-select v-model="formData.multiAgent" :placeholder="t('agent.selectOption')">
-                  <el-option :label="t('agent.auto')" :value="null" />
-                  <el-option :label="t('agent.enabled')" :value="true" />
-                  <el-option :label="t('agent.disabled')" :value="false" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-          </el-row>
+          <div class="grid grid-cols-2 gap-4">
+             <FormItem :label="t('agent.deepThinking')">
+                <Tabs :model-value="getSelectValue(formData.deepThinking)" @update:model-value="(v) => setSelectValue('deepThinking', v)" class="w-full">
+                  <TabsList class="grid w-full grid-cols-3">
+                    <TabsTrigger value="auto">{{ t('agent.auto') }}</TabsTrigger>
+                    <TabsTrigger value="enabled">{{ t('agent.enabled') }}</TabsTrigger>
+                    <TabsTrigger value="disabled">{{ t('agent.disabled') }}</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+             </FormItem>
 
-          <el-row :gutter="20">
-            <el-col :span="12">
-              <el-form-item :label="t('agent.moreSuggest')">
-                <el-switch v-model="formData.moreSuggest" :active-text="t('agent.enabled')"
-                  :inactive-text="t('agent.disabled')" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item :label="t('agent.maxLoopCount')">
-                <el-input-number v-model="formData.maxLoopCount" :min="1" :max="50" :step="1" />
-              </el-form-item>
-            </el-col>
-          </el-row>
+             <FormItem :label="t('agent.multiAgent')">
+                <Tabs :model-value="getSelectValue(formData.multiAgent)" @update:model-value="(v) => setSelectValue('multiAgent', v)" class="w-full">
+                  <TabsList class="grid w-full grid-cols-3">
+                    <TabsTrigger value="auto">{{ t('agent.auto') }}</TabsTrigger>
+                    <TabsTrigger value="enabled">{{ t('agent.enabled') }}</TabsTrigger>
+                    <TabsTrigger value="disabled">{{ t('agent.disabled') }}</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+             </FormItem>
+             
+          </div>
 
-          
+          <div class="grid grid-cols-2 gap-4">
+            <FormItem :label="t('agent.moreSuggest')">
+               <div class="flex items-center h-10 gap-2 border rounded-md px-3">
+                 <Switch :checked="formData.moreSuggest" @update:checked="(v) => formData.moreSuggest = v" />
+                 <span class="text-sm text-muted-foreground">{{ formData.moreSuggest ? t('agent.enabled') : t('agent.disabled') }}</span>
+               </div>
+            </FormItem>
+            <FormItem :label="t('agent.maxLoopCount')">
+              <Input type="number" v-model.number="formData.maxLoopCount" min="1" max="50" />
+            </FormItem>
+          </div>
+
+                    <!-- LLM Config -->
+           <div class="space-y-4">
+              <h3 class="text-lg font-medium flex items-center gap-2">
+                <Bot class="h-5 w-5" />
+                {{ t('agent.llmConfig') }}
+              </h3>
+              <Separator />
+              <FormItem :label="t('agent.apiKey')">
+                 <Input v-model="formData.llmConfig.apiKey" type="password" :placeholder="t('agent.apiKeyPlaceholder')" show-password-toggle />
+              </FormItem>
+              <FormItem :label="t('agent.baseUrl')">
+                 <Input v-model="formData.llmConfig.baseUrl" :placeholder="t('agent.baseUrlPlaceholder')" />
+              </FormItem>
+              <FormItem :label="t('agent.model')">
+                 <Input v-model="formData.llmConfig.model" :placeholder="t('agent.modelPlaceholder')" />
+              </FormItem>
+              <div class="grid grid-cols-2 gap-4">
+                 <FormItem :label="t('agent.maxTokens')">
+                    <Input type="number" v-model.number="formData.llmConfig.maxTokens" placeholder="4096" />
+                 </FormItem>
+                 <FormItem :label="t('agent.temperature')">
+                    <Input type="number" v-model.number="formData.llmConfig.temperature" step="0.1" placeholder="0.2" />
+                 </FormItem>
+                 <FormItem :label="t('agent.topP')">
+                    <Input type="number" v-model.number="formData.llmConfig.topP" step="0.1" placeholder="0.9" />
+                 </FormItem>
+                 <FormItem :label="t('agent.presencePenalty')">
+                    <Input type="number" v-model.number="formData.llmConfig.presencePenalty" step="0.1" placeholder="0.0" />
+                 </FormItem>
+              </div>
+              <FormItem :label="t('agent.maxModelLen')">
+                 <Input type="number" v-model.number="formData.llmConfig.maxModelLen" placeholder="54000" />
+              </FormItem>
+           </div>
+
         </div>
 
-        <!-- 中间分隔线 -->
-        <div class="divider-line"></div>
+        <!-- Divider -->
+        <Separator orientation="vertical" class="hidden lg:block h-auto" />
+        <Separator orientation="horizontal" class="lg:hidden" />
 
-        <!-- 右侧：系统上下文和工作流 -->
-        <div class="right-panel">
-          <!-- LLM 配置 -->
-          <el-divider content-position="left">{{ t('agent.llmConfig') }}</el-divider>
+        <!-- Right Panel: Context & Workflow -->
+        <div class="flex-1 space-y-6 min-w-0">
 
-          <el-form-item :label="t('agent.apiKey')">
-            <el-input v-model="formData.llmConfig.apiKey" type="password" :placeholder="t('agent.apiKeyPlaceholder')"
-              show-password />
-          </el-form-item>
-
-          <el-form-item :label="t('agent.baseUrl')">
-            <el-input v-model="formData.llmConfig.baseUrl" :placeholder="t('agent.baseUrlPlaceholder')" />
-          </el-form-item>
-
-          <el-form-item :label="t('agent.model')">
-            <el-input v-model="formData.llmConfig.model" :placeholder="t('agent.modelPlaceholder')" />
-          </el-form-item>
-          <el-divider content-position="left">{{ t('agent.mcpConfig') }}</el-divider>
-          <el-form-item :label="t('agent.availableTools')">
-            <el-select v-model="formData.availableTools" multiple :placeholder="t('agent.selectTools')"
-              style="width: 100%">
-              <el-option v-for="tool in props.tools" :key="tool.name" :label="tool.name" :value="tool.name" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="t('agent.availableSkills')">
-            <el-select v-model="formData.availableSkills" multiple :placeholder="t('agent.selectSkills')"
-              style="width: 100%">
-              <el-option 
-                v-for="skill in props.skills" 
-                :key="skill.name || skill" 
-                :label="skill.name || skill" 
-                :value="skill.name || skill"
-              >
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span>{{ skill.name || skill }}</span>
-                  <span v-if="skill.description" style="color: #909399; font-size: 12px; margin-left: 10px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
-                    {{ skill.description }}
-                  </span>
-                </div>
-              </el-option>
-            </el-select>
-          </el-form-item>
-          <!-- 系统上下文 -->
-          <el-divider content-position="left">{{ t('agent.systemContext') }}</el-divider>
-
-          <div class="context-editor">
-            <div v-for="(pair, index) in systemContextPairs" :key="index" class="context-pair">
-              <el-row :gutter="10" align="middle">
-                <el-col :span="10">
-                  <el-input v-model="pair.key" :placeholder="t('agent.contextKey')"
-                    @input="updateSystemContextPair(index, 'key', $event)" />
-                </el-col>
-                <el-col :span="10">
-                  <el-input v-model="pair.value" :placeholder="t('agent.contextValue')"
-                    @input="updateSystemContextPair(index, 'value', $event)" />
-                </el-col>
-                <el-col :span="4">
-                  <el-button type="danger" size="small" @click="removeSystemContextPair(index)"
-                    :disabled="systemContextPairs.length === 1 && !pair.key && !pair.value">
-                    <el-icon>
-                      <Delete />
-                    </el-icon>
-                  </el-button>
-                </el-col>
-              </el-row>
-            </div>
-            <el-button type="primary" size="small" @click="addSystemContextPair" style="margin-top: 10px;">
-              {{ t('agent.addContext') }}
-            </el-button>
-          </div>
-
-          <!-- 工作流 -->
-          <el-divider content-position="left">{{ t('agent.workflows') }}</el-divider>
-
-          <div class="workflow-editor">
-            <div ref="workflowContainer" class="workflow-container">
-              <div v-for="(workflow, index) in workflowPairs" :key="`workflow-${index}`" class="workflow-item"
-                :data-index="index">
-                <el-card shadow="never" style="margin-bottom: 10px;">
-                  <template #header>
-                    <el-row :gutter="10" align="middle">
-                      <el-col :span="2">
-                        <div class="drag-handle workflow-drag-handle">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <circle cx="9" cy="12" r="1" />
-                            <circle cx="9" cy="5" r="1" />
-                            <circle cx="9" cy="19" r="1" />
-                            <circle cx="15" cy="12" r="1" />
-                            <circle cx="15" cy="5" r="1" />
-                            <circle cx="15" cy="19" r="1" />
-                          </svg>
-                        </div>
-                      </el-col>
-                      <el-col :span="16">
-                        <el-input v-model="workflow.key" :placeholder="t('agent.workflowName')"
-                          @input="updateWorkflowPair(index, 'key', $event)" />
-                      </el-col>
-                      <el-col :span="6">
-                        <el-button type="text" size="small" @click.stop="toggleWorkflowCollapse(index)"
-                          style="margin-right: 8px;">
-                          <el-icon style="font-weight: bold;">
-                            <component :is="workflowCollapsed[index] ? 'ArrowDown' : 'ArrowUp'" />
-                          </el-icon>
-                        </el-button>
-                        <el-button type="danger" size="small" @click="removeWorkflowPair(index)"
-                          :title="t('common.delete')">
-                          <el-icon>
-                            <Delete />
-                          </el-icon>
-                        </el-button>
-                      </el-col>
-                    </el-row>
-                  </template>
-
-                  <transition name="workflow-collapse">
-                    <div class="workflow-steps" v-show="!workflowCollapsed[index]">
-                      <div class="steps-container" :ref="el => setStepContainer(el, index)">
-                        <div v-for="(step, stepIndex) in workflow.steps" :key="`step-${index}-${stepIndex}`"
-                          class="step-item" :data-step-index="stepIndex">
-                          <el-row :gutter="10" align="middle">
-                            <el-col :span="2">
-                              <div class="drag-handle">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                  <path
-                                    d="M9 3h2v2H9V3zm0 4h2v2H9V7zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm4-16h2v2h-2V3zm0 4h2v2h-2V7zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2z" />
-                                </svg>
-                              </div>
-                            </el-col>
-                            <el-col :span="18">
-                              <el-input v-model="workflow.steps[stepIndex]" type="textarea"
-                                :placeholder="`${t('agent.step')} ${stepIndex + 1}`"
-                                @input="updateWorkflowStep(index, stepIndex, $event)"
-                                :autosize="{ minRows: 2, maxRows: 6 }" resize="vertical" />
-                            </el-col>
-                            <el-col :span="4">
-                              <el-button type="danger" size="small" @click="removeWorkflowStep(index, stepIndex)"
-                                :disabled="workflow.steps.length === 1">
-                                <el-icon>
-                                  <Delete />
-                                </el-icon>
-                              </el-button>
-                            </el-col>
-                          </el-row>
-                        </div>
-                      </div>
-                      <el-button type="primary" size="small" @click="addWorkflowStep(index)" style="margin-top: 5px;">
-                        {{ t('agent.addStep') }}
-                      </el-button>
+           <!-- MCP Config -->
+           <div class="space-y-4">
+              <h3 class="text-lg font-medium flex items-center gap-2">
+                <Wrench class="h-5 w-5" />
+                {{ t('agent.mcpConfig') }}
+              </h3>
+              <Separator />
+              <FormItem :label="t('agent.availableTools')">
+                <ScrollArea class="h-[200px] border rounded-md p-4 bg-muted/10">
+                  <div class="space-y-3">
+                    <div v-for="tool in props.tools" :key="tool.name" class="flex items-center space-x-2">
+                      <Checkbox :id="`tool-${tool.name}`" :checked="formData.availableTools.includes(tool.name)" @update:checked="(c) => handleToolCheck(tool.name, c)" />
+                      <label :for="`tool-${tool.name}`" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                        {{ tool.name }}
+                      </label>
                     </div>
-                  </transition>
-                </el-card>
+                    <div v-if="props.tools.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                      {{ t('tools.noTools') || '暂无可用工具' }}
+                    </div>
+                  </div>
+                </ScrollArea>
+              </FormItem>
+              <FormItem :label="t('agent.availableSkills')">
+                 <ScrollArea class="h-[200px] border rounded-md p-4 bg-muted/10">
+                  <div class="space-y-4">
+                    <div v-for="skill in props.skills" :key="skill.name || skill" class="flex items-start space-x-2">
+                       <Checkbox :id="`skill-${skill.name || skill}`" :checked="formData.availableSkills.includes(skill.name || skill)" @update:checked="(c) => handleSkillCheck(skill.name || skill, c)" class="mt-1" />
+                       <div class="grid gap-1.5 leading-none">
+                          <label :for="`skill-${skill.name || skill}`" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                            {{ skill.name || skill }}
+                          </label>
+                          <p v-if="skill.description" class="text-xs text-muted-foreground line-clamp-2">{{ skill.description }}</p>
+                       </div>
+                    </div>
+                    <div v-if="props.skills.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                      {{ t('skills.noSkills') || '暂无可用技能' }}
+                    </div>
+                  </div>
+                 </ScrollArea>
+              </FormItem>
+           </div>
+
+           <!-- System Context -->
+           <div class="space-y-4">
+              <h3 class="text-lg font-medium flex items-center gap-2">
+                <Database class="h-5 w-5" />
+                {{ t('agent.systemContext') }}
+              </h3>
+              <Separator />
+              <div class="space-y-3">
+                 <div v-for="(pair, index) in systemContextPairs" :key="index" class="flex items-center gap-2">
+                    <Input v-model="pair.key" :placeholder="t('agent.contextKey')" @input="updateSystemContextPair(index, 'key', $event.target.value)" />
+                    <Input v-model="pair.value" :placeholder="t('agent.contextValue')" @input="updateSystemContextPair(index, 'value', $event.target.value)" />
+                    <Button variant="ghost" size="icon" class="text-destructive hover:text-destructive hover:bg-destructive/10" @click="removeSystemContextPair(index)" :disabled="systemContextPairs.length === 1 && !pair.key && !pair.value">
+                       <Trash2 class="h-4 w-4" />
+                    </Button>
+                 </div>
+                 <Button variant="outline" size="sm" @click="addSystemContextPair" class="w-full border-dashed">
+                    <Plus class="h-4 w-4 mr-2" /> {{ t('agent.addContext') }}
+                 </Button>
               </div>
-            </div>
-            <el-button type="primary" @click="addWorkflowPair" style="margin-top: 10px;">
-              {{ t('agent.addWorkflow') }}
-            </el-button>
-          </div>
+           </div>
+
+           <!-- Workflows -->
+           <div class="space-y-4">
+              <h3 class="text-lg font-medium flex items-center gap-2">
+                <Workflow class="h-5 w-5" />
+                {{ t('agent.workflows') }}
+              </h3>
+              <Separator />
+              <div ref="workflowContainer" class="workflow-container space-y-4">
+                 <div v-for="(workflow, index) in workflowPairs" :key="workflow.id" class="workflow-item" :data-index="index">
+                    <Card class="relative transition-all hover:shadow-md">
+                       <CardHeader class="pb-2 pt-4 px-4 bg-muted/20">
+                          <div class="flex items-center gap-2">
+                             <Input v-model="workflow.key" :placeholder="t('agent.workflowName')" class="flex-1 h-8 bg-background" @input="updateWorkflowPair(index, 'key', $event.target.value)" />
+                             <Button variant="ghost" size="sm" class="h-8 w-8 p-0" @click.stop="toggleWorkflowCollapse(index)">
+                                <ChevronDown v-if="workflowCollapsed[index]" class="h-4 w-4" />
+                                <ChevronUp v-else class="h-4 w-4" />
+                             </Button>
+                             <Button variant="ghost" size="sm" class="h-8 w-8 p-0 text-destructive hover:text-destructive" @click="removeWorkflowPair(index)">
+                                <Trash2 class="h-4 w-4" />
+                             </Button>
+                          </div>
+                       </CardHeader>
+                       <div v-show="!workflowCollapsed[index]" class="px-4 pb-4 pt-2">
+                          <div class="steps-container space-y-2 pl-6 border-l-2 border-muted ml-2" :ref="el => setStepContainer(el, index)">
+                             <div v-for="(step, stepIndex) in workflow.steps" :key="step.id" class="step-item flex items-start gap-2 group" :data-step-index="stepIndex">
+                                <div class="drag-handle cursor-grab active:cursor-grabbing p-1 mt-2 hover:bg-muted rounded opacity-50 group-hover:opacity-100 transition-opacity">
+                                   <GripVertical class="h-3 w-3 text-muted-foreground" />
+                                </div>
+                                <Textarea v-model="step.value" :placeholder="`${t('agent.step')} ${stepIndex + 1}`" class="flex-1 min-h-[60px] resize-y" @input="updateWorkflowStep(index, stepIndex, $event.target.value)" />
+                                <Button variant="ghost" size="sm" class="h-8 w-8 p-0 mt-1 text-destructive hover:text-destructive opacity-50 group-hover:opacity-100 transition-opacity" @click="removeWorkflowStep(index, stepIndex)" :disabled="workflow.steps.length === 1">
+                                   <Trash2 class="h-3 w-3" />
+                                </Button>
+                             </div>
+                          </div>
+                          <Button variant="outline" size="sm" class="w-[calc(100%-1.5rem)] mt-2 ml-6 border-dashed" @click="addWorkflowStep(index)">
+                             <Plus class="h-3 w-3 mr-2" /> {{ t('agent.addStep') }}
+                          </Button>
+                       </div>
+                    </Card>
+                 </div>
+              </div>
+              <Button variant="outline" class="w-full border-dashed py-6" @click="addWorkflowPair">
+                 <Plus class="h-4 w-4 mr-2" /> {{ t('agent.addWorkflow') }}
+              </Button>
+           </div>
         </div>
       </div>
-    </el-form>
-
-    <div class="form-footer">
-      <el-button @click="handleClose">{{ t('common.cancel') }}</el-button>
-      <el-button type="primary" :loading="saving" @click="handleSave">
-        {{ t('common.save') }}
-      </el-button>
     </div>
 
-    <!-- 优化对话框 -->
-    <el-dialog v-model="showOptimizeModal" title="优化系统提示词" width="640px" :close-on-click-modal="false"
-               :close-on-press-escape="!isOptimizing" :show-close="!isOptimizing">
-      <div class="form-group">
-        <label class="form-label">优化目标 <span class="optional-text">(可选)</span></label>
-        <el-input v-model="optimizationGoal" type="textarea" :rows="3"
-                  placeholder="例如：提高专业性和准确性，增强工具使用能力..."
-                  :disabled="isOptimizing || !!optimizedResult" />
-        <div class="help-text">如果不填写优化目标，系统将进行通用优化</div>
-      </div>
+    <!-- Footer -->
+    <div class="p-4 border-t bg-muted/20 flex justify-end gap-3">
+       <Button variant="outline" @click="handleClose">{{ t('common.cancel') }}</Button>
+       <Button @click="handleSave" :disabled="saving">
+         <Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+         {{ t('common.save') }}
+       </Button>
+    </div>
 
-      <div v-if="optimizedResult" class="form-group" style="margin-top: 12px;">
-        <label class="form-label">优化结果预览 <span class="help-text-inline">（可编辑）</span></label>
-        <el-input v-model="optimizedResult" type="textarea" :rows="8"
-                  placeholder="优化结果将显示在这里，您可以直接编辑..." />
-        <div class="help-text">您可以直接编辑优化结果，确认无误后点击"应用优化"按钮</div>
-      </div>
-
-      <template #footer>
-        <el-button @click="handleOptimizeCancel" :disabled="isOptimizing">取消</el-button>
-        <template v-if="optimizedResult">
-          <el-button type="default" @click="handleResetOptimization">重新优化</el-button>
-          <el-button type="primary" @click="handleApplyOptimization">应用优化</el-button>
-        </template>
-        <template v-else>
-          <el-button type="primary" :loading="isOptimizing" @click="handleOptimizeStart" :disabled="isOptimizing">
-            开始优化
-          </el-button>
-        </template>
-      </template>
-    </el-dialog>
+    <!-- Optimize Modal -->
+    <Dialog :open="showOptimizeModal" @update:open="v => !v && !isOptimizing && handleOptimizeCancel()">
+       <DialogContent class="sm:max-w-[640px]">
+          <DialogHeader>
+             <DialogTitle>优化系统提示词</DialogTitle>
+             <DialogDescription>使用 AI 自动优化您的系统提示词，提高 Agent 的表现。</DialogDescription>
+          </DialogHeader>
+          <div class="space-y-4 py-4">
+             <div class="space-y-2">
+                <Label>优化目标 <span class="text-xs text-muted-foreground">(可选)</span></Label>
+                <Textarea v-model="optimizationGoal" :rows="3" placeholder="例如：提高专业性和准确性，增强工具使用能力..." :disabled="isOptimizing || !!optimizedResult" />
+             </div>
+             <div v-if="optimizedResult" class="space-y-2">
+                <Label>优化结果预览 <span class="text-xs text-muted-foreground">（可编辑）</span></Label>
+                <Textarea v-model="optimizedResult" :rows="8" placeholder="优化结果将显示在这里..." />
+             </div>
+          </div>
+          <DialogFooter>
+             <Button variant="outline" @click="handleOptimizeCancel" :disabled="isOptimizing">取消</Button>
+             <template v-if="optimizedResult">
+                <Button variant="outline" @click="handleResetOptimization">重新优化</Button>
+                <Button @click="handleApplyOptimization">应用优化</Button>
+             </template>
+             <template v-else>
+                <Button @click="handleOptimizeStart" :disabled="isOptimizing">
+                  <Loader2 v-if="isOptimizing" class="mr-2 h-4 w-4 animate-spin" />
+                  开始优化
+                </Button>
+             </template>
+          </DialogFooter>
+       </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../utils/i18n.js'
-import { ArrowDown, ArrowUp, Delete } from '@element-plus/icons-vue'
+import { Trash2, Plus, ChevronDown, ChevronUp, GripVertical, Bot, Wrench, Database, Workflow, Loader2 } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
-import {agentAPI} from '../api/agent.js'
+import { agentAPI } from '../api/agent.js'
+
+// UI Components
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Separator } from '@/components/ui/separator'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Label } from '@/components/ui/label'
+import { FormItem } from '@/components/ui/form'
 
 // Props
 const props = defineProps({
@@ -303,7 +305,6 @@ const emit = defineEmits(['update:visible', 'save'])
 const { t } = useLanguage()
 
 // Refs
-const formRef = ref(null)
 const saving = ref(false)
 const systemContextPairs = ref([{ key: '', value: '' }])
 const workflowPairs = ref([{ key: '', steps: [''] }])
@@ -311,15 +312,15 @@ const workflowCollapsed = ref([]) // 工作流收缩状态
 const workflowContainer = ref(null)
 const stepContainers = ref(new Map())
 const isInternalEdit = ref(false) // 标记是否为内部编辑
+const errors = ref({})
 
 // Sortable instances
-let workflowSortable = null
 const stepSortables = new Map()
+
+const generateId = () => '_' + Math.random().toString(36).substr(2, 9)
 
 // Computed
 const isEditing = computed(() => !!props.agent?.id)
-
-
 
 // Form data
 const defaultFormData = () => ({
@@ -334,7 +335,12 @@ const defaultFormData = () => ({
   llmConfig: {
     apiKey: '',
     baseUrl: '',
-    model: ''
+    model: '',
+    maxTokens: null,
+    temperature: null,
+    topP: null,
+    presencePenalty: null,
+    maxModelLen: null
   },
   availableTools: [],
   availableSkills: [],
@@ -344,32 +350,77 @@ const defaultFormData = () => ({
 
 const formData = ref(defaultFormData())
 
-// Form rules
-const rules = {
-  name: [
-    { required: true, message: t('agent.nameRequired'), trigger: 'blur' },
-    { min: 2, max: 50, message: t('agent.nameLength'), trigger: 'blur' }
-  ],
-  description: [
-    { max: 200, message: t('agent.descriptionLength'), trigger: 'blur' }
-  ],
-  systemPrefix: [
-    { required: true, message: t('agent.systemPrefixRequired'), trigger: 'blur' }
-  ]
+// Helper functions for Select
+const getSelectValue = (val) => {
+  if (val === null) return 'auto'
+  return val ? 'enabled' : 'disabled'
+}
+
+const setSelectValue = (field, val) => {
+  if (val === 'auto') formData.value[field] = null
+  else if (val === 'enabled') formData.value[field] = true
+  else formData.value[field] = false
+}
+
+// Helper functions for Tools/Skills
+const handleToolCheck = (name, checked) => {
+  if (checked) {
+    if (!formData.value.availableTools.includes(name)) {
+      formData.value.availableTools.push(name)
+    }
+  } else {
+    formData.value.availableTools = formData.value.availableTools.filter(t => t !== name)
+  }
+}
+
+const handleSkillCheck = (name, checked) => {
+  if (checked) {
+    if (!formData.value.availableSkills.includes(name)) {
+      formData.value.availableSkills.push(name)
+    }
+  } else {
+    formData.value.availableSkills = formData.value.availableSkills.filter(s => s !== name)
+  }
+}
+
+// Validation
+const validate = () => {
+  errors.value = {}
+  let isValid = true
+
+  if (!formData.value.name || !formData.value.name.trim()) {
+    errors.value.name = t('agent.nameRequired')
+    isValid = false
+  } else if (formData.value.name.length < 2 || formData.value.name.length > 50) {
+    errors.value.name = t('agent.nameLength')
+    isValid = false
+  }
+
+  if (formData.value.description && formData.value.description.length > 200) {
+    errors.value.description = t('agent.descriptionLength')
+    isValid = false
+  }
+
+  if (!formData.value.systemPrefix || !formData.value.systemPrefix.trim()) {
+    errors.value.systemPrefix = t('agent.systemPrefixRequired')
+    isValid = false
+  }
+
+  return isValid
 }
 
 // Watch for agent changes
 watch(() => props.agent, (newAgent) => {
-  // 如果是内部编辑导致的变化，跳过处理
-  if (isInternalEdit.value) {
-    return
-  }
+  if (isInternalEdit.value) return
 
   if (newAgent) {
-    formData.value = {
+    formData.value = JSON.parse(JSON.stringify({
       ...defaultFormData(),
-      ...newAgent
-    }
+      ...newAgent,
+      availableTools: newAgent.availableTools || [],
+      availableSkills: newAgent.availableSkills || [],
+      llmConfig: { ...defaultFormData().llmConfig, ...(newAgent.llmConfig || {}) }
+    }))
 
     // 初始化系统上下文键值对
     const contextEntries = Object.entries(newAgent.systemContext || {})
@@ -383,22 +434,25 @@ watch(() => props.agent, (newAgent) => {
     // 初始化工作流键值对
     const workflowEntries = Object.entries(newAgent.availableWorkflows || {})
     workflowPairs.value = workflowEntries.length > 0
-      ? workflowEntries.map(([key, value]) => ({
-        key,
-        steps: Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(s => s) : [''])
-      }))
-      : [{ key: '', steps: [''] }]
+      ? workflowEntries.map(([key, value]) => {
+          const steps = Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(s => s) : [''])
+          return {
+            id: generateId(),
+            key,
+            steps: steps.map(s => ({ id: generateId(), value: s }))
+          }
+        })
+      : [{ id: generateId(), key: '', steps: [{ id: generateId(), value: '' }] }]
 
     // 初始化工作流收缩状态（默认全部展开）
     workflowCollapsed.value = new Array(workflowPairs.value.length).fill(true)
   } else {
     formData.value = defaultFormData()
     systemContextPairs.value = [{ key: '', value: '' }]
-    workflowPairs.value = [{ key: '', steps: [''] }]
+    workflowPairs.value = [{ id: generateId(), key: '', steps: [{ id: generateId(), value: '' }] }]
     workflowCollapsed.value = [false]
   }
 
-  // 重新初始化拖拽功能
   nextTick(() => {
     initializeDragAndDrop()
   })
@@ -406,10 +460,8 @@ watch(() => props.agent, (newAgent) => {
 
 // Watch for visibility changes
 watch(() => props.visible, (newVisible) => {
-  if (newVisible && formRef.value) {
-    nextTick(() => {
-      formRef.value.clearValidate()
-    })
+  if (newVisible) {
+    errors.value = {}
   }
 })
 
@@ -423,32 +475,9 @@ const setStepContainer = (el, workflowIndex) => {
 // 初始化拖拽功能
 const initializeDragAndDrop = () => {
   nextTick(() => {
-    // 初始化工作流拖拽
-    if (workflowContainer.value) {
-      if (workflowSortable) {
-        workflowSortable.destroy()
-      }
-
-      workflowSortable = new Sortable(workflowContainer.value, {
-        handle: '.workflow-drag-handle',
-        animation: 150,
-        ghostClass: 'sortable-ghost',
-        chosenClass: 'sortable-chosen',
-        dragClass: 'sortable-drag',
-        onEnd: (evt) => {
-          const { oldIndex, newIndex } = evt
-          if (oldIndex !== newIndex) {
-            const movedItem = workflowPairs.value.splice(oldIndex, 1)[0]
-            workflowPairs.value.splice(newIndex, 0, movedItem)
-          }
-        }
-      })
-    }
-
     // 初始化步骤拖拽
     stepContainers.value.forEach((container, workflowIndex) => {
       if (container) {
-        // 销毁旧的实例
         if (stepSortables.has(workflowIndex)) {
           stepSortables.get(workflowIndex).destroy()
         }
@@ -477,23 +506,16 @@ const initializeDragAndDrop = () => {
 
 // 销毁拖拽实例
 const destroyDragAndDrop = () => {
-  if (workflowSortable) {
-    workflowSortable.destroy()
-    workflowSortable = null
-  }
-
   stepSortables.forEach(sortable => {
     sortable.destroy()
   })
   stepSortables.clear()
 }
 
-// 在组件挂载时初始化拖拽
 onMounted(() => {
   initializeDragAndDrop()
 })
 
-// 在组件卸载时销毁拖拽实例
 onUnmounted(() => {
   destroyDragAndDrop()
 })
@@ -565,21 +587,19 @@ const removeSystemContextPair = (index) => {
 }
 
 const updateSystemContextPair = (index, field, value) => {
-  // 确保value是字符串类型
   systemContextPairs.value[index][field] = typeof value === 'string' ? value : String(value || '')
 }
 
 // 工作流处理方法
 const addWorkflowPair = () => {
-  workflowPairs.value.push({ key: '', steps: [''] })
-  workflowCollapsed.value.push(false) // 新工作流默认展开
+  workflowPairs.value.push({ id: generateId(), key: '', steps: [{ id: generateId(), value: '' }] })
+  workflowCollapsed.value.push(false)
   nextTick(() => {
     initializeDragAndDrop()
   })
 }
 
 const removeWorkflowPair = (index) => {
-  // 销毁对应的步骤拖拽实例
   if (stepSortables.has(index)) {
     stepSortables.get(index).destroy()
     stepSortables.delete(index)
@@ -587,11 +607,11 @@ const removeWorkflowPair = (index) => {
 
   const newPairs = workflowPairs.value.filter((_, i) => i !== index)
   if (newPairs.length === 0) {
-    workflowPairs.value = [{ key: '', steps: [''] }]
-    workflowCollapsed.value = [false] // 重置收缩状态
+    workflowPairs.value = [{ id: generateId(), key: '', steps: [{ id: generateId(), value: '' }] }]
+    workflowCollapsed.value = [false]
   } else {
     workflowPairs.value = newPairs
-    workflowCollapsed.value.splice(index, 1) // 删除对应的收缩状态
+    workflowCollapsed.value.splice(index, 1)
   }
 
   nextTick(() => {
@@ -609,7 +629,7 @@ const updateWorkflowPair = (index, field, value) => {
 
 const addWorkflowStep = (workflowIndex) => {
   isInternalEdit.value = true
-  workflowPairs.value[workflowIndex].steps.push('')
+  workflowPairs.value[workflowIndex].steps.push({ id: generateId(), value: '' })
   nextTick(() => {
     initializeDragAndDrop()
     isInternalEdit.value = false
@@ -629,50 +649,32 @@ const removeWorkflowStep = (workflowIndex, stepIndex) => {
 
 const updateWorkflowStep = (workflowIndex, stepIndex, value) => {
   isInternalEdit.value = true
-  workflowPairs.value[workflowIndex].steps[stepIndex] = value
-  // 使用 nextTick 确保在下一个事件循环中重置标志
+  workflowPairs.value[workflowIndex].steps[stepIndex].value = value
   nextTick(() => {
     isInternalEdit.value = false
   })
 }
 
-// 工作流收缩状态管理
 const toggleWorkflowCollapse = (index) => {
   workflowCollapsed.value[index] = !workflowCollapsed.value[index]
 }
 
-const syncWorkflowCollapsedState = () => {
-  // 确保收缩状态数组与工作流数组长度一致
-  const currentLength = workflowPairs.value.length
-  const collapsedLength = workflowCollapsed.value.length
-
-  if (collapsedLength < currentLength) {
-    // 添加新的收缩状态（默认展开）
-    for (let i = collapsedLength; i < currentLength; i++) {
-      workflowCollapsed.value.push(false)
-    }
-  } else if (collapsedLength > currentLength) {
-    // 移除多余的收缩状态
-    workflowCollapsed.value.splice(currentLength)
-  }
-}
-
-// Methods
 const handleClose = () => {
   emit('update:visible', false)
 }
 
 const handleSave = async () => {
-  if (!formRef.value) return
+  if (!validate()) {
+    // 滚动到第一个错误位置? 简单处理即可
+    return
+  }
 
   try {
-    await formRef.value.validate()
     saving.value = true
 
     // 从键值对构建系统上下文对象
     const systemContext = {}
     systemContextPairs.value.forEach(pair => {
-      // 确保key和value都是字符串类型
       const key = typeof pair.key === 'string' ? pair.key.trim() : ''
       const value = typeof pair.value === 'string' ? pair.value.trim() : ''
       if (key && value) {
@@ -683,10 +685,10 @@ const handleSave = async () => {
     // 从键值对构建工作流对象
     const availableWorkflows = {}
     workflowPairs.value.forEach(pair => {
-      if (pair.key && pair.key.trim() && pair.steps && pair.steps.some(step => step && step.trim())) {
+      if (pair.key && pair.key.trim() && pair.steps && pair.steps.some(step => step.value && step.value.trim())) {
         const steps = pair.steps
-          .filter(step => step && typeof step === 'string')
-          .map(step => step.trim())
+          .filter(step => step.value && typeof step.value === 'string')
+          .map(step => step.value.trim())
           .filter(step => step)
         if (steps.length > 0) {
           availableWorkflows[pair.key.trim()] = steps
@@ -694,14 +696,22 @@ const handleSave = async () => {
       }
     })
 
-    // 准备保存的数据
+    formData.value.systemContext = systemContext
+    formData.value.availableWorkflows = availableWorkflows
+
     const saveData = {
-      ...formData.value,
-      systemContext,
-      availableWorkflows
+      ...formData.value
     }
 
-    // 如果是新建，移除id
+    // If set to auto (null), do not send the field to backend
+    if (saveData.deepThinking === null) {
+      delete saveData.deepThinking
+    }
+    
+    if (saveData.multiAgent === null) {
+      delete saveData.multiAgent
+    }
+
     if (!isEditing.value) {
       delete saveData.id
     }
@@ -709,265 +719,31 @@ const handleSave = async () => {
     emit('save', saveData)
 
   } catch (error) {
-    console.error('表单验证失败:', error)
+    console.error('保存失败:', error)
   } finally {
     saving.value = false
   }
 }
 
-// Expose methods
 defineExpose({
-  formRef
+  // formRef not needed anymore
 })
 </script>
 
 <style scoped>
-.agent-edit-container {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 24px;
-  margin: 20px 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  overflow-y: auto;
-  max-height: calc(100vh - 120px);
-}
-
-.form-content {
-  display: flex;
-  gap: 24px;
-  min-height: 500px;
-}
-
-.left-panel {
-  flex: 1;
-  min-width: 0;
-}
-
-.divider-line {
-  width: 2px;
-  background: repeating-linear-gradient(to bottom,
-      #e5e7eb 0px,
-      #e5e7eb 8px,
-      transparent 8px,
-      transparent 16px);
-  flex-shrink: 0;
-  margin: 0 12px;
-}
-
-.right-panel {
-  flex: 1;
-  min-width: 0;
-}
-
-.form-header {
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.form-title {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.form-footer {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid #e5e7eb;
-}
-
-/* 响应式设计 */
-@media (max-width: 1200px) {
-  .form-content {
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .divider-line {
-    width: 100%;
-    height: 2px;
-    background: repeating-linear-gradient(to right,
-        #e5e7eb 0px,
-        #e5e7eb 8px,
-        transparent 8px,
-        transparent 16px);
-    margin: 12px 0;
-  }
-}
-
-:deep(.el-form-item__label) {
-  font-weight: 500;
-  color: #1f2937;
-}
-
-:deep(.el-input__wrapper) {
-  border-radius: 6px;
-}
-
-:deep(.el-textarea__inner) {
-  border-radius: 6px;
-}
-
-:deep(.el-select) {
-  width: 100%;
-}
-
-.context-editor {
-  margin-bottom: 20px;
-}
-
-.context-pair {
-  margin-bottom: 10px;
-}
-
-.workflow-editor {
-  margin-bottom: 20px;
-}
-
-.workflow-item {
-  margin-bottom: 15px;
-}
-
-.workflow-steps {
-  padding: 10px 0;
-}
-
-.workflow-step {
-  margin-bottom: 8px;
-}
-
-:deep(.el-card__header) {
-  padding: 10px 20px;
-}
-
-:deep(.el-card__body) {
-  padding: 15px 20px;
-}
-
-/* 系统提示词输入框内按钮定位 */
-.system-prefix-wrapper {
-  position: relative;
-  width: 100%; /* 让系统提示词输入区域占满到左侧面板的分割线 */
-}
-
-.system-prefix-wrapper :deep(.el-textarea__inner) {
-  padding-right: 120px; /* 为内嵌按钮留出空间，避免文本遮挡 */
-}
-
-/* 保证 textarea 组件本身也占满可用宽度 */
-.system-prefix-wrapper :deep(.el-textarea) {
-  width: 100%;
-}
-
-.optimize-btn-inline {
-
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 2;
-  background: transparent;
-  color: #0000005f; /* 黑色文字 */
-  border-color: transparent;
-  box-shadow: none;
-  --el-button-bg-color: transparent;
-  --el-button-border-color: transparent;
-  --el-button-text-color: #111827;
-}
-
-/* 拖拽相关样式 */
-.workflow-drag-handle,
-.drag-handle {
-  cursor: grab;
-  color: #909399;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.workflow-drag-handle:hover,
-.drag-handle:hover {
-  color: #409eff;
-  background-color: #f0f9ff;
-}
-
-.workflow-drag-handle:active,
-.drag-handle:active {
-  cursor: grabbing;
-}
-
 .sortable-ghost {
   opacity: 0.5;
-  background-color: #f0f9ff;
-  border: 2px dashed #409eff;
+  background-color: hsl(var(--muted));
+  border: 2px dashed hsl(var(--primary));
 }
 
 .sortable-chosen {
   transform: scale(1.02);
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .sortable-drag {
-  transform: rotate(5deg);
-  opacity: 0.8;
-}
-
-.step-item {
-  margin-bottom: 8px;
-  padding: 8px;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  background-color: #fafafa;
-  transition: all 0.2s;
-}
-
-.step-item:hover {
-  border-color: #409eff;
-  background-color: #f0f9ff;
-}
-
-/* 工作流收缩/展开动画 */
-.workflow-collapse-enter-active,
-.workflow-collapse-leave-active {
-  transition: all 0.3s ease;
-  overflow: hidden;
-}
-
-.workflow-collapse-enter-from,
-.workflow-collapse-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.workflow-collapse-enter-to,
-.workflow-collapse-leave-from {
-  opacity: 1;
-  max-height: 1000px;
-}
-
-/* 工作流步骤textarea样式 */
-.workflow-steps .el-textarea__inner {
-  min-height: 60px;
-  line-height: 1.5;
-  font-family: inherit;
-}
-
-.workflow-steps .el-textarea {
-  width: 100%;
-}
-
-.step-item .el-textarea__inner:focus {
-  border-color: #409eff;
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+  transform: rotate(2deg);
+  opacity: 0.9;
 }
 </style>

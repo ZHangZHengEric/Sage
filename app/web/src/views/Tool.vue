@@ -1,79 +1,104 @@
 <template>
-  <div class="tool-page">
-      <!-- 列表视图的过滤器和内容 -->
-  <div v-if="viewMode === 'list'" class="list-content">
-    <div class="filter-tabs-row">
-      <div class="search-box">
-        <Search :size="16" class="search-icon" />
-        <input type="text" class="input search-input"
-          :placeholder="t('tools.search')" v-model="searchTerm" />
-      </div>
-    </div>
-    <!-- 工具列表 -->
-    <div class="tools-section">
-      <div v-if="groupedTools.length > 0" class="tools-groups">
-        <div v-for="(group, groupIndex) in groupedTools" :key="group.source" class="tool-group">
-          <!-- 分组标题 -->
-          <div class="group-header">
-            <h3 class="group-title">{{ getToolSourceLabel(group.source) }}</h3>
-            <span class="group-count">{{ group.tools.length }} {{ t('tools.count') }}</span>
-          </div>
-
-          <!-- 工具网格 -->
-          <div class="tools-grid">
-            <div v-for="tool in group.tools" :key="tool.name" class="tool-card" @click="openToolDetail(tool)">
-              <div class="tool-header">
-                <div class="tool-icon"
-                  :style="{ background: `linear-gradient(135deg, ${getToolTypeColor(tool.type)} 0%, ${getToolTypeColor(tool.type)}80 100%)` }">
-                  <component :is="getToolIcon(tool.type)" :size="20" />
-                </div>
-                <div class="tool-info">
-                  <h3 class="tool-name">{{ tool.name }}</h3>
-                  <p class="tool-description">
-                    {{ tool.description || t('tools.noDescription') }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="tool-meta">
-                <div class="meta-item">
-                  <span class="meta-label">{{ t('tools.source') }}:</span>
-                  <span class="meta-value">{{ getToolSourceLabel(tool.source) }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">{{ t('tools.params') }}:</span>
-                  <span class="meta-value">
-                    {{ formatParameters(tool.parameters).length }} {{ t('tools.count') }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+  <div class="h-screen w-full bg-background p-6">
+    <!-- 列表视图 -->
+    <div v-if="viewMode === 'list'" class="flex h-full flex-col space-y-6">
+      <!-- 头部搜索区 -->
+      <div class="flex items-center justify-between pb-4 border-b">
+        <div class="relative w-full max-w-sm">
+          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input 
+            v-model="searchTerm" 
+            :placeholder="t('tools.search')" 
+            class="pl-9"
+          />
         </div>
       </div>
 
-      <div v-if="filteredTools.length === 0" class="empty-state">
-        <Wrench :size="48" class="empty-icon" />
-        <h3>{{ t('tools.noTools') }}</h3>
-        <p>{{ t('tools.noToolsDesc') }}</p>
-      </div>
+      <!-- 工具列表 -->
+      <ScrollArea class="flex-1">
+        <div class="space-y-8 pr-4">
+          <!-- 空状态 -->
+          <div v-if="filteredTools.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="rounded-full bg-muted p-4">
+              <Wrench class="h-8 w-8 text-muted-foreground" />
+            </div>
+            <h3 class="mt-4 text-lg font-semibold">{{ t('tools.noTools') }}</h3>
+            <p class="text-sm text-muted-foreground">{{ t('tools.noToolsDesc') }}</p>
+          </div>
+
+          <!-- 分组展示 -->
+          <div v-else v-for="(group, groupIndex) in groupedTools" :key="group.source" class="space-y-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-lg font-semibold tracking-tight">{{ getToolSourceLabel(group.source) }}</h3>
+              <Badge variant="secondary" class="rounded-sm px-2 font-normal">
+                {{ group.tools.length }} {{ t('tools.count') }}
+              </Badge>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <Card 
+                v-for="tool in group.tools" 
+                :key="tool.name" 
+                class="cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 group"
+                @click="openToolDetail(tool)"
+              >
+                <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-2">
+                  <div 
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm transition-opacity group-hover:opacity-90"
+                    :class="getToolTypeColorClass(tool.type)"
+                  >
+                    <component :is="getToolIcon(tool.type)" class="h-5 w-5" />
+                  </div>
+                  <div class="space-y-1 overflow-hidden">
+                    <CardTitle class="text-base truncate" :title="tool.name">
+                      {{ tool.name }}
+                    </CardTitle>
+                    <CardDescription class="line-clamp-2 text-xs">
+                      {{ tool.description || t('tools.noDescription') }}
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div class="flex items-center justify-between pt-4 border-t mt-2 text-xs text-muted-foreground">
+                    <div class="flex items-center gap-1">
+                      <span>{{ t('tools.source') }}:</span>
+                      <span class="font-medium text-foreground">{{ getToolSourceLabel(tool.source) }}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <span>{{ t('tools.params') }}:</span>
+                      <span class="font-medium text-foreground">{{ formatParameters(tool.parameters).length }}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
+      </ScrollArea>
     </div>
-  </div>
-  <!-- 工具详情视图 -->
-  <ToolDetail v-if="viewMode === 'detail' && selectedTool" :tool="selectedTool" @back="backToList" />
+
+    <!-- 详情视图 -->
+    <ToolDetail 
+      v-if="viewMode === 'detail' && selectedTool" 
+      :tool="selectedTool" 
+      @back="backToList" 
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import ToolDetail from '../components/ToolDetail.vue'
+import { Input } from '@/components/ui/input'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 // Composables
 const { t } = useLanguage()
-
 
 // State
 const allTools = ref([])
@@ -181,19 +206,18 @@ const getToolIcon = (type) => {
   }
 }
 
-const getToolTypeColor = (type) => {
+const getToolTypeColorClass = (type) => {
   switch (type) {
     case 'basic':
-      return '#4facfe'
+      return 'bg-blue-500'
     case 'mcp':
-      return '#667eea'
+      return 'bg-indigo-500'
     case 'agent':
-      return '#ff6b6b'
+      return 'bg-red-500'
     default:
-      return '#4ade80'
+      return 'bg-green-500'
   }
 }
-
 
 const formatParameters = (parameters) => {
   if (!parameters || typeof parameters !== 'object') {
@@ -226,225 +250,3 @@ onMounted(() => {
   loadMcpServers()
 })
 </script>
-
-<style scoped>
-.tool-page {
-  padding: 1.5rem;
-  min-height: 100vh;
-  background: transparent;
-}
-.list-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  max-height: calc(100vh - 120px);
-  background: transparent;
-}
-
-
-.filter-tabs-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 10px 10px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  flex-wrap: wrap;
-}
-
-
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-  max-width: 400px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  z-index: 1;
-}
-
-.search-input {
-  width: 100%;
-  padding: 10px 12px 10px 40px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
-  font-size: 14px;
-  color: #333333;
-  background: rgba(255, 255, 255, 0.9);
-  transition: all 0.2s ease;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-  background: white;
-}
-
-.tools-section {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.tools-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
-.tool-group {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 2px solid rgba(0, 0, 0, 0.1);
-}
-
-.group-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: #333333;
-}
-
-.group-count {
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.7);
-  background: #f5f5f5;
-  padding: 4px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.tools-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 20px;
-}
-
-.tool-card {
-  background: white;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
-  padding: 20px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.tool-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.tool-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.tool-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-
-.tool-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.tool-name {
-  margin: 0 0 8px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #333333;
-  word-break: break-word;
-}
-
-.tool-description {
-  margin: 0;
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.7);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.tool-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.meta-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-}
-
-.meta-label {
-  color: rgba(0, 0, 0, 0.7);
-  font-weight: 500;
-}
-
-.meta-value {
-  color: #333333;
-  font-weight: 600;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 32px;
-  text-align: center;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-.empty-icon {
-  margin-bottom: 16px;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #333333;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: rgba(0, 0, 0, 0.7);
-}
-
-
-</style>

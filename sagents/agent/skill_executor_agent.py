@@ -407,7 +407,7 @@ class SkillExecutorAgent(AgentBase):
             tool_definitions_for_llm = skill_tools.get_execute_tool_definitions()
             # 执行的system message
             execute_system_message = MessageChunk(role=MessageRole.SYSTEM.value, content=execute_system_prompt, message_id=str(uuid.uuid4()), message_type=MessageType.SYSTEM.value)
-            history_messages.insert(0, execute_system_message)
+            history_messages.insert(0, execute_system_message.to_dict())
             all_new_response_chunks: List[MessageChunk] = []
 
             loop_count = 0
