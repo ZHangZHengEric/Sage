@@ -485,7 +485,8 @@ _active_sessions: Dict[str, SessionContext] = {}
 def get_session_context(session_id: str) -> Optional[SessionContext]:
     """获取会话上下文"""
     if session_id not in _active_sessions:
-        logger.debug(f"SessionContext: 会话 {session_id} 不存在")
+        # 避免递归调用 logger
+        # logger.debug(f"SessionContext: 会话 {session_id} 不存在")
         return None
     return _active_sessions[session_id]
 
