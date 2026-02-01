@@ -112,6 +112,3 @@ const handleAgentChange = (e) => {
 }
 </script>
 
-<style scoped>
-/* Removed custom styles in favor of Tailwind classes */
-</style>

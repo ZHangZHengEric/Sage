@@ -1,18 +1,18 @@
 <template>
-  <div class="syntax-highlighter">
-    <div v-if="showHeader" class="code-header">
-      <span class="language-label">{{ language || 'text' }}</span>
+  <div class="rounded-lg border bg-muted/40 overflow-hidden my-4">
+    <div v-if="showHeader" class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b text-xs text-muted-foreground">
+      <span class="font-medium uppercase tracking-wider text-[10px]">{{ language || 'text' }}</span>
       <button 
         v-if="showCopyButton"
         @click="copyCode"
-        class="copy-button"
+        class="flex items-center gap-1 hover:text-foreground transition-colors focus:outline-none"
         :title="copyButtonText"
       >
-        <span v-if="!copied">📋</span>
-        <span v-else>✅</span>
+        <span v-if="!copied" class="text-xs">📋</span>
+        <span v-else class="text-xs">✅</span>
       </button>
     </div>
-    <pre class="code-block"><code :class="codeClass" v-html="highlightedCode"></code></pre>
+    <pre class="m-0 p-4 overflow-x-auto text-sm font-mono leading-relaxed bg-background/50"><code :class="codeClass" v-html="highlightedCode"></code></pre>
   </div>
 </template>
 
@@ -134,83 +134,3 @@ const fallbackCopy = () => {
   }
 }
 </script>
-
-<style scoped>
-.syntax-highlighter {
-  margin: 12px 0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #2d3748;
-  border: 1px solid #4a5568;
-}
-
-.code-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: #1a202c;
-  border-bottom: 1px solid #4a5568;
-}
-
-.language-label {
-  font-size: 12px;
-  color: #a0aec0;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.copy-button {
-  background: transparent;
-  border: 1px solid #4a5568;
-  color: #a0aec0;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s ease;
-}
-
-.copy-button:hover {
-  background: #4a5568;
-  color: #fff;
-}
-
-.code-block {
-  margin: 0;
-  padding: 16px;
-  overflow-x: auto;
-  background: #2d3748;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.code-block code {
-  background: none;
-  padding: 0;
-  border-radius: 0;
-  color: #e2e8f0;
-}
-
-/* 滚动条样式 */
-.code-block::-webkit-scrollbar {
-  height: 8px;
-}
-
-.code-block::-webkit-scrollbar-track {
-  background: #1a202c;
-}
-
-.code-block::-webkit-scrollbar-thumb {
-  background: #4a5568;
-  border-radius: 4px;
-}
-
-.code-block::-webkit-scrollbar-thumb:hover {
-  background: #718096;
-}
-
-
-</style>

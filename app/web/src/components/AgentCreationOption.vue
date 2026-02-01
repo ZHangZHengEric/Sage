@@ -197,6 +197,3 @@ ${selectedTools.value.length > 0 ? `用户已选择以下工具，请在配置�
 }
 </script>
 
-<style scoped>
-/* Removed custom styles as we use tailwind classes */
-</style>

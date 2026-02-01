@@ -140,6 +140,3 @@ const handleDownload = (filename) => {
 }
 </script>
 
-<style scoped>
-/* Removed custom styles in favor of Tailwind classes */
-</style>
