@@ -246,8 +246,40 @@ const getLabel = ({ role, type, messageType, toolName }) => {
 
 const formatTime = (timestamp) => {
   if (!timestamp) return ''
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  
+  let dateVal = timestamp
+  const num = Number(timestamp)
+  
+  // 如果是数字且看起来像秒级时间戳（小于100亿，对应年份2286年之前）
+  // Python后端常返回秒级浮点数时间戳，如 1769963248.061118
+  if (!isNaN(num)) {
+    if (num < 10000000000) {
+      dateVal = num * 1000
+    } else {
+      dateVal = num
+    }
+  }
+  
+  const date = new Date(dateVal)
+  // 检查日期是否有效
+  if (isNaN(date.getTime())) return ''
+  
+  const now = new Date()
+  const isToday = date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear()
+
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } else {
+    return date.toLocaleString([], {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
 }
 
 const getToolIcon = (name) => {
