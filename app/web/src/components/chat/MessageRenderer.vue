@@ -1,73 +1,106 @@
 <template>
-  <div v-if="shouldRenderMessage" class="flex flex-col gap-4 mb-4">
+  <div v-if="shouldRenderMessage" class="flex flex-col gap-6 mb-6">
     <!-- 错误消息 -->
-    <div v-if="isErrorMessage" class="flex flex-row gap-3 px-4">
-      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
+    <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
+      <div class="flex-none">
         <MessageAvatar messageType="error" role="assistant" />
-        <MessageTypeLabel messageType="error" role="assistant" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
       </div>
-      <div class="bg-destructive text-destructive-foreground rounded-2xl rounded-tl-sm px-4 py-3 max-w-[70%] shadow-sm overflow-hidden break-words">
-          <div class="font-semibold mb-1">{{ t('error.title') }}</div>
-          <div class="opacity-90">{{ message.show_content || message.content || t('error.unknown') }}</div>
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
+          {{ getLabel({ role: 'assistant', type: 'error' }) }}
+        </div>
+        <div class="bg-destructive/10 text-destructive border border-destructive/20 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full">
+          <div class="font-semibold mb-1 flex items-center gap-2">
+            <span class="i-lucide-alert-circle w-4 h-4"></span>
+            {{ t('error.title') }}
+          </div>
+          <div class="opacity-90 text-sm leading-relaxed">{{ message.show_content || message.content || t('error.unknown') }}</div>
+        </div>
       </div>
     </div>
 
     <!-- Token 使用消息 -->
-    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="flex justify-center px-4">
+    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="flex justify-center px-4 my-2">
       <TokenUsage :token-usage="tokenUsageData" />
     </div>
 
     <!-- 用户消息 -->
-    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="flex flex-row-reverse gap-3 px-4">
-      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
+    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="flex flex-row-reverse items-start gap-3 px-4 group">
+      <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
-        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
       </div>
-      <div class="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-3 max-w-[70%] shadow-md overflow-hidden break-words">
-       <ReactMarkdown
+      <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none">
+          {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
+        </div>
+        <div class="bg-primary/95 text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm overflow-hidden break-words text-sm leading-relaxed tracking-wide">
+          <ReactMarkdown
             :content="formatMessageContent(message.content)"
           />
+        </div>
       </div>
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="flex flex-row gap-3 px-4">
-      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="flex flex-row items-start gap-3 px-4">
+      <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" />
-        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
       </div>
-      <div class="bg-card text-card-foreground border rounded-2xl rounded-tl-sm px-4 py-3 max-w-[70%] shadow-sm overflow-hidden break-words">
-        <ReactMarkdown
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
+          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+        </div>
+        <div class="bg-card text-card-foreground border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full">
+          <ReactMarkdown
             :content="formatMessageContent(message.show_content)"
             :components="markdownComponents"
           />
+        </div>
       </div>
     </div>
 
     <!-- 工具调用按钮 -->
-    <div v-else-if="hasToolCalls" class="flex flex-row gap-3 px-4 mb-4">
-      <div class="flex flex-col items-center gap-1.5 min-w-[48px] w-12 self-start">
-        <MessageAvatar :messageType="message.message_type" role="assistant" />
-        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="w-12 text-[11px] font-medium text-center text-foreground/70" />
+    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
+      <div class="flex-none mt-1">
+        <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" />
       </div>
-      <div class="bg-secondary/50 text-secondary-foreground border rounded-2xl rounded-tl-sm p-3 max-w-[70%] shadow-sm overflow-hidden break-words w-full sm:w-auto">
-        <div class="flex flex-col gap-2">
-        <div
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
+            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
+         </div>
+         <div class="bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-full sm:w-auto min-w-[260px]">
+          <div class="flex flex-col gap-2">
+            <div
               v-for="(toolCall, index) in message.tool_calls"
               :key="toolCall.id || index"
-              class="flex items-center justify-between p-3 rounded-lg bg-background/50 hover:bg-background/80 transition-colors cursor-pointer border border-transparent hover:border-border"
+              class="relative flex items-center justify-between p-2 rounded-xl bg-background border border-border/50 hover:border-primary/30 hover:shadow-md transition-all cursor-pointer group"
               @click="handleToolClick(toolCall, getToolResult(toolCall))"
             >
-              <div class="flex items-center gap-3 flex-1 min-w-0">
-                <span class="font-medium text-sm truncate">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
-                <Badge :variant="getToolResult(toolCall) ? 'default' : 'secondary'" class="text-[10px] h-5 px-2">
-                  {{ getToolResult(toolCall) ? t('toolCall.completed') : t('toolCall.executing') }}
-                </Badge>
+              <!-- Status Indicator -->
+              <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-colors"
+                   :class="getToolResult(toolCall) ? 'bg-green-500/50' : 'bg-blue-500/50'"></div>
+
+              <div class="flex items-center gap-3 flex-1 min-w-0 pl-3">
+       
+                <div class="flex flex-col min-w-0 gap-0.5">
+                  <span class="font-medium text-sm truncate text-foreground/90 group-hover:text-primary transition-colors">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
+                  <span class="text-[10px] text-muted-foreground truncate font-mono opacity-80 flex items-center gap-1">
+                     <span class="w-1.5 h-1.5 rounded-full" :class="getToolResult(toolCall) ? 'bg-green-500' : 'bg-blue-500 animate-pulse'"></span>
+                     {{ getToolResult(toolCall) ? t('toolCall.completed') : t('toolCall.executing') }}
+                  </span>
+                </div>
               </div>
-              <Button variant="ghost" size="icon" class="h-8 w-8 ml-2 shrink-0" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
-                <ChevronRight class="h-4 w-4" />
-              </Button>
+              
+              <div class="flex items-center gap-2">
+                 <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-full" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
+                    <ChevronRight class="h-4 w-4" />
+                 </Button>
+              </div>
             </div>
+          </div>
         </div>
       </div>
     </div>
@@ -79,14 +112,14 @@
 import { computed, h } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
-import MessageTypeLabel from './MessageTypeLabel.vue'
 import ReactMarkdown from './ReactMarkdown.vue'
 import ReactECharts from './ReactECharts.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ChevronRight } from 'lucide-vue-next'
+import { ChevronRight, Terminal, FileText, Search, Zap } from 'lucide-vue-next'
+import { getMessageLabel } from '@/utils/messageLabels'
 
 const props = defineProps({
   message: {
@@ -139,7 +172,7 @@ const markdownComponents = {
     if (!inline && (language === 'echarts' || language === 'echart')) {
       try {
         const chartOption = JSON.parse(String(children).replace(/\n$/, ''))
-        return h('div', { class: 'echarts-container', style: { margin: '10px 0' } }, [
+        return h('div', { class: 'echarts-container', style: { margin: '16px 0' } }, [
           h(ReactECharts, { 
             option: chartOption, 
             style: { height: '400px', width: '100%' },
@@ -148,11 +181,11 @@ const markdownComponents = {
         ])
       } catch (error) {
         return h('div', { 
-          class: 'p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm'
+          class: 'p-4 bg-destructive/5 border border-destructive/20 rounded-lg text-destructive text-sm'
         }, [
-          h('strong', { class: 'font-semibold' }, 'ECharts 配置错误: '),
-          error.message,
-          h('pre', { style: { marginTop: '8px', fontSize: '12px' } }, String(children).replace(/\n$/, ''))
+          h('strong', { class: 'font-semibold block mb-1' }, 'ECharts 配置错误'),
+          h('div', { class: 'opacity-90' }, error.message),
+          h('pre', { class: 'mt-2 p-2 bg-black/5 rounded text-xs overflow-x-auto' }, String(children).replace(/\n$/, ''))
         ])
       }
     }
@@ -196,8 +229,33 @@ const getToolResult = (toolCall) => {
   return null
 }
 
-const getFileName = (filePath) => {
-  return filePath ? filePath.split('/').pop() : ''
+const getToolName = (message) => {
+    if (message.tool_calls && message.tool_calls.length > 0) {
+        return message.tool_calls[0].function?.name || ''
+    }
+    return ''
+}
+
+const getLabel = ({ role, type, messageType, toolName }) => {
+  return getMessageLabel({
+    role,
+    type: messageType || type, // 优先使用 messageType
+    toolName
+  })
+}
+
+const formatTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+const getToolIcon = (name) => {
+  if (!name) return Zap
+  if (name.includes('search')) return Search
+  if (name.includes('file') || name.includes('read')) return FileText
+  if (name.includes('command') || name.includes('terminal')) return Terminal
+  return Zap
 }
 
 const handleToolClick = (toolCall, toolResult) => {
