@@ -131,7 +131,7 @@ const treeData = computed(() => {
       children: [],
 
       symbol: 'roundRect',
-      symbolSize: [260, 70],
+      symbolSize: [240, 70],
       
       // Node styling
       itemStyle: {
@@ -146,16 +146,15 @@ const treeData = computed(() => {
 
       label: {
         show: true,
-        position: 'insideLeft',
-        align: 'left',
+        position: 'inside',
+        align: 'center',
         verticalAlign: 'middle',
-        padding: [0, 0, 0, 16], // Left padding for text
         formatter: ({ name, data }) => {
           const statusIcon = data.status === 'ERROR' ? '❌' : ''
           const cost = `${data.value?.toFixed(1) || 0} ms`
           
           // Truncate name
-          const maxLength = 26
+          const maxLength = 18
           const displayName = name.length > maxLength ? name.slice(0, maxLength) + '...' : name
           
           return `{t|${displayName}}\n{d|${cost}}  {s|${statusIcon}}`

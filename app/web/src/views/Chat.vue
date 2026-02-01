@@ -31,7 +31,7 @@
     </div>
     <div class="flex-1 overflow-hidden relative flex flex-row">
       <div class="flex-1 flex flex-col min-w-0 bg-muted/5 relative">
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth">
+        <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
           <div v-if="!messages || messages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
             <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm">
                <Bot :size="32" class="opacity-80 text-primary" />
@@ -39,19 +39,29 @@
             <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
             <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
           </div>
-          <div v-else ref="messagesListRef" class="pb-8 max-w-4xl mx-auto w-full" @scroll="handleScroll">
+          <div v-else class="pb-8 max-w-4xl mx-auto w-full">
             <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
               :messages="messages || []" :message-index="index" @download-file="downloadFile"
               @toolClick="handleToolClick" />
-            <div v-if="isLoading" class="flex justify-start py-4 px-4">
-              <div class="flex items-center gap-3">
-                 <div class="h-8 w-8 rounded-full bg-muted/50 flex items-center justify-center animate-pulse">
-                    <Bot class="h-4 w-4 opacity-50" />
+            <div v-if="isLoading && (!messages?.length || messages[messages.length - 1]?.role !== 'assistant')" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+              <div class="flex items-start gap-4 max-w-[80%]">
+                 <!-- Avatar -->
+                 <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/10 flex items-center justify-center shrink-0 shadow-sm mt-1">
+                    <Bot class="h-4 w-4 text-primary animate-pulse" />
                  </div>
-                 <div class="loading-dots opacity-60 scale-90">
-                   <span></span>
-                   <span></span>
-                   <span></span>
+                 
+                 <!-- Loading Bubble -->
+                 <div class="relative group">
+                   <div class="bg-background border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm flex items-center gap-3">
+                     <div class="flex items-center gap-1">
+                       <span class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]"></span>
+                       <span class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]"></span>
+                       <span class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce"></span>
+                     </div>
+                   </div>
+                   
+                   <!-- Decorative blur effect -->
+                   <div class="absolute -inset-1 bg-gradient-to-r from-primary/10 to-transparent blur-lg opacity-20 -z-10 group-hover:opacity-30 transition-opacity"></div>
                  </div>
               </div>
             </div>
@@ -138,6 +148,7 @@ const toolResult = ref(null)
 
 // 滚动相关状态
 const isUserScrolling = ref(false)
+const isAutoScrolling = ref(false)
 const shouldAutoScroll = ref(true)
 const scrollTimeout = ref(null)
 
@@ -483,6 +494,9 @@ const handleMessage = (messageData) => {
       ...messageData,
       timestamp: messageData.timestamp || Date.now()
     });
+    // 新消息开始时强制滚动到底部
+    shouldAutoScroll.value = true
+    nextTick(() => scrollToBottom(true))
   }
   console.log('📝 处理消息:', newMessages);
   messages.value = newMessages;
@@ -547,9 +561,16 @@ const selectedAgentId = computed(() => selectedAgent.value?.id)
 const scrollToBottom = (force = false) => {
   if (!shouldAutoScroll.value && !force) return
   
+  isAutoScrolling.value = true
   nextTick(() => {
     if (messagesListRef.value) {
       messagesListRef.value.scrollTop = messagesListRef.value.scrollHeight
+      // 这里的timeout是为了防止 programmatic scroll 触发 scroll 事件导致 shouldAutoScroll 被置为 false
+      setTimeout(() => {
+        isAutoScrolling.value = false
+      }, 100)
+    } else {
+      isAutoScrolling.value = false
     }
   })
 }
@@ -566,6 +587,7 @@ const isScrolledToBottom = () => {
 // 处理用户滚动
 const handleScroll = () => {
   if (!messagesListRef.value) return
+  if (isAutoScrolling.value) return
   
   // 清除之前的超时
   if (scrollTimeout.value) {
