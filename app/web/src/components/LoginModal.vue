@@ -1,22 +1,14 @@
 <template>
-  <div v-if="visible" class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200" @click="handleOverlayClick">
-    <Card class="w-[90%] max-w-[400px] shadow-2xl animate-in zoom-in-95 duration-200" @click.stop>
-      <CardHeader>
-        <div class="flex justify-between items-center">
-          <CardTitle>{{ mode === 'login' ? '用户登录' : '用户注册' }}</CardTitle>
-          <Button 
-            v-if="!required" 
-            variant="ghost" 
-            size="icon" 
-            class="h-8 w-8 rounded-full" 
-            @click="$emit('close')"
-          >
-            <span class="text-lg leading-none">&times;</span>
-          </Button>
-        </div>
-      </CardHeader>
+  <Dialog :open="visible" @update:open="(val) => !val && $emit('close')">
+    <DialogContent class="sm:max-w-[400px] p-0 overflow-hidden">
+      <DialogHeader class="px-6 pt-6">
+        <DialogTitle>{{ mode === 'login' ? '用户登录' : '用户注册' }}</DialogTitle>
+        <DialogDescription class="hidden">
+          {{ mode === 'login' ? '登录您的账户以继续' : '创建一个新账户' }}
+        </DialogDescription>
+      </DialogHeader>
       
-      <CardContent>
+      <div class="px-6 py-4">
         <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="grid gap-4">
           <div class="grid gap-2">
             <Label for="username">用户名</Label>
@@ -46,7 +38,7 @@
           </div>
 
           <Button type="submit" class="w-full" :disabled="isLoading || !loginForm.username || !loginForm.password">
-            <span v-if="isLoading" class="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+            <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             {{ isLoading ? '登录中...' : '登录' }}
           </Button>
         </form>
@@ -92,12 +84,13 @@
           </div>
 
           <Button type="submit" class="w-full" :disabled="isLoading || !registerForm.username || !registerForm.password || !registerForm.confirmPassword">
-            <span v-if="isLoading" class="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+            <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             {{ isLoading ? '注册中...' : '注册并登录' }}
           </Button>
         </form>
-      </CardContent>
-      <CardFooter class="flex justify-center bg-muted/50 p-4 rounded-b-lg">
+      </div>
+
+      <div class="bg-muted/50 p-4 flex justify-center border-t">
         <div class="text-sm text-muted-foreground">
           <span v-if="mode === 'login'">
             没有账号？<a href="#" class="text-primary font-medium hover:underline" @click.prevent="switchToRegister">去注册</a>
@@ -106,18 +99,25 @@
             已有账号？<a href="#" class="text-primary font-medium hover:underline" @click.prevent="switchToLogin">去登录</a>
           </span>
         </div>
-      </CardFooter>
-    </Card>
-  </div>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup>
 import { ref, reactive } from 'vue'
 import { loginAPI, registerAPI } from '../utils/auth.js'
+import { Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle,
+  DialogDescription
+} from '@/components/ui/dialog'
 
 const props = defineProps({
   visible: {

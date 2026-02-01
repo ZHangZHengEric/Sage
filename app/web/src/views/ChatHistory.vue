@@ -1,7 +1,7 @@
 <template>
-  <div class="history-page">
-    <div class="conversations-container">
-      <div class="search-filter-row">
+  <div class="h-full flex flex-col p-6 bg-background">
+    <div class="bg-background rounded-lg flex-1 flex flex-col min-h-0">
+      <div class="flex gap-4 items-center mb-6">
         <div class="relative w-full max-w-sm flex-1">
           <Input 
             v-model="searchTerm" 
@@ -11,7 +11,7 @@
           <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
         </div>
         
-        <div class="filter-controls">
+        <div class="flex gap-3 items-center">
           <Select v-model="filterAgent">
             <SelectTrigger class="w-[140px]">
               <SelectValue :placeholder="t('history.all')" />
@@ -36,67 +36,75 @@
           </Select>
         </div>
       </div>
-      <div class="conversations-list">
+      
+      <div class="flex-1 overflow-y-auto pr-2 space-y-3">
         <!-- 加载状态 -->
-        <div v-if="isLoading" class="loading-state">
+        <div v-if="isLoading" class="flex flex-col gap-4 p-4">
+           <!-- Skeleton loader could go here -->
+           <div class="h-24 w-full bg-muted animate-pulse rounded-lg"></div>
+           <div class="h-24 w-full bg-muted animate-pulse rounded-lg"></div>
+           <div class="h-24 w-full bg-muted animate-pulse rounded-lg"></div>
         </div>
+        
         <div
           v-else
           v-for="conversation in paginatedConversations"
           :key="conversation.id"
-          :class="['conversation-card', { selected: selectedConversations.has(conversation.id) }]"
+          :class="[
+            'group border rounded-lg p-0 transition-all hover:shadow-md hover:border-primary/50 bg-card text-card-foreground',
+            { 'border-primary bg-primary/5': selectedConversations.has(conversation.id) }
+          ]"
         >
-          <div class="conversation-header">
-            <div class="conversation-info" @click="handleSelectConversation(conversation)">
-              <div class="conversation-title-row">
-                <h3 class="conversation-title">{{ conversation.title }}</h3>
-                 <!-- 展示session_id并支持复制 -->
-                 
-                <div class="conversation-meta">
- <span class="conversation-session-id">
+          <div class="flex items-start gap-4 p-4">
+            <div class="flex-1 min-w-0 cursor-pointer" @click="handleSelectConversation(conversation)">
+              <div class="flex justify-between items-start mb-2">
+                <h3 class="text-base font-semibold leading-none tracking-tight text-foreground truncate pr-2">{{ conversation.title }}</h3>
+                
+                <div class="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
+                  <span class="flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded">
                     {{ conversation.session_id }}
                     <button
-                      class="copy-session-id-btn"
+                      class="inline-flex items-center justify-center h-4 w-4 hover:text-primary transition-colors"
                       @click.stop="copySessionId(conversation)"
                       :title="t('common.copy') || '复制'"
                     >
-                      <Copy :size="12" />
+                      <Copy :size="10" />
                     </button>
                   </span>
-                  <span class="conversation-date">
+                  <span class="flex items-center gap-1">
                     <Calendar :size="12" />
                     {{ formatDate(conversation.updated_at) }}
                   </span>
-                  <span class="conversation-time">
+                  <span class="flex items-center gap-1">
                     <Clock :size="12" />
                     {{ formatTime(conversation.updated_at) }}
                   </span>
                 </div>
               </div>
        
-              <div class="conversation-stats">
-                <div class="stat-group">
-                  <div class="stat-item-small">
+              <div class="flex justify-between items-center">
+                <div class="flex gap-4">
+                  <div class="flex items-center gap-1 text-xs text-muted-foreground">
                     <User :size="12" />
                     <span>{{ conversation.user_count }}</span>
                   </div>
-                  <div class="stat-item-small">
+                  <div class="flex items-center gap-1 text-xs text-muted-foreground">
                     <Bot :size="12" />
                     <span>{{ conversation.agent_count }}</span>
                   </div>
                 </div>
                 
-                <div class="agent-info">
-                  <span class="agent-name">{{ getAgentName(conversation.agent_id) }}</span>
+                <div class="text-right">
+                  <span class="text-xs font-medium text-primary">{{ getAgentName(conversation.agent_id) }}</span>
                 </div>
               </div>
             </div>
             
-            <div class="conversation-actions">
+            <div class="flex flex-col gap-2 shrink-0">
               <Button
-                variant="default"
+                variant="ghost"
                 size="icon"
-                class="h-8 w-8"
+                class="h-8 w-8 text-muted-foreground hover:text-foreground"
                 @click.stop="handleShareConversation(conversation)"
                 :title="t('history.share')"
               >
@@ -105,36 +113,36 @@
             </div>
           </div>
         </div>
+        
+        <div v-if="!isLoading && totalCount === 0" class="flex flex-col items-center justify-center h-full text-muted-foreground min-h-[300px]">
+          <MessageCircle :size="48" class="mb-4 opacity-50" />
+          <h3 class="text-lg font-medium mb-2">{{ t('history.noConversations') }}</h3>
+          <p class="text-sm">{{ t('history.noConversationsDesc') }}</p>
+        </div>
       </div>
           
-    <!-- 分页组件 -->
-    <div v-if="totalCount > 0" class="flex items-center justify-center gap-4 py-4">
-      <Button 
-        variant="outline" 
-        size="sm" 
-        :disabled="currentPage <= 1" 
-        @click="handlePageChange(currentPage - 1)"
-      >
-        Previous
-      </Button>
-      <span class="text-sm text-muted-foreground">
-        Page {{ currentPage }} of {{ Math.ceil(totalCount / pageSize) }}
-      </span>
-      <Button 
-        variant="outline" 
-        size="sm" 
-        :disabled="currentPage * pageSize >= totalCount" 
-        @click="handlePageChange(currentPage + 1)"
-      >
-        Next
-      </Button>
-    </div>
-    </div>
-
-    <div v-if="totalCount === 0" class="empty-state">
-      <MessageCircle :size="48" class="empty-icon" />
-      <h3>{{ t('history.noConversations') }}</h3>
-      <p>{{ t('history.noConversationsDesc') }}</p>
+      <!-- 分页组件 -->
+      <div v-if="totalCount > 0" class="flex items-center justify-center gap-4 py-6 border-t mt-2">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          :disabled="currentPage <= 1" 
+          @click="handlePageChange(currentPage - 1)"
+        >
+          Previous
+        </Button>
+        <span class="text-sm text-muted-foreground">
+          Page {{ currentPage }} of {{ Math.ceil(totalCount / pageSize) }}
+        </span>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          :disabled="currentPage * pageSize >= totalCount" 
+          @click="handlePageChange(currentPage + 1)"
+        >
+          Next
+        </Button>
+      </div>
     </div>
     
     <!-- 分享模态框 -->
@@ -423,300 +431,3 @@ onMounted(async () => {
   await loadConversationsPaginated()
 })
 </script>
-
-<style scoped>
-.history-page {
-  padding: 1.5rem;
-  min-height: 100vh;
-  background: transparent;
-}
-
-.conversations-container {
-  background: transparent;
-  border-radius: 8px;
-}
-
-.search-filter-row {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.search-box {
-  position: relative;
-  flex: 1;
-  max-width: 400px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 1rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: rgba(0, 0, 0, 1);
-  z-index: 1;
-}
-
-.search-input {
-  padding-left: 2.5rem;
-}
-
-.filter-controls {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.filter-select,
-.sort-select {
-  min-width: 120px;
-}
-
-.bulk-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  background: rgba(255, 193, 7, 0.1);
-  border: 1px solid #ffc107;
-  border-radius: 6px;
-  margin-bottom: 1rem;
-}
-
-.selected-count {
-  color: #ffc107;
-  font-weight: 500;
-}
-
-
-
-.conversations-list {
-  padding: 1rem;
-    overflow-y: auto;
-  max-height: calc(100vh - 200px);
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-}
-
-.conversation-card {
-  border: 1px solid rgba(159, 147, 147, 0.328);
-  border-radius: 8px;
-  margin-bottom: 1rem;
-  background: transparent;
-  transition: all 0.2s ease;
-}
-
-.conversation-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.conversation-card.selected {
-  border-color: #667eea;
-  background: rgba(102, 126, 234, 0.1);
-}
-
-.conversation-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 1rem;
-}
-
-.conversation-select {
-  padding-top: 0.25rem;
-}
-
-.conversation-info {
-  flex: 1;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.conversation-title-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 0.5rem;
-}
-
-.conversation-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #1d1d1d;
-  word-break: break-word;
-}
-
-.conversation-meta {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  flex-shrink: 0;
-}
-.conversation-session-id,
-.conversation-date,
-.conversation-time {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-  color: rgba(72, 65, 65, 0.7);
-}
-
-.copy-session-id-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
-  height: 18px;
-  border: none;
-  background: transparent;
-  color: #667eea;
-  cursor: pointer;
-}
-
-.copy-session-id-btn:hover {
-  text-decoration: underline;
-}
-
-.conversation-preview {
-  margin: 0 0 1rem 0;
-  color: rgba(100, 84, 84, 0.7);
-  font-size: 0.875rem;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.conversation-stats {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.stat-group {
-  display: flex;
-  gap: 1rem;
-}
-
-.stat-item-small {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-  color: rgba(82, 74, 74, 0.7);
-}
-
-.agent-info {
-  text-align: right;
-}
-
-.agent-name {
-  font-size: 0.75rem;
-  color: #667eea;
-  font-weight: 500;
-}
-
-.conversation-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 3rem 2rem;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.empty-icon {
-  margin-bottom: 1rem;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.125rem;
-  font-weight: 500;
-}
-
-.empty-state p {
-  margin: 0 0 1.5rem 0;
-  font-size: 0.875rem;
-}
-
-.export-options {
-  display: flex;
-  gap: 1rem;
-  margin: 1rem 0;
-}
-
-.export-btn {
-  flex: 1;
-}
-
-.export-info {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: transparent;
-  border-radius: 6px;
-  font-size: 0.875rem;
-}
-
-.export-info p {
-  margin: 0.5rem 0;
-}
-
-/* 分页样式 */
-.pagination-container {
-  display: flex;
-  justify-content: center;
-  margin: 2rem 0;
-  padding: 1rem;
-  border-radius: 8px;
-}
-
-.pagination-container :deep(.el-pagination) {
-  --el-pagination-bg-color: transparent;
-  --el-pagination-border-radius: 6px;
-}
-
-.pagination-container :deep(.el-pagination .btn-prev),
-.pagination-container :deep(.el-pagination .btn-next) {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color:  #1a1a2e;
-}
-
-.pagination-container :deep(.el-pagination .btn-prev:hover),
-.pagination-container :deep(.el-pagination .btn-next:hover) {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.pagination-container :deep(.el-pagination .el-pager li) {
-  background: #1a1a2e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-  margin: 0 2px;
-}
-
-.pagination-container :deep(.el-pagination .el-pager li:hover) {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.pagination-container :deep(.el-pagination .el-pager li.is-active) {
-  background: transparent;
-  color: #1a1a2e;
-}
-</style>

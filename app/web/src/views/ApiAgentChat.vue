@@ -1,154 +1,195 @@
 <template>
-  <div class="api-doc">
-    <div class="doc-header">
-      <div class="doc-header-left">
-        <h2>Agent对话 · API参考</h2>
+  <div class="h-full overflow-y-auto w-full">
+    <div class="container mx-auto py-6 max-w-5xl">
+      <div class="flex items-center justify-between mb-6">
+      <div class="space-y-1">
+        <h2 class="text-2xl font-bold tracking-tight">Agent对话 · API参考</h2>
       </div>
-
     </div>
 
-    <div class="endpoint-bar">
-      <span class="method-badge">POST</span>
-      <span class="endpoint-path">{{ endpoint }}/api/stream</span>
-    </div>
+    <Card class="mb-8">
+      <CardContent class="flex items-center gap-4 p-4">
+        <Badge variant="secondary" class="font-bold text-primary">POST</Badge>
+        <span class="font-mono font-medium">{{ endpoint }}/api/stream</span>
+      </CardContent>
+    </Card>
 
-    <div class="doc-content">
+    <div class="space-y-8">
       
-
-      <section class="doc-section">
-        <div class="section-title">Headers</div>
-        <div class="section-block">
-          <div class="chip-group">
-            <span class="chip">Content-Type</span>
-            <span class="chip">application/json</span>
-            <span class="chip danger">required</span>
-          </div>
-        </div>
+      <section>
+        <h3 class="text-lg font-bold mb-4 flex items-center gap-2">Headers</h3>
+        <Card>
+          <CardContent class="p-4">
+            <div class="flex gap-2 flex-wrap">
+              <Badge variant="outline">Content-Type</Badge>
+              <Badge variant="secondary">application/json</Badge>
+              <Badge variant="destructive">required</Badge>
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
-      <section class="doc-section">
-        <div class="section-title">Body <span class="muted">application/json</span></div>
-        <div class="doc-hint danger">不同会话请使用不同的 <code>session_id</code>。<code>system_context</code> 按业务值填写。</div>
-        <div class="param-list">
-          <div class="param-item" v-for="p in params" :key="p.name">
-            <div class="param-head">
-              <div class="param-name">{{ p.name }}</div>
-              <div class="param-tags">
-                <span class="chip type">{{ p.type }}</span>
-                <span v-if="p.required" class="chip danger">必填</span>
+      <section>
+        <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+          Body <span class="text-muted-foreground font-normal text-sm">application/json</span>
+        </h3>
+        
+        <Alert variant="destructive" class="mb-4">
+          <AlertTitle>Attention</AlertTitle>
+          <AlertDescription>
+            不同会话请使用不同的 <code>session_id</code>。<code>system_context</code> 按业务值填写。
+          </AlertDescription>
+        </Alert>
+
+        <div class="grid gap-4">
+          <Card v-for="p in params" :key="p.name">
+            <CardHeader class="p-4 pb-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold">{{ p.name }}</span>
+                <Badge variant="secondary">{{ p.type }}</Badge>
+                <Badge v-if="p.required" variant="destructive">必填</Badge>
               </div>
-            </div>
-            <div class="param-desc">{{ p.desc }}</div>
-            <div v-if="p.children && p.children.length" class="param-children">
-              <div class="param-child" v-for="c in p.children" :key="p.name + '-' + c.name">
-                <div class="param-head">
-                  <div class="param-name">{{ c.name }}</div>
-                  <div class="param-tags">
-                    <span class="chip type">{{ c.type }}</span>
-                    <span v-if="c.required" class="chip danger">必填</span>
+            </CardHeader>
+            <CardContent class="p-4 pt-0">
+              <p class="text-sm text-muted-foreground">{{ p.desc }}</p>
+              
+              <div v-if="p.children && p.children.length" class="mt-4 pl-4 border-l-2 border-muted space-y-4">
+                <div v-for="c in p.children" :key="p.name + '-' + c.name">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <span class="font-semibold text-sm">{{ c.name }}</span>
+                    <Badge variant="secondary" class="text-xs">{{ c.type }}</Badge>
+                    <Badge v-if="c.required" variant="destructive" class="text-xs">必填</Badge>
                   </div>
+                  <p class="text-xs text-muted-foreground">{{ c.desc }}</p>
                 </div>
-                <div class="param-desc">{{ c.desc }}</div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div class="doc-section">
-          <div class="section-title">请求示例</div>
-          <a href="#" class="link" @click.prevent="goToAgentList">前往Agent列表查看调用示例</a>
+        <div class="mt-8">
+          <h3 class="text-lg font-bold mb-4">请求示例</h3>
+          <Button variant="link" class="p-0 h-auto text-primary" @click="goToAgentList">
+            前往Agent列表查看调用示例
+          </Button>
         </div>
       </section>
 
-      <section class="doc-section">
-        <div class="section-title">Response <span class="muted">200 · application/json</span></div>
-        <div class="param-list">
-          <div class="param-item" v-for="p in responseParams" :key="p.name">
-            <div class="param-head">
-              <div class="param-name">{{ p.name }}</div>
-              <div class="param-tags">
-                <span class="chip type">{{ p.type }}</span>
-                <span v-if="p.required" class="chip danger">必填</span>
+      <section>
+        <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+          Response <span class="text-muted-foreground font-normal text-sm">200 · application/json</span>
+        </h3>
+        
+        <div class="grid gap-4 mb-8">
+          <Card v-for="p in responseParams" :key="p.name">
+            <CardHeader class="p-4 pb-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold">{{ p.name }}</span>
+                <Badge variant="secondary">{{ p.type }}</Badge>
+                <Badge v-if="p.required" variant="destructive">必填</Badge>
               </div>
-            </div>
-            <div class="param-desc">{{ p.desc }}</div>
-            <div v-if="p.children && p.children.length" class="param-children">
-              <div class="param-child" v-for="c in p.children" :key="p.name + '-' + c.name">
-                <div class="param-head">
-                  <div class="param-name">{{ c.name }}</div>
-                  <div class="param-tags">
-                    <span class="chip type">{{ c.type }}</span>
-                    <span v-if="c.required" class="chip danger">必填</span>
+            </CardHeader>
+            <CardContent class="p-4 pt-0">
+              <p class="text-sm text-muted-foreground">{{ p.desc }}</p>
+              
+              <div v-if="p.children && p.children.length" class="mt-4 pl-4 border-l-2 border-muted space-y-4">
+                <div v-for="c in p.children" :key="p.name + '-' + c.name">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <span class="font-semibold text-sm">{{ c.name }}</span>
+                    <Badge variant="secondary" class="text-xs">{{ c.type }}</Badge>
+                    <Badge v-if="c.required" variant="destructive" class="text-xs">必填</Badge>
                   </div>
+                  <p class="text-xs text-muted-foreground">{{ c.desc }}</p>
                 </div>
-                <div class="param-desc">{{ c.desc }}</div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div class="section-title">分块事件说明</div>
-        <div class="param-list">
-          <div class="param-item" v-for="p in chunkParams" :key="p.name">
-            <div class="param-head">
-              <div class="param-name">{{ p.name }}</div>
-              <div class="param-tags">
-                <span class="chip type">{{ p.type }}</span>
+        <h3 class="text-lg font-bold mb-4">分块事件说明</h3>
+        <div class="grid gap-4 mb-8">
+          <Card v-for="p in chunkParams" :key="p.name">
+            <CardHeader class="p-4 pb-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold">{{ p.name }}</span>
+                <Badge variant="secondary">{{ p.type }}</Badge>
               </div>
-            </div>
-            <div class="param-desc">{{ p.desc }}</div>
-            <div v-if="p.children && p.children.length" class="param-children">
-              <div class="param-child" v-for="c in p.children" :key="p.name + '-' + c.name">
-                <div class="param-head">
-                  <div class="param-name">{{ c.name }}</div>
-                  <div class="param-tags">
-                    <span class="chip type">{{ c.type }}</span>
+            </CardHeader>
+            <CardContent class="p-4 pt-0">
+              <p class="text-sm text-muted-foreground">{{ p.desc }}</p>
+              
+              <div v-if="p.children && p.children.length" class="mt-4 pl-4 border-l-2 border-muted space-y-4">
+                <div v-for="c in p.children" :key="p.name + '-' + c.name">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <span class="font-semibold text-sm">{{ c.name }}</span>
+                    <Badge variant="secondary" class="text-xs">{{ c.type }}</Badge>
                   </div>
+                  <p class="text-xs text-muted-foreground">{{ c.desc }}</p>
                 </div>
-                <div class="param-desc">{{ c.desc }}</div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div class="code-card">
-          <div class="code-card-header">
-            <div class="code-card-title">流式响应示例</div>
-            <div class="code-card-actions">
-              <button class="icon-btn" title="复制" @click="copy(exampleStreamResponse)"><Copy :size="16" /></button>
-              <button class="icon-btn" :title="showResponseExample ? '收起' : '展开'" @click="showResponseExample = !showResponseExample">
-                <component :is="showResponseExample ? 'ChevronUp' : 'ChevronDown'" :size="16" />
-              </button>
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between p-4">
+            <CardTitle class="text-base">流式响应示例</CardTitle>
+            <div class="flex gap-2">
+              <Button variant="ghost" size="icon" title="复制" @click="copy(exampleStreamResponse)">
+                <Copy class="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="icon" :title="showResponseExample ? '收起' : '展开'" @click="showResponseExample = !showResponseExample">
+                <component :is="showResponseExample ? 'ChevronUp' : 'ChevronDown'" class="w-4 h-4" />
+              </Button>
             </div>
-          </div>
-          <div v-show="showResponseExample" class="code-card-body">
-            <pre class="code"><code>{{ exampleStreamResponse }}</code></pre>
-          </div>
-        </div>
+          </CardHeader>
+          <CardContent v-show="showResponseExample" class="p-0">
+            <pre class="bg-slate-950 text-slate-50 p-4 overflow-auto rounded-b-lg text-sm"><code>{{ exampleStreamResponse }}</code></pre>
+          </CardContent>
+        </Card>
       </section>
 
-      <section class="doc-section">
-        <div class="section-title">消息类型 type 含义</div>
-        <div class="simple-table">
-          <div class="simple-head">
-            <div>类型</div>
-            <div>含义</div>
-          </div>
-          <div class="simple-row" v-for="t in typeList" :key="t.key">
-            <div class="cell name">{{ t.key }}</div>
-            <div class="cell desc">{{ t.label }}</div>
-          </div>
+      <section>
+        <h3 class="text-lg font-bold mb-4">消息类型 type 含义</h3>
+        <div class="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-[200px]">类型</TableHead>
+                <TableHead>含义</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="t in typeList" :key="t.key">
+                <TableCell class="font-medium">{{ t.key }}</TableCell>
+                <TableCell>{{ t.label }}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
       </section>
+    </div>
     </div>
   </div>
-  </template>
+</template>
 
 <script setup>
 import { computed, ref } from 'vue'
 import { Copy, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { messageTypeLabels } from '../utils/messageLabels.js'
 import { useRouter } from 'vue-router'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const endpoint = (
   import.meta.env.VITE_SAGE_API_BASE_URL ||
@@ -272,76 +313,4 @@ const scrollTo = (id) => {
 }
 </script>
 
-<style scoped>
-.api-doc { padding: 24px; max-width: 1000px; margin: 0 auto; }
-.doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.doc-header-left h2 { margin: 0 0 6px 0; font-size: 22px; font-weight: 700; color: #1f2937; }
-.doc-subtitle { margin: 0; color: rgba(0,0,0,0.6); }
-.doc-header-right { display: flex; align-items: center; gap: 12px; }
-.lang-toggle { display: inline-flex; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; overflow: hidden; }
-.toggle-btn { padding: 6px 12px; border: none; background: transparent; color: #374151; cursor: pointer; }
-.toggle-btn.active { background: #ffffff; }
-.primary-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid #e5e7eb; background: #4f46e5; color: #ffffff; cursor: pointer; }
-.link { color: #4f46e5; font-weight: 600; cursor: pointer; text-decoration: none; }
-.link:hover { text-decoration: underline; }
 
-.endpoint-bar { display: flex; align-items: center; gap: 10px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; background: #ffffff; }
-.method-badge { display: inline-block; padding: 4px 8px; border-radius: 6px; background: #eef2ff; color: #4f46e5; font-weight: 700; }
-.endpoint-path { color: #111827; font-weight: 600; }
-.ghost-btn { margin-left: auto; background: transparent; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 10px; color: #374151; cursor: pointer; }
-
-.doc-content { display: block; }
-
-.doc-section { margin-top: 24px; }
-.section-title { font-weight: 700; color: #111827; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.muted { color: #6b7280; font-weight: 400; }
-.section-block { border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; padding: 12px; }
-.chip-group { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.chip { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
-.chip.danger { background: #fee2e2; color: #ef4444; border-color: #fecaca; }
-.field { margin-top: 8px; }
-.field label { display: block; color: #6b7280; margin-bottom: 6px; }
-.input { width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; }
-.textarea { width: 100%; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; }
-
-.doc-hint { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
-.doc-hint.danger { background: #fff2f0; border: 1px solid #ffccc7; color: #cf1322; }
-
-.param-list { display: grid; gap: 12px; }
-.param-item { border-top: 2px solid #e5e7eb;  background: #ffffff; padding: 12px; }
-.param-head { display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
-.param-name { font-weight: 700; color: #1f2937; padding-top: 10px; }
-.param-tags { display: inline-flex; gap: 6px; }
-.param-tags .chip.type { background: #eef2ff; color: #4f46e5; border-color: #e0e7ff; }
-.param-desc { color: #374151; margin-top: 6px; }
-.param-children { border-top: 1px solid #f3f4f6; padding-left: 20px; margin-top: 10px; display: grid; gap: 10px; }
-.param-child .param-name { font-weight: 600; }
-
-.code-card { border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; margin-top: 12px; }
-.code-card-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
-.code-card-title { font-weight: 700; color: #1f2937; }
-.code-card-actions { display: flex; gap: 6px; }
-.icon-btn { background: transparent; color: #374151; border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px; cursor: pointer; }
-.icon-btn:hover { background: #f3f4f6; }
-.code-card-body { padding: 10px 12px; }
-.code { background: #0b1020; color: #e5e7eb; border-radius: 8px; padding: 14px 16px; overflow: auto; }
-
-.sub-table { display: none; }
-
-.inline-actions { padding: 12px; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; }
-
-.simple-table { border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; border-left: none; border-right: none; background: #ffffff; border-radius: 0; }
-.simple-head { display: grid; grid-template-columns: 220px 140px 1fr; gap: 0; background: #f9fafb; padding: 10px 12px; color: #6b7280; font-weight: 600; }
-.simple-row { display: grid; grid-template-columns: 220px 140px 1fr; gap: 0; border-top: 1px solid #f3f4f6; padding: 10px 12px; }
-
-.response-preview { display: grid; gap: 10px; grid-template-columns: 1fr; margin-top: 12px; }
-
-@media (max-width: 1024px) {
-  .simple-head, .simple-row { grid-template-columns: 160px 120px 1fr; }
-}
-
-@media (max-width: 768px) {
-  .api-doc { padding: 16px; max-width: 100%; }
-  .simple-head, .simple-row { grid-template-columns: 140px 1fr; }
-}
-</style>

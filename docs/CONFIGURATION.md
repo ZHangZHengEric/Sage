@@ -374,7 +374,7 @@ custom_agents:
   code_agent:
     class: "agents.professional_agents.code_agent.CodeAgent" 
     config:
-      languages: ["python", "javascript", "java"]
+      languages: ["python", "javascript"]
       linting: true
 ```
 

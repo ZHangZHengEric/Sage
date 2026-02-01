@@ -3,26 +3,26 @@
     <div 
       v-for="file in node" 
       :key="file" 
-      class="file-item"
+      class="flex items-center gap-1.5 p-1 rounded transition-colors hover:bg-accent/50 mb-0.5"
     >
-      <span class="file-icon">📄</span>
-      <span class="file-name">{{ file.split('/').pop() }}</span>
+      <File class="w-3 h-3 text-muted-foreground" />
+      <span class="flex-1 text-[11px] text-muted-foreground/90 break-all">{{ file.split('/').pop() }}</span>
       <button 
-        class="download-btn"
+        class="flex items-center justify-center w-5 h-[18px] rounded border border-primary/30 bg-primary/10 hover:bg-primary/20 hover:border-primary/50 hover:-translate-y-px active:translate-y-0 transition-all cursor-pointer"
         @click="$emit('download', file)"
         :title="t('workspace.download')"
       >
-        ⬇️
+        <Download class="w-2.5 h-2.5 text-primary" />
       </button>
     </div>
   </template>
   
-  <div v-else class="directory-item">
-    <div class="directory-header">
-      <span class="directory-icon">📁</span>
-      <span class="directory-name">{{ name }}</span>
+  <div v-else class="bg-card/30 border border-border/50 rounded-md overflow-hidden mb-1">
+    <div class="flex items-center gap-1.5 p-1.5 bg-card/40 cursor-pointer hover:bg-card/60 transition-colors">
+      <Folder class="w-3 h-3 text-muted-foreground" />
+      <span class="text-xs font-medium text-muted-foreground/90">{{ name }}</span>
     </div>
-    <div class="directory-content">
+    <div class="pl-4 pr-2 pb-2 pt-1">
       <FileTreeNode
         v-if="hasFiles"
         name="_files"
@@ -44,6 +44,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { File, Folder, Download } from 'lucide-vue-next'
 import { useLanguage } from '../../composables/useLanguage'
 
 const props = defineProps({
@@ -74,92 +75,3 @@ const filteredNode = computed(() => {
   return filtered
 })
 </script>
-
-<style scoped>
-.directory-item {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 4px;
-}
-
-.directory-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.directory-header:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.directory-icon {
-  font-size: 12px;
-}
-
-.directory-name {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
-  font-weight: 500;
-}
-
-.directory-content {
-  padding: 4px 8px 8px 16px;
-}
-
-.file-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  transition: background 0.2s;
-  margin-bottom: 2px;
-}
-
-.file-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.file-icon {
-  font-size: 10px;
-}
-
-.file-name {
-  flex: 1;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
-  word-break: break-word;
-}
-
-.download-btn {
-  background: rgba(102, 126, 234, 0.2);
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 4px;
-  padding: 2px 4px;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 18px;
-}
-
-.download-btn:hover {
-  background: rgba(102, 126, 234, 0.3);
-  border-color: rgba(102, 126, 234, 0.5);
-  transform: translateY(-1px);
-}
-
-.download-btn:active {
-  transform: translateY(0);
-}
-</style>
