@@ -45,7 +45,7 @@
         <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
       </div>
     </main>
-    <Toaster />
+    <Toaster position="top-center" richColors />
 
     <LoginModal
         :visible="showLoginModal"
@@ -116,6 +116,4 @@ onUnmounted(() => {
 })
 </script>
 
-<style>
-/* Reset and base styles handled by Tailwind */
-</style>
+

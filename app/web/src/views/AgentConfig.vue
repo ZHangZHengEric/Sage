@@ -113,7 +113,6 @@
             <TabsTrigger value="curl">cURL</TabsTrigger>
             <TabsTrigger value="python">Python</TabsTrigger>
             <TabsTrigger value="go">Go</TabsTrigger>
-            <TabsTrigger value="java">Java</TabsTrigger>
           </TabsList>
           
           <div class="mt-4 relative group">
@@ -182,7 +181,7 @@ const editingAgent = ref(null)
 const showUsageModal = ref(false)
 const usageAgent = ref(null)
 const usageActiveTab = ref('curl')
-const usageCodeMap = ref({ curl: '', python: '', go: '', java: '' })
+const usageCodeMap = ref({ curl: '', python: '', go: '' })
 
 // Composables
 const { t } = useLanguage()
@@ -567,30 +566,10 @@ const generateUsageCodes = (agent) => {
     '}'
   ].join('\n')
 
-  const java = [
-    'import java.net.*;',
-    'import java.io.*;',
-    '',
-    'public class Demo {',
-    '  public static void main(String[] args) throws Exception {',
-    `    String url = "${backendEndpoint}/api/stream";`,
-    '    String json = ' + JSON.stringify(jsonStr) + ';',
-    '    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();',
-    '    conn.setRequestMethod("POST");',
-    '    conn.setRequestProperty("Content-Type", "application/json");',
-    '    conn.setDoOutput(true);',
-    '    try (OutputStream os = conn.getOutputStream()) {',
-    '      os.write(json.getBytes("UTF-8"));',
-    '    }',
-    '    System.out.println(conn.getResponseCode());',
-    '  }',
-    '}'
-  ].join('\n')
 
   usageCodeMap.value.curl = '```bash\n' + curl + '\n```'
   usageCodeMap.value.python = '```python\n' + python + '\n```'
   usageCodeMap.value.go = '```go\n' + go + '\n```'
-  usageCodeMap.value.java = '```java\n' + java + '\n```'
 }
 
 const usageCodeMarkdown = computed(() => usageCodeMap.value[usageActiveTab.value] || '')

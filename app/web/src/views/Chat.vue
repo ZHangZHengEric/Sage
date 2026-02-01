@@ -1,7 +1,7 @@
 <template>
-  <div class="chat-page">
-    <div class="chat-header">
-      <div class="chat-controls flex items-center gap-2">
+  <div class="flex flex-col h-full bg-background">
+    <div class="flex-none h-14 border-b flex items-center px-4 justify-end bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div class="flex items-center gap-2">
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
           <SelectTrigger class="w-[200px]">
             <SelectValue :placeholder="t('chat.selectAgent') || 'Select Agent'" />
@@ -21,18 +21,18 @@
         </Button>
       </div>
     </div>
-    <div class="chat-container">
-      <div class="chat-messages">
-        <div v-if="!messages || messages.length === 0" class="empty-state">
-          <Bot :size="48" class="empty-icon" />
-          <h3>{{ t('chat.emptyTitle') }}</h3>
-          <p>{{ t('chat.emptyDesc') }}</p>
+    <div class="flex-1 overflow-hidden relative flex flex-col">
+      <div class="flex-1 overflow-y-auto p-4 scroll-smooth">
+        <div v-if="!messages || messages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground">
+          <Bot :size="48" class="mb-4 opacity-50" />
+          <h3 class="mb-2 text-lg font-medium">{{ t('chat.emptyTitle') }}</h3>
+          <p class="mb-6 text-sm">{{ t('chat.emptyDesc') }}</p>
         </div>
-        <div v-else ref="messagesListRef" class="messages-list" @scroll="handleScroll">
+        <div v-else ref="messagesListRef" class="space-y-4 pb-4" @scroll="handleScroll">
           <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
             :messages="messages || []" :message-index="index" @download-file="downloadFile"
             @toolClick="handleToolClick" />
-          <div v-if="isLoading" class="loading-indicator">
+          <div v-if="isLoading" class="flex justify-center py-4">
             <div class="loading-dots">
               <span></span>
               <span></span>
@@ -57,7 +57,7 @@
       <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
         @config-change="updateConfig" @close="showSettings = false" />
     </div>
-    <div class="chat-input-container">
+    <div class="flex-none p-4 border-t bg-background">
         <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
     </div>
   </div>
@@ -901,110 +901,3 @@ watch(messages, () => {
 
 </script>
 
-<style scoped>
-.chat-page {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.chat-header {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid rgba(102, 96, 96, 0.207);
-}
-
-.chat-container {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-.chat-input-container {
-  padding: 16px;
-  background: white;
-  border-top: 1px solid #e1e5e9;
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-}
-
-.chat-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.agent-select {
-  min-width: 150px;
-}
-
-.chat-messages {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 2rem;
-  color: rgba(25, 25, 25, 0.7);
-}
-
-.empty-icon {
-  margin-bottom: 1rem;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.125rem;
-  font-weight: 500;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 0.875rem;
-}
-
-.messages-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-}
-
-.loading-indicator {
-  display: flex;
-  justify-content: center;
-  padding: 1rem;
-}
-
-.loading-dots {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.loading-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #667eea;
-  animation: loading-bounce 1.4s ease-in-out infinite both;
-}
-
-.loading-dots span:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.loading-dots span:nth-child(2) {
-  animation-delay: -0.16s;
-}
-</style>

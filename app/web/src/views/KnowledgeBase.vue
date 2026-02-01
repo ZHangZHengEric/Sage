@@ -6,7 +6,7 @@
         <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           v-model="searchTerm"
-          :placeholder="t('knowledgeBase.searchPlaceholder') || 'Search...'"
+          :placeholder="t('knowledgeBase.search') || 'Search...'"
           class="pl-9"
         />
       </div>

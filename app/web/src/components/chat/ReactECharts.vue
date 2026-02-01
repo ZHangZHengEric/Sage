@@ -141,9 +141,3 @@ defineExpose({
 })
 </script>
 
-<style scoped>
-.echarts-container {
-  position: relative;
-  overflow: hidden;
-}
-</style>
