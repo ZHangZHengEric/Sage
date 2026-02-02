@@ -5,7 +5,7 @@ from .bootstrap import (
     close_skill_manager,
     close_tool_manager,
     initialize_clients,
-    initialize_db_data,
+    initialize_preset_data,
     initialize_observability,
     initialize_scheduler,
     initialize_skill_manager,
@@ -13,6 +13,7 @@ from .bootstrap import (
     shutdown_clients,
     shutdown_scheduler,
     validate_and_disable_mcp_servers,
+    ensure_system_init,
 )
 from .core.config import StartupConfig
 from .utils.async_utils import create_safe_task
@@ -26,8 +27,10 @@ async def initialize_system(cfg: StartupConfig):
     # 初始化 观测链路上报
     await initialize_observability(cfg)
     # 初始化数据库预置数据（DB 连接已在 client 初始化中完成）
-    await initialize_db_data(cfg)
 
+    await ensure_system_init()
+    
+    await initialize_preset_data(cfg)
     """初始化工具与技能管理器"""
     await initialize_tool_manager()
     await initialize_skill_manager()

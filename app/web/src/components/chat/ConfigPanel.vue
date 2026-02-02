@@ -1,5 +1,13 @@
 <template>
-  <div class="w-[35%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+  <div class="fixed inset-0 z-50 sm:static sm:z-auto w-full sm:w-[35%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <!-- 移动端头部 -->
+    <div class="flex items-center justify-between p-4 border-b sm:hidden">
+      <h3 class="font-semibold">{{ t('chat.settings') }}</h3>
+      <Button variant="ghost" size="icon" @click="$emit('close')">
+        <X class="h-4 w-4" />
+      </Button>
+    </div>
+
     <div class="flex-1 overflow-y-auto p-6 space-y-6">
       
       <!-- 深度思考 -->
@@ -65,6 +73,8 @@ import ThreeOptionSwitch from './ThreeOptionSwitch.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { X } from 'lucide-vue-next'
 
 // Props
 const props = defineProps({

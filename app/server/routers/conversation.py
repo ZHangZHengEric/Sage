@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from ..core.render import Response
+from ..core.exceptions import SageHTTPException
 from ..services.conversation import (
     delete_conversation,
     get_conversation_messages,
@@ -49,30 +50,39 @@ class InterruptRequest(BaseModel):
 
 
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
-async def interrupt(session_id: str, request: InterruptRequest = None):
+async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
     """中断指定会话"""
-    message = request.message if request else "用户请求中断"
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+
+    message = body.message if body else "用户请求中断"
     data = await interrupt_session(session_id, message)
-    return await Response.succ(message=f"会话 {session_id} 已中断", data=data)
+    return await Response.succ(message=f"会话 {session_id} 已中断", data={**data, "user_id": user_id})
 
 
 @conversation_router.post("/api/sessions/{session_id}/tasks_status")
-async def get_status(session_id: str):
+async def get_status(session_id: str, request: Request):
     """获取指定会话的状态"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+
     result = await get_session_status(session_id)
     tasks = result.get("tasks_status", {}).get("tasks", [])
     logger.info(f"获取会话 {session_id} 任务数量：{len(tasks)}")
-    return await Response.succ(message=f"会话 {session_id} 状态获取成功", data=result)
+    return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result, "user_id": user_id})
 
 
 @conversation_router.post("/api/sessions/{session_id}/file_workspace")
-async def get_workspace(session_id: str):
+async def get_workspace(session_id: str, request: Request):
     """获取指定会话的文件工作空间"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+
     result = await get_file_workspace(session_id)
     files = result.get("files", [])
     logger.info(f"获取会话 {session_id} 工作空间文件数量：{len(files)}")
     return await Response.succ(
-        message=result.get("message", "获取文件列表成功"), data=result
+        message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id}
     )
 
 
@@ -102,7 +112,13 @@ async def list_conversations(
     ),
 ):
     claims = getattr(request.state, "user_claims", {}) or {}
-    current_user_id = claims.get("userid") or user_id
+    current_user_id = claims.get("userid") or user_id or ""
+    role = claims.get("role") or "user"
+
+    if role == "admin":
+        current_user_id = None
+    elif role == "user" and not current_user_id:
+        return await Response.succ(data={"list": [], "total": 0}, message="获取会话列表成功")
     conversations, total_count = await get_conversations_paginated(
         page=page,
         page_size=page_size,
@@ -143,25 +159,32 @@ async def list_conversations(
         "total_pages": total_pages,
         "has_next": has_next,
         "has_prev": has_prev,
+        "user_id": current_user_id, # Keeping this as caller context
     }
     return await Response.succ(data=result, message="获取会话列表成功")
 
 
 @conversation_router.get("/api/conversations/{conversation_id}/messages")
-async def list_messages(conversation_id: str):
+async def get_messages(conversation_id: str, request: Request):
     """获取指定对话的所有消息"""
-    result = await get_conversation_messages(conversation_id)
-    return await Response.succ(
-        data=result, message=f"获取会话 {conversation_id} 消息成功"
-    )
+            
+    data = await get_conversation_messages(conversation_id)
+    return await Response.succ(data=data, message="获取消息成功")
+
+
+@conversation_router.get("/api/share/conversations/{conversation_id}/messages")
+async def get_shared_messages(conversation_id: str):
+    """获取分享对话的消息（无权限校验）"""
+    data = await get_conversation_messages(conversation_id)
+    return await Response.succ(data=data, message="获取分享消息成功")
 
 
 @conversation_router.delete("/api/conversations/{conversation_id}")
-async def delete(conversation_id: str):
+async def delete(conversation_id: str, request: Request):
     """删除指定对话"""
     conversation_id_res = await delete_conversation(conversation_id)
     logger.info(f"会话 {conversation_id} 删除成功")
     return await Response.succ(
         message=f"会话 {conversation_id} 已删除",
-        data={"conversation_id": conversation_id_res},
+        data={"conversation_id": conversation_id_res, "user_id": target_user_id},
     )

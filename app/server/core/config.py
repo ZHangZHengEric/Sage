@@ -20,10 +20,6 @@ class StartupConfig:
     port: int = 8080
     logs_dir: str = "logs"
     workspace: str = "agent_workspace"
-    memory_root: Optional[str] = None
-    memory_type: str = "session"  # session | user
-    force_summary: bool = False
-    no_auth: bool = True  # 无认证模式，根据入参用户id获取数据
 
     # DB
     db_type: str = "file"  # file | memory | mysql
@@ -56,6 +52,7 @@ class StartupConfig:
     context_max_new_message_ratio: float = 0.5
     context_recent_turns: int = 0
     
+    # auth
     jwt_key: str = "123"
     jwt_expire_hours: int = 24
     refresh_token_secret: str = "123"
@@ -111,10 +108,6 @@ class ENV:
     PRESET_RUNNING_CONFIG = "SAGE_PRESET_RUNNING_CONFIG_PATH"
     WORKSPACE = "SAGE_WORKSPACE_PATH"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
-    MEMORY_ROOT = "SAGE_MEMORY_ROOT"
-    MEMORY_TYPE = "SAGE_MEMORY_TYPE"
-    FORCE_SUMMARY = "SAGE_FORCE_SUMMARY"
-    NO_AUTH = "SAGE_NO_AUTH"
 
     # 数据库
     DB_TYPE = "SAGE_DB_TYPE"
@@ -336,15 +329,6 @@ def create_argument_parser():
         help=f"日志目录 (环境变量: {ENV.LOGS_DIR})",
     )
 
-    parser.add_argument(
-        "--memory_type",
-        help=f"用户记忆类型: session | user (环境变量: {ENV.MEMORY_TYPE})",
-    )
-    parser.add_argument(
-        "--force_summary",
-        action="store_true",
-        help=f"是否强制总结 (环境变量: {ENV.FORCE_SUMMARY})",
-    )
 
     # Embedding 配置
     parser.add_argument(
@@ -446,13 +430,7 @@ def build_startup_config() -> StartupConfig:
         port=pick_int(args.port, ENV.PORT, StartupConfig.port),
         logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
         workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
-        memory_type=pick_str(
-            args.memory_type, ENV.MEMORY_TYPE, StartupConfig.memory_type
-        ),
-        force_summary=pick_bool(
-            args.force_summary, ENV.FORCE_SUMMARY, StartupConfig.force_summary
-        ),
-        no_auth=pick_bool(False, ENV.NO_AUTH, StartupConfig.no_auth),
+
         db_type=pick_str(args.db_type, ENV.DB_TYPE, StartupConfig.db_type),
         db_path=pick_str(args.db_path, ENV.DB_PATH, StartupConfig.db_path),
         mysql_host=pick_str(args.mysql_host, ENV.MYSQL_HOST, StartupConfig.mysql_host),
@@ -599,8 +577,7 @@ def build_startup_config() -> StartupConfig:
         os.makedirs(cfg.logs_dir, exist_ok=True)
     if cfg.db_type == "file" and cfg.db_path:
         cfg.db_path = os.path.abspath(cfg.db_path)
-    if cfg.memory_root:
-        os.environ["MEMORY_ROOT_PATH"] = cfg.memory_root
+
     return cfg
 
 

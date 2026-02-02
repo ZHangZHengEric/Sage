@@ -36,7 +36,7 @@
           <div class="flex items-center gap-2">
              <input ref="fileInputRef" type="file" multiple style="display:none" @change="onFileChange"
               accept=".doc,.docx,.pdf,.txt,.json,.eml,.ppt,.pptx,.xlsx,.xls,.csv,.md" />
-             <Button size="sm" @click="triggerSelectFiles" :disabled="docLoading">
+             <Button v-if="canEdit" size="sm" @click="triggerSelectFiles" :disabled="docLoading">
                <Upload class="mr-2 h-4 w-4" />
                上传文件
              </Button>
@@ -59,7 +59,7 @@
                 <TableCell>
                   <div class="flex items-center gap-2" :title="statusText(d.status)">
                     <Clock v-if="d.status === 0" class="h-4 w-4 text-muted-foreground" />
-                    <Loader2 v-else-if="d.status === 1" class="h-4 w-4 text-primary animate-spin" />
+                    <Loader v-else-if="d.status === 1" class="h-4 w-4 text-primary animate-spin" />
                     <CheckCircle2 v-else-if="d.status === 2" class="h-4 w-4 text-green-500" />
                     <XCircle v-else-if="d.status === 3" class="h-4 w-4 text-destructive" />
                     <span class="text-sm text-muted-foreground">{{ statusText(d.status) }}</span>
@@ -145,7 +145,7 @@
       </TabsContent>
 
       <!-- Settings Tab -->
-      <TabsContent value="settings" class="mt-6">
+      <TabsContent value="settings" class="mt-6" v-if="canEdit">
         <Card>
           <CardHeader>
             <CardTitle>知识库设置</CardTitle>
@@ -177,10 +177,11 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Trash2, RotateCcw, Clock, Loader2, CheckCircle2, XCircle, ArrowLeft, Upload, Search } from 'lucide-vue-next'
+import { Trash2, RotateCcw, Clock, Loader, CheckCircle2, XCircle, ArrowLeft, Upload, Search } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
+import { getCurrentUser } from '../utils/auth.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 
 import { Button } from '@/components/ui/button'
@@ -195,9 +196,17 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 const { t } = useLanguage()
 const route = useRoute()
 const router = useRouter()
+const currentUser = ref(getCurrentUser())
 
 const kdbId = route.params.kdbId
 const activeTab = ref('documents')
+
+const canEdit = computed(() => {
+  if (!currentUser.value) return false
+  if (currentUser.value.role === 'admin') return true
+  return kbInfo.value.user_id === currentUser.value.userid
+})
+
 const kbInfo = ref({})
 const saving = ref(false)
 const editForm = ref({ name: '', intro: '' })

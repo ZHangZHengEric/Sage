@@ -81,7 +81,7 @@ async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServ
     return mcp_servers
 
 
-async def remove_mcp_server(server_name: str, user_id: Optional[str] = None) -> str:
+async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
     """删除 MCP 服务器，返回 server_name"""
     logger.info(f"开始删除MCP server: {server_name}")
     tm = get_tool_manager()
@@ -93,6 +93,14 @@ async def remove_mcp_server(server_name: str, user_id: Optional[str] = None) -> 
             status_code=404,
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
+        )
+
+    # Permission check
+    if role != "admin" and existing_server.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权删除该MCP服务器",
+            error_detail="Permission denied",
         )
 
     success = await tm.remove_tool_by_mcp(server_name)
@@ -143,7 +151,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
     return new_disabled, status_text
 
 
-async def refresh_mcp_server(server_name: str) -> str:
+async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
     """刷新 MCP 服务器连接，返回是否成功"""
     logger.info(f"开始刷新MCP server: {server_name}")
     tm = get_tool_manager()
@@ -155,6 +163,15 @@ async def refresh_mcp_server(server_name: str) -> str:
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
+    
+    # Permission check
+    if role != "admin" and existing_server.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权操作该MCP服务器",
+            error_detail="Permission denied",
+        )
+
     await tm.remove_tool_by_mcp(server_name)
     server_config = existing_server.config
     server_config["disabled"] = False

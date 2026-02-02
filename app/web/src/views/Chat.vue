@@ -16,7 +16,10 @@
         
         <div class="h-4 w-[1px] bg-border mx-1"></div>
 
-        <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showTrace = !showTrace" title="Trace Workflow">
+        <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare" :title="t('chat.share') || 'Share'">
+          <Share class="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showTrace = !showTrace" title="Trace Workflow">
           <Activity class="h-4 w-4" />
         </Button>
         <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showSettings = !showSettings" :title="t('chat.settings')">
@@ -64,7 +67,7 @@
           <div ref="messagesEndRef" />
         </div>
         
-        <div class="flex-none p-4 border-t bg-background">
+        <div class="flex-none p-4 border-t bg-background" v-if="selectedAgent">
             <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
@@ -91,7 +94,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Bot, Settings, Activity } from 'lucide-vue-next'
+import { Bot, Settings, Activity, Share } from 'lucide-vue-next'
 
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
@@ -862,6 +865,19 @@ const sendMessageApi = async ({
   }
 };
 
+const handleShare = () => {
+  if (!currentSessionId.value) {
+    toast.error(t('chat.shareNoSession') || 'No active session to share')
+    return
+  }
+  const shareUrl = `${window.location.origin}/share/${currentSessionId.value}`
+  navigator.clipboard.writeText(shareUrl).then(() => {
+    toast.success(t('chat.shareSuccess') || 'Share link copied to clipboard')
+  }).catch(err => {
+    console.error('Copy failed:', err)
+    toast.error(t('chat.shareFailed') || 'Failed to copy link')
+  })
+}
 
 // 生命周期
 onMounted(async () => {

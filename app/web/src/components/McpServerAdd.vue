@@ -116,7 +116,7 @@
             {{ t('tools.cancel') }}
           </Button>
           <Button type="submit" :disabled="loading">
-            <Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
+            <Loader v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
             {{ loading ? t('tools.adding') : t('tools.add') }}
           </Button>
         </div>
@@ -127,7 +127,7 @@
 
 <script setup>
 import { reactive } from 'vue'
-import { Database, Code, Globe, Loader2 } from 'lucide-vue-next'
+import { Database, Code, Globe, Loader } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

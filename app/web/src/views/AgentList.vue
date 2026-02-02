@@ -13,7 +13,10 @@
         </Button>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div v-if="loading" class="flex flex-col items-center justify-center py-20">
+        <Loader class="h-8 w-8 animate-spin text-primary" />
+      </div>
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         <Card v-for="agent in agents" :key="agent.id" class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader class="pb-4">
             <div class="flex items-start gap-4">
@@ -56,14 +59,14 @@
             <Button variant="ghost" size="icon" @click="openUsageModal(agent)" :title="t('agent.usage')">
               <Settings class="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
+            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
               <Edit class="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
               <Download class="h-4 w-4" />
             </Button>
             <Button 
-              v-if="agent.id !== 'default'" 
+              v-if="canDelete(agent)" 
               variant="ghost" 
               size="icon" 
               class="text-destructive hover:text-destructive hover:bg-destructive/10"
@@ -97,42 +100,35 @@
          @update:visible="handleCloseEdit" 
        />
     </div>
-
     <!-- Usage Dialog -->
     <Dialog :open="showUsageModal" @update:open="showUsageModal = $event">
-      <DialogContent class="sm:max-w-[800px]">
+      <DialogContent class="sm:max-w-[80vw] overflow-hidden">
         <DialogHeader>
-          <DialogTitle>{{ usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例' }}</DialogTitle>
+          <DialogTitle>
+            {{ usageAgent?.name ? `调用示例 - ${usageAgent.name}` : '调用示例' }}
+          </DialogTitle>
           <DialogDescription>
-            不同的会话要替换session_id为不同值。system_context 根据真实值替换
+            不同的会话要替换 session_id 为不同值。system_context 根据真实值替换
           </DialogDescription>
         </DialogHeader>
-        
-        <Tabs v-model="usageActiveTab" class="w-full">
-          <TabsList class="grid w-full grid-cols-4">
+
+        <Tabs v-model="usageActiveTab" class="sm:max-w-[80vw] overflow-hidden">
+          <TabsList class="grid w-full grid-cols-3">
             <TabsTrigger value="curl">cURL</TabsTrigger>
             <TabsTrigger value="python">Python</TabsTrigger>
             <TabsTrigger value="go">Go</TabsTrigger>
           </TabsList>
-          
-          <div class="mt-4 relative group">
-             <Button 
-               size="icon" 
-               variant="ghost" 
-               class="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-muted/50 hover:bg-muted"
-               @click="copyUsageCode"
-             >
-               <Copy class="h-4 w-4" />
-             </Button>
-             <ScrollArea class="h-[400px] w-full rounded-md border p-4 bg-muted/30">
-               <MarkdownRenderer :content="usageCodeMarkdown" />
-             </ScrollArea>
+
+          <div class="mt-4 relative group sm:max-w-[80vw] overflow-hidden">
+            <ScrollArea class="h-[400px] rounded-md border p-4 bg-background">
+              <MarkdownRenderer :content="usageCodeMarkdown" />
+            </ScrollArea>
           </div>
         </Tabs>
-        
+
         <DialogFooter>
-           <Button variant="outline" @click="copyUsageCode">复制</Button>
-           <Button @click="showUsageModal = false">关闭</Button>
+          <Button variant="outline" @click="copyUsageCode">复制</Button>
+          <Button @click="showUsageModal = false">关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -152,9 +148,10 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Trash2, Bot, Settings, Download, Upload, Copy } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, Settings, Download, Upload, Copy, Loader } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
+import { getCurrentUser } from '../utils/auth.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
 import { toolAPI } from '../api/tool.js'
@@ -182,9 +179,30 @@ const showUsageModal = ref(false)
 const usageAgent = ref(null)
 const usageActiveTab = ref('curl')
 const usageCodeMap = ref({ curl: '', python: '', go: '' })
+const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
 
 // Composables
 const { t } = useLanguage()
+
+const currentUser = ref(getCurrentUser())
+
+
+
+const canEdit = (agent) => {
+  if (!currentUser.value) return false
+  if (currentUser.value.role === 'admin') return true
+  // If agent has no owner (system agent), user cannot edit
+  if (!agent.user_id) return false
+  return agent.user_id === currentUser.value.userid
+}
+
+const canDelete = (agent) => {
+  if (!currentUser.value) return false
+  if (currentUser.value.role === 'admin') return true
+  // If agent has no owner (system agent), user cannot delete
+  if (!agent.user_id) return false
+  return agent.user_id === currentUser.value.userid
+}
 
 // 生命周期
 onMounted(async () => {
@@ -230,7 +248,13 @@ const loadAgents = async () => {
     loading.value = true
     error.value = null
     const response = await agentAPI.getAgents()
-    agents.value = response
+    if (response.agents) {
+      agents.value = response.agents
+    } else if (Array.isArray(response)) {
+      agents.value = response
+    } else {
+      agents.value = []
+    }
   } catch (err) {
     console.error('加载agents失败:', err)
     error.value = err.message || '加载失败'
@@ -567,6 +591,12 @@ const generateUsageCodes = (agent) => {
   ].join('\n')
 
 
+  // 保存原始代码用于复制
+  usageCodeRawMap.value.curl = curl
+  usageCodeRawMap.value.python = python
+  usageCodeRawMap.value.go = go
+
+  // 保存 Markdown 格式用于展示
   usageCodeMap.value.curl = '```bash\n' + curl + '\n```'
   usageCodeMap.value.python = '```python\n' + python + '\n```'
   usageCodeMap.value.go = '```go\n' + go + '\n```'
@@ -575,8 +605,9 @@ const generateUsageCodes = (agent) => {
 const usageCodeMarkdown = computed(() => usageCodeMap.value[usageActiveTab.value] || '')
 
 const copyUsageCode = async () => {
-  const md = usageCodeMap.value[usageActiveTab.value] || ''
-  const raw = md.replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '')
+  // 直接从 raw map 获取纯净代码，避免正则处理错误
+  const raw = usageCodeRawMap.value[usageActiveTab.value] || ''
+  
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(raw)

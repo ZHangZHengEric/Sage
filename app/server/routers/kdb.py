@@ -46,37 +46,39 @@ async def kdb_add(
         language=req.language, 
         user_id=user_id
     )
-    return await Response.succ(data=KdbAddResponse(kdb_id=kdb_id))
+    return await Response.succ(data=KdbAddResponse(kdb_id=kdb_id, user_id=user_id))
 
 
 @kdb_router.post("/update", response_model=BaseResponse[SuccessResponse])
-async def kdb_update(req: KdbUpdateRequest):
+async def kdb_update(req: KdbUpdateRequest, http_request: Request):
     svc = KdbService()
-    await svc.update(
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
+    check_user_id = user_id if role != "admin" else None
+
+    kdb = await svc.update(
         kdb_id=req.kdb_id, 
         name=req.name, 
         intro=req.intro, 
-        kdb_setting=req.kdb_setting
+        kdb_setting=req.kdb_setting,
+        user_id=check_user_id
     )
-    return await Response.succ(data=SuccessResponse(success=True))
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
 @kdb_router.get("/info", response_model=BaseResponse[KdbInfoResponse])
-async def kdb_info(kdb_id: str = Query(...)):
+async def kdb_info(http_request: Request, kdb_id: str = Query(...)):
     svc = KdbService()
-    obj = await svc.info(kdb_id)
-    if not obj:
-        now_ts = int(datetime.now().timestamp())
-        return await Response.succ(
-            data=KdbInfoResponse(
-                kdbId=kdb_id,
-                name="",
-                intro="",
-                createdAt=now_ts,
-                updatedAt=now_ts,
-                kdbSetting=None,
-            )
-        )
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+
+    check_user_id = user_id if role != "admin" else None
+
+    obj = await svc.info(kdb_id, user_id=check_user_id)
+    # svc.info raises 404/403 now, so obj is guaranteed to be valid if we reach here
     return await Response.succ(
         data=KdbInfoResponse(
             kdbId=obj.id,
@@ -85,6 +87,7 @@ async def kdb_info(kdb_id: str = Query(...)):
             createdAt=int(obj.created_at.timestamp()),
             updatedAt=int(obj.updated_at.timestamp()),
             kdbSetting=obj.setting,
+            user_id=obj.user_id,
         )
     )
 
@@ -97,10 +100,14 @@ async def kdb_retrieve(
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    result = await svc.retrieve(
-        kdb_id=req.kdb_id, query=req.query, top_k=req.top_k, user_id=user_id
+    role = claims.get("role") or "user"
+    
+    check_user_id = user_id if role != "admin" else None
+    
+    result, kdb = await svc.retrieve(
+        kdb_id=req.kdb_id, query=req.query, top_k=req.top_k, user_id=check_user_id
     )
-    return await Response.succ(data=KdbRetrieveResponse(results=result))
+    return await Response.succ(data=KdbRetrieveResponse(results=result, user_id=kdb.user_id))
 
 
 @kdb_router.get("/list", response_model=BaseResponse[KdbListResponse])
@@ -114,12 +121,25 @@ async def kdb_list(
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
+    # For list, if admin, they can see all. If user, only theirs.
+    # The svc.list method handles filtering if user_id is passed.
+    # If admin, we pass None to see all? Or does admin want to filter by user_id?
+    # Current implementation:
+    # user_id = claims.get("userid") or ""
+    # items, total, counts = await svc.list(..., user_id=user_id)
+    # This forces admin to see only their own KDBs if we pass user_id.
+    # We should allow admin to see all.
+    
+    check_user_id = user_id if role != "admin" else None
+    
     items, total, counts = await svc.list(
         query_name=query_name,
         type=type,
         page=page,
         page_size=page_size,
-        user_id=user_id,
+        user_id=check_user_id,
     )
     out_list = [
         KdbListItem(
@@ -132,33 +152,48 @@ async def kdb_list(
             docNum=counts.get(k.id, 0),
             cover="",
             defaultColor=True,
-            creator=None,
+            user_id=k.user_id,
             type=None,
         )
         for k in items
     ]
-    return await Response.succ(data=KdbListResponse(list=out_list, total=total))
+    return await Response.succ(data=KdbListResponse(list=out_list, total=total, user_id=user_id))
 
 
 @kdb_router.delete("/delete/{kdb_id}", response_model=BaseResponse[SuccessResponse])
-async def kdb_delete(kdb_id: str):
+async def kdb_delete(kdb_id: str, http_request: Request):
     svc = KdbService()
-    await svc.delete(kdb_id)
-    return await Response.succ(data=SuccessResponse(success=True))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+    
+    kdb = await svc.delete(kdb_id, user_id=check_user_id)
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
 @kdb_router.post("/clear", response_model=BaseResponse[SuccessResponse])
-async def kdb_clear(req: KdbIdRequest):
+async def kdb_clear(req: KdbIdRequest, http_request: Request):
     svc = KdbService()
-    await svc.clear(req.kdb_id)
-    return await Response.succ(data=SuccessResponse(success=True))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    kdb = await svc.clear(req.kdb_id, user_id=check_user_id)
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
 @kdb_router.post("/redo_all", response_model=BaseResponse[SuccessResponse])
-async def kdb_redo_all(req: KdbIdRequest):
+async def kdb_redo_all(req: KdbIdRequest, http_request: Request):
     svc = KdbService()
-    await svc.redo_all(req.kdb_id)
-    return await Response.succ(data=SuccessResponse(success=True))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    kdb = await svc.redo_all(req.kdb_id, user_id=check_user_id)
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
 # ===== KDB Doc =====
@@ -175,14 +210,17 @@ async def kdb_doc_list(
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    docs, total = await svc.doc_list(
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    docs, total, kdb = await svc.doc_list(
         kdb_id=kdb_id,
         query_name=query_name,
         query_status=query_status or [],
         task_id=task_id,
         page_no=page_no,
         page_size=page_size,
-        user_id=user_id,
+        user_id=check_user_id,
     )
     items = [
         KdbDocListItem(
@@ -195,15 +233,24 @@ async def kdb_doc_list(
         )
         for d in docs
     ]
-    return await Response.succ(data=KdbDocListResponse(list=items, total=total))
+    return await Response.succ(data=KdbDocListResponse(list=items, total=total, user_id=kdb.user_id))
 
 
 @kdb_router.get("/doc/info/{doc_id}", response_model=BaseResponse[Optional[KdbDocInfoResponse]])
-async def kdb_doc_info(doc_id: str):
+async def kdb_doc_info(doc_id: str, http_request: Request):
     svc = KdbService()
-    d = await svc.doc_info(doc_id=doc_id)
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    d, kdb = await svc.doc_info(doc_id=doc_id, user_id=check_user_id)
     if not d:
         return await Response.succ(data=None)
+    
+    # kdb should be present if d is present (enforced by service)
+    kdb_user_id = kdb.user_id if kdb else ""
+
     return await Response.succ(
         data=KdbDocInfoResponse(
             id=d.id,
@@ -213,6 +260,7 @@ async def kdb_doc_info(doc_id: str):
             createTime=d.created_at.isoformat(),
             metadata=d.meta_data,
             taskId=d.task_id,
+            user_id=kdb_user_id
         )
     )
 
@@ -227,31 +275,58 @@ async def kdb_doc_add_by_files(
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    task_id = await svc.doc_add_by_upload_files(
-        kdb_id=kdb_id, files=files, override=override, user_id=user_id
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    task_id, kdb = await svc.doc_add_by_upload_files(
+        kdb_id=kdb_id, files=files, override=override, user_id=check_user_id
     )
-    return await Response.succ(data=KdbDocAddByFilesResponse(taskId=task_id))
+    return await Response.succ(data=KdbDocAddByFilesResponse(taskId=task_id, user_id=kdb.user_id))
 
 
 @kdb_router.delete("/doc/delete/{doc_id}", response_model=BaseResponse[SuccessResponse])
-async def kdb_doc_delete(doc_id: str):
+async def kdb_doc_delete(doc_id: str, http_request: Request):
     svc = KdbService()
-    await svc.doc_delete(doc_id=doc_id)
-    return await Response.succ(data=SuccessResponse(success=True))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    kdb = await svc.doc_delete(doc_id=doc_id, user_id=check_user_id)
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
 @kdb_router.put("/doc/redo/{doc_id}", response_model=BaseResponse[SuccessResponse])
-async def kdb_doc_redo(doc_id: str):
+async def kdb_doc_redo(doc_id: str, http_request: Request):
     svc = KdbService()
-    await svc.doc_redo(doc_id=doc_id)
-    return await Response.succ(data=SuccessResponse(success=True))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    kdb = await svc.doc_redo(doc_id=doc_id, user_id=check_user_id)
+    # kdb might be None if doc not found but service handles it (though logic there was tricky)
+    # If service raises exception for not found, we are good.
+    # Service doc_redo checks kdb_doc. If not found, it logs and returns None (my modified code).
+    # I should check if kdb is None.
+    kdb_user_id = kdb.user_id if kdb else ""
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb_user_id))
 
 
 @kdb_router.get("/doc/task_process", response_model=BaseResponse[KdbDocTaskProcessResponse])
-async def kdb_doc_task_process(kdb_id: str = Query(...), task_id: str = Query(...)):
+async def kdb_doc_task_process(
+    http_request: Request,
+    kdb_id: str = Query(...), 
+    task_id: str = Query(...)
+):
     svc = KdbService()
-    success, fail, in_progress, waiting, total, task_process = await svc.task_process(
-        kdb_id=kdb_id, task_id=task_id
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    success, fail, in_progress, waiting, total, task_process, kdb = await svc.task_process(
+        kdb_id=kdb_id, task_id=task_id, user_id=check_user_id
     )
     return await Response.succ(
         data=KdbDocTaskProcessResponse(
@@ -261,15 +336,22 @@ async def kdb_doc_task_process(kdb_id: str = Query(...), task_id: str = Query(..
             waiting=waiting,
             total=total,
             taskProcess=task_process,
+            user_id=kdb.user_id
         )
     )
 
 
 @kdb_router.post("/doc/task_redo", response_model=BaseResponse[SuccessResponse])
-async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest):
+async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest, http_request: Request):
     svc = KdbService()
-    await svc.task_redo(kdb_id=req.kdb_id, task_id=req.task_id)
-    return await Response.succ(data=SuccessResponse(success=True))
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    check_user_id = user_id if role != "admin" else None
+
+    kdb = await svc.task_redo(kdb_id=req.kdb_id, task_id=req.task_id, user_id=check_user_id)
+    return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
+
 
 @sage_mcp_tool()
 async def retrieve_on_zavixai_db(index_name: str, query: str, top_k: int = 5):

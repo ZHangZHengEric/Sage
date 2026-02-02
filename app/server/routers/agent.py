@@ -23,6 +23,7 @@ from ..services.agent import (
 
 class AgentConfigDTO(BaseModel):
     id: Optional[str] = None
+    user_id: Optional[str] = None
     name: str
     systemPrefix: Optional[str] = None
     systemContext: Optional[Dict[str, Any]] = None
@@ -51,10 +52,13 @@ class SystemPromptOptimizeRequest(BaseModel):
     optimization_goal: Optional[str] = None  # 优化目标（可选）
 
 
-def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfigDTO:
+def convert_config_to_agent(
+    agent_id: str, config: Dict[str, Any], user_id: Optional[str] = None
+) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
     return AgentConfigDTO(
         id=agent_id,
+        user_id=user_id,
         name=config.get("name", f"Agent {agent_id}"),
         systemPrefix=config.get("systemPrefix") or config.get("system_prefix"),
         systemContext=config.get("systemContext") or config.get("system_context"),
@@ -110,11 +114,12 @@ async def list(http_request: Request):
     # 从 handler 获取数据
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    all_configs = await list_agents(user_id)
+    role = claims.get("role") or "user"
+    all_configs = await list_agents(user_id, role)
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(agent_id, agent.config)
+        agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
         agents_data.append(agent_resp.model_dump())
     # 根据agent名称排序
     agents_data.sort(key=lambda x: x["name"])
@@ -136,9 +141,9 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    agent_id = await create_agent(agent.name, convert_agent_to_config(agent), user_id)
+    created_agent = await create_agent(agent.name, convert_agent_to_config(agent), user_id)
     return await Response.succ(
-        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 创建成功"
+        data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
 
 
@@ -156,7 +161,7 @@ async def get(agent_id: str, http_request: Request):
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     agent = await get_agent(agent_id, user_id)
-    agent_resp = convert_config_to_agent(agent_id, agent)
+    agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
     return await Response.succ(
         data={"agent": agent_resp.model_dump()}, message=f"获取Agent '{agent_id}' 成功"
     )
@@ -174,7 +179,8 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    await update_agent(agent_id, agent.name, convert_agent_to_config(agent), user_id)
+    role = claims.get("role") or "user"
+    await update_agent(agent_id, agent.name, convert_agent_to_config(agent), user_id, role)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
     )
@@ -191,7 +197,8 @@ async def delete(agent_id: str, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    await delete_agent(agent_id, user_id)
+    role = claims.get("role") or "user"
+    await delete_agent(agent_id, user_id, role)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
     )

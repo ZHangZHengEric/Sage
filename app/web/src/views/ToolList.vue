@@ -4,21 +4,25 @@
     <div v-if="viewMode === 'list'" class="flex h-full flex-col space-y-6">
       <!-- 头部搜索区 -->
       <div class="flex items-center justify-between pb-4 border-b">
-        <div class="relative w-full max-w-sm">
-          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            v-model="searchTerm" 
-            :placeholder="t('tools.search')" 
-            class="pl-9"
-          />
+        <div class="flex items-center justify-between">
+          <Input v-model="searchTerm" :placeholder="t('tools.search')" class="pl-9" />
         </div>
+        <Button @click="showAddMcpForm">
+          <Plus class="mr-2 h-4 w-4" />
+          {{ t('tools.addMcpServer') }}
+        </Button>
       </div>
 
       <!-- 工具列表 -->
       <ScrollArea class="flex-1">
         <div class="space-y-8 pr-4">
+          <!-- Loading -->
+          <div v-if="loading" class="flex flex-col items-center justify-center py-20">
+            <Loader class="h-8 w-8 animate-spin text-primary" />
+          </div>
+
           <!-- 空状态 -->
-          <div v-if="filteredTools.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+          <div v-else-if="filteredTools.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
             <div class="rounded-full bg-muted p-4">
               <Wrench class="h-8 w-8 text-muted-foreground" />
             </div>
@@ -29,7 +33,16 @@
           <!-- 分组展示 -->
           <div v-else v-for="(group, groupIndex) in groupedTools" :key="group.source" class="space-y-4">
             <div class="flex items-center justify-between">
-              <h3 class="text-lg font-semibold tracking-tight">{{ getToolSourceLabel(group.source) }}</h3>
+              <div class="flex">
+                <h3 class="text-lg font-semibold tracking-tight">{{ getToolSourceLabel(group.source) }}</h3>
+                <Button v-if="canManage(group.tools[0])" variant="ghost" size="icon"
+                  class="h-6 w-6 text-destructive hover:text-destructive shrink-0 -mr-2"
+                  @click.stop="handleDeleteMcpTool(group.source)" :title="t('tools.delete') || 'Delete Server'">
+                  <Trash2 class="h-3.5 w-3.5" />
+                </Button>
+              </div>
+
+
               <Badge variant="secondary" class="rounded-sm px-2 font-normal">
                 {{ group.tools.length }} {{ t('tools.count') }}
               </Badge>
@@ -49,10 +62,13 @@
                   >
                     <component :is="getToolIcon(tool.type)" class="h-5 w-5" />
                   </div>
-                  <div class="space-y-1 overflow-hidden">
-                    <CardTitle class="text-base truncate" :title="tool.name">
-                      {{ tool.name }}
-                    </CardTitle>
+                  <div class="space-y-1 overflow-hidden flex-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <CardTitle class="text-base truncate" :title="tool.name">
+                        {{ tool.name }}
+                      </CardTitle>
+   
+                    </div>
                     <CardDescription class="line-clamp-2 text-xs">
                       {{ tool.description || t('tools.noDescription') }}
                     </CardDescription>
@@ -83,15 +99,27 @@
       :tool="selectedTool" 
       @back="backToList" 
     />
+
+    <!-- MCP服务器添加视图 -->
+    <McpServerAdd 
+      v-if="viewMode === 'add-mcp'" 
+      :loading="loading" 
+      @submit="handleMcpSubmit" 
+      @cancel="backToList"
+      ref="mcpServerAddRef" 
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench, Search, Code, Database, Globe, Cpu } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
+import { getCurrentUser } from '../utils/auth.js'
 import ToolDetail from '../components/ToolDetail.vue'
+import McpServerAdd from '../components/McpServerAdd.vue'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -108,6 +136,8 @@ const searchTerm = ref('')
 const filterType = ref('all')
 const viewMode = ref('list') // 'list', 'detail', 'add-mcp'
 const loading = ref(false)
+const mcpServerAddRef = ref(null)
+const currentUser = ref({ userid: '', role: 'user' })
 
 // Computed
 const filteredTools = computed(() => {
@@ -181,6 +211,51 @@ const loadMcpServers = async () => {
   }
 }
 
+const showAddMcpForm = () => {
+  if (mcpServerAddRef.value) {
+    mcpServerAddRef.value.resetForm()
+  }
+  viewMode.value = 'add-mcp'
+}
+
+const handleMcpSubmit = async (payload) => {
+  loading.value = true
+  try {
+    await toolAPI.addMcpServer(payload)
+    await loadMcpServers()
+    await loadBasicTools()
+    backToList()
+  } catch (error) {
+    console.error('Failed to add MCP server:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const canManage = (tool) => {
+  if (tool.type !== 'mcp') return false
+  if (currentUser.value.role === 'admin') return true
+  const server = mcpServers.value.find(s => 'MCP Server: ' + s.name  === tool.source)
+  if (!server || !server.user_id) return false
+  return server.user_id === currentUser.value.userid
+}
+
+const handleDeleteMcpTool = async (source) => {
+  // Simple confirmation
+  if (!window.confirm(`是否确认删除 "${source}"? 这将删除该服务器提供的所有工具。`)) return
+
+  try {
+    loading.value = true
+    await toolAPI.deleteMcpServer(source.substring('MCP Server: '.length))
+    await loadMcpServers()
+    await loadBasicTools()
+  } catch (error) {
+    console.error(`Failed to delete MCP server ${source}:`, error)
+  } finally {
+    loading.value = false
+  }
+}
+
 const getToolSourceLabel = (source) => {
   // 直接映射中文source到翻译key
   const sourceMapping = {
@@ -245,7 +320,11 @@ const backToList = () => {
 }
 
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
+  const user = await getCurrentUser()
+  if (user) {
+    currentUser.value = user
+  }
   loadBasicTools()
   loadMcpServers()
 })

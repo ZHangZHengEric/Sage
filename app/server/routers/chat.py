@@ -90,7 +90,7 @@ def validate_and_prepare_request(
 
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
-        raise SageHTTPException(status_code=400, detail="消息列表不能为空")
+        raise SageHTTPException(status_code=500, detail="消息列表不能为空")
 
     # 注入当前用户ID（如果未指定）
     claims = getattr(http_request.state, "user_claims", {}) or {}

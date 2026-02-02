@@ -75,7 +75,7 @@
               type="submit"
               :disabled="loading || !isFormValid"
             >
-              <Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
+              <Loader v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
               {{ loading ? t('common.creating') : t('common.create') }}
             </Button>
           </div>
@@ -87,7 +87,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { ChevronDown, Info, Loader2 } from 'lucide-vue-next'
+import { ChevronDown, Info, Loader } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import { Button } from '@/components/ui/button'
