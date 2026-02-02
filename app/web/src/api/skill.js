@@ -31,7 +31,16 @@ export const skillAPI = {
    * @param {string} url - 技能 ZIP 下载链接
    * @returns {Promise<Object>}
    */
-  importSkillFromUrl: async (url) => {
-    return await baseAPI.post('/api/skills/import-url', { url })
+  importSkillFromUrl: async (data) => {
+    return await baseAPI.post('/api/skills/import-url', data)
+  },
+
+  /**
+   * 删除技能
+   * @param {string} skillName - 技能名称
+   * @returns {Promise<Object>}
+   */
+  deleteSkill: async (skillName) => {
+    return await baseAPI.delete(`/api/skills/${skillName}`)
   }
 }

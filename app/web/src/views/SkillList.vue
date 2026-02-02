@@ -3,9 +3,12 @@
     <div class="flex h-full flex-col space-y-6">
       <!-- Header -->
       <div class="flex items-center justify-between pb-4 border-b">
-        <div>
-          <h1 class="text-2xl font-bold tracking-tight">{{ t('skills.title') }}</h1>
-          <p class="text-muted-foreground">{{ t('skills.subtitle') }}</p>
+        <!-- Search -->
+        <div class="flex items-center justify-between">
+          <div class="relative w-full max-w-sm">
+            <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input v-model="searchTerm" :placeholder="t('skills.search')" class="pl-9" />
+          </div>
         </div>
         <Button @click="showImportModal = true">
           <Plus class="mr-2 h-4 w-4" />
@@ -13,21 +16,13 @@
         </Button>
       </div>
 
-      <!-- Search -->
-      <div class="flex items-center justify-between">
-        <div class="relative w-full max-w-sm">
-          <Search class="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            v-model="searchTerm" 
-            :placeholder="t('skills.search')" 
-            class="pl-9"
-          />
-        </div>
-      </div>
 
       <!-- Content -->
       <ScrollArea class="flex-1 -mr-4 pr-4">
-        <div v-if="filteredSkills.length > 0" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div v-if="loading" class="flex flex-col items-center justify-center py-20">
+          <Loader class="h-8 w-8 animate-spin text-primary" />
+        </div>
+        <div v-else-if="filteredSkills.length > 0" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <Card 
             v-for="skill in filteredSkills" 
             :key="skill.name" 
@@ -54,6 +49,15 @@
                   </Tooltip>
                 </TooltipProvider>
               </div>
+              <Button 
+                v-if="canDelete(skill)" 
+                variant="ghost" 
+                size="icon" 
+                class="h-8 w-8 text-muted-foreground hover:text-destructive -mr-2 -mt-2"
+                @click.stop="deleteSkill(skill)"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
             </CardHeader>
             <CardContent>
               <div class="flex items-center pt-4 border-t mt-2 text-xs text-muted-foreground" :title="skill.path">
@@ -79,7 +83,7 @@
         <DialogHeader>
           <DialogTitle>{{ t('skills.import') }}</DialogTitle>
           <DialogDescription>
-            Import skills via ZIP file upload or from a URL.
+            {{ t('skills.importDesc') }}
           </DialogDescription>
         </DialogHeader>
         
@@ -108,10 +112,7 @@
                 <div v-if="selectedFile" class="text-sm font-medium text-primary">
                   {{ selectedFile.name }}
                 </div>
-                <div v-else class="text-sm text-muted-foreground">
-                  Drop file here or <span class="text-primary hover:underline">click to upload</span>
-                </div>
-                <p class="text-xs text-muted-foreground mt-1">Only .zip files are allowed</p>
+              
               </div>
             </div>
           </TabsContent>
@@ -135,7 +136,7 @@
         <DialogFooter>
           <Button variant="outline" @click="showImportModal = false">{{ t('skills.cancel') }}</Button>
           <Button type="primary" @click="handleImport" :disabled="isImportDisabled || importing">
-            <Loader2 v-if="importing" class="mr-2 h-4 w-4 animate-spin" />
+            <Loader v-if="importing" class="mr-2 h-4 w-4 animate-spin" />
             {{ t('skills.confirm') }}
           </Button>
         </DialogFooter>
@@ -146,9 +147,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Box, Search, Folder, Plus, Upload, Loader2 } from 'lucide-vue-next'
+import { Box, Search, Folder, Plus, Upload, Loader, Trash2 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { skillAPI } from '../api/skill.js'
+import { getCurrentUser } from '../utils/auth.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -156,6 +158,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { toast } from 'vue-sonner'
 
 // Composables
 const { t } = useLanguage()
@@ -171,6 +174,7 @@ const importUrl = ref('')
 const importing = ref(false)
 const importError = ref('')
 const fileInput = ref(null)
+const currentUser = ref({ userid: '', role: 'user' })
 
 // Computed
 const filteredSkills = computed(() => {
@@ -190,6 +194,13 @@ const isImportDisabled = computed(() => {
   }
 })
 
+const canDelete = (skill) => {
+  if (currentUser.value.role === 'admin') return true
+  // If skill has no owner (system skill), user cannot delete
+  if (!skill.user_id) return false
+  return skill.user_id === currentUser.value.userid
+}
+
 // API Methods
 const loadSkills = async () => {
   try {
@@ -200,6 +211,26 @@ const loadSkills = async () => {
     }
   } catch (error) {
     console.error('Failed to load skills:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const deleteSkill = async (skill) => {
+  if (!confirm(t('skills.confirmDelete', 'Are you sure you want to delete this skill?'))) return
+  
+  try {
+    loading.value = true
+    await skillAPI.deleteSkill(skill.name)
+    toast.success(t('common.success'), {
+      description: t('skills.deleteSuccess', 'Skill deleted successfully'),
+    })
+    await loadSkills()
+  } catch (error) {
+    console.error('Failed to delete skill:', error)
+    toast.error(t('common.error'), {
+      description: error.message || t('skills.deleteFailed', 'Failed to delete skill'),
+    })
   } finally {
     loading.value = false
   }
@@ -242,10 +273,8 @@ const handleImport = async () => {
     if (importMode.value === 'upload') {
       if (!selectedFile.value) return
       
-      const formData = new FormData()
-      formData.append('file', selectedFile.value)
-      
-      await skillAPI.uploadSkill(formData)
+      // Pass file object directly, API handles FormData
+      await skillAPI.uploadSkill(selectedFile.value)
     } else {
       if (!importUrl.value) return
       await skillAPI.importSkillFromUrl({ url: importUrl.value })
@@ -257,6 +286,9 @@ const handleImport = async () => {
     selectedFile.value = null
     importUrl.value = ''
     if (fileInput.value) fileInput.value.value = ''
+    toast.success(t('common.success'), {
+      description: t('skills.importSuccess', 'Skill imported successfully'),
+    })
   } catch (error) {
     console.error('Import failed:', error)
     importError.value = error.message || 'Import failed'
@@ -265,7 +297,11 @@ const handleImport = async () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  const user = await getCurrentUser()
+  if (user) {
+    currentUser.value = user
+  }
   loadSkills()
 })
 </script>

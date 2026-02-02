@@ -2,7 +2,11 @@ export default {
   // 侧边栏
   'app.title': 'Zavixai Agent',
   'sidebar.newChat': 'New Chat',
-  'sidebar.agentConfig': 'Agent Config',
+  'sidebar.agentList': 'Agent List',
+  'sidebar.toolsList': 'Tools',
+  'sidebar.skillList': 'Skills',
+  'sidebar.knowledgeBaseList': 'KnowledgeBase',
+
   'sidebar.tools': 'Tools',
   'sidebar.history': 'History',
   'sidebar.online': 'Online',
@@ -10,23 +14,22 @@ export default {
   'sidebar.language': 'Language',
   'sidebar.mcps': 'MCP Servers',
   'sidebar.chatAndConfig': 'Chat & Settings',
-  'sidebar.toolsAndServices': 'Tools',
+  'sidebar.capabilityModules': 'Agent Config',
   'sidebar.knowledgeBase': 'Knowledge Base',
   'sidebar.sessions': 'Session History',
-  'sidebar.toolsList': 'Tools List',
-  'sidebar.skillLibrary': 'Skill Library',
-  'sidebar.mcpsManage': 'MCP Management',
-  'sidebar.knowledgeBaseManage': 'Knowledge Base',
+
   'sidebar.langToggleZh': 'ZH / EN',
   'sidebar.langToggleEn': 'EN / ZH',
   'sidebar.apiReference': 'API Reference',
   'sidebar.apiAgentChat': 'Agent Chat - api/stream',
+  'sidebar.systemManagement': 'System Management',
+  'sidebar.userList': 'User List',
+  'sidebar.systemSettings': 'System Settings',
   'auth.logout': 'Logout',
 
   // 聊天页面
   'chat.title': 'Chat Assistant',
   'chat.current': 'Current',
-  'chat.placeholder': 'Type your message... (Shift+Enter for new line)',
   'chat.send': 'Send',
   'chat.stop': 'Stop',
   'chat.thinking': 'Thinking...',
@@ -48,6 +51,9 @@ export default {
   'chat.loadAgentsError': 'Failed to load agents',
   'chat.loadConversationError': 'Failed to load conversation',
   'chat.downloadError': 'Failed to download file',
+  'chat.shareNoSession': 'No active session to share',
+  'chat.shareSuccess': 'Session shared successfully',
+
 
   // Agent配置页面
   'agent.title': 'Agent Configuration',
@@ -132,7 +138,33 @@ export default {
   'agent.descriptionLength': 'Description length cannot exceed 200 characters',
   'agent.systemPrefixRequired': 'Please enter system prompt',
 
+  // System Management
+  'user.addUser': 'Add User',
+  'user.username': 'Username',
+  'user.nickname': 'Nickname',
+  'user.email': 'Email',
+  'user.role': 'Role',
+  'user.selectRole': 'Select a role',
+  'user.roleUser': 'User',
+  'user.roleAdmin': 'Admin',
+  'user.createdAt': 'Created At',
+  'user.password': 'Password',
+  'user.deleteConfirm': 'Are you sure you want to delete user {name}?',
+  'user.addSuccess': 'User added successfully',
+  'user.deleteSuccess': 'User deleted successfully',
+  'user.addError': 'Failed to add user',
+  'user.deleteError': 'Failed to delete user',
+  'system.generalSettings': 'General Settings',
+  'system.allowRegistration': 'Allow Registration',
+  'system.allowRegistrationDesc': 'Allow new users to register an account.',
+  'system.updateSuccess': 'Settings updated',
+  'system.updateError': 'Failed to update settings',
+
   // 通用选项
+  'common.actions': 'Actions',
+  'common.previous': 'Previous',
+  'common.next': 'Next',
+  'common.page': 'Page',
   'common.on': 'On',
   'common.off': 'Off',
   'common.auto': 'Auto',
@@ -251,6 +283,7 @@ export default {
   'skills.viewFiles': 'View Files',
   'skills.delete': 'Delete',
   'skills.deleteConfirm': 'Are you sure you want to delete skill "{name}"?',
+  'skills.importDesc': 'Import skills via ZIP file upload or from a URL.',
 
   // MCP Server related
   'tools.Tools': 'Internal Tools',

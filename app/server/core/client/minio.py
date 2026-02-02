@@ -101,7 +101,7 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     public_base = cfg.minio_public_base_url if cfg else None
 
     if not client or not bucket or not public_base:
-        raise SageHTTPException(status_code=400, detail="MinIO 未配置或未初始化")
+        raise SageHTTPException(status_code=500, detail="MinIO 未配置或未初始化")
 
     from ...utils.file import split_file_name
 

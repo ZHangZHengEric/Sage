@@ -33,6 +33,15 @@ export const userAPI = {
   },
   updateProfile: (userData) => {
     return request.put('/api/user/profile', userData)
+  },
+  getUserList: (page, pageSize) => {
+      return request.get('/api/user/list', { params: { page, page_size: pageSize } })
+  },
+  deleteUser: (userId) => {
+      return request.post('/api/user/delete', { user_id: userId })
+  },
+  addUser: (data) => {
+      return request.post('/api/user/add', data)
   }
 }
 
