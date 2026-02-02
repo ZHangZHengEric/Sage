@@ -58,7 +58,7 @@
       </div>
 
       <!-- Chart -->
-      <ReactECharts 
+      <EChartsRenderer 
         v-else 
         :option="chartOption" 
         :style="chartStyle" 
@@ -87,7 +87,7 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from 'vue'
-import ReactECharts from './ReactECharts.vue'
+import EChartsRenderer from './EChartsRenderer.vue'
 import { traceApi } from '@/api/trace'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
