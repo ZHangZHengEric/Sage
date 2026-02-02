@@ -125,7 +125,7 @@
                <Copy class="h-4 w-4" />
              </Button>
              <ScrollArea class="h-[400px] w-full rounded-md border p-4 bg-muted/30">
-               <ReactMarkdown :content="usageCodeMarkdown" />
+               <MarkdownRenderer :content="usageCodeMarkdown" />
              </ScrollArea>
           </div>
         </Tabs>
@@ -159,7 +159,7 @@ import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
 import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
-import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
+import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 
 // UI Components
 import { Button } from '@/components/ui/button'

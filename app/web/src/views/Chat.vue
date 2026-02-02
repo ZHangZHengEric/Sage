@@ -1,12 +1,7 @@
 <template>
   <div class="flex flex-col h-full bg-background">
-    <div class="flex-none h-16 border-b flex items-center px-6 justify-between bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
-      <div class="flex items-center gap-3">
-         <div class="p-2 rounded-lg bg-primary/10 text-primary">
-            <Bot class="h-5 w-5" />
-         </div>
-         <span class="font-semibold text-sm tracking-tight">{{ selectedAgent?.name || t('chat.defaultAgent') || 'AI Assistant' }}</span>
-      </div>
+    <div class="flex-none h-16 border-b flex items-center px-6 justify-end bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
+
       <div class="flex items-center gap-2">
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
           <SelectTrigger class="w-[180px] h-9 text-xs border-muted-foreground/20 bg-muted/50 focus:ring-1 focus:ring-primary/20">
@@ -81,9 +76,6 @@
         :tool-result="toolResult" 
       />
 
-      <TaskStatusPanel v-if="showTaskStatus" :task-status="taskStatus" :expanded-tasks="expandedTasks"
-        @toggle-task-expanded="toggleTaskExpanded" @close="showTaskStatus = false" />
-
       <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles" :workspace-path="workspacePath"
         @download-file="downloadFile" @close="showWorkspace = false" />
 
@@ -104,7 +96,6 @@ import { Bot, Settings, Activity } from 'lucide-vue-next'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
-import TaskStatusPanel from '@/components/chat/TaskStatusPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
 import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
