@@ -132,8 +132,8 @@
                </div>
              </CardHeader>
              <CardContent class="pt-4">
-               <div class="text-sm leading-relaxed">
-                 <ReactMarkdown :content="r.doc_content" />
+               <div class="prose prose-sm dark:prose-invert max-w-none">
+                 <MarkdownRenderer :content="r.doc_content" />
                </div>
              </CardContent>
            </Card>
@@ -181,7 +181,7 @@ import { Trash2, RotateCcw, Clock, Loader2, CheckCircle2, XCircle, ArrowLeft, Up
 import { useRoute, useRouter } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
-import ReactMarkdown from '../components/chat/ReactMarkdown.vue'
+import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

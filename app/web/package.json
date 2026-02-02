@@ -20,8 +20,6 @@
     "prismjs": "^1.30.0",
     "sortablejs": "^1.15.6",
     "vue": "^3.5.22",
-    "vue-echarts": "^6.7.3",
-    "vue-markdown-render": "^2.3.0",
     "vue-router": "^4.6.0",
     "vue-sonner": "^2.0.9"
   },

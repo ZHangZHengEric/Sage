@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # --- Build stage: use Node 22 to satisfy Vite requirements ---
 FROM docker.m.daocloud.io/node:22-alpine AS builder
 WORKDIR /app

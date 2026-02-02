@@ -102,7 +102,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const router = useRouter()
 const route = useRoute()
