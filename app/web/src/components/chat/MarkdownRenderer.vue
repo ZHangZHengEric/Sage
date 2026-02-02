@@ -7,6 +7,33 @@ import {computed, nextTick, onMounted, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
+import Prism from 'prismjs'
+import 'prismjs/themes/prism-tomorrow.css'
+
+// 基础依赖（必须按顺序加载）
+import 'prismjs/components/prism-clike'
+import 'prismjs/components/prism-markup'
+import 'prismjs/components/prism-markup-templating'
+
+// 常用语言
+import 'prismjs/components/prism-javascript'
+import 'prismjs/components/prism-typescript'
+import 'prismjs/components/prism-jsx'
+import 'prismjs/components/prism-tsx'
+import 'prismjs/components/prism-python'
+import 'prismjs/components/prism-java'
+import 'prismjs/components/prism-css'
+import 'prismjs/components/prism-scss'
+import 'prismjs/components/prism-json'
+import 'prismjs/components/prism-yaml'
+import 'prismjs/components/prism-markdown'
+import 'prismjs/components/prism-bash'
+import 'prismjs/components/prism-sql'
+import 'prismjs/components/prism-go'
+import 'prismjs/components/prism-rust'
+import 'prismjs/components/prism-php'
+import 'prismjs/components/prism-c'
+import 'prismjs/components/prism-cpp'
 
 
 const props = defineProps({
@@ -51,18 +78,22 @@ const jsToJson = (jsStr) => {
 const chartList = [] // 存放所有图表容器与配置项
 const renderer = new marked.Renderer()
 renderer.code = (code, language) => {
-  console.log("language", language, code.lang)
   // 获取代码文本，兼容不同版本的 marked
-  let codeText = typeof code === 'string' ? code : code.text
-  if (code.lang === 'echarts') {
+  const codeText = typeof code === 'string' ? code : code.text
+  // 优先从 token 对象中获取 lang，其次是 language 参数，最后默认为 plaintext
+  // marked v5+ 传入的是 token 对象，lang 属性在对象中
+  const rawLang = (typeof code === 'string' ? language : code.lang) || ''
+  const lang = rawLang.split(/\s+/)[0] || 'plaintext'
+
+  if (lang === 'echarts') {
     try {
       // 移除 option = 前缀和末尾的分号
-      codeText = codeText.replace(/^[\s\S]*?=\s*/, '').trim()
-      if (codeText.endsWith(';')) {
-        codeText = codeText.slice(0, -1).trim()
+      let chartCode = codeText.replace(/^[\s\S]*?=\s*/, '').trim()
+      if (chartCode.endsWith(';')) {
+        chartCode = chartCode.slice(0, -1).trim()
       }
       const id = `chart-${Math.random().toString(36).substr(2, 9)}`
-      const jsonStr = jsToJson(codeText)
+      const jsonStr = jsToJson(chartCode)
       const option = JSON.parse(jsonStr)
       chartList.push({id, option})
       return `<div id="${id}" class="w-full h-[300px] my-4"></div>`
@@ -72,9 +103,19 @@ renderer.code = (code, language) => {
     }
   }
 
-  // 转义代码中的HTML特殊字符
-  const escapedCode = escapeHtml(codeText)
-  return `<pre class="not-prose bg-muted/50 rounded-lg p-4 overflow-x-auto my-4 border"><code class="language-${language || 'plaintext'} text-sm font-mono">${escapedCode}</code></pre>`
+  let highlighted = ''
+  try {
+    if (lang !== 'plaintext' && Prism.languages[lang]) {
+      highlighted = Prism.highlight(codeText, Prism.languages[lang], lang)
+    } else {
+      highlighted = escapeHtml(codeText)
+    }
+  } catch (e) {
+    console.warn('Prism highlight failed:', e)
+    highlighted = escapeHtml(codeText)
+  }
+
+  return `<pre class="not-prose rounded-lg p-4 overflow-x-auto my-4 border language-${lang}"><code class="language-${lang} text-sm font-mono">${highlighted}</code></pre>`
 }
 // 配置marked选项
 marked.setOptions({

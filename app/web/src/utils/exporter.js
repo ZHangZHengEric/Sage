@@ -4,6 +4,13 @@
  */
 
 import { getMessageLabel } from './messageLabels'
+import { marked } from 'marked'
+
+// 配置 marked
+marked.setOptions({
+  breaks: true, // 支持 GitHub 风格的换行
+  gfm: true, // 启用 GitHub 风格 Markdown
+})
 
 /**
  * 导出对话记录为HTML文件
@@ -12,13 +19,24 @@ import { getMessageLabel } from './messageLabels'
  */
 export const exportToHTML = (conversation, visibleMessages) => {
   console.log('🚀 exportToHTML 函数开始执行')
-  console.log('📋 conversation:', conversation)
-  console.log('📝 原始消息数量:', conversation.messages?.length || 0)
-  console.log('✅ 过滤后的可见消息数量:', visibleMessages.length)
-  console.log('📄 可见消息内容:', visibleMessages)
-
+  
   const htmlContent = generateHTMLContent(conversation, visibleMessages)
   downloadHTML(htmlContent, conversation.title)
+}
+
+/**
+ * 下载HTML文件
+ */
+const downloadHTML = (content, filename) => {
+  const blob = new Blob([content], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${filename || 'conversation'}_${new Date().toISOString().split('T')[0]}.html`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
@@ -67,25 +85,34 @@ export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
 const generateHTMLContent = (conversation, visibleMessages) => {
   const title = conversation.title || '对话记录'
   const exportTime = new Date().toLocaleString('zh-CN')
-  const messageCount = visibleMessages.length
   
   // 构建消息HTML
   let messagesHtml = ''
   
-  visibleMessages.forEach((message, index) => {
+  visibleMessages.forEach((message) => {
     if (message.role === 'user') {
       const content = renderMarkdown(message.content || '')
-        const assistantName = getMessageLabel({
-          role: message.role,
-          type: message.type,
-          toolName: message.toolName
-        })
+      const label = getMessageLabel({
+        role: message.role,
+        type: message.type,
+        messageType: message.message_type
+      })
+      
       messagesHtml += `
-        <div class="message user">
-          <div class="avatar">👤</div>
-          <div class="message-bubble">
-            <div class="message-info">${assistantName}</div>
-            <div class="message-content">${content}</div>
+        <!-- 用户消息 -->
+        <div class="flex flex-row-reverse items-start gap-3 px-4 group mb-6">
+          <div class="flex-none mt-1">
+             <div class="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md border shadow-sm bg-background">
+                <i data-lucide="user" class="h-4 w-4"></i>
+             </div>
+          </div>
+          <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
+            <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground select-none">
+              ${escapeHtml(label)}
+            </div>
+            <div class="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm overflow-hidden break-words text-sm leading-relaxed tracking-wide message-content prose prose-invert max-w-none">
+              ${content}
+            </div>
           </div>
         </div>`
     } else if (message.role === 'assistant') {
@@ -94,47 +121,108 @@ const generateHTMLContent = (conversation, visibleMessages) => {
         message.tool_calls.forEach(toolCall => {
           const toolName = toolCall.function?.name || '未知工具'
           const toolArgs = toolCall.function?.arguments || '{}'
+          const label = getMessageLabel({
+             role: message.role,
+             type: message.type,
+             messageType: message.message_type,
+             toolName: toolName
+          })
+          
           messagesHtml += `
-            <div class="message tool">
-              <div class="avatar">🔧</div>
-              <div class="message-bubble">
-                <div class="tool-info">工具调用: ${escapeHtml(toolName)}</div>
-                <div class="message-content">
-                  <pre><code>${escapeHtml(toolArgs)}</code></pre>
+            <!-- 工具调用 -->
+            <div class="flex flex-row items-start gap-3 px-4 mb-2">
+              <div class="flex-none mt-1">
+                <div class="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md border shadow-sm bg-background">
+                    <i data-lucide="wrench" class="h-4 w-4"></i>
                 </div>
+              </div>
+              <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+                 <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
+                    ${escapeHtml(label)}
+                 </div>
+                 <div class="bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-full sm:w-auto min-w-[260px]">
+                  <div class="flex flex-col gap-2">
+                    <div class="relative flex items-center justify-between p-2 rounded-xl bg-background border border-border/50">
+                      <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full bg-green-500/50"></div>
+                      <div class="flex items-center gap-3 flex-1 min-w-0 pl-3">
+                        <div class="flex flex-col min-w-0 gap-0.5">
+                          <span class="font-medium text-sm truncate text-foreground/90">${escapeHtml(toolName)}</span>
+                          <span class="text-[10px] text-muted-foreground truncate font-mono opacity-80 flex items-center gap-1">
+                             <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                             已完成
+                          </span>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                         <div class="h-8 w-8 flex items-center justify-center text-muted-foreground rounded-full">
+                            <i data-lucide="chevron-right" class="h-4 w-4"></i>
+                         </div>
+                      </div>
+                    </div>
+                    
+                    <!-- 参数显示 -->
+                    <div class="px-2 py-1">
+                        <pre class="text-xs font-mono bg-muted/50 p-2 rounded overflow-x-auto text-foreground"><code>${escapeHtml(toolArgs)}</code></pre>
+                    </div>
+
+                  </div>
+                 </div>
               </div>
             </div>`
         })
       } else if (message.show_content) {
         // AI助手回复
         const content = renderMarkdown(message.show_content)
-        const assistantName = getMessageLabel({
+        const label = getMessageLabel({
           role: message.role,
           type: message.type,
-          toolName: message.toolName
+          messageType: message.message_type
         })
+        
         messagesHtml += `
-          <div class="message assistant">
-            <div class="avatar">🤖</div>
-            <div class="message-bubble">
-              <div class="message-info">${assistantName}</div>
-              <div class="message-content">${content}</div>
+          <!-- 助手消息 -->
+          <div class="flex flex-row items-start gap-3 px-4 mb-6">
+            <div class="flex-none mt-1">
+              <div class="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md border shadow-sm bg-background">
+                <i data-lucide="bot" class="h-4 w-4"></i>
+              </div>
+            </div>
+            <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+              <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+                ${escapeHtml(label)}
+                <span class="text-[10px] opacity-60 font-normal">
+                  ${message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : ''}
+                </span>
+              </div>
+              <div class="bg-card text-card-foreground border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full message-content prose dark:prose-invert max-w-none">
+                ${content}
+              </div>
             </div>
           </div>`
       }
     } else if (message.role === 'tool') {
-      const toolName = message.name || '未知工具'
-      const content = typeof message.content === 'object' 
+       // Tool Result 通常已经在 Assistant 的 Tool Calls 中或者紧接着显示，或者在 SharedChat 中可能不直接显示 Tool Result 详情
+       // 为了简化，我们展示 Tool Result
+       const toolName = message.name || '未知工具'
+       const content = typeof message.content === 'object' 
         ? JSON.stringify(message.content, null, 2) 
         : (message.content || '')
-      messagesHtml += `
-        <div class="message tool-result">
-          <div class="avatar">📋</div>
-          <div class="message-bubble">
-            <div class="tool-info">执行结果</div>
-            <div class="message-content">
-              <pre><code>${escapeHtml(content)}</code></pre>
-            </div>
+        
+       messagesHtml += `
+        <!-- 工具结果 -->
+        <div class="flex flex-row items-start gap-3 px-4 mb-6">
+          <div class="flex-none mt-1">
+             <div class="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md border shadow-sm bg-background">
+                <i data-lucide="clipboard-list" class="h-4 w-4"></i>
+             </div>
+          </div>
+          <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+             <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
+                工具执行结果
+             </div>
+             <div class="bg-muted/30 text-muted-foreground border border-border/20 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm overflow-hidden break-words w-full">
+                <pre class="text-xs font-mono overflow-x-auto"><code>${escapeHtml(content)}</code></pre>
+             </div>
           </div>
         </div>`
     }
@@ -147,234 +235,164 @@ const generateHTMLContent = (conversation, visibleMessages) => {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>对话记录 - ${escapeHtml(title)}</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- ECharts -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f5f5f5;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
-        
-        .header h1 {
-            font-size: 2em;
-            margin-bottom: 10px;
-        }
-        
-        .header .meta {
-            opacity: 0.9;
-            font-size: 0.9em;
-        }
-        
-        .messages {
-            padding: 20px;
-        }
-        
-        .message {
-            display: flex;
-            margin-bottom: 20px;
-            align-items: flex-start;
-        }
-        
-        .message.user {
-            flex-direction: row-reverse;
-        }
-        .message-info {
-          background: transparent;
-          color: #666;
-        }
 
-        .avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.2em;
-            margin: 0 10px;
-            flex-shrink: 0;
+    <!-- Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              border: "hsl(var(--border))",
+              input: "hsl(var(--input))",
+              ring: "hsl(var(--ring))",
+              background: "hsl(var(--background))",
+              foreground: "hsl(var(--foreground))",
+              primary: {
+                DEFAULT: "hsl(var(--primary))",
+                foreground: "hsl(var(--primary-foreground))",
+              },
+              secondary: {
+                DEFAULT: "hsl(var(--secondary))",
+                foreground: "hsl(var(--secondary-foreground))",
+              },
+              destructive: {
+                DEFAULT: "hsl(var(--destructive))",
+                foreground: "hsl(var(--destructive-foreground))",
+              },
+              muted: {
+                DEFAULT: "hsl(var(--muted))",
+                foreground: "hsl(var(--muted-foreground))",
+              },
+              accent: {
+                DEFAULT: "hsl(var(--accent))",
+                foreground: "hsl(var(--accent-foreground))",
+              },
+              popover: {
+                DEFAULT: "hsl(var(--popover))",
+                foreground: "hsl(var(--popover-foreground))",
+              },
+              card: {
+                DEFAULT: "hsl(var(--card))",
+                foreground: "hsl(var(--card-foreground))",
+              },
+            },
+            borderRadius: {
+              lg: "var(--radius)",
+              md: "calc(var(--radius) - 2px)",
+              sm: "calc(var(--radius) - 4px)",
+            },
+          }
         }
-        
-        .message.user .avatar {
-            background: #007bff;
-            color: white;
-        }
-        
-        .message.assistant .avatar {
-            background: #28a745;
-            color: white;
-        }
-        
-        .message.tool .avatar,
-        .message.tool-result .avatar {
-            background: #ffc107;
-            color: #333;
-        }
-        
-        .message-bubble {
-            max-width: 70%;
-            padding: 15px;
-            border-radius: 18px;
-            position: relative;
-        }
-        
-        .message.user .message-bubble {
-            background: #007bff;
-            color: white;
-        }
-        
-        .message.assistant .message-bubble {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-        }
-        
-        .message.tool .message-bubble,
-        .message.tool-result .message-bubble {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-        }
-        
-        .tool-info {
-            font-weight: bold;
-            margin-bottom: 8px;
-            color: #856404;
-        }
-        
-        .message-content {
-            word-wrap: break-word;
-        }
-        
-        .message-content pre {
-            background: rgba(0,0,0,0.05);
-            padding: 10px;
-            border-radius: 5px;
-            overflow-x: auto;
-            margin: 10px 0;
-        }
-        
-        .message-content code {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 0.9em;
-        }
-        
-        .message-content h1,
-        .message-content h2,
-        .message-content h3,
-        .message-content h4,
-        .message-content h5,
-        .message-content h6 {
-            margin: 15px 0 10px 0;
-            color: #333;
-        }
-        
-        .message-content p {
-            margin: 10px 0;
-        }
-        
-        .message-content ul,
-        .message-content ol {
-            margin: 10px 0;
-            padding-left: 20px;
-        }
-        
-        .message-content blockquote {
-            border-left: 4px solid #ddd;
-            margin: 15px 0;
-            padding-left: 15px;
-            color: #666;
-        }
-        
-        .message-content table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 15px 0;
-        }
-        
-        .message-content th,
-        .message-content td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        
-        .message-content th {
-            background-color: #f2f2f2;
-            font-weight: bold;
-        }
-        
-        .echarts-container {
-            margin: 15px 0;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        
-        @media (max-width: 768px) {
-            body {
-                padding: 10px;
-            }
-            
-            .header {
-                padding: 20px;
-            }
-            
-            .header h1 {
-                font-size: 1.5em;
-            }
-            
-            .messages {
-                padding: 15px;
-            }
-            
-            .message-bubble {
-                max-width: 85%;
-            }
-            
-            .avatar {
-                width: 35px;
-                height: 35px;
-                font-size: 1em;
-            }
-        }
+      }
+    </script>
+
+    <style>
+      :root {
+        --background: 0 0% 100%;
+        --foreground: 222.2 84% 4.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 222.2 84% 4.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222.2 84% 4.9%;
+        --primary: 222.2 47.4% 11.2%;
+        --primary-foreground: 210 40% 98%;
+        --secondary: 210 40% 96.1%;
+        --secondary-foreground: 222.2 47.4% 11.2%;
+        --muted: 210 40% 96.1%;
+        --muted-foreground: 215.4 16.3% 46.9%;
+        --accent: 210 40% 96.1%;
+        --accent-foreground: 222.2 47.4% 11.2%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 214.3 31.8% 91.4%;
+        --input: 214.3 31.8% 91.4%;
+        --ring: 222.2 84% 4.9%;
+        --radius: 0.5rem;
+      }
+     
+      .dark {
+        --background: 222.2 84% 4.9%;
+        --foreground: 210 40% 98%;
+        --card: 222.2 84% 4.9%;
+        --card-foreground: 210 40% 98%;
+        --popover: 222.2 84% 4.9%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 210 40% 98%;
+        --primary-foreground: 222.2 47.4% 11.2%;
+        --secondary: 217.2 32.6% 17.5%;
+        --secondary-foreground: 210 40% 98%;
+        --muted: 217.2 32.6% 17.5%;
+        --muted-foreground: 215 20.2% 65.1%;
+        --accent: 217.2 32.6% 17.5%;
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 62.8% 30.6%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 217.2 32.6% 17.5%;
+        --input: 217.2 32.6% 17.5%;
+        --ring: 212.7 26.8% 83.9%;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      }
+      
+      /* Markdown Styles Override for Tailwind Typography */
+      .prose pre {
+        background-color: transparent;
+        padding: 0;
+        margin: 0;
+      }
+      
+      .message-content p:first-child {
+        margin-top: 0;
+      }
+      .message-content p:last-child {
+        margin-bottom: 0;
+      }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-                导出时间: ${exportTime} | 消息数量: ${messageCount}
+<body class="bg-background text-foreground min-h-screen flex flex-col">
+    <div class="h-screen w-full flex flex-col">
+        <!-- Header -->
+        <div class="border-b bg-card p-4 flex justify-between items-center shadow-sm z-10">
+            <div>
+                <h1 class="font-semibold text-lg">${escapeHtml(title)}</h1>
+                <p class="text-xs text-muted-foreground">导出时间: ${exportTime} | 消息数量: ${visibleMessages.length}</p>
+            </div>
+            <div class="text-sm font-medium text-primary">
+                Zavixai Agent
             </div>
         </div>
-        <div class="messages">
-            ${messagesHtml}
+
+        <!-- Content -->
+        <div class="flex-1 overflow-hidden relative bg-muted/5">
+            <div class="h-full overflow-y-auto p-4 sm:p-6 scroll-smooth">
+                <div class="pb-8 max-w-4xl mx-auto w-full">
+                    ${messagesHtml}
+                </div>
+            </div>
         </div>
     </div>
     
     <script>
+        // 初始化图标
+        lucide.createIcons();
+        
+        // 初始化代码高亮
+        hljs.highlightAll();
+
         // 初始化所有ECharts图表
         document.addEventListener('DOMContentLoaded', function() {
             const echartsContainers = document.querySelectorAll('.echarts-container');
@@ -404,45 +422,33 @@ const generateHTMLContent = (conversation, visibleMessages) => {
 }
 
 /**
- * 简单的Markdown渲染器
+ * 简单的Markdown渲染器 (配合 marked 库)
  * @param {string} text - Markdown文本
  * @returns {string} 渲染后的HTML
  */
 const renderMarkdown = (text) => {
   if (!text) return ''
   
-  let html = escapeHtml(text)
-  
-  // 处理代码块
-  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-    return `<pre><code class="language-${lang || 'text'}">${code.trim()}</code></pre>`
-  })
-  
-  // 处理行内代码
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  
-  // 处理标题
-  html = html.replace(/^### (.*$)/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.*$)/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.*$)/gm, '<h1>$1</h1>')
-  
-  // 处理粗体和斜体
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>')
-  
-  // 处理链接
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-  
-  // 处理换行
-  html = html.replace(/\n/g, '<br>')
+  // 使用 marked 渲染
+  let html = marked.parse(text)
   
   // 处理ECharts代码块
   html = processEChartsBlocks(html)
   
-  // 处理表格
-  html = processMarkdownTables(html)
-  
   return html
+}
+
+/**
+ * HTML转义
+ */
+const escapeHtml = (unsafe) => {
+  if (typeof unsafe !== 'string') return ''
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /**
@@ -451,6 +457,8 @@ const renderMarkdown = (text) => {
  * @returns {string} 处理后的HTML
  */
 const processEChartsBlocks = (html) => {
+  // 这里的正则可能需要适配 marked 渲染后的 HTML 结构
+  // marked 渲染的代码块通常是 <pre><code class="language-echarts">...</code></pre>
   return html.replace(/<pre><code class="language-echarts">([\s\S]*?)<\/code><\/pre>/g, (match, code) => {
     try {
       // 解码HTML实体
@@ -459,13 +467,14 @@ const processEChartsBlocks = (html) => {
         .replace(/&gt;/g, '>')
         .replace(/&amp;/g, '&')
         .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'") // marked 可能会转义单引号
         .replace(/&#x27;/g, "'")
       
       // 生成唯一ID
       const chartId = 'chart_' + Math.random().toString(36).substr(2, 9)
       
       return `
-        <div class="echarts-container" id="${chartId}" style="width: 100%; height: 400px;">
+        <div class="echarts-container my-4 border rounded-lg p-2 bg-card" id="${chartId}" style="width: 100%; height: 400px;">
           <script type="text/javascript">
             ${decodedCode}
           </script>
@@ -476,82 +485,4 @@ const processEChartsBlocks = (html) => {
       return match
     }
   })
-}
-
-/**
- * 处理Markdown表格
- * @param {string} html - HTML内容
- * @returns {string} 处理后的HTML
- */
-const processMarkdownTables = (html) => {
-  // 匹配Markdown表格格式
-  const tableRegex = /(\|.*\|.*\n\|[-\s|:]+\|.*\n(?:\|.*\|.*\n?)*)/g
-  
-  return html.replace(tableRegex, (match) => {
-    const lines = match.trim().split('\n')
-    if (lines.length < 2) return match
-    
-    const headerLine = lines[0]
-    const separatorLine = lines[1]
-    const dataLines = lines.slice(2)
-    
-    // 解析表头
-    const headers = headerLine.split('|').map(h => h.trim()).filter(h => h)
-    
-    // 构建HTML表格
-    let tableHtml = '<table><thead><tr>'
-    headers.forEach(header => {
-      tableHtml += `<th>${header}</th>`
-    })
-    tableHtml += '</tr></thead><tbody>'
-    
-    // 处理数据行
-    dataLines.forEach(line => {
-      if (line.trim()) {
-        const cells = line.split('|').map(c => c.trim()).filter(c => c)
-        tableHtml += '<tr>'
-        cells.forEach(cell => {
-          tableHtml += `<td>${cell}</td>`
-        })
-        tableHtml += '</tr>'
-      }
-    })
-    
-    tableHtml += '</tbody></table>'
-    return tableHtml
-  })
-}
-
-/**
- * HTML转义
- * @param {string} text - 需要转义的文本
- * @returns {string} 转义后的文本
- */
-const escapeHtml = (text) => {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
-}
-
-/**
- * 下载HTML文件
- * @param {string} htmlContent - HTML内容
- * @param {string} filename - 文件名
- */
-const downloadHTML = (htmlContent, filename) => {
-  const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${filename || '对话记录'}.html`
-  link.style.display = 'none'
-  
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  
-  URL.revokeObjectURL(url)
-  
-  console.log('✅ HTML文件下载完成:', link.download)
 }

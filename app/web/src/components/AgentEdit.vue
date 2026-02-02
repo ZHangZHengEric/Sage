@@ -229,7 +229,7 @@
     <div class="p-4 border-t bg-muted/20 flex justify-end gap-3">
        <Button variant="outline" @click="handleClose">{{ t('common.cancel') }}</Button>
        <Button @click="handleSave" :disabled="saving">
-         <Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+         <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
          {{ t('common.save') }}
        </Button>
     </div>
@@ -259,7 +259,7 @@
              </template>
              <template v-else>
                 <Button @click="handleOptimizeStart" :disabled="isOptimizing">
-                  <Loader2 v-if="isOptimizing" class="mr-2 h-4 w-4 animate-spin" />
+                  <Loader v-if="isOptimizing" class="mr-2 h-4 w-4 animate-spin" />
                   开始优化
                 </Button>
              </template>
@@ -272,7 +272,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../utils/i18n.js'
-import { Trash2, Plus, ChevronDown, ChevronUp, GripVertical, Bot, Wrench, Database, Workflow, Loader2 } from 'lucide-vue-next'
+import { Trash2, Plus, ChevronDown, ChevronUp, GripVertical, Bot, Wrench, Database, Workflow, Loader } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 import { agentAPI } from '../api/agent.js'
 

@@ -1,8 +1,6 @@
 {
   "$schema": "https://shadcn-vue.com/schema.json",
   "style": "default",
-  "rsc": false,
-  "tsx": false,
   "tailwind": {
     "config": "tailwind.config.js",
     "css": "src/assets/index.css",

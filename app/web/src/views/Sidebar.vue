@@ -5,78 +5,163 @@
       <h2 class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent text-center mb-6">
         {{ t('app.title') }}
       </h2>
-      
-      <div v-if="currentUser" class="flex items-center gap-3 bg-white p-3 rounded-lg shadow-sm border">
-        <Avatar class="h-9 w-9 border-2 border-primary/10">
-          <AvatarImage :src="currentUser.avatar" />
-          <AvatarFallback class="bg-primary/10 text-primary font-bold">
-            {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
-          </AvatarFallback>
-        </Avatar>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium truncate text-foreground">
-            {{ currentUser.nickname || currentUser.username }}
-          </p>
-          <p class="text-xs text-muted-foreground truncate">User</p>
-        </div>
-        <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive" @click="handleLogout" :title="t('auth.logout')">
-          <LogOut class="w-4 h-4" />
-        </Button>
-      </div>
     </div>
+
+    <!-- Change Password Dialog -->
+    <Dialog v-model:open="showChangePasswordDialog">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>修改密码</DialogTitle>
+          <DialogDescription>
+            请输入当前密码和新密码以修改您的登录密码。
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label for="old-password" class="text-right">
+              旧密码
+            </Label>
+            <Input
+              id="old-password"
+              v-model="changePasswordForm.oldPassword"
+              type="password"
+              class="col-span-3"
+            />
+          </div>
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label for="new-password" class="text-right">
+              新密码
+            </Label>
+            <Input
+              id="new-password"
+              v-model="changePasswordForm.newPassword"
+              type="password"
+              class="col-span-3"
+            />
+          </div>
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label for="confirm-password" class="text-right">
+              确认新密码
+            </Label>
+            <Input
+              id="confirm-password"
+              v-model="changePasswordForm.confirmPassword"
+              type="password"
+              class="col-span-3"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showChangePasswordDialog = false">取消</Button>
+          <Button type="submit" @click="handleChangePassword" :disabled="changingPassword">
+            <span v-if="changingPassword">修改中...</span>
+            <span v-else>确认修改</span>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- Navigation -->
     <ScrollArea class="flex-1 px-3 py-4">
       <div class="space-y-4">
-        <Collapsible
-          v-for="category in predefinedServices"
-          :key="category.id"
-          v-model:open="expandedCategories[category.key]"
-          class="space-y-1"
-        >
-          <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
-            <component :is="getCategoryIcon(category.key)" class="mr-2 h-4 w-4" />
-            <span class="flex-1 text-left">{{ t(category.nameKey) }}</span>
-            <ChevronDown
-              class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
-              :class="{ '-rotate-90': !expandedCategories[category.key] }"
-            />
-          </CollapsibleTrigger>
-          
-          <CollapsibleContent class="space-y-1">
-            <div 
-              v-for="service in category.children" 
-              :key="service.id"
-            >
-              <Button
-                variant="ghost"
-                class="w-full justify-start h-9 pl-9 font-normal"
-                :class="cn(
-                  'hover:bg-primary/10 hover:text-primary',
-                  isCurrentService(service.url, service.isInternal) && 'bg-primary/10 text-primary font-medium'
-                )"
-                @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+        <template v-for="item in predefinedServices" :key="item.id">
+          <!-- Item with children (Category) -->
+          <Collapsible
+            v-if="item.children"
+            v-model:open="expandedCategories[item.key]"
+            class="space-y-1"
+          >
+            <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
+              <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
+              <span class="flex-1 text-left">{{ t(item.nameKey) }}</span>
+              <ChevronDown
+                class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
+                :class="{ '-rotate-90': !expandedCategories[item.key] }"
+              />
+            </CollapsibleTrigger>
+            
+            <CollapsibleContent class="space-y-1">
+              <div 
+                v-for="service in item.children" 
+                :key="service.id"
               >
-                {{ t(service.nameKey) }}
-              </Button>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+                <Button
+                  variant="ghost"
+                  class="w-full justify-start h-9 pl-9 font-normal"
+                  :class="cn(
+                    'hover:bg-primary/10 hover:text-primary',
+                    isCurrentService(service.url, service.isInternal) && 'bg-primary/10 text-primary font-medium'
+                  )"
+                  @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                >
+                  {{ t(service.nameKey) }}
+                </Button>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <!-- Item without children (Direct Link) -->
+          <Button
+            v-else
+            variant="ghost"
+            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors mb-1"
+            :class="cn(
+              isCurrentService(item.url, item.isInternal) && 'bg-primary/10 text-primary font-medium'
+            )"
+            @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+          >
+            <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
+            <span class="flex-1 text-left">{{ t(item.nameKey) }}</span>
+          </Button>
+        </template>
       </div>
     </ScrollArea>
 
-    <!-- Footer -->
-    <div class="p-4 border-t bg-white/50 backdrop-blur-sm">
-      <Button variant="outline" class="w-full justify-start bg-white hover:bg-muted/50" @click="toggleLanguage">
-        <Globe class="mr-2 h-4 w-4 text-muted-foreground" />
-        <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
-      </Button>
+    <!-- Footer User Profile -->
+    <div class="p-4 border-t bg-white/50 backdrop-blur-sm mt-auto" v-if="currentUser">
+      <DropdownMenu v-model:open="isDropdownOpen">
+        <DropdownMenuTrigger as-child>
+          <div class="flex items-center gap-3 bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:bg-slate-50 transition-colors w-full">
+            <Avatar class="h-9 w-9 border-2 border-primary/10">
+              <AvatarImage :src="currentUser.avatar" />
+              <AvatarFallback class="bg-primary/10 text-primary font-bold">
+                {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
+              </AvatarFallback>
+            </Avatar>
+            <div class="flex-1 min-w-0 text-left">
+              <p class="text-sm font-medium truncate text-foreground">
+                {{ currentUser.nickname || currentUser.username }}
+              </p>
+            </div>
+            <ChevronDown 
+              class="w-4 h-4 text-muted-foreground transition-transform duration-200" 
+              :class="{ '-rotate-90': !isDropdownOpen, 'rotate-180': isDropdownOpen }"
+            />
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent class="w-56" side="top" align="end">
+          <DropdownMenuSeparator />
+          <DropdownMenuItem @click="toggleLanguage">
+             <Globe class="mr-2 h-4 w-4" />
+             <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem @select.prevent="showChangePasswordDialog = true">
+            <KeyRound class="mr-2 h-4 w-4" />
+            <span>修改密码</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem @click="handleLogout" class="text-red-600">
+            <LogOut class="mr-2 h-4 w-4" />
+            <span>{{ t('auth.logout') }}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   MessageSquare, 
@@ -90,13 +175,36 @@ import {
   ChevronDown,
   LogOut,
   Settings,
-  LayoutGrid
+  LayoutGrid,
+  Users,
+  KeyRound
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { getCurrentUser, logout } from '../utils/auth.js'
+import { userAPI } from '@/api/user'
+import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import {
   Collapsible,
   CollapsibleContent,
@@ -115,6 +223,45 @@ const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
 }
 
+const isDropdownOpen = ref(false)
+const showChangePasswordDialog = ref(false)
+const changePasswordForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+const changingPassword = ref(false)
+
+const handleChangePassword = async () => {
+  if (!changePasswordForm.value.oldPassword || !changePasswordForm.value.newPassword) {
+    toast.error('请输入密码')
+    return
+  }
+  
+  if (changePasswordForm.value.newPassword !== changePasswordForm.value.confirmPassword) {
+    toast.error('两次输入的密码不一致')
+    return
+  }
+  
+  changingPassword.value = true
+  try {
+    await userAPI.changePassword(
+      changePasswordForm.value.oldPassword, 
+      changePasswordForm.value.newPassword
+    )
+    toast.success('密码修改成功，请重新登录')
+    showChangePasswordDialog.value = false
+    handleLogout()
+  } catch (error) {
+    // Error is handled by request interceptor usually, but if not:
+    console.error(error)
+    // If request.js throws error with message
+    // toast.error(error.message || '密码修改失败')
+  } finally {
+    changingPassword.value = false
+  }
+}
+
 onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('user-updated', handleUserUpdated)
@@ -127,76 +274,71 @@ onUnmounted(() => {
   }
 })
 
-const predefinedServices = ref([
-  {
-    id: 'cat1',
-    key: 'chat_and_config',
-    nameKey: 'sidebar.chatAndConfig',
-    children: [
-      { id: 'svc_chat', nameKey: 'sidebar.newChat', url: 'Chat', isInternal: true },
-      { id: 'svc_agent', nameKey: 'sidebar.agentConfig', url: 'AgentConfig', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat2',
-    key: 'tools_and_services',
-    nameKey: 'sidebar.toolsAndServices',
-    children: [
-      { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
-      { id: 'svc_mcps', nameKey: 'sidebar.mcpsManage', url: 'Mcps', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat_skills',
-    key: 'skills',
-    nameKey: 'sidebar.skillLibrary',
-    children: [
-      { id: 'svc_skills', nameKey: 'sidebar.skillLibrary', url: 'Skills', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat3',
-    key: 'knowledge_base',
-    nameKey: 'sidebar.knowledgeBase',
-    children: [
-      { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseManage', url: 'KnowledgeBase', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat4',
-    key: 'history',
-    nameKey: 'sidebar.sessions',
-    children: [
-      { id: 'svc_history', nameKey: 'sidebar.history', url: 'History', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat5',
-    key: 'api_reference',
-    nameKey: 'sidebar.apiReference',
-    children: [
-      { id: 'svc_api_agent_chat', nameKey: 'sidebar.apiAgentChat', url: 'ApiAgentChat', isInternal: true }
-    ]
+const predefinedServices = computed(() => {
+  const services = [
+    {
+      id: 'svc_chat',
+      key: 'new_chat',
+      nameKey: 'sidebar.newChat',
+      url: 'Chat',
+      isInternal: true
+    },
+    { id: 'svc_history', nameKey: 'sidebar.sessions', url: 'History', isInternal: true },
+    {
+      id: 'cat2',
+      key: 'agent_capabilities',
+      nameKey: 'sidebar.capabilityModules',
+      children: [
+        { id: 'svc_agent', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true },
+        { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
+        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
+        { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseList', url: 'KnowledgeBase', isInternal: true }
+      ]
+    },
+    {
+      id: 'cat5',
+      key: 'api_reference',
+      nameKey: 'sidebar.apiReference',
+      children: [
+        { id: 'svc_api_agent_chat', nameKey: 'sidebar.apiAgentChat', url: 'ApiAgentChat', isInternal: true }
+      ]
+    }
+  ]
+
+  if (currentUser.value?.role === 'admin') {
+    services.push({
+      id: 'cat_sys',
+      key: 'system_management',
+      nameKey: 'sidebar.systemManagement',
+      children: [
+        { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
+        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
+      ]
+    })
   }
-])
+
+  return services
+})
 
 const expandedCategories = ref({
-  chat_and_config: true,
-  tools_and_services: false,
+  new_chat: true,
+  agent_capabilities: false,
   knowledge_base: false,
   history: false,
   api_reference: false,
-  skills: false
+  skills: false,
+  system_management: false
 })
 
 const getCategoryIcon = (key) => {
   const map = {
-    chat_and_config: MessageSquare,
-    tools_and_services: Wrench,
+    new_chat: MessageSquare,
+    agent_capabilities: Wrench,
     skills: Zap,
     knowledge_base: Book,
     history: Clock,
-    api_reference: Code
+    api_reference: Code,
+    system_management: Settings
   }
   return map[key] || LayoutGrid
 }

@@ -21,6 +21,7 @@ from .render import Response
 WHITELIST_API_PATHS = frozenset(
     {
         "/api/health",
+        "/api/system/info",
         "/api/stream/task_messages",
         "/api/user/login",
         "/api/user/register",
@@ -98,29 +99,28 @@ def register_middlewares(app):
 
         return response
 
-    cfg = get_startup_config()
-    if cfg and cfg.no_auth:
-        return
-
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
-        if path.startswith("/api") and not _is_whitelisted(path):
+        if path.startswith("/api"):
+            is_whitelisted = _is_whitelisted(path)
             auth = request.headers.get("Authorization", "")
 
-            if not auth.lower().startswith("bearer "):
+            if auth.lower().startswith("bearer "):
+                token = auth.split(" ", 1)[1]
+                try:
+                    request.state.user_claims = parse_access_token(token)
+                except SageHTTPException as e:
+                    if not is_whitelisted:
+                        return await _unauthorized_response(
+                            e.status_code, e.detail, e.error_detail
+                        )
+                except Exception as e:
+                    if not is_whitelisted:
+                        return await _unauthorized_response(401, "Token非法", str(e))
+            elif not is_whitelisted:
                 return await _unauthorized_response(
                     401, "未授权", "missing bearer token"
                 )
-
-            token = auth.split(" ", 1)[1]
-            try:
-                request.state.user_claims = parse_access_token(token)
-            except SageHTTPException as e:
-                return await _unauthorized_response(
-                    e.status_code, e.detail, e.error_detail
-                )
-            except Exception as e:
-                return await _unauthorized_response(401, "Token非法", str(e))
 
         return await call_next(request)

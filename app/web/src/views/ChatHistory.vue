@@ -39,15 +39,12 @@
       
       <div class="flex-1 overflow-y-auto pr-2 space-y-3">
         <!-- 加载状态 -->
-        <div v-if="isLoading" class="flex flex-col gap-4 p-4">
-           <!-- Skeleton loader could go here -->
-           <div class="h-24 w-full bg-muted animate-pulse rounded-lg"></div>
-           <div class="h-24 w-full bg-muted animate-pulse rounded-lg"></div>
-           <div class="h-24 w-full bg-muted animate-pulse rounded-lg"></div>
+        <div v-if="isLoading" class="flex flex-col gap-4 p-4 items-center justify-center py-20">
+          <Loader class="h-8 w-8 animate-spin text-primary" />
         </div>
         
         <div
-          v-else
+          v-else-if="paginatedConversations.length > 0"
           v-for="conversation in paginatedConversations"
           :key="conversation.id"
           :class="[
@@ -60,18 +57,18 @@
               <div class="flex justify-between items-start mb-2">
                 <h3 class="text-base font-semibold leading-none tracking-tight text-foreground truncate pr-2">{{ conversation.title }}</h3>
                 
-                <div class="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
-                  <span class="flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded">
-                    {{ conversation.session_id }}
+                <div class="flex items-center gap-4 text-xs text-muted-foreground shrink-0 flex-wrap sm:flex-nowrap">
+                  <span class="flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded max-w-[120px] sm:max-w-none truncate">
+                    <span class="truncate">{{ conversation.session_id }}</span>
                     <button
-                      class="inline-flex items-center justify-center h-4 w-4 hover:text-primary transition-colors"
+                      class="inline-flex items-center justify-center h-4 w-4 hover:text-primary transition-colors shrink-0"
                       @click.stop="copySessionId(conversation)"
                       :title="t('common.copy') || '复制'"
                     >
                       <Copy :size="10" />
                     </button>
                   </span>
-                  <span class="flex items-center gap-1">
+                  <span class="flex items-center gap-1 shrink-0">
                     <Calendar :size="12" />
                     {{ formatDate(conversation.updated_at) }}
                   </span>
@@ -82,18 +79,7 @@
                 </div>
               </div>
        
-              <div class="flex justify-between items-center">
-                <div class="flex gap-4">
-                  <div class="flex items-center gap-1 text-xs text-muted-foreground">
-                    <User :size="12" />
-                    <span>{{ conversation.user_count }}</span>
-                  </div>
-                  <div class="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Bot :size="12" />
-                    <span>{{ conversation.agent_count }}</span>
-                  </div>
-                </div>
-                
+              <div class="flex justify-end items-center">
                 <div class="text-right">
                   <span class="text-xs font-medium text-primary">{{ getAgentName(conversation.agent_id) }}</span>
                 </div>
@@ -181,7 +167,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy } from 'lucide-vue-next'
+import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy, Loader } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
@@ -202,7 +188,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -230,7 +215,7 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const totalCount = ref(0)
 const paginatedConversations = ref([])
-const isLoading = ref(false)
+const isLoading = ref(true)
 
 // 加载agents
 const loadAgents = async () => {
