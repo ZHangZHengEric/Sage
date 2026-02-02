@@ -127,6 +127,7 @@
                       <label :for="`tool-${tool.name}`" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
                         {{ tool.name }}
                       </label>
+                      <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2">{{ tool.description}}</p>
                     </div>
                     <div v-if="props.tools.length === 0" class="text-sm text-muted-foreground text-center py-4">
                       {{ t('tools.noTools') || '暂无可用工具' }}

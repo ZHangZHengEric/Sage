@@ -34,7 +34,7 @@
           {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
         </div>
         <div class="bg-primary/95 text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm overflow-hidden break-words text-sm leading-relaxed tracking-wide">
-          <ReactMarkdown
+          <MarkdownRenderer
             :content="formatMessageContent(message.content)"
           />
         </div>
@@ -54,7 +54,7 @@
           </span>
         </div>
         <div class="bg-card text-card-foreground border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full">
-          <ReactMarkdown
+          <MarkdownRenderer
             :content="formatMessageContent(message.show_content)"
             :components="markdownComponents"
           />
@@ -112,8 +112,8 @@
 import { computed, h } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
-import ReactMarkdown from './ReactMarkdown.vue'
-import ReactECharts from './ReactECharts.vue'
+import MarkdownRenderer from './MarkdownRenderer.vue'
+import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
 import { Badge } from '@/components/ui/badge'
@@ -173,7 +173,7 @@ const markdownComponents = {
       try {
         const chartOption = JSON.parse(String(children).replace(/\n$/, ''))
         return h('div', { class: 'echarts-container', style: { margin: '16px 0' } }, [
-          h(ReactECharts, { 
+          h(EChartsRenderer, { 
             option: chartOption, 
             style: { height: '400px', width: '100%' },
             opts: { renderer: 'canvas' }
