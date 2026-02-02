@@ -2,6 +2,7 @@
   <div class="app flex h-screen overflow-hidden bg-background text-foreground">
     <!-- Desktop Sidebar -->
     <Sidebar 
+      v-if="!isSharedPage"
       class="hidden lg:flex shrink-0" 
       @new-chat="handleNewChat" 
     />
@@ -15,7 +16,7 @@
       leave-from-class="opacity-100"
       leave-to-class="opacity-0"
     >
-      <div v-if="isMobileMenuOpen" class="fixed inset-0 z-50 bg-black/50 lg:hidden" @click="isMobileMenuOpen = false" />
+      <div v-if="isMobileMenuOpen && !isSharedPage" class="fixed inset-0 z-50 bg-black/50 lg:hidden" @click="isMobileMenuOpen = false" />
     </Transition>
 
     <!-- Mobile Sidebar -->
@@ -27,14 +28,14 @@
       leave-from-class="translate-x-0"
       leave-to-class="-translate-x-full"
     >
-      <div v-if="isMobileMenuOpen" class="fixed inset-y-0 left-0 z-50 lg:hidden bg-background h-full shadow-xl">
+      <div v-if="isMobileMenuOpen && !isSharedPage" class="fixed inset-y-0 left-0 z-50 lg:hidden bg-background h-full shadow-xl">
          <Sidebar @new-chat="handleNewChat" />
       </div>
     </Transition>
 
     <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
       <!-- Mobile Header -->
-      <div class="lg:hidden flex items-center p-4 border-b bg-background shrink-0">
+      <div v-if="!isSharedPage" class="lg:hidden flex items-center p-4 border-b bg-background shrink-0">
          <Button variant="ghost" size="icon" @click="isMobileMenuOpen = true" class="-ml-2">
             <Menu class="h-6 w-6" />
          </Button>
@@ -45,19 +46,21 @@
         <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
       </div>
     </main>
-    <Toaster position="top-center" richColors />
 
     <LoginModal
         :visible="showLoginModal"
         @close="showLoginModal = false"
         @login-success="handleLoginSuccess"
     />
+    <Teleport to="body">
+      <Toaster position="top-center" richColors />
+    </Teleport>
   </div>
 
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
 import LoginModal from './components/LoginModal.vue'
@@ -69,8 +72,19 @@ import { Button } from '@/components/ui/button'
 const router = useRouter()
 const route = useRoute()
 
+const isSharedPage = computed(() => route.name === 'SharedChat')
+
 // 登录模态框显示状态
-const showLoginModal = ref(!isLoggedIn())
+const showLoginModal = ref(false)
+
+// Check login status on mount and route change
+watch(() => route.path, () => {
+  if (isSharedPage.value) {
+    showLoginModal.value = false
+  } else {
+    showLoginModal.value = !isLoggedIn()
+  }
+}, { immediate: true })
 
 // Mobile menu state
 const isMobileMenuOpen = ref(false)

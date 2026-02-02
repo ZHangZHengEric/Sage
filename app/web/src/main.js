@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import './assets/index.css'
+import 'vue-sonner/style.css'
 import App from './App.vue'
 
 // 导入路由和状态管理

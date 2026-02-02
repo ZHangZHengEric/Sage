@@ -96,7 +96,7 @@
           @click="handleCreateSmart" 
           :disabled="!description.trim() || isGenerating"
         >
-          <Loader2 v-if="isGenerating" class="mr-2 h-4 w-4 animate-spin" />
+          <Loader v-if="isGenerating" class="mr-2 h-4 w-4 animate-spin" />
           <Sparkles v-else class="mr-2 h-4 w-4" />
           {{ isGenerating ? t('agentCreation.generating') : t('agentCreation.generate') }}
         </Button>
@@ -107,7 +107,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { Sparkles, FileText, Loader2 } from 'lucide-vue-next'
+import { Sparkles, FileText, Loader } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 
 // UI Components
@@ -139,14 +139,11 @@ const selectedTools = ref([])
 const isGenerating = ref(false)
 
 const handleClose = () => {
-  if (isGenerating.value) return
+  selectedType.value = ''
+  description.value = ''
+  isGenerating.value = false
+  selectedTools.value = []
   emit('close')
-  // Reset state after transition
-  setTimeout(() => {
-    selectedType.value = ''
-    description.value = ''
-    selectedTools.value = []
-  }, 300)
 }
 
 const handleTypeSelect = (type) => {
@@ -158,42 +155,32 @@ const handleCreateBlank = () => {
   handleClose()
 }
 
+import { toast } from 'vue-sonner'
+
 const handleCreateSmart = async () => {
-  if (!description.value.trim()) return
+  if (!description.value.trim()) {
+    toast.error(t('agentCreation.error'))
+    return
+  }
 
   isGenerating.value = true
   try {
-    await generateConfig()
+    // 使用回调握手，等待父组件异步逻辑完成
+    await new Promise((resolve, reject) => {
+      emit('create-smart', description.value.trim(), selectedTools.value, {
+        onSuccess: () => resolve(),
+        onError: (err) => reject(err)
+      })
+    })
+    handleClose()
   } catch (error) {
-    console.error('生成配置失败:', error)
+    console.error('Smart creation failed:', error)
+    toast.error(t('agentCreation.error'))
   } finally {
     isGenerating.value = false
   }
 }
 
-// 恢复 agentAPI
-import { agentAPI } from '../api/agent.js'
 
-const generateConfig = async () => {
-  try {
-    const prompt = `请创建一个Agent，描述如下：
-${description.value}
-
-请根据描述生成合适的系统提示词、开场白等配置。
-${selectedTools.value.length > 0 ? `用户已选择以下工具，请在配置中启用它们：${selectedTools.value.join(', ')}` : ''}`
-
-    const config = await agentAPI.generateConfig(prompt)
-    
-    // 确保选中的工具被添加到配置中
-    if (selectedTools.value.length > 0) {
-      config.availableTools = [...new Set([...(config.availableTools || []), ...selectedTools.value])]
-    }
-
-    emit('create-smart', config)
-    handleClose()
-  } catch (error) {
-    throw error
-  }
-}
 </script>
 

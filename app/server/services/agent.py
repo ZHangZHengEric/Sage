@@ -29,17 +29,19 @@ def generate_agent_id() -> str:
 # ================= 业务函数 =================
 
 
-async def list_agents(user_id: str) -> List[models.Agent]:
+async def list_agents(user_id: str, role: str = "user") -> List[models.Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
     dao = models.AgentConfigDao()
-    all_configs = await dao.get_list(user_id)
+    # Admin can see all agents; regular users only see their own
+    target_user_id = None if role == "admin" else user_id
+    all_configs = await dao.get_list(target_user_id)
     return all_configs
 
 
 async def create_agent(
     agent_name: str, agent_config: Dict[str, Any], user_id: str
-) -> str:
-    """创建新的 Agent，返回创建的 agent_id"""
+) -> models.Agent:
+    """创建新的 Agent，返回创建的 Agent 对象"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
 
@@ -55,7 +57,7 @@ async def create_agent(
     orm_obj.user_id = user_id
     await dao.save(orm_obj)
     logger.info(f"Agent {agent_id} 创建成功")
-    return agent_id
+    return orm_obj
 
 
 async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agent:
@@ -79,9 +81,9 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agen
 
 
 async def update_agent(
-    agent_id: str, agent_name: str, agent_config: Dict[str, Any], user_id: str
-) -> str:
-    """更新指定 Agent 的配置，返回 agent_id"""
+    agent_id: str, agent_name: str, agent_config: Dict[str, Any], user_id: Optional[str] = None
+) -> models.Agent:
+    """更新指定 Agent 的配置，返回 Agent 对象"""
     logger.info(f"开始更新Agent: {agent_id}")
     dao = models.AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
@@ -91,7 +93,8 @@ async def update_agent(
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
-    if existing_config.user_id and existing_config.user_id != user_id:
+    # Check permission: if user_id is provided, it must match
+    if user_id and existing_config.user_id and existing_config.user_id != user_id:
         raise SageHTTPException(
             status_code=403,
             detail="无权更新该Agent",
@@ -100,14 +103,14 @@ async def update_agent(
     orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
     # 保留原始创建时间
     orm_obj.created_at = existing_config.created_at
-    orm_obj.user_id = user_id
+    orm_obj.user_id = existing_config.user_id  # Keep original owner
     await dao.save(orm_obj)
     logger.info(f"Agent {agent_id} 更新成功")
-    return agent_id
+    return orm_obj
 
 
-async def delete_agent(agent_id: str, user_id: str) -> str:
-    """删除指定 Agent，返回 agent_id"""
+async def delete_agent(agent_id: str, user_id: Optional[str] = None, role: str = "user") -> models.Agent:
+    """删除指定 Agent，返回删除的 Agent 对象"""
     logger.info(f"开始删除Agent: {agent_id}")
     dao = models.AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
@@ -117,7 +120,7 @@ async def delete_agent(agent_id: str, user_id: str) -> str:
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
-    if existing_config.user_id and existing_config.user_id != user_id:
+    if role != "admin" and user_id and existing_config.user_id and existing_config.user_id != user_id:
         raise SageHTTPException(
             status_code=403,
             detail="无权删除该Agent",
@@ -125,7 +128,7 @@ async def delete_agent(agent_id: str, user_id: str) -> str:
         )
     await dao.delete_by_id(agent_id)
     logger.info(f"Agent {agent_id} 删除成功")
-    return agent_id
+    return existing_config
 
 
 async def auto_generate_agent(

@@ -147,23 +147,14 @@ async def _load_preset_agent_config(config_path: str):
         logger.info(f"已加载 {count} 个Agent配置")
 
 
-async def initialize_db_data(cfg: StartupConfig):
-    """初始化数据库数据"""
+async def initialize_preset_data(cfg: StartupConfig):
+    """初始化数据库预设数据"""
     if not await _should_initialize_data(cfg):
         logger.debug("数据库已存在数据，跳过预加载")
         return
     await _load_preset_mcp_config(cfg.preset_mcp_config)
     await _load_preset_agent_config(cfg.preset_running_config)
     logger.debug("数据库预加载完成")
-
-    from .core.client.db import get_global_db
-
-    db = await get_global_db()
-    async with db._engine.begin() as conn:
-        from . import models
-
-        await conn.run_sync(models.Base.metadata.create_all)
-    logger.debug("数据库自动建表完成")
 
 
 async def validate_and_disable_mcp_servers():
@@ -306,3 +297,41 @@ async def shutdown_clients():
         await close_db_client()
     finally:
         logger.info("数据库客户端 已关闭")
+
+
+async def ensure_system_init():
+    """Ensure system tables and default data exist."""
+    from . import models
+    from .services.user import _hash_password
+    from .utils.id import gen_id
+    from .core.client.db import get_global_db
+
+    db = await get_global_db()
+    async with db._engine.begin() as conn:
+        from . import models
+
+        await conn.run_sync(models.Base.metadata.create_all)
+    logger.debug("数据库自动建表完成")
+
+    # Check System Info
+    sys_dao = models.SystemInfoDao()
+    allow_reg = await sys_dao.get_by_key("allow_registration")
+    if allow_reg is None:
+        await sys_dao.set_value("allow_registration", "false")
+        logger.info("初始化系统配置: 允许自注册=false")
+
+    # Check Admin
+    user_dao = models.UserDao()
+    users = await user_dao.get_list(limit=1)
+    if not users:
+        admin_password = "admin"
+        hashed = _hash_password(admin_password)
+        admin_user = models.User(
+            user_id=gen_id(),
+            username="admin",
+            password_hash=hashed,
+            role="admin",
+            email="admin@example.com"
+        )
+        await user_dao.save(admin_user)
+        logger.info(f"初始化默认管理员用户. 用户名: admin, 密码: {admin_password}")

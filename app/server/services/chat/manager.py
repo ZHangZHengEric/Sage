@@ -105,14 +105,14 @@ async def populate_request_from_agent_config(
     if not getattr(request, "agent_id", None):
         # 如果要求必须有 Agent ID，则抛出异常
         if require_agent_id:
-            raise SageHTTPException(status_code=400, detail="Agent ID 不能为空")
+            raise SageHTTPException(status_code=500, detail="Agent ID 不能为空")
         return
     agent_dao = models.AgentConfigDao()
     agent = await agent_dao.get_by_id(request.agent_id)
     if not agent or not agent.config:
         # 如果要求必须有 Agent ID，但 Agent 不存在，则抛出异常
         if require_agent_id:
-            raise SageHTTPException(status_code=400, detail="Agent 不存在")
+            raise SageHTTPException(status_code=500, detail="Agent 不存在")
         logger.warning(f"Agent {request.agent_id} not found")
         return
 

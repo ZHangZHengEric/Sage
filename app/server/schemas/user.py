@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -23,3 +23,25 @@ class LoginResponse(BaseModel):
 
 class UserInfoResponse(BaseModel):
     user: Dict[str, Any]
+
+class UserDTO(BaseModel):
+    user_id: str
+    username: str
+    email: Optional[str] = None
+    phonenum: Optional[str] = None
+    role: str
+    created_at: str
+
+class UserListResponse(BaseModel):
+    items: List[UserDTO]
+    total: int
+
+class UserAddRequest(RegisterRequest):
+    role: Optional[str] = "user"
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class UserDeleteRequest(BaseModel):
+    user_id: str

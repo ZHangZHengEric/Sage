@@ -38,7 +38,7 @@
           </div>
 
           <Button type="submit" class="w-full" :disabled="isLoading || !loginForm.username || !loginForm.password">
-            <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
+            <Loader v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             {{ isLoading ? '登录中...' : '登录' }}
           </Button>
         </form>
@@ -84,7 +84,7 @@
           </div>
 
           <Button type="submit" class="w-full" :disabled="isLoading || !registerForm.username || !registerForm.password || !registerForm.confirmPassword">
-            <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
+            <Loader v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             {{ isLoading ? '注册中...' : '注册并登录' }}
           </Button>
         </form>
@@ -93,7 +93,9 @@
       <div class="bg-muted/50 p-4 flex justify-center border-t">
         <div class="text-sm text-muted-foreground">
           <span v-if="mode === 'login'">
-            没有账号？<a href="#" class="text-primary font-medium hover:underline" @click.prevent="switchToRegister">去注册</a>
+            <span v-if="allowRegistration">
+              没有账号？<a href="#" class="text-primary font-medium hover:underline" @click.prevent="switchToRegister">去注册</a>
+            </span>
           </span>
           <span v-else>
             已有账号？<a href="#" class="text-primary font-medium hover:underline" @click.prevent="switchToLogin">去登录</a>
@@ -105,9 +107,10 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { loginAPI, registerAPI } from '../utils/auth.js'
-import { Loader2 } from 'lucide-vue-next'
+import { systemAPI } from '../api/system.js'
+import { Loader } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -135,6 +138,17 @@ const emit = defineEmits(['close', 'login-success'])
 const isLoading = ref(false)
 const errorMessage = ref('')
 const mode = ref('login')
+const allowRegistration = ref(true)
+
+onMounted(async () => {
+  try {
+    const res = await systemAPI.getSystemInfo()
+    allowRegistration.value = res.allow_registration
+
+  } catch (e) {
+    console.error('Failed to get system info', e)
+  }
+})
 
 const loginForm = reactive({
   username: '',
@@ -214,6 +228,7 @@ const handleRegister = async () => {
 }
 
 const switchToRegister = () => {
+  if (!allowRegistration.value) return
   errorMessage.value = ''
   mode.value = 'register'
 }
