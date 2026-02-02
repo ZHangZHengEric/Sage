@@ -1,6 +1,6 @@
 <script setup>
 import { AvatarImage } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   src: { type: String, required: true },

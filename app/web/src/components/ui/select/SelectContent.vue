@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { SelectContent, SelectPortal, SelectViewport, useForwardPropsEmits } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   forceMount: { type: Boolean, required: false },

@@ -1,6 +1,6 @@
 <script setup>
 import { TooltipContent, TooltipPortal, useForwardPropsEmits } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   forceMount: { type: Boolean, required: false },
