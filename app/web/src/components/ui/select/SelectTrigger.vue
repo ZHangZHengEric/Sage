@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { SelectIcon, SelectTrigger, useForwardProps } from 'radix-vue'
 import { ChevronDown } from 'lucide-vue-next'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   disabled: { type: Boolean, required: false },

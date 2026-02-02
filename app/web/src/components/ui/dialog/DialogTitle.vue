@@ -1,6 +1,6 @@
 <script setup>
 import { DialogTitle } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   asChild: { type: Boolean, default: false },

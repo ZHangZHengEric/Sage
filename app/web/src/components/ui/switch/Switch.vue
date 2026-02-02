@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { SwitchRoot, SwitchThumb, useForwardPropsEmits } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   class: { type: String, default: '' },

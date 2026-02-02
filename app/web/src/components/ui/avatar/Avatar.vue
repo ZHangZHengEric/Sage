@@ -1,6 +1,6 @@
 <script setup>
 import { AvatarRoot } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 import { cva } from 'class-variance-authority'
 
 const avatarVariant = cva(
