@@ -1,7 +1,7 @@
 <script setup>
 import { DialogContent, DialogOverlay, DialogPortal, DialogClose } from 'radix-vue'
 import { X } from 'lucide-vue-next'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   forceMount: { type: Boolean, default: undefined },

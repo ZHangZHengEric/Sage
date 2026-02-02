@@ -33,7 +33,7 @@ export const buttonVariants = cva(
 
 <script setup>
 import { Primitive } from 'radix-vue'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = defineProps({
   variant: {

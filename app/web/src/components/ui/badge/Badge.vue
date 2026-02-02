@@ -1,5 +1,5 @@
 <script setup>
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 import { cva } from 'class-variance-authority'
 
 const badgeVariants = cva(

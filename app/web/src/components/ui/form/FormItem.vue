@@ -1,6 +1,6 @@
 <script setup>
 import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 defineProps({
   label: { type: String, default: '' },
