@@ -117,9 +117,10 @@ const uploadedFiles = ref([])
 // 自动调整文本区域高度
 const adjustTextareaHeight = async () => {
   await nextTick()
-  if (textareaRef.value) {
-    textareaRef.value.style.height = 'auto'
-    textareaRef.value.style.height = `${textareaRef.value.scrollHeight}px`
+  const el = textareaRef.value?.$el || textareaRef.value
+  if (el && el.style) {
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
   }
 }
 
