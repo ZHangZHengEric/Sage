@@ -71,7 +71,7 @@
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
             {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
          </div>
-         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
+         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage, 'pointer-events-none opacity-60 grayscale': readonly }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
              <!-- Global Error Card -->
              <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
@@ -82,6 +82,7 @@
                :toolCall="toolCall"
                :toolResult="getParsedToolResult(toolCall)"
                :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
+               :readonly="readonly"
                @sendMessage="handleSendMessage"
                @click="handleToolClick"
              />
@@ -122,6 +123,10 @@ const props = defineProps({
   messageIndex: {
     type: Number,
     default: 0
+  },
+  readonly: {
+    type: Boolean,
+    default: false
   }
 })
 
