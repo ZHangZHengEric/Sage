@@ -30,6 +30,7 @@ class KdbInfoResponse(BaseModel):
     kdbId: str
     name: str
     intro: str
+    type: str
     createdAt: int
     updatedAt: int
     kdbSetting: Optional[Dict[str, Any]] = None
