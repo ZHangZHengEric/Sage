@@ -1,6 +1,5 @@
 export default {
   // 侧边栏
-  'app.title': 'Zavixai Agent',
   'sidebar.newChat': '新对话',
   'sidebar.agentList': 'Agent列表',
   'sidebar.skillList': '技能库',
@@ -51,6 +50,10 @@ export default {
   'chat.downloadError': '下载文件失败',
   'chat.shareNoSession': '当前会话不存在，无法分享',
   'chat.shareSuccess': '会话分享成功',
+  'chat.noMessages': '暂无消息',
+  'chat.share': '分享当前会话',
+  'chat.traceWorkflow': '跟踪工作流',
+  
   // Agent配置页面
   'agent.title': 'Agent配置',
   'agent.subtitle': '管理您的AI助手配置',

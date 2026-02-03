@@ -4,7 +4,7 @@
     <div v-if="currentView === 'list'" class="space-y-6 animate-in fade-in duration-500">
       <div class="flex justify-end gap-3">
         <Button variant="outline" @click="handleImport">
-          <Upload class="mr-2 h-4 w-4" />
+          <Download class="mr-2 h-4 w-4" />
           {{ t('agent.import') }}
         </Button>
         <Button @click="handleCreateAgent">
@@ -57,13 +57,13 @@
 
           <CardFooter class="pt-4 border-t bg-muted/20 flex flex-wrap gap-2 justify-end">
             <Button variant="ghost" size="icon" @click="openUsageModal(agent)" :title="t('agent.usage')">
-              <Settings class="h-4 w-4" />
+              <FileBraces class="h-4 w-4" />
             </Button>
             <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
               <Edit class="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
-              <Download class="h-4 w-4" />
+              <Upload class="h-4 w-4" />
             </Button>
             <Button 
               v-if="canDelete(agent)" 
@@ -149,7 +149,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Trash2, Bot, Settings, Download, Upload, Copy, Loader } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
 import { getCurrentUser } from '../utils/auth.js'
