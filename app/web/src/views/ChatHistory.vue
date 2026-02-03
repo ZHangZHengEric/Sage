@@ -70,11 +70,7 @@
                   </span>
                   <span class="flex items-center gap-1 shrink-0">
                     <Calendar :size="12" />
-                    {{ formatDate(conversation.updated_at) }}
-                  </span>
-                  <span class="flex items-center gap-1">
-                    <Clock :size="12" />
-                    {{ formatTime(conversation.updated_at) }}
+                    {{ formatDateTime(conversation.updated_at) }}
                   </span>
                 </div>
               </div>
@@ -273,34 +269,16 @@ const handleSelectConversation = (conversation) => {
   })
 }
 
-const formatDate = (timestamp) => {
+const formatDateTime = (timestamp) => {
+  if (!timestamp) return ''
   const date = new Date(timestamp)
-  const now = new Date()
-  const diffTime = Math.abs(now - date)
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-  
-  if (diffDays === 1) {
-    return t('history.today')
-  } else if (diffDays === 2) {
-    return t('history.yesterday')
-  } else if (diffDays <= 7) {
-    return t('history.daysAgo').replace('{days}', diffDays - 1)
-  } else {
-    const locale = language.value === 'en-US' ? 'en-US' : 'zh-CN'
-    return date.toLocaleDateString(locale, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    })
-  }
-}
-
-const formatTime = (timestamp) => {
-  const locale = language.value === 'en-US' ? 'en-US' : 'zh-CN'
-  return new Date(timestamp).toLocaleTimeString(locale, {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
 
