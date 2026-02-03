@@ -117,6 +117,53 @@ renderer.code = (code, language) => {
 
   return `<pre class="not-prose rounded-lg p-4 overflow-x-auto my-4 border language-${lang}"><code class="language-${lang} text-sm font-mono">${highlighted}</code></pre>`
 }
+
+renderer.table = function(token) {
+  let header = ''
+  let body = ''
+  
+  // 生成表头
+  let headerContent = ''
+  for (const cell of token.header) {
+    headerContent += this.tablecell(cell)
+  }
+  header = `<tr>${headerContent}</tr>`
+
+  // 生成表体
+  for (const row of token.rows) {
+    let rowContent = ''
+    for (const cell of row) {
+      rowContent += this.tablecell(cell)
+    }
+    body += `<tr>${rowContent}</tr>`
+  }
+
+  return `<div class="overflow-x-auto my-4 w-full">
+    <table class="w-full text-sm border-collapse border rounded-md">
+      <thead class="bg-muted/50">
+        ${header}
+      </thead>
+      <tbody>
+        ${body}
+      </tbody>
+    </table>
+  </div>`
+}
+
+renderer.tablecell = function(token) {
+  const content = this.parser.parseInline(token.tokens)
+  const tag = token.header ? 'th' : 'td'
+  let className = token.header
+    ? 'border px-4 py-2 text-left font-medium text-muted-foreground'
+    : 'border px-4 py-2'
+    
+  if (token.align) {
+    className += ` text-${token.align}`
+  }
+  
+  return `<${tag} class="${className}">${content}</${tag}>`
+}
+
 // 配置marked选项
 marked.setOptions({
   breaks: true,
