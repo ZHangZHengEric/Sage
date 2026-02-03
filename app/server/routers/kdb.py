@@ -84,6 +84,7 @@ async def kdb_info(http_request: Request, kdb_id: str = Query(...)):
             kdbId=obj.id,
             name=obj.name,
             intro=obj.intro,
+            type=obj.data_type,
             createdAt=int(obj.created_at.timestamp()),
             updatedAt=int(obj.updated_at.timestamp()),
             kdbSetting=obj.setting,
