@@ -275,12 +275,8 @@ async def kdb_doc_add_by_files(
     svc = KdbService()
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    check_user_id = user_id if role != "admin" else None
 
-    task_id, kdb = await svc.doc_add_by_upload_files(
-        kdb_id=kdb_id, files=files, override=override, user_id=check_user_id
-    )
+    task_id, kdb = await svc.doc_add_by_upload_files(kdb_id=kdb_id, files=files, override=override, user_id=user_id)
     return await Response.succ(data=KdbDocAddByFilesResponse(taskId=task_id, user_id=kdb.user_id))
 
 
