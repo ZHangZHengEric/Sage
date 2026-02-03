@@ -26,6 +26,7 @@ WHITELIST_API_PATHS = frozenset(
         "/api/user/login",
         "/api/user/register",
         "/api/stream",
+        "/api/chat",
         "/api/files/workspace",
         "/api/files/workspace/download",
         "/api/files/workspace/preview",
