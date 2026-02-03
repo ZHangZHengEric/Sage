@@ -62,7 +62,7 @@
       </div>
     </div>
 
-    <!-- 工具调用按钮 -->
+    <!-- 工具渲染 -->
     <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" />
@@ -71,37 +71,22 @@
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
             {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
          </div>
-         <div class="bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-full sm:w-auto min-w-[260px]">
-          <div class="flex flex-col gap-2">
-            <div
-              v-for="(toolCall, index) in message.tool_calls"
-              :key="toolCall.id || index"
-              class="relative flex items-center justify-between p-2 rounded-xl bg-background border border-border/50 hover:border-primary/30 hover:shadow-md transition-all cursor-pointer group"
-              @click="handleToolClick(toolCall, getToolResult(toolCall))"
-            >
-              <!-- Status Indicator -->
-              <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-colors"
-                   :class="getToolResult(toolCall) ? 'bg-green-500/50' : 'bg-blue-500/50'"></div>
-
-              <div class="flex items-center gap-3 flex-1 min-w-0 pl-3">
-       
-                <div class="flex flex-col min-w-0 gap-0.5">
-                  <span class="font-medium text-sm truncate text-foreground/90 group-hover:text-primary transition-colors">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
-                  <span class="text-[10px] text-muted-foreground truncate font-mono opacity-80 flex items-center gap-1">
-                     <span class="w-1.5 h-1.5 rounded-full" :class="getToolResult(toolCall) ? 'bg-green-500' : 'bg-blue-500 animate-pulse'"></span>
-                     {{ getToolResult(toolCall) ? t('toolCall.completed') : t('toolCall.executing') }}
-                  </span>
-                </div>
-              </div>
-              
-              <div class="flex items-center gap-2">
-                 <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-full" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
-                    <ChevronRight class="h-4 w-4" />
-                 </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
+           <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
+             <!-- Global Error Card -->
+             <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
+             <!-- Dynamic Tool Component -->
+             <component
+               v-else
+               :is="getToolComponent(toolCall.function?.name)"
+               :toolCall="toolCall"
+               :toolResult="getParsedToolResult(toolCall)"
+               :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
+               @sendMessage="handleSendMessage"
+               @click="handleToolClick"
+             />
+           </div>
+         </div>
       </div>
     </div>
 
@@ -116,10 +101,14 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { ChevronRight, Terminal, FileText, Search, Zap } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap } from 'lucide-vue-next'
 import { getMessageLabel } from '@/utils/messageLabels'
+import ToolErrorCard from './tools/ToolErrorCard.vue'
+import ToolDefaultCard from './tools/ToolDefaultCard.vue'
+// Custom Tools
+const TOOL_COMPONENT_MAP = {
+
+}
 
 const props = defineProps({
   message: {
@@ -136,7 +125,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['downloadFile', 'toolClick'])
+const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage'])
 
 const { t } = useLanguage()
 
@@ -297,5 +286,54 @@ const handleToolClick = (toolCall, toolResult) => {
 const handleDownloadFile = (filePath) => {
   emit('downloadFile', filePath)
 }
+
+const handleSendMessage = (text) => {
+  emit('sendMessage', text)
+}
+
+const getParsedToolResult = (toolCall) => {
+  const result = getToolResult(toolCall)
+  if (!result) return null
+
+  // If content is string, try to parse it
+  if (result.content && typeof result.content === 'string') {
+    try {
+      // Check if it looks like JSON
+      if (result.content.trim().startsWith('{') || result.content.trim().startsWith('[')) {
+          return {
+            ...result,
+            content: JSON.parse(result.content)
+          }
+      }
+    } catch (e) {
+      console.warn('Failed to parse tool result content:', e)
+      return result
+    }
+  }
+  return result
+}
+
+const checkIsToolError = (result) => {
+    if (!result) return false
+    if (result.is_error || result.status === 'error') return true
+    if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
+    return false
+}
+
+const isLatestMessage = computed(() => {
+    return props.messageIndex === props.messages.length - 1
+})
+
+
+const isCustomToolMessage = computed(() => {
+    if (!hasToolCalls.value) return false
+    return props.message.tool_calls.some(call => !!TOOL_COMPONENT_MAP[call.function?.name])
+})
+
+const getToolComponent = (toolName) => {
+  if (!toolName) return ToolDefaultCard
+  return TOOL_COMPONENT_MAP[toolName] || ToolDefaultCard
+}
+
 </script>
 
