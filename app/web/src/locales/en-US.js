@@ -1,6 +1,5 @@
 export default {
   // 侧边栏
-  'app.title': 'Zavixai Agent',
   'sidebar.newChat': 'New Chat',
   'sidebar.agentList': 'Agent List',
   'sidebar.toolsList': 'Tools',
@@ -53,8 +52,9 @@ export default {
   'chat.downloadError': 'Failed to download file',
   'chat.shareNoSession': 'No active session to share',
   'chat.shareSuccess': 'Session shared successfully',
-
-
+  'chat.noMessages': 'No messages yet',
+  'chat.share': 'Share',
+  'chat.traceWorkflow': 'Trace Workflow',
   // Agent配置页面
   'agent.title': 'Agent Configuration',
   'agent.subtitle': 'Manage your AI assistant configurations',
