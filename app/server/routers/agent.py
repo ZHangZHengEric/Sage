@@ -111,11 +111,7 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含所有Agent配置的标准响应
     """
-    # 从 handler 获取数据
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    all_configs = await list_agents(user_id, role)
+    all_configs = await list_agents()
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
