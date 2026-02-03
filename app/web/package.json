@@ -14,7 +14,7 @@
     "dompurify": "^3.3.0",
     "echarts": "^5.6.0",
     "js-cookie": "^3.0.5",
-    "lucide-vue-next": "^0.545.0",
+    "lucide-vue-next": "^0.563.0",
     "marked": "^16.4.0",
     "pinia": "^3.0.3",
     "prismjs": "^1.30.0",
