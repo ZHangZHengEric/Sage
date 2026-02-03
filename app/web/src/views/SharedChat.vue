@@ -21,7 +21,7 @@
 
         <div v-else class="pb-8 max-w-4xl mx-auto w-full">
           <MessageRenderer v-for="(message, index) in messages" :key="message.id || index" :message="message"
-            :messages="messages" :message-index="index" @download-file="downloadFile" @tool-click="handleToolClick" />
+            :messages="messages" :message-index="index" :readonly="true" @download-file="downloadFile" @tool-click="handleToolClick" />
         </div>
       </div>
     </div>

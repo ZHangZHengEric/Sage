@@ -72,13 +72,13 @@ import { Button } from '@/components/ui/button'
 const router = useRouter()
 const route = useRoute()
 
-const isSharedPage = computed(() => route.name === 'SharedChat')
+const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.startsWith('/share/'))
 
 // 登录模态框显示状态
 const showLoginModal = ref(false)
 
 // Check login status on mount and route change
-watch(() => route.path, () => {
+watch(() => [route.path, route.name], () => {
   if (isSharedPage.value) {
     showLoginModal.value = false
   } else {
@@ -114,7 +114,11 @@ const handleLoginSuccess = (userData) => {
 }
 
 const handleUserUpdated = () => {
-  showLoginModal.value = !isLoggedIn()
+  if (isSharedPage.value) {
+    showLoginModal.value = false
+  } else {
+    showLoginModal.value = !isLoggedIn()
+  }
 }
 
 onMounted(() => {
