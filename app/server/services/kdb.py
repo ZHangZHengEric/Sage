@@ -6,6 +6,7 @@ KDB 领域服务，实现知识库与文档相关业务逻辑（异步）
 
 from __future__ import annotations
 
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import UploadFile
@@ -350,7 +351,7 @@ class KdbService:
     async def build_waiting_doc(self):
         docs: List[models.KdbDoc] = (
             await self.kdb_doc_dao.get_list_by_status_and_data_source(
-                models.KdbDocStatus.PENDING, "file", DEFAULT_BATCH_SIZE
+                models.KdbDocStatus.PENDING, ["file", "qa"], DEFAULT_BATCH_SIZE
             )
         )
         if not docs:
@@ -362,7 +363,7 @@ class KdbService:
 
     async def build_failed_doc(self):
         docs: List[models.KdbDoc] = await self.kdb_doc_dao.get_failed_list(
-            "file", DEFAULT_BATCH_SIZE
+            ["file", "qa"], DEFAULT_BATCH_SIZE
         )
         if not docs:
             return
@@ -400,5 +401,5 @@ class KdbService:
                 doc.id, models.KdbDocStatus.FAILED
             )
             logger.error(
-                f"处理文档失败 - DocId: {doc.id}, docName: {doc.doc_name}, err={e}"
+                f"处理文档失败 - DocId: {doc.id}, docName: {doc.doc_name}, err={e}, trace={traceback.format_exc()}"
             )

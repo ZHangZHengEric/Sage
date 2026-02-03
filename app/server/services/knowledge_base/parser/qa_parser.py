@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import traceback
 from typing import TYPE_CHECKING, List
 
 import httpx
@@ -9,6 +10,7 @@ from loguru import logger
 import openpyxl
 
 from .... import models
+from ....core import config
 from ....utils.id import gen_id
 from .base import BaseParser
 
@@ -30,18 +32,38 @@ class QAParser(BaseParser):
         # Download content
         content_bytes = b""
         try:
+            file_path = file.path
+            
+            # 尝试解决 MinIO 内部访问问题
+            cfg = config.get_startup_config()
+            if cfg.minio_public_base_url and file_path.startswith(cfg.minio_public_base_url) and cfg.minio_endpoint and cfg.minio_bucket_name:
+                # 提取对象名称
+                object_name = file_path[len(cfg.minio_public_base_url):].lstrip("/")
+                # 构建内部访问 URL
+                scheme = "https" if cfg.minio_secure else "http"
+                # 处理 minio_endpoint 可能包含 http 前缀的情况
+                endpoint = cfg.minio_endpoint
+                if endpoint.startswith("http://"):
+                    endpoint = endpoint[7:]
+                elif endpoint.startswith("https://"):
+                    endpoint = endpoint[8:]
+                    
+                internal_url = f"{scheme}://{endpoint}/{cfg.minio_bucket_name}/{object_name}"
+                logger.info(f"[QAParser] 转换 MinIO URL: {file_path} -> {internal_url}")
+                file_path = internal_url
+
             # Check if it looks like a URL
-            if file.path.startswith("http://") or file.path.startswith("https://"):
+            if file_path.startswith("http://") or file_path.startswith("https://"):
                 async with httpx.AsyncClient() as client:
-                    resp = await client.get(file.path, timeout=60.0)
+                    resp = await client.get(file_path, timeout=60.0)
                     resp.raise_for_status()
                     content_bytes = resp.content
             else:
                 # Assume local file path
-                with open(file.path, "rb") as f:
+                with open(file_path, "rb") as f:
                     content_bytes = f.read()
         except Exception as e:
-            logger.error(f"[QAParser] 读取文件失败: {e}")
+            logger.error(f"[QAParser] 读取文件失败: {file.path}, error: {e}, trace: {traceback.format_exc()}")
             raise e
 
         # Parse content based on file extension
