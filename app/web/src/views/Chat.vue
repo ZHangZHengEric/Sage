@@ -1,8 +1,8 @@
 <template>
   <div class="flex flex-col h-full bg-background">
-    <div class="flex-none h-16 border-b flex items-center px-6 justify-end bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
+    <div class="flex-none h-16 flex items-center px-6 justify-end bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
 
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 ">
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
           <SelectTrigger class="w-[180px] h-9 text-xs border-muted-foreground/20 bg-muted/50 focus:ring-1 focus:ring-primary/20">
             <SelectValue :placeholder="t('chat.selectAgent') || 'Select Agent'" />
@@ -16,15 +16,42 @@
         
         <div class="h-4 w-[1px] bg-border mx-1"></div>
 
-        <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare" :title="t('chat.share') || 'Share'">
-          <Share class="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showTrace = !showTrace" title="Trace Workflow">
-          <Activity class="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showSettings = !showSettings" :title="t('chat.settings')">
-          <Settings class="h-4 w-4" />
-        </Button>
+        <TooltipProvider>
+          <div class="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare">
+                  <Share2 class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.share') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showTrace = !showTrace">
+                  <Activity class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.traceWorkflow') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showSettings = !showSettings">
+                  <Settings class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.settings') }}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
       </div>
     </div>
     <div class="flex-1 overflow-hidden relative flex flex-row">
@@ -67,7 +94,7 @@
           <div ref="messagesEndRef" />
         </div>
         
-        <div class="flex-none p-4 border-t bg-background" v-if="selectedAgent">
+        <div class="flex-none p-4  bg-background" v-if="selectedAgent">
             <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
@@ -94,8 +121,9 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Bot, Settings, Activity, Share } from 'lucide-vue-next'
+import { Bot, Settings, Activity, Share2 } from 'lucide-vue-next'
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
@@ -117,6 +145,7 @@ import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
 import { chatAPI } from '../api/chat.js'
 import { taskAPI } from '../api/task.js'
+import { isLoggedIn } from '@/utils/auth.js'
 
 // Props
 const props = defineProps({
@@ -609,12 +638,20 @@ const handleScroll = () => {
 }
 
 const loadAgents = async () => {
+  // 如果未登录，不加载Agent列表，避免401导致无限循环
+  if (!isLoggedIn()) {
+    agents.value = []
+    return
+  }
   try {
     const response = await agentAPI.getAgents()
     agents.value = response || []
   } catch (error) {
     console.error('Failed to load agents:', error)
-    toast.error(t('chat.loadAgentsError'))
+    // 只有在登录状态下才提示错误，避免未登录时的干扰
+    if (isLoggedIn()) {
+      toast.error(t('chat.loadAgentsError'))
+    }
   }
 }
 
@@ -865,13 +902,41 @@ const sendMessageApi = async ({
   }
 };
 
+const copyToClipboard = (text) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  } else {
+    return new Promise((resolve, reject) => {
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) {
+          resolve();
+        } else {
+          reject(new Error('execCommand copy failed'));
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+};
+
 const handleShare = () => {
   if (!currentSessionId.value) {
     toast.error(t('chat.shareNoSession') || 'No active session to share')
     return
   }
   const shareUrl = `${window.location.origin}/share/${currentSessionId.value}`
-  navigator.clipboard.writeText(shareUrl).then(() => {
+  
+  copyToClipboard(shareUrl).then(() => {
     toast.success(t('chat.shareSuccess') || 'Share link copied to clipboard')
   }).catch(err => {
     console.error('Copy failed:', err)
@@ -881,14 +946,12 @@ const handleShare = () => {
 
 // 生命周期
 onMounted(async () => {
-  // 1. 获取Agent列表
-  try {
-    const res = await agentAPI.getAgents();
-    agents.value = res || [];
-    restoreSelectedAgent(agents.value);
-  } catch (e) {
-    console.error('获取Agent列表失败:', e);
+  if (typeof window !== 'undefined') {
+    window.addEventListener('user-updated', loadAgents)
   }
+
+  // 1. 获取Agent列表
+  await loadAgents()
   
   // 2. 检查URL参数是否有session_id
   const routeSessionId = route.query.session_id;
@@ -903,6 +966,10 @@ onMounted(async () => {
 
 // 组件卸载时清理
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('user-updated', loadAgents)
+  }
+  
   if (scrollTimeout.value) {
     clearTimeout(scrollTimeout.value)
   }
