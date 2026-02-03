@@ -97,20 +97,6 @@ async def login_user(username_or_email: str, password: str) -> Tuple[str, str, i
     user = await dao.get_by_username(username_or_email)
     if not user and "@" in username_or_email:
         user = await dao.get_by_email(username_or_email)
-    if not user:
-        # Check if it's admin
-        cfg = config.get_startup_config()
-        if username_or_email == cfg.admin_username:
-            if password == cfg.admin_password:
-                # Admin login success
-                # Mock an admin user object
-                admin_user = models.User(
-                    user_id="admin",
-                    username="admin",
-                    role="admin",
-                    email="admin@sage.com",
-                )
-                return _gen_tokens(admin_user)
 
     if not user or not _verify_password(password, user.password_hash):
         raise SageHTTPException(status_code=500, detail="用户名或密码错误", error_detail="invalid credentials")
