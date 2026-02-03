@@ -71,7 +71,7 @@
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
             {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
          </div>
-         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage, 'pointer-events-none opacity-60 grayscale': readonly }">
+         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
              <!-- Global Error Card -->
              <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
@@ -82,7 +82,6 @@
                :toolCall="toolCall"
                :toolResult="getParsedToolResult(toolCall)"
                :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
-               :readonly="readonly"
                @sendMessage="handleSendMessage"
                @click="handleToolClick"
              />
@@ -332,6 +331,9 @@ const checkIsToolError = (result) => {
 }
 
 const isLatestMessage = computed(() => {
+    // 如果readonly，所有消息都不是最新
+    if (props.readonly) return false
+    
     // If it's the last message, it's definitely latest
     if (props.messageIndex === props.messages.length - 1) return true
     
