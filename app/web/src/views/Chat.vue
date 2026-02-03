@@ -40,7 +40,7 @@
           <div v-else class="pb-8 max-w-4xl mx-auto w-full">
             <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
               :messages="messages || []" :message-index="index" @download-file="downloadFile"
-              @toolClick="handleToolClick" />
+              @toolClick="handleToolClick" @sendMessage="handleSendMessage" />
             <div v-if="isLoading && (!messages?.length || messages[messages.length - 1]?.role !== 'assistant')" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
               <div class="flex items-start gap-4 max-w-[80%]">
                  <!-- Avatar -->
