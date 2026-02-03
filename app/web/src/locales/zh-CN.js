@@ -102,6 +102,7 @@ export default {
   'agent.moreSuggest': '更多建议',
   'agent.availableSkills': '可用技能',
   'agent.selectSkills': '选择可用技能',
+  'agent.availableKnowledgeBases': '可用知识库',
 
   // 系统管理
   'user.addUser': '添加用户',
@@ -172,7 +173,6 @@ export default {
   'agent.nameLength': '名称长度应在2-50个字符之间',
   'agent.descriptionLength': '描述长度不能超过200个字符',
   'agent.systemPrefixRequired': '请输入系统提示词',
-
   // Agent创建模态框
   'agentCreation.title': '创建新Agent',
   'agentCreation.blankConfig': '空白配置',
