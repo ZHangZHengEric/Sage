@@ -375,7 +375,7 @@ const runRecall = async () => {
     recallLoading.value = true
     const res = await knowledgeBaseAPI.retrieve({ kdb_id: kdbId, query: recallQuery.value, top_k: 10 })
     if (res && res.success) {
-      const list = Array.isArray(res.data.search_results) ? res.data.search_results : []
+      const list = Array.isArray(res.data.results) ? res.data.results : []
       recallResults.value = list
     }
   } finally {
