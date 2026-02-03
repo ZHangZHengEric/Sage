@@ -283,7 +283,6 @@ class KdbService:
             name=uf.filename,
             path=path,
             size=len(data),
-            user_id=user_id or "",
         )
         await self.file_dao.insert(f)
         return f

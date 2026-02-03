@@ -17,7 +17,6 @@ class File(Base):
     name: Mapped[str] = mapped_column(String(512), default="")
     path: Mapped[str] = mapped_column(String(4096), default="")
     size: Mapped[int] = mapped_column(Integer, default=0)
-    user_id: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(default=datetime.now)
 
