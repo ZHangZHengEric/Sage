@@ -121,7 +121,7 @@ class TraceService:
 
                 # Extract session_id from attributes
                 session_id = (
-                    attributes.get("session_id")
+                    attributes.get("session_id") or "system"
                 )
 
                 trace_span = TraceSpan(

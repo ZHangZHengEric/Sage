@@ -137,6 +137,7 @@ export default {
   'agent.nameLength': 'Name length should be between 2-50 characters',
   'agent.descriptionLength': 'Description length cannot exceed 200 characters',
   'agent.systemPrefixRequired': 'Please enter system prompt',
+  'agent.availableKnowledgeBases': 'Available Knowledge Bases',
 
   // System Management
   'user.addUser': 'Add User',

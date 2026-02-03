@@ -92,13 +92,14 @@
        </div>
        
        <AgentEdit 
-         :visible="currentView !== 'list'" 
-         :agent="editingAgent" 
-         :tools="tools" 
-         :skills="skills" 
-         @save="handleSaveAgent"
-         @update:visible="handleCloseEdit" 
-       />
+      :visible="currentView !== 'list'" 
+      :agent="editingAgent" 
+      :tools="tools" 
+      :skills="skills" 
+      :knowledgeBases="knowledgeBases"
+      @save="handleSaveAgent"
+      @update:visible="handleCloseEdit" 
+    />
     </div>
     <!-- Usage Dialog -->
     <Dialog :open="showUsageModal" @update:open="showUsageModal = $event">
@@ -156,6 +157,7 @@ import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
 import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
+import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 
 // UI Components
@@ -163,7 +165,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
 // State
@@ -172,6 +174,7 @@ const loading = ref(false)
 const error = ref(null)
 const tools = ref([])
 const skills = ref([])
+const knowledgeBases = ref([])
 const showCreationModal = ref(false)
 const currentView = ref('list') // 'list', 'create', 'edit', 'view'
 const editingAgent = ref(null)
@@ -209,6 +212,7 @@ onMounted(async () => {
   await loadAgents()
   await loadAvailableTools()
   await loadAvailableSkills()
+  await loadKnowledgeBases()
 })
 
 
@@ -237,6 +241,20 @@ const loadAvailableSkills = async () => {
     }
   } catch (error) {
     console.error('Failed to load available skills:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadKnowledgeBases = async () => {
+  try {
+    loading.value = true
+    const response = await knowledgeBaseAPI.getKnowledgeBases({ page: 1, page_size: 1000 })
+    if (response.data && response.data.list) {
+      knowledgeBases.value = response.data.list
+    }
+  } catch (error) {
+    console.error('Failed to load knowledge bases:', error)
   } finally {
     loading.value = false
   }
@@ -332,6 +350,7 @@ const handleExport = (agent) => {
     llmConfig: agent.llmConfig,
     availableTools: agent.availableTools,
     availableSkills: agent.availableSkills,
+    availableKnowledgeBases: agent.availableKnowledgeBases,
     systemContext: agent.systemContext,
     availableWorkflows: agent.availableWorkflows,
     exportTime: new Date().toISOString(),
@@ -388,6 +407,7 @@ const handleImport = () => {
           maxLoopCount: importedConfig.maxLoopCount || 10,
           availableTools: importedConfig.availableTools || [],
           availableSkills: importedConfig.availableSkills || [],
+          availableKnowledgeBases: importedConfig.availableKnowledgeBases || [],
           systemContext: importedConfig.systemContext || {},
           availableWorkflows: importedConfig.availableWorkflows || {}
         }
