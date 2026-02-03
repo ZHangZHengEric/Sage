@@ -355,4 +355,14 @@ async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest, http_request: Request):
 
 @sage_mcp_tool()
 async def retrieve_on_zavixai_db(index_name: str, query: str, top_k: int = 5):
+    """
+    Search documents on ZavixAI knowledge database.
+    
+    Args:
+        index_name: The name of the index to search. (required)
+        query: Search query (required)
+        top_k: Number of results (1-50, default 5)
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing the search results.
+    """
     return await DocumentService().doc_search(index_name, query, top_k)
