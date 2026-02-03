@@ -280,6 +280,12 @@ const getToolIcon = (name) => {
 }
 
 const handleToolClick = (toolCall, toolResult) => {
+  // Prevent custom tools from triggering the detail modal via native click events
+  // ToolDefaultCard explicitly emits 'click' with (toolCall, toolResult)
+  // Custom tools (without explicit emit) trigger native click with (MouseEvent)
+  if (toolCall instanceof Event) {
+    return
+  }
   emit('toolClick', toolCall, toolResult)
 }
 
@@ -321,7 +327,17 @@ const checkIsToolError = (result) => {
 }
 
 const isLatestMessage = computed(() => {
-    return props.messageIndex === props.messages.length - 1
+    // If it's the last message, it's definitely latest
+    if (props.messageIndex === props.messages.length - 1) return true
+    
+    // Check if there are any user messages after this one
+    // If no user message follows, it is considered the latest turn
+    for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
+        if (props.messages[i].role === 'user') {
+            return false
+        }
+    }
+    return true
 })
 
 
@@ -336,4 +352,5 @@ const getToolComponent = (toolName) => {
 }
 
 </script>
+
 

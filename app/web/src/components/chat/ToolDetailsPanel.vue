@@ -27,7 +27,7 @@
                  <div class="flex items-center justify-between px-4 py-2 bg-slate-900/50 border-b border-border/10">
                     <span class="text-[10px] text-muted-foreground font-mono">JSON</span>
                  </div>
-                 <pre class="p-4 text-xs font-mono text-slate-50 overflow-auto max-h-[200px] custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(toolExecution.function.arguments) }}</pre>
+                <pre class="p-4 text-xs font-mono text-slate-50 overflow-auto max-h-[200px] custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(toolExecution?.function?.arguments) }}</pre>
               </div>
             </div>
           </div>
