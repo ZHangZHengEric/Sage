@@ -7,6 +7,18 @@ description: "Sage Examples and Server Changelog"
 
 # Sage Examples Changelog
 
+## 2026-02-03 - Frontend UI Refactoring and Feature Enhancements
+
+**Changes:**
+- **Frontend UI Refactoring**:
+  - Comprehensively optimized interface design to improve user experience.
+  - Added mobile responsiveness support to ensure good display effects on mobile devices.
+- **Management Feature Enhancements**:
+  - **User List**: Added a user management page visible only to administrators, supporting user viewing and management.
+  - **System Settings**: Added a system settings page, providing richer system configuration options.
+
+**Modification Time:** 2026-02-03
+
 ## 2026-01-31 - Memory Configuration Logic Update
 
 **Changes:**
