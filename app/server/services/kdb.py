@@ -178,6 +178,64 @@ class KdbService:
         user_id: Optional[str] = None,
     ) -> Tuple[str, models.Kdb]:
         kdb = await self._check_kdb_permission(kdb_id, user_id)
+
+        # QA类型校验
+        if kdb.data_type == "qa":
+            import csv
+            import io
+            import openpyxl
+
+            for uf in files:
+                filename = uf.filename.lower()
+                if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xls")):
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail=f"QA知识库仅支持CSV或Excel文件: {uf.filename}",
+                    )
+                
+                content = await uf.read()
+                try:
+                    if filename.endswith(('.xlsx', '.xls')):
+                        # 校验Excel内容
+                        wb = openpyxl.load_workbook(filename=io.BytesIO(content), read_only=True, data_only=True)
+                        ws = wb.active
+                        if ws:
+                            count = 0
+                            for row in ws.iter_rows(max_row=10, values_only=True):
+                                # Convert cells to string and filter None
+                                cleaned_row = [str(cell) if cell is not None else "" for cell in row]
+                                if not any(cleaned_row):
+                                    continue
+                                if len(cleaned_row) < 2:
+                                    raise ValueError(f"Excel row does not have at least 2 columns")
+                                count += 1
+                            if count == 0:
+                                raise ValueError("Empty Excel sheet")
+                        else:
+                            raise ValueError("No active sheet in Excel")
+                    else:
+                        # 校验CSV内容
+                        text = content.decode("utf-8")
+                        reader = csv.reader(io.StringIO(text))
+                        rows = list(reader)
+                        if not rows:
+                            raise ValueError("Empty CSV")
+                        
+                        # 检查前几行，确保是2列
+                        for i, row in enumerate(rows[:10]):
+                            if not row:
+                                continue
+                            if len(row) < 2:
+                                raise ValueError(f"Line {i+1} does not have at least 2 columns")
+                            
+                except Exception as e:
+                    raise SageHTTPException(
+                        status_code=400,
+                        detail=f"文件格式错误 {uf.filename}: {e} (QA库要求两列数据: Question, Answer)",
+                    )
+                finally:
+                    await uf.seek(0)
+
         save_files: List[models.File] = []
         for uf in files or []:
             if not uf or not uf.filename:
@@ -245,7 +303,9 @@ class KdbService:
         docs: List[models.KdbDoc] = []
         for f in files:
             ds = "file"
-            if f.name.lower().endswith("eml"):
+            if kdb.data_type == "qa":
+                ds = "qa"
+            elif f.name.lower().endswith("eml"):
                 ds = "eml"
             metadata: Dict[str, Any] = {}
             if attach_map:

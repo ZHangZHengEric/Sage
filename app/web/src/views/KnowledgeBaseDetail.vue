@@ -223,7 +223,12 @@ const recallQuery = ref('')
 const recallResults = ref([])
 const recallLoading = ref(false)
 const recallExpandedMap = ref({})
-const allowedExts = ['.doc', '.docx', '.pdf', '.txt', '.json', '.eml', '.ppt', '.pptx', '.xlsx', '.xls', '.csv', '.md']
+const allowedExts = computed(() => {
+  if (kbInfo.value.type === 'qa') {
+    return ['.csv', '.xlsx', '.xls']
+  }
+  return ['.doc', '.docx', '.pdf', '.txt', '.json', '.eml', '.ppt', '.pptx', '.xlsx', '.xls', '.csv', '.md']
+})
 
 const loadInfo = async () => {
   const res = await knowledgeBaseAPI.getKnowledgeBase(kdbId)
@@ -294,10 +299,10 @@ const onFileChange = (e) => {
     const name = f.name || ''
     const idx = name.lastIndexOf('.')
     const ext = idx >= 0 ? name.slice(idx).toLowerCase() : ''
-    return allowedExts.includes(ext)
+    return allowedExts.value.includes(ext)
   })
   if (filtered.length !== fl.length) {
-    window.alert('仅支持上传以下文件类型：' + allowedExts.join(', '))
+    window.alert('仅支持上传以下文件类型：' + allowedExts.value.join(', '))
   }
   selectedFiles.value = filtered
   if (selectedFiles.value.length) {
