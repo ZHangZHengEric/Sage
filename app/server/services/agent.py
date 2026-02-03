@@ -29,12 +29,11 @@ def generate_agent_id() -> str:
 # ================= 业务函数 =================
 
 
-async def list_agents(user_id: str, role: str = "user") -> List[models.Agent]:
+async def list_agents() -> List[models.Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
     dao = models.AgentConfigDao()
     # Admin can see all agents; regular users only see their own
-    target_user_id = None if role == "admin" else user_id
-    all_configs = await dao.get_list(target_user_id)
+    all_configs = await dao.get_list()
     return all_configs
 
 
