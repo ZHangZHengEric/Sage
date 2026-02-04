@@ -18,6 +18,7 @@ import json
 import os
 import datetime
 import pytz
+from sagents.utils.sandbox.sandbox import Sandbox
 
 
 class SessionStatus(Enum):
@@ -67,17 +68,22 @@ class SessionContext:
     def init_more(self, workspace_root: str):
         logger.info(f"SessionContext: 后初始化会话上下文，会话ID: {self.session_id}")
         self.session_workspace = os.path.join(workspace_root, self.session_id)
+        
+        # 定义虚拟工作空间路径 / Define virtual workspace path
+        self.virtual_workspace = "/workspace"
+        
+        # 临时变量存储宿主机路径
+        _agent_workspace_host_path = os.path.join(self.session_workspace, "agent_workspace")
+
         if not os.path.exists(self.session_workspace):
             os.makedirs(self.session_workspace)
             # 创建agent 执行过程中保存内容的文件夹
-            self.agent_workspace = os.path.join(self.session_workspace, "agent_workspace")
-            if not os.path.exists(self.agent_workspace):
-                os.makedirs(self.agent_workspace)
+            if not os.path.exists(_agent_workspace_host_path):
+                os.makedirs(_agent_workspace_host_path)
 
         else:
-            self.agent_workspace = os.path.join(self.session_workspace, "agent_workspace")
-            if not os.path.exists(self.agent_workspace):
-                os.makedirs(self.agent_workspace)
+            if not os.path.exists(_agent_workspace_host_path):
+                os.makedirs(_agent_workspace_host_path)
 
             # 加载save的session_status.json
             session_status_path = os.path.join(self.session_workspace, "session_status.json")
@@ -91,9 +97,36 @@ class SessionContext:
 
         current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
         self.system_context['current_time'] = current_time_str
-        # file_workspace 去掉 workspace_root的绝对路径的 前置路径
-        # self.system_context['file_workspace'] = self.agent_workspace.replace(os.path.abspath(self.workspace_root), "")
-        self.system_context['file_workspace'] = self.agent_workspace
+        
+        # 初始化沙箱环境 / Initialize sandbox environment
+        # 沙箱内部会自动管理 SandboxFileSystem
+        self.sandbox = Sandbox(
+            host_workspace=_agent_workspace_host_path,
+            virtual_workspace=self.virtual_workspace
+        )
+        
+        # 将 agent_workspace 设置为 SandboxFileSystem 对象，而不是原始路径字符串
+        # 这样如果在 Prompt 中直接打印它，会显示 __str__ (即虚拟路径)
+        # 如果代码需要宿主机路径，可以使用 self.agent_workspace.host_path
+        self.agent_workspace = self.sandbox.file_system
+        
+        # 为了兼容性，保留 file_system 引用
+        self.file_system = self.sandbox.file_system
+        
+        # Copy skills to workspace if skill manager is available
+        if self.skill_manager:
+            logger.info(f"SessionContext: 准备复制技能到工作区: {self.agent_workspace.host_path}")
+            logger.info(f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}")
+            try:
+                self.skill_manager.prepare_skills_in_workspace(self.agent_workspace.host_path)
+                logger.info("SessionContext: 技能复制完成")
+            except Exception as e:
+                logger.error(f"SessionContext: 技能复制失败: {e}", exc_info=True)
+        else:
+            logger.warning("SessionContext: SkillManager 未初始化，跳过技能复制")
+        
+        # file_workspace 使用虚拟路径，避免暴露宿主机绝对路径
+        self.system_context['file_workspace'] = self.virtual_workspace
         if self.user_id:
             self.system_context['user_id'] = self.user_id
         # if self.system_context['file_workspace'].startswith('/'):
@@ -368,7 +401,7 @@ class SessionContext:
                 "system_context": self.system_context,
                 "session_id": self.session_id,
                 "session_workspace": self.session_workspace,
-                "agent_workspace": self.agent_workspace,
+                "agent_workspace": self.agent_workspace.host_path,
                 "tokens_usage_info": self.get_tokens_usage_info(),
                 "audit_status": self.audit_status,
                 # 已移除 SessionStateMachine 相关持久化

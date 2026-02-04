@@ -172,12 +172,20 @@ def tool(
                 except Exception:
                     pass
 
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            logger.debug(f"Calling tool: {tool_name} with {len(kwargs)} args")
-            result = func(*args, **kwargs)
-            logger.debug(f"Completed tool: {tool_name}")
-            return result
+        if inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                logger.debug(f"Calling async tool: {tool_name} with {len(kwargs)} args")
+                result = await func(*args, **kwargs)
+                logger.debug(f"Completed async tool: {tool_name}")
+                return result
+        else:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                logger.debug(f"Calling tool: {tool_name} with {len(kwargs)} args")
+                result = func(*args, **kwargs)
+                logger.debug(f"Completed tool: {tool_name}")
+                return result
 
         wrapper._tool_spec = spec
         func._tool_spec = spec

@@ -16,6 +16,7 @@ from sagents.context.messages.message import MessageChunk, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, ToolProxy
+from sagents.skill import SkillManager, SkillProxy
 from sagents.utils.logger import logger
 from sagents.utils.streaming_message_box import (
     StreamingMessageBox,
@@ -49,13 +50,16 @@ def display_tools(console, tool_manager: Union[ToolManager, ToolProxy]):
         console.print(f"\n[red]获取工具列表时出错: {e}[/red]")
 
 
-async def chat(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], context_budget_config: Optional[Dict[str, Any]] = None):
+async def chat(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], skill_manager: Optional[Union[SkillManager, SkillProxy]] = None, context_budget_config: Optional[Dict[str, Any]] = None):
     # 对话式的，流式的打印只显示 show_content 的信息到命令行，且命令行的样式要好看一些，调用agent 进行对话
 
     console = Console()
 
     # 在chat函数中调用display_tools
     display_tools(console, tool_manager)
+
+    if skill_manager:
+        console.print(f"[cyan]已加载技能: {skill_manager.list_skills()}[/cyan]")
 
     console.print("[green]欢迎使用 SAgent CLI。输入 'exit' 或 'quit' 退出。[/green]")
     # 打印当前的session id
@@ -80,6 +84,7 @@ async def chat(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], conte
 
             async for chunks in agent.run_stream(input_messages=messages,
                                                  tool_manager=tool_manager,
+                                                 skill_manager=skill_manager,
                                                  session_id=session_id,
                                                  user_id=config['user_id'],
                                                  deep_thinking=config['use_deepthink'],
@@ -167,6 +172,7 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--user_id', type=str, default=None, help='用户ID')
     parser.add_argument('--memory_root', type=str, default=None, help='记忆根目录')
     parser.add_argument('--tools_folders', nargs='+', default=[], help='工具目录路径（多个路径用空格分隔）')
+    parser.add_argument('--skills_path', type=str, default=None, help='技能目录路径')
     parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
     parser.add_argument('--no-multi-agent', action='store_true', default=None, help='禁用多智能体推理')
     parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录')
@@ -191,6 +197,7 @@ def parse_arguments() -> Dict[str, Any]:
         'model_name': args.default_llm_model_name if args.default_llm_model_name else preset_running_agent_config.get('llmConfig', {}).get('model', ''),
         'base_url': args.default_llm_api_base_url,
         'tools_folders': args.tools_folders,
+        'skills_path': args.skills_path,
         'max_tokens': args.default_llm_max_tokens if args.default_llm_max_tokens else int(preset_running_agent_config.get('llmConfig', {}).get('maxTokens', 4096)),
         'temperature': args.default_llm_temperature if args.default_llm_temperature else float(preset_running_agent_config.get('llmConfig', {}).get('temperature', 0.2)),
         'max_model_len': args.default_llm_max_model_len,
@@ -227,6 +234,11 @@ if __name__ == '__main__':
             tool_proxy = ToolProxy(tool_manager=tool_manager, available_tools=config['available_tools'])
         else:
             tool_proxy = tool_manager
+
+        # 初始化 skill manager
+        skill_manager = None
+        if config['skills_path']:
+            skill_manager = SkillManager(skill_dirs=[config['skills_path']])
 
         # 初始化 model
         client = AsyncOpenAI(
@@ -269,7 +281,7 @@ if __name__ == '__main__':
         )
 
         # 调用 chat 函数
-        await chat(sagent, tool_proxy, context_budget_config)
+        await chat(sagent, tool_proxy, skill_manager, context_budget_config)
 
     import asyncio
     asyncio.run(main_async())
