@@ -765,7 +765,9 @@ class Sandbox:
             return
 
         if not os.path.exists(os.path.join(self.venv_dir, "bin", "python")):
-            venv.create(self.venv_dir, with_pip=True)
+            # 优化：不安装 pip，大幅提升创建速度（~3s -> ~10ms）
+            # sandbox 内部运行不需要 pip，依赖安装使用的是 host 的 pip (PIP_TARGET)
+            venv.create(self.venv_dir, with_pip=False)
             
         launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
         if not os.path.exists(launcher_path) or os.path.getsize(launcher_path) != len(LAUNCHER_SCRIPT):
