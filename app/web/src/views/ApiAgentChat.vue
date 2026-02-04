@@ -10,7 +10,7 @@
     <Card class="mb-8">
       <CardContent class="flex items-center gap-4 p-4">
         <Badge variant="secondary" class="font-bold text-primary">POST</Badge>
-        <span class="font-mono font-medium">{{ endpoint }}/api/stream</span>
+        <span class="break-all font-mono font-medium">{{ endpoint }}/api/stream</span>
       </CardContent>
     </Card>
 
@@ -134,7 +134,7 @@
         <Card>
           <CardHeader class="flex flex-row items-center justify-between p-4">
             <CardTitle class="text-base">流式响应示例</CardTitle>
-            <div class="flex gap-2">
+            <div class="hidden sm:flex gap-2">
               <Button variant="ghost" size="icon" title="复制" @click="copy(exampleStreamResponse)">
                 <Copy class="w-4 h-4" />
               </Button>
@@ -143,9 +143,13 @@
               </Button>
             </div>
           </CardHeader>
-          <CardContent v-show="showResponseExample" class="p-0">
-            <pre class="bg-slate-950 text-slate-50 p-4 overflow-auto rounded-b-lg text-sm"><code>{{ exampleStreamResponse }}</code></pre>
-          </CardContent>
+            <CardContent v-show="showResponseExample" class="p-0">
+              <pre
+                class="bg-slate-950 text-slate-50 p-4 overflow-auto rounded-b-lg text-sm whitespace-pre-wrap break-words">
+    <code>{{ exampleStreamResponse }}</code>
+  </pre>
+            </CardContent>
+ 
         </Card>
       </section>
 
