@@ -1,6 +1,5 @@
 export default {
   // 侧边栏
-  'app.title': 'Zavixai Agent',
   'sidebar.newChat': '新对话',
   'sidebar.agentList': 'Agent列表',
   'sidebar.skillList': '技能库',
@@ -51,6 +50,10 @@ export default {
   'chat.downloadError': '下载文件失败',
   'chat.shareNoSession': '当前会话不存在，无法分享',
   'chat.shareSuccess': '会话分享成功',
+  'chat.noMessages': '暂无消息',
+  'chat.share': '分享当前会话',
+  'chat.traceWorkflow': '跟踪工作流',
+  
   // Agent配置页面
   'agent.title': 'Agent配置',
   'agent.subtitle': '管理您的AI助手配置',
@@ -102,6 +105,7 @@ export default {
   'agent.moreSuggest': '更多建议',
   'agent.availableSkills': '可用技能',
   'agent.selectSkills': '选择可用技能',
+  'agent.availableKnowledgeBases': '可用知识库',
 
   // 系统管理
   'user.addUser': '添加用户',
@@ -172,7 +176,6 @@ export default {
   'agent.nameLength': '名称长度应在2-50个字符之间',
   'agent.descriptionLength': '描述长度不能超过200个字符',
   'agent.systemPrefixRequired': '请输入系统提示词',
-
   // Agent创建模态框
   'agentCreation.title': '创建新Agent',
   'agentCreation.blankConfig': '空白配置',

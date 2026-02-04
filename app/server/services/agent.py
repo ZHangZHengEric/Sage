@@ -80,7 +80,7 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agen
 
 
 async def update_agent(
-    agent_id: str, agent_name: str, agent_config: Dict[str, Any], user_id: Optional[str] = None
+    agent_id: str, agent_name: str, agent_config: Dict[str, Any], user_id: Optional[str] = None, role: str = "user"
 ) -> models.Agent:
     """更新指定 Agent 的配置，返回 Agent 对象"""
     logger.info(f"开始更新Agent: {agent_id}")
@@ -93,7 +93,7 @@ async def update_agent(
             error_detail=f"Agent '{agent_id}' 不存在",
         )
     # Check permission: if user_id is provided, it must match
-    if user_id and existing_config.user_id and existing_config.user_id != user_id:
+    if role != "admin" and user_id and existing_config.user_id and existing_config.user_id != user_id:
         raise SageHTTPException(
             status_code=403,
             detail="无权更新该Agent",

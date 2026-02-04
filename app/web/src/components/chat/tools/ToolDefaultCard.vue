@@ -1,5 +1,7 @@
 <template>
-  <div class="tool-call-item bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-fit max-w-[260px] mb-2" @click="handleClick">
+  <div class="tool-call-item bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-fit mb-2" 
+    :class="[imageUrl ? 'max-w-[530px]' : 'max-w-[260px]']"
+    @click="handleClick">
     <div class="relative flex items-center justify-between p-2 rounded-xl bg-background border border-border/50 hover:border-primary/30 hover:shadow-md transition-all cursor-pointer group">
       <!-- Status Indicator -->
       <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-colors"
@@ -21,6 +23,11 @@
             <ChevronRight class="h-4 w-4" />
          </Button>
       </div>
+    </div>
+    
+    <!-- Markdown Image Preview -->
+    <div v-if="imageUrl" class="mt-2 rounded-xl overflow-hidden border border-border/50 bg-background/50">
+      <img :src="imageUrl" alt="Tool Generated Image" class="w-full h-auto object-contain max-w-[512px]" loading="lazy" />
     </div>
   </div>
 </template>
@@ -48,6 +55,26 @@ const { t } = useLanguage()
 
 const toolName = computed(() => props.toolCall?.function?.name || 'Unknown Tool')
 const isCompleted = computed(() => !!props.toolResult)
+
+const imageUrl = computed(() => {
+  if (!props.toolResult) return null
+  
+  let content = ''
+  if (typeof props.toolResult === 'string') {
+    content = props.toolResult
+  } else if (props.toolResult.content && typeof props.toolResult.content === 'string') {
+    content = props.toolResult.content
+  } else {
+    return null
+  }
+
+  // Match markdown image syntax ![alt](url)
+  const match = content.match(/!\[.*?\]\((.*?)\)/)
+  if (match && match[1]) {
+    return match[1]
+  }
+  return null
+})
 
 const handleClick = () => {
   emit('click', props.toolCall, props.toolResult)

@@ -10,10 +10,12 @@ from typing import Dict, Optional, Type
 from .base import BaseParser
 from .common_parser import CommonParser
 from .eml_parser import EmlParser
+from .qa_parser import QAParser
 
 _parsers: Dict[str, Type[BaseParser]] = {
     "file": CommonParser,
     "eml": EmlParser,
+    "qa": QAParser,
 }
 
 

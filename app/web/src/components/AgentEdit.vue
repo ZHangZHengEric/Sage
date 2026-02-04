@@ -114,11 +114,7 @@
 
            <!-- MCP Config -->
            <div class="space-y-4">
-              <h3 class="text-lg font-medium flex items-center gap-2">
-                <Wrench class="h-5 w-5" />
-                {{ t('agent.mcpConfig') }}
-              </h3>
-              <Separator />
+      
               <FormItem :label="t('agent.availableTools')">
                 <ScrollArea class="h-[200px] border rounded-md p-4 bg-muted/10">
                   <div class="space-y-3">
@@ -153,6 +149,23 @@
                   </div>
                  </ScrollArea>
               </FormItem>
+              <FormItem :label="t('agent.availableKnowledgeBases')">
+                 <ScrollArea class="h-[200px] border rounded-md p-4 bg-muted/10">
+                  <div class="space-y-3">
+                    <div v-for="kb in props.knowledgeBases" :key="kb.id" class="flex items-center space-x-2">
+                      <Checkbox :id="`kb-${kb.id}`" :checked="formData.availableKnowledgeBases.includes(kb.id)" @update:checked="(c) => handleKnowledgeBaseCheck(kb.id, c)" />
+                      <label :for="`kb-${kb.id}`" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                        {{ kb.name }}
+                      </label>
+                      <p v-if="kb.intro" class="text-xs text-muted-foreground line-clamp-2">{{ kb.intro }}</p>
+                    </div>
+                    <div v-if="props.knowledgeBases.length === 0" class="text-sm text-muted-foreground text-center py-4">
+                      {{ t('knowledgeBase.noKnowledgeBases') || '暂无可用知识库' }}
+                    </div>
+                  </div>
+                 </ScrollArea>
+              </FormItem>
+
            </div>
 
            <!-- System Context -->
@@ -308,6 +321,10 @@ const props = defineProps({
   skills: {
     type: Array,
     default: () => []
+  },
+  knowledgeBases: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -358,6 +375,7 @@ const defaultFormData = () => ({
   },
   availableTools: [],
   availableSkills: [],
+  availableKnowledgeBases: [],
   systemContext: {},
   availableWorkflows: {}
 })
@@ -397,6 +415,16 @@ const handleSkillCheck = (name, checked) => {
   }
 }
 
+const handleKnowledgeBaseCheck = (id, checked) => {
+  if (checked) {
+    if (!formData.value.availableKnowledgeBases.includes(id)) {
+      formData.value.availableKnowledgeBases.push(id)
+    }
+  } else {
+    formData.value.availableKnowledgeBases = formData.value.availableKnowledgeBases.filter(kb => kb !== id)
+  }
+}
+
 // Validation
 const validate = () => {
   errors.value = {}
@@ -433,6 +461,7 @@ watch(() => props.agent, (newAgent) => {
       ...newAgent,
       availableTools: newAgent.availableTools || [],
       availableSkills: newAgent.availableSkills || [],
+      availableKnowledgeBases: newAgent.availableKnowledgeBases || [],
       llmConfig: { ...defaultFormData().llmConfig, ...(newAgent.llmConfig || {}) }
     }))
 

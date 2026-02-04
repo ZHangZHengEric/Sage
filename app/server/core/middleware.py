@@ -36,6 +36,7 @@ WHITELIST_API_PATHS = frozenset(
         "/api/conversations",
         "/api/conversations/{conversation_id}",
         "/api/conversations/{conversation_id}/messages",
+        "/api/share/conversations/{conversation_id}/messages",
         "/api/sessions/{session_id}/interrupt",
     }
 )
@@ -43,11 +44,7 @@ WHITELIST_API_PATHS = frozenset(
 
 def _compile_whitelist_regex(paths: frozenset[str]) -> Tuple[re.Pattern, ...]:
     """将带参数的路径转换为正则"""
-    return tuple(
-        re.compile("^" + re.sub(r"\{[^}]+\}", r"[^/]+", p) + "$")
-        for p in paths
-        if "{" in p
-    )
+    return tuple(re.compile("^" + re.sub(r"\{[^}]+\}", r"[^/]+", p) + "$") for p in paths if "{" in p)
 
 
 WHITELIST_API_REGEXES = _compile_whitelist_regex(WHITELIST_API_PATHS)
@@ -55,9 +52,7 @@ WHITELIST_API_REGEXES = _compile_whitelist_regex(WHITELIST_API_PATHS)
 
 def _is_whitelisted(path: str) -> bool:
     """判断路径是否在白名单"""
-    return path in WHITELIST_API_PATHS or any(
-        r.match(path) for r in WHITELIST_API_REGEXES
-    )
+    return path in WHITELIST_API_PATHS or any(r.match(path) for r in WHITELIST_API_REGEXES)
 
 
 async def _unauthorized_response(status_code: int, detail: str, error_detail: str):
@@ -83,7 +78,6 @@ def register_middlewares(app):
         """请求日志中间件，记录请求信息和用户名称"""
         # 生成请求ID
         request_id = f"{uuid.uuid4().hex[:12]}"
-
 
         # 使用bind创建带有上下文的logger实例，避免全局状态污染
         request_logger = logger.bind(request_id=request_id)
@@ -113,15 +107,11 @@ def register_middlewares(app):
                     request.state.user_claims = parse_access_token(token)
                 except SageHTTPException as e:
                     if not is_whitelisted:
-                        return await _unauthorized_response(
-                            e.status_code, e.detail, e.error_detail
-                        )
+                        return await _unauthorized_response(e.status_code, e.detail, e.error_detail)
                 except Exception as e:
                     if not is_whitelisted:
                         return await _unauthorized_response(401, "Token非法", str(e))
             elif not is_whitelisted:
-                return await _unauthorized_response(
-                    401, "未授权", "missing bearer token"
-                )
+                return await _unauthorized_response(401, "未授权", "missing bearer token")
 
         return await call_next(request)

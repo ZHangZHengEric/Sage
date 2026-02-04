@@ -35,11 +35,10 @@
 
     <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
       <!-- Mobile Header -->
-      <div v-if="!isSharedPage" class="lg:hidden flex items-center p-4 border-b bg-background shrink-0">
+      <div v-if="!isSharedPage" class="lg:hidden flex justify-between items-center p-2 border-b bg-background shrink-0">
          <Button variant="ghost" size="icon" @click="isMobileMenuOpen = true" class="-ml-2">
             <Menu class="h-6 w-6" />
          </Button>
-         <span class="ml-2 font-semibold text-lg">Zavixai Agent</span>
       </div>
 
       <div class="flex-1 overflow-hidden relative flex flex-col">
@@ -72,13 +71,13 @@ import { Button } from '@/components/ui/button'
 const router = useRouter()
 const route = useRoute()
 
-const isSharedPage = computed(() => route.name === 'SharedChat')
+const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.startsWith('/share/'))
 
 // 登录模态框显示状态
 const showLoginModal = ref(false)
 
 // Check login status on mount and route change
-watch(() => route.path, () => {
+watch(() => [route.path, route.name], () => {
   if (isSharedPage.value) {
     showLoginModal.value = false
   } else {
@@ -114,7 +113,11 @@ const handleLoginSuccess = (userData) => {
 }
 
 const handleUserUpdated = () => {
-  showLoginModal.value = !isLoggedIn()
+  if (isSharedPage.value) {
+    showLoginModal.value = false
+  } else {
+    showLoginModal.value = !isLoggedIn()
+  }
 }
 
 onMounted(() => {
