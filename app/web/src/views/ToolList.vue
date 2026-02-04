@@ -35,11 +35,18 @@
             <div class="flex items-center justify-between">
               <div class="flex">
                 <h3 class="text-lg font-semibold tracking-tight">{{ getToolSourceLabel(group.source) }}</h3>
-                <Button v-if="canManage(group.tools[0])" variant="ghost" size="icon"
-                  class="h-6 w-6 text-destructive hover:text-destructive shrink-0 -mr-2"
-                  @click.stop="handleDeleteMcpTool(group.source)" :title="t('tools.delete') || 'Delete Server'">
-                  <Trash2 class="h-3.5 w-3.5" />
-                </Button>
+                <div v-if="canManage(group.tools[0])" class="flex items-center ml-2 space-x-1">
+                  <Button variant="ghost" size="icon"
+                    class="h-6 w-6 text-muted-foreground hover:text-primary shrink-0"
+                    @click.stop="handleRefreshMcpTool(group.source)" :title="t('tools.refresh') || 'Refresh Server'">
+                    <RefreshCw class="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon"
+                    class="h-6 w-6 text-destructive hover:text-destructive shrink-0"
+                    @click.stop="handleDeleteMcpTool(group.source)" :title="t('tools.delete') || 'Delete Server'">
+                    <Trash2 class="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
 
 
@@ -113,7 +120,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
@@ -240,17 +247,37 @@ const canManage = (tool) => {
   return server.user_id === currentUser.value.userid
 }
 
-const handleDeleteMcpTool = async (source) => {
-  // Simple confirmation
-  if (!window.confirm(`是否确认删除 "${source}"? 这将删除该服务器提供的所有工具。`)) return
+const handleDeleteMcpTool = async (sourceName) => {
+  if (!confirm(t('tools.confirmDelete') || 'Are you sure you want to remove this MCP server?')) {
+    return
+  }
+
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
 
   try {
     loading.value = true
-    await toolAPI.deleteMcpServer(source.substring('MCP Server: '.length))
-    await loadMcpServers()
+    await toolAPI.removeMcpServer(serverName)
+    toast.success(t('tools.deleteSuccess') || 'Server removed successfully')
     await loadBasicTools()
   } catch (error) {
-    console.error(`Failed to delete MCP server ${source}:`, error)
+    console.error('Failed to remove MCP server:', error)
+    toast.error(error.message || t('tools.deleteFailed') || 'Failed to remove server')
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleRefreshMcpTool = async (sourceName) => {
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+
+  try {
+    loading.value = true
+    await toolAPI.refreshMcpServer(serverName)
+    toast.success(t('tools.refreshSuccess') || 'Server refreshed successfully')
+    await loadBasicTools()
+  } catch (error) {
+    console.error('Failed to refresh MCP server:', error)
+    toast.error(error.message || t('tools.refreshFailed') || 'Failed to refresh server')
   } finally {
     loading.value = false
   }
