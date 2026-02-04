@@ -97,13 +97,14 @@ class SessionContext:
 
         current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
         self.system_context['current_time'] = current_time_str
-        
+        logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {_agent_workspace_host_path}")
         # 初始化沙箱环境 / Initialize sandbox environment
         # 沙箱内部会自动管理 SandboxFileSystem
         self.sandbox = Sandbox(
             host_workspace=_agent_workspace_host_path,
             virtual_workspace=self.virtual_workspace
         )
+        logger.debug(f"SessionContext: 沙箱环境初始化完成，工作区: {self.sandbox.host_workspace}")
         
         # 将 agent_workspace 设置为 SandboxFileSystem 对象，而不是原始路径字符串
         # 这样如果在 Prompt 中直接打印它，会显示 __str__ (即虚拟路径)
