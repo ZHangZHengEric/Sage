@@ -74,20 +74,9 @@ class SAgent:
         else:
             logger.info(f"SAgent: 记忆类型为 {memory_type}，将禁用用户记忆功能")
             self.user_memory_manager = None
-        # 初始化所有智能体
-        self.simple_agent = SimpleAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_analysis_agent = TaskAnalysisAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_decompose_agent = TaskDecomposeAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_executor_agent = TaskExecutorAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_observation_agent = TaskObservationAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_completion_judge_agent = TaskCompletionJudgeAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_planning_agent = TaskPlanningAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_summary_agent = TaskSummaryAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_stage_summary_agent = TaskStageSummaryAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.workflow_select_agent = WorkflowSelectAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.query_suggest_agent = QuerySuggestAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_rewrite_agent = TaskRewriteAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.task_router_agent = TaskRouterAgent(self.model, self.model_config, system_prefix=self.system_prefix)
+        
+        # 懒加载代理缓存
+        self._agents = {}
 
         self.observability_manager = None # Initialize to None
         if enable_obs:
@@ -97,21 +86,68 @@ class SAgent:
             # 包装模型以支持可观测性
             # 注意：这会拦截 self.model 的调用以记录 LLM 事件
             self.model = ObservableAsyncOpenAI(self.model, self.observability_manager)
-            # 包装所有智能体以支持可观测性
-            self.simple_agent = AgentRuntime(self.simple_agent, self.observability_manager)
-            self.task_analysis_agent = AgentRuntime(self.task_analysis_agent, self.observability_manager)
-            self.task_decompose_agent = AgentRuntime(self.task_decompose_agent, self.observability_manager)
-            self.task_executor_agent = AgentRuntime(self.task_executor_agent, self.observability_manager)
-            self.task_observation_agent = AgentRuntime(self.task_observation_agent, self.observability_manager)
-            self.task_completion_judge_agent = AgentRuntime(self.task_completion_judge_agent, self.observability_manager)
-            self.task_planning_agent = AgentRuntime(self.task_planning_agent, self.observability_manager)
-            self.task_summary_agent = AgentRuntime(self.task_summary_agent, self.observability_manager)
-            self.task_stage_summary_agent = AgentRuntime(self.task_stage_summary_agent, self.observability_manager)
-            self.workflow_select_agent = AgentRuntime(self.workflow_select_agent, self.observability_manager)
-            self.query_suggest_agent = AgentRuntime(self.query_suggest_agent, self.observability_manager)
-            self.task_rewrite_agent = AgentRuntime(self.task_rewrite_agent, self.observability_manager)
-            self.task_router_agent = AgentRuntime(self.task_router_agent, self.observability_manager)
-        logger.info("SAgent: 智能体控制器初始化完成")
+            
+        logger.info("SAgent: 智能体控制器初始化完成 (Lazy Loading Enabled)")
+
+    def _get_agent(self, agent_cls: Type[AgentBase], name: str) -> AgentBase:
+        if name not in self._agents:
+            agent = agent_cls(self.model, self.model_config, system_prefix=self.system_prefix)
+            if self.observability_manager:
+                agent = AgentRuntime(agent, self.observability_manager)
+            self._agents[name] = agent
+        return self._agents[name]
+
+    @property
+    def simple_agent(self):
+        return self._get_agent(SimpleAgent, "simple_agent")
+
+    @property
+    def task_analysis_agent(self):
+        return self._get_agent(TaskAnalysisAgent, "task_analysis_agent")
+
+    @property
+    def task_decompose_agent(self):
+        return self._get_agent(TaskDecomposeAgent, "task_decompose_agent")
+
+    @property
+    def task_executor_agent(self):
+        return self._get_agent(TaskExecutorAgent, "task_executor_agent")
+
+    @property
+    def task_observation_agent(self):
+        return self._get_agent(TaskObservationAgent, "task_observation_agent")
+
+    @property
+    def task_completion_judge_agent(self):
+        return self._get_agent(TaskCompletionJudgeAgent, "task_completion_judge_agent")
+
+    @property
+    def task_planning_agent(self):
+        return self._get_agent(TaskPlanningAgent, "task_planning_agent")
+
+    @property
+    def task_summary_agent(self):
+        return self._get_agent(TaskSummaryAgent, "task_summary_agent")
+
+    @property
+    def task_stage_summary_agent(self):
+        return self._get_agent(TaskStageSummaryAgent, "task_stage_summary_agent")
+
+    @property
+    def workflow_select_agent(self):
+        return self._get_agent(WorkflowSelectAgent, "workflow_select_agent")
+
+    @property
+    def query_suggest_agent(self):
+        return self._get_agent(QuerySuggestAgent, "query_suggest_agent")
+
+    @property
+    def task_rewrite_agent(self):
+        return self._get_agent(TaskRewriteAgent, "task_rewrite_agent")
+
+    @property
+    def task_router_agent(self):
+        return self._get_agent(TaskRouterAgent, "task_router_agent")
 
     async def run_stream(
         self,
