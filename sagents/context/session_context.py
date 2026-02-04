@@ -98,13 +98,14 @@ class SessionContext:
         current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
         self.system_context['current_time'] = current_time_str
         logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {_agent_workspace_host_path}")
+        t0 = time.time()
         # 初始化沙箱环境 / Initialize sandbox environment
         # 沙箱内部会自动管理 SandboxFileSystem
         self.sandbox = Sandbox(
             host_workspace=_agent_workspace_host_path,
             virtual_workspace=self.virtual_workspace
         )
-        logger.debug(f"SessionContext: 沙箱环境初始化完成，工作区: {self.sandbox.host_workspace}")
+        logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         
         # 将 agent_workspace 设置为 SandboxFileSystem 对象，而不是原始路径字符串
         # 这样如果在 Prompt 中直接打印它，会显示 __str__ (即虚拟路径)
@@ -117,10 +118,11 @@ class SessionContext:
         # Copy skills to workspace if skill manager is available
         if self.skill_manager:
             logger.info(f"SessionContext: 准备复制技能到工作区: {self.agent_workspace.host_path}")
+            t1 = time.time()
             logger.info(f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}")
             try:
                 self.skill_manager.prepare_skills_in_workspace(self.agent_workspace.host_path)
-                logger.info("SessionContext: 技能复制完成")
+                logger.info(f"SessionContext: 技能复制完成，耗时: {time.time() - t1:.3f}s")
             except Exception as e:
                 logger.error(f"SessionContext: 技能复制失败: {e}", exc_info=True)
         else:
@@ -140,11 +142,12 @@ class SessionContext:
         # 如果有历史的messages.json，则加载messages.json
         messages_path = os.path.join(self.session_workspace, "messages.json")
         if os.path.exists(messages_path):
+            t2 = time.time()
             with open(messages_path, "r") as f:
                 messages = json.load(f)
                 for message_item in messages:
                     self.message_manager.add_messages(MessageChunk(**message_item))
-                logger.info(f"已经成功加载{len(messages)}条历史消息")
+                logger.info(f"已经成功加载{len(messages)}条历史消息，耗时: {time.time() - t2:.3f}s")
 
     async def init_user_memory_context(self):
         """初始化用户记忆
@@ -491,15 +494,18 @@ class SessionContext:
         
         这是 SessionContext 的职责：协调消息检索和上下文保存。
         """
+        t_start = time.time()
         # 1. 准备历史上下文
         prepare_result = self.message_manager.prepare_history_split(self.agent_config)
-
+        t_prepare = time.time()
+        
         # 2. 检索历史消息
         history_messages = self.session_memory_manager.retrieve_history_messages(
             messages=prepare_result['split_result']['history_messages'],
             query=prepare_result['current_query'],
             history_budget=prepare_result['budget_info']['history_budget']
         )
+        t_retrieve = time.time()
 
         if len(history_messages) > 0:
             # 4. 序列化为字符串并插入到system_context
@@ -508,7 +514,8 @@ class SessionContext:
 
         logger.info(
             f"SessionContext: 历史上下文准备完成 - "
-            f"检索历史消息{len(history_messages)}条消息到system_context"
+            f"检索历史消息{len(history_messages)}条消息到system_context, "
+            f"总耗时: {time.time() - t_start:.3f}s (准备: {t_prepare - t_start:.3f}s, 检索: {t_retrieve - t_prepare:.3f}s)"
         )
 
 
@@ -576,6 +583,9 @@ def init_session_context(
         # 如果提供了tool_manager，更新现有会话的tool_manager
         if tool_manager:
             _active_sessions[session_id].tool_manager = tool_manager
+        # 如果提供了skill_manager，更新现有会话的skill_manager
+        if skill_manager:
+            _active_sessions[session_id].skill_manager = skill_manager
         return _active_sessions[session_id]
     _active_sessions[session_id] = SessionContext(
         session_id,
