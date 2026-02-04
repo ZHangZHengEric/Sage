@@ -20,9 +20,16 @@ class Logger:
             cls._instance = super(Logger, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, log_dir='logs'):
+    def __init__(self, log_dir=None):
         if Logger._initialized:
             return
+
+        if log_dir is None:
+            # Use absolute path relative to project root to avoid creating logs in CWD
+            # .../Sage/sagents/utils/logger.py -> .../Sage
+            current_file = os.path.abspath(__file__)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+            log_dir = os.path.join(project_root, 'logs')
 
         self.log_dir = log_dir
         os.makedirs(log_dir, exist_ok=True)

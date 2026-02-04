@@ -23,10 +23,14 @@ from typing import Any, Dict, List, Optional, Union
 
 import streamlit as st
 from openai import AsyncOpenAI
+# 项目路径配置
+project_root = Path(os.path.realpath(__file__)).parent.parent
+sys.path.insert(0, str(project_root))
 
 from sagents.context.messages.message_manager import MessageManager
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, ToolProxy
+from sagents.skill import SkillManager, SkillProxy
 from sagents.utils.logger import logger
 
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
@@ -41,9 +45,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 项目路径配置
-project_root = Path(os.path.realpath(__file__)).parent.parent
-sys.path.insert(0, str(project_root))
+
 
 
 class ComponentManager:
@@ -56,6 +58,7 @@ class ComponentManager:
                  workspace: Optional[str] = None, memory_type: Optional[str] = "session",
                  mcp_config: Optional[str] = None,
                  preset_running_config: Optional[str] = None, logs_dir: Optional[str] = None,
+                 skills_path: Optional[str] = None,
                  context_history_ratio: Optional[float] = None,
                  context_active_ratio: Optional[float] = None,
                  context_max_new_message_ratio: Optional[float] = None,
@@ -78,6 +81,7 @@ class ComponentManager:
         self.mcp_config = mcp_config
         self.preset_running_config = preset_running_config
         self.logs_dir = logs_dir
+        self.skills_path = skills_path
 
         # 处理preset_running_config（参考sage_server.py的实现）
         self.preset_config_dict = {}
@@ -152,23 +156,27 @@ class ComponentManager:
 
         # 初始化组件变量
         self._tool_manager: Optional[Union[ToolManager, ToolProxy]] = None
+        self._skill_manager: Optional[Union[SkillManager, SkillProxy]] = None
         self._controller: Optional[SAgent] = None
         self._model: Optional[AsyncOpenAI] = None
 
-    async def initialize(self) -> tuple[Union[ToolManager, ToolProxy], SAgent]:
+    async def initialize(self) -> tuple[Union[ToolManager, ToolProxy], Optional[Union[SkillManager, SkillProxy]], SAgent]:
         """异步初始化所有组件"""
         try:
             logger.info(f"初始化组件，模型: {self.model_name}")
 
             # 异步初始化工具管理器
             self._tool_manager = await self._init_tool_manager()
+            
+            # 初始化技能管理器
+            self._skill_manager = self._init_skill_manager()
 
             # 初始化模型和控制器
             self._model = self._init_model()
             self._controller = self._init_controller()
 
             logger.info("所有组件初始化成功")
-            return self._tool_manager, self._controller
+            return self._tool_manager, self._skill_manager, self._controller
 
         except Exception as e:
             logger.error(f"组件初始化失败: {str(e)}")
@@ -200,6 +208,17 @@ class ComponentManager:
             return tool_proxy
 
         return tool_manager
+
+    def _init_skill_manager(self) -> Optional[Union[SkillManager, SkillProxy]]:
+        """初始化技能管理器"""
+        logger.debug("初始化技能管理器")
+        try:
+            skill_dirs = [self.skills_path] if self.skills_path else None
+            return SkillManager(skill_dirs=skill_dirs)
+        except Exception as e:
+            logger.error(f"技能管理器初始化失败: {str(e)}")
+            # 技能管理器初始化失败不应阻止整个应用启动，记录日志即可
+            return None
 
     def _init_model(self) -> AsyncOpenAI:
         """初始化模型"""
@@ -284,6 +303,7 @@ class StreamingHandler:
     async def process_stream(self,
                              messages: List[Dict[str, Any]],
                              tool_manager: Union[ToolManager, ToolProxy],
+                             skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
                              session_id: Optional[str] = None,
                              use_deepthink: bool = True,
                              use_multi_agent: bool = True,
@@ -309,6 +329,7 @@ class StreamingHandler:
             async for chunk in self.controller.run_stream(
                 messages,
                 tool_manager,
+                skill_manager=skill_manager,
                 session_id=session_id,
                 deep_thinking=use_deepthink,
                 multi_agent=use_multi_agent,
@@ -371,7 +392,7 @@ def setup_ui(config: Dict):
 
         # 多智能体选项
         use_multi_agent = st.toggle('🤖 启用多智能体推理',
-                                    value=config.get('use_multi_agent', True))
+                                    value=config.get('use_multi_agent', False))
         use_deepthink = st.toggle('🧠 启用深度思考',
                                   value=config.get('use_deepthink', True))
 
@@ -411,6 +432,9 @@ def clear_history():
     logger.info("用户清除对话历史")
     st.session_state.conversation = []
     st.session_state.inference_conversation = []
+    # 更新 session_id
+    st.session_state.session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_' + str(uuid.uuid4())[:4]
+    logger.info(f"更新会话ID: {st.session_state.session_id}")
     st.rerun()
 
 
@@ -422,6 +446,9 @@ def init_session_state():
         st.session_state.inference_conversation = []
     if 'components_initialized' not in st.session_state:
         st.session_state.components_initialized = False
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_' + str(uuid.uuid4())[:4]
+        logger.info(f"初始化会话ID: {st.session_state.session_id}")
 
 
 def display_conversation_history():
@@ -468,13 +495,17 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
 
     context_budget_config = component_manager.context_budget_config if component_manager else None
 
+    # 获取skill_manager
+    skill_manager = st.session_state.get('skill_manager', None)
+
     # 处理流式响应
     new_messages = asyncio.run(streaming_handler.process_stream(
         st.session_state.inference_conversation.copy(),
         tool_manager,
-        session_id=time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime()) + '_'+str(uuid.uuid4())[:4],
+        skill_manager=skill_manager,
+        session_id=st.session_state.session_id,
         use_deepthink=st.session_state.get('use_deepthink', True),
-        use_multi_agent=st.session_state.get('use_multi_agent', True),
+        use_multi_agent=st.session_state.get('use_multi_agent', False),
         context_budget_config=context_budget_config
     ))
 
@@ -500,6 +531,7 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
                  workspace: Optional[str] = None, memory_type: Optional[str] = "session",
                  mcp_config: Optional[str] = None,
                  preset_running_config: Optional[str] = None, logs_dir: Optional[str] = None,
+                 skills_path: Optional[str] = None,
                  host: Optional[str] = None, port: Optional[int] = None,
                  context_history_ratio: Optional[float] = None,
                  context_active_ratio: Optional[float] = None,
@@ -538,6 +570,7 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
         'preset_running_config': preset_running_config,
         'logs_dir': logs_dir,
         'context_history_ratio': context_history_ratio,
+        'context_history_ratio': context_history_ratio,
         'context_active_ratio': context_active_ratio,
         'context_max_new_message_ratio': context_max_new_message_ratio,
         'context_recent_turns': context_recent_turns
@@ -567,14 +600,16 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
                     mcp_config=mcp_config,
                     preset_running_config=preset_running_config,
                     logs_dir=logs_dir,
+                    skills_path=skills_path,
                     context_history_ratio=context_history_ratio,
                     context_active_ratio=context_active_ratio,
                     context_max_new_message_ratio=context_max_new_message_ratio,
                     context_recent_turns=context_recent_turns
                 )
-                tool_manager, controller = asyncio.run(component_manager.initialize())
+                tool_manager, skill_manager, controller = asyncio.run(component_manager.initialize())
                 st.session_state.tool_manager = tool_manager
-                st.session_state.controller = controller
+                st.session_state.skill_manager = skill_manager
+                st.session_state.controller = controller 
                 st.session_state.component_manager = component_manager
                 st.session_state.components_initialized = True
                 st.session_state.config_updated = True  # 标记配置已更新
@@ -582,6 +617,8 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
             # 打印已注册工具，便于调试
             print("已注册工具：", [t['name'] for t in tool_manager.list_tools_simplified()])
             # 初始化完成后重新运行，确保UI显示更新后的配置
+            if skill_manager:
+                print("已注册技能：", skill_manager.list_skills())
             st.rerun()
         except Exception as e:
             # 其他异常
@@ -656,6 +693,8 @@ def parse_arguments() -> Dict[str, Any]:
                         help='工作空间目录')
     parser.add_argument('--logs_dir', default='logs',
                         help='日志目录')
+    parser.add_argument('--skills_path', default=None,
+                        help='技能文件夹路径')
     parser.add_argument('--preset_running_config', default='',
                         help='预设配置，system_context，以及workflow，与接口中传过来的合并使用')
     parser.add_argument('--memory_root', default=None,
@@ -692,6 +731,7 @@ def parse_arguments() -> Dict[str, Any]:
         'mcp_config': args.mcp_config,
         'workspace': args.workspace,
         'logs_dir': args.logs_dir,
+        'skills_path': args.skills_path,
         'preset_running_config': args.preset_running_config,
         'memory_type': args.memory_type
     }
@@ -706,25 +746,26 @@ def main():
 
         # 运行 Web 演示
         run_web_demo(
-            config['api_key'],
-            config['model_name'],
-            config['base_url'],
-            config['max_tokens'],
-            config['temperature'],
-            config['max_model_len'],
-            config['top_p'],
-            config['presence_penalty'],
-            config['workspace'],
-            config['memory_type'],
-            config['mcp_config'],
-            config['preset_running_config'],
-            config['logs_dir'],
-            config['host'],
-            config['port'],
-            config['context_history_ratio'],
-            config['context_active_ratio'],
-            config['context_max_new_message_ratio'],
-            config['context_recent_turns']
+            api_key=config['api_key'],
+            model_name=config['model_name'],
+            base_url=config['base_url'],
+            max_tokens=config['max_tokens'],
+            temperature=config['temperature'],
+            max_model_len=config['max_model_len'],
+            top_p=config['top_p'],
+            presence_penalty=config['presence_penalty'],
+            workspace=config['workspace'],
+            memory_type=config['memory_type'],
+            mcp_config=config['mcp_config'],
+            preset_running_config=config['preset_running_config'],
+            logs_dir=config['logs_dir'],
+            skills_path=config['skills_path'],
+            host=config['host'],
+            port=config['port'],
+            context_history_ratio=config['context_history_ratio'],
+            context_active_ratio=config['context_active_ratio'],
+            context_max_new_message_ratio=config['context_max_new_message_ratio'],
+            context_recent_turns=config['context_recent_turns']
         )
 
     except Exception as e:

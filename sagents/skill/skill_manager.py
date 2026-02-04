@@ -20,18 +20,32 @@ def set_skill_manager(tm: Optional["SkillManager"]) -> None:
 
 class SkillManager:
     """
+    SkillManager (技能管理器)
     Manages the discovery, registration, and loading of skills.
+    负责技能的发现、注册和加载。
+
+    Core Responsibilities (核心职责):
+    1. Discovery (发现): Scans the 'skills' directory for valid skill packages. (扫描 'skills' 目录以查找有效的技能包)
+    2. Registration (注册): Validates and registers skills into memory. (验证并将技能注册到内存中)
+    3. Loading (加载): Loads skill metadata and instructions (SKILL.md). (加载技能元数据和说明)
+    4. Workspace Preparation (工作区准备): Copies skill files to the agent's workspace for execution. (将技能文件复制到智能体的工作区以供执行)
     """
     def __init__(self, skill_dirs: List[str] = None):
         logger.info("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
+        # Base directory resolution (基础目录解析)
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.skill_workspace = os.path.join(base_dir, "skills")
+        # Combine custom directories with the default workspace (合并自定义目录和默认工作区)
         self.skill_dirs = list(dict.fromkeys((skill_dirs or []) + [self.skill_workspace]))
         self._load_skills_from_workspace()
 
     @classmethod
     def get_instance(cls) -> "SkillManager":
+        """
+        Get the global singleton instance of SkillManager.
+        获取 SkillManager 的全局单例实例。
+        """
         tm = get_skill_manager()
         if tm is None:
             tm = SkillManager()
@@ -39,12 +53,26 @@ class SkillManager:
         return tm
 
     def list_skills(self) -> List[str]:
+        """
+        List all registered skill names.
+        列出所有已注册的技能名称。
+        """
         return list(self.skills.keys())
 
     def list_skill_info(self) -> List[Dict[str, Any]]:
+        """
+        List detailed information for all skills.
+        列出所有技能的详细信息。
+        """
         return  self.skills.values()
 
     def get_skill_description_lines(self, skills: Optional[List[str]] = None) -> List[str]:
+        """
+        Get a list of formatted description lines for skills.
+        获取技能的格式化描述行列表。
+        
+        Format: "- {name}: {description}"
+        """
         if skills is None:
             skill_names = self.list_skills()
         elif isinstance(skills, list):
@@ -58,13 +86,28 @@ class SkillManager:
         return lines
 
     def _load_skills_from_workspace(self):
+        """
+        Internal method to scan and load skills from all configured skill directories.
+        内部方法：扫描并加载所有配置的技能目录中的技能。
+        """
         self.skills.clear()
-        if not os.path.exists(self.skill_workspace):
-            return
-        for item in os.listdir(self.skill_workspace):
-            skill_path = os.path.join(self.skill_workspace, item)
-            if os.path.isdir(skill_path):
-                self._load_skill_from_dir(skill_path)
+        
+        # Iterate over all configured skill directories
+        for workspace in self.skill_dirs:
+            if not os.path.exists(workspace):
+                logger.warning(f"Skill workspace directory not found: {workspace}")
+                continue
+                
+            logger.info(f"Scanning skill workspace: {workspace}")
+            try:
+                for item in os.listdir(workspace):
+                    skill_path = os.path.join(workspace, item)
+                    if os.path.isdir(skill_path):
+                        # Avoid duplicates if multiple workspaces have same skill name? 
+                        # Current logic: Last loaded overwrites previous if names collide.
+                        self._load_skill_from_dir(skill_path)
+            except Exception as e:
+                logger.error(f"Error scanning workspace {workspace}: {e}")
 
     def _generate_file_tree(self, path: str, root_path: Optional[str] = None, prefix: str = "") -> str:
         if root_path is None:
@@ -213,6 +256,14 @@ class SkillManager:
             return None
 
         return target_dir
+
+    def prepare_skills_in_workspace(self, agent_workspace: str) -> None:
+        """
+        Copy all registered skills to the agent's workspace.
+        将所有已注册的技能复制到智能体的工作区。
+        """
+        for skill_name in self.skills:
+            self.prepare_skill_in_workspace(skill_name, agent_workspace)
 
     def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
         """

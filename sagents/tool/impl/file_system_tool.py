@@ -27,19 +27,19 @@ class FileSystemTool:
         param_description_i18n={
             "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
             "start_line": {"zh": "开始行号，默认0", "en": "Start line number, default 0", "pt": "Linha inicial, padrão 0"},
-            "end_line": {"zh": "结束行号（不包含）", "en": "End line number (exclusive)", "pt": "Linha final (exclusiva)"},
+            "end_line": {"zh": "结束行号（不包含），默认200，None表示读取到文件末尾", "en": "End line number (exclusive), default 200, None means read to end", "pt": "Linha final (exclusiva), padrão 200, None significa ler até o final"},
             "encoding": {"zh": "文件编码，auto自动检测", "en": "File encoding, 'auto' for detection", "pt": "Codificação, 'auto' para detectar"},
             "max_size_mb": {"zh": "最大读取文件大小（MB）", "en": "Maximum file size to read (MB)", "pt": "Tamanho máximo do arquivo para leitura (MB)"}
         }
     )
-    async def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 20, 
+    async def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 200, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
         """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
 
         Args:
             file_path (str): 文件绝对路径
             start_line (int): 开始行号，默认0
-            end_line (int): 结束行号（不包含），默认20
+            end_line (int): 结束行号（不包含），默认200，None表示读取到文件末尾
             encoding (str): 文件编码，'auto'表示自动检测
             max_size_mb (float): 最大读取文件大小（MB），默认10MB
 

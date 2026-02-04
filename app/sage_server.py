@@ -31,6 +31,7 @@ print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sagents.context.session_context import get_session_context
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, ToolProxy
+from sagents.skill import SkillManager, SkillProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.logger import logger
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
@@ -54,6 +55,7 @@ parser.add_argument("--port", default=8001, type=int, help="Server Port")
 
 parser.add_argument("--mcp-config", default="mcp_setting.json", help="MCP配置文件路径")
 parser.add_argument("--workspace", default="agent_workspace", help="工作空间目录")
+parser.add_argument("--skills-path", default=None, help="技能目录路径")
 parser.add_argument("--logs-dir", default="logs", help="日志目录")
 parser.add_argument("--preset_running_config", default="", help="预设配置，system_context，以及workflow，与接口中传过来的合并使用")
 parser.add_argument("--memory_root", default=None, help="记忆存储根目录（已废弃，请使用 --memory_type）")
@@ -130,6 +132,7 @@ class SageStreamService:
     def __init__(self, model: Optional[AsyncOpenAI] = None, 
                         model_config: Optional[Dict[str, Any]] = None, 
                         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None, 
+                        skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
                         preset_running_config: Optional[Dict[str, Any]] = None,
                         workspace: Optional[str] = None,
                         memory_type: Optional[str] = "session",
@@ -243,7 +246,7 @@ class SageStreamService:
             if isinstance(self.tool_manager, ToolManager):
                 self.tool_manager = ToolProxy(self.tool_manager, self.preset_available_tools)    
         
-
+        self.skill_manager = skill_manager
         
         logger.info("SageStreamService 初始化完成")
     
@@ -291,6 +294,7 @@ class SageStreamService:
             stream_result = self.sage_controller.run_stream(
                 input_messages=messages,
                 tool_manager=self.tool_manager,
+                skill_manager=self.skill_manager,
                 session_id=session_id,
                 user_id=user_id,
                 deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,
@@ -463,7 +467,7 @@ async def initialize_tool_manager():
 
 async def initialize_system(server_args):
     """初始化系统"""
-    global default_stream_service, tool_manager, default_model_client
+    global default_stream_service, tool_manager, skill_manager, default_model_client
     
     logger.info("正在初始化 Sage Stream Service...")
     
@@ -490,6 +494,16 @@ async def initialize_system(server_args):
             logger.error(traceback.format_exc())
             tool_manager = None
         
+        # 初始化技能管理器
+        try:
+            skill_dirs = [server_args.skills_path] if server_args.skills_path else None
+            skill_manager = SkillManager(skill_dirs=skill_dirs)
+            logger.info("技能管理器初始化成功")
+        except Exception as e:
+            logger.warning(f"技能管理器初始化失败: {e}")
+            logger.error(traceback.format_exc())
+            skill_manager = None
+
         # 初始化流式服务
         if default_model_client:
             # 从配置中构建模型配置字典
@@ -530,6 +544,7 @@ async def initialize_system(server_args):
                 model=default_model_client,
                 model_config=model_config_dict,
                 tool_manager=tool_manager,
+                skill_manager=skill_manager,
                 preset_running_config=preset_running_config,
                 workspace=server_args.workspace,
                 memory_type=server_args.memory_type,
@@ -602,6 +617,7 @@ class StreamRequest(BaseModel):
     llm_model_config: Optional[Dict[str, Any]] = None
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
+    available_skills: Optional[List[str]] = None # Added for skill restriction
     
     def __init__(self, **data):
         # 处理字段兼容性
@@ -798,7 +814,7 @@ async def stream_chat(request: StreamRequest):
         traceback.print_exc()
     # 判断是否要初始化新的 sage service 还是使用默认的
     # 取决于是否需要自定义模型以及 agent 的system prefix ，以及对tool 的工具是否有限制
-    if request.llm_model_config or request.system_prefix or request.available_tools:
+    if request.llm_model_config or request.system_prefix or request.available_tools or request.available_skills:
         llm_config_dict = request.llm_model_config or {}
         # 根据model config 初始化新的模型客户端
         logger.info(f"初始化新的模型客户端，模型配置api_key :{llm_config_dict.get('api_key', server_args.default_llm_api_key)}")
@@ -847,6 +863,15 @@ async def stream_chat(request: StreamRequest):
         else:
             tool_proxy = tool_manager
 
+        if request.available_skills is not None:
+            logger.info(f"初始化技能代理，可用技能: {request.available_skills}")
+            start_skill_proxy = time.time()
+            skill_proxy = SkillProxy(skill_manager, request.available_skills)
+            end_skill_proxy = time.time()
+            logger.info(f"初始化技能代理耗时: {end_skill_proxy - start_skill_proxy} 秒")
+        else:
+            skill_proxy = skill_manager
+
         start_stream_service = time.time()
         # 构建context_budget_config字典
         # max_model_len统一使用请求中的max_model_len（如果提供）或default_llm_max_model_len
@@ -867,11 +892,12 @@ async def stream_chat(request: StreamRequest):
             model=model_client,
             model_config=llm_model_config,
             tool_manager=tool_proxy,
+            skill_manager=skill_proxy,
             preset_running_config={
                 "system_prefix": request.system_prefix
             },
             workspace=server_args.workspace,
-            memory_root=server_args.memory_root,
+            memory_type=server_args.memory_type,
             context_budget_config=context_budget_config
         )
         end_stream_service = time.time()

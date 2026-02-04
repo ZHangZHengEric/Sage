@@ -34,9 +34,10 @@ class SecurityManager:
     
     # 恶意模式检测
     MALICIOUS_PATTERNS = [
-        '&&', '||', ';', '|', '>', '>>', '<',
-        '$(', '`',
-        'curl', 'wget', 'nc', 'netcat'
+        # '&&', '||', ';', '|',  # 允许常用的 Shell 连接符和管道，提高 Agent 灵活性
+        '>', '>>', '<',  # 仍保留重定向限制，视情况可放开
+        '$(', '`',       # 保留命令替换限制
+        'curl', 'wget', 'nc', 'netcat'  # 保留网络工具限制
     ]
     
     def __init__(self, enable_dangerous_commands: bool = False):
