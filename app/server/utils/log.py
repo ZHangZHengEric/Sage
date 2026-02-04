@@ -26,13 +26,24 @@ class InterceptHandler(logging.Handler):
         if record.name.startswith("apscheduler") and level == "INFO":
             level = "DEBUG"
 
+        # 降级 httpx 的 INFO 日志到 DEBUG
+        if record.name.startswith("httpx") and level == "INFO":
+            level = "DEBUG"
+
+        # 降级 httptools_impl 的 INFO 日志到 DEBUG
+        if record.name.startswith("http/httptools_impl") and level == "INFO":
+            level = "DEBUG"
+        # 降级 client/streamable_http 的 INFO 日志到 DEBUG
+        if record.name.startswith("client/streamable_http") and level == "INFO":
+            level = "DEBUG"
+        
         # Find caller from where originated the logged message
         frame = logging.currentframe()
         depth = 1
-        
+
         # Skip the InterceptHandler.emit frame itself
         if frame:
-             frame = frame.f_back
+            frame = frame.f_back
 
         while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back

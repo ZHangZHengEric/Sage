@@ -157,10 +157,8 @@ class WorkflowManager:
 """
                 ordered_steps = workflow.get_ordered_steps()
                 for i, step in enumerate(ordered_steps, 0):
-                    print(step)
-                    print(type(step))
+                    logger.debug(f"workflow {name} step: {step}")
                     workflow_guidance += f"{i}. {step.description}\n"
-
                 workflow_list += workflow_guidance
 
         if find_workflows_nums > 0:
