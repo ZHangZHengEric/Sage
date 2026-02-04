@@ -174,3 +174,16 @@ async def populate_request_from_agent_config(
 
             if "retrieve_on_zavixai_db" not in current_tools:
                 current_tools.append("retrieve_on_zavixai_db")
+    # 处理可用技能
+    available_skills = agent.config.get("availableSkills", [])
+    if available_skills:
+        # file_read execute_python_code execute_shell_command file_write update_file 五种工具注入
+        current_skills = getattr(request, "available_skills", [])
+        if current_skills is None:
+            current_skills = []
+            setattr(request, "available_skills", current_skills)
+        need_skills = ["file_read", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
+        for skill in need_skills:
+            if skill not in current_skills:
+                current_skills.append(skill)
+    
