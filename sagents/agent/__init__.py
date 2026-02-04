@@ -12,7 +12,6 @@ from .task_completion_judge_agent import TaskCompletionJudgeAgent
 from .query_suggest_agent import QuerySuggestAgent
 from .task_rewrite_agent import TaskRewriteAgent
 from .task_router_agent import TaskRouterAgent
-from .skill_executor_agent import SkillExecutorAgent
 
 __all__ = [
     "AgentBase",
@@ -29,5 +28,4 @@ __all__ = [
     "QuerySuggestAgent",
     "TaskRewriteAgent",
     "TaskRouterAgent",
-    "SkillExecutorAgent",
 ]

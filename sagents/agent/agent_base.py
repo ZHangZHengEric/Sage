@@ -312,9 +312,43 @@ class AgentBase(ABC):
                     system_prefix += f"{key}: {str(value)}\n"
             logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
 
-            # 补充当前工作空间中的文件情况，工作空间的路径是 session_context.agent_workspace,需要把这个文件夹下的文件或者文件夹，有可能多层路径，给展示出来，类似tree 结构，只展示文件的相对路径
-            current_agent_workspace = session_context.agent_workspace
-            if current_agent_workspace:
+            # 补充当前工作空间中的文件情况
+            # 优先使用 session_context.sandbox.file_system 获取文件树信息
+            # 为了兼容性，也可以检查 session_context.file_system
+            file_system = None
+            if hasattr(session_context, 'sandbox') and session_context.sandbox and session_context.sandbox.file_system:
+                file_system = session_context.sandbox.file_system
+            elif hasattr(session_context, 'file_system') and session_context.file_system:
+                file_system = session_context.file_system
+
+            if file_system:
+                workspace_name = session_context.system_context.get('file_workspace', '')
+                
+                # 使用PromptManager获取多语言文本
+                workspace_files = prompt_manager.get_prompt(
+                    'workspace_files_label',
+                    agent='common',
+                    language=language,
+                    default=f"\n当前工作空间 {workspace_name} 的文件情况：\n"
+                )
+                system_prefix += workspace_files.format(workspace=workspace_name)
+                
+                file_tree = file_system.get_file_tree()
+                if not file_tree:
+                    no_files = prompt_manager.get_prompt(
+                        'no_files_message',
+                        agent='common',
+                        language=language,
+                        default="当前工作空间下没有文件。\n"
+                    )
+                    system_prefix += no_files
+                else:
+                    system_prefix += file_tree
+                system_prefix += "\n"
+            
+            # Fallback: 如果没有 file_system 对象但有 agent_workspace 路径 (兼容旧代码)
+            elif session_context.agent_workspace:
+                current_agent_workspace = session_context.agent_workspace
                 workspace_name = session_context.system_context.get('file_workspace', '')
 
                 # 使用PromptManager获取多语言文本
@@ -326,8 +360,33 @@ class AgentBase(ABC):
                 )
                 system_prefix += workspace_files.format(workspace=workspace_name)
 
-                # 如果没有文件，就不展示了
-                if not os.listdir(current_agent_workspace):
+                # 尝试使用临时 SandboxFileSystem 获取文件树，保持行为一致性
+                # 即使没有全局 Sandbox，我们也使用 SandboxFileSystem 的安全逻辑来展示文件
+                try:
+                    from sagents.utils.sandbox.filesystem import SandboxFileSystem
+                    
+                    fs_obj = None
+                    if isinstance(current_agent_workspace, SandboxFileSystem):
+                         fs_obj = current_agent_workspace
+                    elif isinstance(current_agent_workspace, str):
+                        # 假设虚拟路径就是 /workspace
+                        fs_obj = SandboxFileSystem(host_path=current_agent_workspace, virtual_path="/workspace")
+                    
+                    if fs_obj:
+                        file_tree = fs_obj.get_file_tree()
+                        
+                        if not file_tree:
+                            no_files = prompt_manager.get_prompt(
+                                'no_files_message',
+                                agent='common',
+                                language=language,
+                                default="当前工作空间下没有文件。\n"
+                            )
+                            system_prefix += no_files
+                        else:
+                            system_prefix += file_tree
+                except Exception as e:
+                    # 如果发生错误，仅显示无文件提示，避免暴露宿主机路径
                     no_files = prompt_manager.get_prompt(
                         'no_files_message',
                         agent='common',
@@ -335,19 +394,32 @@ class AgentBase(ABC):
                         default="当前工作空间下没有文件。\n"
                     )
                     system_prefix += no_files
-                else:
-                    for root, dirs, files in os.walk(current_agent_workspace):
-                        # 过滤隐藏文件夹
-                        dirs[:] = [d for d in dirs if not d.startswith('.')]
-                        
-                        for file_item in files:
-                            # 过滤隐藏文件
-                            if file_item.startswith('.'):
-                                continue
-                            system_prefix += f"{os.path.join(root, file_item).replace(current_agent_workspace, '').lstrip('/')}\n"
-                        for dir_item in dirs:
-                            system_prefix += f"{os.path.join(root, dir_item).replace(current_agent_workspace, '').lstrip('/')}/\n"
+                
                 system_prefix += "\n"
+
+            # 补充 Skills 信息
+            if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
+                skill_descriptions = session_context.skill_manager.get_skill_description_lines()
+                if skill_descriptions:
+                    # 使用PromptManager获取多语言文本
+                    skills_header = prompt_manager.get_prompt(
+                        'skills_info_label',
+                        agent='common',
+                        language=language,
+                        default="\n当前工作空间可用技能 / Available Skills in Workspace:\n"
+                    )
+                    system_prefix += skills_header
+                    system_prefix += "\n".join(skill_descriptions)
+                    
+                    # 获取技能使用说明
+                    skills_hint = prompt_manager.get_prompt(
+                        'skills_usage_hint',
+                        agent='common',
+                        language=language,
+                        default=""
+                    )
+                    system_prefix += skills_hint
+                    system_prefix += "\n"
 
         return MessageChunk(
             role=MessageRole.SYSTEM.value,

@@ -26,7 +26,6 @@ from sagents.agent import (
     TaskDecomposeAgent,
     TaskAnalysisAgent,
     SimpleAgent,
-    SkillExecutorAgent,
     AgentBase,
 )
 from sagents.tool import ToolManager, ToolProxy
@@ -89,7 +88,6 @@ class SAgent:
         self.query_suggest_agent = QuerySuggestAgent(self.model, self.model_config, system_prefix=self.system_prefix)
         self.task_rewrite_agent = TaskRewriteAgent(self.model, self.model_config, system_prefix=self.system_prefix)
         self.task_router_agent = TaskRouterAgent(self.model, self.model_config, system_prefix=self.system_prefix)
-        self.skill_executor_agent = SkillExecutorAgent(self.model, self.model_config, system_prefix=self.system_prefix)
 
         self.observability_manager = None # Initialize to None
         if enable_obs:
@@ -113,37 +111,7 @@ class SAgent:
             self.query_suggest_agent = AgentRuntime(self.query_suggest_agent, self.observability_manager)
             self.task_rewrite_agent = AgentRuntime(self.task_rewrite_agent, self.observability_manager)
             self.task_router_agent = AgentRuntime(self.task_router_agent, self.observability_manager)
-            self.skill_executor_agent = AgentRuntime(self.skill_executor_agent, self.observability_manager)
         logger.info("SAgent: 智能体控制器初始化完成")
-
-    def _check_skill_active_state(self, session_context: SessionContext) -> bool:
-        """检查当前会话是否处于技能活跃模式"""
-        messages = session_context.message_manager.messages
-        # 倒序遍历，找到最近的一次状态变更
-        for msg in reversed(messages):
-            if not msg.tool_calls:
-                continue
-
-            tool_calls = msg.tool_calls
-            if isinstance(tool_calls, list):
-                # 倒序遍历 tool calls
-                for tc in reversed(tool_calls):
-                    func_name = ""
-                    if isinstance(tc, dict):
-                        func_name = tc.get("function", {}).get("name", "")
-                    else:
-                        try:
-                            func = getattr(tc, "function", None)
-                            if func:
-                                func_name = getattr(func, "name", "")
-                        except Exception:
-                            pass
-
-                    if func_name == "load_skill":
-                        return True
-                    elif func_name == "unload_skill":
-                        return False
-        return False
 
     async def run_stream(
         self,
@@ -259,6 +227,7 @@ class SAgent:
         Yields:
             消息块列表
         """
+        session_context = None
         try:
             # 初始化会话
             # 初始化该session 的context 管理器
@@ -371,34 +340,25 @@ class SAgent:
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks
 
-                # 技能执行逻辑
-                if session_context.skill_manager and len(session_context.skill_manager.list_skills()) > 0:
-                    async for message_chunks in self._execute_agent_phase(session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.skill_executor_agent, phase_name="技能处理"):
+                # 2. 多智能体工作流阶段
+                if multi_agent:
+                    async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+                else:
+                    # 直接执行模式：可选的任务分析 + 直接执行
+                    logger.info("SAgent: 开始简化工作流")
+
+                    async for message_chunks in self._execute_agent_phase(
+                        session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
+                    ):
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks
 
-                is_skill_active = self._check_skill_active_state(session_context)
-
-                # 2. 多智能体工作流阶段
-                if not is_skill_active:
-                    if multi_agent:
-                        async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
+                    if force_summary:
+                        async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
                             session_context.message_manager.add_messages(message_chunks)
                             yield message_chunks
-                    else:
-                        # 直接执行模式：可选的任务分析 + 直接执行
-                        logger.info("SAgent: 开始简化工作流")
-
-                        async for message_chunks in self._execute_agent_phase(
-                            session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
-                        ):
-                            session_context.message_manager.add_messages(message_chunks)
-                            yield message_chunks
-
-                        if force_summary:
-                            async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
-                                session_context.message_manager.add_messages(message_chunks)
-                                yield message_chunks
 
                 if more_suggest:
                     async for message_chunks in self._execute_agent_phase(
@@ -424,10 +384,19 @@ class SAgent:
 
         except Exception as e:
             # 标记会话错误
-            session_context.status = SessionStatus.ERROR
-            async for message_chunks in self._handle_workflow_error(e):
-                session_context.message_manager.add_messages(message_chunks)
-                yield message_chunks
+            if session_context:
+                session_context.status = SessionStatus.ERROR
+                async for message_chunks in self._handle_workflow_error(e):
+                    session_context.message_manager.add_messages(message_chunks)
+                    yield message_chunks
+            else:
+                 logger.error(f"Failed to initialize session: {e}")
+                 # You might want to yield an error message here even without session context
+                 yield [MessageChunk(
+                     role="assistant", 
+                     content=f"Error initializing session: {str(e)}", 
+                     type="text"
+                 )]
         finally:
             # 保存会话状态
             if session_context:
