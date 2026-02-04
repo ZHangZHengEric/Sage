@@ -68,13 +68,8 @@
             <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
               :messages="messages || []" :message-index="index" @download-file="downloadFile"
               @toolClick="handleToolClick" @sendMessage="handleSendMessage" />
-            <div v-if="isLoading && (!messages?.length || messages[messages.length - 1]?.role !== 'assistant')" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+            <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
               <div class="flex items-start gap-4 max-w-[80%]">
-                 <!-- Avatar -->
-                 <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/10 flex items-center justify-center shrink-0 shadow-sm mt-1">
-                    <Bot class="h-4 w-4 text-primary animate-pulse" />
-                 </div>
-                 
                  <!-- Loading Bubble -->
                  <div class="relative group">
                    <div class="bg-background border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm flex items-center gap-3">
@@ -579,6 +574,30 @@ const stopGeneration = async () => {
 
 // 计算属性
 const selectedAgentId = computed(() => selectedAgent.value?.id)
+
+const showLoadingBubble = computed(() => {
+  if (!isLoading.value) return false;
+  const msgs = messages.value;
+  if (!msgs || msgs.length === 0) return true;
+  
+  const lastMsg = msgs[msgs.length - 1];
+  if (lastMsg.role !== 'assistant') return true;
+  
+  // Assistant message exists.
+  // Hide loading if we are showing SOMETHING for this message.
+  
+  // Check error
+  if (lastMsg.type === 'error' || lastMsg.message_type === 'error') return false;
+  
+  // Check tools
+  if (lastMsg.tool_calls && lastMsg.tool_calls.length > 0) return false;
+  
+  // Check content
+  if (lastMsg.show_content) return false;
+  
+  // Otherwise, we are still waiting for content
+  return true;
+});
 
 // 滚动相关方法
 const scrollToBottom = (force = false) => {
