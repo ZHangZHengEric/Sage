@@ -30,6 +30,7 @@ class KdbInfoResponse(BaseModel):
     kdbId: str
     name: str
     intro: str
+    type: str
     createdAt: int
     updatedAt: int
     kdbSetting: Optional[Dict[str, Any]] = None
@@ -72,7 +73,7 @@ class KdbIdRequest(BaseModel):
 class KdbDocListItem(BaseModel):
     id: str
     doc_name: str
-    status: str
+    status: int
     create_time: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
     task_id: str
@@ -86,7 +87,7 @@ class KdbDocInfoResponse(BaseModel):
     id: str
     type: str
     dataName: str
-    status: str
+    status: int
     createTime: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
     taskId: str

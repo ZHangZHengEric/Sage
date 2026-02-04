@@ -143,3 +143,34 @@ async def populate_request_from_agent_config(
     _merge_dict("system_context", agent.config.get("systemContext", {}))
     _fill_if_none("system_prefix", agent.config.get("systemPrefix", ""))
     _fill_if_none("memory_type", agent.config.get("memoryType", "session"))
+
+    # 处理可用知识库
+    available_knowledge_bases = agent.config.get("availableKnowledgeBases", [])
+    if available_knowledge_bases:
+        kdb_dao = models.KdbDao()
+        # 分页获取所有关联的知识库
+        kdbs, _ = await kdb_dao.get_kdbs_paginated(
+            kdb_ids=available_knowledge_bases,
+            data_type=None,
+            query_name=None,
+            page=1,
+            page_size=1000,
+        )
+
+        if kdbs:
+            # 1. 注入 system_context
+            kdb_context = {}
+            for kdb in kdbs:
+                index_name = kdb.get_index_name()
+                kdb_context[f"{kdb.name}数据库的index_name"] = index_name
+
+            _merge_dict("system_context", kdb_context)
+
+            # 2. 添加 retrieve_on_zavixai_db 工具
+            current_tools = getattr(request, "available_tools", [])
+            if current_tools is None:
+                current_tools = []
+                setattr(request, "available_tools", current_tools)
+
+            if "retrieve_on_zavixai_db" not in current_tools:
+                current_tools.append("retrieve_on_zavixai_db")

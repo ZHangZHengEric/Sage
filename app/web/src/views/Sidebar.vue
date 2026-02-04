@@ -1,9 +1,9 @@
 <template>
-  <div class="flex flex-col w-[280px] h-full bg-slate-50/50 border-r">
+  <div class="flex flex-col w-[280px] h-full bg-slate-100/60 border-r-0">
     <!-- Header -->
-    <div class="p-6 border-b bg-white/50 backdrop-blur-sm">
-      <h2 class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent text-center mb-6">
-        {{ t('app.title') }}
+    <div class="p-6 bg-transparent">
+      <h2 class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent text-center mb-2">
+        Zavixai Agent
       </h2>
     </div>
 
@@ -62,7 +62,7 @@
     </Dialog>
 
     <!-- Navigation -->
-    <ScrollArea class="flex-1 px-3 py-4">
+    <ScrollArea class="flex-1 px-3">
       <div class="space-y-4">
         <template v-for="item in predefinedServices" :key="item.id">
           <!-- Item with children (Category) -->
@@ -87,10 +87,10 @@
               >
                 <Button
                   variant="ghost"
-                  class="w-full justify-start h-9 pl-9 font-normal"
+                  class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
                   :class="cn(
-                    'hover:bg-primary/10 hover:text-primary',
-                    isCurrentService(service.url, service.isInternal) && 'bg-primary/10 text-primary font-medium'
+                    'hover:bg-white hover:shadow-sm hover:text-primary transition-all duration-200',
+                    isCurrentService(service.url, service.isInternal) && 'bg-white shadow text-primary font-semibold'
                   )"
                   @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
                 >
@@ -104,9 +104,9 @@
           <Button
             v-else
             variant="ghost"
-            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors mb-1"
+            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-white hover:shadow-sm transition-all duration-200 mb-1"
             :class="cn(
-              isCurrentService(item.url, item.isInternal) && 'bg-primary/10 text-primary font-medium'
+              isCurrentService(item.url, item.isInternal) && 'bg-white shadow text-primary font-bold'
             )"
             @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
           >
@@ -118,29 +118,28 @@
     </ScrollArea>
 
     <!-- Footer User Profile -->
-    <div class="p-4 border-t bg-white/50 backdrop-blur-sm mt-auto" v-if="currentUser">
+    <div class="p-4 mt-auto" v-if="currentUser">
       <DropdownMenu v-model:open="isDropdownOpen">
         <DropdownMenuTrigger as-child>
-          <div class="flex items-center gap-3 bg-white p-3 rounded-lg shadow-sm border cursor-pointer hover:bg-slate-50 transition-colors w-full">
-            <Avatar class="h-9 w-9 border-2 border-primary/10">
+          <div class="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-white hover:shadow-sm transition-all duration-200 w-full group">
+            <Avatar class="h-9 w-9 border-2 border-white shadow-sm group-hover:border-primary/20 transition-colors">
               <AvatarImage :src="currentUser.avatar" />
               <AvatarFallback class="bg-primary/10 text-primary font-bold">
                 {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
               </AvatarFallback>
             </Avatar>
             <div class="flex-1 min-w-0 text-left">
-              <p class="text-sm font-medium truncate text-foreground">
+              <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
                 {{ currentUser.nickname || currentUser.username }}
               </p>
             </div>
             <ChevronDown 
-              class="w-4 h-4 text-muted-foreground transition-transform duration-200" 
+              class="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-transform duration-200" 
               :class="{ '-rotate-90': !isDropdownOpen, 'rotate-180': isDropdownOpen }"
             />
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent class="w-56" side="top" align="end">
-          <DropdownMenuSeparator />
           <DropdownMenuItem @click="toggleLanguage">
              <Globe class="mr-2 h-4 w-4" />
              <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>

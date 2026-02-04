@@ -95,17 +95,17 @@ class KdbDocDao(BaseDao):
         return items, total
 
     async def get_list_by_status_and_data_source(
-        self, status: int, data_source: str, limit: int
+        self, status: int, data_sources: List[str], limit: int
     ) -> list[KdbDoc]:
-        where = [KdbDoc.status == status, KdbDoc.data_source == data_source]
+        where = [KdbDoc.status == status, KdbDoc.data_source.in_(data_sources)]
         return await BaseDao.get_list(
             self, KdbDoc, where=where, order_by=KdbDoc.created_at.asc(), limit=limit
         )
 
-    async def get_failed_list(self, data_source: str, limit: int) -> list[KdbDoc]:
+    async def get_failed_list(self, data_sources: List[str], limit: int) -> list[KdbDoc]:
         where = [
             KdbDoc.status == KdbDocStatus.FAILED,
-            KdbDoc.data_source == data_source,
+            KdbDoc.data_source.in_(data_sources),
             KdbDoc.retry_count < 3,
         ]
         return await BaseDao.get_list(

@@ -19,7 +19,7 @@ marked.setOptions({
  */
 export const exportToHTML = (conversation, visibleMessages) => {
   console.log('🚀 exportToHTML 函数开始执行')
-  
+
   const htmlContent = generateHTMLContent(conversation, visibleMessages)
   downloadHTML(htmlContent, conversation.title)
 }
@@ -40,13 +40,13 @@ const downloadHTML = (content, filename) => {
 }
 
 export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
-  
+
   let markdown = `# ${conversation.title}\n\n`
   markdown += `**导出时间**: ${new Date().toLocaleString()}\n`
   markdown += `**Agent**: ${agentName}\n`
   markdown += `**消息数量**: ${visibleMessages.length}\n\n`
   markdown += '---\n\n'
-  
+
   visibleMessages.forEach((message, index) => {
     if (message.role === 'user') {
       markdown += `## 用户 ${index + 1}\n\n${message.content}\n\n`
@@ -62,7 +62,7 @@ export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
       }
     }
   })
-  
+
   // 下载文件
   const blob = new Blob([markdown], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
@@ -85,10 +85,10 @@ export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
 const generateHTMLContent = (conversation, visibleMessages) => {
   const title = conversation.title || '对话记录'
   const exportTime = new Date().toLocaleString('zh-CN')
-  
+
   // 构建消息HTML
   let messagesHtml = ''
-  
+
   visibleMessages.forEach((message) => {
     if (message.role === 'user') {
       const content = renderMarkdown(message.content || '')
@@ -97,7 +97,7 @@ const generateHTMLContent = (conversation, visibleMessages) => {
         type: message.type,
         messageType: message.message_type
       })
-      
+
       messagesHtml += `
         <!-- 用户消息 -->
         <div class="flex flex-row-reverse items-start gap-3 px-4 group mb-6">
@@ -122,12 +122,12 @@ const generateHTMLContent = (conversation, visibleMessages) => {
           const toolName = toolCall.function?.name || '未知工具'
           const toolArgs = toolCall.function?.arguments || '{}'
           const label = getMessageLabel({
-             role: message.role,
-             type: message.type,
-             messageType: message.message_type,
-             toolName: toolName
+            role: message.role,
+            type: message.type,
+            messageType: message.message_type,
+            toolName: toolName
           })
-          
+
           messagesHtml += `
             <!-- 工具调用 -->
             <div class="flex flex-row items-start gap-3 px-4 mb-2">
@@ -138,9 +138,9 @@ const generateHTMLContent = (conversation, visibleMessages) => {
               </div>
               <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
                  <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
-                    ${escapeHtml(label)}
+                    工具执行参数
                  </div>
-                 <div class="bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-full sm:w-auto min-w-[260px]">
+                 <div class="bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-full">
                   <div class="flex flex-col gap-2">
                     <div class="relative flex items-center justify-between p-2 rounded-xl bg-background border border-border/50">
                       <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full bg-green-500/50"></div>
@@ -162,7 +162,7 @@ const generateHTMLContent = (conversation, visibleMessages) => {
                     
                     <!-- 参数显示 -->
                     <div class="px-2 py-1">
-                        <pre class="text-xs font-mono bg-muted/50 p-2 rounded overflow-x-auto text-foreground"><code>${escapeHtml(toolArgs)}</code></pre>
+                        <pre class="text-xs font-mono bg-muted/50 p-2 rounded whitespace-pre-wrap break-all text-foreground"><code>${escapeHtml(toolArgs)}</code></pre>
                     </div>
 
                   </div>
@@ -178,7 +178,7 @@ const generateHTMLContent = (conversation, visibleMessages) => {
           type: message.type,
           messageType: message.message_type
         })
-        
+
         messagesHtml += `
           <!-- 助手消息 -->
           <div class="flex flex-row items-start gap-3 px-4 mb-6">
@@ -201,14 +201,14 @@ const generateHTMLContent = (conversation, visibleMessages) => {
           </div>`
       }
     } else if (message.role === 'tool') {
-       // Tool Result 通常已经在 Assistant 的 Tool Calls 中或者紧接着显示，或者在 SharedChat 中可能不直接显示 Tool Result 详情
-       // 为了简化，我们展示 Tool Result
-       const toolName = message.name || '未知工具'
-       const content = typeof message.content === 'object' 
-        ? JSON.stringify(message.content, null, 2) 
+      // Tool Result 通常已经在 Assistant 的 Tool Calls 中或者紧接着显示，或者在 SharedChat 中可能不直接显示 Tool Result 详情
+      // 为了简化，我们展示 Tool Result
+      const toolName = message.name || '未知工具'
+      const content = typeof message.content === 'object'
+        ? JSON.stringify(message.content, null, 2)
         : (message.content || '')
-        
-       messagesHtml += `
+
+      messagesHtml += `
         <!-- 工具结果 -->
         <div class="flex flex-row items-start gap-3 px-4 mb-6">
           <div class="flex-none mt-1">
@@ -227,7 +227,7 @@ const generateHTMLContent = (conversation, visibleMessages) => {
         </div>`
     }
   })
-  
+
   // 构建完整的HTML
   const htmlContent = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -428,13 +428,13 @@ const generateHTMLContent = (conversation, visibleMessages) => {
  */
 const renderMarkdown = (text) => {
   if (!text) return ''
-  
+
   // 使用 marked 渲染
   let html = marked.parse(text)
-  
+
   // 处理ECharts代码块
   html = processEChartsBlocks(html)
-  
+
   return html
 }
 
@@ -469,10 +469,10 @@ const processEChartsBlocks = (html) => {
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'") // marked 可能会转义单引号
         .replace(/&#x27;/g, "'")
-      
+
       // 生成唯一ID
       const chartId = 'chart_' + Math.random().toString(36).substr(2, 9)
-      
+
       return `
         <div class="echarts-container my-4 border rounded-lg p-2 bg-card" id="${chartId}" style="width: 100%; height: 400px;">
           <script type="text/javascript">
