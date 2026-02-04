@@ -35,11 +35,10 @@
 
     <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
       <!-- Mobile Header -->
-      <div v-if="!isSharedPage" class="lg:hidden flex items-center p-4 border-b bg-background shrink-0">
+      <div v-if="!isSharedPage" class="lg:hidden flex justify-between items-center p-2 border-b bg-background shrink-0">
          <Button variant="ghost" size="icon" @click="isMobileMenuOpen = true" class="-ml-2">
             <Menu class="h-6 w-6" />
          </Button>
-         <span class="ml-2 font-semibold text-lg">Zavixai Agent</span>
       </div>
 
       <div class="flex-1 overflow-hidden relative flex flex-col">

@@ -13,7 +13,7 @@
         
         <div class="flex gap-3 items-center">
           <Select v-model="filterAgent">
-            <SelectTrigger class="w-[140px]">
+            <SelectTrigger class="w-[100px]">
               <SelectValue :placeholder="t('history.all')" />
             </SelectTrigger>
             <SelectContent>
@@ -25,7 +25,7 @@
           </Select>
           
           <Select v-model="sortBy">
-            <SelectTrigger class="w-[140px]">
+            <SelectTrigger class="w-[100px]">
               <SelectValue :placeholder="t('history.sortByDate')" />
             </SelectTrigger>
             <SelectContent>
@@ -58,7 +58,7 @@
                 <h3 class="text-base font-semibold leading-none tracking-tight text-foreground truncate pr-2">{{ conversation.title }}</h3>
                 
                 <div class="flex items-center gap-4 text-xs text-muted-foreground shrink-0 flex-wrap sm:flex-nowrap">
-                  <span class="flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded max-w-[120px] sm:max-w-none truncate">
+                  <span class="hidden sm:flex items-center gap-1 font-mono bg-muted px-1.5 py-0.5 rounded max-w-[120px] sm:max-w-none truncate">
                     <span class="truncate">{{ conversation.session_id }}</span>
                     <button
                       class="inline-flex items-center justify-center h-4 w-4 hover:text-primary transition-colors shrink-0"
@@ -82,7 +82,7 @@
               </div>
             </div>
             
-            <div class="flex flex-col gap-2 shrink-0">
+            <div class="hidden sm:flex flex-col gap-2 shrink-0">
               <Button
                 variant="ghost"
                 size="icon"
@@ -111,7 +111,7 @@
           :disabled="currentPage <= 1" 
           @click="handlePageChange(currentPage - 1)"
         >
-          Previous
+          上一页
         </Button>
         <span class="text-sm text-muted-foreground">
           Page {{ currentPage }} of {{ Math.ceil(totalCount / pageSize) }}
@@ -122,7 +122,7 @@
           :disabled="currentPage * pageSize >= totalCount" 
           @click="handlePageChange(currentPage + 1)"
         >
-          Next
+          下一页
         </Button>
       </div>
     </div>

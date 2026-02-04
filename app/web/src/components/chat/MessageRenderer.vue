@@ -33,7 +33,7 @@
         <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none">
           {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
         </div>
-        <div class="bg-primary/95 text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm overflow-hidden break-words text-sm leading-relaxed tracking-wide">
+        <div class="bg-primary/95 text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm overflow-hidden break-all text-sm leading-relaxed tracking-wide">
           <MarkdownRenderer
             :content="formatMessageContent(message.content)"
           />
