@@ -2,10 +2,18 @@ import multiprocessing
 import resource
 import time
 import traceback
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any, Callable, Dict, Optional, List, Union
 import sys
 import os
+import contextvars
+import subprocess
+import platform
+import pickle
+import json
+import venv
 from sagents.utils.logger import logger
+
+_current_sandbox = contextvars.ContextVar('current_sandbox', default=None)
 
 class SandboxError(Exception):
     pass
@@ -52,6 +60,13 @@ def _get_cgroup_memory_limit_bytes() -> Optional[int]:
 def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
     if 'memory' not in limits:
         return None
+    
+    # On macOS, RLIMIT_AS (Virtual Memory Size) is strictly enforced and often causes
+    # immediate crashes for Python processes (which may reserve large address spaces).
+    # We skip strict memory limiting on macOS to prevent "Process died unexpectedly".
+    if sys.platform == 'darwin':
+        return None
+
     try:
         target = int(limits['memory'])
     except Exception:
@@ -63,6 +78,132 @@ def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
     if hard != resource.RLIM_INFINITY:
         target = min(target, hard)
     return target
+
+# --- Launcher Script Content ---
+LAUNCHER_SCRIPT = """
+import sys
+import os
+import pickle
+import traceback
+import importlib
+import importlib.util
+import asyncio
+import subprocess
+import io
+from contextlib import redirect_stdout, redirect_stderr
+
+# Ensure current directory is in sys.path
+sys.path.insert(0, os.getcwd())
+
+def main():
+    try:
+        if len(sys.argv) < 3:
+            raise ValueError("Usage: launcher.py <input_pkl> <output_pkl>")
+            
+        input_path = sys.argv[1]
+        output_path = sys.argv[2]
+        
+        with open(input_path, 'rb') as f:
+            payload = pickle.load(f)
+            
+        mode = payload['mode']
+        args = payload.get('args', [])
+        kwargs = payload.get('kwargs', {})
+        sys_path = payload.get('sys_path', [])
+        
+        # Restore sys.path
+        for p in reversed(sys_path):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        
+        result = None
+        
+        if mode == 'library':
+            module_name = payload['module_name']
+            class_name = payload.get('class_name')
+            function_name = payload['function_name']
+            
+            module = importlib.import_module(module_name)
+            if class_name:
+                cls = getattr(module, class_name)
+                instance = cls()
+                func = getattr(instance, function_name)
+            else:
+                func = getattr(module, function_name)
+                
+            if asyncio.iscoroutinefunction(func):
+                result = asyncio.run(func(*args, **kwargs))
+            else:
+                result = func(*args, **kwargs)
+                
+        elif mode == 'module':
+            module_path = payload['module_path']
+            func_name = payload['func_name']
+            
+            spec = importlib.util.spec_from_file_location("sandboxed_module", module_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                func = getattr(module, func_name)
+                result = func(*args, **kwargs)
+            else:
+                raise ImportError(f"Could not load module from {module_path}")
+
+        elif mode == 'script':
+            script_path = payload['script_path']
+            
+            script_dir = os.path.dirname(os.path.abspath(script_path))
+            if script_dir not in sys.path:
+                sys.path.insert(0, script_dir)
+                
+            with open(script_path, 'r', encoding='utf-8') as f:
+                script_content = f.read()
+                
+            global_ns = {'__name__': '__main__', '__file__': script_path}
+            
+            # Capture output
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            
+            try:
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    exec(script_content, global_ns)
+            except Exception:
+                # Print traceback to stderr capture
+                traceback.print_exc(file=stderr)
+                raise
+                
+            result = stdout.getvalue() + stderr.getvalue()
+
+        elif mode == 'shell':
+            cmd = payload['command']
+            cwd = payload.get('cwd')
+            # For shell, we use subprocess inside the sandbox
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
+            if proc.returncode != 0:
+                 raise Exception(f"Command failed with code {proc.returncode}: {proc.stderr}")
+            result = proc.stdout
+
+        with open(output_path, 'wb') as f:
+            pickle.dump({'status': 'success', 'result': result}, f)
+            
+    except Exception as e:
+        try:
+            with open(output_path, 'wb') as f:
+                pickle.dump({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()}, f)
+        except Exception:
+            # Fallback if writing fails
+            traceback.print_exc()
+            sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+"""
+
+# Deleted duplicate class definition
+
+
+
 
 def _restricted_execution(func: Callable, args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, limits: Dict[str, Any]):
     """
@@ -389,6 +530,51 @@ def _restricted_module_execution(module_path: str, func_name: str, requirements:
     except Exception as e:
         result_queue.put({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()})
 
+def _restricted_library_execution(module_name: str, class_name: Optional[str], function_name: str, args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, limits: Dict[str, Any], cwd: Optional[str], sys_path: List[str]):
+    """
+    Internal function to run a library function in a separate process.
+    """
+    import sys
+    import importlib
+    import asyncio
+    
+    # Restore sys.path to ensure we can find the project modules
+    if sys_path:
+        for p in reversed(sys_path):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+                
+    # Setup cwd
+    if cwd and os.path.exists(cwd):
+        os.chdir(cwd)
+        
+    try:
+        # Apply limits (including monkey patching open)
+        _apply_limits(limits)
+        
+        # Import module
+        module = importlib.import_module(module_name)
+        
+        # Get function
+        if class_name:
+            cls = getattr(module, class_name)
+            # Instantiate class (assuming no-arg constructor for Tool classes)
+            instance = cls()
+            func = getattr(instance, function_name)
+        else:
+            func = getattr(module, function_name)
+            
+        # Execute
+        if asyncio.iscoroutinefunction(func):
+            result = asyncio.run(func(*args, **kwargs))
+        else:
+            result = func(*args, **kwargs)
+            
+        result_queue.put({'status': 'success', 'result': result})
+        
+    except Exception as e:
+        result_queue.put({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()})
+
 def _apply_limits(limits: Dict[str, Any], restrict_files: bool = True):
     # Set CPU time limit (in seconds)
     if 'cpu_time' in limits:
@@ -518,32 +704,329 @@ def _run_install_cmd(install_cmd: str, stdout_capture: Optional[Any], stderr_cap
     if result.returncode != 0:
         raise Exception(f"Install command failed: {install_cmd}")
 
+from sagents.utils.sandbox.filesystem import SandboxFileSystem
+
 class Sandbox:
-    """
-    A secure sandbox execution environment for skills.
-    """
-    def __init__(self, 
-                 cpu_time_limit: int = 10, 
-                 memory_limit_mb: int = 2048, 
-                 allowed_paths: Optional[list] = None):
-        """
-        Initialize the sandbox.
+    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace"):
+        # Default allowed system paths required for common libraries (e.g., pandas/dateutil need zoneinfo, openpyxl/mimetypes need mime.types)
+        default_allowed_paths = [
+            "/usr/share/zoneinfo",
+            "/etc/localtime",
+            "/etc/mime.types",
+            "/etc/apache2/mime.types",
+            "/etc/httpd/mime.types",
+            "/usr/local/etc/mime.types"
+        ]
         
-        Args:
-            cpu_time_limit: Max CPU time in seconds.
-            memory_limit_mb: Max memory usage in MB.
-            allowed_paths: List of paths allowed to be accessed by file operations.
-        """
+        # Merge allowed_paths with default_allowed_paths
+        final_allowed_paths = list(set((allowed_paths or []) + default_allowed_paths))
+        
         self.limits = {
             'cpu_time': cpu_time_limit,
-            'memory': memory_limit_mb * 1024 * 1024,
-            'allowed_paths': allowed_paths or []
+            'memory': memory_limit_mb * 1024 * 1024,  # Convert to bytes
+            'allowed_paths': final_allowed_paths
         }
+        self.host_workspace = host_workspace
+        self.virtual_workspace = virtual_workspace
+        self.file_system = None
+        self.sandbox_dir = None
+        self.venv_dir = None
+
+        if host_workspace:
+            # Enable path mapping only on macOS (Darwin).
+            # On Linux (future bwrap implementation), we can use bind mounts to map paths natively,
+            # eliminating the need for text-based path replacement.
+            enable_path_mapping = (sys.platform == 'darwin')
+            self.file_system = SandboxFileSystem(
+                host_path=host_workspace, 
+                virtual_path=virtual_workspace,
+                enable_path_mapping=enable_path_mapping
+            )
+            
+            # Ensure host workspace is in allowed paths
+            if host_workspace not in self.limits['allowed_paths']:
+                self.limits['allowed_paths'].append(host_workspace)
+            
+            self.sandbox_dir = os.path.join(host_workspace, ".sandbox")
+            self.venv_dir = os.path.join(self.sandbox_dir, "venv")
+            
+            # Ensure sandbox directory exists
+            os.makedirs(self.sandbox_dir, exist_ok=True)
+            
+            # Ensure venv exists
+            self._ensure_venv()
+            
+            # Add sandbox dir to allowed paths
+            if self.sandbox_dir not in self.limits['allowed_paths']:
+                self.limits['allowed_paths'].append(self.sandbox_dir)
+
+    def _ensure_venv(self):
+        if not self.sandbox_dir or not self.venv_dir:
+            return
+
+        if not os.path.exists(os.path.join(self.venv_dir, "bin", "python")):
+            venv.create(self.venv_dir, with_pip=True)
+            
+        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
+        if not os.path.exists(launcher_path) or os.path.getsize(launcher_path) != len(LAUNCHER_SCRIPT):
+             with open(launcher_path, "w", encoding="utf-8") as f:
+                 f.write(LAUNCHER_SCRIPT)
+
+    def _generate_seatbelt_profile(self, output_path: str, additional_read_paths: List[str] = [], additional_write_paths: List[str] = []) -> str:
+        profile_path = os.path.join(self.sandbox_dir, "profile.sb")
+        
+        sb_lines = [
+            "(version 1)",
+            "(deny default)",
+            "(allow process-exec*)",
+            "(allow process-fork)",
+            "(allow signal)",
+            "(allow sysctl-read)",
+            "(allow ipc-posix-shm)",
+            "(allow network*)",
+            '(allow file-read* (subpath "/"))', 
+            f'(allow file-write* (subpath "{self.sandbox_dir}"))',
+            '(allow file-write* (subpath "/private/var/folders"))',
+            '(allow file-write* (subpath "/tmp"))',
+            '(allow file-write* (subpath "/dev/null"))',
+        ]
+        
+        for p in self.limits.get('allowed_paths', []) + additional_write_paths:
+             if p:
+                sb_lines.append(f'(allow file-write* (subpath "{os.path.abspath(p)}"))')
+        
+        sb_content = "\n".join(sb_lines)
+        
+        with open(profile_path, "w") as f:
+            f.write(sb_content)
+            
+        return profile_path
+
+    def _run_with_seatbelt(self, payload: dict, cwd: Optional[str] = None) -> Any:
+        if not self.sandbox_dir:
+             raise SandboxError("Sandbox directory not initialized")
+
+        import uuid
+        run_id = str(uuid.uuid4())
+        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
+        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
+        
+        with open(input_pkl, "wb") as f:
+            pickle.dump(payload, f)
+            
+        profile_path = self._generate_seatbelt_profile(
+            output_path=output_pkl,
+            additional_read_paths=[input_pkl],
+            additional_write_paths=[cwd] if cwd else []
+        )
+        
+        python_bin = os.path.join(self.venv_dir, "bin", "python")
+        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
+        
+        cmd = [
+            "sandbox-exec", "-f", profile_path,
+            python_bin, launcher_path,
+            input_pkl, output_pkl
+        ]
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=cwd or self.sandbox_dir
+            )
+            
+            if result.returncode != 0:
+                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
+                 
+            if not os.path.exists(output_pkl):
+                 raise SandboxError("Sandbox execution produced no output file")
+                 
+            with open(output_pkl, "rb") as f:
+                res = pickle.load(f)
+                
+            if res['status'] == 'success':
+                return res['result']
+            else:
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                
+        finally:
+            if os.path.exists(input_pkl):
+                try: os.remove(input_pkl)
+                except: pass
+            if os.path.exists(output_pkl):
+                try: os.remove(output_pkl)
+                except: pass
+            if os.path.exists(profile_path):
+                try: os.remove(profile_path)
+                except: pass
+
+    def _run_with_bwrap(self, payload: dict, cwd: Optional[str] = None) -> Any:
+        if not self.sandbox_dir:
+             raise SandboxError("Sandbox directory not initialized")
+
+        import uuid
+        run_id = str(uuid.uuid4())
+        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
+        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
+        
+        with open(input_pkl, "wb") as f:
+            pickle.dump(payload, f)
+            
+        python_bin = os.path.join(self.venv_dir, "bin", "python")
+        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
+        
+        # Build bwrap command
+        # We mount root as read-only to ensure isolation, but we must bind-mount necessary paths
+        cmd = [
+            "bwrap",
+            "--ro-bind", "/", "/",            # Read-only root
+            "--dev", "/dev",                  # Device files
+            "--proc", "/proc",                # Process info
+            "--tmpfs", "/tmp",                # Temp filesystem
+            "--bind", self.host_workspace, self.virtual_workspace, # Bind workspace to /workspace
+            "--bind", self.sandbox_dir, self.sandbox_dir,          # Bind sandbox dir RW (for venv/pickles)
+            "--unshare-all",                  # Create new namespaces (net, ipc, pid, user, uts, cgroup)
+            "--share-net",                    # Share network namespace (allow internet access)
+            "--die-with-parent",              # Cleanup when parent dies
+            "--chdir", cwd or self.virtual_workspace, # Change directory inside sandbox
+        ]
+        
+        # Add the command to run
+        cmd.extend([
+            python_bin, launcher_path,
+            input_pkl, output_pkl
+        ])
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=self.host_workspace # Run from host workspace so relative paths in bwrap args resolve? Actually bwrap handles absolute paths.
+            )
+            
+            if result.returncode != 0:
+                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
+                 
+            if not os.path.exists(output_pkl):
+                 raise SandboxError("Sandbox execution produced no output file")
+                 
+            with open(output_pkl, "rb") as f:
+                res = pickle.load(f)
+                
+            if res['status'] == 'success':
+                return res['result']
+            else:
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                
+        finally:
+            if os.path.exists(input_pkl):
+                try: os.remove(input_pkl)
+                except: pass
+            if os.path.exists(output_pkl):
+                try: os.remove(output_pkl)
+                except: pass
+
+    def __enter__(self):
+        self._token = _current_sandbox.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if hasattr(self, '_token'):
+            _current_sandbox.reset(self._token)
+            
+    @staticmethod
+    def current() -> Optional['Sandbox']:
+        return _current_sandbox.get()
+
+    def run_tool(self, tool_func: Callable, kwargs: Dict[str, Any], tool_obj: Any = None) -> Any:
+        """
+        Runs a tool function within the sandbox.
+        """
+        # 1. Map paths in kwargs
+        host_kwargs = self._map_to_host(kwargs)
+        
+        # 2. Extract module/function info
+        func = tool_func
+        if hasattr(func, "__self__"):
+            # Bound method
+            instance = func.__self__
+            module_name = instance.__class__.__module__
+            class_name = instance.__class__.__name__
+            function_name = func.__name__
+        elif tool_obj:
+            # Maybe provided explicitly
+            module_name = tool_obj.__module__
+            class_name = tool_obj.__class__.__name__
+            function_name = func.__name__
+        else:
+            # Unbound function
+            module_name = func.__module__
+            # Try to guess class if it's a method
+            parts = func.__qualname__.split('.')
+            if len(parts) > 1:
+                class_name = parts[-2]
+                function_name = parts[-1]
+            else:
+                class_name = None
+                function_name = func.__name__
+
+        # 3. Run
+        result = self.run_library_task(
+            module_name=module_name,
+            class_name=class_name,
+            function_name=function_name,
+            args=(),
+            kwargs=host_kwargs,
+            cwd=self.host_workspace if self.host_workspace else None
+        )
+        
+        # 4. Map paths in result
+        return self._map_to_virtual(result)
+
+    def _map_to_host(self, obj: Any) -> Any:
+        if not self.file_system:
+            return obj
+        if isinstance(obj, str):
+            # Use map_text_to_host to replace path in commands/scripts/paths
+            return self.file_system.map_text_to_host(obj)
+        elif isinstance(obj, dict):
+            return {k: self._map_to_host(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._map_to_host(item) for item in obj]
+        return obj
+
+    def _map_to_virtual(self, obj: Any) -> Any:
+        if not self.file_system:
+            return obj
+        if isinstance(obj, str):
+            # Use map_text_to_virtual to hide host paths in output
+            return self.file_system.map_text_to_virtual(obj)
+        elif isinstance(obj, dict):
+            return {k: self._map_to_virtual(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._map_to_virtual(item) for item in obj]
+        return obj
 
     def run_module_function(self, module_path: str, func_name: str, *args, requirements: Optional[list] = None, **kwargs) -> Any:
         """
         Run a function loaded from a module file in the sandbox.
         """
+        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
+            payload = {
+                'mode': 'module',
+                'module_path': module_path,
+                'func_name': func_name,
+                'args': args,
+                'kwargs': kwargs,
+                'requirements': requirements
+            }
+            if sys.platform == 'linux':
+                return self._run_with_bwrap(payload)
+            return self._run_with_seatbelt(payload)
+
         result_queue = multiprocessing.Queue()
         process = multiprocessing.Process(
             target=_restricted_module_execution, 
@@ -566,11 +1049,69 @@ class Sandbox:
                 raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
             raise SandboxError("Sandboxed process died unexpectedly")
 
+    def run_library_task(self, module_name: str, function_name: str, args: tuple = (), kwargs: dict = {}, class_name: Optional[str] = None, cwd: Optional[str] = None) -> Any:
+        """
+        Run a function from an installed library module in the sandbox.
+        
+        Args:
+            module_name: The dotted name of the module (e.g. 'sagents.tool.impl.file_system_tool')
+            function_name: The name of the function to call
+            args: Positional arguments for the function
+            kwargs: Keyword arguments for the function
+            class_name: Optional class name if the function is a method of a class. The class must be instantiable without arguments.
+            cwd: Optional current working directory to set in the sandbox
+        """
+        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
+            payload = {
+                'mode': 'library',
+                'module_name': module_name,
+                'class_name': class_name,
+                'function_name': function_name,
+                'args': args,
+                'kwargs': kwargs,
+                'sys_path': sys.path
+            }
+            if sys.platform == 'linux':
+                return self._run_with_bwrap(payload, cwd=cwd)
+            return self._run_with_seatbelt(payload, cwd=cwd)
+
+        result_queue = multiprocessing.Queue()
+        process = multiprocessing.Process(
+            target=_restricted_library_execution, 
+            args=(module_name, class_name, function_name, args, kwargs, result_queue, self.limits, cwd, sys.path)
+        )
+        
+        process.start()
+        process.join()
+        
+        if not result_queue.empty():
+            result = result_queue.get()
+            if result['status'] == 'success':
+                return result['result']
+            else:
+                raise SandboxError(f"Error in sandboxed task: {result.get('error')}\n{result.get('traceback')}")
+        else:
+             if process.exitcode is not None and process.exitcode != 0:
+                raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
+             raise SandboxError("Sandboxed process died unexpectedly")
+
     def skill_run_script(self, script_path: str, args: list = None, requirements: Optional[list] = None, install_cmd: Optional[str] = None, cwd: Optional[str] = None) -> str:
         """
         Run a python script file in the sandbox and return stdout.
         """
         args = args or []
+        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
+            payload = {
+                'mode': 'script',
+                'script_path': script_path,
+                'args': args,
+                'requirements': requirements,
+                'install_cmd': install_cmd
+            }
+            if sys.platform == 'linux':
+                return self._run_with_bwrap(payload, cwd=cwd)
+            return self._run_with_seatbelt(payload, cwd=cwd)
+
         result_queue = multiprocessing.Queue()
         process = multiprocessing.Process(
             target=_restricted_script_execution, 
@@ -597,10 +1138,22 @@ class Sandbox:
         """
         Run a raw shell command in the sandbox.
         """
+        target_cwd = cwd or self.host_workspace
+        
+        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
+            payload = {
+                'mode': 'shell',
+                'command': command,
+                'cwd': target_cwd
+            }
+            if sys.platform == 'linux':
+                return self._run_with_bwrap(payload, cwd=target_cwd)
+            return self._run_with_seatbelt(payload, cwd=target_cwd)
+
         result_queue = multiprocessing.Queue()
         process = multiprocessing.Process(
             target=_restricted_shell_execution, 
-            args=(command, result_queue, self.limits, cwd)
+            args=(command, result_queue, self.limits, target_cwd)
         )
         
         process.start()
@@ -618,6 +1171,7 @@ class Sandbox:
             if process.exitcode is not None and process.exitcode != 0:
                 raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
             raise SandboxError("Sandboxed process died unexpectedly")
+
 
     def run(self, func: Callable, *args, **kwargs) -> Any:
         """

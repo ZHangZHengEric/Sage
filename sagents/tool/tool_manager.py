@@ -560,7 +560,39 @@ class ToolManager:
             elif isinstance(tool, SageMcpToolSpec):
                 final_result = await self._execute_standard_tool_async(tool, **kwargs)
             elif isinstance(tool, ToolSpec):
-                final_result = await self._execute_standard_tool_async(tool, **kwargs)
+                # Check for sandbox execution
+                # Define sandbox tools (can be moved to config later)
+                SANDBOX_TOOLS = [
+                    "execute_shell_command", 
+                    "execute_python_code", 
+                    "file_read", 
+                    "file_write", 
+                    "search_content_in_file", 
+                    "download_file_from_url", 
+                    "update_file",
+                    "extract_text_from_non_text_file"
+                ]
+                
+                if tool.name in SANDBOX_TOOLS:
+                    try:
+                        # Use sandbox if available
+                        if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                            # Use run_tool which handles path mapping and execution
+                            # We pass the function object from the tool spec
+                            # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
+                            # usually it's bound method if created from class)
+                            result = session_context.sandbox.run_tool(tool.func, kwargs)
+                            final_result = json.dumps({"content": result}, ensure_ascii=False, indent=2)
+                        else:
+                             # Fallback to standard execution if no sandbox found (should not happen in new setup)
+                            logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")
+                            final_result = await self._execute_standard_tool_async(tool, **kwargs)
+
+                    except Exception as e:
+                        logger.error(f"Sandbox execution failed for {tool.name}, aborting.")
+                        raise e
+                else:
+                    final_result = await self._execute_standard_tool_async(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
                 # For AgentToolSpec, return a generator for streaming
                 return self._execute_agent_tool_streaming_async(
