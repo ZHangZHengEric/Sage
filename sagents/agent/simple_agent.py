@@ -217,6 +217,13 @@ class SimpleAgent(AgentBase):
             if 'complete_task' in suggested_tools:
                 suggested_tools.remove('complete_task')
 
+            # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write update_file 这几个工具
+            if session_context.skill_manager is not None:
+                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_shell_command', 'file_write', 'update_file'])
+
+            # 去重
+            suggested_tools = list(set(suggested_tools))    
+
             logger.info(f"SimpleAgent: 获取到建议工具: {suggested_tools}")
             return suggested_tools
 
