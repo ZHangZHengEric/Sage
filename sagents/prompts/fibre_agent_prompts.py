@@ -66,3 +66,21 @@ Failure to call this tool will result in the task being considered incomplete.
 仅仅回复文本是不够的，必须调用该工具才算任务完成。
 """
 }
+
+# Sub-Agent Fallback Summary Prompt
+sub_agent_fallback_summary_prompt = {
+    "en": """The sub-agent completed the execution but did not report the result. Please summarize the following execution log into a final result.
+Format:
+Status: success/failure
+Result: <summary>
+
+Execution Log:
+{history_str}""",
+    "zh": """子智能体完成了执行但没有报告结果。请将以下执行日志总结为最终结果。
+格式：
+Status: success/failure
+Result: <总结内容>
+
+执行日志：
+{history_str}"""
+}
