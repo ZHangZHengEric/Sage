@@ -19,17 +19,17 @@ class FibreTools:
         param_description_i18n={
             "agent_name": {"zh": "智能体的唯一标识符（例如 'sql_expert_1'）"},
             "role_description": {"zh": "智能体角色的简短摘要"},
-            "system_instruction": {"zh": "定义智能体角色和约束的系统提示词"}
+            "system_prompt": {"zh": "定义智能体角色、能力要求和限制的系统提示词（不需要包含具体任务信息）"}
         }
     )
-    async def sys_spawn_agent(self, agent_name: str, role_description: str, system_instruction: str) -> str:
+    async def sys_spawn_agent(self, agent_name: str, role_description: str, system_prompt: str) -> str:
         """
         Create a new sub-agent.
         
         Args:
             agent_name: Unique identifier for the agent (e.g., "sql_expert_1")
             role_description: Short summary of the agent's role
-            system_instruction: The System Prompt defining the agent's persona and constraints
+            system_prompt: The System Prompt defining the agent's persona, capabilities, and constraints
         """
         logger.info(f"Tool Call: sys_spawn_agent(name={agent_name}, role={role_description})")
         
@@ -37,7 +37,7 @@ class FibreTools:
             parent_context=self.session_context,
             name=agent_name,
             role=role_description,
-            instruction=system_instruction
+            system_prompt=system_prompt
         )
         return f"Agent spawned successfully. ID: {agent_id}. Ready to receive messages."
 
