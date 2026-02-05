@@ -13,7 +13,7 @@
         
         <div class="flex gap-3 items-center">
           <Select v-model="filterAgent">
-            <SelectTrigger class="w-[100px]">
+            <SelectTrigger class="w-[180px]">
               <SelectValue :placeholder="t('history.all')" />
             </SelectTrigger>
             <SelectContent>
@@ -162,7 +162,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy, Loader } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n.js'
@@ -192,6 +192,7 @@ import {
 const emit = defineEmits(['select-conversation'])
 
 const router = useRouter()
+const route = useRoute()
 
 // Get data from stores with null checks
 const agents = ref([])
@@ -199,15 +200,15 @@ const agents = ref([])
 const { t, language } = useLanguage()
 
 // State
-const searchTerm = ref('')
-const filterAgent = ref('all')
-const sortBy = ref('date')
+const searchTerm = ref(route.query.search || '')
+const filterAgent = ref(route.query.agent_id || 'all')
+const sortBy = ref(route.query.sort_by || 'date')
 const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
 const shareConversation = ref(null)
 
 // 分页相关状态
-const currentPage = ref(1)
+const currentPage = ref(parseInt(route.query.page) || 1)
 const pageSize = ref(10)
 const totalCount = ref(0)
 const paginatedConversations = ref([])
@@ -249,14 +250,16 @@ const loadConversationsPaginated = async () => {
 // 处理页码变化
 const handlePageChange = (page) => {
   currentPage.value = page
-  loadConversationsPaginated()
 }
 
 // 处理每页大小变化
 const handlePageSizeChange = (size) => {
   pageSize.value = size
-  currentPage.value = 1
-  loadConversationsPaginated()
+  if (currentPage.value !== 1) {
+    currentPage.value = 1 // 会触发 watch(currentPage)
+  } else {
+    loadConversationsPaginated()
+  }
 }
 
 // Methods
@@ -382,11 +385,34 @@ const handleExportToHTML = () => {
   toast.success('HTML文件已导出')
 }
 
+// 更新 URL 参数
+const updateUrlParams = () => {
+  router.replace({
+    query: {
+      ...route.query,
+      search: searchTerm.value || undefined,
+      agent_id: filterAgent.value !== 'all' ? filterAgent.value : undefined,
+      sort_by: sortBy.value,
+      page: currentPage.value > 1 ? String(currentPage.value) : undefined
+    }
+  })
+}
+
 // 监听搜索、过滤和排序条件的变化
 watch([searchTerm, filterAgent, sortBy], () => {
-  currentPage.value = 1 // 重置到第一页
-  loadConversationsPaginated()
+  if (currentPage.value !== 1) {
+    currentPage.value = 1 // 会触发 watch(currentPage)
+  } else {
+    updateUrlParams()
+    loadConversationsPaginated()
+  }
 }, { deep: true })
+
+// 监听页码变化
+watch(currentPage, () => {
+  updateUrlParams()
+  loadConversationsPaginated()
+})
 
 // 生命周期钩子
 onMounted(async () => {

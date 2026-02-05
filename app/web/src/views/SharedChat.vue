@@ -38,7 +38,7 @@ import { Bot, Loader, AlertCircle } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
-import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
+import ToolDetailsPanel from '@/components/chat/tools/ToolDetailsPanel.vue'
 import { toast } from 'vue-sonner'
 
 const route = useRoute()
