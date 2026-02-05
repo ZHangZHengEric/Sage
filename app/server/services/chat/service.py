@@ -109,15 +109,15 @@ class SageStreamService:
                 "base_url": client_params.get("base_url"),
                 "api_key_hash": api_key_hash,
             },
-            "available_tools": request.available_tools,
-            "available_skills": request.available_skills,
-            "available_workflows": request.available_workflows,
-            "deep_thinking": request.deep_thinking,
-            "max_loop_count": request.max_loop_count,
-            "multi_agent": request.multi_agent,
-            "more_suggest": request.more_suggest,
-            "system_context": request.system_context,
-            "force_summary": request.force_summary,
+            # "available_tools": request.available_tools,  # 动态参数，不影响 SAgent 初始化
+            # "available_skills": request.available_skills, # 动态参数
+            # "available_workflows": request.available_workflows, # 动态参数
+            # "deep_thinking": request.deep_thinking, # 运行时参数
+            # "max_loop_count": request.max_loop_count, # 运行时参数
+            # "multi_agent": request.multi_agent, # 运行时参数
+            # "more_suggest": request.more_suggest, # 运行时参数
+            # "system_context": request.system_context, # 运行时参数
+            # "force_summary": request.force_summary, # 运行时参数
             "workspace": workspace,
             "memory_type": request.memory_type,
         }
@@ -188,7 +188,8 @@ async def prepare_session(request: StreamRequest):
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
     
-    logger.info(f"sessionId={session_id} Server: 请求参数: {request}")
+    logger.info(f"sessionId={session_id} Server: 请求参数摘要 - Agent: {request.agent_name}, 消息数: {len(request.messages) if request.messages else 0}, 技能数: {len(request.available_skills or [])}, 工具数: {len(request.available_tools or [])}")
+    # logger.debug(f"sessionId={session_id} Server: 完整请求参数: {request}")
     
     lock = get_session_run_lock(session_id)
     acquired = False
