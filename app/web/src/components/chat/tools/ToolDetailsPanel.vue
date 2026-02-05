@@ -1,6 +1,6 @@
 <template>
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
-    <DialogContent class="sm:max-w-[700px] max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-background">
+    <DialogContent class="sm:max-w-[70vw] max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-background">
       <DialogHeader class="px-6 py-4 border-b bg-muted/20">
         <DialogTitle class="flex items-center gap-2">
            <Terminal class="w-5 h-5 text-primary" />
@@ -8,7 +8,7 @@
         </DialogTitle>
       </DialogHeader>
       
-      <ScrollArea class="flex-1">
+      <ScrollArea class="flex-1 min-h-0 ">
         <div class="p-6 space-y-8" v-if="toolExecution">
           <!-- Parameters -->
           <div class="space-y-3">
@@ -21,7 +21,7 @@
                 </Button>
               </div>
             </div>
-            <div class="relative group">
+            <div class="relative group" v-if="!parsedArguments">
               <div class="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-background/10 pointer-events-none rounded-lg border border-transparent group-hover:border-border/50 transition-colors"></div>
               <div class="bg-slate-950 dark:bg-black rounded-lg border border-border/40 overflow-hidden shadow-inner">
                  <div class="flex items-center justify-between px-4 py-2 bg-slate-900/50 border-b border-border/10">
@@ -29,6 +29,12 @@
                  </div>
                 <pre class="p-4 text-xs font-mono text-slate-50 overflow-auto max-h-[200px] custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(toolExecution?.function?.arguments) }}</pre>
               </div>
+            </div>
+            
+            <div v-else class="rounded-lg border border-border/40 overflow-hidden shadow-sm bg-background p-1">
+               <div class="overflow-auto max-h-[300px] custom-scrollbar">
+                  <JsonDataViewer :data="parsedArguments" />
+               </div>
             </div>
           </div>
 
@@ -43,7 +49,14 @@
                 </Button>
               </div>
             </div>
-            <div class="bg-slate-950 dark:bg-black rounded-lg border border-border/40 overflow-hidden shadow-inner">
+            
+            <div v-if="parsedResult" class="rounded-lg border border-border/40 overflow-hidden shadow-sm bg-background p-1">
+               <div class="overflow-auto max-h-[400px] custom-scrollbar">
+                  <JsonDataViewer :data="parsedResult" />
+               </div>
+            </div>
+
+            <div v-else class="bg-slate-950 dark:bg-black rounded-lg border border-border/40 overflow-hidden shadow-inner">
                <div class="flex items-center justify-between px-4 py-2 bg-slate-900/50 border-b border-border/10">
                   <span class="text-[10px] text-muted-foreground font-mono">Output</span>
                </div>
@@ -57,11 +70,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useLanguage } from '@/utils/i18n.js'
 import { Copy, Terminal } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import JsonDataViewer from '@/components/chat/tools/JsonDataViewer.vue'
 import {
   Dialog,
   DialogContent,
@@ -94,8 +108,48 @@ const emit = defineEmits(['update:open'])
 const copiedParams = ref(false)
 const copiedResult = ref(false)
 
-// 复制到剪贴板
-const copyToClipboard = async (text, type) => {
+const parsedArguments = computed(() => {
+  try {
+    const args = props.toolExecution?.function?.arguments
+    if (!args) return null
+    // parse JSON
+    const parsed = JSON.parse(args)
+    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+      return parsed
+    }
+    return null
+  } catch (e) {
+    return null
+   }
+ })
+
+ const parsedResult = computed(() => {
+   try {
+     const result = props.toolResult.content
+     if (!result) return null
+     
+     if (typeof result === 'object') {
+        return result
+     }
+     
+     if (typeof result === 'string') {
+        // Try parsing string as JSON
+        try {
+          const parsed = JSON.parse(result)
+          return parsed
+        } catch {
+          return null
+        }
+     }
+     
+     return null
+   } catch (e) {
+     return null
+   }
+ })
+ 
+ // 复制到剪贴板
+ const copyToClipboard = async (text, type) => {
   try {
     await navigator.clipboard.writeText(text)
     if (type === 'params') {
