@@ -183,8 +183,13 @@ class FibreOrchestrator:
         return msgs
 
     def _create_combined_tool_manager(self, original_tm, fibre_tools_impl):
-        # Create a new ToolManager or reuse the existing one
-        new_tm = original_tm if original_tm else ToolManager(is_auto_discover=False)
+        # Create a new ToolManager to avoid side effects on the original one
+        # Copy tools from original_tm if provided
+        new_tm = ToolManager(is_auto_discover=False)
+        if original_tm:
+            new_tm.tools = original_tm.tools.copy()
+            if hasattr(original_tm, "_tool_instances"):
+                new_tm._tool_instances = original_tm._tool_instances.copy()
         
         # Add Fibre Tools using @tool decorator metadata
         # We need to bind the tool spec to the instance method
@@ -195,7 +200,8 @@ class FibreOrchestrator:
                 spec = copy.deepcopy(bound_method._tool_spec)
                 # Important: update func to be the bound method so 'self' is passed correctly
                 spec.func = bound_method
-                new_tm.register_tool(spec)
+                # Force register the tool, bypassing priority check if needed
+                new_tm.tools[spec.name] = spec
             else:
                 logger.warning(f"FibreOrchestrator: {bound_method.__name__} has no _tool_spec")
 
@@ -206,7 +212,7 @@ class FibreOrchestrator:
         return new_tm
 
     # Methods called by FibreTools
-    async def spawn_agent(self, parent_context, name, role, instruction):
+    async def spawn_agent(self, parent_context, name, role, system_prompt):
         logger.info(f"Spawning agent: {name}")
         # Create Sub Session
         sub_session_id = f"{parent_context.session_id}/{name}"
@@ -216,7 +222,7 @@ class FibreOrchestrator:
             agent_name=name,
             session_id=sub_session_id,
             parent_context=parent_context,
-            instruction=instruction,
+            system_prompt=system_prompt,
             orchestrator=self
         )
         self.sub_sessions[name] = sub_agent

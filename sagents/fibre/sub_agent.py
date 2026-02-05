@@ -17,11 +17,11 @@ class FibreSubAgent:
     A lightweight wrapper around a SimpleAgent running in its own sub-session.
     """
     
-    def __init__(self, agent_name: str, session_id: str, parent_context: SessionContext, instruction: str, orchestrator):
+    def __init__(self, agent_name: str, session_id: str, parent_context: SessionContext, system_prompt: str, orchestrator):
         self.agent_name = agent_name
         self.session_id = session_id
         self.parent_context = parent_context
-        self.instruction = instruction
+        self.system_prompt = system_prompt
         self.orchestrator = orchestrator
         self.status = "active"
         self.initialized = False
@@ -76,7 +76,7 @@ class FibreSubAgent:
         
         # Combine instruction with some base sub-agent prompt
         system_prompt = f"""You are a Sub-Agent named '{self.agent_name}'.
-Role: {self.instruction}
+Role: {self.system_prompt}
 You are working as part of a larger system.
 
 {fibre_prompt_content}
