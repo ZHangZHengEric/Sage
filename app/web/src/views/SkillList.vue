@@ -256,9 +256,9 @@ const isImportDisabled = computed(() => {
 })
 
 const canDelete = (skill) => {
-  if (currentUser.value.role === 'admin') return true
   // If skill has no owner (system skill), user cannot delete
   if (!skill.user_id) return false
+  if (currentUser.value.role === 'admin') return true
   return skill.user_id === currentUser.value.userid
 }
 
@@ -278,6 +278,7 @@ const loadSkills = async () => {
 }
 
 const deleteSkill = async (skill) => {
+  if (!canDelete(skill)) return
   if (!confirm(t('skills.deleteConfirm', { name: skill.name }) || 'Are you sure you want to delete this skill?')) return
   
   try {
