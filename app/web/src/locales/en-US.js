@@ -24,6 +24,8 @@ export default {
   'sidebar.systemManagement': 'System Management',
   'sidebar.userList': 'User List',
   'sidebar.systemSettings': 'System Settings',
+  'sidebar.userProfile': 'My Profile',
+
   'auth.logout': 'Logout',
 
   // 聊天页面

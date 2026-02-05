@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full bg-gradient-to-b from-background to-muted/20 border rounded-2xl shadow-sm overflow-hidden flex flex-col">
+  <div class="h-full bg-gradient-to-b from-background to-muted/20 border p-2 shadow-sm overflow-hidden flex flex-col">
     <!-- Progress Bar -->
     <AgentEditProgress />
     <!-- Main Content (Steps) -->
@@ -9,18 +9,25 @@
       </Transition>
     </div>
     <!-- Footer -->
-    <div class="p-4 border-t bg-muted/20 flex justify-center items-center">
-      <div class="flex items-center gap-2">
-        <Button  v-if="store.currentStep == 1" variant="outline" @click="handleReturn" class="min-w-[100px]">
-          <ChevronLeft class="mr-2 h-4 w-4" />
-          {{ t('common.return') }}
-        </Button>
+    <div class="px-5 py-5 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex justify-between items-center shrink-0 z-10">
+      <!-- Left Side: Return/Cancel -->
+      <Button 
+        variant="ghost" 
+        @click="handleReturn" 
+        class="text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ChevronLeft class="mr-2 h-4 w-4" />
+        {{ t('common.return') }}
+      </Button>
+
+      <!-- Right Side: Navigation & Action -->
+      <div class="flex items-center gap-3">
          <Button 
             v-if="store.currentStep > 1"
-            variant="outline" 
+            variant="secondary" 
             @click="store.prevStep" 
             :disabled="store.currentStep === 1"
-            class="min-w-[100px]"
+            class="min-w-[100px] shadow-sm border border-border/50"
          >
             <ChevronLeft class="mr-2 h-4 w-4" />
             {{ t('common.prevStep') }}
@@ -30,7 +37,7 @@
             v-if="store.currentStep < store.STEPS.length" 
             @click="store.nextStep"
             :disabled="store.currentStep === 1 && !store.isStep1Valid"
-            class="min-w-[100px]"
+            class="min-w-[120px] shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all active:scale-95"
          >
             {{ t('common.nextStep') }}
             <ChevronRight class="ml-2 h-4 w-4" />
@@ -39,7 +46,7 @@
             v-else 
             @click="handleSave" 
             :disabled="saving"
-            class="min-w-[100px]"
+            class="min-w-[120px] shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all active:scale-95"
          >
             <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
             <Save v-else class="mr-2 h-4 w-4" />

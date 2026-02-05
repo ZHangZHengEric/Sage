@@ -12,15 +12,18 @@
       </FormItem>
 
       <FormItem :error="store.errors.systemPrefix" required>
-        <div class="flex justify-begin items-center">
+        <div class="flex justify-between items-center">
           <div class="flex items-center gap-1">
             <Label :class="store.errors.systemPrefix ? 'text-destructive' : ''">{{ t('agent.systemPrefix') }}</Label>
             <span class="text-destructive">*</span>
           </div>
-          <Button size="sm" variant="ghost" class="h-6 px-2 text-black hover:bg-transparent"
+          <Button size="sm" variant="ghost" class="flex items-center gap-1 text-black hover:bg-transparent"
             @click="showOptimizeModal = true" :disabled="isOptimizing">
-            AI优化
+            <!-- 星星图标 -->
+            <Sparkles class="h-5 w-5 text-yellow-400" />
+            <span>AI优化</span>
           </Button>
+
         </div>
         <div class="relative">
           <Textarea v-model="store.formData.systemPrefix" :rows="20" :placeholder="t('agent.systemPrefixPlaceholder')"
@@ -154,7 +157,7 @@ import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useAgentEditStore } from '../../stores/agentEdit'
 import { useLanguage } from '../../utils/i18n.js'
 import { agentAPI } from '../../api/agent.js'
-import { Loader, Trash2, Plus, ChevronDown, ChevronUp, ChevronRight, Workflow, Database, GripVertical } from 'lucide-vue-next'
+import { Loader, Trash2, Plus, ChevronDown, ChevronUp, ChevronRight, Workflow, Database, GripVertical, Sparkles   } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
 // UI Components
