@@ -221,8 +221,44 @@ class FibreOrchestrator:
         )
         self.sub_sessions[name] = sub_agent
         
+        # Update parent context with available sub-agents
+        if 'available_sub_agents' not in parent_context.system_context:
+            parent_context.system_context['available_sub_agents'] = []
+            
+        # Add new agent info if not exists
+        agent_info = {"name": name, "role": role}
+        if agent_info not in parent_context.system_context['available_sub_agents']:
+            parent_context.system_context['available_sub_agents'].append(agent_info)
+        
         # We just return the name as ID. The agent is lazy-initialized on first message.
         return name
+
+    async def delegate_tasks(self, tasks):
+        """
+        Execute multiple tasks in parallel.
+        Args:
+            tasks: List of dicts with 'agent_id' and 'content'
+        """
+        import asyncio
+        
+        async def _run_single_task(task):
+            agent_id = task.get('agent_id')
+            content = task.get('content')
+            if not agent_id or not content:
+                return f"Invalid task format: {task}"
+            
+            return await self.delegate_task(agent_id, content)
+
+        # Run all tasks concurrently
+        results = await asyncio.gather(*[_run_single_task(t) for t in tasks])
+        
+        # Format results
+        final_output = []
+        for i, result in enumerate(results):
+            agent_id = tasks[i].get('agent_id')
+            final_output.append(f"=== Result from {agent_id} ===\n{result}")
+            
+        return "\n\n".join(final_output)
 
     async def delegate_task(self, agent_id, content):
         if agent_id in self.sub_sessions:
