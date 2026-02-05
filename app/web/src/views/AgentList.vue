@@ -175,8 +175,18 @@ const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
 
 // Composables
 const { t } = useLanguage()
-
+const route = useRoute()
 const currentUser = ref(getCurrentUser())
+
+// 监听路由参数变化，处理刷新
+import { watch } from 'vue'
+import { useRoute } from 'vue-router'
+
+watch(() => route.query.refresh, () => {
+  if (currentView.value !== 'list') {
+    handleBackToList()
+  }
+})
 
 
 

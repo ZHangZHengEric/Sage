@@ -11,7 +11,12 @@
     <!-- Footer -->
     <div class="p-4 border-t bg-muted/20 flex justify-center items-center">
       <div class="flex items-center gap-2">
+        <Button  v-if="store.currentStep == 1" variant="outline" @click="handleReturn" class="min-w-[100px]">
+          <ChevronLeft class="mr-2 h-4 w-4" />
+          {{ t('common.return') }}
+        </Button>
          <Button 
+            v-if="store.currentStep > 1"
             variant="outline" 
             @click="store.prevStep" 
             :disabled="store.currentStep === 1"
@@ -108,11 +113,6 @@ watch(() => props.agent, (newAgent) => {
 }, { immediate: true })
 
 onMounted(() => {
-  if (!props.agent) {
-    if (store.formData.id === null && !store.formData.name) {
-        store.loadDraft()
-    }
-  }
   // Auto-hide right panel on small screens
   if (window.innerWidth < 1024) {
     showRightPanel.value = false
@@ -132,7 +132,7 @@ const handleSave = async () => {
   }
 }
 
-const handleClose = () => {
+const handleReturn = () => {
   emit('update:visible', false)
 }
 </script>

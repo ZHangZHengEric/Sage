@@ -1,7 +1,7 @@
 <template>
   <div 
     class="flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
-    :class="[isCollapsed ? 'w-[70px]' : 'w-[280px]']"
+    :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
   >
     <!-- Header -->
     <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
@@ -365,12 +365,12 @@ const predefinedServices = computed(() => {
       isInternal: true
     },
     { id: 'svc_history', nameKey: 'sidebar.sessions', url: 'History', isInternal: true },
+    { id: 'svc_agent', key: 'agent_list', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true },
     {
       id: 'cat2',
       key: 'agent_capabilities',
       nameKey: 'sidebar.capabilityModules',
       children: [
-        { id: 'svc_agent', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true },
         { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
         { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
         { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseList', url: 'KnowledgeBase', isInternal: true }
@@ -414,6 +414,7 @@ const expandedCategories = ref({
 const getCategoryIcon = (key) => {
   const map = {
     new_chat: MessageSquare,
+    agent_list: Bot,
     agent_capabilities: Wrench,
     skills: Zap,
     knowledge_base: Book,
@@ -437,6 +438,16 @@ const isCategoryActive = (item) => {
 const handleMenuClick = (url, name, isInternal) => {
   if (isInternal) {
     if (url === 'Chat') emit('new-chat')
+    
+    // 如果已经在当前页面，且是AgentConfig，添加刷新参数触发重置
+    if (route.name === url && url === 'AgentConfig') {
+      router.replace({ 
+        name: url, 
+        query: { ...route.query, refresh: Date.now() } 
+      })
+      return
+    }
+    
     router.push({ name: url })
   } else {
     window.open(url, '_blank')

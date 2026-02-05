@@ -33,6 +33,14 @@ const routes = [
     meta: {
       title: 'tools.title'
     }
+  },
+  {
+    path: '/agent/tools/:toolName',
+    name: 'ToolDetailView',
+    component: () => import('../views/ToolDetail.vue'),
+    meta: {
+      title: 'tools.detailTitle'
+    }
   },  
 
   {

@@ -21,8 +21,8 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     name: '',
     description: '',
     systemPrefix: '你是一个有用的AI助手。',
-    deepThinking: null,
-    multiAgent: null,
+    deepThinking: false,
+    multiAgent: false,
     moreSuggest: false,
     memoryType: "session",
     maxLoopCount: 10,
@@ -226,17 +226,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     localStorage.setItem('agent_edit_draft', JSON.stringify(newVal))
   }, { deep: true })
 
-  const loadDraft = () => {
-    const draft = localStorage.getItem('agent_edit_draft')
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft)
-        initForm(parsed)
-      } catch (e) {
-        console.error('Failed to load draft', e)
-      }
-    }
-  }
 
   return {
     STEPS,
@@ -254,7 +243,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     setStep,
     validateStep1,
     prepareForSave,
-    loadDraft,
     addSystemContextPair,
     removeSystemContextPair,
     updateSystemContextPair,
