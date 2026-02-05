@@ -214,8 +214,10 @@ class FibreOrchestrator:
     # Methods called by FibreTools
     async def spawn_agent(self, parent_context, name, role, system_prompt):
         logger.info(f"Spawning agent: {name}")
-        # Create Sub Session
-        sub_session_id = f"{parent_context.session_id}/{name}"
+        # Create Sub Session ID: parent_session_id_{index}_{agent_name}
+        # Index is 1-based based on current sub_sessions count
+        sub_session_index = len(self.sub_sessions) + 1
+        sub_session_id = f"{parent_context.session_id}_{sub_session_index}_{name}"
         
         # Initialize Sub Agent
         sub_agent = FibreSubAgent(
@@ -323,7 +325,7 @@ class FibreOrchestrator:
                 history_str = MessageManager.convert_messages_to_str(accumulated_messages)
                 if sub_agent.agent and sub_agent.agent.model:
                      # Get prompt from PromptManager
-                     language = parent_context.get_language() if parent_context else "en"
+                     language = sub_agent.parent_context.get_language() if sub_agent.parent_context else "en"
                      summary_prompt_template = PromptManager().get_agent_prompt_auto('sub_agent_fallback_summary_prompt', language=language)
                      prompt = summary_prompt_template.format(history_str=history_str)
                      
@@ -350,5 +352,12 @@ class FibreOrchestrator:
                  logger.error(f"Error generating summary: {e}")
                  history_str = MessageManager.convert_messages_to_str(accumulated_messages)
                  return f"Sub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{history_str}"
+            finally:
+                # Ensure sub-session state is saved
+                if sub_agent.sub_session_context:
+                    try:
+                        sub_agent.sub_session_context.save()
+                    except Exception as e:
+                        logger.error(f"Failed to save sub-session context for {sub_agent.session_id}: {e}")
             
         return f"Error: Agent {agent_id} not found."
