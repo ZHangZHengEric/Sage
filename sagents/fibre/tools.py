@@ -44,7 +44,7 @@ class FibreTools:
     @tool(
         description_i18n={"zh": "给子agent 分配任务并执行，支持并发执行多个子任务"},
         param_description_i18n={
-            "tasks": {"zh": "任务列表，每个任务包含 'agent_id' 和 'content' 字段。例如：[{'agent_id': 'agent1', 'content': 'task1'}, {'agent_id': 'agent2', 'content': 'task2'}]"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id' 和 'content' 字段。'content' 必须包含详细的任务描述、具体要求以及期望的返回格式（明确指出需要 sys_finish_task 返回哪些字段）。例如：[{'agent_id': 'agent1', 'content': '请分析...并返回...'}, ...]"}
         }
     )
     async def sys_delegate_task(self, tasks: list[Dict[str, str]]) -> str:
@@ -53,6 +53,7 @@ class FibreTools:
 
         Args:
             tasks: A list of tasks, where each task is a dictionary containing 'agent_id' and 'content'.
+                   'content' should be detailed and specify exactly what information needs to be returned via sys_finish_task.
         """
         logger.info(f"Tool Call: sys_delegate_task(tasks_count={len(tasks)})")
         response = await self.orchestrator.delegate_tasks(tasks)
@@ -62,7 +63,7 @@ class FibreTools:
         description_i18n={"zh": "向父节点报告最终结果。"},
         param_description_i18n={
             "status": {"zh": "任务状态 (success/failed)"},
-            "result": {"zh": "最终结果的总结，包括执行结果和产生的资源"}
+            "result": {"zh": "最终结果的详细总结。必须包含父 Agent 所需的所有信息，包括执行过程的关键步骤、生成的资源路径、以及具体的分析结论。不要只返回简单的'完成'。"}
         }
     )
     async def sys_finish_task(self, status: str, result: str) -> str:
@@ -71,7 +72,8 @@ class FibreTools:
 
         Args:
             status: Task status (success/failed)
-            result: The final result, including execution process and any generated resources.
+            result: The detailed final result. Must include all information requested by the parent agent, 
+                    including key execution steps, paths to generated resources, and specific conclusions.
         """
         # This is typically called by the sub-agent, not the parent.
         # But if the parent calls it, it ends the main session?
