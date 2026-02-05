@@ -165,6 +165,36 @@ renderer.tablecell = function(token) {
 }
 
 // 配置marked选项
+const tokenizer = {
+  fences(src) {
+    const rules = this.rules.block
+    const cap = rules.fences.exec(src)
+    if (cap) {
+      const raw = cap[0]
+      const fence = cap[1]
+      
+      // 检查代码块是否完全闭合
+      // 正则检查是否以 fence 结尾（允许尾部空白）
+      // 如果没有闭合，返回 undefined 让 marked 将其视为普通文本
+      const isClosed = new RegExp(`${fence}\\s*$`).test(raw)
+      
+      if (!isClosed) {
+        return undefined
+      }
+      
+      return {
+        type: 'code',
+        raw: raw,
+        lang: cap[2] ? cap[2].trim() : cap[2],
+        text: cap[3] || ''
+      }
+    }
+    return false
+  }
+}
+
+marked.use({ tokenizer })
+
 marked.setOptions({
   breaks: true,
   gfm: true,
