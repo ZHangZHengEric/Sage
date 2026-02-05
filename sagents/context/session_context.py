@@ -82,6 +82,9 @@ class SessionContext:
                 os.makedirs(_agent_workspace_host_path)
 
         else:
+            # 只有当 agent_workspace 不存在且我们期望它存在时才创建
+            # 对于子会话，如果它被配置为共享父会话的 agent_workspace，它可能会在稍后被覆盖
+            # 但 SessionContext 初始化时，我们默认创建它自己的
             if not os.path.exists(_agent_workspace_host_path):
                 os.makedirs(_agent_workspace_host_path)
 
@@ -94,6 +97,11 @@ class SessionContext:
                     self.start_time = session_status["start_time"]
                     self.end_time = session_status["end_time"]
                     self.system_context = session_status["system_context"]
+        
+        # 确保 llm_request 目录存在，用于存放请求日志
+        self.llm_request_dir = os.path.join(self.session_workspace, "llm_request")
+        if not os.path.exists(self.llm_request_dir):
+            os.makedirs(self.llm_request_dir)
 
         current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
         self.system_context['current_time'] = current_time_str
