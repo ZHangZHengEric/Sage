@@ -1,6 +1,7 @@
 # Change Log
 
 ## 2026-02-05
+- [SandboxFileSystem] Explicitly excluded `.sandbox` directory from `get_file_tree` output to prevent internal sandbox files from being exposed to the agent.
 - [FibreOrchestrator] Removed redundant outer loop in `run_loop` and fixed TypeError by passing `max_loop_count` via `session_context.agent_config` instead of `run_stream` argument.
 - [FibreAgent] Fixed inheritance issue by making `FibreAgent` inherit from `AgentBase` and calling `super().__init__`, ensuring proper type compatibility with `FibreOrchestrator`.
 - [FibreOrchestrator] Renamed `sys_send_message` tool to `sys_delegate_task` to better reflect its function of assigning and executing tasks.
