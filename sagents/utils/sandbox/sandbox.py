@@ -816,10 +816,17 @@ class Sandbox:
         with open(input_pkl, "wb") as f:
             pickle.dump(payload, f)
             
+        # Determine logger directory to allow write access
+        from sagents.utils.logger import logger
+        log_dir = getattr(logger, 'log_dir', None)
+        additional_write_paths = [cwd] if cwd else []
+        if log_dir:
+            additional_write_paths.append(log_dir)
+
         profile_path = self._generate_seatbelt_profile(
             output_path=output_pkl,
             additional_read_paths=[input_pkl],
-            additional_write_paths=[cwd] if cwd else []
+            additional_write_paths=additional_write_paths
         )
         
         python_bin = os.path.join(self.venv_dir, "bin", "python")
