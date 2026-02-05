@@ -577,6 +577,18 @@ class ToolManager:
                     try:
                         # Use sandbox if available
                         if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                            # Check if pip is needed
+                            needs_pip = False
+                            if tool.name == "execute_python_code" and kwargs.get("requirement_list"):
+                                needs_pip = True
+                            elif tool.name == "execute_shell_command":
+                                cmd = kwargs.get("command", "")
+                                if "pip " in cmd or "pip3 " in cmd:
+                                    needs_pip = True
+                            
+                            if needs_pip:
+                                session_context.sandbox.ensure_pip()
+
                             # Use run_tool which handles path mapping and execution
                             # We pass the function object from the tool spec
                             # And try to pass the tool instance if available (though ToolSpec might not store it directly, 

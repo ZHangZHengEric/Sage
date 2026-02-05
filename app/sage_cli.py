@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -175,6 +176,8 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--skills_path', type=str, default=None, help='技能目录路径')
     parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
     parser.add_argument('--no-multi-agent', action='store_true', default=None, help='禁用多智能体推理')
+    parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
+    parser.add_argument('--show_terminal_log', action='store_false', dest='no_terminal_log', help='开启终端打印log')
     parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录')
     parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'),
                         help="""MCP 设置文件路径，文件内容为json格式""")
@@ -218,6 +221,8 @@ def parse_arguments() -> Dict[str, Any]:
         'context_active_ratio': args.context_active_ratio,
         'context_max_new_message_ratio': args.context_max_new_message_ratio,
         'context_recent_turns': args.context_recent_turns,
+        'no_terminal_log': args.no_terminal_log,
+        'memory_type': preset_running_agent_config.get('memoryType', 'local'),
     }
     logger.info(f"config: {config}")
     return config
@@ -227,6 +232,28 @@ if __name__ == '__main__':
     config = parse_arguments()
 
     async def main_async():
+        if config.get('no_terminal_log'):
+            # 移除 sage logger 的 handler
+            for handler in logger.logger.handlers[:]:
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    logger.logger.removeHandler(handler)
+            
+            # 移除 root logger 的 handler，防止其他库（如 httpx, rich 等）输出日志
+            root_logger = logging.getLogger()
+            for handler in root_logger.handlers[:]:
+                if not isinstance(handler, logging.FileHandler):
+                    root_logger.removeHandler(handler)
+            
+            # 强制设置 noisy loggers 为 WARNING 级别
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("httpcore").setLevel(logging.WARNING)
+            logging.getLogger("openai").setLevel(logging.WARNING)
+            
+            # 针对 sagents 内部模块设置 ERROR 级别，屏蔽 INFO 级别的工具调用和编排日志
+            logging.getLogger("sagents").setLevel(logging.ERROR)
+            logging.getLogger("sagents.fibre.tools").setLevel(logging.ERROR)
+            logging.getLogger("sagents.fibre.orchestrator").setLevel(logging.ERROR)
+
         # 初始化tool manager
         tool_manager = ToolManager()
         await tool_manager._discover_mcp_tools(config['mcp_setting_path'])

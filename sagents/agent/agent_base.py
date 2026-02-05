@@ -132,11 +132,13 @@ class AgentBase(ABC):
         Returns:
             Generator: 语言模型的流式响应
         """
-        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
+        logger.debug(f"{self.__class__.__name__}: 调用语言模型进行流式生成, session_id={session_id}")
 
         if session_id:
             sc_now = get_session_context(session_id)
-            if sc_now is None or sc_now.status == SessionStatus.INTERRUPTED:
+            if sc_now is None:
+                logger.warning(f"{self.__class__.__name__}: sc_now is None for session_id={session_id}")
+            elif sc_now.status == SessionStatus.INTERRUPTED:
                 logger.info(f"{self.__class__.__name__}: 跳过模型调用，session上下文不存在或已中断，会话ID: {session_id}")
                 return
         # 确定最终的模型配置
@@ -174,7 +176,7 @@ class AgentBase(ABC):
                 if 'content' not in msg:
                     msg['content'] = ''
 
-            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成，模型配置: {final_config}")
+            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
 
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
@@ -424,7 +426,8 @@ class AgentBase(ABC):
         return MessageChunk(
             role=MessageRole.SYSTEM.value,
             content=system_prefix,
-            type=MessageType.SYSTEM.value
+            type=MessageType.SYSTEM.value,
+            agent_name=self.agent_name
         )
 
     def _judge_delta_content_type(self,
@@ -520,7 +523,7 @@ class AgentBase(ABC):
             tool_call: 工具调用信息
 
         Returns:
-            List[Dict[str, Any]]: 工具调用消息列表
+            List[MessageChunk]: 工具调用消息列表
         """
         # 格式化工具参数显示
         # 兼容两种分隔符
@@ -584,7 +587,8 @@ class AgentBase(ABC):
             }],
             message_type=MessageType.TOOL_CALL.value,
             message_id=str(uuid.uuid4()),
-            show_content=f"{tool_name}({formatted_params})"
+            show_content=f"{tool_name}({formatted_params})",
+            agent_name=self.agent_name
         )]
 
     async def _execute_tool(self,
@@ -658,7 +662,8 @@ class AgentBase(ABC):
                                             tool_call_id=tool_call['id'],
                                             message_id=str(uuid.uuid4()),
                                             message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            show_content=message['content']
+                                            show_content=message['content'],
+                                            agent_name=self.agent_name
                                         ))
                                 yield message_chunks
                             else:
@@ -670,7 +675,8 @@ class AgentBase(ABC):
                                         tool_call_id=tool_call['id'],
                                         message_id=str(uuid.uuid4()),
                                         message_type=MessageType.TOOL_CALL_RESULT.value,
-                                        show_content=chunk['content']
+                                        show_content=chunk['content'],
+                                        agent_name=self.agent_name
                                     )
                                     yield [message_chunk_]
                 except Exception as e:
@@ -733,47 +739,27 @@ class AgentBase(ABC):
             tool_response_dict = json.loads(tool_response)
 
             if "content" in tool_response_dict:
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=tool_response,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content='\\n```json\\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\\n```\\n'
-                )]
-            elif 'messages' in tool_response_dict:
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=msg,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content=msg
-                ) for msg in tool_response_dict['messages']]
+                content = tool_response_dict["content"]
             else:
-                # 默认处理
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=tool_response,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content='\\n' + tool_response + '\\n'
-                )]
+                content = tool_response
+        except (json.JSONDecodeError, TypeError):
+            content = tool_response
 
-            logger.debug(f"{self.agent_name}: 工具响应处理成功")
-            return result
+        # 如果 content 还是 dict/list，转成 json string
+        if isinstance(content, (dict, list)):
+            content = json.dumps(content, ensure_ascii=False)
+        else:
+            content = str(content)
 
-        except json.JSONDecodeError:
-            logger.warning(f"{self.agent_name}: 处理工具响应时JSON解码错误")
-            return [MessageChunk(
-                role='tool',
-                content='\\n' + tool_response + '\\n',
-                tool_call_id=tool_call_id,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TOOL_CALL_RESULT.value,
-                show_content="工具调用失败\\n\\n"
-            )]
+        return [MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=content,
+            tool_call_id=tool_call_id,
+            message_id=str(uuid.uuid4()),
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+            show_content=content,
+            agent_name=self.agent_name
+        )]
 
     def merge_stream_response_to_non_stream_response(self, chunks):
         """

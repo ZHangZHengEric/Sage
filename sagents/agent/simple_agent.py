@@ -222,7 +222,11 @@ class SimpleAgent(AgentBase):
                 suggested_tools.extend(['file_read', 'execute_python_code', 'execute_shell_command', 'file_write', 'update_file'])
 
             if "sys_spawn_agent" in tool_names:
-                suggested_tools.extend(['sys_spawn_agent', 'sys_send_message','sys_finish_task'])
+                suggested_tools.extend(['sys_spawn_agent'])
+            if 'sys_send_message' in tool_names:
+                suggested_tools.extend(['sys_send_message'])
+            if 'sys_finish_task' in tool_names:
+                suggested_tools.append('sys_finish_task')
 
             # 去重
             suggested_tools = list(set(suggested_tools))    
@@ -312,6 +316,15 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
             )
             all_new_response_chunks = []
+
+            # 更新system message，确保包含最新的子智能体列表等上下文信息
+            if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
+                system_message = self.prepare_unified_system_message(
+                    session_id,
+                    custom_prefix=session_context.system_prompt if hasattr(session_context, 'system_prompt') else "",
+                    language=session_context.get_language(),
+                )
+                messages_input[0] = system_message
 
             # 调用LLM
             should_break = False
@@ -430,7 +443,8 @@ class SimpleAgent(AgentBase):
                         content=chunk.choices[0].delta.content,
                         message_id=content_response_message_id,
                         show_content=chunk.choices[0].delta.content,
-                        message_type=MessageType.DO_SUBTASK_RESULT.value
+                        message_type=MessageType.DO_SUBTASK_RESULT.value,
+                        agent_name=self.agent_name
                     )]
                     yield (output_messages, False)
             else:
@@ -441,7 +455,8 @@ class SimpleAgent(AgentBase):
                         content="",
                         message_id=reasoning_content_response_message_id,
                         show_content=chunk.choices[0].delta.reasoning_content,
-                        message_type=MessageType.TASK_ANALYSIS.value
+                        message_type=MessageType.TASK_ANALYSIS.value,
+                        agent_name=self.agent_name
                     )]
                     yield (output_messages, False)
         # 处理工具调用
@@ -478,7 +493,8 @@ class SimpleAgent(AgentBase):
                 content='',
                 message_id=content_response_message_id,
                 show_content='\n',
-                message_type=MessageType.DO_SUBTASK_RESULT.value
+                message_type=MessageType.DO_SUBTASK_RESULT.value,
+                agent_name=self.agent_name
             )]
             yield (output_messages, False)
 

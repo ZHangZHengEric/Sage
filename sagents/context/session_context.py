@@ -322,11 +322,13 @@ class SessionContext:
 
     def add_llm_request(self, request: Dict[str, Any], response: Optional[Dict[str, Any]]):
         """添加LLM请求"""
+        logger.debug(f"SessionContext: Adding LLM request to session {self.session_id}, step: {request.get('step_name')}")
         self.llm_requests_logs.append({
             "request": request,
             "response": response,
             "timestamp": time.time(),
         })
+        logger.debug(f"SessionContext: Current llm_requests_logs count for session {self.session_id}: {len(self.llm_requests_logs)}")
 
     def get_tokens_usage_info(self):
         """获取tokens使用信息"""
@@ -351,34 +353,49 @@ class SessionContext:
 
     def save(self):
         """保存会话上下文"""
+        logger.debug(f"SessionContext: Saving session context for {self.session_id}")
         # 先判断该会话的文件夹是否存在
         if not os.path.exists(self.session_workspace):
             os.makedirs(self.session_workspace)
+            logger.debug(f"SessionContext: Created session workspace: {self.session_workspace}")
 
         # 保存模型请求记录
         llm_request_folder = os.path.join(self.session_workspace, "llm_request")
         if not os.path.exists(llm_request_folder):
             os.makedirs(llm_request_folder)
+            logger.debug(f"SessionContext: Created llm_request folder: {llm_request_folder}")
 
         # 说明存在，需要看看当前的序号从几开始
         existing_files = os.listdir(llm_request_folder)
         max_index = -1
         for file in existing_files:
             if file.endswith(".json"):
-                index = int(file.split("_")[0])
-                max_index = max(max_index, index)
+                try:
+                    index = int(file.split("_")[0])
+                    max_index = max(max_index, index)
+                except ValueError:
+                    continue
+                    
         # 从max_index + 1 开始
         logger.debug(f"SessionContext: 保存llm_requests_logs，当前的序号从{max_index + 1}开始")
         logger.debug(f"SessionContext: 需要保存的llm_requests_logs数量: {len(self.llm_requests_logs)}")
+        
         for i, llm_request in enumerate(self.llm_requests_logs):
-            with open(os.path.join(llm_request_folder, f"{max_index + 1 + i}_{llm_request['request']['step_name']}_{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"), "w") as f:
-                # 创建可序列化的副本
-                serializable_request = {
-                    "request": self._make_serializable(llm_request['request']),
-                    "response": self._make_serializable(llm_request['response']),
-                    "timestamp": llm_request['timestamp']
-                }
-                json.dump(serializable_request, f, ensure_ascii=False, indent=4)
+            file_name = f"{max_index + 1 + i}_{llm_request['request'].get('step_name', 'unknown')}_{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"
+            file_path = os.path.join(llm_request_folder, file_name)
+            logger.debug(f"SessionContext: Saving LLM request to {file_path}")
+            
+            try:
+                with open(file_path, "w") as f:
+                    # 创建可序列化的副本
+                    serializable_request = {
+                        "request": self._make_serializable(llm_request['request']),
+                        "response": self._make_serializable(llm_request['response']),
+                        "timestamp": llm_request['timestamp']
+                    }
+                    json.dump(serializable_request, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to write log file {file_path}: {e}")
         # 根据
 
         # 保存messages 到messages.json

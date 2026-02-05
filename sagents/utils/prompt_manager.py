@@ -50,11 +50,14 @@ def _auto_import_prompt_modules():
                         not attr_name.endswith('_PROMPTS_PT')):
                         
                         attr_value = getattr(module, attr_name)
-                        # 检查是否是包含zh、en和pt键的字典
-                        if isinstance(attr_value, dict) and 'zh' in attr_value and 'en' in attr_value and 'pt' in attr_value:
-                            zh_prompts[attr_name] = attr_value['zh']
-                            en_prompts[attr_name] = attr_value['en']
-                            pt_prompts[attr_name] = attr_value['pt']
+                        # 检查是否是包含zh或en键的字典
+                        if isinstance(attr_value, dict) and ('zh' in attr_value or 'en' in attr_value):
+                            if 'zh' in attr_value:
+                                zh_prompts[attr_name] = attr_value['zh']
+                            if 'en' in attr_value:
+                                en_prompts[attr_name] = attr_value['en']
+                            if 'pt' in attr_value:
+                                pt_prompts[attr_name] = attr_value['pt']
                 
                 # 如果找到了prompt，则存储
                 if zh_prompts or en_prompts or pt_prompts:

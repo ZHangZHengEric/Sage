@@ -86,6 +86,9 @@ class FibreOrchestrator:
                     self.agent.model_config, 
                     system_prefix=combined_system_prefix
                 )
+                # Ensure container agent has the same name as the main FibreAgent
+                container_agent.agent_name = self.agent.agent_name if hasattr(self.agent, 'agent_name') else "FibreAgent"
+                
                 if self.observability_manager:
                     from sagents.observability import AgentRuntime
                     container_agent = AgentRuntime(container_agent, self.observability_manager)
@@ -102,7 +105,7 @@ class FibreOrchestrator:
                 # When it calls sys_spawn_agent, we intercept and manage sub-agents.
                 
                 # Create a combined tool manager that includes Fibre tools
-                combined_tool_manager = self._create_combined_tool_manager(tool_manager, fibre_tools_impl)
+                combined_tool_manager = self._create_combined_tool_manager(tool_manager, fibre_tools_impl, include_finish_task=False)
 
                 # A. Run Container Agent
                 # We need to run the container agent to get next actions
@@ -182,7 +185,7 @@ class FibreOrchestrator:
                     msgs.append(m)
         return msgs
 
-    def _create_combined_tool_manager(self, original_tm, fibre_tools_impl):
+    def _create_combined_tool_manager(self, original_tm, fibre_tools_impl, include_finish_task=True):
         # Create a new ToolManager to avoid side effects on the original one
         # Copy tools from original_tm if provided
         new_tm = ToolManager(is_auto_discover=False)
@@ -207,7 +210,9 @@ class FibreOrchestrator:
 
         register_bound_tool(fibre_tools_impl.sys_spawn_agent)
         register_bound_tool(fibre_tools_impl.sys_delegate_task)
-        register_bound_tool(fibre_tools_impl.sys_finish_task)
+        
+        if include_finish_task:
+            register_bound_tool(fibre_tools_impl.sys_finish_task)
         
         # Explicitly register the FibreTools instance to prevent ToolManager from trying to re-instantiate it
         # This fixes the TypeError: FibreTools.__init__() missing required arguments
@@ -223,6 +228,7 @@ class FibreOrchestrator:
         # Create Sub Session ID: parent_session_id_{index}_{agent_name}
         # Index is 1-based based on current sub_sessions count
         sub_session_index = len(self.sub_sessions) + 1
+        # Use a flat string ID (safe for session_manager keys), path hierarchy is handled by workspace_root in sub_agent.py
         sub_session_id = f"{parent_context.session_id}_{sub_session_index}_{name}"
         
         # Initialize Sub Agent
@@ -240,7 +246,7 @@ class FibreOrchestrator:
             parent_context.system_context['available_sub_agents'] = []
             
         # Add new agent info if not exists
-        agent_info = {"name": name, "role": role}
+        agent_info = {"id": name, "role": role}
         if agent_info not in parent_context.system_context['available_sub_agents']:
             parent_context.system_context['available_sub_agents'].append(agent_info)
         

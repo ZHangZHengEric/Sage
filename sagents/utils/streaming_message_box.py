@@ -46,9 +46,10 @@ def get_message_type_style(message_type: str) -> Tuple[str, str]:
 class StreamingMessageBox:
     """支持流式输出的消息框类"""
     
-    def __init__(self, console, message_type: str):
+    def __init__(self, console, message_type: str, agent_name: str = None):
         self.console = console
         self.message_type = message_type
+        self.agent_name = agent_name
         self.type_color, self.type_label = get_message_type_style(message_type)
         self.terminal_width = shutil.get_terminal_size().columns
         self.box_width = min(self.terminal_width - 4, 80)  # 最大80字符，最小留4字符边距
@@ -67,11 +68,12 @@ class StreamingMessageBox:
             self.console.print(f"\n[{self.type_color}]{top_border}[/{self.type_color}]")
             
             # 标题行（考虑中文字符宽度）
-            title_display_width = self._get_display_width(self.type_label)
+            display_label = f"{self.type_label} | {self.agent_name}" if self.agent_name else self.type_label
+            title_display_width = self._get_display_width(display_label)
             title_padding = self.box_width - 3 - title_display_width  # 减去左边框、左空格、右边框
             if title_padding < 0:
                 title_padding = 0
-            title_line = f"│ {self.type_label}{' ' * title_padding}│"
+            title_line = f"│ {display_label}{' ' * title_padding}│"
             self.console.print(f"[{self.type_color}]{title_line}[/{self.type_color}]")
             
             # 分隔线
