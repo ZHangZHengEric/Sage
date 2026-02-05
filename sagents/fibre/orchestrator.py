@@ -5,6 +5,7 @@ import uuid
 import copy
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext, init_session_context, SessionStatus
 from sagents.context.session_context_manager import session_manager
 from sagents.tool import ToolManager, ToolProxy
@@ -228,17 +229,24 @@ class FibreOrchestrator:
             task_result = None
 
             try:
-                accumulated_session_content = []
+                accumulated_messages = []
                 
                 # Stream the response
                 async for chunks in sub_agent.process_message(content):
-                    # Aggregate text and check for sys_finish_task
+                    # Filter chunks for the current sub-agent session (exclude nested sub-sessions)
+                    filtered_chunks = [
+                        c for c in chunks 
+                        if c.session_id == sub_agent.session_id and c.role == MessageRole.ASSISTANT.value
+                    ]
+                    
+                    # Merge chunks into accumulated messages using MessageManager
+                    if filtered_chunks:
+                         accumulated_messages = MessageManager.merge_new_messages_to_old_messages(
+                             filtered_chunks, accumulated_messages
+                         )
+
+                    # Check for tool calls to sys_finish_task
                     for chunk in chunks:
-                        # Only collect content from the direct sub-agent's session, ignoring nested sub-sessions
-                        if chunk.session_id == sub_agent.session_id and chunk.role == MessageRole.ASSISTANT.value and chunk.content:
-                             accumulated_session_content.append(chunk.content)
-                        
-                        # Check for tool calls to sys_finish_task
                         if chunk.tool_calls:
                             for tool_call in chunk.tool_calls:
                                 func_name = tool_call.function.name if hasattr(tool_call, 'function') else tool_call.get('function', {}).get('name')
@@ -261,8 +269,26 @@ class FibreOrchestrator:
             if task_result:
                 return task_result
             
-            # If sub-agent finished without calling sys_finish_task, return the aggregated content from its session
-            full_response = "".join(accumulated_session_content)
-            return f"Sub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{full_response}"
+            # If sub-agent finished without calling sys_finish_task, summarize the history
+            try:
+                history_str = MessageManager.convert_messages_to_str(accumulated_messages)
+                if sub_agent.agent and sub_agent.agent.model:
+                     prompt = f"""The sub-agent completed the execution but did not report the result. Please summarize the following execution log into a final result.
+Format:
+Status: success/failure
+Result: <summary>
+
+Execution Log:
+{history_str}"""
+                     response = await sub_agent.agent.model.chat.completions.create(
+                         model=sub_agent.agent.model_config.get('model', 'gpt-4o'),
+                         messages=[{"role": "user", "content": prompt}]
+                     )
+                     summary = response.choices[0].message.content
+                     return f"Sub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary}"
+            except Exception as e:
+                 logger.error(f"Error generating summary: {e}")
+                 history_str = MessageManager.convert_messages_to_str(accumulated_messages)
+                 return f"Sub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{history_str}"
             
         return f"Error: Agent {agent_id} not found."
