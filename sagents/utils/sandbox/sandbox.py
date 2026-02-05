@@ -764,15 +764,52 @@ class Sandbox:
         if not self.sandbox_dir or not self.venv_dir:
             return
 
-        if not os.path.exists(os.path.join(self.venv_dir, "bin", "python")):
-            # 优化：不安装 pip，大幅提升创建速度（~3s -> ~10ms）
-            # sandbox 内部运行不需要 pip，依赖安装使用的是 host 的 pip (PIP_TARGET)
-            venv.create(self.venv_dir, with_pip=False)
+        python_bin = os.path.join(self.venv_dir, "bin", "python")
+
+        # 默认不安装 pip，提升速度
+        if not os.path.exists(python_bin):
+            venv.create(self.venv_dir, with_pip=False, clear=True)
             
         launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
         if not os.path.exists(launcher_path) or os.path.getsize(launcher_path) != len(LAUNCHER_SCRIPT):
              with open(launcher_path, "w", encoding="utf-8") as f:
                  f.write(LAUNCHER_SCRIPT)
+
+    def ensure_pip(self):
+        """Ensure pip is installed in the virtual environment."""
+        if not self.venv_dir:
+            return
+
+        pip_bin = os.path.join(self.venv_dir, "bin", "pip")
+        if os.path.exists(pip_bin):
+            return
+
+        logger.info(f"Installing pip in sandbox venv at {self.venv_dir}...")
+        try:
+             # Use ensurepip to install pip
+             python_bin = os.path.join(self.venv_dir, "bin", "python")
+             subprocess.run([python_bin, "-m", "ensurepip"], check=True, capture_output=True)
+             self._configure_pip_mirror()
+        except Exception as e:
+             logger.error(f"Failed to install pip via ensurepip: {e}")
+             # Fallback to recreation if ensurepip fails
+             logger.info("Recreating venv with pip...")
+             venv.create(self.venv_dir, with_pip=True, clear=True)
+             self._configure_pip_mirror()
+
+    def _configure_pip_mirror(self):
+        """配置 venv 的 pip 镜像源，解决 SSL 和网络问题"""
+        pip_conf_path = os.path.join(self.venv_dir, "pip.conf")
+        # 如果 pip.conf 不存在，则创建
+        if not os.path.exists(pip_conf_path):
+            config_content = """[global]
+index-url = https://pypi.tuna.tsinghua.edu.cn/simple
+trusted-host = pypi.tuna.tsinghua.edu.cn
+timeout = 120
+"""
+            with open(pip_conf_path, "w") as f:
+                f.write(config_content)
+
 
     def _generate_seatbelt_profile(self, output_path: str, additional_read_paths: List[str] = [], additional_write_paths: List[str] = []) -> str:
         profile_path = os.path.join(self.sandbox_dir, "profile.sb")

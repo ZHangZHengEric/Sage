@@ -7,6 +7,7 @@ Execute Command Tool
 """
 
 import os
+import sys
 import subprocess
 import tempfile
 import time
@@ -337,7 +338,10 @@ class ExecuteCommandTool:
                 temp_file = f.name
             
             # 参数类型校验与依赖处理
-            python_path = shutil.which("python") or shutil.which("python3")
+            python_path = sys.executable
+            if not python_path:
+                python_path = shutil.which("python") or shutil.which("python3")
+            
             if not python_path:
                 raise RuntimeError("未找到Python解释器，请确保Python已正确安装")
             parsed_requirements: List[str] = []
@@ -375,7 +379,7 @@ class ExecuteCommandTool:
                                 continue
                         except Exception:
                             pass
-                        install_cmd = f"{python_path} -m pip install {package}"
+                        install_cmd = f"{python_path} -m pip install {package} -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
                         install_result = self.execute_shell_command(
                             install_cmd,
                             workdir=workdir,
