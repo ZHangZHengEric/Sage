@@ -1,7 +1,7 @@
 export default {
   // 侧边栏
   'sidebar.newChat': 'New Chat',
-  'sidebar.agentList': 'Agent List',
+  'sidebar.agentList': 'My Agents',
   'sidebar.toolsList': 'Tools',
   'sidebar.skillList': 'Skills',
   'sidebar.knowledgeBaseList': 'KnowledgeBase',
@@ -121,6 +121,8 @@ export default {
   'agent.importMissingName': 'Import failed: Missing required name field in config file',
   'agent.importDataLoaded': 'Import data loaded, please complete configuration and save',
   'agent.importSuffix': '_imported',
+  'agent.capabilitiesOverview': 'Agent Capabilities Overview',
+  'agent.strategy': 'Strategy Settings',
   'agent.editTitle': 'Edit Agent',
   'agent.createTitle': 'Create Agent',
   'agent.updateSuccess': 'Successfully updated Agent: {name}',
@@ -170,13 +172,19 @@ export default {
   'common.off': 'Off',
   'common.auto': 'Auto',
   'common.save': 'Save',
+  'common.saveDraft': 'Save Draft',
   'common.cancel': 'Cancel',
   'common.confirm': 'Confirm',
   'common.delete': 'Delete',
   'common.create': 'Create',
   'common.creating': 'Creating...',
+  'common.prevStep': 'Previous Step',
+  'common.nextStep': 'Next Step',
   'common.total': 'Total',
   'common.copy': 'Copy',
+  'common.none': 'None',
+  'common.reset': 'Reset',
+  'common.collapseAll': 'Collapse All',
 
   // Agent创建模态框
   'agentCreation.title': 'Create New Agent',
