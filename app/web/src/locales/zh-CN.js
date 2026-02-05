@@ -22,6 +22,7 @@ export default {
   'sidebar.systemManagement': '系统管理',
   'sidebar.userList': '用户列表',
   'sidebar.systemSettings': '系统设置',
+  'sidebar.userProfile': '我的',
   'auth.logout': '退出',
 
   // 聊天页面

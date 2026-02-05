@@ -108,6 +108,14 @@ const routes = [
       title: 'sidebar.systemSettings'
     }
   },
+  {
+    path: '/me',
+    name: 'MobileMe',
+    component: () => import('../views/MobileMe.vue'),
+    meta: {
+      title: 'sidebar.userProfile'
+    }
+  },
   // 重定向根路径到聊天页面
   {
     path: '/:pathMatch(.*)*',

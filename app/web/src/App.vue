@@ -7,44 +7,18 @@
       @new-chat="handleNewChat" 
     />
     
-    <!-- Mobile Sidebar Overlay -->
-    <Transition 
-      enter-active-class="transition-opacity duration-300"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition-opacity duration-300"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
-      <div v-if="isMobileMenuOpen && !isSharedPage" class="fixed inset-0 z-50 bg-black/50 lg:hidden" @click="isMobileMenuOpen = false" />
-    </Transition>
-
-    <!-- Mobile Sidebar -->
-    <Transition
-      enter-active-class="transition-transform duration-300 ease-out"
-      enter-from-class="-translate-x-full"
-      enter-to-class="translate-x-0"
-      leave-active-class="transition-transform duration-300 ease-in"
-      leave-from-class="translate-x-0"
-      leave-to-class="-translate-x-full"
-    >
-      <div v-if="isMobileMenuOpen && !isSharedPage" class="fixed inset-y-0 left-0 z-50 lg:hidden bg-background h-full shadow-xl">
-         <Sidebar @new-chat="handleNewChat" />
-      </div>
-    </Transition>
-
-    <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
-      <!-- Mobile Header -->
-      <div v-if="!isSharedPage" class="lg:hidden flex justify-between items-center p-2 border-b bg-background shrink-0">
-         <Button variant="ghost" size="icon" @click="isMobileMenuOpen = true" class="-ml-2">
-            <Menu class="h-6 w-6" />
-         </Button>
-      </div>
-
+    <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pb-[64px] lg:pb-0">
       <div class="flex-1 overflow-hidden relative flex flex-col">
         <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
       </div>
     </main>
+
+    <!-- Mobile Tab Bar -->
+    <MobileTabBar 
+      v-if="!isSharedPage"
+      class="lg:hidden" 
+      @new-chat="handleNewChat" 
+    />
 
     <LoginModal
         :visible="showLoginModal"
@@ -62,11 +36,12 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
+import MobileTabBar from './components/mobile/MobileTabBar.vue'
 import LoginModal from './components/LoginModal.vue'
 import { Toaster } from '@/components/ui/sonner'
 import { isLoggedIn } from './utils/auth.js'
-import { Menu } from 'lucide-vue-next'
-import { Button } from '@/components/ui/button'
+// import { Menu } from 'lucide-vue-next'
+// import { Button } from '@/components/ui/button'
 
 const router = useRouter()
 const route = useRoute()
@@ -85,20 +60,11 @@ watch(() => [route.path, route.name], () => {
   }
 }, { immediate: true })
 
-// Mobile menu state
-const isMobileMenuOpen = ref(false)
-
-// Close menu on route change
-watch(() => route.path, () => {
-  isMobileMenuOpen.value = false
-})
-
 // 选中的conversation数据
 const selectedConversation = ref(null)
 
 const handleNewChat = () => {
   selectedConversation.value = null
-  isMobileMenuOpen.value = false
 }
 
 const handleSelectConversation = (conversation) => {
