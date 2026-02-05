@@ -221,6 +221,9 @@ class SimpleAgent(AgentBase):
             if session_context.skill_manager is not None:
                 suggested_tools.extend(['file_read', 'execute_python_code', 'execute_shell_command', 'file_write', 'update_file'])
 
+            if "sys_spawn_agent" in tool_names:
+                suggested_tools.extend(['sys_spawn_agent', 'sys_send_message','sys_finish_task'])
+
             # 去重
             suggested_tools = list(set(suggested_tools))    
 
@@ -443,13 +446,30 @@ class SimpleAgent(AgentBase):
                     yield (output_messages, False)
         # 处理工具调用
         if len(tool_calls) > 0:
+            # 识别是否包含结束任务的工具调用
+            termination_tool_ids = set()
+            for tool_call_id, tool_call in tool_calls.items():
+                if tool_call['function']['name'] in ['complete_task', 'sys_finish_task']:
+                    termination_tool_ids.add(tool_call_id)
+
             async for chunk in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id or ""
             ):
-                yield chunk
+                # chunk 是 (messages, is_complete)
+                messages, is_complete = chunk
+                
+                # 如果当前消息块是结束任务工具的执行结果，则标记为完成
+                if termination_tool_ids and not is_complete:
+                    for msg in messages:
+                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id in termination_tool_ids:
+                            logger.info(f"SimpleAgent: 检测到结束任务工具 {msg.tool_call_id} 执行完成，标记任务结束")
+                            is_complete = True
+                            break
+                
+                yield (messages, is_complete)
 
         else:
             # 发送换行消息（也包含usage信息）
@@ -486,12 +506,6 @@ class SimpleAgent(AgentBase):
             tool_name = tool_call['function']['name']
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             logger.info(f"SimpleAgent: 参数 {tool_call['function']['arguments']}")
-
-            # 检查是否为complete_task
-            if tool_name == 'complete_task':
-                logger.info("SimpleAgent: complete_task，停止执行")
-                yield ([], True)
-                return
 
             # 发送工具调用消息
             output_messages = self._create_tool_call_message(tool_call)

@@ -27,19 +27,18 @@ STRATEGY:
 - Synthesize their responses to answer the user.
 """,
     "zh": """
-=== 系统能力（不可变）===
-你是一个具备**动态多智能体编排**能力的**自主智能体**。
-你是"容器"智能体（Container Agent）。你可以生成"子智能体"（Strands）来并行或顺序处理复杂任务。
+=== 动态多智能体编排指令 ===
+你可以生成"子智能体"（Strands）来并行或顺序处理复杂任务。
 
 你可用的特殊工具：
 1. `sys_spawn_agent(agent_name, role_description, system_instruction)`: 创建一个新的子智能体。
-2. `sys_send_message(agent_id, content)`: 向已存在的子智能体发送消息并获取回复。
+2. `sys_delegate_task(agent_id, content)`: 给子agent 分配任务并执行。
 3. `sys_finish_task(status, result)`: 报告最终结果。
 
 策略：
 - 将复杂的用户请求分解为子任务。
 - 为每个子任务生成专门的智能体（例如，"程序员"、"规划者"、"审核员"）。
-- 使用 `sys_send_message` 向它们分配任务并获取结果。
+- 使用 `sys_delegate_task` 向它们分配任务并获取结果。
 - 综合它们的回复来回答用户。
 """
 }

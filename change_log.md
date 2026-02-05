@@ -1,6 +1,22 @@
 # Change Log
 
 ## 2026-02-05
+- [FibreOrchestrator] Removed redundant outer loop in `run_loop` to prevent potential infinite loops and rely on `SimpleAgent`'s internal task completion logic. Passed `max_loop_count` to container agent.
+- [FibreAgent] Fixed inheritance issue by making `FibreAgent` inherit from `AgentBase` and calling `super().__init__`, ensuring proper type compatibility with `FibreOrchestrator`.
+- [FibreOrchestrator] Renamed `sys_send_message` tool to `sys_delegate_task` to better reflect its function of assigning and executing tasks.
+- [FibreOrchestrator] Updated `sys_delegate_task` (formerly `send_message`) to intercept `sys_finish_task` tool calls from sub-agents. It now returns the structured result (status and output) of `sys_finish_task` to the parent agent, instead of just the accumulated conversation text.
+- [FibreSubAgent] Injected `fibre_system_prompt` into sub-agents during initialization, ensuring they share the same core system instructions as the parent agent.
+- [FibreSubAgent] Refactored `sub_agent.py` to inherit parent configuration (budget, tools, skills) and share the parent's workspace/sandbox. Implemented streaming support in `process_message` to yield `MessageChunk`s with sub-session IDs.
+- [FibreOrchestrator] Enhanced `orchestrator.py` to support stream merging. Added an output queue to allow sub-agent message chunks to be streamed back to the user alongside parent messages.
+- [FibreAgent] Implemented guaranteed session saving in `orchestrator.py` by wrapping `run_loop` in a `try-except-finally` block. This ensures `session_context.save()` is called for all states (Completed, Interrupted, Error), aligning behavior with `SAgent`.
+- [CLI] Enhanced `fibre_cli.py` to gracefully handle `KeyboardInterrupt` (Ctrl+C). Now explicitly cancels and awaits the agent task to ensure cleanup logic (including session saving) executes properly.
+- [CLI] Fixed `IndexError: list index out of range` in `orchestrator.py` by adding a check for empty messages before accessing the last message.
+- [CLI] Fixed user input not being processed in `fibre_cli.py` by restoring the `messages.append` line which was accidentally removed during the async refactor.
+- [CLI] Implemented user interruption in `fibre_cli.py`: Added support for pressing 'Q' or 'q' to gracefully stop the current agent session during execution, using `termios` and `tty` for non-blocking input monitoring.
+- [SimpleAgent] Refactored loop termination logic: Moved `sys_finish_task` detection from `_handle_tool_calls` to `_call_llm_and_process_response` to correctly handle tool execution results and ensure proper agent shutdown.
+- [FibreAgent] Analyzed and confirmed `sys_send_message` blocking behavior; verified that parent agents wait for sub-agent completion (triggered by `sys_finish_task` or loop limit).
+- [ToolManager] Confirmed that `run_tool_async` does not enforce an execution timeout, relying on agent-level loop limits or external cancellation.
+- [Sandbox] Fixed `PermissionError` in `sagents/utils/logger.py` when running tools in sandbox. Added try-except block to gracefully handle file logging failures in restricted environments, falling back to console logging.
 - [CLI] Fixed `unrecognized arguments` error in `fibre_cli.py` by wrapping global `argparse` execution in `mcp_servers/search/serper_search.py` with `if __name__ == "__main__":`.
 - [FibreAgent] Fixed `ValueError` in sandbox creation by updating `fibre_cli.py` to generate session IDs with hyphens instead of colons (e.g., `2026-02-05_10-28-17_bd8e`), avoiding invalid paths for `venv` creation.
 - [Observability] Fixed `TypeError: Object of type MessageChunk is not JSON serializable` in `opentelemetry_handler.py` by adding a custom JSON serializer that handles `dataclasses` and objects with `to_dict` methods.

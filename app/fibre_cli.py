@@ -8,6 +8,9 @@ import traceback
 import uuid
 from copy import deepcopy
 from typing import Any, Dict, Optional, Union
+import select
+import tty
+import termios
 
 from openai import AsyncOpenAI
 from rich.console import Console
@@ -58,6 +61,8 @@ async def chat(agent: FibreAgent, tool_manager: Union[ToolManager, ToolProxy], s
     console.print(f"[dim]当前session id: {session_id}[/dim]")
 
     messages = []
+    agent_task = None
+    monitor_task = None
     while True:
         try:
             user_input = console.input("[bold blue]你: [/bold blue]")
@@ -66,50 +71,132 @@ async def chat(agent: FibreAgent, tool_manager: Union[ToolManager, ToolProxy], s
                 break
 
             console.print("[magenta]FibreAgent:[/magenta]")
-            last_message_id = None
+            
+            # 添加用户输入到消息列表
             messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
-            all_chunks = []
-            current_message_box = None
+            
+            # 定义执行任务
+            async def run_agent_execution():
+                nonlocal messages
+                all_chunks = []
+                last_message_id = None
+                current_message_box = None
+                
+                try:
+                    # Call FibreAgent run_stream
+                    async for chunks in agent.run_stream(
+                        input_messages=messages,
+                        tool_manager=tool_manager,
+                        skill_manager=skill_manager,
+                        session_id=session_id,
+                        user_id=config.get('user_id'),
+                        system_context=config.get('system_context'),
+                        context_budget_config=context_budget_config,
+                        max_loop_count=config.get('max_loop_count', 10)
+                    ):
+                        for chunk in chunks:
+                            if isinstance(chunk, MessageChunk):
+                                all_chunks.append(deepcopy(chunk))
+                                try:
+                                    if chunk.message_id != last_message_id:
+                                        if current_message_box is not None:
+                                            current_message_box.finish()
 
-            # Call FibreAgent run_stream
-            async for chunks in agent.run_stream(
-                input_messages=messages,
-                tool_manager=tool_manager,
-                skill_manager=skill_manager,
-                session_id=session_id,
-                user_id=config.get('user_id'),
-                system_context=config.get('system_context'),
-                context_budget_config=context_budget_config,
-                max_loop_count=config.get('max_loop_count', 10)
-            ):
-                for chunk in chunks:
-                    if isinstance(chunk, MessageChunk):
-                        all_chunks.append(deepcopy(chunk))
+                                        if chunk.show_content and chunk.type:
+                                            message_type = chunk.type or chunk.message_type or 'normal'
+                                            current_message_box = StreamingMessageBox(console, message_type)
+
+                                        last_message_id = chunk.message_id
+                                except Exception:
+                                    print(chunk)
+
+                                if chunk.show_content and current_message_box:
+                                    content_to_print = str(chunk.show_content)
+                                    for char in content_to_print:
+                                        current_message_box.add_content(char)
+
+                    if current_message_box is not None:
+                        current_message_box.finish()
+
+                    console.print("")
+                    messages = MessageManager.merge_new_messages_to_old_messages(all_chunks, messages)
+                    
+                except asyncio.CancelledError:
+                    if current_message_box is not None:
+                        current_message_box.finish()
+                    # 即使被取消，也保存已经生成的消息
+                    if all_chunks:
+                        messages = MessageManager.merge_new_messages_to_old_messages(all_chunks, messages)
+                    raise
+
+            # 定义键盘监听任务
+            async def monitor_keyboard():
+                while True:
+                    # 检查 stdin 是否有输入，超时 0.1s
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
                         try:
-                            if chunk.message_id != last_message_id:
-                                if current_message_box is not None:
-                                    current_message_box.finish()
+                            key = sys.stdin.read(1)
+                            if key.lower() == 'q':
+                                return True
+                        except IOError:
+                            pass
+                    await asyncio.sleep(0.05)
 
-                                if chunk.show_content and chunk.type:
-                                    message_type = chunk.type or chunk.message_type or 'normal'
-                                    current_message_box = StreamingMessageBox(console, message_type)
-
-                                last_message_id = chunk.message_id
-                        except Exception:
-                            print(chunk)
-
-                        if chunk.show_content and current_message_box:
-                            content_to_print = str(chunk.show_content)
-                            for char in content_to_print:
-                                current_message_box.add_content(char)
-
-            if current_message_box is not None:
-                current_message_box.finish()
-
-            console.print("")
-            messages = MessageManager.merge_new_messages_to_old_messages(all_chunks, messages)
+            # 并发执行 Agent 和 键盘监听
+            # 使用 tty.setcbreak 允许单字符读取
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setcbreak(fd)
+                
+                agent_task = asyncio.create_task(run_agent_execution())
+                monitor_task = asyncio.create_task(monitor_keyboard())
+                
+                done, pending = await asyncio.wait(
+                    [agent_task, monitor_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                if monitor_task in done:
+                    # 用户按了 q
+                    console.print("\n[yellow]检测到中断请求 (Q)，正在停止...[/yellow]")
+                    agent_task.cancel()
+                    try:
+                        await agent_task
+                    except asyncio.CancelledError:
+                        pass
+                else:
+                    # Agent 执行完成
+                    monitor_task.cancel()
+                    try:
+                        await monitor_task
+                    except asyncio.CancelledError:
+                        pass
+                        
+            except Exception as e:
+                console.print(f"[red]执行出错: {e}[/red]")
+                traceback.print_exc()
+            finally:
+                # 恢复终端设置
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             
         except KeyboardInterrupt:
+            console.print("\n[yellow]检测到中断 (Ctrl+C)，正在停止...[/yellow]")
+            # 确保任务被取消并等待其清理完成（包括保存session）
+            if agent_task and not agent_task.done():
+                agent_task.cancel()
+                try:
+                    await agent_task
+                except asyncio.CancelledError:
+                    pass
+            
+            if monitor_task and not monitor_task.done():
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass
+
             console.print("[green]再见！[/green]")
             break
         except EOFError:

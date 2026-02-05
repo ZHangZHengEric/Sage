@@ -10,10 +10,11 @@ from sagents.skill import SkillManager, SkillProxy
 from sagents.fibre.orchestrator import FibreOrchestrator
 from sagents.context.user_memory import UserMemoryManager
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
+from sagents.agent.agent_base import AgentBase
 
 logger = logging.getLogger(__name__)
 
-class FibreAgent:
+class FibreAgent(AgentBase):
     """
     Fibre Agent Container
     
@@ -23,9 +24,7 @@ class FibreAgent:
     """
 
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = "", workspace: str = "/tmp/sage", memory_type: str = "session", enable_obs: bool = True):
-        self.model = model
-        self.model_config = model_config
-        self.system_prefix = system_prefix
+        super().__init__(model, model_config, system_prefix)
         self.workspace = workspace
         
         # User Memory (similar to SAgent)

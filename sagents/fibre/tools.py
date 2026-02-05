@@ -42,22 +42,22 @@ class FibreTools:
         return f"Agent spawned successfully. ID: {agent_id}. Ready to receive messages."
 
     @tool(
-        description_i18n={"zh": "向已存在的子智能体发送消息。"},
+        description_i18n={"zh": "给子agent 分配任务并执行"},
         param_description_i18n={
             "agent_id": {"zh": "由 sys_spawn_agent 返回的智能体 ID"},
-            "content": {"zh": "消息内容"}
+            "content": {"zh": "任务内容"}
         }
     )
-    async def sys_send_message(self, agent_id: str, content: str) -> str:
+    async def sys_delegate_task(self, agent_id: str, content: str) -> str:
         """
-        Send a message to an existing sub-agent.
+        Delegate a task to an existing sub-agent and wait for the result.
 
         Args:
             agent_id: The agent ID returned by sys_spawn_agent
-            content: The message content
+            content: The task description or message content
         """
-        logger.info(f"Tool Call: sys_send_message(to={agent_id})")
-        response = await self.orchestrator.send_message(agent_id, content)
+        logger.info(f"Tool Call: sys_delegate_task(to={agent_id})")
+        response = await self.orchestrator.delegate_task(agent_id, content)
         return response
 
     @tool(
