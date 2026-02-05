@@ -347,9 +347,7 @@ const handleImport = async () => {
     selectedFile.value = null
     importUrl.value = ''
     if (fileInput.value) fileInput.value.value = ''
-    toast.success(t('common.success'), {
-      description: t('skills.importSuccess') || 'Skill imported successfully',
-    })
+    toast.success(t('skills.importSuccess'))
   } catch (error) {
     console.error('Import failed:', error)
     importError.value = error.message || 'Import failed'
