@@ -228,21 +228,15 @@ class FibreOrchestrator:
             task_result = None
 
             try:
-                last_response_content = ""
+                accumulated_session_content = []
                 
                 # Stream the response
                 async for chunks in sub_agent.process_message(content):
                     # Aggregate text and check for sys_finish_task
                     for chunk in chunks:
-                        if chunk.role == MessageRole.ASSISTANT.value and chunk.content:
-                             # Keep track of the latest content for fallback/error reporting, but don't accumulate full history
-                             # We append to a temporary buffer that resets when we detect a new "turn" or just keep a rolling window?
-                             # For simplicity and to satisfy the requirement "absolutely no full response_text", 
-                             # we just update it. Note: chunks are fragments. We might want to accumulate just the *current* message.
-                             # But since we don't want full history, let's just keep the last 1000 chars of the stream as context.
-                             last_response_content += chunk.content
-                             if len(last_response_content) > 1000:
-                                 last_response_content = last_response_content[-1000:]
+                        # Only collect content from the direct sub-agent's session, ignoring nested sub-sessions
+                        if chunk.session_id == sub_agent.session_id and chunk.role == MessageRole.ASSISTANT.value and chunk.content:
+                             accumulated_session_content.append(chunk.content)
                         
                         # Check for tool calls to sys_finish_task
                         if chunk.tool_calls:
@@ -267,8 +261,8 @@ class FibreOrchestrator:
             if task_result:
                 return task_result
             
-            # If not, return an error message with the last snippet of context.
-            # This prevents token explosion while providing some debug info.
-            return f"Error: Sub-agent finished execution WITHOUT calling 'sys_finish_task'. Please check the agent's logic. Last output snippet: ...{last_response_content}"
+            # If sub-agent finished without calling sys_finish_task, return the aggregated content from its session
+            full_response = "".join(accumulated_session_content)
+            return f"Sub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{full_response}"
             
         return f"Error: Agent {agent_id} not found."
