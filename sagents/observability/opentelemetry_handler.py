@@ -3,6 +3,7 @@ import contextvars
 import json
 import random
 import hashlib
+import dataclasses
 from opentelemetry import trace, context
 from opentelemetry.trace import Status, StatusCode
 
@@ -143,7 +144,16 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         try:
             if isinstance(input_data, (dict, list)):
-                input_str = json.dumps(input_data, ensure_ascii=False)
+                def default_serializer(obj):
+                    if dataclasses.is_dataclass(obj):
+                        return dataclasses.asdict(obj)
+                    if hasattr(obj, 'to_dict'):
+                        return obj.to_dict()
+                    if hasattr(obj, '__dict__'):
+                        return obj.__dict__
+                    return str(obj)
+                    
+                input_str = json.dumps(input_data, ensure_ascii=False, default=default_serializer)
             else:
                 input_str = str(input_data)
             span.set_attribute("input", input_str)
@@ -160,7 +170,16 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         try:
             if isinstance(output_data, (dict, list)):
-                output_str = json.dumps(output_data, ensure_ascii=False)
+                def default_serializer(obj):
+                    if dataclasses.is_dataclass(obj):
+                        return dataclasses.asdict(obj)
+                    if hasattr(obj, 'to_dict'):
+                        return obj.to_dict()
+                    if hasattr(obj, '__dict__'):
+                        return obj.__dict__
+                    return str(obj)
+
+                output_str = json.dumps(output_data, ensure_ascii=False, default=default_serializer)
             else:
                 output_str = str(output_data)
             span.set_attribute("output", str(output_str))
