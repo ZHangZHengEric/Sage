@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -25,7 +26,12 @@ from sagents.utils.logger import logger
 from sagents.utils.streaming_message_box import (
     StreamingMessageBox,
     display_items_in_columns,
+    get_message_type_style
 )
+from rich.live import Live
+from rich.panel import Panel
+from rich.console import Group
+from rich import box
 
 
 def display_tools(console, tool_manager: Union[ToolManager, ToolProxy]):
@@ -79,54 +85,132 @@ async def chat(agent: FibreAgent, tool_manager: Union[ToolManager, ToolProxy], s
             async def run_agent_execution():
                 nonlocal messages
                 all_chunks = []
-                last_message_id = None
-                current_message_box = None
                 
+                # 用于 Live Display 的状态管理
+                # active_states: agent_name -> {'id': str, 'type': str, 'content': str}
+                active_states = {}
+                
+                def generate_live_view():
+                    panels = []
+                    # 按名称排序，保证显示顺序稳定
+                    for name in sorted(active_states.keys()):
+                        state = active_states[name]
+                        color, label = get_message_type_style(state['type'])
+                        
+                        display_label = f"{label} | {name}"
+                        
+                        # 截取最后20行内容用于显示，避免刷屏
+                        content = state['content']
+                        lines = content.split('\n')
+                        if len(lines) > 20:
+                            content = "...\n" + "\n".join(lines[-20:])
+                        
+                        panels.append(Panel(
+                            content,
+                            title=display_label,
+                            border_style=color,
+                            box=box.ROUNDED,
+                            padding=(0, 1)
+                        ))
+                    return Group(*panels)
+
                 try:
-                    # Call FibreAgent run_stream
-                    async for chunks in agent.run_stream(
-                        input_messages=messages,
-                        tool_manager=tool_manager,
-                        skill_manager=skill_manager,
-                        session_id=session_id,
-                        user_id=config.get('user_id'),
-                        system_context=config.get('system_context'),
-                        context_budget_config=context_budget_config,
-                        max_loop_count=config.get('max_loop_count', 10)
-                    ):
-                        for chunk in chunks:
-                            if isinstance(chunk, MessageChunk):
-                                all_chunks.append(deepcopy(chunk))
-                                try:
-                                    if chunk.message_id != last_message_id:
-                                        if current_message_box is not None:
-                                            current_message_box.finish()
-
+                    # 使用 Live 上下文管理器接管屏幕输出
+                    # 关闭 auto_refresh，手动控制刷新以保证实时性
+                    with Live(generate_live_view(), console=console, auto_refresh=False, vertical_overflow="visible") as live:
+                        # Call FibreAgent run_stream
+                        async for chunks in agent.run_stream(
+                            input_messages=messages,
+                            tool_manager=tool_manager,
+                            skill_manager=skill_manager,
+                            session_id=session_id,
+                            user_id=config.get('user_id'),
+                            system_context=config.get('system_context'),
+                            context_budget_config=context_budget_config,
+                            max_loop_count=config.get('max_loop_count', 10)
+                        ):
+                            for chunk in chunks:
+                                if isinstance(chunk, MessageChunk):
+                                    all_chunks.append(deepcopy(chunk))
+                                    try:
                                         if chunk.show_content and chunk.type:
-                                            message_type = chunk.type or chunk.message_type or 'normal'
-                                            current_message_box = StreamingMessageBox(console, message_type)
+                                            agent_name = chunk.agent_name or "FibreAgent"
+                                            
+                                            # 初始化该 agent 的状态
+                                            if agent_name not in active_states:
+                                                active_states[agent_name] = {
+                                                    'id': chunk.message_id,
+                                                    'type': chunk.type or chunk.message_type or 'normal',
+                                                    'content': ''
+                                                }
+                                            
+                                            state = active_states[agent_name]
+                                            
+                                            # 如果 message_id 变化，说明上一条消息结束了
+                                            if state['id'] != chunk.message_id:
+                                                # 1. 将上一条消息作为静态 Panel 打印到控制台（Live 区域上方）
+                                                if state['content']:
+                                                    color, label = get_message_type_style(state['type'])
+                                                    display_label = f"{label} | {agent_name}"
+                                                    static_panel = Panel(
+                                                        state['content'],
+                                                        title=display_label,
+                                                        border_style=color,
+                                                        box=box.ROUNDED,
+                                                        padding=(0, 1)
+                                                    )
+                                                    live.console.print(static_panel)
+                                                
+                                                # 2. 重置状态为新消息
+                                                state['id'] = chunk.message_id
+                                                state['type'] = chunk.type or chunk.message_type or 'normal'
+                                                state['content'] = ""
+                                            
+                                            # 追加新内容
+                                            content_to_add = str(chunk.show_content)
+                                            state['content'] += content_to_add
+                                            
+                                            # 3. 更新 Live 视图并强制刷新
+                                            live.update(generate_live_view(), refresh=True)
+                                            
+                                    except Exception:
+                                        # 避免打印出错影响流程，改为记录日志或忽略
+                                        # print(chunk) 
+                                        pass
 
-                                        last_message_id = chunk.message_id
-                                except Exception:
-                                    print(chunk)
-
-                                if chunk.show_content and current_message_box:
-                                    content_to_print = str(chunk.show_content)
-                                    for char in content_to_print:
-                                        current_message_box.add_content(char)
-
-                    if current_message_box is not None:
-                        current_message_box.finish()
-
+                        # 循环结束后，将所有剩余的活跃消息打印出来
+                        for name in sorted(active_states.keys()):
+                            state = active_states[name]
+                            if state['content']:
+                                color, label = get_message_type_style(state['type'])
+                                display_label = f"{label} | {name}"
+                                final_panel = Panel(
+                                    state['content'],
+                                    title=display_label,
+                                    border_style=color,
+                                    box=box.ROUNDED,
+                                    padding=(0, 1)
+                                )
+                                live.console.print(final_panel)
+                    
                     console.print("")
-                    messages = MessageManager.merge_new_messages_to_old_messages(all_chunks, messages)
+                    
+                    # 过滤掉非当前session的消息（例如子agent的消息），避免污染主session历史
+                    main_session_chunks = [
+                        c for c in all_chunks 
+                        if c.session_id == session_id or c.session_id is None
+                    ]
+                    messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
                     
                 except asyncio.CancelledError:
-                    if current_message_box is not None:
-                        current_message_box.finish()
                     # 即使被取消，也保存已经生成的消息
                     if all_chunks:
-                        messages = MessageManager.merge_new_messages_to_old_messages(all_chunks, messages)
+                        # 过滤掉非当前session的消息
+                        main_session_chunks = [
+                            c for c in all_chunks 
+                            if c.session_id == session_id or c.session_id is None
+                        ]
+                        messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
                     raise
 
             # 定义键盘监听任务
@@ -236,6 +320,7 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'), help="MCP 设置文件路径")
     parser.add_argument('--preset_running_agent_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_agent_config.json'), help="预设运行配置文件路径")
     parser.add_argument('--memory_type', type=str, default='session', help='记忆类型 (session/user)')
+    parser.add_argument('--no_terminal_log', action='store_true', help='停止终端打印log')
 
     args = parser.parse_args()
 
@@ -268,6 +353,7 @@ def parse_arguments() -> Dict[str, Any]:
         'context_max_new_message_ratio': args.context_max_new_message_ratio,
         'context_recent_turns': args.context_recent_turns,
         'memory_type': args.memory_type,
+        'no_terminal_log': args.no_terminal_log,
     }
     return config
 
@@ -276,6 +362,33 @@ if __name__ == '__main__':
     config = parse_arguments()
 
     async def main_async():
+        # 如果配置了禁止终端日志，移除console handler
+        if config.get('no_terminal_log'):
+            # 移除 sage logger 的 handler
+            for handler in logger.logger.handlers[:]:
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    logger.logger.removeHandler(handler)
+            
+            # 移除 root logger 的 handler，防止其他库（如 httpx, rich 等）输出日志
+            root_logger = logging.getLogger()
+            for handler in root_logger.handlers[:]:
+                # 移除所有非文件handler
+                if not isinstance(handler, logging.FileHandler):
+                    root_logger.removeHandler(handler)
+            
+            # 强制设置 noisy loggers 为 WARNING 级别
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("httpcore").setLevel(logging.WARNING)
+            logging.getLogger("openai").setLevel(logging.WARNING)
+            
+            # 针对 sagents 内部模块设置 ERROR 级别，屏蔽 INFO 级别的工具调用和编排日志
+            logging.getLogger("sagents").setLevel(logging.ERROR)
+            logging.getLogger("sagents.fibre.tools").setLevel(logging.ERROR)
+            logging.getLogger("sagents.fibre.orchestrator").setLevel(logging.ERROR)
+            
+            # 防止其他未命名logger传播到root (虽然这可能比较激进，但对于CLI工具是合理的)
+            # logging.getLogger().setLevel(logging.WARNING) # 这会影响所有logger，可能太强了
+
         tool_manager = ToolManager()
         await tool_manager._discover_mcp_tools(config['mcp_setting_path'])
         if config['available_tools']:
