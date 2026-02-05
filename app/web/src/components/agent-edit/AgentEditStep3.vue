@@ -1,13 +1,5 @@
 <template>
   <div class="space-y-6">
-    <div class="flex justify-end gap-2 mb-2">
-      <Button variant="outline" size="sm" @click="restoreDefaults">
-        {{ t('common.reset') }}
-      </Button>
-      <Button variant="ghost" size="sm" @click="collapseAll">
-        {{ t('common.collapseAll') }}
-      </Button>
-    </div>
 
     <!-- Strategy Settings -->
     <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
@@ -135,32 +127,6 @@ const sections = reactive({
 
 const toggleSection = (key) => {
   sections[key] = !sections[key]
-}
-
-const collapseAll = () => {
-  sections.strategy = true
-  sections.llm = true
-}
-
-const restoreDefaults = () => {
-  // Logic to restore defaults for Step 3 fields only? 
-  // Or reset the whole form? 
-  // Requirement says "Restore Defaults" in Step 3. I'll assume it resets Step 3 fields.
-  store.formData.memoryType = "session"
-  store.formData.deepThinking = null
-  store.formData.multiAgent = null
-  store.formData.moreSuggest = false
-  store.formData.maxLoopCount = 10
-  store.formData.llmConfig = {
-    apiKey: '',
-    baseUrl: '',
-    model: '',
-    maxTokens: 4096,
-    temperature: 0.2,
-    topP: 0.9,
-    presencePenalty: 0.0,
-    maxModelLen: 54000
-  }
 }
 
 // Helpers

@@ -1,183 +1,269 @@
 <template>
-  <div class="container py-6 space-y-6 max-w-7xl mx-auto min-h-screen">
-    <!-- Header -->
-    <div class="flex flex-col space-y-2">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-           <Button variant="ghost" size="icon" @click="goBack" class="mr-2 -ml-2">
-             <ArrowLeft class="h-4 w-4" />
-           </Button>
-           <h2 class="text-2xl font-bold tracking-tight">{{ kbInfo.name || 'Knowledge Base' }}</h2>
+  <div class="min-h-screen bg-background pb-10">
+    <!-- Header Section with Breadcrumb and Actions -->
+    <div class="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+      <div class="container max-w-7xl mx-auto py-4 px-4 md:px-6">
+        <div class="flex flex-col space-y-4">
+
+          <!-- Title and Stats -->
+          <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+            <div class="flex items-start gap-4">
+              <div class="p-3 rounded-xl bg-primary/10 text-primary shrink-0">
+                <BookOpen v-if="kbInfo.dataSource === 'document'" class="h-5 w-5" />
+                <MessageSquare v-else-if="kbInfo.dataSource === 'qa'" class="h-5 w-5" />
+                <Code v-else-if="kbInfo.dataSource === 'code'" class="h-5 w-5" />
+                <Layers v-else class="h-5 w-5" />
+              </div>
+              <div class="space-y-1">
+                <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground">{{ kbInfo.name || 'Loading...' }}</h1>
+                <p class="text-muted-foreground text-sm md:text-base max-w-xl leading-relaxed">
+                  {{ kbInfo.intro || t('knowledgeBase.noDescription') }}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <p class="text-muted-foreground ml-10">{{ kbInfo.intro || t('knowledgeBase.noDescription') }}</p>
     </div>
 
-    <Tabs v-model="activeTab" class="w-full">
-      <TabsList class="grid w-full grid-cols-3 max-w-[400px]">
-        <TabsTrigger value="documents">{{ t('knowledgeBase.documents') }}</TabsTrigger>
-        <TabsTrigger value="recall">召回测试</TabsTrigger>
-        <TabsTrigger value="settings">设置</TabsTrigger>
-      </TabsList>
-      
-      <!-- Documents Tab -->
-      <TabsContent value="documents" class="space-y-4 mt-6">
-        <div class="flex items-center justify-between gap-4 flex-wrap">
-          <div class="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm">
-            <Input 
-              v-model="docQueryName" 
-              placeholder="搜索文档..." 
-              class="h-9"
-              @keyup.enter="loadDocs"
-            />
-            <Button size="sm" @click="loadDocs" :disabled="docLoading">查询</Button>
-          </div>
-          
-          <div class="flex items-center gap-2">
-             <input ref="fileInputRef" type="file" multiple style="display:none" @change="onFileChange"
-              accept=".doc,.docx,.pdf,.txt,.json,.eml,.ppt,.pptx,.xlsx,.xls,.csv,.md" />
-             <Button v-if="canEdit" size="sm" @click="triggerSelectFiles" :disabled="docLoading">
-               <Upload class="mr-2 h-4 w-4" />
-               上传文件
-             </Button>
-          </div>
-        </div>
-
-        <div class="rounded-md border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>名称</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>创建时间</TableHead>
-                <TableHead class="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="d in docList" :key="d.id">
-                <TableCell class="font-medium">{{ d.doc_name }}</TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-2" :title="statusText(d.status)">
-                    <Clock v-if="d.status === 0" class="h-4 w-4 text-muted-foreground" />
-                    <Loader v-else-if="d.status === 1" class="h-4 w-4 text-primary animate-spin" />
-                    <CheckCircle2 v-else-if="d.status === 2" class="h-4 w-4 text-green-500" />
-                    <XCircle v-else-if="d.status === 3" class="h-4 w-4 text-destructive" />
-                    <span class="text-sm text-muted-foreground">{{ statusText(d.status) }}</span>
-                  </div>
-                </TableCell>
-                <TableCell>{{ formatTime(d.create_time) }}</TableCell>
-                <TableCell class="text-right">
-                  <div class="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" class="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10" @click="redoDoc(d)" title="重做">
-                      <RotateCcw class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" @click="deleteDoc(d)" title="删除">
-                      <Trash2 class="h-4 w-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="docList.length === 0">
-                 <TableCell colspan="4" class="h-32 text-center text-muted-foreground">
-                   暂无文档
-                 </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-
-        <!-- Pagination -->
-        <div class="flex items-center justify-end space-x-2 py-4">
-           <div class="text-sm text-muted-foreground mr-4">
-             {{ t('common.total') }}: {{ docTotal }}
-           </div>
-           <Button
-            variant="outline"
-            size="sm"
-            :disabled="docPageNo <= 1 || docLoading"
-            @click="prevPage"
+    <div class="container max-w-7xl mx-auto py-8 px-4 md:px-6">
+      <Tabs v-model="activeTab" class="w-full space-y-6">
+        <TabsList class="h-12 w-full justify-start rounded-lg bg-muted/50 p-1">
+          <TabsTrigger 
+            value="documents" 
+            class="h-full px-6 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all"
           >
-            上一页
-          </Button>
-          <div class="text-sm font-medium w-16 text-center">
-             {{ docPageNo }} / {{ totalPages }}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="docPageNo >= totalPages || docLoading"
-            @click="nextPage"
+            <FileText class="mr-2 h-4 w-4" />
+            {{ t('knowledgeBase.documents') }}
+          </TabsTrigger>
+          <TabsTrigger 
+            value="recall"
+            class="h-full px-6 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all"
           >
-            下一页
-          </Button>
-        </div>
-      </TabsContent>
-      
-      <!-- Recall Tab -->
-      <TabsContent value="recall" class="space-y-6 mt-6">
-        <div class="flex gap-4">
-           <Input v-model="recallQuery" placeholder="输入问题或关键词进行召回测试..." class="max-w-xl" @keyup.enter="runRecall" />
-           <Button @click="runRecall" :disabled="recallLoading">
-             <Search class="mr-2 h-4 w-4" />
-             查询
-           </Button>
-        </div>
-
-        <div class="space-y-4">
-           <Card v-for="r in recallResults" :key="makeRecallKey(r)" class="overflow-hidden">
-             <CardHeader class="pb-2 bg-muted/20">
-               <div class="flex justify-between items-start">
-                 <CardTitle class="text-base font-medium truncate pr-4">{{ r.title }}</CardTitle>
-                 <Badge variant="outline" class="bg-background">Score: {{ (r.score ?? 0).toFixed(4) }}</Badge>
-               </div>
-             </CardHeader>
-             <CardContent class="pt-4">
-               <div class="prose prose-sm dark:prose-invert max-w-none">
-                 <MarkdownRenderer :content="r.doc_content" />
-               </div>
-             </CardContent>
-           </Card>
-           
-           <div v-if="recallResults.length === 0 && !recallLoading" class="text-center py-12 text-muted-foreground bg-muted/10 rounded-lg border border-dashed">
-             暂无召回结果，请尝试搜索
-           </div>
-        </div>
-      </TabsContent>
-
-      <!-- Settings Tab -->
-      <TabsContent value="settings" class="mt-6" v-if="canEdit">
-        <Card>
-          <CardHeader>
-            <CardTitle>知识库设置</CardTitle>
-            <CardDescription>管理知识库的基本信息</CardDescription>
-          </CardHeader>
-          <CardContent class="space-y-4">
-            <div class="grid gap-2">
-              <Label for="kb-name">{{ t('knowledgeBase.name') }}</Label>
-              <Input id="kb-name" v-model="editForm.name" />
+            <Search class="mr-2 h-4 w-4" />
+            {{ t('knowledgeBase.recallTest') }}
+          </TabsTrigger>
+          <TabsTrigger 
+            value="settings"
+            class="h-full px-6 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all"
+            v-if="canEdit"
+          >
+            <Settings class="mr-2 h-4 w-4" />
+            {{ t('knowledgeBase.settings') }}
+          </TabsTrigger>
+        </TabsList>
+        
+        <!-- Documents Tab -->
+        <TabsContent value="documents" class="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-4 bg-card p-1 rounded-lg">
+            <div class="relative w-full sm:w-72">
+              <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input 
+                v-model="docQueryName" 
+                :placeholder="t('knowledgeBase.searchDocs')" 
+                class="pl-9 h-10 bg-background border-muted hover:border-primary/50 transition-colors"
+                @keyup.enter="loadDocs"
+              />
             </div>
-            <div class="grid gap-2">
-              <Label for="kb-intro">{{ t('knowledgeBase.description') }}</Label>
-              <Textarea id="kb-intro" v-model="editForm.intro" rows="4" />
+            
+            <div class="flex items-center gap-3 w-full sm:w-auto">
+               <input ref="fileInputRef" type="file" multiple style="display:none" @change="onFileChange"
+                accept=".doc,.docx,.pdf,.txt,.json,.eml,.ppt,.pptx,.xlsx,.xls,.csv,.md" />
+               <Button v-if="canEdit" size="default" @click="triggerSelectFiles" :disabled="docLoading" class="w-full sm:w-auto shadow-sm">
+                 <Upload class="mr-2 h-4 w-4" />
+                 {{ t('knowledgeBase.uploadFile') }}
+               </Button>
             </div>
-          </CardContent>
-          <CardFooter class="flex justify-between border-t bg-muted/20 pt-4">
-            <Button variant="destructive" @click="confirmDelete" :disabled="saving">
-               {{ t('common.delete') }}
-            </Button>
-            <Button @click="saveSettings" :disabled="saving">
-              {{ saving ? '保存中...' : t('common.save') }}
-            </Button>
-          </CardFooter>
-        </Card>
-      </TabsContent>
-    </Tabs>
+          </div>
+
+          <div class="rounded-xl border bg-card shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader class="bg-muted/30">
+                <TableRow class="hover:bg-transparent">
+                  <TableHead class="w-[400px] pl-6 h-12">{{ t('knowledgeBase.docName') }}</TableHead>
+                  <TableHead class="h-12">{{ t('knowledgeBase.docStatus') }}</TableHead>
+                  <TableHead class="h-12">{{ t('knowledgeBase.docCreatedAt') }}</TableHead>
+                  <TableHead class="text-right pr-6 h-12">{{ t('common.actions') }}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="d in docList" :key="d.id" class="group hover:bg-muted/30 transition-colors">
+                  <TableCell class="font-medium pl-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="p-2.5 rounded-lg bg-primary/5 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300">
+                        <FileText class="h-4 w-4" />
+                      </div>
+                      <span class="truncate max-w-[300px] font-medium text-foreground" :title="d.doc_name">{{ d.doc_name }}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge :variant="getStatusVariant(d.status)" class="flex w-fit items-center gap-1.5 px-2.5 py-0.5 font-normal transition-colors">
+                      <component :is="getStatusIcon(d.status)" class="h-3.5 w-3.5" :class="{'animate-spin': d.status === 1}" />
+                      <span>{{ statusText(d.status) }}</span>
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-muted-foreground text-sm">{{ formatTime(d.create_time) }}</TableCell>
+                  <TableCell class="text-right pr-6">
+                    <div class="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                      <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10" @click="redoDoc(d)" :title="t('knowledgeBase.redo')">
+                        <RotateCcw class="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" @click="deleteDoc(d)" :title="t('common.delete')">
+                        <Trash2 class="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+                <TableRow v-if="docList.length === 0 && !docLoading">
+                   <TableCell colspan="4" class="h-64 text-center">
+                     <div class="flex flex-col items-center justify-center text-muted-foreground/50">
+                       <div class="p-4 rounded-full bg-muted/50 mb-4">
+                         <FileText class="h-8 w-8" />
+                       </div>
+                       <span class="text-lg font-medium text-foreground/80 mb-1">{{ t('knowledgeBase.noDocs') }}</span>
+                       <span class="text-sm">{{ t('knowledgeBase.noDocsDesc') }}</span>
+                     </div>
+                   </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+
+          <!-- Pagination -->
+          <div class="flex items-center justify-between py-4" v-if="docTotal > 0">
+             <div class="text-sm text-muted-foreground">
+               {{ t('knowledgeBase.totalDocuments', { n: docTotal }) }}
+             </div>
+             <div class="flex items-center space-x-2">
+               <Button
+                variant="outline"
+                size="sm"
+                :disabled="docPageNo <= 1 || docLoading"
+                @click="prevPage"
+                class="h-8 w-8 p-0"
+              >
+                <ChevronLeft class="h-4 w-4" />
+              </Button>
+              <div class="text-sm font-medium min-w-[3rem] text-center">
+                 {{ docPageNo }} / {{ totalPages }}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="docPageNo >= totalPages || docLoading"
+                @click="nextPage"
+                class="h-8 w-8 p-0"
+              >
+                <ChevronRight class="h-4 w-4" />
+              </Button>
+             </div>
+          </div>
+        </TabsContent>
+        
+        <!-- Recall Tab -->
+        <TabsContent value="recall" class="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div class="flex flex-col space-y-2 bg-card p-4 rounded-lg border border-muted/60 shadow-sm">
+             <div class="flex flex-col sm:flex-row w-full gap-3">
+               <div class="relative flex-1">
+                 <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                 <Input 
+                   v-model="recallQuery" 
+                   :placeholder="t('knowledgeBase.recallPlaceholder')" 
+                   class="pl-9 h-10 bg-background" 
+                   @keyup.enter="runRecall" 
+                 />
+               </div>
+               <Button @click="runRecall" :disabled="recallLoading" class="h-10 px-6">
+                 <Search class="mr-2 h-4 w-4" />
+                 {{ t('knowledgeBase.recallQuery') }}
+               </Button>
+             </div>
+             <p class="text-xs text-muted-foreground px-1">{{ t('knowledgeBase.recallTestDesc') }}</p>
+          </div>
+
+          <div v-if="recallResults.length > 0" class="flex flex-col max-h-[calc(100vh-320px)] min-h-[200px] mt-4">
+             <div class="flex items-center justify-between pb-2 border-b shrink-0 mb-4 mr-2">
+               <span class="text-sm font-medium flex items-center gap-2">
+                 <Search class="h-4 w-4 text-primary" />
+                 {{ t('knowledgeBase.recallResults') }} ({{ recallResults.length }})
+               </span>
+             </div>
+             
+             <div class="overflow-y-auto pr-2 space-y-4 pb-4 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent flex-1">
+               <Card v-for="(r, i) in recallResults" :key="makeRecallKey(r)" class="border-muted/60 transition-all hover:shadow-md group">
+                 <CardHeader class="pb-3 bg-muted/10 pt-4 border-b border-muted/40">
+                   <div class="flex justify-between items-start gap-4">
+                     <div class="space-y-1.5">
+                       <CardTitle class="text-base font-semibold text-foreground flex items-center gap-3">
+                         <span class="bg-primary text-primary-foreground w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold shadow-sm">{{ i + 1 }}</span>
+                         <span class="line-clamp-1">{{ r.title }}</span>
+                       </CardTitle>
+                       <div class="flex items-center gap-2 pl-9">
+                          <Badge variant="outline" class="text-[10px] h-5 px-1.5 text-muted-foreground bg-background/50">Doc ID: {{ r.doc_id }}</Badge>
+                       </div>
+                     </div>
+                     <Badge :variant="getScoreVariant(r.score)" class="shrink-0 text-xs font-medium px-2.5 py-0.5 shadow-sm">
+                       Score: {{ (r.score ?? 0).toFixed(4) }}
+                     </Badge>
+                   </div>
+                 </CardHeader>
+                 <CardContent class="pt-4 pl-4 md:pl-12 pr-4 md:pr-8">
+                   <div class=" overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent prose prose-sm dark:prose-invert max-w-none text-muted-foreground/90 bg-muted/30 p-4 rounded-lg border border-muted/50 leading-relaxed group-hover:bg-muted/50 transition-colors">
+                     <MarkdownRenderer :content="r.doc_content" />
+                   </div>
+                 </CardContent>
+               </Card>
+             </div>
+          </div>
+             
+          <div v-else-if="!recallLoading && recallQuery" class="text-center py-16">
+            <div class="bg-muted/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Search class="h-8 w-8 text-muted-foreground/40" />
+            </div>
+            <h3 class="text-lg font-medium text-foreground">{{ t('knowledgeBase.noRecallResults') }}</h3>
+            <p class="text-muted-foreground text-sm mt-1">{{ t('knowledgeBase.noRecallResultsDesc') }}</p>
+          </div>
+        </TabsContent>
+
+        <!-- Settings Tab -->
+        <TabsContent value="settings" v-if="canEdit" class="animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div class="max-w-3xl mx-auto py-4">
+            <Card class="border-muted/60 shadow-sm">
+              <CardHeader class="border-b bg-muted/10 pb-6">
+                <CardTitle class="text-xl">{{ t('knowledgeBase.settings') }}</CardTitle>
+                <CardDescription>{{ t('knowledgeBase.settingsDesc') }}</CardDescription>
+              </CardHeader>
+              <CardContent class="space-y-6 pt-8">
+                <div class="grid gap-3">
+                  <Label for="kb-name" class="text-base">{{ t('knowledgeBase.name') }}</Label>
+                  <Input id="kb-name" v-model="editForm.name" class="h-11" />
+                </div>
+                <div class="grid gap-3">
+                  <Label for="kb-intro" class="text-base">{{ t('knowledgeBase.description') }}</Label>
+                  <Textarea id="kb-intro" v-model="editForm.intro" rows="6" class="resize-none" />
+                  <p class="text-xs text-muted-foreground">{{ t('knowledgeBase.descriptionHint') }}</p>
+                </div>
+              </CardContent>
+              <CardFooter class="flex justify-between border-t bg-muted/10 py-4 px-6 mt-6">
+                <Button variant="ghost" class="text-destructive hover:text-destructive hover:bg-destructive/10" @click="confirmDelete" :disabled="saving">
+                   <Trash2 class="mr-2 h-4 w-4" />
+                   {{ t('common.delete') }}
+                </Button>
+                <Button @click="saveSettings" :disabled="saving" class="min-w-[100px]">
+                  {{ saving ? t('knowledgeBase.status.processing') : t('common.save') }}
+                </Button>
+              </CardFooter>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { Trash2, RotateCcw, Clock, Loader, CheckCircle2, XCircle, ArrowLeft, Upload, Search } from 'lucide-vue-next'
+import { Trash2, RotateCcw, Clock, Loader, CheckCircle2, XCircle, ArrowLeft, Upload, Search, ChevronRight, BookOpen, MessageSquare, Code, Layers, FileText, Settings, ChevronLeft, AlertCircle } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
@@ -302,7 +388,7 @@ const onFileChange = (e) => {
     return allowedExts.value.includes(ext)
   })
   if (filtered.length !== fl.length) {
-    window.alert('仅支持上传以下文件类型：' + allowedExts.value.join(', '))
+    window.alert(t('knowledgeBase.fileTypeWarning') + ' ' + allowedExts.value.join(', '))
   }
   selectedFiles.value = filtered
   if (selectedFiles.value.length) {
@@ -362,6 +448,15 @@ const totalPages = computed(() => {
   return Math.max(1, Math.ceil(docTotal.value / docPageSize.value))
 })
 
+const formatDate = (iso) => {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleDateString()
+  } catch (e) {
+    return iso
+  }
+}
+
 const formatTime = (iso) => {
   try {
     return new Date(iso).toLocaleString()
@@ -384,29 +479,23 @@ const runRecall = async () => {
 }
 
 const makeRecallKey = (r) => `${r.doc_id || ''}-${r.doc_segment_id || ''}-${r.start || 0}-${r.end || 0}`
-const isRecallExpanded = (r) => !!recallExpandedMap.value[makeRecallKey(r)]
-const toggleRecall = (r) => {
-  const k = makeRecallKey(r)
-  recallExpandedMap.value[k] = !recallExpandedMap.value[k]
-}
 
-const buildExpanded = (r) => {
-  const text = r.full_content || ''
-  return highlightWindow(text, r.start, r.end, text.length, text.length)
-}
-
-const highlightWindow = (text, start, end, before = 120, after = 160) => {
-  if (!text) return ''
-  if (typeof start !== 'number' || typeof end !== 'number') {
-    return text
+const getStatusVariant = (s) => {
+  switch (s) {
+    case 1: return 'secondary' // Processing
+    case 2: return 'default' // Success (green-ish usually, but default is dark)
+    case 3: return 'destructive' // Failed
+    default: return 'outline' // Pending
   }
-  const s = Math.max(0, Math.min(start, text.length))
-  const e = Math.max(s, Math.min(end, text.length))
-  const preStart = Math.max(0, s - before)
-  const postEnd = Math.min(text.length, e + after)
-  const prefixEllipsis = preStart > 0 ? '…' : ''
-  const suffixEllipsis = postEnd < text.length ? '…' : ''
-  return `${prefixEllipsis}${text.slice(preStart, s)}<span class="recall-highlight">${text.slice(s, e)}</span>${text.slice(e, postEnd)}${suffixEllipsis}`
+}
+
+const getStatusIcon = (s) => {
+  switch (s) {
+    case 1: return Loader
+    case 2: return CheckCircle2
+    case 3: return AlertCircle
+    default: return Clock
+  }
 }
 
 const statusText = (s) => {
@@ -415,7 +504,19 @@ const statusText = (s) => {
     case 1: return t('knowledgeBase.status.processing')
     case 2: return t('knowledgeBase.status.success')
     case 3: return t('knowledgeBase.status.failed')
-    default: return `${s}`
+    default: return t('knowledgeBase.status.unknown')
   }
 }
+
+const getScoreVariant = (score) => {
+  if (score > 0.8) return 'default'
+  if (score > 0.6) return 'secondary'
+  return 'outline'
+}
 </script>
+
+<style scoped>
+:deep(.recall-highlight) {
+  @apply bg-yellow-200 dark:bg-yellow-900/50 text-foreground rounded px-0.5;
+}
+</style>
