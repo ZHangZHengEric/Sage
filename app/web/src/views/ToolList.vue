@@ -1,139 +1,187 @@
 <template>
-  <div class="h-screen w-full bg-background p-6">
-    <!-- 列表视图 -->
-    <div v-if="viewMode === 'list'" class="flex h-full flex-col space-y-6">
-      <!-- 头部搜索区 -->
-      <div class="flex items-center justify-between pb-4 border-b">
-        <div class="flex items-center justify-between">
-          <Input v-model="searchTerm" :placeholder="t('tools.search')" class="pl-9" />
+  <div class="h-full w-full bg-background flex flex-col overflow-hidden">
+    <!-- Header Area -->
+    <div class="flex-none bg-background border-b">
+  
+
+      <!-- Source Groups Grid -->
+      <Collapsible
+        v-model:open="isGridExpanded"
+        class="flex flex-col border-b bg-background py-2"
+      >
+        <div class="px-6 py-2 flex items-center justify-begin">
+           <span class="text-sm font-medium text-muted-foreground">{{ t('tools.sourceGroups') || 'Source Groups' }}</span>
+           <CollapsibleTrigger as-child>
+            <Button variant="ghost" size="sm" class="h-8 w-8 p-0">
+              <ChevronDown v-if="!isGridExpanded" class="h-4 w-4" />
+              <ChevronUp v-else class="h-4 w-4" />
+              <span class="sr-only">Toggle Grid</span>
+            </Button>
+          </CollapsibleTrigger>
         </div>
-        <Button @click="showAddMcpForm">
-          <Plus class="mr-2 h-4 w-4" />
-          {{ t('tools.addMcpServer') }}
-        </Button>
-      </div>
-
-      <!-- 工具列表 -->
-      <ScrollArea class="flex-1">
-        <div class="space-y-8 pr-4">
-          <!-- Loading -->
-          <div v-if="loading" class="flex flex-col items-center justify-center py-20">
-            <Loader class="h-8 w-8 animate-spin text-primary" />
-          </div>
-
-          <!-- 空状态 -->
-          <div v-else-if="filteredTools.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
-            <div class="rounded-full bg-muted p-4">
-              <Wrench class="h-8 w-8 text-muted-foreground" />
-            </div>
-            <h3 class="mt-4 text-lg font-semibold">{{ t('tools.noTools') }}</h3>
-            <p class="text-sm text-muted-foreground">{{ t('tools.noToolsDesc') }}</p>
-          </div>
-
-          <!-- 分组展示 -->
-          <div v-else v-for="(group, groupIndex) in groupedTools" :key="group.source" class="space-y-4">
-            <div class="flex items-center justify-between">
-              <div class="flex">
-                <h3 class="text-lg font-semibold tracking-tight">{{ getToolSourceLabel(group.source) }}</h3>
-                <div v-if="canManage(group.tools[0])" class="flex items-center ml-2 space-x-1">
-                  <Button variant="ghost" size="icon"
-                    class="h-6 w-6 text-muted-foreground hover:text-primary shrink-0"
-                    @click.stop="handleRefreshMcpTool(group.source)" :title="t('tools.refresh') || 'Refresh Server'">
-                    <RefreshCw class="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon"
-                    class="h-6 w-6 text-destructive hover:text-destructive shrink-0"
-                    @click.stop="handleDeleteMcpTool(group.source)" :title="t('tools.delete') || 'Delete Server'">
-                    <Trash2 class="h-3.5 w-3.5" />
-                  </Button>
+        
+        <CollapsibleContent class="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+           <div class="px-6 pb-6">
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+              <!-- Dynamic Groups -->
+              <div
+                v-for="group in groupedTools"
+                :key="group.source"
+                class="relative flex flex-col gap-2 p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-md group"
+                :class="selectedGroupSource === group.source 
+                  ? 'bg-primary/5 border-primary ring-1 ring-primary/20' 
+                  : 'bg-card border-border hover:border-primary/50'"
+                @click="selectedGroupSource = group.source"
+              >
+                <div class="flex items-center gap-2">
+                  <div 
+                    class="p-1.5 rounded-md transition-colors shrink-0"
+                    :class="selectedGroupSource === group.source ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:text-primary group-hover:bg-primary/10'"
+                  >
+                    <component :is="getGroupIcon(group.source)" class="h-4 w-4" />
+                  </div>
+                  <h3 class="font-medium text-sm truncate flex-1" :title="getToolSourceLabel(group.source)">
+                    {{ getToolSourceLabel(group.source) }}
+                  </h3>
+                  <Badge variant="secondary" class="h-5 px-1.5 text-[10px] bg-background/80 backdrop-blur shrink-0">
+                    {{ group.tools.length }}
+                  </Badge>
                 </div>
+                <p class="text-xs text-muted-foreground line-clamp-1">
+                  {{ isMcpGroup(group.source) ? 'MCP Server' : 'System Provider' }}
+                </p>
               </div>
 
-
-              <Badge variant="secondary" class="rounded-sm px-2 font-normal">
-                {{ group.tools.length }} {{ t('tools.count') }}
-              </Badge>
-            </div>
-
-            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              <Card 
-                v-for="tool in group.tools" 
-                :key="tool.name" 
-                class="cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 group"
-                @click="openToolDetail(tool)"
+              <!-- Add New MCP Card -->
+              <div
+                class="relative flex flex-col items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-muted-foreground/25 hover:border-primary hover:bg-primary/5 cursor-pointer transition-all duration-200"
+                @click="showAddMcpForm"
               >
-                <CardHeader class="flex flex-row items-start gap-4 space-y-0 pb-2">
-                  <div 
-                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm transition-opacity group-hover:opacity-90"
-                    :class="getToolTypeColorClass(tool.type)"
-                  >
-                    <component :is="getToolIcon(tool.type)" class="h-5 w-5" />
-                  </div>
-                  <div class="space-y-1 overflow-hidden flex-1">
-                    <div class="flex items-center justify-between gap-2">
-                      <CardTitle class="text-base truncate" :title="tool.name">
-                        {{ tool.name }}
-                      </CardTitle>
-   
-                    </div>
-                    <CardDescription class="line-clamp-2 text-xs">
-                      {{ tool.description || t('tools.noDescription') }}
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div class="flex items-center justify-between pt-4 border-t mt-2 text-xs text-muted-foreground">
-                    <div class="flex items-center gap-1">
-                      <span>{{ t('tools.source') }}:</span>
-                      <span class="font-medium text-foreground">{{ getToolSourceLabel(tool.source) }}</span>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      <span>{{ t('tools.params') }}:</span>
-                      <span class="font-medium text-foreground">{{ formatParameters(tool.parameters).length }}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                <div class="flex items-center gap-2 text-muted-foreground group-hover:text-primary">
+                  <Plus class="h-4 w-4" />
+                  <span class="text-sm font-medium">
+                    {{ t('tools.addMcpServer') || 'Add MCP Server' }}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      <!-- MCP Management Bar (Only visible when specific MCP server is selected) -->
+      <div v-if="isMcpGroup(selectedGroupSource)" class="px-6 py-2 bg-muted/30 border-t flex items-center justify-between animate-in slide-in-from-top-2">
+        <div class="flex items-center gap-2 text-sm text-muted-foreground">
+          <Server class="h-4 w-4" />
+          <span class="font-medium">{{ getToolSourceLabel(selectedGroupSource) }}</span>
+          <span class="mx-2 text-muted-foreground/50">|</span>
+          <span>{{ displayedTools.length }} {{ t('tools.count') }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <Button variant="outline" size="sm" class="h-8" @click="handleRefreshMcpTool(selectedGroupSource)">
+            <RefreshCw class="mr-2 h-3.5 w-3.5" />
+            {{ t('tools.refresh') }}
+          </Button>
+          <Button variant="outline" size="sm" class="h-8 text-destructive hover:text-destructive hover:bg-destructive/10" @click="handleDeleteMcpTool(selectedGroupSource)">
+            <Trash2 class="mr-2 h-3.5 w-3.5" />
+            {{ t('tools.delete') }}
+          </Button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div v-if="viewMode === 'list'" class="flex-1 overflow-hidden bg-muted/5 p-4 md:p-6">
+      <ScrollArea class="h-full pr-4">
+        <div v-if="loading" class="flex flex-col items-center justify-center py-20">
+          <Loader class="h-8 w-8 animate-spin text-primary" />
+        </div>
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pb-20">
+           <Card 
+              v-for="tool in displayedTools" 
+              :key="tool.name" 
+              class="cursor-pointer transition-all duration-200 hover:shadow-md border-muted/60 hover:border-primary/50 group bg-card"
+              @click="openToolDetail(tool)"
+            >
+              <CardHeader class="flex flex-row items-start gap-3 space-y-0 pb-3 p-4">
+                <div 
+                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white shadow-sm transition-all group-hover:scale-105"
+                  :class="getToolTypeColorClass(tool.type)"
+                >
+                  <component :is="getToolIcon(tool.type)" class="h-5 w-5" />
+                </div>
+                <div class="space-y-1 overflow-hidden flex-1 min-w-0">
+                  <div class="flex items-center justify-between gap-2">
+                    <CardTitle class="text-sm font-semibold truncate" :title="tool.name">
+                      {{ tool.name }}
+                    </CardTitle>
+                  </div>
+                  <p class="text-xs text-muted-foreground line-clamp-3 h-8">
+                    {{ tool.description || t('tools.noDescription') }}
+                  </p>
+                </div>
+              </CardHeader>
+              <CardContent class="p-4 pt-0">
+                <div class="flex items-center justify-between pt-3 border-t border-dashed mt-1 text-[10px] text-muted-foreground">
+                  <div class="flex items-center gap-1.5 truncate max-w-[70%]">
+                    <Database v-if="tool.type === 'mcp'" class="h-3 w-3 shrink-0" />
+                    <Code v-else class="h-3 w-3 shrink-0" />
+                    <span class="truncate" :title="getToolSourceLabel(tool.source)">{{ getToolSourceLabel(tool.source) }}</span>
+                  </div>
+                  <Badge variant="secondary" class="text-[10px] h-5 px-1.5 font-normal">
+                    {{ formatParameters(tool.parameters).length }} 参数
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
         </div>
       </ScrollArea>
     </div>
 
-    <!-- 详情视图 -->
-    <ToolDetail 
-      v-if="viewMode === 'detail' && selectedTool" 
-      :tool="selectedTool" 
-      @back="backToList" 
-    />
-
-    <!-- MCP服务器添加视图 -->
-    <McpServerAdd 
-      v-if="viewMode === 'add-mcp'" 
-      :loading="loading" 
-      @submit="handleMcpSubmit" 
-      @cancel="backToList"
-      ref="mcpServerAddRef" 
-    />
+    <!-- Add MCP Dialog -->
+    <Dialog v-model:open="isAddMcpDialogOpen">
+      <DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-hidden flex flex-col p-0 gap-0">
+        <DialogHeader class="px-6 py-4 border-b">
+          <DialogTitle>{{ t('tools.addMcpServer') }}</DialogTitle>
+          <DialogDescription class="hidden">
+             Add a new MCP server
+          </DialogDescription>
+        </DialogHeader>
+        <div class="flex-1 overflow-y-auto">
+           <McpServerAdd 
+            :loading="loading" 
+            @submit="handleMcpSubmit" 
+            @cancel="isAddMcpDialogOpen = false"
+            ref="mcpServerAddRef" 
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw } from 'lucide-vue-next'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
-import ToolDetail from '../components/ToolDetail.vue'
 import McpServerAdd from '../components/McpServerAdd.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { toast } from 'vue-sonner'
+
+import { ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 // Composables
 const { t } = useLanguage()
+const router = useRouter()
 
 // State
 const allTools = ref([])
@@ -141,10 +189,13 @@ const mcpServers = ref([])
 const selectedTool = ref(null)
 const searchTerm = ref('')
 const filterType = ref('all')
-const viewMode = ref('list') // 'list', 'detail', 'add-mcp'
+const viewMode = ref('list') // 'list', 'detail'
+const isAddMcpDialogOpen = ref(false)
 const loading = ref(false)
 const mcpServerAddRef = ref(null)
 const currentUser = ref({ userid: '', role: 'user' })
+const selectedGroupSource = ref('')
+const isGridExpanded = ref(true)
 
 // Computed
 const filteredTools = computed(() => {
@@ -188,6 +239,20 @@ const groupedTools = computed(() => {
   return sortedGroups
 })
 
+// Watch for changes in groupedTools to set initial selection
+watch(groupedTools, (newGroups) => {
+  if (newGroups.length > 0 && !selectedGroupSource.value) {
+    selectedGroupSource.value = newGroups[0].source
+  }
+}, { immediate: true })
+
+const displayedTools = computed(() => {
+  if (!selectedGroupSource.value && groupedTools.value.length > 0) {
+    return []
+  }
+  return filteredTools.value.filter(tool => tool.source === selectedGroupSource.value)
+})
+
 // API Methods
 const loadBasicTools = async () => {
   try {
@@ -222,7 +287,7 @@ const showAddMcpForm = () => {
   if (mcpServerAddRef.value) {
     mcpServerAddRef.value.resetForm()
   }
-  viewMode.value = 'add-mcp'
+  isAddMcpDialogOpen.value = true
 }
 
 const handleMcpSubmit = async (payload) => {
@@ -231,7 +296,7 @@ const handleMcpSubmit = async (payload) => {
     await toolAPI.addMcpServer(payload)
     await loadMcpServers()
     await loadBasicTools()
-    backToList()
+    isAddMcpDialogOpen.value = false
   } catch (error) {
     console.error('Failed to add MCP server:', error)
   } finally {
@@ -248,17 +313,23 @@ const canManage = (tool) => {
 }
 
 const handleDeleteMcpTool = async (sourceName) => {
-  if (!confirm(t('tools.confirmDelete') || 'Are you sure you want to remove this MCP server?')) {
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+
+  if (!confirm(t('tools.deleteConfirm', { name: serverName }) || 'Are you sure you want to remove this MCP server?')) {
     return
   }
-
-  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
 
   try {
     loading.value = true
     await toolAPI.removeMcpServer(serverName)
     toast.success(t('tools.deleteSuccess') || 'Server removed successfully')
     await loadBasicTools()
+    await loadMcpServers()
+
+    // Reset selection if deleted group was selected
+    if (selectedGroupSource.value === sourceName) {
+        selectedGroupSource.value = groupedTools.value[0].source
+    }
   } catch (error) {
     console.error('Failed to remove MCP server:', error)
     toast.error(error.message || t('tools.deleteFailed') || 'Failed to remove server')
@@ -274,7 +345,9 @@ const handleRefreshMcpTool = async (sourceName) => {
     loading.value = true
     await toolAPI.refreshMcpServer(serverName)
     toast.success(t('tools.refreshSuccess') || 'Server refreshed successfully')
+    await loadMcpServers()
     await loadBasicTools()
+    
   } catch (error) {
     console.error('Failed to refresh MCP server:', error)
     toast.error(error.message || t('tools.refreshFailed') || 'Failed to refresh server')
@@ -284,7 +357,6 @@ const handleRefreshMcpTool = async (sourceName) => {
 }
 
 const getToolSourceLabel = (source) => {
-  // 直接映射中文source到翻译key
   const sourceMapping = {
     '基础工具': 'tools.source.basic',
     '内置工具': 'tools.source.builtin',
@@ -306,6 +378,12 @@ const getToolIcon = (type) => {
     default:
       return Wrench
   }
+}
+
+const getGroupIcon = (source) => {
+    if (source.includes('MCP')) return Server
+    if (['基础工具', '内置工具', '系统工具'].includes(source)) return Code
+    return Wrench
 }
 
 const getToolTypeColorClass = (type) => {
@@ -337,13 +415,16 @@ const formatParameters = (parameters) => {
 }
 
 const openToolDetail = (tool) => {
-  selectedTool.value = tool
-  viewMode.value = 'detail'
+  router.push({ name: 'ToolDetailView', params: { toolName: tool.name } })
 }
 
 const backToList = () => {
   viewMode.value = 'list'
   selectedTool.value = null
+}
+
+const isMcpGroup = (source) => {
+    return source.startsWith('MCP Server:')
 }
 
 // 生命周期

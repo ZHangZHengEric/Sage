@@ -1,22 +1,22 @@
 <template>
-  <div class="flex h-full flex-col space-y-6">
+  <div class="flex h-full flex-col space-y-4 md:space-y-6">
     <!-- 头部信息 -->
-    <div class="flex items-center justify-between pb-4 border-b">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b gap-4 sm:gap-0">
       <div class="flex items-center gap-4">
         <div 
-          class="flex h-12 w-12 items-center justify-center rounded-lg text-white shadow-sm"
+          class="flex h-12 w-12 items-center justify-center rounded-lg text-white shadow-sm shrink-0"
           :class="getToolTypeColorClass(tool.type)"
         >
           <component :is="getToolIcon(tool.type)" class="h-6 w-6" />
         </div>
-        <div>
-          <h1 class="text-2xl font-bold tracking-tight">{{ tool.name }}</h1>
+        <div class="min-w-0 flex-1">
+          <h1 class="text-xl md:text-2xl font-bold tracking-tight truncate">{{ tool.name }}</h1>
           <Badge :variant="getToolTypeBadgeVariant(tool.type)" class="mt-1">
             {{ getToolTypeLabel(tool.type) }}
           </Badge>
         </div>
       </div>
-      <Button variant="outline" @click="$emit('back')">
+      <Button variant="outline" @click="$emit('back')" class="w-full sm:w-auto">
         <ArrowLeft class="mr-2 h-4 w-4" />
         {{ t('tools.backToList') }}
       </Button>
@@ -73,38 +73,40 @@
               {{ t('toolDetail.parameterDetails') }}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div v-if="formattedParams.length > 0" class="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead class="w-[200px]">{{ t('toolDetail.paramName') }}</TableHead>
-                    <TableHead class="w-[150px]">{{ t('toolDetail.paramType') }}</TableHead>
-                    <TableHead class="w-[100px]">{{ t('toolDetail.required') }}</TableHead>
-                    <TableHead>{{ t('toolDetail.paramDescription') }}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="(param, index) in formattedParams" :key="index">
-                    <TableCell class="font-medium font-mono text-primary">{{ param.name }}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" class="font-mono text-xs">
-                        {{ param.type }}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge :variant="param.required ? 'default' : 'secondary'">
-                        {{ param.required ? t('toolDetail.yes') : t('toolDetail.no') }}
-                      </Badge>
-                    </TableCell>
-                    <TableCell class="text-muted-foreground">
-                      {{ param.description }}
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+          <CardContent class="p-0 sm:p-6">
+            <div v-if="formattedParams.length > 0" class="rounded-md border overflow-hidden">
+              <div class="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead class="w-[150px] sm:w-[200px]">{{ t('toolDetail.paramName') }}</TableHead>
+                      <TableHead class="w-[100px] sm:w-[150px]">{{ t('toolDetail.paramType') }}</TableHead>
+                      <TableHead class="w-[80px] sm:w-[100px]">{{ t('toolDetail.required') }}</TableHead>
+                      <TableHead class="min-w-[200px]">{{ t('toolDetail.paramDescription') }}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="(param, index) in formattedParams" :key="index">
+                      <TableCell class="font-medium font-mono text-primary">{{ param.name }}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" class="font-mono text-xs whitespace-nowrap">
+                          {{ param.type }}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge :variant="param.required ? 'default' : 'secondary'" class="whitespace-nowrap">
+                          {{ param.required ? t('toolDetail.yes') : t('toolDetail.no') }}
+                        </Badge>
+                      </TableCell>
+                      <TableCell class="text-muted-foreground">
+                        {{ param.description }}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
             </div>
-            <p v-else class="text-sm text-muted-foreground italic">
+            <p v-else class="text-sm text-muted-foreground italic p-4 sm:p-0">
               {{ t('toolDetail.noParameters') }}
             </p>
           </CardContent>
