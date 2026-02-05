@@ -6,6 +6,7 @@ import copy
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
+from sagents.utils.prompt_manager import PromptManager
 from sagents.context.session_context import SessionContext, init_session_context, SessionStatus
 from sagents.context.session_context_manager import session_manager
 from sagents.tool import ToolManager, ToolProxy
@@ -230,20 +231,20 @@ class FibreOrchestrator:
 
             try:
                 accumulated_messages = []
+                # Temporary buffer to hold chunks until we can merge them properly (although MessageManager.merge expects full messages or chunks to merge into list)
+                # Actually, process_message yields List[MessageChunk]. We can just collect them.
+                all_filtered_chunks = []
                 
                 # Stream the response
                 async for chunks in sub_agent.process_message(content):
                     # Filter chunks for the current sub-agent session (exclude nested sub-sessions)
+                    # We collect all relevant chunks first
                     filtered_chunks = [
                         c for c in chunks 
                         if c.session_id == sub_agent.session_id and c.role == MessageRole.ASSISTANT.value
                     ]
-                    
-                    # Merge chunks into accumulated messages using MessageManager
                     if filtered_chunks:
-                         accumulated_messages = MessageManager.merge_new_messages_to_old_messages(
-                             filtered_chunks, accumulated_messages
-                         )
+                        all_filtered_chunks.extend(filtered_chunks)
 
                     # Check for tool calls to sys_finish_task
                     for chunk in chunks:
@@ -262,6 +263,12 @@ class FibreOrchestrator:
                     # Push to output queue if available
                     if self.output_queue:
                          await self.output_queue.put(chunks)
+                
+                # Merge messages after the loop to save processing
+                if all_filtered_chunks:
+                    accumulated_messages = MessageManager.merge_new_messages_to_old_messages(
+                        all_filtered_chunks, []
+                    )
             except Exception as e:
                 return f"Error executing sub-agent task: {e}"
             
@@ -273,19 +280,30 @@ class FibreOrchestrator:
             try:
                 history_str = MessageManager.convert_messages_to_str(accumulated_messages)
                 if sub_agent.agent and sub_agent.agent.model:
-                     prompt = f"""The sub-agent completed the execution but did not report the result. Please summarize the following execution log into a final result.
-Format:
-Status: success/failure
-Result: <summary>
-
-Execution Log:
-{history_str}"""
-                     response = await sub_agent.agent.model.chat.completions.create(
-                         model=sub_agent.agent.model_config.get('model', 'gpt-4o'),
-                         messages=[{"role": "user", "content": prompt}]
+                     # Get prompt from PromptManager
+                     language = parent_context.get_language() if parent_context else "en"
+                     summary_prompt_template = PromptManager().get_agent_prompt_auto('sub_agent_fallback_summary_prompt', language=language)
+                     prompt = summary_prompt_template.format(history_str=history_str)
+                     
+                     # Use AgentBase's _call_llm_streaming method for consistent logging and handling
+                     # We wrap the prompt in a user message
+                     messages_input = [{'role': 'user', 'content': prompt}]
+                     
+                     # We need to access the private method, assuming we are in a trusted context (Orchestrator managing SubAgent)
+                     # Or check if there is a public wrapper. SimpleAgent uses _call_llm_streaming internally.
+                     # We will use _call_llm_streaming and accumulate the result.
+                     response_stream = sub_agent.agent._call_llm_streaming(
+                         messages=messages_input,
+                         session_id=sub_agent.session_id,
+                         step_name="sub_agent_fallback_summary"
                      )
-                     summary = response.choices[0].message.content
-                     return f"Sub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary}"
+                     
+                     summary_content = ""
+                     async for chunk in response_stream:
+                         if chunk.choices and chunk.choices[0].delta.content:
+                             summary_content += chunk.choices[0].delta.content
+                             
+                     return f"Sub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
             except Exception as e:
                  logger.error(f"Error generating summary: {e}")
                  history_str = MessageManager.convert_messages_to_str(accumulated_messages)
