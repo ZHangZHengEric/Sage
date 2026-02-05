@@ -128,7 +128,7 @@ class Workflow:
         if not isinstance(step, WorkflowStep):
             raise ValueError("Workflow.add_step: step必须是WorkflowStep实例")
         self.steps[step.id] = step
-        logger.debug(f"Workflow '{self.name}': 添加步骤 '{step.id}', 步骤描述: {step.description}")
+        # logger.debug(f"Workflow '{self.name}': 添加步骤 '{step.id}', 步骤描述: {step.description}")
     
     def remove_step(self, step_id: str) -> bool:
         """移除步骤"""
@@ -226,7 +226,7 @@ class Workflow:
             else:
                 logger.warning(f"Workflow.from_legacy_format: 跳过非字符串步骤: {step_text}")
         
-        logger.info(f"Workflow: 从旧格式创建工作流 '{name}'，包含 {len(workflow.steps)} 个步骤")
+        logger.debug(f"Workflow: 从旧格式创建工作流 '{name}'，包含 {len(workflow.steps)} 个步骤")
         return workflow
     
     def to_json(self) -> str:
