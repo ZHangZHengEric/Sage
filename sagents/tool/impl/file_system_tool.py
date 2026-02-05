@@ -405,9 +405,9 @@ class FileSystemTool:
 
     @tool(
         description_i18n={
-            "zh": "在文件中搜索并替换文本",
-            "en": "Search and replace text in file",
-            "pt": "Busca e substitui texto no arquivo"
+            "zh": "在文件中搜索并替换文本，当需要修改文件内容时使用",
+            "en": "Search and replace text in file, when you need to modify file content",
+            "pt": "Busca e substitui texto no arquivo, quando você precisa modificar o conteúdo do arquivo"
         },
         param_description_i18n={
             "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},

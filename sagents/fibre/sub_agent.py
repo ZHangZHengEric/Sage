@@ -49,10 +49,15 @@ class FibreSubAgent:
             'recent_turns': budget_manager.recent_turns
         }
 
+        # Calculate workspace root for sub-session to ensure physical nesting
+        # The structure will be: parent_workspace/sub_sessions/{sub_session_id}
+        import os
+        workspace_root = os.path.join(self.parent_context.session_workspace, "sub_sessions")
+
         self.sub_session_context = init_session_context(
             session_id=self.session_id,
             user_id=self.parent_context.user_id,
-            workspace_root=self.parent_context.session_workspace, # Use parent's session_workspace as root
+            workspace_root=workspace_root,
             # Inherit configuration from parent
             context_budget_config=context_budget_config, 
             tool_manager=self.parent_context.tool_manager,
@@ -84,7 +89,7 @@ You are working as part of a larger system.
 
 {sub_agent_req_content}
 """
-        self.sub_session_context.add_and_update_system_context({"system_prompt": system_prompt})
+        # self.sub_session_context.add_and_update_system_context({"system_prompt": system_prompt})
         
         # 3. Initialize Agent
         # We use SimpleAgent for the logic
@@ -93,6 +98,8 @@ You are working as part of a larger system.
             model_config=self.orchestrator.agent.model_config,
             system_prefix=system_prompt
         )
+        # Update agent name to specific sub-agent name
+        self.agent.agent_name = self.agent_name
         
         self.initialized = True
 
@@ -154,8 +161,19 @@ You are working as part of a larger system.
                     # Ensure chunks have the correct session_id
                     for chunk in chunks:
                         chunk.session_id = self.session_id
+                    
+                    # Sync to sub-session context immediately
+                    if self.sub_session_context:
+                        self.sub_session_context.message_manager.add_messages(chunks)
+
                     yield chunks
-                            
+            
+            # Save session after agent execution
+            if self.sub_session_context:
+                logger.debug(f"SubAgent {self.agent_name}: Saving session context")
+                self.sub_session_context.save()
+                logger.info(f"SubAgent {self.agent_name}: Session saved successfully")
+
         except Exception as e:
             logger.error(f"Error in SubAgent {self.agent_name}: {e}")
             traceback.print_exc()
