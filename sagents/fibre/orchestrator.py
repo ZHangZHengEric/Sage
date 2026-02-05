@@ -209,6 +209,12 @@ class FibreOrchestrator:
         register_bound_tool(fibre_tools_impl.sys_delegate_task)
         register_bound_tool(fibre_tools_impl.sys_finish_task)
         
+        # Explicitly register the FibreTools instance to prevent ToolManager from trying to re-instantiate it
+        # This fixes the TypeError: FibreTools.__init__() missing required arguments
+        if not hasattr(new_tm, "_tool_instances"):
+            new_tm._tool_instances = {}
+        new_tm._tool_instances[fibre_tools_impl.__class__] = fibre_tools_impl
+        
         return new_tm
 
     # Methods called by FibreTools
