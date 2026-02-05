@@ -1,7 +1,7 @@
 # Change Log
 
 ## 2026-02-05
-- [FibreOrchestrator] Improved fallback mechanism for `sys_delegate_task`: when a sub-agent finishes without calling `sys_finish_task`, it now returns an aggregated summary of the sub-agent's response (excluding nested sub-sessions) instead of a generic error.
+- [FibreOrchestrator] Enhanced fallback mechanism for `sys_delegate_task`: when a sub-agent finishes without calling `sys_finish_task`, it now aggregates the execution log (including tool calls) and uses the sub-agent's LLM to generate a structured summary (Status/Result), ensuring proper task completion reporting even without explicit tool usage.
 - [FibrePrompts] Refined `fibre_system_prompt` (EN/ZH) with clearer formatting and explicit criteria for sub-agent spawning vs. direct execution. Updated tool names in English prompt.
 - [FibreSubAgent] Added `sub_agent_requirement_prompt` to explicitly enforce `sys_finish_task` usage for sub-agents, while keeping the parent agent's prompt clean.
 - [SandboxFileSystem] Explicitly excluded `.sandbox` directory from `get_file_tree` output to prevent internal sandbox files from being exposed to the agent.
