@@ -111,11 +111,15 @@ class FibreOrchestrator:
                 
                 async def run_container_stream():
                     try:
+                        # Set max_loop_count in session context config
+                        if session_context.agent_config is None:
+                            session_context.agent_config = {}
+                        session_context.agent_config['maxLoopCount'] = max_loop_count
+                        
                         async for chunks in container_agent.run_stream(
                             session_context=session_context,
                             tool_manager=combined_tool_manager,
-                            session_id=session_id,
-                            max_loop_count=max_loop_count
+                            session_id=session_id
                         ):
                             await self.output_queue.put(chunks)
                     except Exception as e:
