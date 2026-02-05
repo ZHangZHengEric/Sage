@@ -59,12 +59,12 @@ class SkillManager:
         """
         return list(self.skills.keys())
 
-    def list_skill_info(self) -> List[Dict[str, Any]]:
+    def list_skill_info(self) -> List[SkillSchema]:
         """
         List detailed information for all skills.
         列出所有技能的详细信息。
         """
-        return  self.skills.values()
+        return  list(self.skills.values())
 
     def get_skill_description_lines(self, skills: Optional[List[str]] = None) -> List[str]:
         """
