@@ -35,13 +35,13 @@ async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
     skills = []
     if role == "admin":
         for skill in all_skills:
-            name = skill.skill_name
+            name = skill.name
             skill["user_id"] = ownership_map.get(name, "")
             skills.append(skill)
     else:
         # Filter for user: System skills (no owner) + Own skills
         for skill in all_skills:
-            name = skill.skill_name
+            name = skill.name
             owner = ownership_map.get(name, "")
             skill["user_id"] = owner
             if not owner or owner == user_id:
