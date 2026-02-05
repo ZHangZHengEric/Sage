@@ -62,6 +62,7 @@ class FibreSubAgent:
         # SHARE AGENT WORKSPACE (SANDBOX) WITH PARENT
         # We want the sub-agent to operate on the same files as the parent
         self.sub_session_context.sandbox = self.parent_context.sandbox
+        # Ensure sub-agent uses parent's agent_workspace path directly to avoid nested workspaces
         self.sub_session_context.agent_workspace = self.parent_context.agent_workspace
         self.sub_session_context.file_system = self.parent_context.file_system
         # We also need to ensure the system_context reflects the shared workspace if needed
