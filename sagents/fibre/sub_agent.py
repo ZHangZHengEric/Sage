@@ -117,11 +117,38 @@ You are working as part of a larger system.
             # We need to use session_manager context
             with session_manager.session_context(self.session_id):
                 # We need to pass tools. 
-                # Use the tool_manager from context (which we inherited from parent)
+            # Use the tool_manager from context (which we inherited from parent)
+            # Ensure FibreTools are properly registered in the sub-agent's tool manager context
+            # The parent's tool manager might not have the FibreTools instance registered in the same way
+            # or it might be the original one without FibreTools.
+            # We need to make sure the sub-agent can call sys_finish_task.
+            
+            # The tool_manager passed to run_stream is self.sub_session_context.tool_manager
+            # which is self.parent_context.tool_manager.
+            
+            # If parent_context.tool_manager doesn't have FibreTools, we need to add them.
+            # But wait, the container agent uses a *combined* tool manager.
+            # The parent_context.tool_manager is the *original* one.
+            
+            # We need to inject FibreTools into the sub-agent's tool manager.
+            # We should create a new ToolManager for the sub-agent that includes FibreTools.
+            
+                # 1. Get FibreTools instance
+                # We can create a new one bound to the sub-agent's context?
+                # Or use the one from orchestrator?
+                # FibreTools needs orchestrator and session_context.
+                # If we bind it to sub_session_context, then sys_spawn_agent would spawn sub-sub-agents (which is allowed).
+                
+                from sagents.fibre.tools import FibreTools
+                fibre_tools_impl = FibreTools(self.orchestrator, self.sub_session_context)
+                
+                # 2. Create combined tool manager
+                original_tm = self.sub_session_context.tool_manager
+                sub_agent_tm = self.orchestrator._create_combined_tool_manager(original_tm, fibre_tools_impl)
                 
                 async for chunks in self.agent.run_stream(
                     session_context=self.sub_session_context,
-                    tool_manager=self.sub_session_context.tool_manager,
+                    tool_manager=sub_agent_tm,
                     session_id=self.session_id
                 ):
                     # Ensure chunks have the correct session_id
