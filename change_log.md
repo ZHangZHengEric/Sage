@@ -1,7 +1,7 @@
 # Change Log
 
 ## 2026-02-05
-- [FibreOrchestrator] Removed redundant outer loop in `run_loop` to prevent potential infinite loops and rely on `SimpleAgent`'s internal task completion logic. Passed `max_loop_count` to container agent.
+- [FibreOrchestrator] Removed redundant outer loop in `run_loop` and fixed TypeError by passing `max_loop_count` via `session_context.agent_config` instead of `run_stream` argument.
 - [FibreAgent] Fixed inheritance issue by making `FibreAgent` inherit from `AgentBase` and calling `super().__init__`, ensuring proper type compatibility with `FibreOrchestrator`.
 - [FibreOrchestrator] Renamed `sys_send_message` tool to `sys_delegate_task` to better reflect its function of assigning and executing tasks.
 - [FibreOrchestrator] Updated `sys_delegate_task` (formerly `send_message`) to intercept `sys_finish_task` tool calls from sub-agents. It now returns the structured result (status and output) of `sys_finish_task` to the parent agent, instead of just the accumulated conversation text.
