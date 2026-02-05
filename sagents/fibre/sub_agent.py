@@ -69,9 +69,10 @@ class FibreSubAgent:
         
         # 2. Setup System Prompt
         # Inject Fibre System Prompt
-        from sagents.prompts.fibre_agent_prompts import fibre_system_prompt
+        from sagents.prompts.fibre_agent_prompts import fibre_system_prompt, sub_agent_requirement_prompt
         lang = self.sub_session_context.get_language()
         fibre_prompt_content = fibre_system_prompt.get(lang, fibre_system_prompt.get("en", ""))
+        sub_agent_req_content = sub_agent_requirement_prompt.get(lang, sub_agent_requirement_prompt.get("en", ""))
         
         # Combine instruction with some base sub-agent prompt
         system_prompt = f"""You are a Sub-Agent named '{self.agent_name}'.
@@ -79,6 +80,8 @@ Role: {self.instruction}
 You are working as part of a larger system.
 
 {fibre_prompt_content}
+
+{sub_agent_req_content}
 """
         self.sub_session_context.add_and_update_system_context({"system_prompt": system_prompt})
         
