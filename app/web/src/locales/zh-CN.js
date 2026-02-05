@@ -37,7 +37,7 @@ export default {
   'chat.emptyDesc': '右上角选择一个AI助手，然后输入您的问题',
   'chat.taskManager': '任务管理器',
   'chat.workspace': '工作空间',
-  'chat.toolDetails': '工具执行详情',
+  'chat.toolDetails': '工具执行',
   'chat.toolName': '工具名称',
   'chat.toolParams': '执行参数',
   'chat.toolResult': '执行结果',

@@ -39,7 +39,7 @@ export default {
   'chat.emptyDesc': 'Select an AI assistant and type your question',
   'chat.taskManager': 'Task Manager',
   'chat.workspace': 'Workspace',
-  'chat.toolDetails': 'Tool Execution Details',
+  'chat.toolDetails': 'Tool Execution',
   'chat.toolName': 'Tool Name',
   'chat.toolParams': 'Execution Parameters',
   'chat.toolResult': 'Execution Result',
