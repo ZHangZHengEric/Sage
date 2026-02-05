@@ -10,10 +10,6 @@
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
         </div>
         <div class="bg-destructive/10 text-destructive border border-destructive/20 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full">
-          <div class="font-semibold mb-1 flex items-center gap-2">
-            <span class="i-lucide-alert-circle w-4 h-4"></span>
-            {{ t('error.title') }}
-          </div>
           <div class="opacity-90 text-sm leading-relaxed">{{ message.show_content || message.content || t('error.unknown') }}</div>
         </div>
       </div>
@@ -37,6 +33,28 @@
           <MarkdownRenderer
             :content="formatMessageContent(message.content)"
           />
+        </div>
+      </div>
+    </div>
+    
+    <!-- 任务分析消息 -->
+    <div
+      v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"       class="flex flex-row items-start gap-3 px-4">
+      <div class="flex-none mt-1">
+        <MessageAvatar :messageType="message.message_type" role="assistant" />
+      </div>
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
+          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+        </div>
+        <div class="w-full">
+           <TaskAnalysisMessage 
+             :content="message.show_content || message.content" 
+             :isStreaming="isStreaming"
+           />
         </div>
       </div>
     </div>
@@ -69,7 +87,7 @@
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
-            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
+            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: '工具调用: ' + getToolName(message) }) }}
          </div>
          <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
@@ -89,12 +107,20 @@
          </div>
       </div>
     </div>
+    
+    <!-- Tool Details Modal -->
+    <ToolDetailsPanel 
+        :open="showToolDetails" 
+        @update:open="showToolDetails = $event"
+        :tool-execution="selectedToolExecution"
+        :tool-result="toolResult" 
+    />
 
   </div>
 </template>
 
 <script setup>
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -105,6 +131,8 @@ import { Terminal, FileText, Search, Zap } from 'lucide-vue-next'
 import { getMessageLabel } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
+import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
+import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
 
@@ -126,6 +154,10 @@ const props = defineProps({
   readonly: {
     type: Boolean,
     default: false
+  },
+  isLoading: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -136,6 +168,11 @@ const { t } = useLanguage()
 // 计算属性
 const shouldRenderMessage = computed(() => {
   return props.message.role !== 'tool'
+})
+
+// 统一的 isStreaming 状态判断
+const isStreaming = computed(() => {
+  return props.isLoading && props.messageIndex === props.messages.length - 1
 })
 
 const isErrorMessage = computed(() => {
@@ -283,14 +320,23 @@ const getToolIcon = (name) => {
   return Zap
 }
 
-const handleToolClick = (toolCall, toolResult) => {
+const showToolDetails = ref(false)
+const selectedToolExecution = ref(null)
+const toolResult = ref(null)
+
+const handleToolClick = (toolCall, result) => {
   // Prevent custom tools from triggering the detail modal via native click events
   // ToolDefaultCard explicitly emits 'click' with (toolCall, toolResult)
   // Custom tools (without explicit emit) trigger native click with (MouseEvent)
   if (toolCall instanceof Event) {
     return
   }
-  emit('toolClick', toolCall, toolResult)
+  
+  selectedToolExecution.value = toolCall
+  toolResult.value = result
+  showToolDetails.value = true
+  
+  emit('toolClick', toolCall, result)
 }
 
 const handleDownloadFile = (filePath) => {

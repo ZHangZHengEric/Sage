@@ -65,25 +65,21 @@
             <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
           </div>
           <div v-else class="pb-8 max-w-4xl mx-auto w-full">
-            <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
-              :messages="messages || []" :message-index="index" @download-file="downloadFile"
-              @toolClick="handleToolClick" @sendMessage="handleSendMessage" />
-            <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
-              <div class="flex items-start gap-4 max-w-[80%]">
-                 <!-- Loading Bubble -->
-                 <div class="relative group">
-                   <div class="bg-background border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm flex items-center gap-3">
-                     <div class="flex items-center gap-1">
-                       <span class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.3s]"></span>
-                       <span class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce [animation-delay:-0.15s]"></span>
-                       <span class="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce"></span>
-                     </div>
-                   </div>
-                   
-                   <!-- Decorative blur effect -->
-                   <div class="absolute -inset-1 bg-gradient-to-r from-primary/10 to-transparent blur-lg opacity-20 -z-10 group-hover:opacity-30 transition-opacity"></div>
-                 </div>
-              </div>
+            <MessageRenderer 
+              v-for="(message, index) in (messages || [])" 
+              :key="message.id || index" 
+              :message="message"
+              :messages="messages || []" 
+              :message-index="index" 
+              :is-loading="isLoading && index === (messages || []).length - 1"
+              @download-file="downloadFile"
+              @toolClick="handleToolClick" 
+              @sendMessage="handleSendMessage" 
+            />
+            
+            <!-- Global loading indicator when no messages or waiting for first chunk of response -->
+            <div v-if="isLoading && (!messages || messages.length === 0 || messages[messages.length - 1].role === 'user')" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+               <LoadingBubble />
             </div>
           </div>
           <div ref="messagesEndRef" />
@@ -93,13 +89,6 @@
             <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
-
-      <ToolDetailsPanel 
-        :open="showToolDetails" 
-        @update:open="showToolDetails = $event"
-        :tool-execution="selectedToolExecution"
-        :tool-result="toolResult" 
-      />
 
       <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles" :workspace-path="workspacePath"
         @download-file="downloadFile" @close="showWorkspace = false" />
@@ -123,8 +112,8 @@ import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
-import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
 import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
+import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 
 // UI Components
 import { Button } from '@/components/ui/button'
