@@ -28,8 +28,8 @@ class SandboxFileSystem:
             return system_prefix
 
         for root, dirs, files in os.walk(self.host_path):
-            # Filter hidden directories
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            # Filter hidden directories and .sandbox
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.sandbox']
             
             # Files
             for file_item in files:
