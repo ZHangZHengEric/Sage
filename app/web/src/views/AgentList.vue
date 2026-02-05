@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full w-full p-6 overflow-y-auto">
+  <div class="h-full w-full overflow-hidden flex flex-col">
     <!-- List View -->
-    <div v-if="currentView === 'list'" class="space-y-6 animate-in fade-in duration-500">
+    <div v-if="currentView === 'list'" class="flex-1 overflow-y-auto p-6 space-y-6 animate-in fade-in duration-500">
       <div class="flex justify-end gap-3">
         <Button variant="outline" @click="handleImport">
           <Download class="mr-2 h-4 w-4" />
@@ -79,18 +79,7 @@
         </Card>
       </div>
     </div>
-
-    <!-- Edit/Create View -->
-    <div v-else class="space-y-6 animate-in slide-in-from-right-10 duration-300">
-       <div class="flex items-center justify-between">
-         <h3 class="text-2xl font-bold tracking-tight">
-           {{ currentView === 'edit' ? t('agent.editTitle') : t('agent.createTitle') }}
-         </h3>
-         <Button variant="outline" @click="handleBackToList">
-           ← {{ t('tools.backToList') }}
-         </Button>
-       </div>
-       
+    <div v-else class="flex-1 overflow-hidden">
        <AgentEdit 
       :visible="currentView !== 'list'" 
       :agent="editingAgent" 

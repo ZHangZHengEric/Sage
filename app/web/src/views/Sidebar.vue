@@ -1,10 +1,26 @@
 <template>
-  <div class="flex flex-col w-[280px] h-full bg-slate-100/60 border-r-0">
+  <div 
+    class="flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
+    :class="[isCollapsed ? 'w-[70px]' : 'w-[280px]']"
+  >
     <!-- Header -->
-    <div class="p-6 bg-transparent">
-      <h2 class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent text-center mb-2">
+    <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
+      <h2 
+        v-if="!isCollapsed" 
+        class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
+      >
         Zavixai Agent
       </h2>
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        @click="toggleCollapse"
+        :title="isCollapsed ? '展开' : '收起'"
+        class="text-muted-foreground hover:text-foreground shrink-0"
+      >
+        <PanelLeftOpen v-if="isCollapsed" class="h-4 w-4" />
+        <PanelLeftClose v-else class="h-4 w-4" />
+      </Button>
     </div>
 
     <!-- Change Password Dialog -->
@@ -65,54 +81,105 @@
     <ScrollArea class="flex-1 px-3">
       <div class="space-y-4">
         <template v-for="item in predefinedServices" :key="item.id">
-          <!-- Item with children (Category) -->
-          <Collapsible
-            v-if="item.children"
-            v-model:open="expandedCategories[item.key]"
-            class="space-y-1"
-          >
-            <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
-              <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
-              <span class="flex-1 text-left">{{ t(item.nameKey) }}</span>
-              <ChevronDown
-                class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
-                :class="{ '-rotate-90': !expandedCategories[item.key] }"
-              />
-            </CollapsibleTrigger>
-            
-            <CollapsibleContent class="space-y-1">
-              <div 
-                v-for="service in item.children" 
-                :key="service.id"
-              >
-                <Button
-                  variant="ghost"
-                  class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
-                  :class="cn(
-                    'hover:bg-white hover:shadow-sm hover:text-primary transition-all duration-200',
-                    isCurrentService(service.url, service.isInternal) && 'bg-white shadow text-primary font-semibold'
-                  )"
-                  @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
-                >
-                  {{ t(service.nameKey) }}
-                </Button>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
+          
+          <!-- Collapsed Mode -->
+          <div v-if="isCollapsed" class="flex justify-center group/item relative">
+            <!-- Item with children (Category) -->
+            <DropdownMenu v-if="item.children">
+               <DropdownMenuTrigger as-child>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    :class="[
+                      'transition-all duration-200',
+                      isCategoryActive(item) ? 'bg-white shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                    ]"
+                  >
+                     <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
+                  </Button>
+               </DropdownMenuTrigger>
+               <DropdownMenuContent side="right" align="start" class="w-48 ml-2">
+                  <DropdownMenuLabel>{{ t(item.nameKey) }}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    v-for="service in item.children" 
+                    :key="service.id"
+                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                    :class="{'bg-muted font-medium text-primary': isCurrentService(service.url, service.isInternal)}"
+                  >
+                     {{ t(service.nameKey) }}
+                  </DropdownMenuItem>
+               </DropdownMenuContent>
+            </DropdownMenu>
 
-          <!-- Item without children (Direct Link) -->
-          <Button
-            v-else
-            variant="ghost"
-            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-white hover:shadow-sm transition-all duration-200 mb-1"
-            :class="cn(
-              isCurrentService(item.url, item.isInternal) && 'bg-white shadow text-primary font-bold'
-            )"
-            @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
-          >
-            <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
-            <span class="flex-1 text-left">{{ t(item.nameKey) }}</span>
-          </Button>
+            <!-- Item without children (Direct Link) -->
+            <Button
+               v-else
+               variant="ghost"
+               size="icon"
+               :title="t(item.nameKey)"
+               :class="[
+                 'transition-all duration-200',
+                 isCurrentService(item.url, item.isInternal) ? 'bg-white shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+               ]"
+               @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+            >
+               <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
+            </Button>
+          </div>
+
+          <!-- Expanded Mode -->
+          <template v-else>
+            <!-- Item with children (Category) -->
+            <Collapsible
+              v-if="item.children"
+              v-model:open="expandedCategories[item.key]"
+              class="space-y-1"
+            >
+              <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
+                <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
+                <span class="flex-1 text-left truncate">{{ t(item.nameKey) }}</span>
+                <ChevronDown
+                  class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
+                  :class="{ '-rotate-90': !expandedCategories[item.key] }"
+                />
+              </CollapsibleTrigger>
+              
+              <CollapsibleContent class="space-y-1">
+                <div 
+                  v-for="service in item.children" 
+                  :key="service.id"
+                >
+                  <Button
+                    variant="ghost"
+                    class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
+                    :class="cn(
+                      'hover:bg-white hover:shadow-sm hover:text-primary transition-all duration-200',
+                      isCurrentService(service.url, service.isInternal) && 'bg-white shadow text-primary font-semibold'
+                    )"
+                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                  >
+                    <span class="truncate">{{ t(service.nameKey) }}</span>
+                  </Button>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
+            <!-- Item without children (Direct Link) -->
+            <Button
+              v-else
+              variant="ghost"
+              class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-white hover:shadow-sm transition-all duration-200 mb-1"
+              :class="cn(
+                isCurrentService(item.url, item.isInternal) && 'bg-white shadow text-primary font-bold'
+              )"
+              @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+            >
+              <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
+              <span class="flex-1 text-left truncate">{{ t(item.nameKey) }}</span>
+            </Button>
+          </template>
+
         </template>
       </div>
     </ScrollArea>
@@ -121,25 +188,36 @@
     <div class="p-4 mt-auto" v-if="currentUser">
       <DropdownMenu v-model:open="isDropdownOpen">
         <DropdownMenuTrigger as-child>
-          <div class="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-white hover:shadow-sm transition-all duration-200 w-full group">
-            <Avatar class="h-9 w-9 border-2 border-white shadow-sm group-hover:border-primary/20 transition-colors">
+          <div 
+            class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-white hover:shadow-sm transition-all duration-200 w-full group"
+            :class="{'justify-center': isCollapsed}"
+          >
+            <Avatar class="h-9 w-9 border-2 border-white shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
               <AvatarImage :src="currentUser.avatar" />
               <AvatarFallback class="bg-primary/10 text-primary font-bold">
                 {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
               </AvatarFallback>
             </Avatar>
-            <div class="flex-1 min-w-0 text-left">
+            <div v-if="!isCollapsed" class="flex-1 min-w-0 text-left">
               <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
                 {{ currentUser.nickname || currentUser.username }}
               </p>
             </div>
             <ChevronDown 
+              v-if="!isCollapsed"
               class="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-transform duration-200" 
               :class="{ '-rotate-90': !isDropdownOpen, 'rotate-180': isDropdownOpen }"
             />
           </div>
         </DropdownMenuTrigger>
-        <DropdownMenuContent class="w-56" side="top" align="end">
+        <DropdownMenuContent class="w-56" :side="isCollapsed ? 'right' : 'top'" align="end" :sideOffset="isCollapsed ? 10 : 0">
+          <DropdownMenuLabel class="font-normal" v-if="isCollapsed">
+             <div class="flex flex-col space-y-1">
+                <p class="text-sm font-medium leading-none">{{ currentUser.nickname || currentUser.username }}</p>
+                <p class="text-xs leading-none text-muted-foreground">User Profile</p>
+             </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator v-if="isCollapsed" />
           <DropdownMenuItem @click="toggleLanguage">
              <Globe class="mr-2 h-4 w-4" />
              <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
@@ -176,7 +254,9 @@ import {
   Settings,
   LayoutGrid,
   Users,
-  KeyRound
+  KeyRound,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { getCurrentUser, logout } from '../utils/auth.js'
@@ -217,9 +297,14 @@ const { toggleLanguage, t, isZhCN } = useLanguage()
 const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
+const isCollapsed = ref(false)
 
 const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
+}
+
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value
 }
 
 const isDropdownOpen = ref(false)
@@ -252,10 +337,7 @@ const handleChangePassword = async () => {
     showChangePasswordDialog.value = false
     handleLogout()
   } catch (error) {
-    // Error is handled by request interceptor usually, but if not:
     console.error(error)
-    // If request.js throws error with message
-    // toast.error(error.message || '密码修改失败')
   } finally {
     changingPassword.value = false
   }
@@ -345,6 +427,11 @@ const getCategoryIcon = (key) => {
 const isCurrentService = (url, isInternal) => {
   if (isInternal) return route.name === url || (route.name === 'KnowledgeBaseDetail' && url === 'KnowledgeBase')
   return false
+}
+
+const isCategoryActive = (item) => {
+  if (!item.children) return false
+  return item.children.some(child => isCurrentService(child.url, child.isInternal))
 }
 
 const handleMenuClick = (url, name, isInternal) => {
