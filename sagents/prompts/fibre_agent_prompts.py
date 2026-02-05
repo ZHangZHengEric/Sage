@@ -36,9 +36,26 @@ STRATEGY:
 3. `sys_finish_task(status, result)`: 报告最终结果。
 
 策略：
+- **何时生成子智能体**：当任务包含多个独立步骤、需要不同领域的专业知识、或者可以通过并行处理提高效率时（例如：同时进行代码编写和文档撰写，或者先规划再执行），请创建专门的子智能体。对于简单、线性的任务，直接处理即可，无需创建子智能体。
 - 将复杂的用户请求分解为子任务。
 - 为每个子任务生成专门的智能体（例如，"程序员"、"规划者"、"审核员"）。
 - 使用 `sys_delegate_task` 向它们分配任务并获取结果。
 - 综合它们的回复来回答用户。
+"""
+}
+
+# Sub-Agent Specific Requirements
+sub_agent_requirement_prompt = {
+    "en": """
+=== SUB-AGENT REQUIREMENT ===
+You are a Sub-Agent spawned to perform a specific task.
+You MUST call `sys_finish_task(status, result)` to report your final result and complete your assignment.
+Failure to call this tool will result in the task being considered incomplete.
+""",
+    "zh": """
+=== 子智能体必须遵守的规则 ===
+你是由父智能体创建来执行特定任务的子智能体。
+你 **必须** 调用 `sys_finish_task(status, result)` 工具来报告最终结果并结束任务。
+仅仅回复文本是不够的，必须调用该工具才算任务完成。
 """
 }
