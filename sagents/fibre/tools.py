@@ -42,22 +42,20 @@ class FibreTools:
         return f"Agent spawned successfully. ID: {agent_id}. Ready to receive messages."
 
     @tool(
-        description_i18n={"zh": "给子agent 分配任务并执行"},
+        description_i18n={"zh": "给子agent 分配任务并执行，支持并发执行多个子任务"},
         param_description_i18n={
-            "agent_id": {"zh": "由 sys_spawn_agent 返回的智能体 ID"},
-            "content": {"zh": "任务内容"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id' 和 'content' 字段。例如：[{'agent_id': 'agent1', 'content': 'task1'}, {'agent_id': 'agent2', 'content': 'task2'}]"}
         }
     )
-    async def sys_delegate_task(self, agent_id: str, content: str) -> str:
+    async def sys_delegate_task(self, tasks: list[Dict[str, str]]) -> str:
         """
-        Delegate a task to an existing sub-agent and wait for the result.
+        Delegate tasks to existing sub-agents and wait for the results. Supports parallel execution.
 
         Args:
-            agent_id: The agent ID returned by sys_spawn_agent
-            content: The task description or message content
+            tasks: A list of tasks, where each task is a dictionary containing 'agent_id' and 'content'.
         """
-        logger.info(f"Tool Call: sys_delegate_task(to={agent_id})")
-        response = await self.orchestrator.delegate_task(agent_id, content)
+        logger.info(f"Tool Call: sys_delegate_task(tasks_count={len(tasks)})")
+        response = await self.orchestrator.delegate_tasks(tasks)
         return response
 
     @tool(
