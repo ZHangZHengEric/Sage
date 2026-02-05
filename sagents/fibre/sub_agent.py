@@ -52,7 +52,7 @@ class FibreSubAgent:
         self.sub_session_context = init_session_context(
             session_id=self.session_id,
             user_id=self.parent_context.user_id,
-            workspace_root=self.parent_context.session_workspace,
+            workspace_root=self.parent_context.session_workspace, # Use parent's session_workspace as root
             # Inherit configuration from parent
             context_budget_config=context_budget_config, 
             tool_manager=self.parent_context.tool_manager,
