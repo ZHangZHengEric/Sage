@@ -86,10 +86,16 @@ async def get_workspace(session_id: str, request: Request):
 @conversation_router.get("/api/sessions/{session_id}/file_workspace/download")
 async def download_file(session_id: str, request: Request):
     file_path = request.query_params.get("file_path")
-    path, filename, media_type = await download_session_file(session_id, file_path)
-    return FileResponse(
-        path=path, filename=filename, media_type=media_type
-    )
+    logger.bind(session_id=session_id).info(f"Download request: file_path={file_path}")
+    try:
+        path, filename, media_type = await download_session_file(session_id, file_path)
+        logger.bind(session_id=session_id).info(f"Download resolved: path={path}")
+        return FileResponse(
+            path=path, filename=filename, media_type=media_type
+        )
+    except Exception as e:
+        logger.bind(session_id=session_id).error(f"Download failed: {e}")
+        raise
 
 
 @conversation_router.get("/api/conversations")
