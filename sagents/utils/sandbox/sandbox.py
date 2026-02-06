@@ -707,7 +707,21 @@ def _run_install_cmd(install_cmd: str, stdout_capture: Optional[Any], stderr_cap
 from sagents.utils.sandbox.filesystem import SandboxFileSystem
 
 class Sandbox:
-    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace"):
+    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace", linux_isolation_mode: str = 'chroot'):
+        """
+        Initialize the Sandbox.
+
+        Args:
+            cpu_time_limit: CPU time limit in seconds.
+            memory_limit_mb: Memory limit in MB.
+            allowed_paths: List of allowed paths (for Seatbelt/Sandbox).
+            host_workspace: The host workspace path.
+            virtual_workspace: The virtual workspace path inside the sandbox.
+            linux_isolation_mode: Isolation mode for Linux ('chroot', 'bwrap', 'subprocess'). Default is 'chroot'.
+                                  - 'chroot': Use chroot for isolation (requires root or configured chroot env).
+                                  - 'bwrap': Use bubblewrap for isolation (unprivileged).
+                                  - 'subprocess': Direct execution in venv (no FS isolation).
+        """
         # Default allowed system paths required for common libraries (e.g., pandas/dateutil need zoneinfo, openpyxl/mimetypes need mime.types)
         default_allowed_paths = [
             "/usr/share/zoneinfo",
@@ -728,7 +742,9 @@ class Sandbox:
         }
         self.host_workspace = host_workspace
         self.virtual_workspace = virtual_workspace
+        self.linux_isolation_mode = linux_isolation_mode
         self.file_system = None
+
         self.sandbox_dir = None
         self.venv_dir = None
 
@@ -908,6 +924,120 @@ timeout = 120
                 try: os.remove(profile_path)
                 except: pass
 
+    def _run_with_subprocess(self, payload: dict, cwd: Optional[str] = None) -> Any:
+        """
+        Run the payload in a subprocess using the sandbox venv (no filesystem isolation).
+        """
+        if not self.sandbox_dir:
+             raise SandboxError("Sandbox directory not initialized")
+
+        import uuid
+        run_id = str(uuid.uuid4())
+        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
+        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
+        
+        with open(input_pkl, "wb") as f:
+            pickle.dump(payload, f)
+            
+        python_bin = os.path.join(self.venv_dir, "bin", "python")
+        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
+        
+        cmd = [
+            python_bin, launcher_path,
+            input_pkl, output_pkl
+        ]
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=cwd or self.host_workspace
+            )
+            
+            if result.returncode != 0:
+                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
+                 
+            if not os.path.exists(output_pkl):
+                 raise SandboxError("Sandbox execution produced no output file")
+                 
+            with open(output_pkl, "rb") as f:
+                res = pickle.load(f)
+                
+            if res['status'] == 'success':
+                return res['result']
+            else:
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                
+        finally:
+            if os.path.exists(input_pkl):
+                try: os.remove(input_pkl)
+                except: pass
+            if os.path.exists(output_pkl):
+                try: os.remove(output_pkl)
+                except: pass
+
+    def _run_with_chroot(self, payload: dict, cwd: Optional[str] = None) -> Any:
+        """
+        Run the payload using chroot. 
+        Note: This requires the sandbox_dir to be a valid root filesystem or at least contain 
+        necessary libraries for the venv python to run.
+        """
+        if not self.sandbox_dir:
+             raise SandboxError("Sandbox directory not initialized")
+
+        import uuid
+        run_id = str(uuid.uuid4())
+        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
+        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
+        
+        with open(input_pkl, "wb") as f:
+            pickle.dump(payload, f)
+            
+        # Paths relative to the new root (sandbox_dir)
+        inner_launcher = "/launcher.py"
+        inner_input = f"/input_{run_id}.pkl"
+        inner_output = f"/output_{run_id}.pkl"
+        inner_python = "/venv/bin/python"
+        
+        cmd = [
+            "chroot",
+            self.sandbox_dir,
+            inner_python, inner_launcher,
+            inner_input, inner_output
+        ]
+        
+        try:
+            # We cannot easily set CWD inside chroot with simple `chroot` command without using `sh -c cd ...`
+            # For now we ignore CWD for chroot mode or assume the script handles paths.
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
+                 
+            if not os.path.exists(output_pkl):
+                 raise SandboxError("Sandbox execution produced no output file")
+                 
+            with open(output_pkl, "rb") as f:
+                res = pickle.load(f)
+                
+            if res['status'] == 'success':
+                return res['result']
+            else:
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                
+        finally:
+            if os.path.exists(input_pkl):
+                try: os.remove(input_pkl)
+                except: pass
+            if os.path.exists(output_pkl):
+                try: os.remove(output_pkl)
+                except: pass
+
     def _run_with_bwrap(self, payload: dict, cwd: Optional[str] = None) -> Any:
         if not self.sandbox_dir:
              raise SandboxError("Sandbox directory not initialized")
@@ -1070,7 +1200,12 @@ timeout = 120
                 'requirements': requirements
             }
             if sys.platform == 'linux':
-                return self._run_with_bwrap(payload)
+                if self.linux_isolation_mode == 'bwrap':
+                    return self._run_with_bwrap(payload)
+                elif self.linux_isolation_mode == 'chroot':
+                    return self._run_with_chroot(payload)
+                else:
+                    return self._run_with_subprocess(payload)
             return self._run_with_seatbelt(payload)
 
         result_queue = multiprocessing.Queue()
@@ -1118,7 +1253,12 @@ timeout = 120
                 'sys_path': sys.path
             }
             if sys.platform == 'linux':
-                return self._run_with_bwrap(payload, cwd=cwd)
+                if self.linux_isolation_mode == 'bwrap':
+                    return self._run_with_bwrap(payload, cwd=cwd)
+                elif self.linux_isolation_mode == 'chroot':
+                    return self._run_with_chroot(payload, cwd=cwd)
+                else:
+                    return self._run_with_subprocess(payload, cwd=cwd)
             return self._run_with_seatbelt(payload, cwd=cwd)
 
         result_queue = multiprocessing.Queue()
@@ -1155,7 +1295,12 @@ timeout = 120
                 'install_cmd': install_cmd
             }
             if sys.platform == 'linux':
-                return self._run_with_bwrap(payload, cwd=cwd)
+                if self.linux_isolation_mode == 'bwrap':
+                    return self._run_with_bwrap(payload, cwd=cwd)
+                elif self.linux_isolation_mode == 'chroot':
+                    return self._run_with_chroot(payload, cwd=cwd)
+                else:
+                    return self._run_with_subprocess(payload, cwd=cwd)
             return self._run_with_seatbelt(payload, cwd=cwd)
 
         result_queue = multiprocessing.Queue()
@@ -1193,7 +1338,12 @@ timeout = 120
                 'cwd': target_cwd
             }
             if sys.platform == 'linux':
-                return self._run_with_bwrap(payload, cwd=target_cwd)
+                if self.linux_isolation_mode == 'bwrap':
+                    return self._run_with_bwrap(payload, cwd=target_cwd)
+                elif self.linux_isolation_mode == 'chroot':
+                    return self._run_with_chroot(payload, cwd=target_cwd)
+                else:
+                    return self._run_with_subprocess(payload, cwd=target_cwd)
             return self._run_with_seatbelt(payload, cwd=target_cwd)
 
         result_queue = multiprocessing.Queue()
