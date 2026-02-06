@@ -20,7 +20,7 @@
           <div class="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showWorkspace = !showWorkspace">
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleWorkspacePanel">
                   <FolderOpen class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -222,23 +222,43 @@ const fetchTaskStatus = async (sessionId) => {
     }
   };
 
+  const handleWorkspacePanel = () => {
+    showWorkspace.value = !showWorkspace.value;
+    if (showWorkspace.value) {
+      updateTaskAndWorkspace(currentSessionId.value);
+    }
+  }
+
   // 下载文件
-  const downloadWorkspaceFile = async (sessionId, filePath) => {
-    if (!sessionId || !filePath) return;
+  const downloadWorkspaceFile = async (sessionId, itemOrPath) => {
+    if (!sessionId || !itemOrPath) return;
     
+    // 兼容处理：itemOrPath可能是字符串路径，也可能是文件对象
+    const filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path;
+    const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false;
+    
+    if (!filePath) return;
+
     try {
       const blob = await taskAPI.downloadFile(sessionId, filePath);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = filePath.split('/').pop();
+      
+      let filename = filePath.split('/').pop();
+      if (isDirectory && !filename.endsWith('.zip')) {
+        filename += '.zip';
+      }
+      
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
       console.error('下载文件出错:', error);
+      toast.error(t('chat.downloadError') || `Download failed: ${error.message}`);
     }
   };
 
@@ -301,9 +321,7 @@ const createSession = () => {
         }
       }
       
-      // 恢复工作空间
-      await updateTaskAndWorkspace(sessionId);
-      
+    
     } catch (e) {
       console.error('加载会话失败:', e);
       toast.error(t('chat.loadConversationError') || 'Failed to load conversation');
@@ -806,10 +824,10 @@ const handleToolClick = (toolExecution, result) => {
 }
 
 
-const downloadFile = async (filename) => {
+const downloadFile = async (item) => {
   try {
     if (currentSessionId.value) {
-      await downloadWorkspaceFile(currentSessionId.value, filename)
+      await downloadWorkspaceFile(currentSessionId.value, item)
     }
   } catch (error) {
     console.error('Failed to download file:', error)
