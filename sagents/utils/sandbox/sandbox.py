@@ -13,6 +13,9 @@ import json
 import venv
 from sagents.utils.logger import logger
 
+# Global cache for auto-detected isolation mode
+_AUTO_DETECTED_MODE = None
+
 _current_sandbox = contextvars.ContextVar('current_sandbox', default=None)
 
 class SandboxError(Exception):
@@ -90,10 +93,64 @@ import importlib.util
 import asyncio
 import subprocess
 import io
+import resource
+import builtins
 from contextlib import redirect_stdout, redirect_stderr
 
 # Ensure current directory is in sys.path
 sys.path.insert(0, os.getcwd())
+
+def _apply_limits_internal(limits, restrict_files=True):
+    # Set CPU time limit (in seconds)
+    if 'cpu_time' in limits:
+        target = int(limits['cpu_time'])
+        try:
+            soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
+            if hard != resource.RLIM_INFINITY:
+                target = min(target, hard)
+            resource.setrlimit(resource.RLIMIT_CPU, (target, hard))
+        except Exception:
+            pass
+
+    # Set Memory limit (in bytes)
+    if 'memory' in limits:
+        target = int(limits['memory'])
+        try:
+            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+            if hard != resource.RLIM_INFINITY:
+                target = min(target, hard)
+            resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+        except Exception:
+            pass
+
+    # Simple file system restriction (logical)
+    if restrict_files and 'allowed_paths' in limits:
+        allowed_paths = limits.get('allowed_paths', [])
+        if allowed_paths:
+            original_open = open
+            def restricted_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+                # Resolve absolute path
+                if isinstance(file, int):
+                    return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+                
+                try:
+                    abs_path = os.path.abspath(file)
+                except Exception:
+                    raise Exception(f"Access to file {file} is denied (Invalid Path).")
+
+                allowed = False
+                for path in allowed_paths:
+                    if abs_path.startswith(os.path.abspath(path)):
+                        allowed = True
+                        break
+                
+                if not allowed:
+                    raise Exception(f"Access to file {abs_path} is denied (Sandboxed).")
+                
+                return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+            
+            # Monkey patch builtins.open
+            builtins.open = restricted_open
 
 def main():
     try:
@@ -110,6 +167,12 @@ def main():
         args = payload.get('args', [])
         kwargs = payload.get('kwargs', {})
         sys_path = payload.get('sys_path', [])
+        limits = payload.get('limits', {})
+        apply_file_restrictions = payload.get('apply_file_restrictions', False)
+
+        # Apply limits if provided
+        if limits:
+            _apply_limits_internal(limits, restrict_files=apply_file_restrictions)
         
         # Restore sys.path
         for p in reversed(sys_path):
@@ -750,10 +813,12 @@ class Sandbox:
         self.venv_dir = None
 
         if host_workspace:
-            # Enable path mapping only on macOS (Darwin).
+            # Enable path mapping only on macOS (Darwin) or Linux (subprocess mode).
             # On Linux (future bwrap implementation), we can use bind mounts to map paths natively,
             # eliminating the need for text-based path replacement.
-            enable_path_mapping = (sys.platform == 'darwin')
+            enable_path_mapping = (sys.platform == 'darwin') or (
+                sys.platform == 'linux' and self.linux_isolation_mode == 'subprocess'
+            )
             self.file_system = SandboxFileSystem(
                 host_path=host_workspace, 
                 virtual_path=virtual_workspace,
@@ -781,12 +846,32 @@ class Sandbox:
         if mode != 'auto':
             return mode
             
+        global _AUTO_DETECTED_MODE
+        if _AUTO_DETECTED_MODE:
+            return _AUTO_DETECTED_MODE
+            
         # Auto-detect logic
         import shutil
+        import subprocess
+        
+        resolved_mode = 'subprocess'
         if shutil.which('bwrap'):
-            return 'bwrap'
-        else:
-            return 'subprocess'
+            # Verify if bwrap actually works (can fail in Docker containers without privileges)
+            try:
+                # Try a minimal bwrap command: bind root to / and run true
+                subprocess.run(
+                    ['bwrap', '--bind', '/', '/', 'true'], 
+                    check=True, 
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL
+                )
+                resolved_mode = 'bwrap'
+            except (subprocess.CalledProcessError, OSError):
+                # Fallback if bwrap fails to execute
+                resolved_mode = 'subprocess'
+        
+        _AUTO_DETECTED_MODE = resolved_mode
+        return resolved_mode
 
     def _ensure_venv(self):
         if not self.sandbox_dir or not self.venv_dir:
@@ -1246,7 +1331,9 @@ timeout = 120
                 'func_name': func_name,
                 'args': args,
                 'kwargs': kwargs,
-                'requirements': requirements
+                'requirements': requirements,
+                'limits': self.limits,
+                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
                 if self.linux_isolation_mode == 'bwrap':
@@ -1299,7 +1386,9 @@ timeout = 120
                 'function_name': function_name,
                 'args': args,
                 'kwargs': kwargs,
-                'sys_path': sys.path
+                'sys_path': sys.path,
+                'limits': self.limits,
+                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
                 if self.linux_isolation_mode == 'bwrap':
@@ -1341,7 +1430,9 @@ timeout = 120
                 'script_path': script_path,
                 'args': args,
                 'requirements': requirements,
-                'install_cmd': install_cmd
+                'install_cmd': install_cmd,
+                'limits': self.limits,
+                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
                 if self.linux_isolation_mode == 'bwrap':
@@ -1384,7 +1475,9 @@ timeout = 120
             payload = {
                 'mode': 'shell',
                 'command': command,
-                'cwd': target_cwd
+                'cwd': target_cwd,
+                'limits': self.limits,
+                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
                 if self.linux_isolation_mode == 'bwrap':
