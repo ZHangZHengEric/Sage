@@ -9,11 +9,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import (
-    SessionStatus,
-    get_session_context,
-    get_session_messages,
-)
+from sagents.context.session_context import SessionStatus, get_session_context, get_session_messages, _get_workspace_root
 
 from .. import models
 from ..core.exceptions import SageHTTPException
@@ -50,15 +46,8 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
 
 async def get_file_workspace(session_id: str) -> Dict[str, Any]:
     """获取指定会话的文件工作空间内容"""
-    session_context = get_session_context(session_id)
-    if not session_context:
-        return {
-            "session_id": session_id,
-            "files": [],
-            "agent_workspace": None,
-            "message": f"会话 {session_id} 已完成或者不存在",
-        }
-    workspace_path = session_context.agent_workspace
+    workspace_root = _get_workspace_root()
+    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
 
     if not workspace_path or not os.path.exists(workspace_path):
         return {
