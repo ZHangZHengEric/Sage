@@ -21,5 +21,5 @@ async def get_session_traces(session_id: str):
         traces = await dao.get_traces_by_session_id(session_id)
         return await Response.succ(data=[t.to_dict() for t in traces])
     except Exception as e:
-        logger.error(f"Failed to get traces for session {session_id}: {e}")
+        logger.bind(session_id=session_id).error(f"Failed to get traces: {e}")
         return await Response.error(message=f"获取 Trace 数据失败: {str(e)}")

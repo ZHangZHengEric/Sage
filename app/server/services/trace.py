@@ -142,7 +142,12 @@ class TraceService:
                 )
                 trace_spans.append(trace_span)
             except Exception as e:
-                logger.error(f"Error processing span data: {e}")
+                # Try to use session_id if it was extracted, otherwise it might be unbound or previous loop's value?
+                # Actually session_id is defined inside the loop before try/except? 
+                # No, session_id is defined inside try block. If error happens before, session_id might be undefined.
+                # So we need to be careful.
+                sid = locals().get('session_id', 'unknown')
+                logger.bind(session_id=sid).error(f"Error processing span data: {e}")
 
         if trace_spans:
             await self.dao.save_spans(trace_spans)
