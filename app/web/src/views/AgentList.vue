@@ -282,15 +282,17 @@ const loadAgents = async () => {
 
 const saveAgent = async (agentData) => {
   try {
+    let result
     if (agentData.id) {
       // 更新现有agent
-      await agentAPI.updateAgent(agentData.id, agentData)
+      result = await agentAPI.updateAgent(agentData.id, agentData)
     } else {
       // 创建新agent
-      await agentAPI.createAgent(agentData)
+      result = await agentAPI.createAgent(agentData)
     }
     // 重新加载列表
     await loadAgents()
+    return result
   } catch (err) {
     console.error('保存agent失败:', err)
     throw err
@@ -464,11 +466,34 @@ const handleCloseEdit = () => {
   editingAgent.value = null
 }
 
-const handleSaveAgent = async (agentData) => {
+const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null) => {
   try {
-    await saveAgent(agentData)
-    currentView.value = 'list'
-    editingAgent.value = null
+    const result = await saveAgent(agentData)
+    
+    if (shouldExit) {
+      currentView.value = 'list'
+      editingAgent.value = null
+    } else {
+      // 如果是创建操作且不退出，需要更新editingAgent为新创建的agent
+      if (!agentData.id) {
+        let newAgent = null
+        if (result && result.agent) {
+          newAgent = result.agent
+        } else if (result && result.id) {
+          newAgent = result
+        }
+        
+        // 如果API没有直接返回agent对象，尝试从列表中查找
+        if (!newAgent && agents.value.length > 0) {
+          // 尝试通过名称匹配 (注意：名称可能不唯一，这是一个fallback)
+          newAgent = agents.value.find(a => a.name === agentData.name)
+        }
+        
+        if (newAgent) {
+          editingAgent.value = newAgent
+        }
+      }
+    }
 
     if (agentData.id) {
       toast.success(t('agent.updateSuccess').replace('{name}', agentData.name))
@@ -478,6 +503,8 @@ const handleSaveAgent = async (agentData) => {
   } catch (error) {
     console.error('保存agent失败:', error)
     toast.error(t('agent.saveError'))
+  } finally {
+    if (doneCallback) doneCallback()
   }
 }
 

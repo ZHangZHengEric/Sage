@@ -143,6 +143,8 @@ async def populate_request_from_agent_config(
     _merge_dict("system_context", agent.config.get("systemContext", {}))
     _fill_if_none("system_prefix", agent.config.get("systemPrefix", ""))
     _fill_if_none("memory_type", agent.config.get("memoryType", "session"))
+    user = {"本次会话用户id": request.user_id or "default_user"}
+    _merge_dict("system_context", user)
 
     # 处理可用知识库
     available_knowledge_bases = agent.config.get("availableKnowledgeBases", [])
