@@ -182,6 +182,7 @@ export default {
   'common.creating': 'Creating...',
   'common.prevStep': 'Previous Step',
   'common.nextStep': 'Next Step',
+  'common.saveAndNextStep': 'Save & Next',
   'common.total': 'Total',
   'common.copy': 'Copy',
   'common.none': 'None',
@@ -189,6 +190,7 @@ export default {
   'common.collapseAll': 'Collapse All',
   'common.return': 'Return',
   'common.all': 'All',
+  'common.viewDetails': 'View Details',
   // Agent创建模态框
   'agentCreation.title': 'Create New Agent',
   'agentCreation.blankConfig': 'Blank Configuration',
