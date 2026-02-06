@@ -23,7 +23,6 @@ else:
 
 
 @mcp.tool()
-@sage_mcp_tool()
 async def search_web_page(
     query: str,
     date_range: str = None,
@@ -115,7 +114,6 @@ async def search_web_page(
 
 
 @mcp.tool()
-@sage_mcp_tool()
 async def search_image_from_web(query: str, date_range: str = None, country: str = None, count: int = 10):
     """ this tool is used to search images from web.
     The results are returned in a list of dictionaries, each dictionary contains the following keys:
