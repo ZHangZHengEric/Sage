@@ -742,8 +742,8 @@ class Sandbox:
             'allowed_paths': final_allowed_paths
         }
         self.host_workspace = host_workspace
-        self.virtual_workspace = virtual_workspace
         self.linux_isolation_mode = self._resolve_linux_mode(linux_isolation_mode)
+        self.virtual_workspace = virtual_workspace
         self.file_system = None
 
         self.sandbox_dir = None
@@ -1070,20 +1070,50 @@ timeout = 120
         launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
         
         # Build bwrap command
-        # We mount root as read-only to ensure isolation, but we must bind-mount necessary paths
+        # We construct a new root filesystem by binding top-level directories from host,
+        # instead of binding '/' recursively. This allows us to create new mount points (like /workspace)
+        # even if they don't exist on the host, because the root is an implicit tmpfs.
         cmd = [
             "bwrap",
-            "--ro-bind", "/", "/",            # Read-only root
             "--dev", "/dev",                  # Device files
             "--proc", "/proc",                # Process info
             "--tmpfs", "/tmp",                # Temp filesystem
-            "--bind", self.host_workspace, self.virtual_workspace, # Bind workspace to /workspace
-            "--bind", self.sandbox_dir, self.sandbox_dir,          # Bind sandbox dir RW (for venv/pickles)
-            "--unshare-all",                  # Create new namespaces (net, ipc, pid, user, uts, cgroup)
-            "--share-net",                    # Share network namespace (allow internet access)
-            "--die-with-parent",              # Cleanup when parent dies
-            "--chdir", cwd or self.virtual_workspace, # Change directory inside sandbox
+            "--unshare-all",                  # Create new namespaces
+            "--share-net",                    # Share network
+            "--die-with-parent",              # Cleanup
         ]
+
+        # Bind top-level directories from host
+        try:
+            for name in os.listdir("/"):
+                if name in [".", "..", "dev", "proc", "tmp", "lost+found"]:
+                    continue
+                
+                path = os.path.join("/", name)
+                # Skip if path doesn't exist (symlink broken?)
+                if not os.path.exists(path) and not os.path.islink(path):
+                    continue
+
+                if os.path.islink(path):
+                    try:
+                        target = os.readlink(path)
+                        cmd.extend(["--symlink", target, f"/{name}"])
+                    except OSError:
+                        pass
+                elif os.path.isdir(path):
+                    cmd.extend(["--ro-bind", path, f"/{name}"])
+        except Exception as e:
+            logger.warning(f"Error while constructing bwrap root: {e}")
+            # Fallback to simple root bind if listdir fails (unlikely)
+            cmd.extend(["--ro-bind", "/", "/"])
+
+        # Bind workspace and sandbox dir
+        cmd.extend([
+            "--bind", self.host_workspace, self.virtual_workspace,
+            "--bind", self.sandbox_dir, self.sandbox_dir
+        ])
+
+        cmd.extend(["--chdir", cwd or self.virtual_workspace])
         
         # Add the command to run
         cmd.extend([
