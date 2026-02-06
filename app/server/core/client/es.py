@@ -77,8 +77,8 @@ async def init_es_client(
         else:
             ES_CLIENT = AsyncElasticsearch(base)
         
-        # 尝试自动修复磁盘阈值问题
-        await _configure_disk_thresholds(ES_CLIENT)
+        # # 尝试自动修复磁盘阈值问题
+        # await _configure_disk_thresholds(ES_CLIENT)
         
         logger.info(f"ES 客户端初始化成功: {base}")
         return ES_CLIENT
