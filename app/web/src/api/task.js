@@ -22,11 +22,10 @@ export const taskAPI = {
   /**
    * 下载文件
    * @param {string} filePath - 文件路径
-   * @param {string} workspacePath - 工作空间路径
    * @returns {Promise<Blob>}
    */
-  downloadFile: async (filePath, workspacePath) => {
-    const url = `/api/sessions/file_workspace/download?file_path=${encodeURIComponent(filePath)}&workspace_path=${encodeURIComponent(workspacePath)}`
+  downloadFile: async (sessionId, filePath) => {
+    const url = `/api/sessions/${sessionId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
     
     // 使用原生fetch处理blob响应
     const response = await fetch(url, {
