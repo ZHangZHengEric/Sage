@@ -27,6 +27,7 @@ from sagents.agent import (
     TaskAnalysisAgent,
     SimpleAgent,
     AgentBase,
+    FibreAgent,
 )
 from sagents.tool import ToolManager, ToolProxy
 from sagents.skill import SkillManager, SkillProxy
@@ -149,6 +150,10 @@ class SAgent:
     def task_router_agent(self):
         return self._get_agent(TaskRouterAgent, "task_router_agent")
 
+    @property
+    def fibre_agent(self):
+        return self._get_agent(FibreAgent, "fibre_agent")
+
     async def run_stream(
         self,
         input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
@@ -159,6 +164,7 @@ class SAgent:
         deep_thinking: Optional[Union[bool, str]] = None,
         max_loop_count: int = 10,
         multi_agent: Optional[bool] = None,
+        agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         force_summary: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
@@ -188,6 +194,7 @@ class SAgent:
                 deep_thinking=deep_thinking,
                 max_loop_count=max_loop_count,
                 multi_agent=multi_agent,
+                agent_mode=agent_mode,
                 more_suggest=more_suggest,
                 force_summary=force_summary,
                 system_context=system_context,
@@ -233,6 +240,7 @@ class SAgent:
         deep_thinking: Optional[Union[bool, str]] = None,
         max_loop_count: int = 10,
         multi_agent: Optional[bool] = None,
+        agent_mode: Optional[str] = None,
         more_suggest: bool = False,
         force_summary: bool = False,
         system_context: Optional[Dict[str, Any]] = None,
@@ -249,7 +257,8 @@ class SAgent:
             user_id: 用户ID
             deep_thinking: 是否开启深度思考
             max_loop_count: 最大循环次数
-            multi_agent: 是否开启多智能体模式
+            multi_agent: 是否开启多智能体模式 (Deprecated, use agent_mode)
+            agent_mode: 智能体模式 ('fibre', 'simple', 'multi')
             more_suggest: 是否开启更多建议
             system_context: 系统上下文
             available_workflows: 可用工作流列表
@@ -353,8 +362,14 @@ class SAgent:
                             {"workflow_guidance": session_context.workflow_manager.format_workflows_for_context(session_context.workflow_manager.list_workflows())}
                         )
 
-                # 当deep_thinking 或者 multi_agent 为None，其一为none时，调用task router
-                if deep_thinking is None or multi_agent is None:
+                # 0. 确定 agent_mode
+                if agent_mode is None:
+                    if multi_agent is not None:
+                        agent_mode = 'multi' if multi_agent else 'simple'
+                
+                # 当 agent_mode 未确定，或者 (deep_thinking 未确定 且 agent_mode 不是 fibre) 时，调用 task router
+                # 如果是 fibre 模式，跳过外层路由
+                if agent_mode != 'fibre' and (deep_thinking is None or agent_mode is None):
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.task_router_agent, phase_name="任务路由"
                     ):
@@ -364,9 +379,9 @@ class SAgent:
                 if deep_thinking is None:
                     deep_thinking = session_context.audit_status.get("deep_thinking", False)
 
-                if multi_agent is None:
+                if agent_mode is None:
                     router_agent = session_context.audit_status.get("router_agent", "单智能体")
-                    multi_agent = router_agent != "单智能体"
+                    agent_mode = 'multi' if router_agent != "单智能体" else 'simple'
 
                 # 1. 任务分析阶段
                 if deep_thinking:
@@ -376,8 +391,15 @@ class SAgent:
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks
 
-                # 2. 多智能体工作流阶段
-                if multi_agent:
+                # 2. 执行阶段
+                if agent_mode == 'fibre':
+                    logger.info("SAgent: 开始 Fibre 工作流")
+                    async for message_chunks in self._execute_agent_phase(
+                        session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.fibre_agent, phase_name="Fibre执行"
+                    ):
+                        session_context.message_manager.add_messages(message_chunks)
+                        yield message_chunks
+                elif agent_mode == 'multi':
                     async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
                         session_context.message_manager.add_messages(message_chunks)
                         yield message_chunks

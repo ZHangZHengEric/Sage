@@ -707,7 +707,7 @@ def _run_install_cmd(install_cmd: str, stdout_capture: Optional[Any], stderr_cap
 from sagents.utils.sandbox.filesystem import SandboxFileSystem
 
 class Sandbox:
-    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace", linux_isolation_mode: str = 'bwrap'):
+    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace", linux_isolation_mode: str = 'auto'):
         """
         Initialize the Sandbox.
 
