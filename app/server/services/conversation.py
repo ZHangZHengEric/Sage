@@ -25,11 +25,11 @@ async def interrupt_session(
     """中断指定会话，返回数据字典"""
     session_context = get_session_context(session_id)
     if not session_context:
-        logger.info(f"会话 {session_id} 不存在或者已完成")
+        logger.bind(session_id=session_id).info("会话不存在或者已完成")
         return {"session_id": session_id}
 
     session_context.status = SessionStatus.INTERRUPTED
-    logger.info(f"会话 {session_id} 中断成功")
+    logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
 
 
@@ -44,7 +44,7 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
         )
 
     tasks_status = session_context.task_manager.to_dict()
-    logger.info(f"获取会话 {session_id} 任务数量：{len(tasks_status.get('tasks', []))}")
+    logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks_status.get('tasks', []))}")
     return {"session_id": session_id, "tasks_status": tasks_status}
 
 
@@ -97,7 +97,7 @@ async def get_file_workspace(session_id: str) -> Dict[str, Any]:
                 }
             )
 
-    logger.info(f"获取会话 {session_id} 工作空间文件数量：{len(files)}")
+    logger.bind(session_id=session_id).info(f"获取工作空间文件数量：{len(files)}")
     return {
         "session_id": session_id,
         "files": files,
@@ -277,5 +277,5 @@ async def delete_conversation(conversation_id: str) -> str:
             detail=f"删除会话 {conversation_id} 失败",
             error_detail=f"Failed to delete conversation '{conversation_id}'",
         )
-    logger.info(f"会话 {conversation_id} 删除成功")
+    logger.bind(session_id=conversation_id).info("会话删除成功")
     return conversation_id

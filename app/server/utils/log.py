@@ -52,6 +52,12 @@ class InterceptHandler(logging.Handler):
         payload = {"logger_name": record.name}
         if hasattr(record, "session_id"):
             payload["session_id"] = record.session_id
+        # Also check for session_id in extra if not in record attributes (though loguru usually puts bound vars in extra)
+        # However, InterceptHandler receives a standard logging.LogRecord.
+        # Standard logging doesn't have 'session_id' unless added.
+        # But if we use logger.bind(session_id=...), loguru handles it.
+        # This emit is for standard logging interception.
+        
         if hasattr(record, "caller_filename"):
             payload["file.name"] = record.caller_filename
         if hasattr(record, "caller_lineno"):
@@ -104,17 +110,26 @@ def init_logging(log_name="app", log_level="DEBUG"):
     logger.configure(patcher=patcher)
 
     def formatting_func(record):
-        fmt = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level} - "
+        fmt = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level: <8} - "
 
         # Relative Path
         fmt += "[{extra[rel_path]}:{line}] "
 
-        # Conditional Request ID
-        if (
-            record["extra"].get("request_id")
-            and record["extra"].get("request_id") != "background"
-        ):
-            fmt += "[{extra[request_id]}] "
+        # Context Information
+        extra = record["extra"]
+        context_items = []
+
+        # Request ID
+        if extra.get("request_id") and extra.get("request_id") != "background":
+            context_items.append(f"req:{extra['request_id']}")
+
+        # Session ID
+        if extra.get("session_id"):
+            context_items.append(f"sid:{extra['session_id']}")
+
+        if context_items:
+            fmt += "[" + " ".join(context_items) + "] "
+
         fmt += "- {message} "
         fmt += "\n{exception}"
         return fmt
