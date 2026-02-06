@@ -1,5 +1,5 @@
 <template>
-  <div class="p-4 border border-destructive/20 bg-destructive/5 rounded-lg text-destructive">
+  <div class="p-4 border border-destructive/10 bg-destructive/5 rounded-[20px] rounded-tl-[4px] text-destructive shadow-sm">
     <div class="font-semibold mb-2 flex items-center gap-2">
       <span class="i-lucide-alert-circle"></span>
       Tool Execution Error
