@@ -217,13 +217,14 @@ const handleOptimizeStart = async () => {
   
   isOptimizing.value = true
   try {
-    const result = await agentAPI.optimizeSystemPrompt({
-      systemPrompt: store.formData.systemPrefix,
-      goal: optimizationGoal.value
+    const result = await agentAPI.systemPromptOptimize({
+      original_prompt: store.formData.systemPrefix,
+      optimization_goal: optimizationGoal.value
+      
     })
     
-    if (result && result.optimizedPrompt) {
-      optimizedResult.value = result.optimizedPrompt
+    if (result && result.optimized_prompt) {
+      optimizedResult.value = result.optimized_prompt
     }
   } catch (e) {
     console.error('Optimization failed:', e)

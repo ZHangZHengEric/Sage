@@ -174,6 +174,7 @@ const handlePrevStep = async () => {
 }
 
 const handleReturn = () => {
+  store.currentStep = 1
   emit('update:visible', false)
 }
 </script>
