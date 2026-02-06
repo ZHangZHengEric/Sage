@@ -1,7 +1,7 @@
 <template>
   <Collapsible
     v-model:open="isOpen"
-    class="task-analysis-message bg-card  rounded-lg overflow-hidden mb-2"
+    class="task-analysis-message mb-2"
   >
     <CollapsibleTrigger class="w-full">
       <div class="flex items-center justify-start p-3 cursor-pointer select-none transition-all  group">
@@ -19,8 +19,8 @@
         </div>
       </div>
     </CollapsibleTrigger>
-    <CollapsibleContent class="analysis-content bg-muted/30 border-border/40 text-sm text-muted-foreground">
-      <div class="p-4">
+    <CollapsibleContent class="analysis-content text-sm text-muted-foreground pl-9">
+      <div class="py-2 pr-4">
         <MarkdownRenderer :content="content" />
       </div>
     </CollapsibleContent>
