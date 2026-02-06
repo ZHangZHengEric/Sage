@@ -1,29 +1,32 @@
 <template>
-  <div class="tool-call-item bg-secondary/30 text-secondary-foreground border border-border/30 rounded-2xl rounded-tl-sm p-2 shadow-sm overflow-hidden break-words w-fit mb-2" 
+  <div class="tool-call-item text-foreground/90 w-fit mb-2 flex items-center group cursor-pointer" 
     :class="[imageUrl ? 'max-w-[530px]' : 'max-w-[320px]']"
     @click="handleClick">
-    <div class="relative flex items-center justify-between p-2 rounded-xl bg-background border border-border/50 hover:border-primary/30 hover:shadow-md transition-all cursor-pointer group">
-      <!-- Status Indicator -->
-      <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-colors"
-           :class="isCompleted ? 'bg-green-500/50' : 'bg-blue-500/50'"></div>
+    <div class="relative flex items-center justify-between py-2 px-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-all border border-transparent hover:border-border/40">
+      
+      <div class="flex items-center gap-3 flex-1 min-w-0">
+        <!-- Status Icon -->
+        <div class="flex-none flex items-center justify-center w-6 h-6 rounded-full" :class="isCompleted ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'">
+           <Check v-if="isCompleted" class="w-3.5 h-3.5" />
+           <Loader2 v-else class="w-3.5 h-3.5 animate-spin" />
+        </div>
 
-      <div class="flex items-center gap-3 flex-1 min-w-0 pl-3">
-
-        <div class="flex flex-col min-w-0 gap-0.5">
-          <span class="text-[10px] text-muted-foreground truncate font-mono opacity-80 flex items-center gap-1">
-             <span class="w-1.5 h-1.5 rounded-full" :class="isCompleted ? 'bg-green-500' : 'bg-blue-500 animate-pulse'"></span>
-             {{ isCompleted ? t('toolCall.completed') : t('toolCall.executing') }}
-          </span>
+        <div class="flex flex-col min-w-0 gap-0.5 justify-center">
+           <span class="text-sm font-medium truncate text-muted-foreground">
+             {{ isCompleted ? t('toolCall.completed') : t('toolCall.executing') + '...' }}
+           </span>
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
-         <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground  rounded-full" @click.stop="handleClick">
-            <ChevronRight class="h-4 w-4" />
-         </Button>
+      <div class="flex items-center gap-2 pl-4">
+         <ChevronRight class="h-4 w-4 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
       </div>
     </div>
     
+    <span class="text-[10px] text-muted-foreground ml-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 whitespace-nowrap">
+      {{ t('common.viewDetails') }}
+    </span>
+
     <!-- Markdown Image Preview -->
     <div v-if="imageUrl" class="mt-2 rounded-xl overflow-hidden border border-border/50 bg-background/50">
       <img :src="imageUrl" alt="Tool Generated Image" class="w-full h-auto object-contain max-w-[512px]" loading="lazy" />
@@ -33,8 +36,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Button } from '@/components/ui/button'
-import { ChevronRight } from 'lucide-vue-next'
+import { ChevronRight, Check, Loader2 } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({
