@@ -136,7 +136,7 @@ def _apply_limits_internal(limits, restrict_files=True):
                 try:
                     abs_path = os.path.abspath(file)
                 except Exception:
-                    raise Exception(f"Access to file {file} is denied (Invalid Path).")
+                    raise PermissionError(f"Access to file {file} is denied (Invalid Path).")
 
                 allowed = False
                 for path in allowed_paths:
@@ -145,7 +145,7 @@ def _apply_limits_internal(limits, restrict_files=True):
                         break
                 
                 if not allowed:
-                    raise Exception(f"Access to file {abs_path} is denied (Sandboxed).")
+                    raise PermissionError(f"Access to file {abs_path} is denied (Sandboxed).")
                 
                 return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
             
@@ -873,6 +873,32 @@ class Sandbox:
         _AUTO_DETECTED_MODE = resolved_mode
         return resolved_mode
 
+    def _get_effective_limits(self, cwd: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get limits with additional allowed paths (log_dir, cwd) merged in.
+        This is crucial for Linux subprocess mode (logical isolation) to allow
+        logging and cwd access.
+        """
+        limits = self.limits.copy()
+        # Ensure allowed_paths exists and is a list copy
+        allowed_paths = list(limits.get('allowed_paths', []))
+        
+        # Add log directory
+        from sagents.utils.logger import logger
+        log_dir = getattr(logger, 'log_dir', None)
+        if log_dir:
+            # Check if already included (simple string check)
+            if log_dir not in allowed_paths:
+                allowed_paths.append(log_dir)
+            
+        # Add cwd
+        if cwd:
+            if cwd not in allowed_paths:
+                allowed_paths.append(cwd)
+            
+        limits['allowed_paths'] = allowed_paths
+        return limits
+
     def _ensure_venv(self):
         if not self.sandbox_dir or not self.venv_dir:
             return
@@ -1332,7 +1358,7 @@ timeout = 120
                 'args': args,
                 'kwargs': kwargs,
                 'requirements': requirements,
-                'limits': self.limits,
+                'limits': self._get_effective_limits(),
                 'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
@@ -1387,7 +1413,7 @@ timeout = 120
                 'args': args,
                 'kwargs': kwargs,
                 'sys_path': sys.path,
-                'limits': self.limits,
+                'limits': self._get_effective_limits(cwd),
                 'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
@@ -1431,7 +1457,7 @@ timeout = 120
                 'args': args,
                 'requirements': requirements,
                 'install_cmd': install_cmd,
-                'limits': self.limits,
+                'limits': self._get_effective_limits(cwd),
                 'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
@@ -1476,7 +1502,7 @@ timeout = 120
                 'mode': 'shell',
                 'command': command,
                 'cwd': target_cwd,
-                'limits': self.limits,
+                'limits': self._get_effective_limits(target_cwd),
                 'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
             }
             if sys.platform == 'linux':
