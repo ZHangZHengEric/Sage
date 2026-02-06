@@ -17,6 +17,20 @@ services:
       - .env
     mem_limit: 2g
     cpus: 1.0
+    # 核心：仅添加bwrap必需的内核能力（仅SYS_ADMIN，无其他多余能力）
+    cap_add:
+      - SYS_ADMIN
+    # 解决seccomp拦截bwrap系统调用（关键，非全放开，Docker 20.10+推荐写法）
+    # Ubuntu/Debian专属：放开AppArmor限制（CentOS/RHEL无AppArmor，可省略）
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    # 解决bwrap/tmp权限问题，挂载临时文件系统，避免写入权限不足
+    tmpfs:
+      - /tmp:rw,exec,nosuid,size=64M
+    # 可选：进程隔离，容器内PID从1开始（和bwrap的--unshare-pid不冲突）
+    pid: host
+ 
   sage-web:
     restart: always
     build:

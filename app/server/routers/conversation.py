@@ -68,7 +68,7 @@ async def get_status(session_id: str, request: Request):
 
     result = await get_session_status(session_id)
     tasks = result.get("tasks_status", {}).get("tasks", [])
-    logger.info(f"获取会话 {session_id} 任务数量：{len(tasks)}")
+    logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks)}")
     return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result, "user_id": user_id})
 
 
@@ -80,10 +80,8 @@ async def get_workspace(session_id: str, request: Request):
 
     result = await get_file_workspace(session_id)
     files = result.get("files", [])
-    logger.info(f"获取会话 {session_id} 工作空间文件数量：{len(files)}")
-    return await Response.succ(
-        message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id}
-    )
+    logger.bind(session_id=session_id).info(f"获取工作空间文件数量：{len(files)}")
+    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
 
 
 @conversation_router.get("/api/sessions/file_workspace/download")
@@ -107,9 +105,7 @@ async def list_conversations(
     user_id: Optional[str] = Query(None, description="用户ID过滤"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
-    sort_by: Optional[str] = Query(
-        "date", description="排序方式: date, title, messages"
-    ),
+    sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
 ):
     claims = getattr(request.state, "user_claims", {}) or {}
     current_user_id = claims.get("userid") or user_id or ""
@@ -138,8 +134,7 @@ async def list_conversations(
                 agent_id=conv.agent_id,
                 agent_name=conv.agent_name,
                 title=conv.title,
-                message_count=message_count.get("user_count", 0)
-                + message_count.get("agent_count", 0),
+                message_count=message_count.get("user_count", 0) + message_count.get("agent_count", 0),
                 user_count=message_count.get("user_count", 0),
                 agent_count=message_count.get("agent_count", 0),
                 created_at=conv.created_at.isoformat() if conv.created_at else "",
@@ -159,7 +154,7 @@ async def list_conversations(
         "total_pages": total_pages,
         "has_next": has_next,
         "has_prev": has_prev,
-        "user_id": current_user_id, # Keeping this as caller context
+        "user_id": current_user_id,  # Keeping this as caller context
     }
     return await Response.succ(data=result, message="获取会话列表成功")
 
@@ -167,7 +162,7 @@ async def list_conversations(
 @conversation_router.get("/api/conversations/{conversation_id}/messages")
 async def get_messages(conversation_id: str, request: Request):
     """获取指定对话的所有消息"""
-            
+
     data = await get_conversation_messages(conversation_id)
     return await Response.succ(data=data, message="获取消息成功")
 
@@ -183,7 +178,7 @@ async def get_shared_messages(conversation_id: str):
 async def delete(conversation_id: str, request: Request):
     """删除指定对话"""
     conversation_id_res = await delete_conversation(conversation_id)
-    logger.info(f"会话 {conversation_id} 删除成功")
+    logger.bind(session_id=conversation_id).info("会话删除成功")
     return await Response.succ(
         message=f"会话 {conversation_id} 已删除",
         data={"conversation_id": conversation_id_res, "user_id": target_user_id},
