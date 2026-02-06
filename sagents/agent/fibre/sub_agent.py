@@ -146,7 +146,7 @@ You are working as part of a larger system.
                 # FibreTools needs orchestrator and session_context.
                 # If we bind it to sub_session_context, then sys_spawn_agent would spawn sub-sub-agents (which is allowed).
                 
-                from sagents.fibre.tools import FibreTools
+                from sagents.agent.fibre.tools import FibreTools
                 fibre_tools_impl = FibreTools(self.orchestrator, self.sub_session_context)
                 
                 # 2. Create combined tool manager
