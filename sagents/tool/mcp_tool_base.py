@@ -111,6 +111,7 @@ def get_detailed_schema(py_type, type_mapping):
     return schema
 
 def sage_mcp_tool(
+    server_name: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
     **kwargs
@@ -135,7 +136,6 @@ def sage_mcp_tool(
 
     def decorator(func):
         tool_name = name or func.__name__
-
         # Parse docstring
         docstring = func.__doc__ or ""
         parsed_docstring = parse(docstring)
@@ -198,6 +198,7 @@ def sage_mcp_tool(
                 }
 
         spec = SageMcpToolSpec(
+            server_name=server_name,
             name=tool_name,
             description=tool_desc,
             description_i18n=description_i18n or {},
