@@ -1,5 +1,5 @@
 <template>
-  <div class="w-[35%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+  <div class="w-[30%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
     <div class="flex items-center justify-between p-4 border-b border-border">
       <h3 class="text-base font-semibold">{{ t('workspace.title') }}</h3>
       <Button 
@@ -100,7 +100,7 @@ const fileTree = computed(() => {
 })
 
 const handleDownload = (item) => {
-  emit('downloadFile', item.path)
+  emit('downloadFile', item)
 }
 </script>
 
