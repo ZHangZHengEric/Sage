@@ -224,6 +224,17 @@ class SageStreamService:
             self.preset_multi_agent = None
             logger.debug("未使用预设multiAgent")
 
+        # 设置agent_mode
+        if "agent_mode" in self.preset_running_config:
+            self.preset_agent_mode = self.preset_running_config['agent_mode']
+            logger.debug(f"使用预设agent_mode: {self.preset_agent_mode}")
+        elif "agentMode" in self.preset_running_config:
+            self.preset_agent_mode = self.preset_running_config['agentMode']
+            logger.debug(f"使用预设agentMode: {self.preset_agent_mode}")
+        else:
+            self.preset_agent_mode = None
+            logger.debug("未使用预设agent_mode")
+
         # 设置context_budget_config
         self.context_budget_config = context_budget_config
 
@@ -251,13 +262,13 @@ class SageStreamService:
         logger.info("SageStreamService 初始化完成")
     
     async def process_stream(self, messages, session_id=None, user_id=None, deep_thinking=None, 
-                           max_loop_count=None, multi_agent=None,more_suggest=False,
+                           max_loop_count=None, multi_agent=None, agent_mode=None, more_suggest=False,
                             system_context: Optional[Dict] = None, 
                            available_workflows: Optional[Dict] = None,
                            force_summary: bool=False):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
-        logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, messages_count={len(messages)}")
+        logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, agent_mode={agent_mode}, messages_count={len(messages)}")
         if isinstance(deep_thinking, str):
             if deep_thinking == 'auto':
                 deep_thinking = None
@@ -300,6 +311,7 @@ class SageStreamService:
                 deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,
                 max_loop_count = max_loop_count if max_loop_count is not None else self.preset_max_loop_count ,
                 multi_agent=multi_agent if multi_agent is not None else self.preset_multi_agent,
+                agent_mode=agent_mode if agent_mode is not None else self.preset_agent_mode,
                 more_suggest = more_suggest,
                 system_context=system_context,
                 available_workflows=available_workflows,
@@ -608,6 +620,7 @@ class StreamRequest(BaseModel):
     deep_thinking: Optional[Union[bool, str]] = None
     max_loop_count: int = 10
     multi_agent: Optional[Union[bool, str]] = None
+    agent_mode: Optional[str] = None # fibre, simple, multi
     summary : bool =True  # 过时字段
     deep_research: bool = True # 过时字段，与multi_agent一致
     more_suggest: bool = False
@@ -950,6 +963,7 @@ async def stream_chat(request: StreamRequest):
                 deep_thinking=request.deep_thinking,
                 max_loop_count=request.max_loop_count,
                 multi_agent=request.multi_agent,
+                agent_mode=request.agent_mode,
                 more_suggest=request.more_suggest,
                 system_context=request.system_context,
                 available_workflows=request.available_workflows,
