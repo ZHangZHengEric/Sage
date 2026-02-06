@@ -154,7 +154,6 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     validate_and_prepare_request(request, http_request)
 
     await populate_request_from_agent_config(request, require_agent_id=False)
-
     session_id, stream_service, lock = await prepare_session(request)
 
     return StreamingResponse(

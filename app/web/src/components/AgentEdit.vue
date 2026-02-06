@@ -25,26 +25,30 @@
          <Button 
             v-if="store.currentStep > 1"
             variant="secondary" 
-            @click="store.prevStep" 
-            :disabled="store.currentStep === 1"
+            @click="handlePrevStep" 
+            :disabled="store.currentStep === 1 || saving"
             class="min-w-[100px] shadow-sm border border-border/50"
          >
-            <ChevronLeft class="mr-2 h-4 w-4" />
+            <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+            <ChevronLeft v-else class="mr-2 h-4 w-4" />
             {{ t('common.prevStep') }}
          </Button>
          
          <Button 
             v-if="store.currentStep < store.STEPS.length" 
-            @click="store.nextStep"
-            :disabled="store.currentStep === 1 && !store.isStep1Valid"
+            @click="handleNextStep"
+            :disabled="(store.currentStep === 1 && !store.isStep1Valid) || saving"
             class="min-w-[120px] shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all active:scale-95"
          >
-            {{ t('common.nextStep') }}
-            <ChevronRight class="ml-2 h-4 w-4" />
+            <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+            <template v-else>
+              {{ t('common.saveAndNextStep') }}
+              <ChevronRight class="ml-2 h-4 w-4" />
+            </template>
          </Button>
          <Button 
             v-else 
-            @click="handleSave" 
+            @click="handleSave(true)" 
             :disabled="saving"
             class="min-w-[120px] shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all active:scale-95"
          >
@@ -116,7 +120,14 @@ const stepProps = computed(() => {
 
 // Initialize store when agent prop changes or component mounts
 watch(() => props.agent, (newAgent) => {
-  store.initForm(newAgent)
+  const isIdUpdate = newAgent && newAgent.id && store.formData.id === null && newAgent.name === store.formData.name
+  const isSameAgent = newAgent && store.formData.id === newAgent.id
+  
+  if (isIdUpdate || isSameAgent) {
+    store.initForm(newAgent, { preserveStep: true })
+  } else {
+    store.initForm(newAgent)
+  }
 }, { immediate: true })
 
 onMounted(() => {
@@ -127,15 +138,38 @@ onMounted(() => {
 })
 
 
-const handleSave = async () => {
+const handleSave = async (shouldExit = true) => {
   saving.value = true
   try {
     store.prepareForSave()
-    emit('save', store.formData)
+    await new Promise((resolve) => {
+      emit('save', store.formData, shouldExit, () => {
+        resolve()
+      })
+      // 如果parent没有调用callback (比如旧代码), 这里的promise会一直pending
+      // 实际上在AgentList中我们已经确保调用了
+      // 为了安全起见，可以加一个超时？或者假设parent总是可靠的
+    })
   } catch (e) {
     console.error('handleSave error', e)
   } finally {
     saving.value = false
+  }
+}
+
+const handleNextStep = async () => {
+  const currentStep = store.currentStep
+  store.nextStep()
+  if (store.currentStep !== currentStep) {
+    await handleSave(false)
+  }
+}
+
+const handlePrevStep = async () => {
+  const currentStep = store.currentStep
+  store.prevStep()
+  if (store.currentStep !== currentStep) {
+    await handleSave(false)
   }
 }
 

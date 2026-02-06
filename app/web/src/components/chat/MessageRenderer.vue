@@ -9,8 +9,8 @@
         <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
         </div>
-        <div class="bg-destructive/10 text-destructive border border-destructive/20 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full">
-          <div class="opacity-90 text-sm leading-relaxed">{{ message.show_content || message.content || t('error.unknown') }}</div>
+        <div class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-6 py-4 shadow-sm overflow-hidden break-words w-full">
+          <div class="opacity-90 text-[15px] leading-7 font-medium">{{ message.show_content || message.content || t('error.unknown') }}</div>
         </div>
       </div>
     </div>
@@ -29,7 +29,7 @@
         <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none">
           {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
         </div>
-        <div class="bg-primary/95 text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm overflow-hidden break-all text-sm leading-relaxed tracking-wide">
+        <div class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
           <MarkdownRenderer
             :content="formatMessageContent(message.content)"
           />
@@ -71,7 +71,7 @@
             {{ formatTime(message.timestamp) }}
           </span>
         </div>
-        <div class="bg-card text-card-foreground border border-border/40 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm overflow-hidden break-words w-full">
+        <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
           <MarkdownRenderer
             :content="formatMessageContent(message.show_content)"
             :components="markdownComponents"
@@ -87,7 +87,10 @@
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
-            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: '工具调用: ' + getToolName(message) }) }}
+            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: '工具调用  ' + getToolName(message) }) }}
+            <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
          </div>
          <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
