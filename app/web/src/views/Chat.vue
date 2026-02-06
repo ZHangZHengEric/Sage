@@ -20,6 +20,17 @@
           <div class="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showWorkspace = !showWorkspace">
+                  <FolderOpen class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('workspace.title') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
                 <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare">
                   <Share2 class="h-4 w-4" />
                 </Button>
@@ -90,7 +101,7 @@
         </div>
       </div>
 
-      <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles" :workspace-path="workspacePath"
+      <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles"
         @download-file="downloadFile" @close="showWorkspace = false" />
 
       <WorkflowPanel v-if="showTrace && currentSessionId" :session-id="currentSessionId" @close="showTrace = false" />
@@ -105,7 +116,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Bot, Settings, Activity, Share2 } from 'lucide-vue-next'
+import { Bot, Settings, Activity, Share2, FolderOpen } from 'lucide-vue-next'
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
@@ -180,7 +191,6 @@ const config = ref({
 const userConfigOverrides = ref({});
 const taskStatus = ref(null);
 const workspaceFiles = ref([]);
-const workspacePath = ref(null);
 const lastMessageId = ref(null);
 
   // 获取任务状态
@@ -207,7 +217,6 @@ const fetchTaskStatus = async (sessionId) => {
     try {
       const data = await taskAPI.getWorkspaceFiles(sessionId);
       workspaceFiles.value = data.files || [];
-      workspacePath.value = data.agent_workspace;
     } catch (error) {
       console.error('获取工作空间文件出错:', error);
     }
@@ -215,10 +224,10 @@ const fetchTaskStatus = async (sessionId) => {
 
   // 下载文件
   const downloadWorkspaceFile = async (sessionId, filePath) => {
-    if (!sessionId || !filePath || !workspacePath.value) return;
+    if (!sessionId || !filePath) return;
     
     try {
-      const blob = await taskAPI.downloadFile(filePath, workspacePath.value);
+      const blob = await taskAPI.downloadFile(sessionId, filePath);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
@@ -255,7 +264,6 @@ const toggleTaskExpanded = (taskId) => {
   const clearTaskAndWorkspace = () => {
     taskStatus.value = null;
     workspaceFiles.value = [];
-    workspacePath.value = null;
     expandedTasks.value = new Set();
     lastMessageId.value = null;
   };

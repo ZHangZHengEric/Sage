@@ -6,6 +6,10 @@
 
 import json
 import os
+import mimetypes
+import tempfile
+import zipfile
+import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -53,12 +57,14 @@ async def get_file_workspace(session_id: str) -> Dict[str, Any]:
         return {
             "session_id": session_id,
             "files": [],
-            "agent_workspace": workspace_path,
             "message": "工作空间为空",
         }
 
     files: List[Dict[str, Any]] = []
     for root, dirs, filenames in os.walk(workspace_path):
+        # 过滤掉隐藏文件和文件夹
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        filenames = [f for f in filenames if not f.startswith(".")]
         for filename in filenames:
             file_path = os.path.join(root, filename)
             relative_path = os.path.relpath(file_path, workspace_path)
@@ -90,7 +96,6 @@ async def get_file_workspace(session_id: str) -> Dict[str, Any]:
     return {
         "session_id": session_id,
         "files": files,
-        "agent_workspace": workspace_path,
         "message": "获取文件列表成功",
     }
 
@@ -115,12 +120,6 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
             status_code=404,
             detail=f"文件不存在: {file_path}",
             error_detail=f"File not found: {file_path}",
-        )
-    if not os.path.isfile(full_file_path):
-        raise SageHTTPException(
-            status_code=400,
-            detail=f"路径不是文件: {file_path}",
-            error_detail=f"Path is not a file: {file_path}",
         )
     return full_file_path
 
@@ -268,3 +267,57 @@ async def delete_conversation(conversation_id: str) -> str:
         )
     logger.bind(session_id=conversation_id).info("会话删除成功")
     return conversation_id
+
+
+async def download_session_file(session_id: str, file_path: str) -> Tuple[str, str, str]:
+    """
+    下载会话文件
+
+    :param session_id: 会话ID
+    :param file_path: 相对文件路径
+    :return: (file_path, filename, media_type)
+    """
+    workspace_root = _get_workspace_root()
+    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
+
+    full_path = resolve_download_path(workspace_path, file_path)
+
+    # 检查是否为文件或目录
+    if os.path.isdir(full_path):
+        # 如果是目录，创建zip文件并下载
+        try:
+            # 使用临时文件存储zip
+            temp_dir = tempfile.gettempdir()
+            zip_filename = f"{os.path.basename(full_path)}.zip"
+            zip_path = os.path.join(temp_dir, zip_filename)
+
+            # 创建zip文件
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(full_path):
+                    for file in files:
+                        file_abs_path = os.path.join(root, file)
+                        # 计算在zip中的相对路径
+                        rel_path = os.path.relpath(file_abs_path, full_path)
+                        zipf.write(file_abs_path, rel_path)
+
+            return zip_path, zip_filename, "application/zip"
+        except Exception as e:
+            raise SageHTTPException(
+                status_code=500,
+                detail=f"创建压缩文件失败: {str(e)}",
+                error_detail=f"Failed to create zip file: {str(e)}",
+            )
+
+    if not os.path.isfile(full_path):
+        raise SageHTTPException(
+            status_code=400,
+            detail=f"路径不是文件: {file_path}",
+            error_detail=f"Path is not a file: {file_path}",
+        )
+
+    # 获取MIME类型
+    mime_type, _ = mimetypes.guess_type(full_path)
+    if mime_type is None:
+        mime_type = "application/octet-stream"
+
+    return full_path, os.path.basename(full_path), mime_type

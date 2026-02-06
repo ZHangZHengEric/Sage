@@ -3,7 +3,6 @@
 """
 
 import math
-import os
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, Request
@@ -20,7 +19,7 @@ from ..services.conversation import (
     get_file_workspace,
     get_session_status,
     interrupt_session,
-    resolve_download_path,
+    download_session_file,
 )
 
 # ============= 会话相关模型 =============
@@ -84,16 +83,12 @@ async def get_workspace(session_id: str, request: Request):
     return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
 
 
-@conversation_router.get("/api/sessions/file_workspace/download")
-async def download_file(request: Request):
-    """下载工作空间中的指定文件"""
+@conversation_router.get(f"/api/sessions/{session_id}/file_workspace/download")
+async def download_file(session_id: str, request: Request):
     file_path = request.query_params.get("file_path")
-    workspace_path = request.query_params.get("workspace_path")
-    full_file_path = resolve_download_path(workspace_path, file_path)
+    path, filename, media_type = await download_session_file(session_id, file_path)
     return FileResponse(
-        path=full_file_path,
-        filename=os.path.basename(file_path),
-        media_type="application/octet-stream",
+        path=path, filename=filename, media_type=media_type
     )
 
 
