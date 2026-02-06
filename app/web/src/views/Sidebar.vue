@@ -437,7 +437,11 @@ const isCategoryActive = (item) => {
 
 const handleMenuClick = (url, name, isInternal) => {
   if (isInternal) {
-    if (url === 'Chat') emit('new-chat')
+    if (url === 'Chat') {
+      emit('new-chat')
+      // 如果已经在 Chat 页面，触发重置后直接返回，避免重复 push
+      if (route.name === 'Chat') return
+    }
     
     // 如果已经在当前页面，且是AgentConfig，添加刷新参数触发重置
     if (route.name === url && url === 'AgentConfig') {

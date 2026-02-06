@@ -253,6 +253,7 @@ export default {
   // 工具调用
   'toolCall.completed': '已完成',
   'toolCall.executing': '执行中',
+  'toolCall.executionError': '执行错误',
 
   // 工具页面
   'tools.title': '工具集',
