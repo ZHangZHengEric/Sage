@@ -52,7 +52,7 @@ async def write_diary(user_id: str, date: str, content: str) -> str:
         return f"Error saving diary: {str(e)}"
 
 @mcp.tool()
-@sage_mcp_tool()
+@sage_mcp_tool(server_name="diary")
 async def update_diary(user_id: str, date: str, content: str, append: bool = False) -> str:
     """
     Update a diary entry. Can overwrite or append to existing content.
