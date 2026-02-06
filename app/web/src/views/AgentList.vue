@@ -16,7 +16,7 @@
       <div v-if="loading" class="flex flex-col items-center justify-center py-20">
         <Loader class="h-8 w-8 animate-spin text-primary" />
       </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         <Card v-for="agent in agents" :key="agent.id" class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader class="pb-4">
             <div class="flex items-start gap-4">
