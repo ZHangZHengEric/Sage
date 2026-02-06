@@ -494,7 +494,7 @@ class ToolManager:
                 source = "专业智能体"
             elif isinstance(tool, SageMcpToolSpec):
                 tool_type = "sage_mcp"
-                source = "内置MCP工具"
+                source = f"内置MCP: {tool.server_name}"
             elif isinstance(tool, ToolSpec):
                 tool_type = "basic"
                 source = "基础工具"
