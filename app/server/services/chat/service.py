@@ -140,7 +140,7 @@ class SageStreamService:
         if max_loop_count is None:
             max_loop_count = 10
         """处理流式聊天请求"""
-        logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
+        logger.bind(session_id=session_id).info("🚀 SageStreamService.process_stream 开始")
         try:
             stream_result = self.sage_engine.run_stream(
                 input_messages=messages,
@@ -170,10 +170,10 @@ class SageStreamService:
 
                     yield result
 
-            logger.info(f"sessionId={session_id} 🏁 流式处理完成")
+            logger.bind(session_id=session_id).info("🏁 流式处理完成")
 
         except Exception as e:
-            logger.error(f"❌ 流式处理异常: {traceback.format_exc()}")
+            logger.bind(session_id=session_id).error(f"❌ 流式处理异常: {traceback.format_exc()}")
             error_result = {
                 'type': 'error',
                 'content': f"处理失败: {str(e)}",
@@ -188,8 +188,8 @@ async def prepare_session(request: StreamRequest):
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
     
-    logger.info(f"sessionId={session_id} Server: 请求参数摘要 - Agent: {request.agent_name}, 消息数: {len(request.messages) if request.messages else 0}, 技能数: {len(request.available_skills or [])}, 工具数: {len(request.available_tools or [])}")
-    # logger.debug(f"sessionId={session_id} Server: 完整请求参数: {request}")
+    logger.bind(session_id=session_id).info(f"Server: 请求参数摘要 - Agent: {request.agent_name}, 消息数: {len(request.messages) if request.messages else 0}, 技能数: {len(request.available_skills or [])}, 工具数: {len(request.available_tools or [])}")
+    # logger.bind(session_id=session_id).debug(f"Server: 完整请求参数: {request}")
     
     lock = get_session_run_lock(session_id)
     acquired = False
@@ -255,8 +255,8 @@ async def _generate_stream_lines(
         last_activity_time = current_time
 
         if stream_counter % 100 == 0:
-            logger.info(
-                f"📊 流处理状态 - 会话: {session_id}, 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
+            logger.bind(session_id=session_id).info(
+                f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
             )
 
         if mode == "chat":
@@ -286,8 +286,8 @@ async def _generate_stream_lines(
         if "time_since_last" in locals()
         else last_activity_time
     )
-    logger.info(
-        f"sessionId={session_id} ✅ 完成流式处理: 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s"
+    logger.bind(session_id=session_id).info(
+        f"✅ 完成流式处理: 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s"
     )
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
@@ -330,11 +330,11 @@ async def run_chat_session(
             yield line
     finally:
         # 3. 清理资源
-        logger.info(f"sessionId={session_id} 流处理结束，清理会话资源")
+        logger.bind(session_id=session_id).info("流处理结束，清理会话资源")
         if lock.locked():
             await lock.release()
         delete_session_run_lock(session_id)
-        logger.info(f"sessionId={session_id} 资源已清理")
+        logger.bind(session_id=session_id).info("资源已清理")
 
 
 async def _execute_chat_task(
