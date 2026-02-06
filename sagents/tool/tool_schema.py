@@ -1,6 +1,10 @@
+from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Any, List, Callable, Optional, Union
-from mcp import StdioServerParameters
+from typing import Dict, Any, List, Callable, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mcp import StdioServerParameters
+
 
 @dataclass
 class SseServerParameters:
