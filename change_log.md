@@ -7,3 +7,4 @@
 2026-02-05 18:30:00 - 重构 fibre_cli.py 的输出逻辑，使用 rich.live.Live 替换原有的顺序打印模式，实现了多 Agent 并发输出时的“Dashboard”视图，避免了内容交替打印导致的显示混乱。
 2026-02-05 18:40:00 - 优化 fibre_cli.py 的 Live 视图体验，关闭自动刷新改为手动刷新以恢复流式打字感，并限制 Live 区域显示的行数（最近20行），避免消息过长导致终端刷屏和滚动问题。
 2026-02-05 18:45:00 - 优化 simple_agent.py 的工具建议逻辑，禁止顶级 FibreAgent 使用 sys_finish_task 工具，避免误结束整个对话。
+2026-02-06 14:00:00 - 修复了Linux环境下 Sandbox 执行的兼容性问题：1) 针对 bwrap 模式，当宿主机缺少 /workspace 时自动使用 /tmp/workspace 作为虚拟工作区；2) 为 tool_manager.py 增加 BaseExceptionGroup 向后兼容支持，解决低版本 Python 的运行错误。

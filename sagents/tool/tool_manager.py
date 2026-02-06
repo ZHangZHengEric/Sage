@@ -21,6 +21,12 @@ import traceback
 import time
 import os
 import sys
+try:
+    BaseExceptionGroup
+except NameError:
+    class BaseExceptionGroup(BaseException):
+        """Backport for Python < 3.11"""
+        pass
 from .mcp_proxy import McpProxy
 
 _GLOBAL_TOOL_MANAGER: Optional["ToolManager"] = None
