@@ -192,7 +192,7 @@ class SAgent:
             deep_thinking (Optional[Union[bool, str]], optional): 
                 深度思考模式配置。
                 - True/False: 开启/关闭深度思考。
-                - "auto": 自动决定（暂未实现，同 None）。
+                - "auto": 自动决定是否开启深度思考模式。
                 - 字符串值可能用于指定特定思考模式。
                 默认为 None。
             max_loop_count (int, optional): 
@@ -204,7 +204,7 @@ class SAgent:
                 智能体运行模式。
                 - "fibre": 使用 Fibre 编排模式（推荐），支持复杂的任务规划和子 Agent 协作。
                 - "simple": 使用简单模式，单 Agent 直接响应。
-                - "multi": 旧版多智能体模式（已废弃，建议迁移到 fibre）。
+                - "multi": 多智能体模式，适用于需要多个 Agent 协作的场景。
                 默认为 None（通常由系统自动决定或使用默认值）。
             more_suggest (bool, optional): 
                 是否生成更多建议（Follow-up questions）。默认为 False。
