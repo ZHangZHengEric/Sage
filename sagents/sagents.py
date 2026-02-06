@@ -171,6 +171,62 @@ class SAgent:
         available_workflows: Optional[Dict[str, Any]] = {},
         context_budget_config: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
+        """
+        执行流式对话任务
+
+        这是 SAgent 的主入口方法，用于处理用户的输入消息并生成流式响应。
+        它封装了底层的 run_stream_internal 方法，并添加了链路追踪（Tracing）
+        和性能监控（耗时统计）功能。
+
+        Args:
+            input_messages (Union[List[Dict[str, Any]], List[MessageChunk]]): 
+                输入消息列表。可以是字典列表（如 OpenAI 格式）或 MessageChunk 对象列表。
+            tool_manager (Optional[Union[ToolManager, ToolProxy]], optional): 
+                工具管理器实例或代理。用于管理和调用外部工具。默认为 None。
+            skill_manager (Optional[Union[SkillManager, SkillProxy]], optional): 
+                技能管理器实例或代理。用于管理和调用注册的技能。默认为 None。
+            session_id (Optional[str], optional): 
+                会话 ID。如果未提供，将自动生成一个新的 UUID。用于跟踪对话上下文。
+            user_id (Optional[str], optional): 
+                用户 ID。用于关联用户特定的记忆和偏好。默认为 None。
+            deep_thinking (Optional[Union[bool, str]], optional): 
+                深度思考模式配置。
+                - True/False: 开启/关闭深度思考。
+                - "auto": 自动决定（暂未实现，同 None）。
+                - 字符串值可能用于指定特定思考模式。
+                默认为 None。
+            max_loop_count (int, optional): 
+                最大执行循环次数。防止 Agent 陷入死循环。默认为 10。
+            multi_agent (Optional[bool], optional): 
+                【已废弃】是否开启多智能体模式。请使用 `agent_mode` 参数代替。
+                如果设置为 True，等同于 agent_mode='multi'。默认为 None。
+            agent_mode (Optional[str], optional): 
+                智能体运行模式。
+                - "fibre": 使用 Fibre 编排模式（推荐），支持复杂的任务规划和子 Agent 协作。
+                - "simple": 使用简单模式，单 Agent 直接响应。
+                - "multi": 旧版多智能体模式（已废弃，建议迁移到 fibre）。
+                默认为 None（通常由系统自动决定或使用默认值）。
+            more_suggest (bool, optional): 
+                是否生成更多建议（Follow-up questions）。默认为 False。
+            force_summary (bool, optional): 
+                是否强制生成对话总结。默认为 False。
+            system_context (Optional[Dict[str, Any]], optional): 
+                额外的系统上下文变量。将合并到当前会话的上下文中。默认为 None。
+            available_workflows (Optional[Dict[str, Any]], optional): 
+                可用的工作流配置。用于指导 Agent 选择特定的执行流程。默认为 {}。
+            context_budget_config (Optional[Dict[str, Any]], optional): 
+                上下文预算配置，用于控制 Token 使用量。包含：
+                - max_model_len: 模型最大上下文长度。
+                - history_ratio: 历史消息保留比例。
+                - active_ratio: 活跃（近期）消息保留比例。
+                - max_new_message_ratio: 新生成消息预留比例。
+                - recent_turns: 保留最近 N 轮对话。
+                默认为 None。
+
+        Yields:
+            AsyncGenerator[List["MessageChunk"], None]: 
+                异步生成的流式消息块列表。每个块可能包含部分文本内容、工具调用信息或状态更新。
+        """
 
         # 确保 session_id 存在，用于 trace
         session_id = session_id or str(uuid.uuid4())
