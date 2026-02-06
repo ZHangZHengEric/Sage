@@ -130,7 +130,9 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     else list.splice(index, 1)
   }
 
-  const initForm = (agentData = null) => {
+  const initForm = (agentData = null, options = {}) => {
+    const { preserveStep = false } = options
+
     if (agentData) {
       formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...agentData }))
       if (!Array.isArray(formData.value.availableTools)) formData.value.availableTools = []
@@ -152,7 +154,10 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       systemContextPairs.value = [{ key: '', value: '' }]
       workflowPairs.value = [{ key: '', steps: [''] }]
     }
-    currentStep.value = 1
+    
+    if (!preserveStep) {
+      currentStep.value = 1
+    }
     errors.value = {}
   }
 
