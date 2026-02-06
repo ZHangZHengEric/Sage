@@ -26,19 +26,18 @@ class SecurityManager:
     
     # 危险命令黑名单
     DANGEROUS_COMMANDS = {
-        'rm', 'rmdir', 'del', 'format', 'fdisk', 'mkfs',
-        'sudo', 'su', 'chmod', 'chown', 'passwd',
+        'format', 'fdisk', 'mkfs',
+        'sudo', 'su', 'passwd',
         'shutdown', 'reboot', 'systemctl', 'service',
-        'kill', 'killall', 'pkill', 'taskkill',
         'dd', 'crontab', 'at', 'batch'
     }
     
     # 恶意模式检测
     MALICIOUS_PATTERNS = [
-        # '&&', '||', ';', '|',  # 允许常用的 Shell 连接符和管道，提高 Agent 灵活性
-        '>', '>>', '<',  # 仍保留重定向限制，视情况可放开
-        '$(', '`',       # 保留命令替换限制
-        'curl', 'wget', 'nc', 'netcat'  # 保留网络工具限制
+        # '&&', '||', ';', '|',
+        # '>', '>>', '<',
+        # '$(', '`',
+        # 'curl', 'wget', 'nc', 'netcat'
     ]
     
     def __init__(self, enable_dangerous_commands: bool = False):
@@ -56,7 +55,7 @@ class SecurityManager:
             command_parts = command.split()
             if command_parts:
                 base_command = command_parts[0].split('/')[-1]  # 处理绝对路径
-                if base_command in self.DANGEROUS_COMMANDS:
+                if base_command in self.DANGEROUS_COMMANDS or base_command.startswith('mkfs.'):
                     return False, f"危险命令被阻止: {base_command}"
         
         # 检查恶意模式
@@ -125,6 +124,7 @@ class ExecuteCommandTool:
     def __init__(self):
         logger.debug("Initializing ExecuteCommandTool")
         # 先初始化必要的组件，再调用父类初始化
+        # 启用安全检查，但使用宽松的黑名单（允许 rm/nc 等）
         self.security_manager = SecurityManager(False)
         self.process_manager = ProcessManager()
 
