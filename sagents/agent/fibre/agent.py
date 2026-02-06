@@ -5,9 +5,10 @@ import traceback
 import logging
 
 from sagents.context.messages.message import MessageChunk
+from sagents.context.session_context import SessionContext
 from sagents.tool import ToolManager, ToolProxy
 from sagents.skill import SkillManager, SkillProxy
-from sagents.fibre.orchestrator import FibreOrchestrator
+from sagents.agent.fibre.orchestrator import FibreOrchestrator
 from sagents.context.user_memory import UserMemoryManager
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.agent.agent_base import AgentBase
@@ -57,7 +58,7 @@ class FibreAgent(AgentBase):
 
     async def run_stream(
         self,
-        input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
+        input_messages: Optional[Union[List[Dict[str, Any]], List[MessageChunk]]] = None,
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         session_id: Optional[str] = None,
@@ -65,10 +66,14 @@ class FibreAgent(AgentBase):
         system_context: Optional[Dict[str, Any]] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
         max_loop_count: int = 10,
+        session_context: Optional[SessionContext] = None,
         **kwargs
     ) -> AsyncGenerator[List["MessageChunk"], None]:
         
         session_id = session_id or str(uuid.uuid4())
+        
+        if input_messages is None:
+            input_messages = []
         
         if self.observability_manager:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
@@ -85,7 +90,8 @@ class FibreAgent(AgentBase):
                 user_id=user_id,
                 system_context=system_context,
                 context_budget_config=context_budget_config,
-                max_loop_count=max_loop_count
+                max_loop_count=max_loop_count,
+                session_context=session_context
             ):
                 # Basic filtering similar to SAgent
                 if message_chunks:

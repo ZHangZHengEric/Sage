@@ -11,8 +11,8 @@ from sagents.context.session_context import SessionContext, init_session_context
 from sagents.context.session_context_manager import session_manager
 from sagents.tool import ToolManager, ToolProxy
 from sagents.skill import SkillManager, SkillProxy
-from sagents.fibre.tools import FibreTools
-from sagents.fibre.sub_agent import FibreSubAgent
+from sagents.agent.fibre.tools import FibreTools
+from sagents.agent.fibre.sub_agent import FibreSubAgent
 from sagents.agent.simple_agent import SimpleAgent
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ class FibreOrchestrator:
         system_context: Optional[Dict[str, Any]] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
         max_loop_count: int = 10,
+        session_context: Optional[SessionContext] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         
         # Initialize Output Queue for merging streams
@@ -48,15 +49,16 @@ class FibreOrchestrator:
         
         # Initialize Main Session Context
         # Note: FibreAgent shares the same workspace root as SAgent
-        session_context = init_session_context(
-            session_id=session_id,
-            user_id=user_id,
-            workspace_root=self.agent.workspace,
-            context_budget_config=context_budget_config,
-            user_memory_manager=self.agent.user_memory_manager,
-            tool_manager=tool_manager,
-            skill_manager=skill_manager,
-        )
+        if session_context is None:
+            session_context = init_session_context(
+                session_id=session_id,
+                user_id=user_id,
+                workspace_root=self.agent.workspace,
+                context_budget_config=context_budget_config,
+                user_memory_manager=self.agent.user_memory_manager,
+                tool_manager=tool_manager,
+                skill_manager=skill_manager,
+            )
         
         with session_manager.session_context(session_id):
             logger.info(f"FibreOrchestrator: Starting session {session_id}")
