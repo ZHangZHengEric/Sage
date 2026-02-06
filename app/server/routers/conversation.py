@@ -83,7 +83,7 @@ async def get_workspace(session_id: str, request: Request):
     return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
 
 
-@conversation_router.get(f"/api/sessions/{session_id}/file_workspace/download")
+@conversation_router.get("/api/sessions/{session_id}/file_workspace/download")
 async def download_file(session_id: str, request: Request):
     file_path = request.query_params.get("file_path")
     path, filename, media_type = await download_session_file(session_id, file_path)
