@@ -6,14 +6,20 @@
       
       <div class="flex items-center gap-3 flex-1 min-w-0">
         <!-- Status Icon -->
-        <div class="flex-none flex items-center justify-center w-6 h-6 rounded-full" :class="isCompleted ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'">
-           <Check v-if="isCompleted" class="w-3.5 h-3.5" />
+        <div class="flex-none flex items-center justify-center w-6 h-6 rounded-full" 
+          :class="[
+            isError ? 'bg-red-500/10 text-red-500' : 
+            isCompleted ? 'bg-green-500/10 text-green-500' : 
+            'bg-blue-500/10 text-blue-500'
+          ]">
+           <AlertCircle v-if="isError" class="w-3.5 h-3.5" />
+           <Check v-else-if="isCompleted" class="w-3.5 h-3.5" />
            <Loader2 v-else class="w-3.5 h-3.5 animate-spin" />
         </div>
 
         <div class="flex flex-col min-w-0 gap-0.5 justify-center">
            <span class="text-sm font-medium truncate text-muted-foreground">
-             {{ isCompleted ? t('toolCall.completed') : t('toolCall.executing') + '...' }}
+             {{ isError ? t('toolCall.executionError') : (isCompleted ? t('toolCall.completed') : t('toolCall.executing') + '...') }}
            </span>
         </div>
       </div>
@@ -36,7 +42,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ChevronRight, Check, Loader2 } from 'lucide-vue-next'
+import { ChevronRight, Check, Loader2, AlertCircle } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({
@@ -55,6 +61,14 @@ const emit = defineEmits(['click'])
 const { t } = useLanguage()
 
 const isCompleted = computed(() => !!props.toolResult)
+
+const isError = computed(() => {
+  if (!props.toolResult) return false
+  if (typeof props.toolResult.content === 'object' && props.toolResult.content.error === true) {
+    return true
+  }
+  return false
+})
 
 const imageUrl = computed(() => {
   if (!props.toolResult) return null

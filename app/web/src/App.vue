@@ -9,7 +9,14 @@
     
     <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pb-[64px] lg:pb-0">
       <div class="flex-1 overflow-hidden relative flex flex-col">
-        <router-view @select-conversation="handleSelectConversation" :selected-conversation="selectedConversation" />
+        <router-view v-slot="{ Component }">
+          <component 
+            :is="Component" 
+            @select-conversation="handleSelectConversation" 
+            :selected-conversation="selectedConversation" 
+            :chat-reset-token="chatResetToken"
+          />
+        </router-view>
       </div>
     </main>
 
@@ -65,7 +72,12 @@ const selectedConversation = ref(null)
 
 const handleNewChat = () => {
   selectedConversation.value = null
+  // 触发重置 token，强制 Chat 组件清理状态
+  chatResetToken.value = Date.now()
 }
+
+const chatResetToken = ref(0)
+
 
 const handleSelectConversation = (conversation) => {
   selectedConversation.value = conversation
