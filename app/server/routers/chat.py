@@ -41,7 +41,7 @@ async def stream_with_disconnect_check(
     try:
         async for chunk in generator:
             if await request.is_disconnected():
-                logger.info(f"Session {session_id}: Client disconnection detected")
+                logger.bind(session_id=session_id).info("Client disconnection detected")
                 # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
                 raise GeneratorExit
             yield chunk
@@ -50,12 +50,12 @@ async def stream_with_disconnect_check(
         try:
             await interrupt_session(session_id, "客户端断开连接")
         except Exception as ex:
-            logger.error(f"Error interrupting session {session_id}: {ex}")
+            logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
             
         # 重新抛出异常，确保生成器正确关闭
         raise e
     except Exception as e:
-        logger.error(f"Stream generator error: {e}")
+        logger.bind(session_id=session_id).error(f"Stream generator error: {e}")
         raise e
     finally:
         # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
@@ -64,17 +64,17 @@ async def stream_with_disconnect_check(
             if hasattr(generator, 'aclose'):
                 await generator.aclose()
         except Exception as e:
-            logger.warning(f"Error closing generator for session {session_id}: {e}")
+            logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
 
         # 清理资源
-        logger.info(f"sessionId={session_id} 流处理结束，清理会话资源")
+        logger.bind(session_id=session_id).info("流处理结束，清理会话资源")
         try:
             if lock.locked():
                 await lock.release()
             delete_session_run_lock(session_id)
-            logger.info(f"sessionId={session_id} 资源已清理")
+            logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
-            logger.error(f"Error releasing resources for session {session_id}: {e}")
+            logger.bind(session_id=session_id).error(f"Error releasing resources: {e}")
 
 
 def validate_and_prepare_request(
