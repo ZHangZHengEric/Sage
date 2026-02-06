@@ -707,7 +707,7 @@ def _run_install_cmd(install_cmd: str, stdout_capture: Optional[Any], stderr_cap
 from sagents.utils.sandbox.filesystem import SandboxFileSystem
 
 class Sandbox:
-    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace", linux_isolation_mode: str = 'chroot'):
+    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace", linux_isolation_mode: str = 'bwrap'):
         """
         Initialize the Sandbox.
 
@@ -717,7 +717,8 @@ class Sandbox:
             allowed_paths: List of allowed paths (for Seatbelt/Sandbox).
             host_workspace: The host workspace path.
             virtual_workspace: The virtual workspace path inside the sandbox.
-            linux_isolation_mode: Isolation mode for Linux ('chroot', 'bwrap', 'subprocess'). Default is 'chroot'.
+            linux_isolation_mode: Isolation mode for Linux ('auto', 'chroot', 'bwrap', 'subprocess'). Default is 'bwrap'.
+                                  - 'auto': Automatically detect available isolation method (bwrap -> subprocess).
                                   - 'chroot': Use chroot for isolation (requires root or configured chroot env).
                                   - 'bwrap': Use bubblewrap for isolation (unprivileged).
                                   - 'subprocess': Direct execution in venv (no FS isolation).
@@ -742,7 +743,7 @@ class Sandbox:
         }
         self.host_workspace = host_workspace
         self.virtual_workspace = virtual_workspace
-        self.linux_isolation_mode = linux_isolation_mode
+        self.linux_isolation_mode = self._resolve_linux_mode(linux_isolation_mode)
         self.file_system = None
 
         self.sandbox_dir = None
@@ -775,6 +776,17 @@ class Sandbox:
             # Add sandbox dir to allowed paths
             if self.sandbox_dir not in self.limits['allowed_paths']:
                 self.limits['allowed_paths'].append(self.sandbox_dir)
+
+    def _resolve_linux_mode(self, mode: str) -> str:
+        if mode != 'auto':
+            return mode
+            
+        # Auto-detect logic
+        import shutil
+        if shutil.which('bwrap'):
+            return 'bwrap'
+        else:
+            return 'subprocess'
 
     def _ensure_venv(self):
         if not self.sandbox_dir or not self.venv_dir:
@@ -1017,7 +1029,11 @@ timeout = 120
             )
             
             if result.returncode != 0:
-                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
+                 error_msg = f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}"
+                 if result.returncode == 127 or "No such file or directory" in result.stderr:
+                     error_msg += "\n\n[Hint] 'chroot' mode requires a complete RootFS (libraries, bin, etc.) in the sandbox directory.\n"
+                     error_msg += "If you only have a python venv, please use 'bwrap' mode (requires bubblewrap installed) or 'subprocess' mode."
+                 raise SandboxError(error_msg)
                  
             if not os.path.exists(output_pkl):
                  raise SandboxError("Sandbox execution produced no output file")
@@ -1096,6 +1112,9 @@ timeout = 120
                 return res['result']
             else:
                 raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+        
+        except FileNotFoundError:
+             raise SandboxError("Bubblewrap (bwrap) executable not found. Please install bubblewrap (e.g., `apt install bubblewrap` or `yum install bubblewrap`).")
                 
         finally:
             if os.path.exists(input_pkl):
