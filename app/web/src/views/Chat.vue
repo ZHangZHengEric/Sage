@@ -136,6 +136,10 @@ const props = defineProps({
   selectedConversation: {
     type: Object,
     default: null
+  },
+  chatResetToken: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -330,6 +334,17 @@ const updateConfig = (newConfig) => {
       localStorage.setItem('selectedAgentId', agent.id);
     }
   };
+
+  // 监听重置 Token
+  watch(() => props.chatResetToken, (newVal) => {
+    if (newVal) {
+      console.log('🔄 检测到重置信号，重置聊天状态');
+      resetChat();
+      if (isLoading.value) {
+        stopGeneration();
+      }
+    }
+  });
 
   // 从localStorage恢复选中的智能体
   const restoreSelectedAgent = (agentsList) => {

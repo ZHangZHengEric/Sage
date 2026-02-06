@@ -255,6 +255,7 @@ export default {
   // 工具调用
   'toolCall.completed': 'Completed',
   'toolCall.executing': 'Executing',
+  'toolCall.executionError': 'Execution Error',
 
   // 工具页面
   'tools.title': 'Tools',

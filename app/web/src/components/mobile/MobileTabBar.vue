@@ -28,7 +28,7 @@
       <!-- 3. New Chat (Middle Circle) -->
       <div class="relative flex justify-center h-full pointer-events-none z-10">
         <button
-          class="flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/90 text-primary-foreground shadow-xl shadow-primary/25 ring-4 ring-background transition-all duration-300 active:scale-95 hover:shadow-2xl hover:shadow-primary/40 hover:-translate-y-0.5"
+          class="pointer-events-auto flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/90 text-primary-foreground shadow-xl shadow-primary/25 ring-4 ring-background transition-all duration-300 active:scale-95 hover:shadow-2xl hover:shadow-primary/40 hover:-translate-y-0.5"
           @click="handleNewChat">
           <MessageSquare class="w-6 h-6" />
         </button>
