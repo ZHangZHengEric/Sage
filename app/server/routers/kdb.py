@@ -350,7 +350,7 @@ async def kdb_doc_task_redo(req: KdbDocTaskRedoRequest, http_request: Request):
     return await Response.succ(data=SuccessResponse(success=True, user_id=kdb.user_id))
 
 
-@sage_mcp_tool()
+@sage_mcp_tool(server_name="knowledge_base")
 async def retrieve_on_zavixai_db(index_name: str, query: str, top_k: int = 5):
     """
     Search documents on ZavixAI knowledge database.

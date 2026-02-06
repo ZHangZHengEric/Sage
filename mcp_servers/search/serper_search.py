@@ -6,7 +6,6 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.routing import Mount
-from sagents.tool.mcp_tool_base import sage_mcp_tool
 
 mcp = FastMCP("Serper Search")
 
