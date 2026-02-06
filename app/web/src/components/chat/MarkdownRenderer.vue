@@ -257,6 +257,48 @@ const addImageDownloadButton = (html) => {
   })
 }
 
+const convertHttpLinksToDownload = (html) => {
+  return html.replace(
+    /<a([^>]*?)href="(https?:\/\/[^"]+)"([^>]*)>(.*?)<\/a>/gi,
+    (match, pre, href, post, text) => {
+      // 已经有 download 的不重复处理
+      if (/\sdownload(\s|$|=)/i.test(pre) || /\sdownload(\s|$|=)/i.test(post)) {
+        return match
+      }
+
+      // 如果链接内容包含图片，也不处理（避免覆盖图片显示）
+      if (/<img/i.test(text)) {
+        return match
+      }
+
+      let filename = 'download'
+      try {
+        let cleanUrl = href.split(/[?#]/)[0]
+        cleanUrl = decodeURIComponent(cleanUrl)
+        if (cleanUrl.endsWith('/')) {
+          cleanUrl = cleanUrl.slice(0, -1)
+        }
+        filename = cleanUrl.split('/').pop() || 'download'
+      } catch (e) {
+        console.warn('解析URL文件名失败:', e)
+      }
+
+      return `
+        <a
+          href="${href.replace(/ /g, '%20')}"
+          download="${filename}"
+          target="_blank"
+          rel="noopener"
+          class="text-primary underline underline-offset-4 hover:opacity-80 inline-flex items-center gap-1"
+        >
+          ${filename}
+        </a>
+      `
+    }
+  )
+}
+
+
 // 将视频链接转换为video标签
 const convertVideoLinks = (html) => {
   // 首先处理链接标签中的视频URL
@@ -286,6 +328,20 @@ if (typeof window !== 'undefined') {
   window.downloadMarkdownImage = downloadImage
 }
 
+// 预处理 markdown 内容
+const preprocessContent = (content) => {
+  if (!content) return ''
+  // 匹配常见的带扩展名的文件链接，允许中间有空格
+  // 必须以http(s)开头，以常见文件扩展名结尾
+  return content.replace(
+    /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
+    (match) => {
+      // 替换匹配到的URL中的空格为%20
+      return match.replace(/\s/g, '%20')
+    }
+  )
+}
+
 // 渲染Markdown内容
 const renderedContent = computed(() => {
   if (!props.content) return ''
@@ -294,10 +350,14 @@ const renderedContent = computed(() => {
     // 使用marked解析Markdown
     chartList.length = 0
 
-    let html = marked(props.content)
+    const preprocessed = preprocessContent(props.content)
+    let html = marked(preprocessed)
 
     // 转换视频链接
     html = convertVideoLinks(html)
+
+    // 所有 http(s) 链接 → 下载
+    html = convertHttpLinksToDownload(html)
 
     // 为图片添加下载按钮
     html = addImageDownloadButton(html)
