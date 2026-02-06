@@ -25,7 +25,7 @@ def _get_diary_file(user_id: str, date: str) -> Path:
     return _get_user_dir(user_id) / f"{date}.txt"
 
 @mcp.tool()
-@sage_mcp_tool()
+@sage_mcp_tool(server_name="diary")
 async def write_diary(user_id: str, date: str, content: str) -> str:
     """
     Write a diary entry for a specific user and date.
@@ -52,7 +52,7 @@ async def write_diary(user_id: str, date: str, content: str) -> str:
         return f"Error saving diary: {str(e)}"
 
 @mcp.tool()
-@sage_mcp_tool()
+@sage_mcp_tool(server_name="diary")
 async def update_diary(user_id: str, date: str, content: str, append: bool = False) -> str:
     """
     Update a diary entry. Can overwrite or append to existing content.
@@ -87,7 +87,7 @@ async def update_diary(user_id: str, date: str, content: str, append: bool = Fal
         return f"Error updating diary: {str(e)}"
 
 @mcp.tool()
-@sage_mcp_tool()
+@sage_mcp_tool(server_name="diary")
 async def read_diary(user_id: str, date: str) -> str:
     """
     Read a diary entry for a specific user and date.
@@ -114,7 +114,7 @@ async def read_diary(user_id: str, date: str) -> str:
         return f"Error reading diary: {str(e)}"
 
 @mcp.tool()
-@sage_mcp_tool()
+@sage_mcp_tool(server_name="diary")
 async def list_diaries(user_id: str, start_date: str = None, end_date: str = None) -> str:
     """
     List diary entries for a user within a time range.
