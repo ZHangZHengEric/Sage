@@ -28,9 +28,12 @@
                 v-for="group in groupedTools"
                 :key="group.source"
                 class="relative flex flex-col gap-2 p-3 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-md group"
-                :class="selectedGroupSource === group.source 
-                  ? 'bg-primary/5 border-primary ring-1 ring-primary/20' 
-                  : 'bg-card border-border hover:border-primary/50'"
+                :class="[
+                  selectedGroupSource === group.source 
+                    ? 'bg-primary/5 border-primary ring-1 ring-primary/20' 
+                    : 'bg-card border-border hover:border-primary/50',
+                  group.disabled ? 'opacity-60 grayscale' : ''
+                ]"
                 @click="selectedGroupSource = group.source"
               >
                 <div class="flex items-center gap-2">
@@ -43,12 +46,15 @@
                   <h3 class="font-medium text-sm truncate flex-1" :title="getToolSourceLabel(group.source)">
                     {{ getToolSourceLabel(group.source) }}
                   </h3>
-                  <Badge variant="secondary" class="h-5 px-1.5 text-[10px] bg-background/80 backdrop-blur shrink-0">
+                  <Badge v-if="group.disabled" variant="destructive" class="h-5 px-1.5 text-[10px] shrink-0">
+                    {{ t('tools.disabled') || 'Disabled' }}
+                  </Badge>
+                  <Badge v-else variant="secondary" class="h-5 px-1.5 text-[10px] bg-background/80 backdrop-blur shrink-0">
                     {{ group.tools.length }}
                   </Badge>
                 </div>
                 <p class="text-xs text-muted-foreground line-clamp-1">
-                  {{ isMcpGroup(group.source) ? 'MCP Server' : 'System Provider' }}
+                  {{ getGroupCategoryLabel(group.source) }}
                 </p>
               </div>
 
@@ -220,23 +226,58 @@ const filteredTools = computed(() => {
 
 // 按来源分组的工具
 const groupedTools = computed(() => {
-  const groups = {}
+  const groups = []
+  const processedSources = new Set()
+  
+  const showMcpGroups = filterType.value === 'all' || filterType.value === 'mcp'
 
+  // 1. MCP Servers (作为 MCP 分组的数据源)
+  if (showMcpGroups) {
+    mcpServers.value.forEach(server => {
+      // Determine prefix based on server type or existing tools
+      let prefix = 'MCP Server: '
+      const hasBuiltinTools = filteredTools.value.some(t => t.source === `内置MCP: ${server.name}`)
+      if (server.type === 'builtin' || hasBuiltinTools) {
+        prefix = '内置MCP: '
+      }
+
+      const groupSource = `${prefix}${server.name}`
+      processedSources.add(groupSource)
+      
+      // 查找该服务器下的工具（基于过滤后的列表，这样搜索也能生效）
+      const tools = filteredTools.value.filter(t => t.source === groupSource)
+      
+      groups.push({
+        source: groupSource,
+        tools: tools,
+        isMcp: true,
+        disabled: server.status === 'disabled' || server.disabled === true,
+        serverName: server.name
+      })
+    })
+  }
+
+  // 2. 其他来源（如系统工具等）
   filteredTools.value.forEach(tool => {
     const source = tool.source || '未知来源'
-    if (!groups[source]) {
-      groups[source] = []
+    // 如果不是已经处理过的 MCP 来源
+    if (!processedSources.has(source)) {
+      let group = groups.find(g => g.source === source)
+      if (!group) {
+        group = {
+          source: source,
+          tools: [],
+          isMcp: false,
+          disabled: false
+        }
+        groups.push(group)
+      }
+      group.tools.push(tool)
     }
-    groups[source].push(tool)
   })
 
   // 按来源名称排序
-  const sortedGroups = Object.keys(groups).sort().map(source => ({
-    source,
-    tools: groups[source]
-  }))
-
-  return sortedGroups
+  return groups.sort((a, b) => a.source.localeCompare(b.source))
 })
 
 // Watch for changes in groupedTools to set initial selection
@@ -321,7 +362,7 @@ const handleDeleteMcpTool = async (sourceName) => {
 
   try {
     loading.value = true
-    await toolAPI.removeMcpServer(serverName)
+    await toolAPI.deleteMcpServer(serverName)
     toast.success(t('tools.deleteSuccess') || 'Server removed successfully')
     await loadBasicTools()
     await loadMcpServers()
@@ -357,14 +398,21 @@ const handleRefreshMcpTool = async (sourceName) => {
 }
 
 const getToolSourceLabel = (source) => {
+  let displaySource = source
+  if (source.startsWith('MCP Server: ')) {
+    displaySource = source.replace('MCP Server: ', '')
+  } else if (source.startsWith('内置MCP: ')) {
+    displaySource = source.replace('内置MCP: ', '')
+  }
+
   const sourceMapping = {
     '基础工具': 'tools.source.basic',
     '内置工具': 'tools.source.builtin',
     '系统工具': 'tools.source.system'
   }
 
-  const translationKey = sourceMapping[source]
-  return translationKey ? t(translationKey) : source
+  const translationKey = sourceMapping[displaySource]
+  return translationKey ? t(translationKey) : displaySource
 }
 
 const getToolIcon = (type) => {
@@ -424,7 +472,13 @@ const backToList = () => {
 }
 
 const isMcpGroup = (source) => {
-    return source.startsWith('MCP Server:')
+    return source.startsWith('MCP Server:') || source.startsWith('内置MCP:')
+}
+
+const getGroupCategoryLabel = (source) => {
+  if (source.startsWith('内置MCP:')) return '内置MCP'
+  if (source.startsWith('MCP Server:')) return '外部MCP'
+  return '基础工具'
 }
 
 // 生命周期
