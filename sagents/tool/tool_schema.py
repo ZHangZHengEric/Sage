@@ -41,7 +41,7 @@ class ToolSpec:
 
 @dataclass
 class SageMcpToolSpec(ToolSpec):
-    server_name: str
+    server_name: str = ""
     """Spec for built-in MCP tools (annotated with @sage_mcp_tool)"""
     pass
 
