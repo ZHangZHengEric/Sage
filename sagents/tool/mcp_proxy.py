@@ -1,7 +1,7 @@
 from typing import Any, List, Optional, Union, cast
 
 import httpx
-from mcp import ClientSession, Tool
+from mcp import ClientSession, Tool, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
@@ -10,7 +10,6 @@ from mcp.types import TextContent
 from .tool_schema import (
     McpToolSpec,
     SseServerParameters,
-    StdioServerParameters,
     StreamableHttpServerParameters,
 )
 

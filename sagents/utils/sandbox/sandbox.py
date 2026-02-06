@@ -95,12 +95,22 @@ import subprocess
 import io
 import resource
 import builtins
+import time
 from contextlib import redirect_stdout, redirect_stderr
 
 # Ensure current directory is in sys.path
 sys.path.insert(0, os.getcwd())
 
+def log_timing(msg):
+    try:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        sys.stderr.write(f"[{timestamp}] [LAUNCHER] {msg}\\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
 def _apply_limits_internal(limits, restrict_files=True):
+    log_timing("Applying limits...")
     # Set CPU time limit (in seconds)
     if 'cpu_time' in limits:
         target = int(limits['cpu_time'])
@@ -154,12 +164,14 @@ def _apply_limits_internal(limits, restrict_files=True):
 
 def main():
     try:
+        log_timing("Starting launcher main...")
         if len(sys.argv) < 3:
             raise ValueError("Usage: launcher.py <input_pkl> <output_pkl>")
             
         input_path = sys.argv[1]
         output_path = sys.argv[2]
         
+        log_timing(f"Loading payload from {input_path}")
         with open(input_path, 'rb') as f:
             payload = pickle.load(f)
             
@@ -174,30 +186,36 @@ def main():
         if limits:
             _apply_limits_internal(limits, restrict_files=apply_file_restrictions)
         
+        log_timing("Restoring sys.path...")
         # Restore sys.path
         for p in reversed(sys_path):
             if p not in sys.path:
                 sys.path.insert(0, p)
         
         result = None
+        log_timing(f"Executing mode: {mode}")
         
         if mode == 'library':
             module_name = payload['module_name']
             class_name = payload.get('class_name')
             function_name = payload['function_name']
             
+            log_timing(f"Importing module: {module_name}")
             module = importlib.import_module(module_name)
             if class_name:
+                log_timing(f"Getting class: {class_name}")
                 cls = getattr(module, class_name)
                 instance = cls()
                 func = getattr(instance, function_name)
             else:
                 func = getattr(module, function_name)
                 
+            log_timing(f"Running function: {function_name}")
             if asyncio.iscoroutinefunction(func):
                 result = asyncio.run(func(*args, **kwargs))
             else:
                 result = func(*args, **kwargs)
+            log_timing("Function execution completed")
                 
         elif mode == 'module':
             module_path = payload['module_path']
@@ -775,7 +793,7 @@ class Sandbox:
         Initialize the Sandbox.
 
         Args:
-            cpu_time_limit: CPU time limit in seconds.
+            cpu_time_limit: CPU time limit in seconds. Default is 60s.
             memory_limit_mb: Memory limit in MB.
             allowed_paths: List of allowed paths (for Seatbelt/Sandbox).
             host_workspace: The host workspace path.
@@ -1015,12 +1033,15 @@ timeout = 120
         ]
         
         try:
+            t0 = time.time()
+            logger.debug(f"Starting sandbox subprocess (mode=seatbelt, id={run_id})")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 cwd=cwd or self.sandbox_dir
             )
+            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             
             if result.returncode != 0:
                  raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
@@ -1071,12 +1092,15 @@ timeout = 120
         ]
         
         try:
+            t0 = time.time()
+            logger.debug(f"Starting sandbox subprocess (mode=subprocess, id={run_id})")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 cwd=cwd or self.host_workspace
             )
+            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             
             if result.returncode != 0:
                  raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
@@ -1133,11 +1157,14 @@ timeout = 120
         try:
             # We cannot easily set CWD inside chroot with simple `chroot` command without using `sh -c cd ...`
             # For now we ignore CWD for chroot mode or assume the script handles paths.
+            t0 = time.time()
+            logger.debug(f"Starting sandbox subprocess (mode=chroot, id={run_id})")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True
             )
+            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             
             if result.returncode != 0:
                  error_msg = f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}"
@@ -1233,12 +1260,15 @@ timeout = 120
         ])
         
         try:
+            t0 = time.time()
+            logger.debug(f"Starting sandbox subprocess (mode=bwrap, id={run_id})")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 cwd=self.host_workspace # Run from host workspace so relative paths in bwrap args resolve? Actually bwrap handles absolute paths.
             )
+            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             
             if result.returncode != 0:
                  raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
