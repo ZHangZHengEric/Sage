@@ -12,34 +12,14 @@
         <span v-else class="text-xs">✅</span>
       </button>
     </div>
-    <pre class="m-0 p-4 overflow-x-auto text-sm font-mono leading-relaxed bg-background/50"><code :class="codeClass" v-html="highlightedCode"></code></pre>
+    <pre class="m-0 p-4 overflow-x-auto text-sm font-mono leading-relaxed bg-background/50"><code :class="['hljs', codeClass]" v-html="highlightedCode"></code></pre>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
-import Prism from 'prismjs'
-import 'prismjs/themes/prism-tomorrow.css'
-
-// 导入常用语言支持
-import 'prismjs/components/prism-javascript'
-import 'prismjs/components/prism-typescript'
-import 'prismjs/components/prism-jsx'
-import 'prismjs/components/prism-tsx'
-import 'prismjs/components/prism-python'
-import 'prismjs/components/prism-java'
-import 'prismjs/components/prism-css'
-import 'prismjs/components/prism-scss'
-import 'prismjs/components/prism-json'
-import 'prismjs/components/prism-yaml'
-import 'prismjs/components/prism-markdown'
-import 'prismjs/components/prism-bash'
-import 'prismjs/components/prism-sql'
-import 'prismjs/components/prism-go'
-import 'prismjs/components/prism-rust'
-import 'prismjs/components/prism-php'
-import 'prismjs/components/prism-c'
-import 'prismjs/components/prism-cpp'
+import { ref, computed } from 'vue'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
 
 const props = defineProps({
   code: {
@@ -67,13 +47,24 @@ const codeClass = computed(() => {
   return `language-${props.language}`
 })
 
+const escapeHtml = (text) => {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }
+  return text.replace(/[&<>"']/g, char => map[char])
+}
+
 const highlightedCode = computed(() => {
   if (!props.code) return ''
   
   try {
     // 检查语言是否支持
-    if (Prism.languages[props.language]) {
-      return Prism.highlight(props.code, Prism.languages[props.language], props.language)
+    if (props.language && props.language !== 'text' && hljs.getLanguage(props.language)) {
+      return hljs.highlight(props.code, { language: props.language }).value
     } else {
       // 如果不支持该语言，返回原始代码（HTML转义）
       return escapeHtml(props.code)
@@ -87,13 +78,6 @@ const highlightedCode = computed(() => {
 const copyButtonText = computed(() => {
   return copied.value ? '已复制' : '复制代码'
 })
-
-// 方法
-const escapeHtml = (text) => {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
-}
 
 const copyCode = async () => {
   try {

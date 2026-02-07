@@ -7,34 +7,15 @@ import {computed, nextTick, onMounted, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
-import Prism from 'prismjs'
-import 'prismjs/themes/prism-tomorrow.css'
+import { unified } from 'unified'
+import rehypeParse from 'rehype-parse'
+import rehypePrism from 'rehype-prism-plus'
+import rehypeStringify from 'rehype-stringify'
+import { visit } from 'unist-util-visit'
+import { toast } from 'vue-sonner'
 
-// 基础依赖（必须按顺序加载）
-import 'prismjs/components/prism-clike'
-import 'prismjs/components/prism-markup'
-import 'prismjs/components/prism-markup-templating'
-
-// 常用语言
-import 'prismjs/components/prism-javascript'
-import 'prismjs/components/prism-typescript'
-import 'prismjs/components/prism-jsx'
-import 'prismjs/components/prism-tsx'
-import 'prismjs/components/prism-python'
-import 'prismjs/components/prism-java'
-import 'prismjs/components/prism-css'
-import 'prismjs/components/prism-scss'
-import 'prismjs/components/prism-json'
-import 'prismjs/components/prism-yaml'
-import 'prismjs/components/prism-markdown'
-import 'prismjs/components/prism-bash'
-import 'prismjs/components/prism-sql'
-import 'prismjs/components/prism-go'
-import 'prismjs/components/prism-rust'
-import 'prismjs/components/prism-php'
-import 'prismjs/components/prism-c'
-import 'prismjs/components/prism-cpp'
-
+// 常用语言高亮样式
+import 'prismjs/themes/prism-tomorrow.css' 
 
 const props = defineProps({
   content: {
@@ -77,13 +58,14 @@ const jsToJson = (jsStr) => {
 
 const chartList = [] // 存放所有图表容器与配置项
 const renderer = new marked.Renderer()
+
+// 修改 renderer.code，不再使用 Prism，只返回基础 HTML
 renderer.code = (code, language) => {
   // 获取代码文本，兼容不同版本的 marked
   const codeText = typeof code === 'string' ? code : code.text
   // 优先从 token 对象中获取 lang，其次是 language 参数，最后默认为 plaintext
-  // marked v5+ 传入的是 token 对象，lang 属性在对象中
   const rawLang = (typeof code === 'string' ? language : code.lang) || ''
-  const lang = rawLang.split(/\s+/)[0] || 'plaintext'
+  const lang = rawLang.split(/\s+/)[0] || 'text'
 
   if (lang === 'echarts') {
     try {
@@ -102,20 +84,7 @@ renderer.code = (code, language) => {
       return `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">图表配置错误: ${err.message}</pre>`
     }
   }
-
-  let highlighted = ''
-  try {
-    if (lang !== 'plaintext' && Prism.languages[lang]) {
-      highlighted = Prism.highlight(codeText, Prism.languages[lang], lang)
-    } else {
-      highlighted = escapeHtml(codeText)
-    }
-  } catch (e) {
-    console.warn('Prism highlight failed:', e)
-    highlighted = escapeHtml(codeText)
-  }
-
-  return `<pre class="not-prose rounded-lg p-4 overflow-x-auto my-4 border language-${lang}"><code class="language-${lang} text-sm font-mono">${highlighted}</code></pre>`
+  return `<pre><code class="language-${lang}">${escapeHtml(codeText)}</code></pre>`
 }
 
 renderer.table = function(token) {
@@ -165,36 +134,6 @@ renderer.tablecell = function(token) {
 }
 
 // 配置marked选项
-const tokenizer = {
-  fences(src) {
-    const rules = this.rules.block
-    const cap = rules.fences.exec(src)
-    if (cap) {
-      const raw = cap[0]
-      const fence = cap[1]
-      
-      // 检查代码块是否完全闭合
-      // 正则检查是否以 fence 结尾（允许尾部空白）
-      // 如果没有闭合，返回 undefined 让 marked 将其视为普通文本
-      const isClosed = new RegExp(`${fence}\\s*$`).test(raw)
-      
-      if (!isClosed) {
-        return undefined
-      }
-      
-      return {
-        type: 'code',
-        raw: raw,
-        lang: cap[2] ? cap[2].trim() : cap[2],
-        text: cap[3] || ''
-      }
-    }
-    return false
-  }
-}
-
-marked.use({ tokenizer })
-
 marked.setOptions({
   breaks: true,
   gfm: true,
@@ -203,14 +142,148 @@ marked.setOptions({
   renderer
 })
 
+// Rehype 插件：代码块包装（添加语言标签和复制按钮）
+const rehypeCodeBlockWrapper = () => {
+  return (tree) => {
+    visit(tree, 'element', (node, index, parent) => {
+      // Rehype Prism Plus 可能会修改 pre/code 的结构
+      // 它通常保持 pre > code 的结构，但 code 内部会有 span
+      // 我们需要找到 pre 元素，并且它包含一个 code 元素
+      if (node.tagName === 'pre' && node.children && node.children.length > 0) {
+        const codeNode = node.children.find(n => n.tagName === 'code')
+        if (codeNode) {
+          // 获取语言
+          let lang = 'text'
+          
+          // 检查 code 元素上的 class
+          if (codeNode.properties && codeNode.properties.className) {
+            const classes = Array.isArray(codeNode.properties.className) 
+              ? codeNode.properties.className 
+              : [codeNode.properties.className]
+            
+            const langClass = classes.find(c => String(c).startsWith('language-'))
+            if (langClass) {
+              lang = String(langClass).replace('language-', '')
+            }
+          }
+          
+          // 如果 code 上没找到，有时 rehype-prism-plus 可能会把 class 移到 pre 上（取决于配置，默认通常在 code 上）
+          if (lang === 'text' && node.properties && node.properties.className) {
+             const classes = Array.isArray(node.properties.className) 
+              ? node.properties.className 
+              : [node.properties.className]
+            
+            const langClass = classes.find(c => String(c).startsWith('language-'))
+            if (langClass) {
+              lang = String(langClass).replace('language-', '')
+            }
+          }
+
+          // SVG Icons AST
+          const copyIcon = {
+            type: 'element',
+            tagName: 'svg',
+            properties: {
+              xmlns: "http://www.w3.org/2000/svg",
+              width: "14",
+              height: "14",
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              "stroke-width": "2",
+              "stroke-linecap": "round",
+              "stroke-linejoin": "round",
+              class: "lucide lucide-copy"
+            },
+            children: [
+              { type: 'element', tagName: 'rect', properties: { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }, children: [] },
+              { type: 'element', tagName: 'path', properties: { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }, children: [] }
+            ]
+          }
+
+          const checkIcon = {
+             type: 'element',
+             tagName: 'svg',
+             properties: {
+               xmlns: "http://www.w3.org/2000/svg",
+               width: "14",
+               height: "14",
+               viewBox: "0 0 24 24",
+               fill: "none",
+               stroke: "currentColor",
+               "stroke-width": "2",
+               "stroke-linecap": "round",
+               "stroke-linejoin": "round",
+               class: "lucide lucide-check hidden" // 默认隐藏
+             },
+             children: [
+                { type: 'element', tagName: 'polyline', properties: { points: "20 6 9 17 4 12" }, children: [] }
+             ]
+          }
+
+          // 包装结构
+          const wrapper = {
+            type: 'element',
+            tagName: 'div',
+            properties: {
+              className: ['relative', 'group', 'my-4', 'rounded-lg', 'border', 'bg-[#2b2b2b]', 'border-zinc-700']
+            },
+            children: [
+              // 顶部栏
+              {
+                type: 'element',
+                tagName: 'div',
+                properties: {
+                  className: ['flex', 'items-center', 'justify-between', 'px-3', 'py-2', 'bg-[#383838]', 'rounded-t-lg', 'border-b', 'border-zinc-600']
+                },
+                children: [
+                  // 语言标签
+                  {
+                    type: 'element',
+                    tagName: 'span',
+                    properties: {
+                      className: ['text-xs', 'font-medium', 'text-zinc-300', 'uppercase']
+                    },
+                    children: [{ type: 'text', value: lang }]
+                  },
+                  // 复制按钮
+                  {
+                    type: 'element',
+                    tagName: 'button',
+                    properties: {
+                      className: ['copy-btn', 'p-1.5', 'hover:bg-zinc-600', 'rounded-md', 'transition-colors', 'text-zinc-300', 'hover:text-zinc-50', 'flex', 'items-center', 'gap-1'],
+                      title: 'Copy code',
+                      onclick: 'window.copyToClipboard(this)'
+                    },
+                    children: [
+                      copyIcon,
+                      checkIcon
+                    ]
+                  }
+                ]
+              },
+              // 原 pre 元素，修改样式
+              {
+                ...node,
+                properties: {
+                  ...node.properties,
+                  className: [...(node.properties.className || []), '!my-0', '!rounded-t-none', '!border-0', '!bg-transparent']
+                }
+              }
+            ]
+          }
+
+          parent.children[index] = wrapper
+        }
+      }
+    })
+  }
+}
+
 // 检测视频链接的正则表达式
 const videoExtensions = /\.(mp4|webm|ogg|mov|avi|mkv)$/i
-
 // 检测图片链接的正则表达式
 const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i
-
-// 生成唯一ID
-const generateId = () => Math.random().toString(36).substr(2, 9)
 
 // 下载图片函数
 const downloadImage = (url, filename) => {
@@ -227,7 +300,6 @@ const downloadImage = (url, filename) => {
       })
       .catch(error => {
         console.error('下载图片失败:', error)
-        // 如果fetch失败，尝试直接下载
         const link = document.createElement('a')
         link.href = url
         link.download = filename || 'image'
@@ -241,9 +313,7 @@ const downloadImage = (url, filename) => {
 // 将图片添加下载按钮
 const addImageDownloadButton = (html) => {
   return html.replace(/<img([^>]*src="([^"]*)"[^>]*)>/g, (match, attrs, src) => {
-    const imageId = generateId()
     const filename = src.split('/').pop().split('?')[0] || 'image'
-
     return `<div class="relative group inline-block max-w-full my-2">
       <img${attrs} class="rounded-lg max-w-full h-auto block border">
       <button class="absolute top-2 right-2 p-1.5 bg-background/80 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background text-foreground border" onclick="window.downloadMarkdownImage('${src}', '${filename}')" title="下载图片">
@@ -261,27 +331,15 @@ const convertHttpLinksToDownload = (html) => {
   return html.replace(
     /<a([^>]*?)href="(https?:\/\/[^"]+)"([^>]*)>(.*?)<\/a>/gi,
     (match, pre, href, post, text) => {
-      // 已经有 download 的不重复处理
-      if (/\sdownload(\s|$|=)/i.test(pre) || /\sdownload(\s|$|=)/i.test(post)) {
-        return match
-      }
-
-      // 如果链接内容包含图片，也不处理（避免覆盖图片显示）
-      if (/<img/i.test(text)) {
-        return match
-      }
-
+      if (/\sdownload(\s|$|=)/i.test(pre) || /\sdownload(\s|$|=)/i.test(post)) return match
+      if (/<img/i.test(text)) return match
       let filename = 'download'
       try {
         let cleanUrl = href.split(/[?#]/)[0]
         cleanUrl = decodeURIComponent(cleanUrl)
-        if (cleanUrl.endsWith('/')) {
-          cleanUrl = cleanUrl.slice(0, -1)
-        }
+        if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1)
         filename = cleanUrl.split('/').pop() || 'download'
-      } catch (e) {
-        console.warn('解析URL文件名失败:', e)
-      }
+      } catch (e) { console.warn('解析URL文件名失败:', e) }
 
       return `
         <a
@@ -298,10 +356,7 @@ const convertHttpLinksToDownload = (html) => {
   )
 }
 
-
-// 将视频链接转换为video标签
 const convertVideoLinks = (html) => {
-  // 首先处理链接标签中的视频URL
   html = html.replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g, (match, url, text) => {
     if (videoExtensions.test(url)) {
       return `<video controls class="w-full rounded-lg my-4 border bg-black/5">
@@ -311,58 +366,46 @@ const convertVideoLinks = (html) => {
     }
     return match
   })
-
-  // 然后处理直接的视频URL（不在链接标签中的）
   html = html.replace(/(?<!src="|href=")https?:\/\/[^\s<>"]+\.(mp4|webm|ogg|mov|avi|mkv)(?:\?[^\s<>"]*)?/gi, (match) => {
     return `<video controls class="w-full rounded-lg my-4 border bg-black/5">
       <source src="${match}" type="video/mp4">
       您的浏览器不支持视频播放。
     </video>`
   })
-
   return html
 }
 
-// 设置全局下载函数
-if (typeof window !== 'undefined') {
-  window.downloadMarkdownImage = downloadImage
-}
-
-// 预处理 markdown 内容
 const preprocessContent = (content) => {
   if (!content) return ''
-  // 匹配常见的带扩展名的文件链接，允许中间有空格
-  // 必须以http(s)开头，以常见文件扩展名结尾
   return content.replace(
     /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
-    (match) => {
-      // 替换匹配到的URL中的空格为%20
-      return match.replace(/\s/g, '%20')
-    }
+    (match) => match.replace(/\s/g, '%20')
   )
 }
 
-// 渲染Markdown内容
 const renderedContent = computed(() => {
   if (!props.content) return ''
 
   try {
-    // 使用marked解析Markdown
     chartList.length = 0
-
     const preprocessed = preprocessContent(props.content)
     let html = marked(preprocessed)
 
-    // 转换视频链接
+    // Unified Pipeline: Parse -> Highlight -> Stringify
+    const processed = unified()
+      .use(rehypeParse, { fragment: true })
+      .use(rehypePrism, { ignoreMissing: true })
+      .use(rehypeCodeBlockWrapper)
+      .use(rehypeStringify)
+      .processSync(html)
+    
+    html = String(processed)
+
+    // Post-processing
     html = convertVideoLinks(html)
-
-    // 所有 http(s) 链接 → 下载
     html = convertHttpLinksToDownload(html)
-
-    // 为图片添加下载按钮
     html = addImageDownloadButton(html)
 
-    // 使用DOMPurify清理HTML，防止XSS攻击
     return DOMPurify.sanitize(html, {
       ALLOWED_TAGS: [
         'p', 'br', 'strong', 'em', 'u', 'del', 'code', 'pre',
@@ -371,14 +414,16 @@ const renderedContent = computed(() => {
         'blockquote',
         'a', 'img',
         'table', 'thead', 'tbody', 'tr', 'th', 'td',
-        'div', 'span', 'button', 'svg', 'path', 'polyline', 'line',
+        'div', 'span', 'button', 'svg', 'path', 'polyline', 'line', 'rect',
         'video', 'source'
       ],
       ALLOWED_ATTR: [
         'href', 'src', 'alt', 'title', 'class', 'id',
         'target', 'rel', 'controls', 'type', 'onclick',
         'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
-        'points', 'x1', 'y1', 'x2', 'y2', 'd'
+        'stroke-linecap', 'stroke-linejoin',
+        'points', 'x1', 'y1', 'x2', 'y2', 'd', 'x', 'y', 'rx', 'ry',
+        'style' // Prism uses style for some highlights
       ]
     })
   } catch (error) {
@@ -390,35 +435,60 @@ const renderedContent = computed(() => {
 // 渲染 ECharts
 const renderCharts = async () => {
   await nextTick()
-  // 关键：等待 DOM 完全渲染，确保容器有宽高
   await new Promise(resolve => setTimeout(resolve, 200))
 
   chartList.forEach(({id, option}) => {
     const el = document.getElementById(id)
-    console.log(`初始化图表 ${id}:`, {
-      element: !!el,
-      width: el?.clientWidth,
-      height: el?.clientHeight
-    })
-
     if (el && el.clientWidth > 0 && el.clientHeight > 0) {
       try {
         const chart = echarts.init(el)
         chart.setOption(option)
-        console.log(`✓ 图表 ${id} 初始化成功`)
       } catch (err) {
         console.error(`✗ 图表 ${id} 初始化失败:`, err)
       }
-    } else {
-      console.warn(`✗ 图表容器 ${id} 未准备好`)
     }
   })
 }
 
-// 在内容变化后重渲染图表
-onMounted(renderCharts)
+// Global functions setup
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.downloadMarkdownImage = downloadImage
+    
+    window.copyToClipboard = (btn) => {
+      const wrapper = btn.closest('.group')
+      if (!wrapper) return
+      
+      const codeBlock = wrapper.querySelector('code')
+      if (!codeBlock) return
+      
+      const text = codeBlock.innerText || codeBlock.textContent
+      
+      navigator.clipboard.writeText(text).then(() => {
+        // Toggle icons
+        const copyIcon = btn.querySelector('.lucide-copy')
+        const checkIcon = btn.querySelector('.lucide-check')
+        
+        if (copyIcon) copyIcon.classList.add('hidden')
+        if (checkIcon) checkIcon.classList.remove('hidden')
+        
+        toast.success('已复制到剪贴板')
+        
+        setTimeout(() => {
+          if (copyIcon) copyIcon.classList.remove('hidden')
+          if (checkIcon) checkIcon.classList.add('hidden')
+        }, 2000)
+      }).catch(err => {
+        console.error('复制失败:', err)
+        toast.error('复制失败')
+      })
+    }
+  }
+  
+  renderCharts()
+})
+
 watch(() => props.content, async () => {
-  // 内容变化时，先等待 computed 更新，再渲染图表
   await renderCharts()
 }, {flush: 'post'})
 </script>
