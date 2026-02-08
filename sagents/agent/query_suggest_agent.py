@@ -19,7 +19,7 @@ class QuerySuggestAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "QuerySuggestAgent"
         self.agent_description = "查询建议智能体，专门负责根据用户对话生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。"
-        logger.info("QuerySuggestAgent 初始化完成")
+        logger.debug("QuerySuggestAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager

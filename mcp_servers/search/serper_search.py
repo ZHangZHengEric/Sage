@@ -9,9 +9,14 @@ from starlette.routing import Mount
 
 mcp = FastMCP("Serper Search")
 
-parser = argparse.ArgumentParser(description='启动 MCP Server 并传入 API Key')
-parser.add_argument('--api_key', type=str, help='serper API Key')
-args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='启动 MCP Server 并传入 API Key')
+    parser.add_argument('--api_key', type=str, help='serper API Key')
+    args = parser.parse_args()
+else:
+    class Args:
+        api_key = None
+    args = Args()
 
 # 返回提取的内容，以及内容的长度
 

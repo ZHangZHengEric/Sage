@@ -1,19 +1,18 @@
-from typing import Dict, Any, List, Type, Optional, Union
-from .tool_base import ToolBase
-from .tool_config import (
+from typing import Dict, Any, List, Optional, Union
+from .tool_base import _DISCOVERED_TOOLS
+from .mcp_tool_base import _DISCOVERED_MCP_TOOLS
+from .tool_schema import (
     convert_spec_to_openai_format,
     ToolSpec,
     McpToolSpec,
+    SageMcpToolSpec,
     SseServerParameters,
     StreamableHttpServerParameters,
     AgentToolSpec,
 )
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext
-import importlib
-import pkgutil
 from pathlib import Path
-import inspect
 import json
 import asyncio
 from mcp import StdioServerParameters
@@ -22,7 +21,65 @@ import traceback
 import time
 import os
 import sys
+try:
+    BaseExceptionGroup
+except NameError:
+    class BaseExceptionGroup(BaseException):
+        """Backport for Python < 3.11"""
+        pass
 from .mcp_proxy import McpProxy
+
+_GLOBAL_TOOL_MANAGER: Optional["ToolManager"] = None
+
+
+def get_tool_manager() -> Optional["ToolManager"]:
+    return _GLOBAL_TOOL_MANAGER
+
+
+def set_tool_manager(tm: Optional["ToolManager"]) -> None:
+    global _GLOBAL_TOOL_MANAGER
+    _GLOBAL_TOOL_MANAGER = tm
+
+
+def _innermost_exception(exc: BaseException) -> BaseException:
+    seen = set()
+    cur: BaseException = exc
+    while True:
+        cur_id = id(cur)
+        if cur_id in seen:
+            return cur
+        seen.add(cur_id)
+
+        if isinstance(cur, BaseExceptionGroup):
+            exceptions = getattr(cur, "exceptions", None)
+            if exceptions:
+                cur = exceptions[0]
+                continue
+
+        cause = getattr(cur, "__cause__", None)
+        if cause is not None:
+            cur = cause
+            continue
+
+        context = getattr(cur, "__context__", None)
+        if context is not None:
+            cur = context
+            continue
+
+        return cur
+
+
+def _innermost_exception_message(exc: BaseException) -> str:
+    inner = _innermost_exception(exc)
+    msg = str(inner).strip()
+    return msg if msg else repr(inner)
+
+
+def _raise_innermost_exception(exc: BaseException) -> None:
+    inner = _innermost_exception(exc)
+    if isinstance(inner, Exception):
+        raise inner from None
+    raise Exception(_innermost_exception_message(inner)) from None
 
 
 class ToolManager:
@@ -30,11 +87,13 @@ class ToolManager:
         """初始化工具管理器"""
         logger.info("Initializing ToolManager")
 
-        self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec]] = {}
-        self._tool_instances: Dict[type, ToolBase] = {}  # 缓存工具实例
+        self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]] = {}
+        self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
         self._mcp_setting_path = None
+
         if is_auto_discover:
-            self._auto_discover_tools()
+            self.discover_tools_from_path()
+            self.discover_builtin_mcp_tools_from_path()
             # self._mcp_setting_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mcp_servers', 'mcp_setting.json')
             # # 在测试环境中，我们不希望自动发现MCP工具
             # if not os.environ.get('TESTING'):
@@ -43,103 +102,155 @@ class ToolManager:
             # else:
             #     logger.debug("In testing environment, skipping MCP tool discovery")
 
-    def discover_tools_from_path(self, path: str):
-        """Discover and register tools from a custom path
-
-        Args:
-            path: Path to scan for tools
-        """
-        return self._auto_discover_tools(path=path)
+    @classmethod
+    def get_instance(cls, is_auto_discover: bool = True) -> "ToolManager":
+        tm = get_tool_manager()
+        if tm is None:
+            tm = ToolManager(is_auto_discover=is_auto_discover)
+            set_tool_manager(tm)
+        return tm
 
     async def initialize(self):
         """异步初始化，用于测试环境"""
         logger.info("Asynchronously initializing ToolManager")
         await self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path)
 
-    def _auto_discover_tools(self, path: Optional[str] = None):
+    def _discover_import_path(self, path=None, root_package="sagents"):
+        package_path = Path(path) if path else Path(__file__).parent
+        package_path = package_path.resolve()
+
+        # Find root_package in path to determine sys.path and full package name
+        current = package_path
+        parts = []
+        root_found = False
+        sys_path_dir = None
+
+        while True:
+            parts.insert(0, current.name)
+            if current.name == root_package:
+                root_found = True
+                sys_path_dir = current.parent
+                break
+            if current.parent == current:  # Reached root
+                break
+            current = current.parent
+
+        if not root_found:
+            # Fallback: treat package_path as the root package
+            logger.warning(f"Root package '{root_package}' not found in path {package_path}. Using {package_path.name} as root.")
+            sys_path_dir = package_path.parent
+            full_package_name = package_path.name
+        else:
+            full_package_name = ".".join(parts)
+
+        # Add to sys.path
+        if sys_path_dir:
+            sys_path_str = str(sys_path_dir)
+            if sys_path_str not in sys.path:
+                sys.path.append(sys_path_str)
+
+        logger.info(f"Discovering tools from package_path: {package_path}, module prefix: {full_package_name}")
+        import importlib
+        # 遍历 .py 文件
+        for py_file in package_path.rglob("*.py"):
+            if py_file.name.startswith(("test_", "__")):
+                continue
+            # 相对路径 + 模块名
+            rel_parts = py_file.relative_to(package_path).with_suffix("").parts
+            module_name = ".".join([full_package_name, *rel_parts])
+            try:
+                importlib.import_module(module_name)
+            except Exception as e:
+                logger.warning(f"Failed to import {module_name}: {e}")
+
+    def discover_builtin_mcp_tools_from_path(self, path: Optional[str] = None):
+        """Discover and register built-in MCP tools from mcp_servers directory"""
+        if path:
+            self._discover_import_path(path=path, root_package="mcp_servers")
+        else:
+            root_path = Path(__file__).parent.parent.parent
+            mcp_servers_path = root_path / "mcp_servers"
+            if not mcp_servers_path.exists():
+                logger.warning(f"mcp_servers path not found: {mcp_servers_path}")
+            else:
+                self._discover_import_path(path=mcp_servers_path, root_package="mcp_servers")
+
+        # Register discovered tools
+        count = 0
+        for module_name, funcs in _DISCOVERED_MCP_TOOLS.items():
+            for func in funcs:
+                if hasattr(func, '_mcp_tool_spec'):
+                    self.register_tool(func._mcp_tool_spec)
+                    count += 1
+
+        logger.info(f"Registered {count} built-in MCP tools")
+
+    def discover_tools_from_path(self, path: Optional[str] = None):
         """Auto-discover and register all tools in the tools package
         Args:
             path: Optional custom path to scan for tools. If None, uses package directory.
         """
-        logger.info("Auto-discovering tools")
-        package_path = Path(path) if path else Path(__file__).parent
-        sys_package_path = package_path.parent
-        # 自动推断完整包名（如 sagents.tool）
-        pkg_parts: List[str] = []
-        p = package_path
-        while p.name != "sagents" and p.parent != p:
-            pkg_parts.insert(0, p.name)
-            p = p.parent
-        if p.name == "sagents":
-            pkg_parts.insert(0, "sagents")
-        full_package_name = ".".join(pkg_parts)
-        logger.info(f"Auto-discovery full package name: {full_package_name}")
-        logger.info(f"Scanning path: {package_path}")
-        # 需要将package_path 加入sys.path
-        if str(sys_package_path) not in sys.path:
-            sys.path.append(str(sys_package_path))
-            logger.info(f"Added path to sys.path: {sys_package_path}")
-        for _, module_name, _ in pkgutil.iter_modules([str(package_path)]):
-            if module_name == "tool_base" or module_name.endswith("_base"):
-                logger.debug(f"Skipping base module: {module_name}")
-                continue
+        if path:
+            self._discover_import_path(path=path, root_package="sagents")
+        else:
+            # 默认情况：扫描 sagents.tool.impl 包下的所有模块
+            # impl/__init__.py 已清空以避免全量导入，此处使用 pkgutil 显式导入所有子模块
             try:
-                logger.info(f"Attempting to import module: {module_name}")
-                module = importlib.import_module(f".{module_name}", full_package_name)
-                for _, obj in inspect.getmembers(module):
-                    if inspect.isclass(obj) and issubclass(obj, ToolBase):
-                        logger.info(f"Found tool class: {obj.__name__}")
-                        self.register_tool_class(obj)
-            except ImportError as e:
-                logger.error(f"Failed to import module {module_name}: {e}")
-                logger.error(traceback.format_exc())
-                continue
-        logger.info(f"Auto-discovery completed with {len(self.tools)} total tools")
-        # 将package_path 从sys.path 中移除
-        if str(sys_package_path) in sys.path:
-            sys.path.remove(str(sys_package_path))
-            logger.info(f"Removed package path from sys.path: {sys_package_path}")
+                import sagents.tool.impl
+                import pkgutil
+                import importlib
+                for module_info in pkgutil.walk_packages(sagents.tool.impl.__path__, sagents.tool.impl.__name__ + "."):
+                    try:
+                        importlib.import_module(module_info.name)
+                    except Exception as e:
+                        logger.warning(f"Failed to import {module_info.name}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to discover tools in impl package: {e}")
 
-    def register_tool_class(self, tool_class: Type[ToolBase]):
-        """Register all tools from a ToolBase subclass"""
-        logger.info(f"Registering tools from class: {tool_class.__name__}")
-        tool_instance = tool_class()
-        # 缓存工具实例，以便后续执行时重用
-        self._tool_instances[tool_class] = tool_instance
-        instance_tools = tool_instance.tools
+        count = 0
+        for funcs in _DISCOVERED_TOOLS.values():
+            for func in funcs:
+                tool_spec = getattr(func, "_tool_spec", None)
+                if not tool_spec:
+                    continue
+                if tool_spec.name in self.tools:
+                    continue
+                owner_module = getattr(func, "_tool_owner_module", None)
+                owner_qualname = getattr(func, "_tool_owner_qualname", None)
+                if owner_module and owner_qualname:
+                    module = sys.modules.get(owner_module)
+                    if module is None:
+                        try:
+                            module = importlib.import_module(owner_module)
+                        except Exception:
+                            module = None
+                    if module is not None:
+                        target = module
+                        for part in owner_qualname.split("."):
+                            target = getattr(target, part, None)
+                            if target is None:
+                                break
+                        if isinstance(target, type):
+                            func.__objclass__ = target
+                if self.register_tool(tool_spec):
+                    count += 1
+        logger.info(f"Registered {count} tools from package_path")
 
-        if not instance_tools:
-            logger.warning(f"No tools found in {tool_class.__name__}")
-            return False
-
-        logger.info(f"\nRegistering tools to manager from {tool_class.__name__}:")
-        registered = False
-        for tool_name, tool_spec in instance_tools.items():
-            # 修正工具规格中的__objclass__
-            if hasattr(tool_spec.func, "__objclass__"):
-                tool_spec.func.__objclass__ = tool_class
-            if self.register_tool(tool_spec):
-                registered = True
-        logger.info(
-            f"Completed registering tools from {tool_class.__name__}, success: {registered}"
-        )
-        return registered
-
-    def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec]):
+    def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]):
         """Register a tool specification with priority-based replacement
 
         Priority order (high to low):
         1. McpToolSpec (MCP tools)
         2. AgentToolSpec (Agent tools)
-        3. ToolSpec (Local tools)
+        3. SageMcpToolSpec (Built-in MCP tools)
+        4. ToolSpec (Local tools)
         """
-        logger.debug(f"Registering tool: {tool_spec.name}")
 
         if tool_spec.name in self.tools:
             existing_tool = self.tools[tool_spec.name]
 
-            # 定义优先级：MCP > Agent > Local
-            priority_order = {McpToolSpec: 3, AgentToolSpec: 2, ToolSpec: 1}
+            # 定义优先级：MCP > Agent > SageMcp > Local
+            priority_order = {McpToolSpec: 3, AgentToolSpec: 2, SageMcpToolSpec: 1.5, ToolSpec: 1}
 
             existing_priority = priority_order.get(type(existing_tool), 0)
             new_priority = priority_order.get(type(tool_spec), 0)
@@ -280,7 +391,8 @@ class ToolManager:
             for mcp_tool in mcp_tools:
                 await self._register_mcp_tool(server_name, mcp_tool, server_params)
         except Exception as e:
-            logger.warning(f"Error registering MCP server {server_name}: {str(e)}")
+            error_detail = _innermost_exception_message(e)
+            logger.warning(f"Error registering MCP server {server_name}: {error_detail}")
             return bool_registered
         bool_registered = True
         logger.info(f"Successfully registered MCP server: {server_name}")
@@ -306,7 +418,7 @@ class ToolManager:
             input_schema = tool_info.get("input_schema", {})
         else:
             input_schema = tool_info.get("inputSchema", {})
-        
+
         # 兼容 MCP 的 i18n 元数据来源：优先从 _meta/meta 中读取；其次从顶层键读取；然后从 annotations 中读取；最后从 inputSchema.properties 聚合
         meta = tool_info.get("_meta") or tool_info.get("meta") or {} or tool_info.get("annotations", {}) or {}
         description_i18n = meta.get("description_i18n") or tool_info.get("description_i18n", {})
@@ -393,6 +505,9 @@ class ToolManager:
             elif isinstance(tool, AgentToolSpec):
                 tool_type = "agent"
                 source = "专业智能体"
+            elif isinstance(tool, SageMcpToolSpec):
+                tool_type = "sage_mcp"
+                source = f"内置MCP: {tool.server_name}"
             elif isinstance(tool, ToolSpec):
                 tool_type = "basic"
                 source = "基础工具"
@@ -455,8 +570,54 @@ class ToolManager:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
                 final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
-            elif isinstance(tool, ToolSpec):
+            elif isinstance(tool, SageMcpToolSpec):
                 final_result = await self._execute_standard_tool_async(tool, **kwargs)
+            elif isinstance(tool, ToolSpec):
+                # Check for sandbox execution
+                # Define sandbox tools (can be moved to config later)
+                SANDBOX_TOOLS = [
+                    "execute_shell_command", 
+                    "execute_python_code", 
+                    "file_read", 
+                    "file_write", 
+                    "search_content_in_file", 
+                    "download_file_from_url", 
+                    "update_file",
+                    "extract_text_from_non_text_file"
+                ]
+                
+                if tool.name in SANDBOX_TOOLS:
+                    try:
+                        # Use sandbox if available
+                        if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                            # Check if pip is needed
+                            needs_pip = False
+                            if tool.name == "execute_python_code" and kwargs.get("requirement_list"):
+                                needs_pip = True
+                            elif tool.name == "execute_shell_command":
+                                cmd = kwargs.get("command", "")
+                                if "pip " in cmd or "pip3 " in cmd:
+                                    needs_pip = True
+                            
+                            if needs_pip:
+                                session_context.sandbox.ensure_pip()
+
+                            # Use run_tool which handles path mapping and execution
+                            # We pass the function object from the tool spec
+                            # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
+                            # usually it's bound method if created from class)
+                            result = session_context.sandbox.run_tool(tool.func, kwargs)
+                            final_result = json.dumps({"content": result}, ensure_ascii=False, indent=2)
+                        else:
+                             # Fallback to standard execution if no sandbox found (should not happen in new setup)
+                            logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")
+                            final_result = await self._execute_standard_tool_async(tool, **kwargs)
+
+                    except Exception as e:
+                        logger.error(f"Sandbox execution failed for {tool.name}, aborting.")
+                        raise e
+                else:
+                    final_result = await self._execute_standard_tool_async(tool, **kwargs)
             elif isinstance(tool, AgentToolSpec):
                 # For AgentToolSpec, return a generator for streaming
                 return self._execute_agent_tool_streaming_async(
@@ -493,12 +654,12 @@ class ToolManager:
 
         except Exception as e:
             execution_time = time.time() - execution_start
+            error_detail = _innermost_exception_message(e)
             error_msg = (
-                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {str(e)}"
+                f"Tool '{tool_name}' failed after {execution_time:.2f}s: {error_detail}"
             )
-            logger.error(f"Full traceback: {traceback.format_exc()}")
             return self._format_error_response(
-                error_msg, tool_name, "EXECUTION_ERROR", str(e)
+                error_msg, tool_name, "EXECUTION_ERROR", error_detail
             )
 
     async def _execute_mcp_tool(
@@ -527,6 +688,10 @@ class ToolManager:
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
         except Exception as e:
+            if isinstance(e, BaseExceptionGroup):
+                msg = _innermost_exception_message(e)
+                logger.error(f"MCP tool execution failed: {tool.name} - {msg}")
+                _raise_innermost_exception(e)
             logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
 

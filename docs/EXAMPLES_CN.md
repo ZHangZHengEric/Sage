@@ -144,12 +144,12 @@ result = controller.run(messages, tool_manager, deep_research=True)
 ### 计算器工具（内置示例）
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 
-class Calculator(ToolBase):
+class Calculator:
     """数学计算工具集合"""
     
-    @ToolBase.tool()
+    @tool()
     def calculate(self, expression: str) -> dict:
         """
         计算数学表达式
@@ -167,7 +167,7 @@ class Calculator(ToolBase):
         except Exception as e:
             return {"error": str(e), "expression": expression, "status": "error"}
 
-    @ToolBase.tool()
+    @tool()
     def factorial(self, n: int) -> dict:
         """
         计算阶乘
@@ -188,13 +188,13 @@ class Calculator(ToolBase):
 ### 自定义API工具
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 import requests
 
-class APITool(ToolBase):
+class APITool:
     """API集成工具示例"""
     
-    @ToolBase.tool()
+    @tool()
     def fetch_data(self, url: str, method: str = "GET") -> dict:
         """
         从API端点获取数据

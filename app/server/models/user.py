@@ -59,3 +59,7 @@ class UserDao(BaseDao):
         """保存用户"""
         user.updated_at = datetime.now()
         return await BaseDao.save(self, user)
+    
+    async def get_list(self, limit: int = 100) -> list[User]:
+        """查询所有用户"""
+        return await BaseDao.get_list(self, User, limit=limit)

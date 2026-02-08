@@ -8,16 +8,27 @@
 - MemoryBackend: 存储后端类型
 - MemoryEntry: 记忆条目数据结构
 - UserMemoryManager: 用户记忆管理器（集成工具管理器）
+- IMemoryDriver: 记忆驱动接口
+- ToolMemoryDriver: 基于工具的记忆驱动实现
 """
 
-from .memory_types import MemoryType, MemoryBackend, MemoryEntry
-from .memory_manager import UserMemoryManager
+from .schemas import MemoryType, MemoryBackend, MemoryEntry
+from .manager import UserMemoryManager
+from .interfaces import IMemoryDriver
+from .drivers.tool import ToolMemoryDriver
+from .drivers.vector import VectorMemoryDriver
+from .extractor import MemoryExtractor
+
 
 __all__ = [
     'MemoryType',
     'MemoryBackend',
     'MemoryEntry',
-    'UserMemoryManager'
+    'UserMemoryManager',
+    'IMemoryDriver',
+    'ToolMemoryDriver',
+    'VectorMemoryDriver',
+    'MemoryExtractor'
 ]
 
 __version__ = '1.0.0'

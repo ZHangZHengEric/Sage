@@ -1,0 +1,51 @@
+services:
+  sage-server:
+    build:
+      context: ../
+      dockerfile: app/server/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SAGE_PORT=8080
+      - SAGE_DEFAULT_LLM_API_KEY=
+      - SAGE_DEFAULT_LLM_API_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/
+      - SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-v3
+      - SAGE_DEFAULT_LLM_MAX_TOKENS=4096
+      - SAGE_CONTEXT_HISTORY_RATIO=0.2
+      # MCP Settings - these files need to be mounted or created
+      - SAGE_PRESET_MCP_CONFIG=/app/mcp_setting.json
+      # Database Config
+      - SAGE_DB_TYPE=mysql
+      - SAGE_MYSQL_HOST=192.168.76.245
+      - SAGE_MYSQL_PORT=30052
+      - SAGE_MYSQL_DATABASE=sage
+      - SAGE_MYSQL_USER=root
+      - SAGE_MYSQL_PASSWORD=sage.1234
+    volumes:
+      - ./mcp_setting.json:/app/mcp_setting.json
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    depends_on:
+      - mock-mcp
+
+  mock-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    ports:
+      - "9001:9001"
+
+  load-generator:
+    image: docker.m.daocloud.io/python:3.11-slim
+    volumes:
+      - ./stress.py:/app/stress.py
+    working_dir: /app
+    command: sh -c "pip install aiohttp -i https://mirrors.aliyun.com/pypi/simple/ && python -u stress.py --url http://sage-server:8080/api/stream --requests 600 --concurrency 30"
+    depends_on:
+      - sage-server
+
+volumes:
+  mysql_data:
