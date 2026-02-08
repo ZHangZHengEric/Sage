@@ -16,7 +16,7 @@ def _auto_import_prompt_modules():
     import glob
     
     prompt_modules = {}
-    prompts_dir = Path(__file__).parent.parent / "agent" / "prompts"
+    prompts_dir = Path(__file__).parent.parent / "prompts"
     
     try:
         # 获取所有.py文件（排除__init__.py）
@@ -28,7 +28,7 @@ def _auto_import_prompt_modules():
                 
             try:
                 # 动态导入模块
-                module_name = f"sagents.agent.prompts.{file_name}"
+                module_name = f"sagents.prompts.{file_name}"
                 module = importlib.import_module(module_name)
                 
                 # 获取模块的AGENT_IDENTIFIER
@@ -50,11 +50,14 @@ def _auto_import_prompt_modules():
                         not attr_name.endswith('_PROMPTS_PT')):
                         
                         attr_value = getattr(module, attr_name)
-                        # 检查是否是包含zh、en和pt键的字典
-                        if isinstance(attr_value, dict) and 'zh' in attr_value and 'en' in attr_value and 'pt' in attr_value:
-                            zh_prompts[attr_name] = attr_value['zh']
-                            en_prompts[attr_name] = attr_value['en']
-                            pt_prompts[attr_name] = attr_value['pt']
+                        # 检查是否是包含zh或en键的字典
+                        if isinstance(attr_value, dict) and ('zh' in attr_value or 'en' in attr_value):
+                            if 'zh' in attr_value:
+                                zh_prompts[attr_name] = attr_value['zh']
+                            if 'en' in attr_value:
+                                en_prompts[attr_name] = attr_value['en']
+                            if 'pt' in attr_value:
+                                pt_prompts[attr_name] = attr_value['pt']
                 
                 # 如果找到了prompt，则存储
                 if zh_prompts or en_prompts or pt_prompts:
@@ -135,8 +138,7 @@ class PromptManager:
                 # 提取agent名称（去掉_PROMPTS_PT后缀），保持原始大小写
                 agent_name = module_key[:-11]  # 去掉"_PROMPTS_PT"
                 self.agent_prompts_pt[agent_name] = module_content
-        
-        logger.info(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个")
+        print(f"Agent prompt加载完成: 中文{len(self.agent_prompts_zh)}个, 英文{len(self.agent_prompts_en)}个, 葡萄牙语{len(self.agent_prompts_pt)}个")
     
     
     def get_prompt(self, key: str, default: Optional[str] = None, agent: Optional[str] = None, language: str = 'zh') -> str:
@@ -311,6 +313,11 @@ class PromptManager:
                     # 跳过PromptManager自身
                     if class_name == 'PromptManager':
                         continue
+                    if class_name == 'AgentRuntime':
+                        # 如果是AgentRuntime包装的，尝试获取内部agent的类名
+                        agent_runtime = caller_locals['self']
+                        if hasattr(agent_runtime, 'agent'):
+                            class_name = agent_runtime.agent.__class__.__name__
                     # 直接返回类名，不进行格式转换
                     logger.debug(f"自动获取到类名: {class_name}")
                     return class_name

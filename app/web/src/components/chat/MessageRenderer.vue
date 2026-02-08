@@ -1,91 +1,145 @@
 <template>
-  <div v-if="shouldRenderMessage">
+  <div v-if="shouldRenderMessage" class="flex flex-col gap-6 mb-6">
     <!-- 错误消息 -->
-    <div v-if="isErrorMessage" class="message error">
-      <div class="avatar-container">
+    <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
+      <div class="flex-none">
         <MessageAvatar messageType="error" role="assistant" />
-        <MessageTypeLabel messageType="error" role="assistant" class="message-label" />
       </div>
-      <div class="error-bubble">
-          <div class="error-title">{{ t('error.title') }}</div>
-          <div class="error-message">{{ message.show_content || message.content || t('error.unknown') }}</div>
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
+          {{ getLabel({ role: 'assistant', type: 'error' }) }}
+        </div>
+        <div class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-6 py-4 shadow-sm overflow-hidden break-words w-full">
+          <div class="opacity-90 text-[15px] leading-7 font-medium">{{ message.show_content || message.content || t('error.unknown') }}</div>
+        </div>
       </div>
     </div>
 
     <!-- Token 使用消息 -->
-    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="message token-usage-message">
+    <div v-else-if="isTokenUsageMessage && tokenUsageData" class="flex justify-center px-4 my-2">
       <TokenUsage :token-usage="tokenUsageData" />
     </div>
 
     <!-- 用户消息 -->
-    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="message user">
-      <div class="avatar-container">
+    <div v-else-if="message.role === 'user' && message.message_type !== 'guide'" class="flex flex-row-reverse items-start gap-3 px-4 group">
+      <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
-        <MessageTypeLabel :messageType="message.message_type" role="user" :type="message.type" class="message-label" />
       </div>
-      <div class="user-bubble">
-       <ReactMarkdown
+      <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none">
+          {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
+        </div>
+        <div class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
+          <MarkdownRenderer
             :content="formatMessageContent(message.content)"
           />
+        </div>
+      </div>
+    </div>
+    
+    <!-- 任务分析消息 -->
+    <div
+      v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"       class="flex flex-row items-start gap-3 px-4">
+      <div class="flex-none mt-1">
+        <MessageAvatar :messageType="message.message_type" role="assistant" />
+      </div>
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
+          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+        </div>
+        <div class="w-full">
+           <TaskAnalysisMessage 
+             :content="message.show_content || message.content" 
+             :isStreaming="isStreaming"
+           />
+        </div>
       </div>
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="message assistant">
-      <div class="avatar-container">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="flex flex-row items-start gap-3 px-4">
+      <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" />
-        <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="message-label" />
       </div>
-      <div class="assistant-bubble">
-        <ReactMarkdown
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
+        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
+          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+        </div>
+        <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
+          <MarkdownRenderer
             :content="formatMessageContent(message.show_content)"
             :components="markdownComponents"
           />
+        </div>
       </div>
     </div>
 
-    <!-- 工具调用按钮 -->
-    <div v-else-if="hasToolCalls" class="message-container">
-      <div class="message tool-calls">
-        <div class="avatar-container">
-          <MessageAvatar :messageType="message.message_type" role="assistant" />
-          <MessageTypeLabel :messageType="message.message_type" role="assistant" :type="message.type" class="message-label" />
-        </div>
-        <div class="tool-calls-bubble">
-        <div
-              v-for="(toolCall, index) in message.tool_calls"
-              :key="toolCall.id || index"
-              class="tool-call-item"
-              @click="handleToolClick(toolCall, getToolResult(toolCall))"
-            >
-              <div class="tool-call-main">
-                <span class="tool-name">{{ toolCall.function?.name || 'Unknown Tool' }}</span>
-                <span class="tool-status" :class="{ 'completed': getToolResult(toolCall), 'executing': !getToolResult(toolCall) }">
-                  {{ getToolResult(toolCall) ? t('toolCall.completed') : t('toolCall.executing') }}
-                </span>
-              </div>
-              <button class="tool-detail-button" @click.stop="handleToolClick(toolCall, getToolResult(toolCall))">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-            </div>
-        </div>
+    <!-- 工具渲染 -->
+    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
+      <div class="flex-none mt-1">
+        <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" />
+      </div>
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
+            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: '工具调用  ' + getToolName(message) }) }}
+            <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
+            {{ formatTime(message.timestamp) }}
+          </span>
+         </div>
+         <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
+           <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
+             <!-- Global Error Card -->
+             <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
+             <!-- Dynamic Tool Component -->
+             <component
+               v-else
+               :is="getToolComponent(toolCall.function?.name)"
+               :toolCall="toolCall"
+               :toolResult="getParsedToolResult(toolCall)"
+               :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
+               @sendMessage="handleSendMessage"
+               @click="handleToolClick"
+             />
+           </div>
+         </div>
       </div>
     </div>
+    
+    <!-- Tool Details Modal -->
+    <ToolDetailsPanel 
+        :open="showToolDetails" 
+        @update:open="showToolDetails = $event"
+        :tool-execution="selectedToolExecution"
+        :tool-result="toolResult" 
+    />
 
   </div>
 </template>
 
 <script setup>
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
-import MessageTypeLabel from './MessageTypeLabel.vue'
-import ReactMarkdown from './ReactMarkdown.vue'
-import ReactECharts from './ReactECharts.vue'
+import MarkdownRenderer from './MarkdownRenderer.vue'
+import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
+import { Terminal, FileText, Search, Zap } from 'lucide-vue-next'
+import { getMessageLabel } from '@/utils/messageLabels'
+import ToolErrorCard from './tools/ToolErrorCard.vue'
+import ToolDefaultCard from './tools/ToolDefaultCard.vue'
+import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
+import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
+// Custom Tools
+const TOOL_COMPONENT_MAP = {
+
+}
 
 const props = defineProps({
   message: {
@@ -99,16 +153,29 @@ const props = defineProps({
   messageIndex: {
     type: Number,
     default: 0
+  },
+  readonly: {
+    type: Boolean,
+    default: false
+  },
+  isLoading: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['downloadFile', 'toolClick'])
+const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage'])
 
 const { t } = useLanguage()
 
 // 计算属性
 const shouldRenderMessage = computed(() => {
   return props.message.role !== 'tool'
+})
+
+// 统一的 isStreaming 状态判断
+const isStreaming = computed(() => {
+  return props.isLoading && props.messageIndex === props.messages.length - 1
 })
 
 const isErrorMessage = computed(() => {
@@ -138,8 +205,8 @@ const markdownComponents = {
     if (!inline && (language === 'echarts' || language === 'echart')) {
       try {
         const chartOption = JSON.parse(String(children).replace(/\n$/, ''))
-        return h('div', { class: 'echarts-container', style: { margin: '10px 0' } }, [
-          h(ReactECharts, { 
+        return h('div', { class: 'echarts-container', style: { margin: '16px 0' } }, [
+          h(EChartsRenderer, { 
             option: chartOption, 
             style: { height: '400px', width: '100%' },
             opts: { renderer: 'canvas' }
@@ -147,18 +214,11 @@ const markdownComponents = {
         ])
       } catch (error) {
         return h('div', { 
-          class: 'echarts-error',
-          style: { 
-            padding: '10px', 
-            backgroundColor: '#fee', 
-            border: '1px solid #fcc',
-            borderRadius: '4px',
-            color: '#c33'
-          }
+          class: 'p-4 bg-destructive/5 border border-destructive/20 rounded-lg text-destructive text-sm'
         }, [
-          h('strong', {}, 'ECharts 配置错误: '),
-          error.message,
-          h('pre', { style: { marginTop: '8px', fontSize: '12px' } }, String(children).replace(/\n$/, ''))
+          h('strong', { class: 'font-semibold block mb-1' }, 'ECharts 配置错误'),
+          h('div', { class: 'opacity-90' }, error.message),
+          h('pre', { class: 'mt-2 p-2 bg-black/5 rounded text-xs overflow-x-auto' }, String(children).replace(/\n$/, ''))
         ])
       }
     }
@@ -202,433 +262,151 @@ const getToolResult = (toolCall) => {
   return null
 }
 
-const getFileName = (filePath) => {
-  return filePath ? filePath.split('/').pop() : ''
+const getToolName = (message) => {
+    if (message.tool_calls && message.tool_calls.length > 0) {
+        return message.tool_calls[0].function?.name || ''
+    }
+    return ''
 }
 
-const handleToolClick = (toolCall, toolResult) => {
-  emit('toolClick', toolCall, toolResult)
+const getLabel = ({ role, type, messageType, toolName }) => {
+  return getMessageLabel({
+    role,
+    type: messageType || type, // 优先使用 messageType
+    toolName
+  })
+}
+
+const formatTime = (timestamp) => {
+  if (!timestamp) return ''
+  
+  let dateVal = timestamp
+  const num = Number(timestamp)
+  
+  // 如果是数字且看起来像秒级时间戳（小于100亿，对应年份2286年之前）
+  // Python后端常返回秒级浮点数时间戳，如 1769963248.061118
+  if (!isNaN(num)) {
+    if (num < 10000000000) {
+      dateVal = num * 1000
+    } else {
+      dateVal = num
+    }
+  }
+  
+  const date = new Date(dateVal)
+  // 检查日期是否有效
+  if (isNaN(date.getTime())) return ''
+  
+  const now = new Date()
+  const isToday = date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear()
+
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } else {
+    return date.toLocaleString([], {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+}
+
+const getToolIcon = (name) => {
+  if (!name) return Zap
+  if (name.includes('search')) return Search
+  if (name.includes('file') || name.includes('read')) return FileText
+  if (name.includes('command') || name.includes('terminal')) return Terminal
+  return Zap
+}
+
+const showToolDetails = ref(false)
+const selectedToolExecution = ref(null)
+const toolResult = ref(null)
+
+const handleToolClick = (toolCall, result) => {
+  // Prevent custom tools from triggering the detail modal via native click events
+  // ToolDefaultCard explicitly emits 'click' with (toolCall, toolResult)
+  // Custom tools (without explicit emit) trigger native click with (MouseEvent)
+  if (toolCall instanceof Event) {
+    return
+  }
+  
+  selectedToolExecution.value = toolCall
+  toolResult.value = result
+  showToolDetails.value = true
+  
+  emit('toolClick', toolCall, result)
 }
 
 const handleDownloadFile = (filePath) => {
   emit('downloadFile', filePath)
 }
+
+const handleSendMessage = (text) => {
+  emit('sendMessage', text)
+}
+
+const getParsedToolResult = (toolCall) => {
+  const result = getToolResult(toolCall)
+  if (!result) return null
+
+  // If content is string, try to parse it
+  if (result.content && typeof result.content === 'string') {
+    try {
+      // Check if it looks like JSON
+      if (result.content.trim().startsWith('{') || result.content.trim().startsWith('[')) {
+          return {
+            ...result,
+            content: JSON.parse(result.content)
+          }
+      }
+    } catch (e) {
+      console.warn('Failed to parse tool result content:', e)
+      return result
+    }
+  }
+  return result
+}
+
+const checkIsToolError = (result) => {
+    if (!result) return false
+    if (result.is_error || result.status === 'error') return true
+    if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
+    return false
+}
+
+const isLatestMessage = computed(() => {
+    // 如果readonly，所有消息都不是最新
+    if (props.readonly) return false
+    
+    // If it's the last message, it's definitely latest
+    if (props.messageIndex === props.messages.length - 1) return true
+    
+    // Check if there are any user messages after this one
+    // If no user message follows, it is considered the latest turn
+    for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
+        if (props.messages[i].role === 'user') {
+            return false
+        }
+    }
+    return true
+})
+
+
+const isCustomToolMessage = computed(() => {
+    if (!hasToolCalls.value) return false
+    return props.message.tool_calls.some(call => !!TOOL_COMPONENT_MAP[call.function?.name])
+})
+
+const getToolComponent = (toolName) => {
+  if (!toolName) return ToolDefaultCard
+  return TOOL_COMPONENT_MAP[toolName] || ToolDefaultCard
+}
+
 </script>
 
-<style scoped>
-.message {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 0 16px;
-  max-width: 100%;
-  overflow: hidden;
-}
 
-/* 确保头像容器与消息气泡顶部对齐 */
-.message .avatar-container {
-  align-self: flex-start;
-  margin-top: 0;
-}
-
-.message-container {
-  margin-bottom: 16px;
-}
-
-.token-usage-message {
-  justify-content: center;
-}
-
-/* 头像容器样式 */
-.avatar-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  min-width: 48px;
-  width: 48px;
-}
-
-/* 消息标签样式 */
-.message-label {
-  color: #333 !important;
-  font-size: 11px !important;
-  font-weight: 500 !important;
-  text-align: center;
-  white-space: normal !important;
-  width: 48px !important; /* 固定宽度，约4个中文字符 */
-  min-width: 48px !important;
-  max-width: 48px !important;
-  word-wrap: break-word;
-  word-break: break-all;
-  line-height: 1.2;
-  background: none !important;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  overflow: visible;
-}
-
-/* 用户消息样式 */
-.message.user {
-  flex-direction: row-reverse;
-}
-
-.user-bubble {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-radius: 18px 18px 4px 18px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-  overflow: hidden;
-  word-wrap: break-word;
-  word-break: break-word;
-  min-width: 0;
-}
-
-/* 助手消息样式 */
-.message.assistant {
-  flex-direction: row;
-}
-
-.assistant-bubble {
-  background: white;
-  border: 1px solid #e1e5e9;
-  border-radius: 18px 18px 18px 18px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  word-wrap: break-word;
-  word-break: break-word;
-  min-width: 0;
-}
-
-/* 错误消息样式 */
-.message.error {
-  flex-direction: row;
-}
-
-.error-bubble {
-  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-  color: white;
-  border-radius: 18px 18px 18px 18px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-  overflow: hidden;
-  word-wrap: break-word;
-  word-break: break-word;
-  min-width: 0;
-}
-
-.error-title {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.error-message {
-  opacity: 0.9;
-}
-
-/* 工具调用样式 */
-.message.tool-calls {
-  flex-direction: row;
-}
-
-.tool-calls-bubble {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  color: white;
-  border-radius: 18px 18px 18px 18px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(79, 172, 254, 0.3);
-  overflow: hidden;
-  word-wrap: break-word;
-  word-break: break-word;
-  min-width: 0;
-}
-
-.tool-calls-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tool-call-item {
-  background: transparent;
-  border: transparent;
-  border-radius: 10px;
-  padding: 10px 12px;
-  color: white;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 44px;
-}
-
-.tool-call-item:hover {
-  background:transparent;
-}
-
-.tool-call-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-
-.tool-name {
-  font-weight: 600;
-  font-size: 14px;
-  color: white;
-}
-
-.tool-status {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.tool-status.executing {
-  background: rgba(255, 193, 7, 0.2);
-  color: #ffc107;
-  border: 1px solid rgba(255, 193, 7, 0.3);
-  animation: pulse 1.5s infinite;
-}
-
-.tool-status.completed {
-  background: rgba(40, 167, 69, 0.2);
-  color: #28a745;
-  border: 1px solid rgba(40, 167, 69, 0.3);
-}
-
-.tool-detail-button {
-  background: transparent;
-  border: transparent;
-  border-radius: 8px;
-  padding: 6px;
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 32px;
-  height: 32px;
-}
-
-.tool-detail-button:hover {
-  background: transparent;
-  transform: scale(1.05);
-}
-
-.tool-detail-button svg {
-  transition: transform 0.2s ease;
-}
-
-.tool-call-item:hover .tool-detail-button svg {
-  transform: translateX(2px);
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .tool-call-main {
-    gap: 8px;
-  }
-  
-  .tool-name {
-    font-size: 13px;
-  }
-  
-  .tool-status {
-    font-size: 11px;
-    padding: 2px 6px;
-  }
-  
-  .tool-detail-button {
-    min-width: 28px;
-    height: 28px;
-    padding: 4px;
-  }
-  
-  .tool-detail-button svg {
-    width: 14px;
-    height: 14px;
-  }
-}
-
-/* 增强的动画效果 */
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.tool-call-item {
-  animation: slideIn 0.3s ease-out;
-}
-
-.tool-call-item:nth-child(2) {
-  animation-delay: 0.1s;
-}
-
-.tool-call-item:nth-child(3) {
-  animation-delay: 0.2s;
-}
-
-/* 工具执行样式 */
-.message.tool-execution {
-  flex-direction: row;
-}
-
-.tool-execution-bubble {
-  background: white;
-  border: 1px solid #e1e5e9;
-  border-radius: 18px 18px 18px 18px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.tool-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 4px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.tool-name {
-  font-weight: 600;
-  color: #333;
-}
-
-.tool-status {
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 500;
-}
-
-.tool-status.completed {
-  background: #e8f5e8;
-  color: #2d8f2d;
-}
-
-.tool-status.running {
-  background: #fff3cd;
-  color: #856404;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.tool-content {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
-}
-
-.tool-file {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
-}
-
-.download-button {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s ease;
-}
-
-.download-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(79, 172, 254, 0.3);
-}
-
-/* 默认消息样式 */
-.message-content {
-  background: white;
-  border: 1px solid #e1e5e9;
-  border-radius: 12px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-/* ECharts错误样式 */
-.echarts-error {
-  background: #fff2f0;
-  border: 1px solid #ffccc7;
-  border-radius: 6px;
-  padding: 12px;
-  color: #cf1322;
-  font-size: 14px;
-  text-align: center;
-}
-
-/* 响应式样式 - 小屏幕优化 */
-@media (max-width: 768px) {
-  .message {
-    padding: 0 8px;
-    gap: 8px;
-  }
-  
-  .user-bubble,
-  .assistant-bubble,
-  .error-bubble,
-  .tool-calls-bubble {
-    max-width: 85%;
-    padding: 10px 12px;
-    font-size: 14px;
-  }
-  
-  .message-content {
-    max-width: 85%;
-    padding: 10px 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .message {
-    padding: 0 4px;
-    gap: 6px;
-  }
-  
-  .user-bubble,
-  .assistant-bubble,
-  .error-bubble,
-  .tool-calls-bubble {
-    max-width: 90%;
-    padding: 8px 10px;
-    font-size: 13px;
-  }
-  
-  .message-content {
-    max-width: 90%;
-    padding: 8px 10px;
-  }
-}
-
-
-</style>

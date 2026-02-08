@@ -14,14 +14,13 @@ import uuid
 class TaskPlanningAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_planning_system_prefix')
         self.agent_name = "PlanningAgent"
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
-        logger.info("PlanningAgent 初始化完成")
+        logger.debug("PlanningAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_planning_system_prefix', language=session_context.get_language())
+        current_system_prefix = PromptManager().get_agent_prompt_auto('task_planning_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
@@ -51,7 +50,6 @@ class TaskPlanningAgent(AgentBase):
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
-
         prompt = PromptManager().get_agent_prompt_auto('planning_template', language=session_context.get_language()).format(
             task_description=task_description_messages_str,
             task_manager_status=task_manager_status,
@@ -60,7 +58,7 @@ class TaskPlanningAgent(AgentBase):
             agent_description=self.system_prefix
         )
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

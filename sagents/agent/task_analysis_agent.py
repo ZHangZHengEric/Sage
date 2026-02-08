@@ -11,15 +11,14 @@ import uuid
 class TaskAnalysisAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix')
         self.agent_name = "TaskAnalysisAgent"
         self.agent_description = "任务分析智能体，专门负责分析任务并将其分解为组件"
-        logger.info("TaskAnalysisAgent 初始化完成")
+        logger.debug("TaskAnalysisAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        # 重新获取系统前缀，使用正确的语言
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix', language=session_context.get_language())
-        
+        # 重新获取系统前缀，使用正确的语言，不能用init的，会有并发问题
+        current_system_prefix = PromptManager().get_agent_prompt_auto('task_analysis_system_prefix', language=session_context.get_language())
+
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
         # 从消息管理实例中，获取满足context 长度限制的消息
@@ -34,15 +33,24 @@ class TaskAnalysisAgent(AgentBase):
         else:
             recent_message = message_manager.extract_all_context_messages(recent_turns=5)
             recent_message_str = MessageManager.convert_messages_to_str(recent_message)
-        
-        available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
-        available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
-        logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools_name)}")
 
-        
+        available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
+
+        # 获取skills metadata
+        skill_manager = session_context.skill_manager
+        if skill_manager and skill_manager.list_skills():
+            available_skills_name = skill_manager.get_skill_description_lines()
+        else:
+            available_skills_name = []
+
+        available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
+        available_skills_str = ", ".join(available_skills_name) if available_skills_name else "无可用技能"
+        logger.debug(f"TaskAnalysisAgent: 可用工具数量: {len(available_tools_name)}, 可用技能数量: {len(available_skills_name)}")
+
         prompt = PromptManager().get_agent_prompt_auto('analysis_template', language=session_context.get_language()).format(
             conversation=recent_message_str,
             available_tools=available_tools_str,
+            available_skills=available_skills_str,
             agent_description = self.system_prefix
         )
 
@@ -59,7 +67,7 @@ class TaskAnalysisAgent(AgentBase):
         )]
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

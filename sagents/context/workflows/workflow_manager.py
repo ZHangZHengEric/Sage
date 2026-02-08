@@ -28,7 +28,8 @@ class WorkflowManager:
         """获取工作流"""
         workflow = self.workflows.get(name)
         if workflow:
-            logger.debug(f"WorkflowManager: 获取工作流 '{name}' 成功")
+            # logger.debug(f"WorkflowManager: 获取工作流 '{name}' 成功")
+            pass
         else:
             logger.warning(f"WorkflowManager: 工作流 '{name}' 不存在")
         return workflow
@@ -142,34 +143,28 @@ class WorkflowManager:
     
     def format_workflows_for_context(self,workflows_name:List[str]) -> str:
         """格式化系统提示"""
-        workflow_list = ""
+        workflow_parts = []
         find_workflows_nums = 0
         for name in workflows_name:
-            workflow_guidance = ""
             workflow = self.get_workflow(name)
             if workflow:
                 find_workflows_nums += 1
-                workflow_guidance += f"""
-🔄 **推荐工作流{find_workflows_nums}: {name}**
-
-建议按以下步骤执行任务（可根据实际情况灵活调整）：
-
-"""
+                guidance = [f"\n🔄 **推荐工作流{find_workflows_nums}: {name}**\n\n建议按以下步骤执行任务（可根据实际情况灵活调整）：\n\n"]
+                
                 ordered_steps = workflow.get_ordered_steps()
                 for i, step in enumerate(ordered_steps, 0):
-                    print(step)
-                    print(type(step))
-                    workflow_guidance += f"{i}. {step.description}\n"
-
-                workflow_list += workflow_guidance
+                    # logger.debug(f"workflow {name} step: {step}")
+                    guidance.append(f"{i}. {step.description}\n")
+                workflow_parts.append("".join(guidance))
 
         if find_workflows_nums > 0:
-            workflow_list += """
+            workflow_parts.append("""
 💡 **执行建议:**
 - 以上步骤仅作参考指导，请根据具体问题灵活调整
 - 每完成一个步骤，评估进展并决定下一步行动
 - 充分利用可用工具提高工作效率
 - 如遇到问题，优先解决当前步骤的关键障碍
 
-请参考此工作流来规划你的任务执行，但要根据具体情况灵活应用。"""
-        return workflow_list
+请参考此工作流来规划你的任务执行，但要根据具体情况灵活应用。""")
+            
+        return "".join(workflow_parts)

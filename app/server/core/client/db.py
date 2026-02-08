@@ -2,16 +2,48 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
+from functools import wraps
 from typing import Optional
 
-from core.exceptions import SageHTTPException
-from core.config import StartupConfig
+from loguru import logger
+from sqlalchemy import text
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sagents.utils.logger import logger
+
+from ...core.config import StartupConfig
+from ...core.exceptions import SageHTTPException
+
+
+def db_retry(max_retries: int = 3, delay: float = 1.0):
+    """
+    数据库操作重试装饰器
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_err = None
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (OperationalError, InterfaceError) as e:
+                    last_err = e
+                    logger.warning(f"数据库操作异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(delay)
+            
+            # 重试耗尽，抛出 SageHTTPException
+            logger.error(f"数据库操作最终失败: {last_err}")
+            raise SageHTTPException(
+                status_code=500,
+                detail="数据库操作失败",
+                error_detail=str(last_err)
+            )
+        return wrapper
+    return decorator
 
 
 class SessionManager:
@@ -34,10 +66,10 @@ class SessionManager:
         if self.db_type == "file":
             os.makedirs(self.db_path, exist_ok=True)
             self.db_file = os.path.join(self.db_path, "agent_platform.db")
-            logger.info(f"使用文件数据库: {self.db_file}")
+            logger.debug(f"使用file数据库, 数据地址: {self.db_file}")
         elif self.db_type == "memory":
             self.db_file = ":memory:"
-            logger.info("使用内存数据库")
+            logger.debug("使用内存数据库")
         elif self.db_type == "mysql":
             self._engine_name = "mysql"
             self.db_file = None
@@ -49,9 +81,7 @@ class SessionManager:
                 "database": cfg.mysql_database,
                 "charset": cfg.mysql_charset,
             }
-            logger.info(
-                f"使用MySQL数据库: {self.mysql_config.get('host')}:{self.mysql_config.get('port')} / {self.mysql_config.get('database')}"
-            )
+            logger.debug(f"使用MySQL数据库: {self.mysql_config.get('host')}:{self.mysql_config.get('port')} / {self.mysql_config.get('database')}")
         else:
             raise SageHTTPException(
                 status_code=400,
@@ -79,20 +109,39 @@ class SessionManager:
                     self._engine = create_async_engine(
                         url,
                         future=True,
+                        pool_size=100,
+                        max_overflow=50,
+                        pool_recycle=1800,
+                        pool_timeout=30,
+                        pool_pre_ping=True,
                         json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
                         json_deserializer=json.loads,
                     )
                 else:
+                    engine_kwargs = {
+                        "pool_recycle": 1800,
+                        "pool_pre_ping": True,
+                        "json_serializer": lambda obj: json.dumps(
+                            obj, ensure_ascii=False
+                        ),
+                        "json_deserializer": json.loads,
+                    }
+
                     if self.db_file == ":memory:":
+                        from sqlalchemy.pool import StaticPool
+
                         url = "sqlite+aiosqlite:///:memory:"
+                        engine_kwargs.update(
+                            {
+                                "poolclass": StaticPool,
+                                "connect_args": {"check_same_thread": False},
+                            }
+                        )
                     else:
                         url = f"sqlite+aiosqlite:///{self.db_file}"
 
                     self._engine = create_async_engine(
-                        url,
-                        future=True,
-                        json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
-                        json_deserializer=json.loads,
+                        url, future=True, **engine_kwargs
                     )
 
                 self._SessionLocal = async_sessionmaker(
@@ -102,12 +151,71 @@ class SessionManager:
                     expire_on_commit=False,
                 )
 
-                logger.debug(f"数据库连接初始化完成 ({self._engine_name})")
+                # 立即验证连接
+                if self._engine_name == "mysql":
+                    try:
+                        async with self._engine.connect() as conn:
+                            await conn.execute(text("SELECT 1"))
+                    except OperationalError as e:
+                        # 错误码 1049: Unknown database
+                        if "1049" in str(e) or "Unknown database" in str(e):
+                            logger.warning(f"数据库 '{database}' 不存在，尝试自动创建...")
+                            try:
+                                # 创建临时连接用于创建数据库
+                                # 不指定数据库名进行连接
+                                admin_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/?charset={charset}"
+                                admin_engine = create_async_engine(
+                                    admin_url,
+                                    isolation_level="AUTOCOMMIT",
+                                    future=True
+                                )
+                                
+                                async with admin_engine.connect() as admin_conn:
+                                    # 创建数据库
+                                    await admin_conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {charset}"))
+                                    logger.info(f"数据库 '{database}' 创建成功")
+                                
+                                await admin_engine.dispose()
+                                
+                                # 再次验证原连接
+                                async with self._engine.connect() as conn:
+                                    await conn.execute(text("SELECT 1"))
+                            except Exception as create_e:
+                                logger.error(f"自动创建数据库失败: {create_e}")
+                                raise e  # 抛出原始连接错误
+                        else:
+                            logger.error(f"MySQL 连接验证失败: {e}")
+                            raise e
+                    except Exception as e:
+                        logger.error(f"MySQL 连接验证失败: {e}")
+                        raise e
+
+                logger.info(f"数据库连接初始化完成 ({self._engine_name})")
 
         except Exception as e:
-            logger.error(f"数据库初始化失败: {e}")
+            err_msg = str(e)
+            logger.error(f"数据库初始化失败: {err_msg}")
+
+            # 提供更友好的错误提示
+            hint = ""
+            if (
+                "Name or service not known" in err_msg
+                or "gaierror" in err_msg
+                or "Can't connect to MySQL server" in err_msg
+            ):
+                hint = "可能是数据库 Host 配置错误，请检查 mysql_host"
+            elif "Access denied" in err_msg:
+                hint = "可能是数据库用户名或密码错误"
+            elif "Connection refused" in err_msg:
+                hint = "可能是数据库端口错误或服务未启动"
+
+            if hint:
+                logger.error(f"提示: {hint}")
+
             raise SageHTTPException(
-                status_code=500, detail="数据库初始化失败", error_detail=str(e)
+                status_code=500,
+                detail="数据库初始化失败",
+                error_detail=f"{err_msg} | {hint}",
             )
 
     async def close(self):
@@ -123,7 +231,8 @@ class SessionManager:
     async def get_session(self, autocommit: bool = True):
         """
         获取异步数据库会话
-        :param autocommit: 是否在上下文退出时自动提交事务
+        - 适配 StreamingResponse / 高并发
+        - 正确处理 CancelledError
         """
         if not self._SessionLocal or not self._engine:
             raise SageHTTPException(
@@ -131,19 +240,63 @@ class SessionManager:
                 detail="数据库未初始化",
                 error_detail="SQLAlchemy 引擎或会话工厂不存在",
             )
+
         session: AsyncSession = self._SessionLocal()
+        cancelled = False
+
         try:
             yield session
-            if autocommit:
+
+            # ⚠️ 如果 Task 已被 cancel，不要再 commit
+            if autocommit and not cancelled:
                 await session.commit()
+
+        except asyncio.CancelledError:
+            # ✅ 标记取消，但不再尝试 rollback（连接可能已不可用）
+            cancelled = True
+            raise
+
+        except (OperationalError, InterfaceError) as e:
+            # ✅ aiomysql 在取消时抛 InterfaceError: Cancelled during execution
+            if "Cancelled during execution" in str(e):
+                cancelled = True
+                logger.debug(f"数据库操作被取消: {e}")
+                raise asyncio.CancelledError() from e
+
+            # 正常数据库异常
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            raise
+
         except Exception as e:
-            await session.rollback()
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+
             logger.error(f"数据库操作失败: {e}")
             raise SageHTTPException(
-                status_code=500, detail="数据库操作失败", error_detail=str(e)
+                status_code=500,
+                detail="数据库操作失败",
+                error_detail=str(e),
             )
+
         finally:
-            await session.close()
+            # ✅ close 必须 shield，但取消时允许直接放弃连接
+            try:
+                await asyncio.shield(session.close())
+            except asyncio.CancelledError:
+                pass
+            except (OperationalError, InterfaceError) as e:
+                # 忽略因取消导致的 InterfaceError
+                if "Cancelled during execution" in str(e):
+                    pass
+                else:
+                    logger.error(f"关闭 Session 失败 (DB Error): {e}")
+            except Exception as e:
+                logger.error(f"关闭 Session 失败: {e}")
 
 
 # ===== 全局 DB 管理 =====

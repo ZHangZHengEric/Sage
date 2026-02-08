@@ -6,17 +6,17 @@ MCP (Model Context Protocol) 相关路由
 
 from typing import Any, Dict, List, Optional
 
-from core.render import Response
 from fastapi import APIRouter, Request
+from loguru import logger
 from pydantic import BaseModel
-from service.mcp import (
+
+from ..core.render import Response
+from ..services.mcp import (
     add_mcp_server,
     list_mcp_servers,
     refresh_mcp_server,
     remove_mcp_server,
 )
-
-from sagents.utils.logger import logger
 
 # 创建路由器
 mcp_router = APIRouter(prefix="/api/mcp", tags=["MCP"])
@@ -42,7 +42,6 @@ async def add(req: MCPServerRequest, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    logger.info(f"开始添加MCP server: {req.name}")
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     server_name = await add_mcp_server(
@@ -72,7 +71,12 @@ async def list(http_request: Request):
 
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    mcp_servers = await list_mcp_servers(user_id=user_id)
+    role = claims.get("role") or "user"
+    
+    # Admin sees all (user_id=None), User sees own (user_id=user_id)
+    target_user_id = None if role == "admin" else user_id
+    mcp_servers = await list_mcp_servers(user_id=target_user_id)
+    
     servers: List[Dict[str, Any]] = []
     for server in mcp_servers:
         config = server.config
@@ -84,6 +88,7 @@ async def list(http_request: Request):
                 "streamable_http_url": config.get("streamable_http_url"),
                 "sse_url": config.get("sse_url"),
                 "api_key": config.get("api_key"),
+                "user_id": server.user_id,
             }
         )
     return await Response.succ(
@@ -92,7 +97,7 @@ async def list(http_request: Request):
 
 
 @mcp_router.delete("/{server_name}")
-async def remove(server_name: str):
+async def remove(server_name: str, http_request: Request):
     """
     删除MCP服务器
 
@@ -102,15 +107,19 @@ async def remove(server_name: str):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
     logger.info(f"开始删除MCP server: {server_name}")
-    await remove_mcp_server(server_name)
+    await remove_mcp_server(server_name, user_id, role)
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
 
 
 @mcp_router.post("/{server_name}/refresh")
-async def refresh(server_name: str):
+async def refresh(server_name: str, http_request: Request):
     """
     刷新MCP服务器连接
 
@@ -120,7 +129,11 @@ async def refresh(server_name: str):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+
     logger.info(f"开始刷新MCP server: {server_name}")
 
-    status = await refresh_mcp_server(server_name)
+    status = await refresh_mcp_server(server_name, user_id, role)
     return await Response.succ(data={"server_name": server_name, "status": status})

@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.7-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9.8-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage Multi-Agent Framework**
 
@@ -22,12 +22,13 @@
 
 ## ✨ **Key Features**
 
-- 🧠 **Intelligent Task Decomposition**: Automatically breaks down complex problems with dependency tracking.
-- 🔄 **Agent Orchestration**: Seamless coordination between specialized agents (Planning, Execution, Observation, Summary).
-- 🛠️ **Extensible Tool System**: Plugin-based architecture supporting **MCP Servers** and auto-discovery.
-- ⚡ **Dual Modes**: **Deep Research** for analysis and **Rapid Execution** for speed.
-- 📊 **Context Management**: Advanced **Context Budget** controls for precise token optimization (v0.9.7+).
-- 🌐 **Modern UI**: Vue3 + FastAPI web interface with real-time streaming and visualization.
+- 🧠 **Multi-Agent Orchestration**: Support for both **TaskExecutor** (Sequential) and **FibreAgent** (Parallel) orchestration modes.
+- 🏗️ **Enterprise Architecture**: Robust storage layer powered by **Elasticsearch** (Vector), **MinIO** (Object), and **SQLAlchemy** (Relational).
+- � **RAG Engine 2.0**: Advanced Retrieval-Augmented Generation with **RRF** (Reciprocal Rank Fusion) and hybrid search.
+- 🛡️ **Secure Sandbox**: Isolated execution environment (`sagents.utils.sandbox`) for safe agent code execution.
+- 👁️ **Full Observability**: Integrated **OpenTelemetry** tracing to visualize agent thought processes and execution paths.
+- 🧩 **Modular Components**: Plug-and-play architecture for **Skills**, **Tools**, and **MCP Servers**.
+- 📊 **Context Management**: Advanced **Context Budget** controls for precise token optimization.
 - 🐍 **Python 3.11+ Optimized**: Fully typed and linted codebase for enterprise-grade reliability.
 
 ## 🚀 **Quick Start**
@@ -66,44 +67,51 @@ python app/sage_cli.py \
 
 The modern web application is now structured as `app/server` (Backend) and `app/web` (Frontend).
 
-**Deploy with Docker Compose**:
+**Deploy with Docker Compose (Recommended)**:
 ```bash
 docker-compose up -d
 ```
-Access the application at `http://localhost:30051`.
+Access the application at `http://localhost:30051` (Web) / `http://localhost:30050/docs` (API).
 
-## 🤖 **Supported Models**
+## 🏗️ **System Architecture**
 
 ```mermaid
-graph LR
-    U[User Input] --> AC[Agent Controller]
-    AC --> WF
-    AC --> RM
-
-    subgraph WF[Workflow]
-        A[Analysis] --> B[Planning] --> C[Execution] --> D[Observation] --> E[Summary]
-        D -- "Loop" --> B
-        C -- uses --> X[🛠️ Tool System]
+graph TD
+    User[User/Client] --> API[Sage Server API]
+    API --> Orch[🧠 Agent Orchestrator]
+    
+    subgraph Core[Core Engine]
+        Orch -- "Dispatches" --> Agents[🤖 Agents (Fibre/Standard)]
+        Agents -- "Uses" --> RAG[📚 RAG Engine]
+        Agents -- "Uses" --> Tools[🛠️ Tools & Skills]
+        Agents -- "Runs in" --> Box[📦 Security Sandbox]
     end
-    E --> R[Result]
 
-    subgraph RM[Resource Management]
-        F[TaskManager]
-        G[MessageManager]
-        H[Workspace]
+    subgraph Infra[Enterprise Infrastructure]
+        RAG <--> ES[(Elasticsearch)]
+        Tools <--> MinIO[(MinIO)]
+        Orch <--> DB[(SQL Database)]
     end
+    
+    Core -.-> Obs[👁️ Observability (OpenTelemetry)]
 ```
 
-## 📅 **What's New in v0.9.7**
+## 📅 **What's New in v0.9.8**
 
-- **Context Budget**: New parameters (`--context_history_ratio`, etc.) for granular context control.
-- **Unified Parameters**: Standardized `default_llm_*` arguments across Server, CLI, and Demo.
-- **Stability**: Full Python 3.11+ type safety compliance and code style optimizations.
-- **[View Full Release Notes](release_notes/v0.9.7.md)**
+- **Enterprise Storage**: Introduced Elasticsearch, MinIO, and SQL for robust data persistence.
+- **Fibre Agent**: New parallel multi-agent orchestration architecture.
+- **RAG Engine**: Completely refactored retrieval engine with RRF support.
+- **Security**: Added code execution sandbox.
+- **Observability**: Full OpenTelemetry integration.
+- **[View Full Release Notes](release_notes/v0.9.8.md)**
 
 ## 📚 **Documentation**
 
-- [**Full Documentation**](docs/README.md)
+- [**Full Documentation Home**](docs/README.md)
+- [**Server Deployment Guide**](docs/SERVER_DEPLOYMENT.md) - Docker & Source deployment
+- [**Examples Usage Guide**](docs/EXAMPLES_USAGE.md) - CLI, Web, & API Server
+- [**Changelog**](docs/CHANGELOG.md) - Latest updates & history
+- [**Agent Framework Architecture**](docs/ARCHITECTURE.md)
 - [**API Reference**](docs/API_REFERENCE.md)
 - [**Configuration Guide**](docs/CONFIGURATION.md)
 - [**Tool Development**](docs/TOOL_DEVELOPMENT.md)

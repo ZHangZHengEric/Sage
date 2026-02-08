@@ -3,11 +3,12 @@ SQLAlchemy 基础设施
 
 """
 
-import asyncio
 from typing import Any, Optional, Sequence, Type
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase
+
+from ..core.client.db import db_retry
 
 
 class Base(DeclarativeBase):
@@ -18,23 +19,13 @@ class BaseDao:
     """基础DAO类"""
 
     def __init__(self):
-        try:
-            loop = asyncio.get_running_loop()
-            from core.client.db import get_global_db
-
-            self._db_task = loop.create_task(get_global_db())
-        except RuntimeError:
-            self._db_task = None
         self.db = None
 
     async def _get_db(self):
         if self.db is not None:
             return self.db
-        if self._db_task is not None:
-            self.db = await self._db_task
-            return self.db
-        from core.client.db import get_global_db
-
+        
+        from ..core.client.db import get_global_db
         self.db = await get_global_db()
         return self.db
 
@@ -59,6 +50,7 @@ class BaseDao:
             await session.merge(obj)
             return True
 
+    @db_retry()
     async def get_by_id(self, model: Type[Any], pk: Any) -> Optional[Any]:
         """根据主键查询对象"""
         db = await self._get_db()
@@ -75,6 +67,7 @@ class BaseDao:
                 return True
             return False
 
+    @db_retry()
     async def get_all(self, model: Type[Any], order_by: Any | None = None) -> list[Any]:
         """查询所有对象"""
         db = await self._get_db()
@@ -85,6 +78,7 @@ class BaseDao:
             res = await session.execute(stmt)
             return list(res.scalars().all())
 
+    @db_retry()
     async def get_list(
         self,
         model: Type[Any],
@@ -106,6 +100,7 @@ class BaseDao:
             res = await session.execute(stmt)
             return list(res.scalars().all())
 
+    @db_retry()
     async def get_first(
         self,
         model: Type[Any],
@@ -125,6 +120,7 @@ class BaseDao:
             res = await session.execute(stmt)
             return res.scalars().first()
 
+    @db_retry()
     async def count(self, model: Type[Any], where: Sequence[Any] | None = None) -> int:
         """查询对象数量"""
         db = await self._get_db()
@@ -136,6 +132,7 @@ class BaseDao:
             res = await session.execute(stmt)
             return int(res.scalar() or 0)
 
+    @db_retry()
     async def paginate_list(
         self,
         model: Type[Any],

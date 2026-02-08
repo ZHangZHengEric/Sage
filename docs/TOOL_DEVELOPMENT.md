@@ -55,12 +55,45 @@ graph LR
 
 ## 🔧 Creating Basic Tools
 
+### Defining Tools with Annotations (Recommended)
+
+Sage provides the `@sage_mcp_tool` annotation, which is the recommended way to define internal tools. It automatically parses docstrings to generate tool descriptions and parameter schemas, and supports auto-discovery.
+
+```python
+from sagents.tool.mcp_tool_base import sage_mcp_tool
+
+@sage_mcp_tool()
+async def search_web_page(
+    query: str,
+    count: int = 10,
+    language: str = None,
+) -> str:
+    """
+    Search the web using a search engine.
+    
+    Args:
+        query: Search query (required)
+        count: Number of results (default 10)
+        language: Language code (e.g., zh, en)
+        
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing search results
+    """
+    # Tool implementation logic
+    return [{"title": "Example", "url": "https://example.com"}]
+```
+
+**Features:**
+1. **Automatic Schema Generation**: Generates JSON Schema automatically from type hints and docstrings.
+2. **Auto-Discovery**: Marked tools are automatically discovered and registered by the framework.
+3. **Metadata Parsing**: Automatically parses Args and Returns from docstrings.
+
 ### Simple Function Tool
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 
-@ToolBase.register_tool
+@tool()
 def calculator(expression: str) -> str:
     """
     Evaluate mathematical expressions safely
@@ -104,7 +137,7 @@ def calculator(expression: str) -> str:
 ### Class-based Tool
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 from typing import Dict, List
 import requests
 
@@ -115,7 +148,7 @@ class WeatherTool:
         self.api_key = os.getenv('WEATHER_API_KEY')
         self.base_url = "http://api.openweathermap.org/data/2.5/weather"
     
-    @ToolBase.register_tool
+    @tool()
     def get_weather(self, city: str, units: str = "metric") -> Dict[str, Any]:
         """
         Get current weather information for a city
@@ -162,7 +195,7 @@ weather_tool = WeatherTool()
 ### Tool with Configuration
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 from agents.config import get_settings
 from dataclasses import dataclass
 from typing import Optional
@@ -185,7 +218,7 @@ class DatabaseTool:
         self.config.host = os.getenv('DB_HOST', self.config.host)
         self.config.port = int(os.getenv('DB_PORT', self.config.port))
     
-    @ToolBase.register_tool
+    @tool()
     def query_database(self, query: str, limit: int = 100) -> Dict[str, Any]:
         """
         Execute a read-only database query
@@ -234,7 +267,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
-@ToolBase.register_tool
+@tool()
 def process_file(file_content: str, operation: str = "analyze") -> Dict[str, Any]:
     """
     Process file content with various operations
@@ -281,7 +314,7 @@ def _analyze_file(file_path: Path) -> Dict[str, Any]:
 import asyncio
 import aiohttp
 
-@ToolBase.register_tool
+@tool()
 def fetch_url_async(url: str, timeout: int = 30) -> Dict[str, Any]:
     """
     Fetch URL content asynchronously
@@ -319,7 +352,7 @@ async def _fetch_url_internal(url: str, timeout: int) -> Dict[str, Any]:
 ```python
 from agents.utils import logger
 
-@ToolBase.register_tool
+@tool()
 def process_large_dataset(data: List[Dict], operation: str = "transform") -> Dict[str, Any]:
     """
     Process large dataset with progress tracking
@@ -484,8 +517,8 @@ if __name__ == "__main__":
 ### Creating Agent Tools
 
 ```python
-from agents.tool.tool_base import AgentToolSpec
-from agents.agent.agent_base import AgentBase
+from sagents.agent.agent_base import AgentBase
+from sagents.tool.tool_manager import ToolManager
 
 class ResearchAgent(AgentBase):
     """Specialized research agent"""
@@ -500,20 +533,9 @@ class ResearchAgent(AgentBase):
         }]
 
 # Register as agent tool
-@ToolBase.register_agent_tool
-def research_assistant(messages: List[Dict], session_id: str) -> List[Dict]:
-    """
-    Delegate complex research tasks to specialized research agent
-    
-    Args:
-        messages: Conversation history
-        session_id: Current session ID
-        
-    Returns:
-        List of response messages from research agent
-    """
-    research_agent = ResearchAgent()
-    return research_agent.run(messages, session_id=session_id)
+tool_manager = ToolManager()
+research_agent = ResearchAgent()
+tool_manager.register_tool(research_agent.to_tool())
 ```
 
 ## 🧪 Testing and Debugging
@@ -568,7 +590,7 @@ def test_tool_registration():
     tool_manager = ToolManager()
     initial_count = len(tool_manager.list_tools())
     
-    @ToolBase.register_tool
+    @tool()
     def test_tool(param: str) -> str:
         return f"Test: {param}"
     
@@ -602,7 +624,7 @@ print(f"Debug result: {result}")
 ### 1. Error Handling
 
 ```python
-@ToolBase.register_tool
+@tool()
 def robust_tool(param: str) -> Dict[str, Any]:
     """Tool with comprehensive error handling"""
     try:
@@ -637,7 +659,7 @@ def validate_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-@ToolBase.register_tool
+@tool()
 def send_email(to: str, subject: str, body: str) -> Dict[str, Any]:
     """
     Send email with validation
@@ -677,7 +699,7 @@ def temporary_workspace():
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
 
-@ToolBase.register_tool
+@tool()
 def process_files(files: List[str]) -> Dict[str, Any]:
     """Process files with proper resource management"""
     with temporary_workspace() as workspace:
@@ -713,7 +735,7 @@ class OptimizedTool:
         time.sleep(1)
         return f"processed_{data}"
     
-    @ToolBase.register_tool
+    @tool()
     def optimized_processor(self, data: str, use_cache: bool = True) -> Dict[str, Any]:
         """
         Process data with optional caching
