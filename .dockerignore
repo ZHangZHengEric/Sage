@@ -1,9 +1,8 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
-dist/
-build/
 .eggs/
 *.whl
 .tox/
@@ -12,10 +11,58 @@ build/
 .mypy_cache/
 .venv/
 venv/
-node_modules/
+.conda/
 coverage/
 *.log
+.ruff_cache
+
+# Node / Frontend
+**/node_modules/
+**/dist/
+**/build/
 .vite/
 .nuxt/
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+.pnpm-store
+
+# OS
 .DS_Store
-data
+
+# Data & Assets
+data/
+test/
+assets/
+docs/
+
+# IDEs
+.vscode/
+.idea/
+.trae/
+
+# Environment Variables (Secrets)
+.env
+.env.local
+.env.*.local
+# Keep example files
+!.env.example
+!.env.sample
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Git
+.git/
+.github/
+.gitignore
+
+
+# Temporary
+tmp/
+
+skills/*
+assets/
+docs/
+release_notes/

@@ -5,621 +5,401 @@ nav_order: 5
 description: "理解Sage多智能体框架的架构和设计原则"
 ---
 
-{: .note }
-> 需要英文版本？请查看 [Architecture Guide](ARCHITECTURE.html)
 
-## 目录
-{: .no_toc .text-delta }
+# 🏗️ Sage 系统架构与设计原理 (v3.0)
 
-1. TOC
-{:toc}
+本文档详细阐述了 Sage 的核心能力、执行流程以及关键模块的底层实现原理。
 
-# 🏗️ 架构指南 (v2.0)
+Sage 是一个高度模块化、可观测且具备长期记忆能力的智能体系统。其设计核心在于**控制（Control）与状态（State）的分离**，以及**多模式（Multi-Mode）执行策略**，使其既能处理简单的即时问答，也能胜任复杂的长流程任务。
 
-本文档提供了 Sage 多智能体框架增强架构、设计原则和生产就绪功能的内部工作流程的全面概述。
+## 1. 核心设计理念
 
-## 📋 目录
+### 核心实体
+*   **SAgent (控制器)**: 智能体的大脑与指挥官。负责接收请求、编排智能体、路由任务以及控制整个执行流。它本身不存储状态，而是通过 SessionContext 读写状态。
+*   **SessionContext (状态中心)**: 智能体的记忆与状态容器。负责维护会话生命周期内的一切数据，包括消息记录、任务状态、用户记忆、工作流上下文等。
 
-- [核心设计原则](#-核心设计原则)
-- [系统概述](#-系统概述)
-- [组件架构](#-组件架构)
-- [智能体工作流程](#-智能体工作流程)
-- [Token跟踪系统](#-token跟踪系统)
-- [消息流程](#-消息流程)
-- [工具系统](#-工具系统)
-- [错误处理和恢复](#-错误处理和恢复)
-- [配置系统](#-配置系统)
-- [性能监控](#-性能监控)
-- [扩展点](#-扩展点)
+---
 
-## 🎯 核心设计原则
+## 2. 系统整体架构
 
-### 1. **生产就绪**
-- 企业级错误处理和恢复
-- 全面监控和可观测性
-- 性能优化和资源管理
-- 成本跟踪和使用分析
-
-### 2. **模块化和可维护性**
-- 每个智能体都有单一、明确定义的职责
-- 清晰的接口和依赖注入
-- 组件和插件的热重载
-- 全面的单元测试和集成测试
-
-### 3. **可扩展性和灵活性**
-- 基于插件的工具和智能体架构
-- 可配置的执行流水线
-- 支持多个LLM提供商和API格式
-- 运行时配置更新
-
-### 4. **可观测性和监控**
-- 实时token使用跟踪和成本监控
-- 结构化输出的全面日志
-- 性能指标和瓶颈检测
-- 流式可视化和进度跟踪
-
-### 5. **可靠性和韧性**
-- 自动恢复的优雅错误处理
-- 指数退避重试机制
-- 外部服务的熔断器模式
-- 内存管理和资源清理
-
-## 🌐 系统概述
+### 2.1 架构分层图
 
 ```mermaid
 graph TB
-    subgraph "🎮 用户界面层"
-        UI[网页界面<br/>📊 实时监控]
-        CLI[命令行<br/>⚡ 高性能]
-        API[Python API<br/>🔧 完全控制]
+
+    %% ======================
+    %% 👤 用户交互层
+    %% ======================
+    subgraph UI_Layer["👤 用户交互层"]
+        User["用户 (User)<br/>💻 API / Web / CLI"]
     end
-    
-    subgraph "🧠 控制层"
-        AC[智能体控制器<br/>📈 增强协调]
-        TT[Token跟踪器<br/>💰 成本监控]
-        PM[性能监控器<br/>⏱️ 指标]
-        EM[错误管理器<br/>🛡️ 恢复]
+
+    %% ======================
+    %% 🧠 控制平面（Control Plane）
+    %% ======================
+    subgraph Control_Layer["🧠 控制平面"]
+        Orchestrator["SAgent (总控)<br/>🕹️ 全局编排与调度"]
     end
-    
-    subgraph "🤖 智能体层 (v2.0)"
-        TA[任务分析智能体<br/>🎯 上下文感知]
-        PA[规划智能体<br/>🧩 依赖管理]
-        EA[执行智能体<br/>🔧 工具集成]
-        OA[观察智能体<br/>👁️ 进度跟踪]
-        SA[总结智能体<br/>📄 结构化输出]
-        DA[直接执行智能体<br/>⚡ 快速模式]
+
+    %% ======================
+    %% 🧩 执行运行时（Execution Runtime）
+    %% ======================
+    subgraph Runtime_Layer["🧩 智能体执行运行时"]
+        Obs["Observability (观测性)<br/>📡 运行监测"]
+        Execution["Agent Runtime (执行核心)<br/>🤖 智能体执行"]
+        Obs --> Execution
     end
-    
-    subgraph "🛠️ 增强工具层"
-        TM[工具管理器<br/>🔍 自动发现]
-        BT[内置工具<br/>📱 核心功能]
-        MCP[MCP服务器<br/>🌐 外部API]
-        CT[自定义工具<br/>🎨 用户定义]
-        TO[工具编排器<br/>⚙️ 负载均衡]
+
+    %% ======================
+    %% 📦 状态管理层
+    %% ======================
+    subgraph State_Layer["📦 状态管理层"]
+        Context["SessionContext<br/>🗂️ 会话状态容器"]
+
+        subgraph State_Modules["状态子模块"]
+            MsgMgr["MessageManager<br/>消息管理"]
+            TaskMgr["TaskManager<br/>任务管理"]
+            WFMgr["WorkflowManager<br/>工作流管理"]
+            SysCtx["SystemContext<br/>系统上下文"]
+        end
     end
-    
-    subgraph "⚙️ 基础设施层"
-        CFG[配置<br/>📋 热重载]
-        LOG[日志<br/>📝 结构化]
-        EXC[异常处理<br/>🔄 自动恢复]
-        LLM[LLM提供商<br/>🤖 多API]
-        CACHE[缓存层<br/>💾 性能]
+
+    %% ======================
+    %% 🛠️ 基础设施层（能力提供）
+    %% ======================
+    subgraph Infra_Layer["🛠️ 基础设施层"]
+        ToolMgr["ToolManager<br/>🔌 工具系统"]
+        SkillMgr["SkillManager<br/>📚 技能系统"]
+        MemMgr["UserMemoryManager<br/>💾 记忆系统"]
+
+        ObsInfra["Observability Infra<br/>📊 监控设施"]
+
+        InnerTool["内置工具"]
+        MCP["MCP 服务工具"]
+        VectorDB["向量数据库"]
+        FileDB["本地文件"]
     end
-    
-    UI --> AC
-    CLI --> AC
-    API --> AC
-    
-    AC <--> TT
-    AC <--> PM
-    AC <--> EM
-    
-    AC --> TA
-    AC --> PA
-    AC --> EA
-    AC --> OA
-    AC --> SA
-    AC --> DA
-    
-    EA --> TM
-    TM --> TO
-    TO --> BT
-    TO --> MCP
-    TO --> CT
-    
-    AC --> CFG
-    AC --> LOG
-    AC --> EXC
-    AC --> LLM
-    AC --> CACHE
-    
-    TT -.-> TA
-    TT -.-> PA
-    TT -.-> EA
-    TT -.-> OA
-    TT -.-> SA
-    
-    style AC fill:#ff9999
-    style TT fill:#ffcc99
-    style TM fill:#99ccff
-    style EM fill:#ff99cc
+
+    %% ======================
+    %% 🔗 交互与依赖关系
+    %% ======================
+
+    %% User to Control
+    User --> Orchestrator
+
+    %% Control to Runtime
+    Orchestrator --> Obs
+
+    %% Runtime dependencies
+    Execution --> ToolMgr
+    Execution --> SkillMgr
+
+    %% State access
+    Orchestrator <--> Context
+    Execution <--> Context
+
+    %% State internals
+    Context --> MsgMgr
+    Context --> TaskMgr
+    Context --> WFMgr
+    Context --> SysCtx
+    Context --> MemMgr
+
+    %% Infra internals
+    ToolMgr --> InnerTool
+    ToolMgr --> MCP
+    MemMgr --> VectorDB
+    MemMgr --> FileDB
+
+    %% Observability export
+    Obs -.-> ObsInfra
+
+    %% ======================
+    %% 🎨 样式定义
+    %% ======================
+    classDef actor fill:#ffeb3b,stroke:#fbc02d,stroke-width:2px;
+    classDef control fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
+    classDef wrapper fill:#ede7f6,stroke:#673ab7,stroke-width:2px,stroke-dasharray:5 5;
+    classDef agent fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px;
+    classDef state fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+    classDef infra fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+
+    class User actor;
+    class Orchestrator control;
+    class Obs wrapper;
+    class Execution agent;
+    class Context,MsgMgr,TaskMgr,WFMgr,SysCtx state;
+    class ToolMgr,SkillMgr,MemMgr,ObsInfra,InnerTool,MCP,VectorDB,FileDB infra;
+
 ```
 
-## 🔧 组件架构
+---
 
-### 智能体控制器（增强版v2.0）
-具有企业级功能的中央编排器。
+## 3. 对话执行流程与触发逻辑
 
-```python
-class AgentController:
-    """
-    增强的多智能体工作流程编排器
-    
-    v2.0新功能:
-    - 全面的token跟踪和成本监控
-    - 性能指标和瓶颈检测
-    - 带重试机制的高级错误恢复
-    - 进度可视化的实时流式处理
-    - 长时间运行任务的内存优化
-    """
-    
-    def run(self, messages, tool_manager, **kwargs):
-        """执行带监控的完整工作流程"""
-        
-    def run_stream(self, messages, tool_manager, **kwargs):
-        """执行带实时流式处理和进度跟踪"""
-        
-    def get_comprehensive_token_stats(self):
-        """获取详细的token使用和成本分析"""
-        
-    def enable_performance_monitoring(self):
-        """启用详细性能跟踪"""
+Sage 的执行流程是高度动态的，系统会根据输入内容、配置和中间状态决定走哪条路径。
+
+### 3.1 核心流程图
+
+```mermaid
+flowchart TD
+    Start["开始 run_stream<br/>"]
+        --> Init["初始化 SessionContext & UserMemory"]
+
+    Init --> ContextPrep["准备历史上下文<br/>(预算管理器 + 用户记忆提取)"]
+    ContextPrep --> WFCheck{"存在工作流?"}
+
+    WFCheck -- "多于5个" --> WFSelect["WorkflowSelectAgent<br/>(工作流Agent)<br/>选择最匹配的工作流"]
+    WFSelect -- "选择1个" --> WFGuide["注入 WorkflowManager"]
+
+    WFCheck -- "5个及以下" --> WFGuide
+
+    WFGuide --> RouterCheck{"入参指定deep_thinking & multi_agent?"}
+    RouterCheck -- "指定" --> DeepThinkCheck
+    RouterCheck -- "未指定" --> Router
+
+    Router["TaskRouterAgent<br/>(任务路由)<br/>判断 deep_thinking & multi_agent"]
+        --> DeepThinkCheck{"deep_thinking 判断"}
+
+    DeepThinkCheck -- "Yes"
+        --> Analyzer["TaskAnalysisAgent<br/>(任务分析)<br/>分析任务意图与工具/技能"]
+
+    Analyzer --> ModeCheck{"multi_agent 判断"}
+    DeepThinkCheck -- "No" --> ModeCheck
+
+    %% 分支 1: 多智能体复杂模式
+    ModeCheck -- "Multi-Agent = True"
+        --> Decompose["TaskDecomposeAgent<br/>(任务分解)<br/>分解为子任务列表"]
+
+    Decompose --> LoopStart((循环开始))
+
+    subgraph ReActLoop ["ReAct Loop<br/>(规划-执行-观察)"]
+        direction TB
+        LoopStart
+            --> Plan["TaskPlanningAgent<br/>(任务规划)<br/>生成下一步计划"]
+        Plan
+            --> Exec["TaskExecutorAgent<br/>(任务执行)<br/>调用工具或执行代码"]
+        Exec
+            --> Obs["TaskObservationAgent<br/>(任务观察)<br/>观察执行结果"]
+        Obs
+            --> Judge["TaskCompletionJudgeAgent<br/>(完成判断)<br/>判断子任务状态"]
+        Judge
+            --> StageSum["TaskStageSummaryAgent<br/>(阶段总结)<br/>总结当前进度"]
+        StageSum
+            --> CheckDone{"任务全部完成?"}
+        CheckDone -- "否" --> LoopStart
+    end
+
+    CheckDone -- "是"
+        --> TaskSum["TaskSummaryAgent<br/>(任务总结)<br/>生成最终回复"]
+
+    %% 分支 2: 单智能体简单模式
+    ModeCheck -- "Multi-Agent = False"
+        --> SkillCheck{"Has Skills?"}
+
+    subgraph SimpleFlow ["Simple Flow<br/>(直出 / 技能)"]
+        direction TB
+
+        SkillCheck -- "Yes"
+            --> SkillExec["SkillExecutorAgent<br/>(技能执行)<br/>1. 意图识别选技能<br/>2. 沙盒执行技能"]
+
+        SkillCheck -- "No" --> SimpleStart
+
+        SkillExec --> SimpleStart((Loop))
+
+        subgraph SimpleAgentLoop ["SimpleAgent Internal Loop"]
+            direction TB
+            SimpleStart
+                --> SimpleGen["SimpleAgent<br/>(回复生成)<br/>生成回复或工具调用"]
+            SimpleGen
+                --> SimpleTool{"是否有工具调用?"}
+            SimpleTool -- "Yes" --> SimpleGen
+            SimpleTool -- "No"
+                --> SimpleJudge{"任务是否完成?"}
+            SimpleJudge -- "No" --> SimpleStart
+        end
+
+        SimpleJudge -- "Yes"
+            --> ForceSum{"强制总结?"}
+    end
+
+    ForceSum -- "Yes" --> TaskSum["TaskSummaryAgent<br/>(任务总结)<br/>生成最终回复"]
+    ForceSum -- "No" --> EndNode
+
+    TaskSum --> EndNode
+
+    EndNode((流程结束))
+        --> Suggest{"more_suggest = True?"}
+
+    Suggest -- "Yes"
+        --> QSuggest["QuerySuggestAgent<br/>生成后续建议"]
+    Suggest -- "No" --> Extract
+
+    QSuggest --> Extract
+
+    Extract["异步: MemoryExtractor<br/>(提取并保存用户记忆)"]
+        --> Finish["结束 & 保存状态"]
+
 ```
 
-**增强功能:**
-- **Token经济学**: 实时成本跟踪和预算警报
-- **性能分析**: 执行时间分析和优化建议
-- **内存管理**: 自动清理和资源优化
-- **熔断器**: 自动故障检测和恢复
-- **负载均衡**: 智能工具选择和请求分发
+### 3.2 关键触发条件与流转逻辑
 
-### 智能体层次结构（重构版v2.0）
+1.  **历史上下文准备 (History Context Prep)**
+    *   **触发条件**: 每次会话开始。
+    *   **逻辑**: 初始化 `SessionContext` 后，执行 `set_history_context()`。
+    *   **目的**: 加载历史消息，执行截断和 BM25 相关性检索，并应用预算限制（Budget Limiter），确保上下文符合模型 Token 窗口。
+
+2.  **工作流选择 (Workflow Selection)**
+    *   **触发条件**: `available_workflows` 数量大于 5 个。
+    *   **逻辑**: 激活 `WorkflowSelectAgent`。
+    *   **目的**: 当可选工作流过多时，帮助 LLM 预先筛选出最匹配当前用户意图的一个工作流，减少后续干扰。
+
+3.  **任务路由判定 (Task Routing)**
+    *   **触发条件**: 入参未显式指定 `deep_thinking` 或 `multi_agent` 参数。
+    *   **逻辑**: 激活 `TaskRouterAgent`。
+    *   **目的**: 智能判断用户意图，动态决定是否需要“深度思考”以及是否采用“多智能体”模式。若入参已指定，则跳过此步骤直接使用入参配置。
+
+4.  **深度思考 (Deep Thinking)**
+    *   **触发条件**: `deep_thinking = True` (来自入参指定或路由判断)。
+    *   **逻辑**: 激活 `TaskAnalysisAgent`。
+    *   **目的**: 在执行具体任务前，对用户意图、所需工具和潜在技能进行深度分析，生成详细的任务分析报告指导后续执行。
+
+5.  **多智能体模式 (Multi-Agent Workflow)**
+    *   **触发条件**: `multi_agent = True`。
+    *   **流程**: **分解** (`TaskDecomposeAgent`) -> **循环执行** (规划 `TaskPlanningAgent` -> 执行 `TaskExecutorAgent` -> 观察 `TaskObservationAgent` -> 判断 `TaskCompletionJudgeAgent`) -> **总结** (`TaskSummaryAgent`)。
+    *   **适用场景**: 编程开发、复杂逻辑推理、多步工具调用等需要 ReAct 循环的任务。
+
+6.  **单智能体模式 (Simple Workflow)**
+    *   **触发条件**: `multi_agent = False`。
+    *   **流程**: **技能匹配** (若有匹配则执行 `SkillExecutorAgent`) -> **简单回复** (`SimpleAgent` 生成回复或调用工具) -> **强制总结** (可选)。
+    *   **适用场景**: 闲聊、简单问答、单一技能调用、低延迟需求场景。
+
+7.  **后续建议 (Query Suggestion)**
+    *   **触发条件**: `more_suggest = True`。
+    *   **逻辑**: 激活 `QuerySuggestAgent`。
+    *   **目的**: 根据当前对话内容，生成 3 个相关的后续问题建议，引导用户进一步交互。
+
+8.  **记忆提取 (Memory Extraction)**
+    *   **触发条件**: `UserMemoryManager` 已启用且会话正常结束。
+    *   **逻辑**: 启动异步任务 `MemoryExtractor`。
+    *   **目的**: 在不阻塞用户响应的情况下，分析本次对话，提取用户画像、事实偏好并存入向量数据库，实现长期记忆。
+
+---
+
+## 4. 关键模块详解
+
+### 4.1 工具模块 (Tool Module)
+
+工具是 Agent 与外部世界交互的手。Sage 采用分层架构来管理工具的注册、权限控制和执行，对外屏蔽了本地函数与远程服务的差异。
+
+#### 4.1.1 核心组件与架构
 
 ```mermaid
 classDiagram
-    AgentBase <|-- TaskAnalysisAgent
-    AgentBase <|-- PlanningAgent
-    AgentBase <|-- ExecutorAgent
-    AgentBase <|-- ObservationAgent
-    AgentBase <|-- TaskSummaryAgent
-    AgentBase <|-- DirectExecutorAgent
-    
-    class AgentBase {
-        +token_stats: Dict
-        +performance_metrics: Dict
-        +run(messages, tool_manager)
-        +run_stream(messages, tool_manager)
-        +_track_token_usage(response, step_name)
-        +_track_streaming_token_usage(chunks, step_name)
-        +get_token_stats()
-        +reset_token_stats()
-        +_handle_error_generic(error, context)
+    class ToolProxy {
+        +run_tool_async()
+        -available_tools: Set
+        -check_tool_available()
     }
     
-    class TaskAnalysisAgent {
-        +analyze_requirements()
-        +extract_objectives()
-        +assess_complexity()
-        +determine_execution_strategy()
+    class ToolManager {
+        +tools: Dict[str, ToolSpec]
+        +register_tool()
+        +run_tool_async()
+        -discover_tools()
     }
     
-    class PlanningAgent {
-        +decompose_tasks()
-        +identify_dependencies()
-        +create_execution_plan()
-        +optimize_resource_allocation()
+    class ToolSpec {
+        +name: str
+        +func: Callable
     }
     
-    class ExecutorAgent {
-        +execute_plan()
-        +call_tools_with_retry()
-        +handle_tool_results()
-        +manage_concurrent_execution()
+    class McpProxy {
+        +run_mcp_tool()
+        +get_mcp_tools()
     }
-    
-    class ObservationAgent {
-        +monitor_progress()
-        +detect_completion()
-        +identify_failures()
-        +suggest_corrections()
-    }
+
+    ToolProxy --> ToolManager : 代理与过滤
+    ToolManager o-- ToolSpec : 管理
+    ToolManager ..> McpProxy : 调用 MCP 协议
 ```
 
-## 📊 Token跟踪系统
+*   **ToolManager (`sagents/tool/tool_manager.py`)**: 系统核心单例。
+    *   **职责**: 负责工具的全局注册、存储和执行分发。
+    *   **统一接口**: 提供 `run_tool_async` 方法，作为所有工具执行的统一入口。
 
-### 架构概述
+*   **ToolProxy (`sagents/tool/tool_proxy.py`)**: 安全与场景隔离层。
+    *   **职责**: 作为 `ToolManager` 的访问网关。它不持有工具实体，而是维护一份允许使用的工具白名单 (`available_tools`)。
+    *   **场景化**: 不同 Agent (如 SalesAgent, CoderAgent) 持有不同的 `ToolProxy` 实例，从而只能访问其权限范围内的工具。
 
-```mermaid
-graph LR
-    subgraph "🔍 收集层"
-        ST[流跟踪器]
-        RT[响应跟踪器]
-        UT[使用提取器]
-    end
-    
-    subgraph "📊 处理层"
-        AS[智能体聚合器]
-        CS[成本计算器]
-        PA[性能分析器]
-    end
-    
-    subgraph "💾 存储层"
-        TS[Token存储]
-        MS[指标存储]
-        ES[导出服务]
-    end
-    
-    subgraph "📈 分析层"
-        CA[成本分析]
-        PA2[性能分析]
-        RA[推荐引擎]
-    end
-    
-    ST --> AS
-    RT --> AS
-    UT --> AS
-    
-    AS --> CS
-    CS --> PA
-    PA --> TS
-    TS --> MS
-    MS --> ES
-    
-    TS --> CA
-    MS --> PA2
-    CA --> RA
-    PA2 --> RA
-```
+*   **McpProxy (`sagents/tool/mcp_proxy.py`)**: MCP 协议适配器。
+    *   **职责**: 处理 Model Context Protocol (MCP) 协议细节，支持 Stdio, SSE, Streamable HTTP 等多种传输方式。
 
-### Token使用流程
+#### 4.1.2 注册机制 (Registration)
 
-```python
-# 带详细指标的增强token跟踪
-class TokenTracker:
-    def track_agent_usage(self, agent_name, usage_data):
-        """按智能体跟踪token使用并计算成本"""
-        
-    def track_streaming_usage(self, chunks, agent_name):
-        """跟踪带实时更新的流式响应"""
-        
-    def calculate_costs(self, model_name, usage_data):
-        """基于模型定价计算成本"""
-        
-    def get_performance_insights(self):
-        """分析性能模式和瓶颈"""
-        
-    def export_detailed_report(self, format='csv'):
-        """导出全面使用报告"""
-```
+Sage 支持多种来源的工具注册，并采用**优先级覆盖机制**解决命名冲突。
 
-**跟踪的关键指标:**
-- **输入Token**: 请求处理成本
-- **输出Token**: 响应生成成本  
-- **缓存Token**: 优化节省
-- **推理Token**: 高级模型功能（o1等）
-- **执行时间**: 性能跟踪
-- **成功率**: 可靠性指标
-- **每次操作成本**: 经济效率
+1.  **自动发现 (Auto Discovery)**:
+    *   **本地工具**: 启动时扫描 `sagents` 包下的 Python 文件。凡是被 `@tool` 装饰器标记的函数，都会被解析元数据（docstring -> description, type hints -> parameters）并注册。
+    *   **内置 MCP**: 自动扫描 `sagents` 目录下的模块，凡是被 `@sage_mcp_tool` 装饰器标记的函数，注册为内置 MCP 服务。
 
-### 工具系统架构（增强版）
+2.  **MCP 动态加载**:
+    *   读取 `mcp_setting.json` 配置文件。
+    *   通过 `McpProxy` 连接远程 Server，调用 `list_tools` 获取工具列表，动态封装为 `McpToolSpec`。
 
-```mermaid
-graph TB
-    subgraph "🔧 发现和注册"
-        AD[自动发现<br/>📂 目录扫描]
-        TR[工具注册表<br/>📋 中央目录]
-        TV[工具验证<br/>✅ 模式检查]
-        TH[工具健康检查<br/>🩺 状态监控]
-    end
-    
-    subgraph "🛠️ 工具类别"
-        LT[本地工具<br/>📱 内置功能]
-        MT[MCP工具<br/>🌐 外部服务器]
-        AT[智能体工具<br/>🤖 智能体包装器]
-        CT[自定义工具<br/>🎨 用户扩展]
-    end
-    
-    subgraph "⚡ 执行引擎"
-        TE[工具执行器<br/>🔧 多线程]
-        TQ[任务队列<br/>📬 负载均衡]
-        CB[熔断器<br/>🛡️ 容错]
-        RM[重试管理器<br/>🔄 错误恢复]
-    end
-    
-    subgraph "📊 监控"
-        PM[性能监控器<br/>⏱️ 指标]
-        LB[负载均衡器<br/>⚖️ 分发]
-        CH[缓存处理器<br/>💾 优化]
-    end
-    
-    AD --> TR
-    TV --> TR
-    TH --> TR
-    
-    TR --> LT
-    TR --> MT
-    TR --> AT
-    TR --> CT
-    
-    LT --> TQ
-    MT --> TQ
-    AT --> TQ
-    CT --> TQ
-    
-    TQ --> TE
-    TE --> CB
-    TE --> RM
-    
-    TE --> PM
-    PM --> LB
-    LB --> CH
-```
+3.  **优先级覆盖**:
+    *   当出现同名工具时，高优先级覆盖低优先级：
+    *   `McpToolSpec` (MCP工具) > `AgentToolSpec` (智能体工具) > `SageMcpToolSpec` (内置MCP) > `ToolSpec` (本地函数)。
 
-## 🛡️ 错误处理和恢复
+#### 4.1.3 调用流程 (Invocation)
 
-### 多层错误管理
+执行入口为 `ToolProxy.run_tool_async`，其内部流程如下：
 
-```mermaid
-graph TD
-    subgraph "🎯 检测层"
-        ED[错误检测<br/>🔍 实时监控]
-        TD[超时检测<br/>⏰ 资源管理]
-        FD[故障检测<br/>💥 异常识别]
-    end
-    
-    subgraph "🔄 恢复层"
-        AR[自动重试<br/>🔁 指数退避]
-        FB[回退策略<br/>🛤️ 替代路径]
-        GD[优雅降级<br/>📉 功能减少]
-    end
-    
-    subgraph "📝 日志层"
-        SL[结构化日志<br/>📊 JSON格式]
-        AT[警报触发<br/>🚨 通知]
-        RM[恢复指标<br/>📈 成功跟踪]
-    end
-    
-    ED --> AR
-    TD --> FB
-    FD --> GD
-    
-    AR --> SL
-    FB --> AT
-    GD --> RM
-```
+1.  **权限校验**: `ToolProxy` 检查 `tool_name` 是否在白名单中。若不在，抛出 `ValueError`。
+2.  **请求转发**: 通过校验后，请求转发给 `ToolManager.run_tool_async`。
+3.  **多态分发**: `ToolManager` 根据工具的 `ToolSpec` 类型决定执行策略：
+    *   **本地工具 (`ToolSpec`)**: 直接反射调用本地 Python 函数 (`func(**kwargs)`).
+    *   **MCP 工具 (`McpToolSpec`)**: 委托给 `McpProxy`，通过网络协议 (SSE/Stdio) 发送 `call_tool` 请求到远程 Server。
+4.  **结果标准化**: 无论底层返回格式如何，统一封装为 JSON 格式返回给 LLM。
 
-### 错误类别和策略
+### 4.2 技能模块 (Skill Module)
 
-```python
-class ErrorManager:
-    """全面的错误处理和恢复系统"""
-    
-    ERROR_STRATEGIES = {
-        'NetworkError': 'retry_with_backoff',
-        'TokenLimitError': 'truncate_and_retry',
-        'ToolTimeoutError': 'fallback_to_alternative',
-        'ModelUnavailableError': 'switch_provider',
-        'ValidationError': 'graceful_degradation'
-    }
-    
-    def handle_error(self, error, context):
-        """将错误路由到适当的恢复策略"""
-        
-    def retry_with_backoff(self, operation, max_attempts=3):
-        """实现指数退避重试逻辑"""
-        
-    def circuit_breaker(self, service_name, failure_threshold=5):
-        """为外部服务实现熔断器模式"""
-```
+技能（Skill）是比工具更高阶的能力单元，通常包含代码文件、配置文件和使用说明文档。
 
-## 📈 性能监控
+*   **SkillManager (`sagents/skills/skill_manager.py`)**:
+    *   **结构化加载**: 从 `skills` 目录加载技能。每个技能是一个文件夹，核心是 `SKILL.md`（包含元数据和 Prompt 指令）。
+    *   **资源准备**: 在执行前，会将技能所需的脚本和文件复制到当前 Agent 的工作空间（Sandbox），确保执行环境隔离。
+    *   **分级获取**: 提供三级元数据获取：L1（名称描述）、L2（详细指令 Prompt）、L3（具体资源路径）。
 
-### 实时指标收集
+### 4.3 记忆模块 (Memory Module)
 
-```mermaid
-graph LR
-    subgraph "📊 数据收集"
-        ET[执行时间]
-        MU[内存使用]
-        TU[Token消耗]
-        TR[工具响应时间]
-    end
-    
-    subgraph "🔍 分析引擎"
-        BA[瓶颈分析]
-        PA[性能剖析]
-        CA[成本分析]
-        RA[资源分析]
-    end
-    
-    subgraph "🎯 优化"
-        RS[资源扩展]
-        LO[负载优化]
-        CC[缓存控制]
-        PT[性能调优]
-    end
-    
-    ET --> BA
-    MU --> PA
-    TU --> CA
-    TR --> RA
-    
-    BA --> RS
-    PA --> LO
-    CA --> CC
-    RA --> PT
-```
+记忆模块赋予 Sage “个性”和“成长性”。
 
-### 性能分析
+*   **UserMemoryManager (`sagents/context/user_memory/manager.py`)**:
+    *   **Driver 模式**: 通过 `IMemoryDriver` 接口解耦存储实现。默认使用 `ToolMemoryDriver`，可扩展至 VectorDB (如 Milvus, Chroma)。
+    *   **CRUD 操作**: 提供 `remember` (存), `recall` (检索), `forget` (删) 接口。
+    *   **系统级记忆**: 自动维护 `preference` (偏好), `persona` (人设), `requirement` (要求) 等关键维度的记忆。
 
-```python
-class PerformanceMonitor:
-    """高级性能监控和优化"""
-    
-    def collect_metrics(self):
-        """收集全面的性能数据"""
-        return {
-            'execution_times': self._get_execution_times(),
-            'memory_usage': self._get_memory_stats(),
-            'token_efficiency': self._analyze_token_usage(),
-            'tool_performance': self._get_tool_metrics(),
-            'bottlenecks': self._identify_bottlenecks()
-        }
-    
-    def generate_optimization_report(self):
-        """生成可操作的优化建议"""
-        
-    def export_performance_data(self, format='json'):
-        """导出详细的性能分析"""
-```
+*   **MemoryExtractor (`sagents/context/user_memory/extractor.py`)**:
+    *   **异步处理**: 为了不增加用户等待时间，记忆提取在对话结束后**异步**进行。
+    *   **智能提取**: 将最近 10 轮对话发送给 LLM，使用专门的 Prompt 提取出新的事实或偏好（JSON 格式）。
+    *   **去重机制**:
+        1.  **内部去重**: 本次提取结果内的去重。
+        2.  **库内去重**: 将新记忆与已有系统记忆比对，删除旧的冲突记忆，确保记忆库的整洁。
 
-## ⚙️ 增强配置系统
+### 4.4 基础管理器
 
-### 分层配置管理
+*   **ObservabilityManager (观察器)**: 基于 OpenTelemetry 标准，对 LLM 调用链进行全链路追踪（Tracing）和监控。
+*   **SessionContext (会话上下文)**: 状态容器，持有 `MessageManager` (消息历史)、`TaskManager` (任务状态) 和 `SystemContext` (环境变量)，是 Agent 无状态运行的基石。
 
-```mermaid
-graph TD
-    subgraph "📁 配置源"
-        ENV[环境变量<br/>🌍 系统级别]
-        FILE[配置文件<br/>📄 YAML/JSON]
-        CLI[命令行<br/>⌨️ 运行时参数]
-        API[API参数<br/>🔧 程序化]
-    end
-    
-    subgraph "🔄 处理层"
-        VAL[验证引擎<br/>✅ 模式检查]
-        MER[配置合并器<br/>🔀 优先级处理]
-        HOT[热重载<br/>🔥 运行时更新]
-    end
-    
-    subgraph "💾 存储和分发"
-        CS[配置存储<br/>📚 集中化]
-        CD[配置分发<br/>📡 组件更新]
-        CB[配置备份<br/>💼 版本控制]
-    end
-    
-    ENV --> VAL
-    FILE --> VAL
-    CLI --> VAL
-    API --> VAL
-    
-    VAL --> MER
-    MER --> HOT
-    HOT --> CS
-    
-    CS --> CD
-    CS --> CB
-```
+---
 
-### 配置模式
+## 5. 会话中断与取消逻辑
 
-```python
-class ConfigurationManager:
-    """企业级配置管理"""
-    
-    SCHEMA = {
-        'agents': {
-            'max_loop_count': {'type': 'int', 'default': 10, 'min': 1, 'max': 50},
-            'tool_timeout': {'type': 'int', 'default': 30, 'min': 5, 'max': 300},
-            'retry_attempts': {'type': 'int', 'default': 3, 'min': 1, 'max': 10}
-        },
-        'performance': {
-            'enable_monitoring': {'type': 'bool', 'default': True},
-            'memory_threshold': {'type': 'int', 'default': 1024, 'min': 256},
-            'cache_ttl': {'type': 'int', 'default': 3600, 'min': 60}
-        },
-        'costs': {
-            'budget_alert_threshold': {'type': 'float', 'default': 10.0, 'min': 0.1},
-            'cost_tracking_enabled': {'type': 'bool', 'default': True}
-        }
-    }
-    
-    def validate_config(self, config):
-        """根据模式验证配置"""
-        
-    def hot_reload(self, config_path):
-        """不重启重新加载配置"""
-```
+为了响应用户随时可能的“取消”指令，Sage 在执行流的关键节点埋入了检查点。
 
-## 🔌 扩展点
-
-### 插件架构
-
-```python
-class PluginManager:
-    """自定义功能的可扩展插件系统"""
-    
-    def register_agent_plugin(self, plugin_class):
-        """注册自定义智能体实现"""
-        
-    def register_tool_plugin(self, plugin_class):
-        """注册自定义工具实现"""
-        
-    def register_middleware(self, middleware_class):
-        """注册请求/响应中间件"""
-        
-    def load_plugins_from_directory(self, directory):
-        """自动发现和加载插件"""
-```
-
-### 自定义智能体开发
-
-```python
-class CustomAgent(AgentBase):
-    """创建自定义智能体的模板"""
-    
-    def __init__(self, model, config):
-        super().__init__(model, config, system_prefix="自定义智能体提示")
-        self.agent_description = "用于特定任务的自定义智能体"
-    
-    def run_stream(self, messages, tool_manager, context):
-        """实现自定义智能体逻辑"""
-        # 您的自定义实现在这里
-        yield from self._execute_streaming_with_token_tracking(
-            prompt="您的自定义提示",
-            step_name="custom_operation"
-        )
-```
-
-## 🎯 消息流程和数据结构
-
-### 增强消息格式
-
-```python
-# 带监控元数据的增强消息结构
-MESSAGE_SCHEMA = {
-    'role': str,              # 'user', 'assistant', 'tool'
-    'content': str,           # 主要消息内容
-    'type': str,              # 'normal', 'thinking', 'tool_call', 等
-    'message_id': str,        # 唯一标识符
-    'show_content': str,      # 显示友好内容
-    'usage': {                # Token使用信息
-        'prompt_tokens': int,
-        'completion_tokens': int,
-        'total_tokens': int,
-        'cached_tokens': int,
-        'reasoning_tokens': int
-    },
-    'metadata': {             # 性能和监控数据
-        'execution_time': float,
-        'agent_name': str,
-        'step_name': str,
-        'timestamp': float,
-        'success': bool
-    },
-    'tool_calls': List,       # 工具调用数据
-    'tool_call_id': str       # 工具响应链接
-}
-```
-
-这种增强的架构提供了企业级可靠性、全面监控和生产就绪的性能优化，同时保持了使Sage在开发中强大的模块化和可扩展性。 
+*   **状态标记**: 当用户发起取消请求时，系统会将 `SessionContext.status` 设置为 `SessionStatus.INTERRUPTED`。
+*   **检查点机制**:
+    *   **Agent 级别**: 在 `SAgent._execute_agent_phase` 中，每处理完一个流式 Chunk 都会检查状态。
+    *   **循环级别**: 在多智能体 `while` 循环（规划-执行-观察）的每一次迭代开始前，都会检查 `status == INTERRUPTED`。
+*   **响应行为**: 一旦检测到中断，Agent 会立即停止当前的 LLM 生成或工具调用，保存当前会话状态（以便后续恢复或审计），并向用户返回“任务已取消”的响应，而不会继续执行后续的任务步骤。

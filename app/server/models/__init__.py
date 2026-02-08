@@ -5,7 +5,10 @@ from .file import File, FileDao
 from .kdb import Kdb, KdbDao
 from .kdb_doc import KdbDoc, KdbDocDao, KdbDocStatus
 from .mcp_server import MCPServer, MCPServerDao
+from .skill import SkillOwnership, SkillOwnershipDao
+from .trace import TraceDao, TraceSpan
 from .user import User, UserDao
+from .system import SystemInfo, SystemInfoDao
 
 __all__ = [
     "Agent",
@@ -25,4 +28,10 @@ __all__ = [
     "BaseDao",
     "File",
     "FileDao",
+    "TraceSpan",
+    "TraceDao",
+    "SystemInfo",
+    "SystemInfoDao",
+    "SkillOwnership",
+    "SkillOwnershipDao",
 ]

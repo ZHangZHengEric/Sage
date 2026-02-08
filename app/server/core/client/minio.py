@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Optional
-from datetime import datetime
+
 import io
 import json
+from datetime import datetime
+from typing import Optional
 
-from core import config
-from core.exceptions import SageHTTPException
-from sagents.utils.logger import logger
+from loguru import logger
+
+from ...core import config
+from ...core.exceptions import SageHTTPException
 
 MINIO_CLIENT: Optional["Minio"] = None
 
@@ -66,7 +68,7 @@ async def init_minio_client(
 
     if not endpoint or not ak or not sk or not bucket:
         logger.warning(
-            f"MinIO 参数不足，未初始化 endpoint={endpoint}, bucket={bucket}, access_key={ak}, secret_key={sk}"
+            f"MinIO 参数不足，跳过初始化"
         )
         return None
 
@@ -99,9 +101,9 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     public_base = cfg.minio_public_base_url if cfg else None
 
     if not client or not bucket or not public_base:
-        raise SageHTTPException(status_code=400, detail="MinIO 未配置或未初始化")
+        raise SageHTTPException(status_code=500, detail="MinIO 未配置或未初始化")
 
-    from utils.file import split_file_name
+    from ...utils.file import split_file_name
 
     origin, ext = split_file_name(base_name)
     object_name = f"{origin}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"

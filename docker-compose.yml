@@ -3,24 +3,26 @@ services:
     restart: always
     build:
       context: .
-      dockerfile: app/server/docker/Dockerfile
+      dockerfile: docker/Dockerfile.server
     image: sage-server:v1.0
     container_name: sage-server
     volumes:
       - ${ROOT_DATA_DIR}/sage-server/agent_workspace:/app/agent_workspace
       - ${ROOT_DATA_DIR}/sage-server/logs:/app/logs
       - ${ROOT_DATA_DIR}/sage-server/data:/app/data
+      - ${ROOT_DATA_DIR}/sage-server/skills:/app/skills
     ports:
       - 30050:8080
     env_file:
       - .env
     mem_limit: 2g
     cpus: 1.0
+
   sage-web:
     restart: always
     build:
-      context: ./app/web/
-      dockerfile: docker/Dockerfile
+      context: .
+      dockerfile: docker/Dockerfile.web
     image: sage-web:v1.0
     container_name: sage-web
     ports:
@@ -28,6 +30,7 @@ services:
     environment:
       TZ: 'Asia/Shanghai'
       SAGE_API_BASE_URL: http://${HOST_IP}:30050
+      SAGE_TRACE_JAEGER_URL: http://${HOST_IP}:30056
     depends_on:
       - sage-server
     mem_limit: 512m
@@ -49,12 +52,14 @@ services:
     volumes:
       - ${ROOT_DATA_DIR}/mysql/data:/var/lib/mysql
       - ${ROOT_DATA_DIR}/mysql/conf:/etc/mysql/conf.d
-      - ./assets/scripts:/docker-entrypoint-initdb.d
     mem_limit: 1g
     cpus: 1.0
   sage-es:
     restart: always
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.7
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.es
+    image: sage-es:v1.0
     container_name: sage-es
     ports:
       - 30053:9200
@@ -71,8 +76,6 @@ services:
         hard: -1
     volumes:
       - ${ROOT_DATA_DIR}/es/data/node:/usr/share/elasticsearch/data
-      - ./assets/es_conf/plugins:/usr/share/elasticsearch/plugins
-      - ./assets/es_conf/stopwords:/usr/share/elasticsearch/config/stopwords
     mem_limit: 2g
     cpus: 1.0
   sage-minio:
@@ -92,5 +95,17 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    mem_limit: 1g
+    cpus: 0.5
+  sage-jaeger:
+    image:  docker.m.daocloud.io/jaegertracing/all-in-one:1.76.0
+    container_name: sage-jaeger
+    restart: always
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "30056:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
     mem_limit: 1g
     cpus: 0.5

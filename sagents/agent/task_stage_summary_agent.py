@@ -16,14 +16,13 @@ import datetime
 class TaskStageSummaryAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix")
         self.agent_name = "StageSummaryAgent"
-        self.agent_description = "任务执行阶段性总结智能体，专门负责生成任务执行的阶段性总结"
-        logger.info("StageSummaryAgent 初始化完成")
+        self.agent_description = "阶段总结智能体，专门负责对当前阶段的执行情况进行总结"
+        logger.debug("TaskStageSummaryAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取带有正确语言的prompt
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
+        current_system_prefix = PromptManager().get_agent_prompt_auto("task_stage_summary_system_prefix", language=session_context.get_language())
 
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
@@ -87,7 +86,7 @@ class TaskStageSummaryAgent(AgentBase):
         )
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
@@ -232,12 +231,12 @@ class TaskStageSummaryAgent(AgentBase):
                 language=language,
                 default="文件路径:"
             )
-            
+
             formatted_docs = []
             for i, file_info in enumerate(generated_files, 1):
                 doc_info = f"{i}. {file_path_label_text} {file_info['path']}"
                 formatted_docs.append(doc_info)
-            
+
             summary_text = PromptManager().get_prompt(
                 'generated_documents_summary',
                 agent='common',

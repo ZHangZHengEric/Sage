@@ -4,9 +4,8 @@ from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext, get_session_context
+from sagents.context.session_context import SessionContext, get_session_context, SessionStatus
 from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_config import AgentToolSpec
 from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid
@@ -24,20 +23,23 @@ class SimpleAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
 
-        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix')
         # 最大循环次数常量
         self.max_loop_count = 10
         self.agent_name = "SimpleAgent"
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
-        logger.info(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
+        logger.debug(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
 
     async def run_stream(self, session_context: SessionContext,
                          tool_manager: Optional[ToolManager] = None,
                          session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         logger.info(f"SimpleAgent: 开始流式直接执行，会话ID: {session_id}")
+        if self._should_abort_due_to_session(session_id, session_context):
+            return
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
-        self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('agent_custom_system_prefix', language=session_context.get_language())
+        current_system_prefix = PromptManager().get_agent_prompt_auto(
+            "agent_custom_system_prefix", language=session_context.get_language()
+        )
 
         # 从会话管理中，获取消息管理实例
         message_manager = session_context.message_manager
@@ -53,7 +55,11 @@ class SimpleAgent(AgentBase):
         # 准备工具列表
         tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
         # 将system 加入到到messages中
-        system_message = self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix, language=session_context.get_language())
+        system_message = self.prepare_unified_system_message(
+            session_id,
+            custom_prefix=current_system_prefix,
+            language=session_context.get_language(),
+        )
         history_messages.insert(0, system_message)
         async for chunk in self._execute_loop(
             messages_input=history_messages,
@@ -145,7 +151,7 @@ class SimpleAgent(AgentBase):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             result = json.loads(result_clean)
-            return result['task_interrupted']
+            return result.get('task_interrupted', False)
         except json.JSONDecodeError:
             logger.warning("SimpleAgent: 解析任务完成判断响应时JSON解码错误")
             return False
@@ -186,12 +192,19 @@ class SimpleAgent(AgentBase):
             # 准备消息
             clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
 
+            # 重新获取agent_custom_system_prefix以支持动态语言切换
+            current_system_prefix = PromptManager().get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language())
+
             # 生成提示
             tool_suggestion_template = PromptManager().get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
             prompt = tool_suggestion_template.format(
                 session_id=session_id,
                 available_tools_str=available_tools_str,
-                agent_config=self.prepare_unified_system_message(session_id, custom_prefix=self.agent_custom_system_prefix, language=session_context.get_language()).content,
+                agent_config=self.prepare_unified_system_message(
+                    session_id,
+                    custom_prefix=current_system_prefix,
+                    language=session_context.get_language(),
+                ).content,
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
 
@@ -203,6 +216,20 @@ class SimpleAgent(AgentBase):
             # 如果有complete_task 要去掉
             if 'complete_task' in suggested_tools:
                 suggested_tools.remove('complete_task')
+
+            # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write update_file 这几个工具
+            if session_context.skill_manager is not None:
+                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_shell_command', 'file_write', 'update_file'])
+
+            if "sys_spawn_agent" in tool_names:
+                suggested_tools.extend(['sys_spawn_agent'])
+            if 'sys_send_message' in tool_names:
+                suggested_tools.extend(['sys_send_message'])
+            if 'sys_finish_task' in tool_names:
+                suggested_tools.append('sys_finish_task')
+
+            # 去重
+            suggested_tools = list(set(suggested_tools))    
 
             logger.info(f"SimpleAgent: 获取到建议工具: {suggested_tools}")
             return suggested_tools
@@ -265,12 +292,16 @@ class SimpleAgent(AgentBase):
             List[MessageChunk]: 执行结果消息块
         """
 
+        if self._should_abort_due_to_session(session_id, session_context):
+            return
         all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
         max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
         logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         while True:
+            if self._should_abort_due_to_session(session_id, session_context):
+                break
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
 
@@ -285,6 +316,15 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
             )
             all_new_response_chunks = []
+
+            # 更新system message，确保包含最新的子智能体列表等上下文信息
+            if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
+                system_message = self.prepare_unified_system_message(
+                    session_id,
+                    custom_prefix=session_context.system_prompt if hasattr(session_context, 'system_prompt') else "",
+                    language=session_context.get_language(),
+                )
+                messages_input[0] = system_message
 
             # 调用LLM
             should_break = False
@@ -321,11 +361,21 @@ class SimpleAgent(AgentBase):
                 # 任务暂停，返回一个超长的错误消息块
                 yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？", type=MessageType.ERROR.value)]
                 break
-
+            if self._should_abort_due_to_session(session_id, session_context):
+                break
             # 检查任务是否完成
             if await self._is_task_complete(messages_input, session_id, session_context):
                 logger.info("SimpleAgent: 任务完成，终止执行")
                 break
+
+    def _should_abort_due_to_session(self, session_id: Optional[str], session_context: SessionContext) -> bool:
+        if session_id and get_session_context(session_id) is None:
+            logger.info("SimpleAgent: 跳过执行，session上下文不存在或已中断")
+            return True
+        if session_context.status == SessionStatus.INTERRUPTED:
+            logger.info("SimpleAgent: 跳过执行，session上下文状态为中断")
+            return True
+        return False
 
     async def _call_llm_and_process_response(self,
                                              messages_input: List[MessageChunk],
@@ -393,7 +443,8 @@ class SimpleAgent(AgentBase):
                         content=chunk.choices[0].delta.content,
                         message_id=content_response_message_id,
                         show_content=chunk.choices[0].delta.content,
-                        message_type=MessageType.DO_SUBTASK_RESULT.value
+                        message_type=MessageType.DO_SUBTASK_RESULT.value,
+                        agent_name=self.agent_name
                     )]
                     yield (output_messages, False)
             else:
@@ -404,18 +455,36 @@ class SimpleAgent(AgentBase):
                         content="",
                         message_id=reasoning_content_response_message_id,
                         show_content=chunk.choices[0].delta.reasoning_content,
-                        message_type=MessageType.TASK_ANALYSIS.value
+                        message_type=MessageType.TASK_ANALYSIS.value,
+                        agent_name=self.agent_name
                     )]
                     yield (output_messages, False)
         # 处理工具调用
         if len(tool_calls) > 0:
+            # 识别是否包含结束任务的工具调用
+            termination_tool_ids = set()
+            for tool_call_id, tool_call in tool_calls.items():
+                if tool_call['function']['name'] in ['complete_task', 'sys_finish_task']:
+                    termination_tool_ids.add(tool_call_id)
+
             async for chunk in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id or ""
             ):
-                yield chunk
+                # chunk 是 (messages, is_complete)
+                messages, is_complete = chunk
+                
+                # 如果当前消息块是结束任务工具的执行结果，则标记为完成
+                if termination_tool_ids and not is_complete:
+                    for msg in messages:
+                        if msg.role == MessageRole.TOOL.value and msg.tool_call_id in termination_tool_ids:
+                            logger.info(f"SimpleAgent: 检测到结束任务工具 {msg.tool_call_id} 执行完成，标记任务结束")
+                            is_complete = True
+                            break
+                
+                yield (messages, is_complete)
 
         else:
             # 发送换行消息（也包含usage信息）
@@ -424,42 +493,10 @@ class SimpleAgent(AgentBase):
                 content='',
                 message_id=content_response_message_id,
                 show_content='\n',
-                message_type=MessageType.DO_SUBTASK_RESULT.value
+                message_type=MessageType.DO_SUBTASK_RESULT.value,
+                agent_name=self.agent_name
             )]
             yield (output_messages, False)
-
-    def _handle_tool_calls_chunk(self,
-                                 chunk,
-                                 tool_calls: Dict[str, Any],
-                                 last_tool_call_id: str) -> None:
-        """
-        处理工具调用数据块
-
-        Args:
-            chunk: LLM响应块
-            tool_calls: 工具调用字典
-            last_tool_call_id: 最后的工具调用ID
-        """
-        for tool_call in chunk.choices[0].delta.tool_calls:
-            if tool_call.id is not None and len(tool_call.id) > 0:
-                last_tool_call_id = tool_call.id
-
-            if last_tool_call_id not in tool_calls:
-                logger.info(f"SimpleAgent: 检测到新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                tool_calls[last_tool_call_id] = {
-                    'id': last_tool_call_id,
-                    'type': tool_call.type,
-                    'function': {
-                        'name': tool_call.function.name or "",
-                        'arguments': tool_call.function.arguments if tool_call.function.arguments else ""
-                    }
-                }
-            else:
-                if tool_call.function.name:
-                    logger.info(f"SimpleAgent: 更新工具调用: {last_tool_call_id}, 工具名称: {tool_call.function.name}")
-                    tool_calls[last_tool_call_id]['function']['name'] = tool_call.function.name
-                if tool_call.function.arguments:
-                    tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],
@@ -486,12 +523,6 @@ class SimpleAgent(AgentBase):
             logger.info(f"SimpleAgent: 执行工具 {tool_name}")
             logger.info(f"SimpleAgent: 参数 {tool_call['function']['arguments']}")
 
-            # 检查是否为complete_task
-            if tool_name == 'complete_task':
-                logger.info("SimpleAgent: complete_task，停止执行")
-                yield ([], True)
-                return
-
             # 发送工具调用消息
             output_messages = self._create_tool_call_message(tool_call)
             yield (output_messages, False)
@@ -504,257 +535,6 @@ class SimpleAgent(AgentBase):
                 session_id=session_id
             ):
                 yield (message_chunk_list, False)
-
-    def _create_tool_call_message(self, tool_call: Dict[str, Any]) -> List[MessageChunk]:
-        """
-        创建工具调用消息
-
-        Args:
-            tool_call: 工具调用信息
-
-        Returns:
-            List[Dict[str, Any]]: 工具调用消息列表
-        """
-        # 格式化工具参数显示
-        # 格式化工具参数显示
-        if '```<｜tool▁call▁end｜>' in tool_call['function']['arguments']:
-            logger.debug(f"SimpleAgent: 原始错误参数: {tool_call['function']['arguments']}")
-            # 去掉```<｜tool▁call▁end｜> 以及之后所有的字符
-            tool_call['function']['arguments'] = tool_call['function']['arguments'].split('```<｜tool▁call▁end｜>')[0]
-        # 格式化工具参数显示
-        function_params = tool_call['function']['arguments']
-        if len(tool_call['function']['arguments']) > 0:
-            try:
-                function_params = json.loads(tool_call['function']['arguments'])
-            except json.JSONDecodeError:
-                try:
-                    function_params = eval(tool_call['function']['arguments'])
-                except Exception:
-                    logger.error("SimpleAgent: 第一次参数解析报错，再次进行参数解析失败")
-                    logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
-
-            if isinstance(function_params, str):
-                try:
-                    function_params = json.loads(function_params)
-                except json.JSONDecodeError:
-                    try:
-                        function_params = eval(function_params)
-                    except Exception:
-                        logger.error("SimpleAgent: 解析完参数化依旧后是str，再次进行参数解析失败")
-                        logger.error(f"SimpleAgent: 原始参数: {tool_call['function']['arguments']}")
-                        logger.error(f"SimpleAgent: 工具参数格式错误: {function_params}")
-                        logger.error(f"SimpleAgent: 工具参数类型: {type(function_params)}")
-            formatted_params = ''
-            if isinstance(function_params, dict):
-                tool_call['function']['arguments'] = json.dumps(function_params, ensure_ascii=False)
-                for param, value in function_params.items():
-                    # 对于字符串的参数，在format时需要截断，避免过长，并且要用引号包裹,不要使用f-string的写法
-                    # 要对value进行转移，打印的时候，不会发生换行
-                    # if isinstance(value, str) and len(value) > 100:
-                    #     value = f'"{value[:30]}"'
-                    formatted_params += f"{param} = {json.dumps(value,ensure_ascii=False)}, "
-                formatted_params = formatted_params.rstrip(', ')
-        else:
-            formatted_params = ""
-
-        tool_name = tool_call['function']['name']
-
-        # 将show_content 整理成函数调用的形式
-        # func_name(param1 = ,param2)
-        return [MessageChunk(
-            role='assistant',
-            tool_calls=[{
-                'id': tool_call['id'],
-                'type': tool_call['type'],
-                'function': {
-                    'name': tool_call['function']['name'],
-                    'arguments': tool_call['function']['arguments']
-                }
-            }],
-            message_type=MessageType.TOOL_CALL.value,
-            message_id=str(uuid.uuid4()),
-            show_content=f"{tool_name}({formatted_params})"
-        )]
-
-    async def _execute_tool(self,
-                            tool_call: Dict[str, Any],
-                            tool_manager: Optional[ToolManager],
-                            messages_input: List[MessageChunk],
-                            session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
-        """
-        执行工具
-
-        Args:
-            tool_call: 工具调用信息
-            tool_manager: 工具管理器
-            messages_input: 输入消息列表
-            session_id: 会话ID
-
-        Yields:
-            tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
-        """
-        tool_name = tool_call['function']['name']
-
-        try:
-            if len(tool_call['function']['arguments']) > 0:
-                arguments = json.loads(tool_call['function']['arguments'])
-            else:
-                arguments = {}
-
-            if tool_manager is None:
-                raise ValueError("Tool manager is not provided")
-
-            tool_response = await tool_manager.run_tool_async(
-                tool_name,
-                session_context=get_session_context(session_id),
-                session_id=session_id,
-                **arguments
-            )
-
-            # 检查是否为流式响应（AgentToolSpec）
-            if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
-                # 检查是否为专业agent工具
-                tool_spec = tool_manager.get_tool(tool_name) if tool_manager else None
-                is_agent_tool = isinstance(tool_spec, AgentToolSpec)
-
-                # 处理流式响应
-                logger.debug(f"SimpleAgent: 收到流式工具响应，工具类型: {'专业Agent' if is_agent_tool else '普通工具'}")
-                try:
-                    for chunk in tool_response:
-                        if is_agent_tool:
-                            # 专业agent工具：直接返回原始结果，不做任何处理
-                            if isinstance(chunk, list):
-                                yield chunk
-                            else:
-                                yield [chunk]
-                        else:
-                            # 普通工具：添加必要的元数据
-                            if isinstance(chunk, list):
-                                # 转化成message chunk
-                                message_chunks = []
-                                for message in chunk:
-                                    if isinstance(message, dict):
-                                        message_chunks.append(MessageChunk(
-                                            role=MessageRole.TOOL.value,
-                                            content=message['content'],
-                                            tool_call_id=tool_call['id'],
-                                            message_id=str(uuid.uuid4()),
-                                            message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            show_content=message['content']
-                                        ))
-                                yield message_chunks
-                            else:
-                                # 单个消息
-                                if isinstance(chunk, dict):
-                                    message_chunk_ = MessageChunk(
-                                        role=MessageRole.TOOL.value,
-                                        content=chunk['content'],
-                                        tool_call_id=tool_call['id'],
-                                        message_id=str(uuid.uuid4()),
-                                        message_type=MessageType.TOOL_CALL_RESULT.value,
-                                        show_content=chunk['content']
-                                    )
-                                    yield [message_chunk_]
-                except Exception as e:
-                    logger.error(f"SimpleAgent: 处理流式工具响应时发生错误: {str(e)}")
-                    async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
-                        yield chunk
-            else:
-                # 处理非流式响应
-                logger.debug("SimpleAgent: 收到非流式工具响应，正在处理")
-                logger.info(f"SimpleAgent: 工具响应 {tool_response}")
-                processed_response = await self.process_tool_response(tool_response, tool_call['id'])
-                yield processed_response
-
-        except Exception as e:
-            logger.error(f"SimpleAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
-            async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
-                yield chunk
-
-    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
-        """
-        处理工具执行错误
-
-        Args:
-            tool_call_id: 工具调用ID
-            tool_name: 工具名称
-            error: 错误信息
-
-        Yields:
-            tuple[List[MessageChunk], bool]: (错误消息块列表, 是否完成任务)
-        """
-        error_message = f"工具 {tool_name} 执行失败: {str(error)}"
-        logger.error(f"SimpleAgent: {error_message}")
-
-        error_chunk = MessageChunk(
-            role='tool',
-            content=json.dumps({"error": error_message}, ensure_ascii=False),
-            tool_call_id=tool_call_id,
-            message_id=str(uuid.uuid4()),
-            message_type=MessageType.TOOL_CALL_RESULT.value,
-            show_content=error_message
-        )
-
-        yield [error_chunk]
-
-    async def process_tool_response(self, tool_response: str, tool_call_id: str) -> List[MessageChunk]:
-        """
-        处理工具执行响应
-
-        Args:
-            tool_response: 工具执行响应
-            tool_call_id: 工具调用ID
-
-        Returns:
-            List[MessageChunk]: 处理后的结果消息
-        """
-        logger.debug(f"DirectExecutorAgent: 处理工具响应，工具调用ID: {tool_call_id}")
-
-        try:
-            tool_response_dict = json.loads(tool_response)
-
-            if "content" in tool_response_dict:
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=tool_response,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content='\n```json\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\n```\n'
-                )]
-            elif 'messages' in tool_response_dict:
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=msg,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content=msg
-                ) for msg in tool_response_dict['messages']]
-            else:
-                # 默认处理
-                result = [MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=tool_response,
-                    tool_call_id=tool_call_id,
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content='\n' + tool_response + '\n'
-                )]
-
-            logger.debug("DirectExecutorAgent: 工具响应处理成功")
-            return result
-
-        except json.JSONDecodeError:
-            logger.warning("DirectExecutorAgent: 处理工具响应时JSON解码错误")
-            return [MessageChunk(
-                role='tool',
-                content='\n' + tool_response + '\n',
-                tool_call_id=tool_call_id,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TOOL_CALL_RESULT.value,
-                show_content="工具调用失败\n\n"
-            )]
 
     def _should_stop_execution(self, all_new_response_chunks: List[MessageChunk]) -> bool:
         """

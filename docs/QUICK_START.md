@@ -268,45 +268,30 @@ Create production-ready custom tools with enhanced features:
 
 ```python
 # custom_tools/advanced_weather_tool.py
-from agents.tool.tool_base import ToolBase
-from typing import Dict, Any, Optional
-import requests
+from sagents.tool.tool_base import tool
+from typing import Dict, Any
 import time
 
-@ToolBase.register_tool
-class WeatherAnalysisTool(ToolBase):
+class WeatherAnalysisTool:
     """Advanced weather analysis tool with caching and validation"""
-    
-    def __init__(self):
-        super().__init__(
-            name="weather_analysis",
-            description="Get comprehensive weather analysis with forecasts and trends",
-            parameters={
-                "city": {
-                    "type": "string",
-                    "description": "Name of the city",
-                    "required": True
-                },
-                "days": {
-                    "type": "integer",
-                    "description": "Number of forecast days (1-7)",
-                    "minimum": 1,
-                    "maximum": 7,
-                    "default": 3
-                },
-                "include_trends": {
-                    "type": "boolean",
-                    "description": "Include historical trends analysis",
-                    "default": False
-                }
-            }
-        )
-    
-    def execute(self, 
-                city: str, 
-                days: int = 3,
-                include_trends: bool = False,
-                **kwargs) -> Dict[str, Any]:
+
+    @tool(
+        description_i18n={
+            "en": "Get comprehensive weather analysis with forecasts and trends",
+            "zh": "获取包含预测与趋势的天气分析"
+        },
+        param_description_i18n={
+            "city": {"en": "Name of the city", "zh": "城市名称"},
+            "days": {"en": "Number of forecast days (1-7)", "zh": "预测天数（1-7）"},
+            "include_trends": {"en": "Include historical trends analysis", "zh": "包含历史趋势分析"}
+        }
+    )
+    def weather_analysis(
+        self,
+        city: str,
+        days: int = 3,
+        include_trends: bool = False
+    ) -> Dict[str, Any]:
         """Execute weather analysis with enhanced error handling"""
         start_time = time.time()
         
