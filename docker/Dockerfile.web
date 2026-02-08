@@ -9,6 +9,11 @@ COPY ./app/web .
 
 RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
 
+ARG VITE_SAGE_API_BASE_URL
+ARG VITE_SAGE_TRACE_JAEGER_URL
+ENV VITE_SAGE_API_BASE_URL=${VITE_SAGE_API_BASE_URL}
+ENV VITE_SAGE_TRACE_JAEGER_URL=${VITE_SAGE_TRACE_JAEGER_URL}
+
 RUN npm run build
 
 # --- Runtime stage: serve static files with Nginx ---
