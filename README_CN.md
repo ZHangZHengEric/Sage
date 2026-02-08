@@ -79,7 +79,7 @@ graph TD
     API --> Orch[🧠 Agent Orchestrator]
     
     subgraph Core[核心引擎]
-        Orch -- "调度" --> Agents[🤖 Agents (Fibre/Standard)]
+        Orch -- "调度" --> Agents["🤖 Agents (Fibre/Standard)"]
         Agents -- "使用" --> RAG[📚 RAG Engine]
         Agents -- "使用" --> Tools[🛠️ Tools & Skills]
         Agents -- "运行于" --> Box[📦 Security Sandbox]
@@ -91,7 +91,7 @@ graph TD
         Orch <--> DB[(SQL Database)]
     end
     
-    Core -.-> Obs[👁️ Observability (OpenTelemetry)]
+    Core -.-> Obs["👁️ Observability (OpenTelemetry)"]
 ```
 
 ## 📅 **v0.9.8 更新内容**
