@@ -109,39 +109,19 @@ def init_logging(log_name="app", log_level="DEBUG"):
 
     logger.configure(patcher=patcher)
 
-    def formatting_func(record):
-        fmt = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level: <8} - "
+    json_params = {
+        "serialize": True,
+        "format": "{message}",
+    }
 
-        # Relative Path
-        fmt += "[{extra[rel_path]}:{line}] "
-
-        # Context Information
-        extra = record["extra"]
-        context_items = []
-
-        # Request ID
-        if extra.get("request_id") and extra.get("request_id") != "background":
-            context_items.append(f"req:{extra['request_id']}")
-
-        # Session ID
-        if extra.get("session_id"):
-            context_items.append(f"sid:{extra['session_id']}")
-
-        if context_items:
-            fmt += "[" + " ".join(context_items) + "] "
-
-        fmt += "- {message} "
-        fmt += "\n{exception}"
-        return fmt
-
-    logger.add(sys.stdout, level=log_level, format=formatting_func)
+    logger.add(sys.stdout, level=log_level, **json_params)
 
     params = {
         "rotation": "100MB",
         "retention": 20,
         "compression": "zip",
         "encoding": "utf8",
-        "format": formatting_func,
+        **json_params,
     }
     LOG_PATH = "./logs"
     if not os.path.exists(LOG_PATH):
@@ -160,7 +140,7 @@ def init_logging(log_name="app", log_level="DEBUG"):
             "retention": 10,
             "compression": "zip",
             "encoding": "utf8",
-            "format": formatting_func,
+            **json_params,
         }
         logger.add(
             Path(LOG_PATH) / f"{log_name}_access.log",
