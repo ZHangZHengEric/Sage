@@ -1,3 +1,5 @@
+import json
+from collections import OrderedDict
 import logging
 import os
 import re
@@ -109,19 +111,31 @@ def init_logging(log_name="app", log_level="DEBUG"):
 
     logger.configure(patcher=patcher)
 
-    json_params = {
-        "serialize": True,
-        "format": "{message}",
-    }
+    def formatting_func(record):
+        extra = record["extra"]
+        file_path = extra.get("rel_path") or record["file"].path
+        file_value = f"{file_path}:{record['line']}"
+        payload = OrderedDict()
+        payload["level"] = record["level"].name
+        payload["time"] = record["time"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        payload["file"] = file_value
+        payload["msg"] = record["message"]
+        request_id = extra.get("request_id")
+        if request_id:
+            payload["requestId"] = request_id
+        session_id = extra.get("session_id")
+        if session_id:
+            payload["seesion_id"] = session_id
+        return json.dumps(payload, ensure_ascii=False)
 
-    logger.add(sys.stdout, level=log_level, **json_params)
+    logger.add(sys.stdout, level=log_level, format=formatting_func)
 
     params = {
         "rotation": "100MB",
         "retention": 20,
         "compression": "zip",
         "encoding": "utf8",
-        **json_params,
+        "format": formatting_func,
     }
     LOG_PATH = "./logs"
     if not os.path.exists(LOG_PATH):
@@ -140,7 +154,7 @@ def init_logging(log_name="app", log_level="DEBUG"):
             "retention": 10,
             "compression": "zip",
             "encoding": "utf8",
-            **json_params,
+            "format": formatting_func,
         }
         logger.add(
             Path(LOG_PATH) / f"{log_name}_access.log",
