@@ -53,44 +53,116 @@ graph TD
 
 ## 🌍 Environment Variables
 
-### Core Settings
+### Server and Runtime Settings
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `OPENAI_API_KEY` | string | None | OpenAI API key for model access |
-| `SAGE_DEBUG` | boolean | false | Enable debug logging |
-| `SAGE_ENVIRONMENT` | string | "production" | Runtime environment (development/production) |
-| `SAGE_LOG_LEVEL` | string | "INFO" | Logging level (DEBUG/INFO/WARNING/ERROR) |
-| `SAGE_CONFIG_PATH` | string | "./config" | Path to configuration files |
+| `SAGE_PORT` | integer | 8080 | Server port |
+| `SAGE_LOGS_DIR_PATH` | string | "logs" | Logs directory |
+| `SAGE_WORKSPACE_PATH` | string | "agent_workspace" | Workspace directory |
+| `SAGE_MEMORY_ROOT` | string | None | Memory storage root directory (optional) |
+| `SAGE_FORCE_SUMMARY` | boolean | false | Force summary generation |
+| `SAGE_NO_AUTH` | boolean | true | Disable authentication (fetch data by user_id) |
+| `SAGE_MCP_CONFIG_PATH` | string | "mcp_setting.json" | MCP config file path |
+| `SAGE_PRESET_RUNNING_CONFIG_PATH` | string | "agent_setting.json" | Preset running config path |
 
-### Model Settings
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `SAGE_MODEL_NAME` | string | "gpt-3.5-turbo" | Default model name |
-| `SAGE_BASE_URL` | string | None | Custom API base URL |
-| `SAGE_MAX_TOKENS` | integer | 4096 | Maximum tokens per request |
-| `SAGE_TEMPERATURE` | float | 0.7 | Model temperature (0-1) |
-| `SAGE_TIMEOUT` | integer | 60 | Request timeout in seconds |
-
-### Agent Settings
+### LLM Default Settings
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SAGE_MAX_ITERATIONS` | integer | 10 | Maximum agent iterations |
-| `SAGE_DEEP_THINKING` | boolean | true | Enable task analysis by default |
-| `SAGE_DEEP_RESEARCH` | boolean | true | Enable deep research mode in streaming by default |
-| `SAGE_SUMMARY_MODE` | boolean | true | Generate summaries by default |
-| `SAGE_STREAMING` | boolean | false | Enable streaming by default |
+| `SAGE_DEFAULT_LLM_API_KEY` | string | "" | Default LLM API key |
+| `SAGE_EXTRA_LLM_CONFIGS` | string | None | Extra LLM config list (JSON string) |
+| `SAGE_DEFAULT_LLM_API_BASE_URL` | string | "https://api.deepseek.com/v1" | Default LLM API base URL |
+| `SAGE_DEFAULT_LLM_MODEL_NAME` | string | "deepseek-chat" | Default LLM model name |
+| `SAGE_DEFAULT_LLM_MAX_TOKENS` | integer | 4096 | Max generated tokens |
+| `SAGE_DEFAULT_LLM_TEMPERATURE` | float | 0.2 | Temperature parameter (0.0 - 1.0) |
+| `SAGE_DEFAULT_LLM_MAX_MODEL_LEN` | integer | 54000 | Max context length |
+| `SAGE_DEFAULT_LLM_TOP_P` | float | 0.9 | Top P sampling parameter |
+| `SAGE_DEFAULT_LLM_PRESENCE_PENALTY` | float | 0.0 | Presence penalty parameter |
 
-### Tool Settings
+### Context Budget Settings
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SAGE_TOOLS_PATH` | string | "./agents/tool" | Path to tool directories |
-| `SAGE_MCP_SERVERS_PATH` | string | "./mcp_servers" | Path to MCP server configs |
-| `SAGE_TOOL_TIMEOUT` | integer | 30 | Tool execution timeout |
-| `SAGE_MAX_CONCURRENT_TOOLS` | integer | 5 | Max parallel tool executions |
+| `SAGE_CONTEXT_HISTORY_RATIO` | float | 0.2 | Ratio of history messages in context |
+| `SAGE_CONTEXT_ACTIVE_RATIO` | float | 0.3 | Ratio of active messages in context |
+| `SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO` | float | 0.5 | Max ratio of new messages |
+| `SAGE_CONTEXT_RECENT_TURNS` | integer | 0 | Include recent N turns |
+
+### Database Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_DB_TYPE` | string | "file" | Database type (file/memory/mysql) |
+| `SAGE_DB_PATH` | string | "./data/" | Database file path (file mode) |
+
+### MySQL Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_MYSQL_HOST` | string | "127.0.0.1" | MySQL host |
+| `SAGE_MYSQL_PORT` | integer | 3306 | MySQL port |
+| `SAGE_MYSQL_USER` | string | "root" | MySQL username |
+| `SAGE_MYSQL_PASSWORD` | string | "sage.1234" | MySQL password |
+| `SAGE_MYSQL_DATABASE` | string | "sage" | MySQL database |
+
+### Auth and Tokens
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_JWT_KEY` | string | "123" | JWT secret |
+| `SAGE_JWT_EXPIRE_HOURS` | integer | 24 | JWT expiry hours |
+| `SAGE_REFRESH_TOKEN_SECRET` | string | "123" | Refresh token secret |
+
+### Embedding Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_EMBEDDING_API_KEY` | string | None | Embedding API key |
+| `SAGE_EMBEDDING_BASE_URL` | string | None | Embedding base URL |
+| `SAGE_EMBEDDING_MODEL` | string | "text-embedding-3-large" | Embedding model name |
+| `SAGE_EMBEDDING_DIMS` | integer | 1024 | Embedding vector dimensions |
+
+### Elasticsearch Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_ELASTICSEARCH_URL` | string | None | Elasticsearch URL |
+| `SAGE_ELASTICSEARCH_API_KEY` | string | None | Elasticsearch API key |
+| `SAGE_ELASTICSEARCH_USERNAME` | string | None | Elasticsearch username |
+| `SAGE_ELASTICSEARCH_PASSWORD` | string | None | Elasticsearch password |
+
+### MinIO Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_MINIO_ENDPOINT` | string | None | MinIO endpoint |
+| `SAGE_MINIO_ACCESS_KEY` | string | None | MinIO access key |
+| `SAGE_MINIO_SECRET_KEY` | string | None | MinIO secret key |
+| `SAGE_MINIO_SECURE` | boolean | false | Use https |
+| `SAGE_MINIO_BUCKET_NAME` | string | None | MinIO bucket |
+| `SAGE_MINIO_PUBLIC_BASE_URL` | string | None | MinIO public base URL |
+
+### Trace Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_TRACE_JAEGER_ENDPOINT` | string | None | Jaeger OTLP endpoint |
+
+### Knowledge Base MCP Settings
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SAGE_KB_MCP_URL` | string | None | Knowledge Base MCP endpoint |
+| `SAGE_KB_MCP_API_KEY` | string | None | Knowledge Base MCP API key |
+
+### Legacy LLM Variables
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `LLM_API_KEY` | string | None | Legacy LLM API key fallback |
+| `LLM_API_BASE_URL` | string | None | Legacy LLM API base URL fallback |
+| `LLM_MODEL_NAME` | string | None | Legacy LLM model name fallback |
 
 ### Example .env File
 
@@ -98,28 +170,34 @@ graph TD
 # .env file for Sage configuration
 
 # API Configuration
-OPENAI_API_KEY=sk-your-openai-api-key-here
-SAGE_BASE_URL=https://api.openai.com/v1
+SAGE_DEFAULT_LLM_API_KEY=sk-your-api-key-here
+SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
+SAGE_DEFAULT_LLM_MODEL_NAME=deepseek-chat
 
 # Model Settings
-SAGE_MODEL_NAME=gpt-4
-SAGE_MAX_TOKENS=8192
-SAGE_TEMPERATURE=0.3
+SAGE_DEFAULT_LLM_MAX_TOKENS=8192
+SAGE_DEFAULT_LLM_TEMPERATURE=0.3
+SAGE_DEFAULT_LLM_TOP_P=0.9
+SAGE_DEFAULT_LLM_MAX_MODEL_LEN=54000
 
 # Agent Behavior
-SAGE_DEEP_THINKING=true
-SAGE_DEEP_RESEARCH=true
-SAGE_SUMMARY_MODE=true
-SAGE_MAX_ITERATIONS=15
+SAGE_CONTEXT_HISTORY_RATIO=0.2
+SAGE_CONTEXT_ACTIVE_RATIO=0.3
+SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO=0.5
+SAGE_CONTEXT_RECENT_TURNS=6
 
-# Development Settings
-SAGE_DEBUG=true
-SAGE_ENVIRONMENT=development
-SAGE_LOG_LEVEL=DEBUG
+# Server Settings
+SAGE_PORT=8080
+SAGE_WORKSPACE_PATH=./agent_workspace
+SAGE_LOGS_DIR_PATH=./logs
+SAGE_DB_TYPE=file
+SAGE_DB_PATH=./data/
 
-# Tool Settings
-SAGE_TOOLS_PATH=/custom/tools:/default/tools
-SAGE_TOOL_TIMEOUT=60
+# Storage Settings
+SAGE_EMBEDDING_MODEL=text-embedding-3-large
+SAGE_MINIO_ENDPOINT=http://127.0.0.1:9000
+SAGE_MINIO_ACCESS_KEY=minioadmin
+SAGE_MINIO_SECRET_KEY=minioadmin
 ```
 
 ## 📁 Configuration Files
@@ -183,6 +261,13 @@ debug:
   profile: false
   trace_calls: false
   save_conversations: false
+
+# Trace Configuration
+trace:
+  enabled: true
+  exporter: "jaeger"  # jaeger, zipkin, console
+  sample_rate: 1.0    # Sample rate 0.0-1.0
+  service_name: "sage-agent"
 ```
 
 ### Model-specific Configuration (config/models.yaml)
@@ -233,6 +318,16 @@ providers:
     base_url: "https://api.deepseek.com/v1"
     rate_limits:
       requests_per_minute: 500
+
+  # Multi-LLM Agent Pool Configuration
+  llm_pool:
+    strategy: "round_robin"  # round_robin or weighted
+    fallback: true          # Enable failover
+    models:
+      - name: "gpt-4"
+        weight: 1.0
+      - name: "claude-3-opus"
+        weight: 0.8
 ```
 
 ### Agent Configuration (config/agents.yaml)
@@ -279,7 +374,7 @@ custom_agents:
   code_agent:
     class: "agents.professional_agents.code_agent.CodeAgent" 
     config:
-      languages: ["python", "javascript", "java"]
+      languages: ["python", "javascript"]
       linting: true
 ```
 

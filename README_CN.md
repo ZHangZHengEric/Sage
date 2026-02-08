@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前版本-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_版本-0.9.7-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_版本-0.9.8-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage 多智能体框架**
 
@@ -22,12 +22,13 @@
 
 ## ✨ **核心亮点**
 
-- 🧠 **智能任务分解**：自动将复杂问题分解为可管理的子任务，支持依赖追踪。
-- 🔄 **智能体编排**：专业智能体（规划、执行、观察、总结）间的无缝协作。
-- 🛠️ **可扩展工具系统**：基于插件的架构，支持 **MCP 服务器** 和自动发现。
-- ⚡ **双重模式**：**深度研究模式**用于全面分析，**快速执行模式**用于高效完成。
-- 📊 **上下文管理**：先进的 **Context Budget** 控制，实现精准的 Token 优化 (v0.9.7+)。
-- 🌐 **现代化 UI**：基于 Vue3 + FastAPI 的 Web 界面，支持实时流式可视化。
+- 🧠 **多智能体编排**：支持 **TaskExecutor** (串行) 和 **FibreAgent** (并行) 两种编排模式。
+- 🏗️ **企业级架构**：基于 **Elasticsearch** (向量), **MinIO** (对象), 和 **SQLAlchemy** (关系型) 的强大存储层。
+- 📚 **RAG 引擎 2.0**：支持 **RRF** (Reciprocal Rank Fusion) 和混合检索的全新检索增强生成引擎。
+- 🛡️ **安全沙箱**：提供隔离执行环境 (`sagents.utils.sandbox`) 确保智能体代码执行安全。
+- 👁️ **全链路可观测性**：集成 **OpenTelemetry** 追踪，可视化智能体思考与执行路径。
+- 🧩 **模块化组件**：**Skills**, **Tools**, 和 **MCP Servers** 的即插即用架构。
+- 📊 **上下文管理**：先进的 **Context Budget** 控制，实现精准的 Token 优化。
 - 🐍 **Python 3.11+ 优化**：全类型注解和代码风格检查，确保企业级可靠性。
 
 ## 🚀 **快速开始**
@@ -64,44 +65,51 @@ python app/sage_cli.py \
 
 现代化 Web 应用现在重构为 `app/server` (后端) 和 `app/web` (前端)。
 
-**使用 Docker Compose 部署**：
+**使用 Docker Compose 部署 (推荐)**：
 ```bash
 docker-compose up -d
 ```
-访问应用地址：`http://localhost:30051`。
+访问应用地址：`http://localhost:30051` (Web) / `http://localhost:30050/docs` (API)。
 
-## 🤖 **支持的模型**
+## 🏗️ **系统架构**
 
 ```mermaid
-graph LR
-    U[用户输入] --> AC[智能体控制器]
-    AC --> WF
-    AC --> RM
-
-    subgraph WF[工作流]
-        A[分析] --> B[规划] --> C[执行] --> D[观察] --> E[总结]
-        D -- "循环" --> B
-        C -- 使用 --> X[🛠️ 工具系统]
+graph TD
+    User[User/Client] --> API[Sage Server API]
+    API --> Orch[🧠 Agent Orchestrator]
+    
+    subgraph Core[核心引擎]
+        Orch -- "调度" --> Agents[🤖 Agents (Fibre/Standard)]
+        Agents -- "使用" --> RAG[📚 RAG Engine]
+        Agents -- "使用" --> Tools[🛠️ Tools & Skills]
+        Agents -- "运行于" --> Box[📦 Security Sandbox]
     end
-    E --> R[结果展示]
 
-    subgraph RM[资源与状态管理]
-        F[任务管理器]
-        G[消息管理器]
-        H[工作区]
+    subgraph Infra[企业级基础设施]
+        RAG <--> ES[(Elasticsearch)]
+        Tools <--> MinIO[(MinIO)]
+        Orch <--> DB[(SQL Database)]
     end
+    
+    Core -.-> Obs[👁️ Observability (OpenTelemetry)]
 ```
 
-## 📅 **v0.9.7 更新内容**
+## 📅 **v0.9.8 更新内容**
 
-- **上下文预算 (Context Budget)**：新增参数（`--context_history_ratio` 等），实现细粒度上下文控制。
-- **参数统一**：在 Server、CLI 和 Demo 中标准化了 `default_llm_*` 参数。
-- **稳定性**：全面符合 Python 3.11+ 类型安全标准，优化代码风格。
-- **[查看完整版本发布说明](release_notes/v0.9.7.md)**
+- **企业级存储**：引入 Elasticsearch, MinIO, 和 SQL 实现稳健的数据持久化。
+- **Fibre Agent**：全新的并行多智能体编排架构。
+- **RAG 引擎**：完全重构的检索引擎，支持 RRF。
+- **安全性**：新增代码执行沙箱。
+- **可观测性**：全面集成 OpenTelemetry。
+- **[查看完整版本发布说明](release_notes/v0.9.8.md)**
 
 ## 📚 **文档资源**
 
-- [**完整文档**](docs/README.md)
+- [**完整文档首页**](docs/README.md)
+- [**Server 部署指南**](docs/SERVER_DEPLOYMENT_CN.md) - Docker 与源码部署
+- [**示例使用指南**](docs/EXAMPLES_USAGE_CN.md) - CLI、Web 与 API Server
+- [**更新日志**](docs/CHANGELOG_CN.md) - 最新更新与历史记录
+- [**智能体框架架构**](docs/ARCHITECTURE_CN.md)
 - [**API 参考**](docs/API_REFERENCE_CN.md)
 - [**配置指南**](docs/CONFIGURATION_CN.md)
 - [**工具开发**](docs/TOOL_DEVELOPMENT_CN.md)

@@ -1,61 +1,346 @@
 <template>
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <h2>{{ t('app.title') }}</h2>
-      <div v-if="currentUser" class="user-info">
-        <div class="user-details">
-          <div class="user-name">用户名：{{ currentUser.nickname || currentUser.username }}</div>
-        </div>
-        <button @click="handleLogout" class="logout-btn">{{ t('auth.logout') }}</button>
-      </div>
+  <div 
+    class="flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
+    :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
+  >
+    <!-- Header -->
+    <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
+      <h2 
+        v-if="!isCollapsed" 
+        class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
+      >
+        Zavixai Agent
+      </h2>
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        @click="toggleCollapse"
+        :title="isCollapsed ? '展开' : '收起'"
+        class="text-muted-foreground hover:text-foreground shrink-0"
+      >
+        <PanelLeftOpen v-if="isCollapsed" class="h-4 w-4" />
+        <PanelLeftClose v-else class="h-4 w-4" />
+      </Button>
     </div>
 
-    <nav class="sidebar-nav">
-      <ul class="menu-list">
-        <li v-for="category in predefinedServices" :key="category.id" class="menu-category">
-          <div class="category-header" @click="toggleCategory(category.key)">
-            <span class="category-icon">{{ category.icon }}</span>
-            <span class="category-name">{{ t(category.nameKey) }}</span>
-            <span class="category-toggle" :class="{ expanded: expandedCategories[category.key] }">▼</span>
+    <!-- Change Password Dialog -->
+    <Dialog v-model:open="showChangePasswordDialog">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>修改密码</DialogTitle>
+          <DialogDescription>
+            请输入当前密码和新密码以修改您的登录密码。
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label for="old-password" class="text-right">
+              旧密码
+            </Label>
+            <Input
+              id="old-password"
+              v-model="changePasswordForm.oldPassword"
+              type="password"
+              class="col-span-3"
+            />
           </div>
-          <ul v-show="expandedCategories[category.key]" class="submenu-list">
-            <li v-for="service in category.children" :key="service.id" class="submenu-item" :class="{ active: isCurrentService(service.url, service.isInternal) }">
-              <a href="#" class="submenu-link" @click.prevent="handleMenuClick(service.url, t(service.nameKey), service.isInternal)">
-                {{ t(service.nameKey) }}
-              </a>
-            </li>
-          </ul>
-        </li>
-      </ul>
-    </nav>
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label for="new-password" class="text-right">
+              新密码
+            </Label>
+            <Input
+              id="new-password"
+              v-model="changePasswordForm.newPassword"
+              type="password"
+              class="col-span-3"
+            />
+          </div>
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label for="confirm-password" class="text-right">
+              确认新密码
+            </Label>
+            <Input
+              id="confirm-password"
+              v-model="changePasswordForm.confirmPassword"
+              type="password"
+              class="col-span-3"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showChangePasswordDialog = false">取消</Button>
+          <Button type="submit" @click="handleChangePassword" :disabled="changingPassword">
+            <span v-if="changingPassword">修改中...</span>
+            <span v-else>确认修改</span>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-    <div class="sidebar-footer">
-      <button class="language-toggle" @click="toggleLanguage">
-        <el-icon :size="16">
-          <Globe />
-        </el-icon>
-        <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
-      </button>
+    <!-- Navigation -->
+    <ScrollArea class="flex-1 px-3">
+      <div class="space-y-4">
+        <template v-for="item in predefinedServices" :key="item.id">
+          
+          <!-- Collapsed Mode -->
+          <div v-if="isCollapsed" class="flex justify-center group/item relative">
+            <!-- Item with children (Category) -->
+            <DropdownMenu v-if="item.children">
+               <DropdownMenuTrigger as-child>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    :class="[
+                      'transition-all duration-200',
+                      isCategoryActive(item) ? 'bg-white shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                    ]"
+                  >
+                     <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
+                  </Button>
+               </DropdownMenuTrigger>
+               <DropdownMenuContent side="right" align="start" class="w-48 ml-2">
+                  <DropdownMenuLabel>{{ t(item.nameKey) }}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    v-for="service in item.children" 
+                    :key="service.id"
+                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                    :class="{'bg-muted font-medium text-primary': isCurrentService(service.url, service.isInternal)}"
+                  >
+                     {{ t(service.nameKey) }}
+                  </DropdownMenuItem>
+               </DropdownMenuContent>
+            </DropdownMenu>
+
+            <!-- Item without children (Direct Link) -->
+            <Button
+               v-else
+               variant="ghost"
+               size="icon"
+               :title="t(item.nameKey)"
+               :class="[
+                 'transition-all duration-200',
+                 isCurrentService(item.url, item.isInternal) ? 'bg-white shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+               ]"
+               @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+            >
+               <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
+            </Button>
+          </div>
+
+          <!-- Expanded Mode -->
+          <template v-else>
+            <!-- Item with children (Category) -->
+            <Collapsible
+              v-if="item.children"
+              v-model:open="expandedCategories[item.key]"
+              class="space-y-1"
+            >
+              <CollapsibleTrigger class="flex items-center w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors group">
+                <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
+                <span class="flex-1 text-left truncate">{{ t(item.nameKey) }}</span>
+                <ChevronDown
+                  class="h-4 w-4 transition-transform duration-200 text-muted-foreground/50 group-hover:text-muted-foreground"
+                  :class="{ '-rotate-90': !expandedCategories[item.key] }"
+                />
+              </CollapsibleTrigger>
+              
+              <CollapsibleContent class="space-y-1">
+                <div 
+                  v-for="service in item.children" 
+                  :key="service.id"
+                >
+                  <Button
+                    variant="ghost"
+                    class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
+                    :class="cn(
+                      'hover:bg-white hover:shadow-sm hover:text-primary transition-all duration-200',
+                      isCurrentService(service.url, service.isInternal) && 'bg-white shadow text-primary font-semibold'
+                    )"
+                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                  >
+                    <span class="truncate">{{ t(service.nameKey) }}</span>
+                  </Button>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
+            <!-- Item without children (Direct Link) -->
+            <Button
+              v-else
+              variant="ghost"
+              class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-white hover:shadow-sm transition-all duration-200 mb-1"
+              :class="cn(
+                isCurrentService(item.url, item.isInternal) && 'bg-white shadow text-primary font-bold'
+              )"
+              @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+            >
+              <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
+              <span class="flex-1 text-left truncate">{{ t(item.nameKey) }}</span>
+            </Button>
+          </template>
+
+        </template>
+      </div>
+    </ScrollArea>
+
+    <!-- Footer User Profile -->
+    <div class="p-4 mt-auto" v-if="currentUser">
+      <DropdownMenu v-model:open="isDropdownOpen">
+        <DropdownMenuTrigger as-child>
+          <div 
+            class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-white hover:shadow-sm transition-all duration-200 w-full group"
+            :class="{'justify-center': isCollapsed}"
+          >
+            <Avatar class="h-9 w-9 border-2 border-white shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
+              <AvatarImage :src="currentUser.avatar" />
+              <AvatarFallback class="bg-primary/10 text-primary font-bold">
+                {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
+              </AvatarFallback>
+            </Avatar>
+            <div v-if="!isCollapsed" class="flex-1 min-w-0 text-left">
+              <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
+                {{ currentUser.nickname || currentUser.username }}
+              </p>
+            </div>
+            <ChevronDown 
+              v-if="!isCollapsed"
+              class="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-transform duration-200" 
+              :class="{ '-rotate-90': !isDropdownOpen, 'rotate-180': isDropdownOpen }"
+            />
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent class="w-56" :side="isCollapsed ? 'right' : 'top'" align="end" :sideOffset="isCollapsed ? 10 : 0">
+          <DropdownMenuLabel class="font-normal" v-if="isCollapsed">
+             <div class="flex flex-col space-y-1">
+                <p class="text-sm font-medium leading-none">{{ currentUser.nickname || currentUser.username }}</p>
+                <p class="text-xs leading-none text-muted-foreground">User Profile</p>
+             </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator v-if="isCollapsed" />
+          <DropdownMenuItem @click="toggleLanguage">
+             <Globe class="mr-2 h-4 w-4" />
+             <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem @select.prevent="showChangePasswordDialog = true">
+            <KeyRound class="mr-2 h-4 w-4" />
+            <span>修改密码</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem @click="handleLogout" class="text-red-600">
+            <LogOut class="mr-2 h-4 w-4" />
+            <span>{{ t('auth.logout') }}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Connection as Globe } from '@element-plus/icons-vue'
+import { 
+  MessageSquare, 
+  Bot, 
+  Wrench, 
+  Zap, 
+  Book, 
+  Clock, 
+  Code, 
+  Globe, 
+  ChevronDown,
+  LogOut,
+  Settings,
+  LayoutGrid,
+  Users,
+  KeyRound,
+  PanelLeftClose,
+  PanelLeftOpen
+} from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { getCurrentUser, logout } from '../utils/auth.js'
+import { userAPI } from '@/api/user'
+import { toast } from 'vue-sonner'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { cn } from '@/utils/cn'
 
 const router = useRouter()
 const route = useRoute()
-const { language, toggleLanguage, t, isZhCN } = useLanguage()
+const { toggleLanguage, t, isZhCN } = useLanguage()
 const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
+const isCollapsed = ref(false)
 
 const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
+}
+
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value
+}
+
+const isDropdownOpen = ref(false)
+const showChangePasswordDialog = ref(false)
+const changePasswordForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+const changingPassword = ref(false)
+
+const handleChangePassword = async () => {
+  if (!changePasswordForm.value.oldPassword || !changePasswordForm.value.newPassword) {
+    toast.error('请输入密码')
+    return
+  }
+  
+  if (changePasswordForm.value.newPassword !== changePasswordForm.value.confirmPassword) {
+    toast.error('两次输入的密码不一致')
+    return
+  }
+  
+  changingPassword.value = true
+  try {
+    await userAPI.changePassword(
+      changePasswordForm.value.oldPassword, 
+      changePasswordForm.value.newPassword
+    )
+    toast.success('密码修改成功，请重新登录')
+    showChangePasswordDialog.value = false
+    handleLogout()
+  } catch (error) {
+    console.error(error)
+  } finally {
+    changingPassword.value = false
+  }
 }
 
 onMounted(() => {
@@ -70,67 +355,74 @@ onUnmounted(() => {
   }
 })
 
-const predefinedServices = ref([
-  {
-    id: 'cat1',
-    key: 'chat_and_config',
-    nameKey: 'sidebar.chatAndConfig',
-    icon: '💬',
-    children: [
-      { id: 'svc_chat', nameKey: 'sidebar.newChat', url: 'Chat', isInternal: true },
-      { id: 'svc_agent', nameKey: 'sidebar.agentConfig', url: 'AgentConfig', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat2',
-    key: 'tools_and_services',
-    nameKey: 'sidebar.toolsAndServices',
-    icon: '🧰',
-    children: [
-      { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
-      { id: 'svc_mcps', nameKey: 'sidebar.mcpsManage', url: 'Mcps', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat3',
-    key: 'knowledge_base',
-    nameKey: 'sidebar.knowledgeBase',
-    icon: '📚',
-    children: [
-      { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseManage', url: 'KnowledgeBase', isInternal: true }
-    ]
-  },
-  {
-    id: 'cat4',
-    key: 'history',
-    nameKey: 'sidebar.sessions',
-    icon: '🕘',
-    children: [
-      { id: 'svc_history', nameKey: 'sidebar.history', url: 'History', isInternal: true }
-    ]
-  }
-  ,
-  {
-    id: 'cat5',
-    key: 'api_reference',
-    nameKey: 'sidebar.apiReference',
-    icon: '📘',
-    children: [
-      { id: 'svc_api_agent_chat', nameKey: 'sidebar.apiAgentChat', url: 'ApiAgentChat', isInternal: true }
-    ]
-  }
-])
+const predefinedServices = computed(() => {
+  const services = [
+    {
+      id: 'svc_chat',
+      key: 'new_chat',
+      nameKey: 'sidebar.newChat',
+      url: 'Chat',
+      isInternal: true
+    },
+    { id: 'svc_history', nameKey: 'sidebar.sessions', url: 'History', isInternal: true },
+    { id: 'svc_agent', key: 'agent_list', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true },
+    {
+      id: 'cat2',
+      key: 'agent_capabilities',
+      nameKey: 'sidebar.capabilityModules',
+      children: [
+        { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
+        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
+        { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseList', url: 'KnowledgeBase', isInternal: true }
+      ]
+    },
+    {
+      id: 'cat5',
+      key: 'api_reference',
+      nameKey: 'sidebar.apiReference',
+      children: [
+        { id: 'svc_api_agent_chat', nameKey: 'sidebar.apiAgentChat', url: 'ApiAgentChat', isInternal: true }
+      ]
+    }
+  ]
 
-const expandedCategories = ref({
-  chat_and_config: true,
-  tools_and_services: false,
-  knowledge_base: false,
-  history: false,
-  api_reference: false
+  if (currentUser.value?.role === 'admin') {
+    services.push({
+      id: 'cat_sys',
+      key: 'system_management',
+      nameKey: 'sidebar.systemManagement',
+      children: [
+        { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
+        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
+      ]
+    })
+  }
+
+  return services
 })
 
-const toggleCategory = (key) => {
-  expandedCategories.value[key] = !expandedCategories.value[key]
+const expandedCategories = ref({
+  new_chat: true,
+  agent_capabilities: false,
+  knowledge_base: false,
+  history: false,
+  api_reference: false,
+  skills: false,
+  system_management: false
+})
+
+const getCategoryIcon = (key) => {
+  const map = {
+    new_chat: MessageSquare,
+    agent_list: Bot,
+    agent_capabilities: Wrench,
+    skills: Zap,
+    knowledge_base: Book,
+    history: Clock,
+    api_reference: Code,
+    system_management: Settings
+  }
+  return map[key] || LayoutGrid
 }
 
 const isCurrentService = (url, isInternal) => {
@@ -138,9 +430,28 @@ const isCurrentService = (url, isInternal) => {
   return false
 }
 
+const isCategoryActive = (item) => {
+  if (!item.children) return false
+  return item.children.some(child => isCurrentService(child.url, child.isInternal))
+}
+
 const handleMenuClick = (url, name, isInternal) => {
   if (isInternal) {
-    if (url === 'Chat') emit('new-chat')
+    if (url === 'Chat') {
+      emit('new-chat')
+      // 如果已经在 Chat 页面，触发重置后直接返回，避免重复 push
+      if (route.name === 'Chat') return
+    }
+    
+    // 如果已经在当前页面，且是AgentConfig，添加刷新参数触发重置
+    if (route.name === url && url === 'AgentConfig') {
+      router.replace({ 
+        name: url, 
+        query: { ...route.query, refresh: Date.now() } 
+      })
+      return
+    }
+    
     router.push({ name: url })
   } else {
     window.open(url, '_blank')
@@ -153,394 +464,3 @@ const handleLogout = () => {
   router.push({ name: 'Chat' })
 }
 </script>
-
-<style scoped>
-
-/* 左侧菜单样式 */
-.sidebar {
-    width: 280px;
-    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); 
-    color: #334155;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 2px 0 8px rgba(0,0,0,0.06);
-    z-index: 1000;
-    border-right: 1px solid #e2e8f0;
-}
-
-.sidebar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-  pointer-events: none;
-}
-
-.sidebar-header {
-  padding: 24px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  position: relative;
-  z-index: 1;
-}
-
-.sidebar-header h2 {
-  margin: 0;
-  text-align: center;
-  font-size: 20px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.logo-icon {
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-}
-
-.logo-text {
-  font-size: 20px;
-  font-weight: 700;
-  color: white;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.sidebar-nav {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  position: relative;
-  z-index: 1;
-}
-
-.menu-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.menu-category {
-  margin: 0;
-}
-
-.category-header {
-  display: flex;
-  align-items: center;
-  padding: 0.8rem 1.2rem;
-  color: #334155;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border-left: 3px solid transparent;
-  background-color: transparent;
-  font-weight: 500;
-  border-radius: 0;
-  margin: 0.1rem 0;
-  font-size: 0.9rem;
-}
-
-.category-header:hover {
-  background-color: rgba(102, 126, 234, 0.12);
-  color: #1f2937;
-}
-
-.category-icon {
-  font-size: 1rem;
-  margin-right: 0.6rem;
-  color: #475569;
-  width: 20px;
-  text-align: center;
-}
-
-.category-name {
-  flex: 1;
-  font-size: 0.9rem;
-}
-
-.category-toggle {
-  font-size: 0.7rem;
-  transition: transform 0.2s ease;
-  color: #cbd5e1;
-  width: 12px;
-  text-align: center;
-}
-
-.category-toggle.expanded {
-  transform: rotate(180deg);
-}
-
-.submenu-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  background-color: transparent;
-  border-radius: 0;
-  border: none;
-}
-
-.submenu-item {
-  margin: 2px 0;
-  cursor: pointer;
-}
-
-.submenu-link {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 1.2rem 0.6rem 2.8rem;
-  color: #475569;
-  text-decoration: none;
-  transition: all 0.2s ease;
-  border-left: 3px solid transparent;
-  font-size: 0.85rem;
-  border-radius: 0;
-}
-
-.submenu-item:hover .submenu-link {
-  background-color: rgba(102, 126, 234, 0.08);
-  color: #1f2937;
-}
-
-.submenu-item.active .submenu-link {
-  background-color: rgba(102, 126, 234, 0.18);
-  color: #1f2937;
-  font-weight: 600;
-}
-
-.submenu-item.disabled {
-  cursor: not-allowed;
-}
-
-.submenu-item.disabled .submenu-link {
-  cursor: not-allowed;
-  opacity: 0.9;
-  color: white;
-  background-color: rgba(102, 126, 234, 0.6);
-  font-weight: 500;
-}
-
-.submenu-item.disabled:hover .submenu-link {
-  background-color: rgba(102, 126, 234, 0.6);
-  color: white;
-}
-
-.submenu-link.disabled {
-  cursor: not-allowed;
-  pointer-events: auto;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.user-details {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-.user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #667eea;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-}
-
-.user-name {
-  color: #1f2937;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.logout-btn {
-  margin-left: auto;
-  background: transparent;
-  color: #334155;
-  border: transparent;
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-  position: relative;
-  overflow: hidden;
-}
-
-.nav-item::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.nav-item:hover::before {
-  opacity: 1;
-}
-
-.nav-item:hover {
-  color: white;
-  background: rgba(255, 255, 255, 0.05);
-  transform: translateX(4px);
-}
-
-.nav-item.active {
-  color: white;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
-}
-
-.nav-item.active::before {
-  opacity: 1;
-}
-
-.nav-icon {
-  flex-shrink: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.nav-label {
-  flex: 1;
-  position: relative;
-  z-index: 1;
-}
-
-.nav-badge {
-  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  min-width: 20px;
-  text-align: center;
-  position: relative;
-  z-index: 1;
-  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-}
-
-.sidebar-footer {
-  padding: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  background: #4ade80;
-  border-radius: 50%;
-  animation: pulse 2s infinite;
-  box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
-}
-
-.status-text {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500;
-}
-
-.language-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: rgba(51, 65, 85, 0.06);
-  border-radius: 8px;
-  border: 1px solid rgba(203, 213, 225, 0.8);
-  color: #334155;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.language-toggle:hover {
-  background: rgba(102, 126, 234, 0.08);
-  color: #1f2937;
-}
-
-.language-toggle span {
-  flex: 1;
-}
-
-@keyframes pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.7;
-    transform: scale(1.1);
-  }
-}
-</style>

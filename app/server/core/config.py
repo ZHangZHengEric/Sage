@@ -3,9 +3,10 @@
 """
 
 import argparse
+import json
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 # ===== 全局启动参数（统一存放于此） =====
 _GLOBAL_STARTUP_CONFIG: Optional[Any] = None
@@ -17,15 +18,11 @@ class StartupConfig:
 
     # Server
     port: int = 8080
-    pid_file: str = "sage_stream.pid"
     logs_dir: str = "logs"
     workspace: str = "agent_workspace"
-    memory_root: Optional[str] = None
-    force_summary: bool = False
-    no_auth: bool = True  # 无认证模式，根据入参用户id获取数据
 
     # DB
-    db_type: str = "memory"  # file | memory | mysql
+    db_type: str = "file"  # file | memory | mysql
     db_path: str = "./data/"  # file 模式为目录；memory 为忽略；mysql 支持 DSN/JSON/ENV
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 3306
@@ -40,12 +37,22 @@ class StartupConfig:
 
     # LLM defaults
     default_llm_api_key: str = ""
+    extra_llm_configs: Optional[Dict[str, List[Dict[str, str]]]] = None
     default_llm_api_base_url: str = "https://api.deepseek.com/v1"
     default_llm_model_name: str = "deepseek-chat"
     default_llm_max_tokens: int = 4096
     default_llm_temperature: float = 0.2
     default_llm_max_model_len: int = 54000
+    default_llm_top_p: float = 0.9
+    default_llm_presence_penalty: float = 0.0
 
+    # Context Budget Defaults
+    context_history_ratio: float = 0.2
+    context_active_ratio: float = 0.3
+    context_max_new_message_ratio: float = 0.5
+    context_recent_turns: int = 0
+    
+    # auth
     jwt_key: str = "123"
     jwt_expire_hours: int = 24
     refresh_token_secret: str = "123"
@@ -70,15 +77,30 @@ class StartupConfig:
     minio_bucket_name: Optional[str] = None
     minio_public_base_url: Optional[str] = None
 
+    # Trace
+    trace_jaeger_endpoint: Optional[str] = None
+
 
 class ENV:
     # 新版 LLM 相关
     DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
+    EXTRA_LLM_CONFIGS = "SAGE_EXTRA_LLM_CONFIGS"
     DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
     DEFAULT_LLM_MODEL_NAME = "SAGE_DEFAULT_LLM_MODEL_NAME"
     DEFAULT_LLM_MAX_TOKENS = "SAGE_DEFAULT_LLM_MAX_TOKENS"
     DEFAULT_LLM_TEMPERATURE = "SAGE_DEFAULT_LLM_TEMPERATURE"
     DEFAULT_LLM_MAX_MODEL_LEN = "SAGE_DEFAULT_LLM_MAX_MODEL_LEN"
+    DEFAULT_LLM_TOP_P = "SAGE_DEFAULT_LLM_TOP_P"
+    DEFAULT_LLM_PRESENCE_PENALTY = "SAGE_DEFAULT_LLM_PRESENCE_PENALTY"
+
+    # Context Budget
+    CONTEXT_HISTORY_RATIO = "SAGE_CONTEXT_HISTORY_RATIO"
+    CONTEXT_ACTIVE_RATIO = "SAGE_CONTEXT_ACTIVE_RATIO"
+    CONTEXT_MAX_NEW_MESSAGE_RATIO = "SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO"
+    CONTEXT_RECENT_TURNS = "SAGE_CONTEXT_RECENT_TURNS"
+
+    # Trace
+    TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
@@ -86,11 +108,6 @@ class ENV:
     PRESET_RUNNING_CONFIG = "SAGE_PRESET_RUNNING_CONFIG_PATH"
     WORKSPACE = "SAGE_WORKSPACE_PATH"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
-    MEMORY_ROOT = "SAGE_MEMORY_ROOT"
-    DAEMON = "SAGE_DAEMON"
-    PID_FILE = "SAGE_PID_FILE"
-    FORCE_SUMMARY = "SAGE_FORCE_SUMMARY"
-    NO_AUTH = "SAGE_NO_AUTH"
 
     # 数据库
     DB_TYPE = "SAGE_DB_TYPE"
@@ -187,6 +204,43 @@ def pick_bool(arg_flag: bool, env_name: str, default: bool = False) -> bool:
     return True if arg_flag else env_bool(env_name, default)
 
 
+def pick_str_list(
+    arg_val: Optional[str], env_name: str, default: Optional[list[str]] = None
+) -> Optional[list[str]]:
+    val_str = pick_str(arg_val, env_name)
+    if val_str:
+        return [x.strip() for x in val_str.split(",") if x.strip()]
+    return default
+
+
+def pick_json_list(
+    arg_val: Optional[str], env_name: str, default: Optional[List[Dict[str, str]]] = None
+) -> Optional[List[Dict[str, str]]]:
+    val_str = pick_str(arg_val, env_name)
+    if val_str:
+        try:
+            val = json.loads(val_str)
+            if isinstance(val, list):
+                return val
+        except json.JSONDecodeError:
+            pass
+    return default
+
+
+def pick_json_dict_list(
+    arg_val: Optional[str], env_name: str, default: Optional[Dict[str, List[Dict[str, str]]]] = None
+) -> Optional[Dict[str, List[Dict[str, str]]]]:
+    val_str = pick_str(arg_val, env_name)
+    if val_str:
+        try:
+            val = json.loads(val_str)
+            if isinstance(val, dict):
+                return val
+        except json.JSONDecodeError:
+            pass
+    return default
+
+
 def create_argument_parser():
     """创建命令行参数解析器，支持环境变量，优先级：指定入参 > 环境变量 > 默认值"""
     parser = argparse.ArgumentParser(description="Sage Stream Service")
@@ -195,6 +249,10 @@ def create_argument_parser():
     parser.add_argument(
         "--default_llm_api_key",
         help=f"默认LLM API Key (环境变量: {ENV.DEFAULT_LLM_API_KEY})",
+    )
+    parser.add_argument(
+        "--extra_llm_configs",
+        help=f"额外的LLM配置字典 (JSON字符串), 如: '{{\"model_name\": [{{\"api_key\":\"...\", \"base_url\":\"...\"}}]}}' (环境变量: {ENV.EXTRA_LLM_CONFIGS})",
     )
     parser.add_argument(
         "--default_llm_api_base_url",
@@ -219,8 +277,36 @@ def create_argument_parser():
         type=int,
         help=f"默认LLM 最大上下文 (环境变量: {ENV.DEFAULT_LLM_MAX_MODEL_LEN})",
     )
-
-
+    parser.add_argument(
+        "--default_llm_top_p",
+        type=float,
+        help=f"默认LLM API Top P (环境变量: {ENV.DEFAULT_LLM_TOP_P})",
+    )
+    parser.add_argument(
+        "--default_llm_presence_penalty",
+        type=float,
+        help=f"默认LLM API Presence Penalty (环境变量: {ENV.DEFAULT_LLM_PRESENCE_PENALTY})",
+    )
+    parser.add_argument(
+        "--context_history_ratio",
+        type=float,
+        help=f"历史消息比例 (环境变量: {ENV.CONTEXT_HISTORY_RATIO})",
+    )
+    parser.add_argument(
+        "--context_active_ratio",
+        type=float,
+        help=f"活跃消息比例 (环境变量: {ENV.CONTEXT_ACTIVE_RATIO})",
+    )
+    parser.add_argument(
+        "--context_max_new_message_ratio",
+        type=float,
+        help=f"新消息最大比例 (环境变量: {ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO})",
+    )
+    parser.add_argument(
+        "--context_recent_turns",
+        type=int,
+        help=f"最近对话轮数 (环境变量: {ENV.CONTEXT_RECENT_TURNS})",
+    )
     parser.add_argument(
         "--port",
         type=int,
@@ -242,20 +328,7 @@ def create_argument_parser():
         "--logs-dir",
         help=f"日志目录 (环境变量: {ENV.LOGS_DIR})",
     )
-    parser.add_argument(
-        "--memory_root",
-        help=f"记忆存储根目录（可选） (环境变量: {ENV.MEMORY_ROOT})",
-    )
 
-    parser.add_argument(
-        "--pid-file",
-        help=f"PID文件路径 (环境变量: {ENV.PID_FILE})",
-    )
-    parser.add_argument(
-        "--force_summary",
-        action="store_true",
-        help=f"是否强制总结 (环境变量: {ENV.FORCE_SUMMARY})",
-    )
 
     # Embedding 配置
     parser.add_argument(
@@ -321,6 +394,12 @@ def create_argument_parser():
         help=f"MinIO Public Base URL (环境变量: {ENV.MINIO_PUBLIC_BASE_URL})",
     )
 
+    # Trace 配置
+    parser.add_argument(
+        "--trace_jaeger_endpoint",
+        help=f"Jaeger OTLP Endpoint (http/grpc), e.g. http://localhost:4317 (环境变量: {ENV.TRACE_JAEGER_ENDPOINT})",
+    )
+
     # 数据库相关参数
     parser.add_argument(
         "--db_type",
@@ -349,16 +428,9 @@ def build_startup_config() -> StartupConfig:
 
     cfg = StartupConfig(
         port=pick_int(args.port, ENV.PORT, StartupConfig.port),
-        pid_file=pick_str(args.pid_file, ENV.PID_FILE, StartupConfig.pid_file),
         logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
         workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
-        memory_root=pick_str(
-            args.memory_root, ENV.MEMORY_ROOT, StartupConfig.memory_root
-        ),
-        force_summary=pick_bool(
-            args.force_summary, ENV.FORCE_SUMMARY, StartupConfig.force_summary
-        ),
-        no_auth=pick_bool(False, ENV.NO_AUTH, StartupConfig.no_auth),
+
         db_type=pick_str(args.db_type, ENV.DB_TYPE, StartupConfig.db_type),
         db_path=pick_str(args.db_path, ENV.DB_PATH, StartupConfig.db_path),
         mysql_host=pick_str(args.mysql_host, ENV.MYSQL_HOST, StartupConfig.mysql_host),
@@ -386,6 +458,11 @@ def build_startup_config() -> StartupConfig:
             ENV.DEFAULT_LLM_API_KEY,
             StartupConfig.default_llm_api_key,
         ),
+        extra_llm_configs=pick_json_dict_list(
+            args.extra_llm_configs,
+            ENV.EXTRA_LLM_CONFIGS,
+            StartupConfig.extra_llm_configs,
+        ),
         default_llm_api_base_url=pick_str(
             args.default_llm_api_base_url,
             ENV.DEFAULT_LLM_API_BASE_URL,
@@ -410,6 +487,36 @@ def build_startup_config() -> StartupConfig:
             args.default_llm_max_model_len,
             ENV.DEFAULT_LLM_MAX_MODEL_LEN,
             StartupConfig.default_llm_max_model_len,
+        ),
+        default_llm_top_p=pick_float(
+            args.default_llm_top_p,
+            ENV.DEFAULT_LLM_TOP_P,
+            StartupConfig.default_llm_top_p,
+        ),
+        default_llm_presence_penalty=pick_float(
+            args.default_llm_presence_penalty,
+            ENV.DEFAULT_LLM_PRESENCE_PENALTY,
+            StartupConfig.default_llm_presence_penalty,
+        ),
+        context_history_ratio=pick_float(
+            args.context_history_ratio,
+            ENV.CONTEXT_HISTORY_RATIO,
+            StartupConfig.context_history_ratio,
+        ),
+        context_active_ratio=pick_float(
+            args.context_active_ratio,
+            ENV.CONTEXT_ACTIVE_RATIO,
+            StartupConfig.context_active_ratio,
+        ),
+        context_max_new_message_ratio=pick_float(
+            args.context_max_new_message_ratio,
+            ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
+            StartupConfig.context_max_new_message_ratio,
+        ),
+        context_recent_turns=pick_int(
+            args.context_recent_turns,
+            ENV.CONTEXT_RECENT_TURNS,
+            StartupConfig.context_recent_turns,
         ),
         embed_api_key=pick_str(
             args.embedding_api_key, ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
@@ -455,6 +562,11 @@ def build_startup_config() -> StartupConfig:
             ENV.MINIO_PUBLIC_BASE_URL,
             StartupConfig.minio_public_base_url,
         ),
+        trace_jaeger_endpoint=pick_str(
+            args.trace_jaeger_endpoint,
+            ENV.TRACE_JAEGER_ENDPOINT,
+            StartupConfig.trace_jaeger_endpoint,
+        ),
     )
     # 规范化路径
     if cfg.workspace:
@@ -465,6 +577,7 @@ def build_startup_config() -> StartupConfig:
         os.makedirs(cfg.logs_dir, exist_ok=True)
     if cfg.db_type == "file" and cfg.db_path:
         cfg.db_path = os.path.abspath(cfg.db_path)
+
     return cfg
 
 

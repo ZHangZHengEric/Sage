@@ -1,10 +1,17 @@
 <template>
-  <div class="config-panel">
-  
-    <div class="config-content">
+  <div class="fixed inset-0 z-50 sm:static sm:z-auto w-full sm:w-[35%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <!-- 移动端头部 -->
+    <div class="flex items-center justify-between p-4 border-b sm:hidden">
+      <h3 class="font-semibold">{{ t('chat.settings') }}</h3>
+      <Button variant="ghost" size="icon" @click="$emit('close')">
+        <X class="h-4 w-4" />
+      </Button>
+    </div>
 
+    <div class="flex-1 overflow-y-auto p-6 space-y-6">
+      
       <!-- 深度思考 -->
-      <div class="config-section">
+      <div class="space-y-2">
         <ThreeOptionSwitch
           :value="config.deepThinking"
           @change="(value) => handleConfigChange({ deepThinking: value })"
@@ -14,7 +21,7 @@
       </div>
 
       <!-- 多智能体协作 -->
-      <div class="config-section">
+      <div class="space-y-2">
         <ThreeOptionSwitch
           :value="config.multiAgent"
           @change="(value) => handleConfigChange({ multiAgent: value })"
@@ -24,35 +31,37 @@
       </div>
 
       <!-- 更多建议 -->
-      <div class="config-section">
-        <label class="config-checkbox">
-          <input
-            type="checkbox"
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center space-x-2">
+          <Checkbox 
+            id="moreSuggest" 
             :checked="config.moreSuggest"
-            @change="handleConfigToggle('moreSuggest')"
+            @update:checked="handleConfigToggle('moreSuggest')"
           />
-          <span class="checkmark"></span>
-          {{ t('config.moreSuggest') }}
-        </label>
-        <small class="config-description">
+          <Label for="moreSuggest" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+            {{ t('config.moreSuggest') }}
+          </Label>
+        </div>
+        <p class="text-xs text-muted-foreground pl-6">
           {{ t('config.moreSuggestDesc') }}
-        </small>
+        </p>
       </div>
 
       <!-- 最大循环次数 -->
-      <div class="config-section">
-        <label class="config-label">{{ t('config.maxLoopCount') }}</label>
-        <input
+      <div class="space-y-2">
+        <Label for="maxLoopCount">{{ t('config.maxLoopCount') }}</Label>
+        <Input
+          id="maxLoopCount"
           type="number"
           min="1"
           max="50"
           :value="config.maxLoopCount"
           @input="handleMaxLoopCountChange"
-          class="config-input"
+          class="h-9"
         />
-        <small class="config-description">
+        <p class="text-xs text-muted-foreground">
           {{ t('config.maxLoopCountDesc') }}
-        </small>
+        </p>
       </div>
     </div>
   </div>
@@ -61,6 +70,11 @@
 <script setup>
 import { useLanguage } from '../../utils/i18n.js'
 import ThreeOptionSwitch from './ThreeOptionSwitch.vue'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { X } from 'lucide-vue-next'
 
 // Props
 const props = defineProps({
@@ -108,145 +122,3 @@ const handleAgentChange = (e) => {
 }
 </script>
 
-<style scoped>
-/* ConfigPanel 组件样式 */
-.config-panel {
-  width: 35%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0;
-  padding: 20px 24px;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  border-top: none;
-  border-right: none;
-  border-bottom: none;
-}
-
-.panel-header {
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.panel-header h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.config-content {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.config-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.config-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500;
-  margin-bottom: 2px;
-}
-
-.config-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-  user-select: none;
-}
-
-.config-checkbox input[type="checkbox"] {
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 3px;
-  background: transparent;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s;
-}
-
-.config-checkbox input[type="checkbox"]:checked {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-color: #667eea;
-}
-
-.config-checkbox input[type="checkbox"]:checked::after {
-  content: '✓';
-  position: absolute;
-  top: -2px;
-  left: 1px;
-  color: white;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-.checkmark {
-  /* 保留原有的checkmark样式兼容性 */
-}
-
-.agent-select {
-  min-width: 120px;
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 12px;
-  backdrop-filter: blur(10px);
-  transition: all 0.2s;
-}
-
-.agent-select:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
-}
-
-.agent-select option {
-  background: #2a2a2a;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.config-input {
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 12px;
-  backdrop-filter: blur(10px);
-  transition: all 0.2s;
-  width: 60px;
-}
-
-.config-input:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
-}
-
-.config-description {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-top: 2px;
-  line-height: 1.3;
-}
-
-
-</style>

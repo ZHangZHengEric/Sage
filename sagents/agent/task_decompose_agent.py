@@ -15,17 +15,16 @@ import re
 class TaskDecomposeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
         super().__init__(model, model_config, system_prefix)
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix')
         self.agent_name = "TaskDecomposeAgent"
         self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
-        logger.info("TaskDecomposeAgent 初始化完成")
+        logger.debug("TaskDecomposeAgent 初始化完成")
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
-        self.SYSTEM_PREFIX_FIXED = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix', language=session_context.get_language())
-        
+        current_system_prefix = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix', language=session_context.get_language())
+
         message_manager = session_context.message_manager
         task_manager = session_context.task_manager
-        
+
         if 'task_rewrite' in session_context.audit_status:
             recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
                 role=MessageRole.USER.value,
@@ -35,7 +34,7 @@ class TaskDecomposeAgent(AgentBase):
         else:
             history_messages = message_manager.extract_all_context_messages(recent_turns=5)
             recent_message_str = MessageManager.convert_messages_to_str(history_messages)        
-        
+
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
 
@@ -45,7 +44,7 @@ class TaskDecomposeAgent(AgentBase):
             agent_description=self.system_prefix,
         )
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
@@ -65,11 +64,11 @@ class TaskDecomposeAgent(AgentBase):
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:
                 delta_content = llm_repsonse_chunk.choices[0].delta.content
-                
+
                 for delta_content_char in delta_content:
                     delta_content_all = unknown_content+ delta_content_char
                     delta_content_type = self._judge_delta_content_type(delta_content_all, full_response, ['task_item'])
-                    
+
                     full_response += delta_content_char
                     if delta_content_type == 'unknown':
                         unknown_content = delta_content_all
@@ -85,7 +84,7 @@ class TaskDecomposeAgent(AgentBase):
                                     show_content='\n- ',
                                     message_type=MessageType.TASK_DECOMPOSITION.value
                                 )]
-                            
+
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
                                 content="",
@@ -108,12 +107,12 @@ class TaskDecomposeAgent(AgentBase):
             # 解析任务列表
             tasks = self._convert_xlm_to_json(full_response)
             logger.info(f"TaskDecomposeAgent: 成功分解为 {len(tasks)} 个子任务")
-            
+
             # 如果有TaskManager，将子任务存储到任务管理器中
             if task_manager:
                 logger.info("TaskDecomposeAgent: 将分解的子任务存储到TaskManager")
                 task_objects = []
-                
+
                 for i, task_data in enumerate(tasks):
                     # 创建TaskBase对象
                     task_obj = TaskBase(
@@ -124,15 +123,15 @@ class TaskDecomposeAgent(AgentBase):
                         assigned_to='ExecutorAgent'
                     )
                     task_objects.append(task_obj)
-                
+
                 # 批量添加任务到TaskManager
                 task_ids = task_manager.add_tasks_batch(task_objects)
                 logger.info(f"TaskDecomposeAgent: 成功将 {len(task_ids)} 个子任务添加到TaskManager")
-                
+
                 # 将任务ID添加到原始任务数据中（用于后续引用）
                 for task_data, task_id in zip(tasks, task_ids):
                     task_data['task_id'] = task_id
-            
+
             # 返回最终结果（保持原有流式输出格式）
             planning_label = PromptManager().get_prompt(
                 'task_decomposition_planning',
@@ -141,7 +140,7 @@ class TaskDecomposeAgent(AgentBase):
                 default='任务拆解规划：'
             )
             result_content = planning_label + '\n' + json.dumps({"tasks": tasks}, ensure_ascii=False)
-            
+
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
                 content=result_content,
@@ -149,7 +148,7 @@ class TaskDecomposeAgent(AgentBase):
                 show_content='',
                 message_type=MessageType.TASK_DECOMPOSITION.value
             )
-            
+
             yield [result_message]
         except Exception as e:
             logger.error(f"TaskDecomposeAgent: 处理最终结果时发生错误: {str(e)}")
@@ -180,8 +179,7 @@ class TaskDecomposeAgent(AgentBase):
 
             logger.debug(f"TaskDecomposeAgent: XML转JSON完成，共提取 {len(tasks)} 个任务")
             return tasks
-            
+
         except Exception as e:
             logger.error(f"TaskDecomposeAgent: XML转JSON失败: {str(e)}")
             raise
-    

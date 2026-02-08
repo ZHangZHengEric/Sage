@@ -55,12 +55,45 @@ graph LR
 
 ## 🔧 创建基础工具
 
+### 使用注解定义工具 (推荐)
+
+Sage 提供了 `@sage_mcp_tool` 注解，这是定义内部工具的推荐方式。它能够自动解析文档字符串生成工具描述和参数模式，并支持自动发现。
+
+```python
+from sagents.tool.mcp_tool_base import sage_mcp_tool
+
+@sage_mcp_tool()
+async def search_web_page(
+    query: str,
+    count: int = 10,
+    language: str = None,
+) -> str:
+    """
+    使用搜索引擎搜索网页。
+    
+    Args:
+        query: 搜索关键词 (必填)
+        count: 返回结果数量 (默认 10)
+        language: 语言代码 (例如 zh, en)
+        
+    Returns:
+        List[Dict[str, Any]]: 包含搜索结果的字典列表
+    """
+    # 工具实现逻辑
+    return [{"title": "Example", "url": "https://example.com"}]
+```
+
+**特性：**
+1. **自动模式生成**：根据类型提示和文档字符串自动生成 JSON Schema。
+2. **自动发现**：标记的工具会被框架自动发现并注册。
+3. **元数据解析**：自动解析 docstring 中的 Args 和 Returns。
+
 ### 简单函数工具
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 
-@ToolBase.register_tool
+@tool()
 def calculator(expression: str) -> str:
     """
     安全地计算数学表达式
@@ -104,7 +137,7 @@ def calculator(expression: str) -> str:
 ### 基于类的工具
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 from typing import Dict, List
 import requests
 import os
@@ -116,7 +149,7 @@ class WeatherTool:
         self.api_key = os.getenv('WEATHER_API_KEY')
         self.base_url = "http://api.openweathermap.org/data/2.5/weather"
     
-    @ToolBase.register_tool
+    @tool()
     def get_weather(self, city: str, units: str = "metric") -> Dict[str, Any]:
         """
         获取城市的当前天气信息
@@ -163,7 +196,7 @@ weather_tool = WeatherTool()
 ### 带配置的工具
 
 ```python
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 from agents.config import get_settings
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
@@ -186,7 +219,7 @@ class DatabaseTool:
         self.config.host = os.getenv('DB_HOST', self.config.host)
         self.config.port = int(os.getenv('DB_PORT', self.config.port))
     
-    @ToolBase.register_tool
+    @tool()
     def query_database(self, query: str, limit: int = 100) -> Dict[str, Any]:
         """
         执行只读数据库查询
@@ -235,7 +268,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
-@ToolBase.register_tool
+@tool()
 def process_file(file_content: str, operation: str = "analyze") -> Dict[str, Any]:
     """
     使用各种操作处理文件内容
@@ -300,7 +333,7 @@ def _validate_file(file_path: Path) -> Dict[str, Any]:
 import asyncio
 import aiohttp
 
-@ToolBase.register_tool
+@tool()
 def fetch_url_async(url: str, timeout: int = 30) -> Dict[str, Any]:
     """
     异步获取 URL 内容
@@ -338,7 +371,7 @@ async def _fetch_url_internal(url: str, timeout: int) -> Dict[str, Any]:
 ```python
 from agents.utils import logger
 
-@ToolBase.register_tool
+@tool()
 def process_large_dataset(data: List[Dict], operation: str = "transform") -> Dict[str, Any]:
     """
     处理大型数据集并跟踪进度
@@ -469,7 +502,8 @@ if __name__ == "__main__":
 
 ```python
 # test_mcp_integration.py
-from agents.tool.tool_manager import ToolManager
+from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_base import tool
 
 def test_mcp_tools():
     """测试 MCP 工具集成"""
@@ -503,8 +537,8 @@ if __name__ == "__main__":
 ### 创建智能体工具
 
 ```python
-from agents.tool.tool_base import AgentToolSpec
-from agents.agent.agent_base import AgentBase
+from sagents.agent.agent_base import AgentBase
+from sagents.tool.tool_manager import ToolManager
 
 class ResearchAgent(AgentBase):
     """专门的研究智能体"""
@@ -519,20 +553,9 @@ class ResearchAgent(AgentBase):
         }]
 
 # 注册为智能体工具
-@ToolBase.register_agent_tool
-def research_assistant(messages: List[Dict], session_id: str) -> List[Dict]:
-    """
-    将复杂的研究任务委托给专门的研究智能体
-    
-    Args:
-        messages: 对话历史
-        session_id: 当前会话 ID
-        
-    Returns:
-        来自研究智能体的响应消息列表
-    """
-    research_agent = ResearchAgent()
-    return research_agent.run(messages, session_id=session_id)
+tool_manager = ToolManager()
+research_agent = ResearchAgent()
+tool_manager.register_tool(research_agent.to_tool())
 ```
 
 ## 🧪 测试和调试
@@ -587,7 +610,7 @@ def test_tool_registration():
     tool_manager = ToolManager()
     initial_count = len(tool_manager.list_tools())
     
-    @ToolBase.register_tool
+    @tool()
     def test_tool(param: str) -> str:
         return f"测试: {param}"
     
@@ -621,7 +644,7 @@ print(f"调试结果: {result}")
 ### 1. 错误处理
 
 ```python
-@ToolBase.register_tool
+@tool()
 def robust_tool(param: str) -> Dict[str, Any]:
     """具有全面错误处理的工具"""
     try:
@@ -660,7 +683,7 @@ def validate_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-@ToolBase.register_tool
+@tool()
 def send_email(to: str, subject: str, body: str) -> Dict[str, Any]:
     """
     发送带验证的邮件
@@ -701,7 +724,7 @@ def managed_resource(resource_path: str) -> Generator:
         if resource:
             release_resource(resource)
 
-@ToolBase.register_tool
+@tool()
 def process_with_resource(data: str, resource_path: str) -> Dict[str, Any]:
     """使用托管资源处理数据"""
     try:
@@ -736,7 +759,7 @@ def expensive_computation(data: str) -> str:
     time.sleep(2)  # 模拟昂贵操作
     return f"计算结果: {data}"
 
-@ToolBase.register_tool
+@tool()
 def optimized_tool(input_data: str) -> Dict[str, Any]:
     """优化的工具实现"""
     start_time = time.time()
@@ -763,7 +786,7 @@ def optimized_tool(input_data: str) -> Dict[str, Any]:
 ```python
 # production_tools.py
 import os
-from agents.tool.tool_base import ToolBase
+from sagents.tool.tool_base import tool
 from agents.config import get_settings
 
 class ProductionToolConfig:
@@ -774,7 +797,7 @@ class ProductionToolConfig:
         self.max_retries = int(os.getenv('TOOL_MAX_RETRIES', 3))
         self.rate_limit = int(os.getenv('TOOL_RATE_LIMIT', 100))
 
-@ToolBase.register_tool
+@tool()
 def production_ready_tool(data: str) -> Dict[str, Any]:
     """生产就绪的工具实现"""
     config = ProductionToolConfig()

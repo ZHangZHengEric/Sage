@@ -1,9 +1,9 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-from core.config import StartupConfig
 from elasticsearch import AsyncElasticsearch, helpers
-from core.client.embed import EMBEDDING_DIMS
-from sagents.utils.logger import logger
+from loguru import logger
+
+from ...core.config import StartupConfig, get_startup_config
 
 ES_CLIENT: Optional[AsyncElasticsearch] = None
 
@@ -16,6 +16,34 @@ def get_es_client() -> AsyncElasticsearch:
     if ES_CLIENT is None:
         raise RuntimeError("ES 客户端未初始化，请先调用 init_es_client()")
     return ES_CLIENT
+
+
+async def _configure_disk_thresholds(client: AsyncElasticsearch) -> None:
+    """
+    配置 Elasticsearch 磁盘阈值（解决 flood stage disk watermark 问题）
+    """
+    try:
+        # 1. 设置集群磁盘分配设置（使用绝对值，适应大磁盘开发环境）
+        await client.cluster.put_settings(
+            body={
+                "transient": {
+                    "cluster.routing.allocation.disk.threshold_enabled": True,
+                    "cluster.routing.allocation.disk.watermark.low": "10gb",
+                    "cluster.routing.allocation.disk.watermark.high": "5gb",
+                    "cluster.routing.allocation.disk.watermark.flood_stage": "2gb",
+                    "cluster.info.update.interval": "1m",
+                }
+            }
+        )
+        logger.info("ES 集群磁盘阈值已更新 (10gb/5gb/2gb)")
+
+        # 2. 解除索引只读锁定（如果之前被锁）
+        await client.indices.put_settings(
+            body={"index.blocks.read_only_allow_delete": None}, index="_all"
+        )
+        logger.info("ES 索引只读锁定已解除")
+    except Exception as e:
+        logger.warning(f"配置 ES 磁盘阈值失败 (可能权限不足或版本不兼容): {e}")
 
 
 async def init_es_client(
@@ -37,7 +65,7 @@ async def init_es_client(
 
     if not base:
         logger.warning(
-            f"Elasticsearch 参数不足，未初始化 base={base}, api_key={api_key}, username={username}, password={'***' if password else None}"
+            f"Elasticsearch 参数不足，跳过初始化"
         )
         return None
 
@@ -48,6 +76,10 @@ async def init_es_client(
             ES_CLIENT = AsyncElasticsearch(base, basic_auth=(username, password))
         else:
             ES_CLIENT = AsyncElasticsearch(base)
+        
+        # # 尝试自动修复磁盘阈值问题
+        # await _configure_disk_thresholds(ES_CLIENT)
+        
         logger.info(f"ES 客户端初始化成功: {base}")
         return ES_CLIENT
     except Exception as e:
@@ -74,7 +106,14 @@ def dims() -> int:
     """
     返回向量维度
     """
-    return EMBEDDING_DIMS
+    try:
+        cfg = get_startup_config()
+        if cfg and cfg.embed_dims:
+            return cfg.embed_dims
+        # Fallback to default if config not ready or dims not set
+        return 1024
+    except Exception:
+        return 1024
 
 
 async def _index_exists(client: AsyncElasticsearch, index_name: str) -> bool:
@@ -90,17 +129,13 @@ def _common_settings() -> Dict[str, Any]:
     Elasticsearch 通用索引设置
     """
     return {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
         "similarity": {"my_similarity": {"type": "BM25", "b": 0.5, "k1": 2.0}},
         "analysis": {
-            "filter": {
-                "jieba_stop": {
-                    "type": "stop",
-                    "stopwords_path": "stopwords/stopwords.txt",
-                }
-            },
             "analyzer": {
                 "my_ana": {
-                    "filter": ["lowercase", "jieba_stop"],
+                    "filter": ["lowercase"],
                     "tokenizer": "ik_max_word",
                 }
             },

@@ -1,0 +1,26 @@
+# --- Build stage: use Node 22 to satisfy Vite requirements ---
+FROM docker.m.daocloud.io/node:22-alpine AS builder
+WORKDIR /app
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+RUN npm config set registry https://registry.npmmirror.com && npm config set fetch-retries 5 && npm config set fetch-retry-maxtimeout 600000
+
+# Install dependencies
+COPY ./app/web .
+
+RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
+
+RUN npm run build
+
+# --- Runtime stage: serve static files with Nginx ---
+FROM docker.m.daocloud.io/nginx:1.27-alpine
+
+# Copy custom nginx config
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy build output to Nginx html directory
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+# Simple healthcheck to ensure Nginx responds
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost/ || exit 1

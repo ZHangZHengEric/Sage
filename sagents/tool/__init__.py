@@ -1,19 +1,24 @@
-from .tool_manager import ToolManager
-from .tool_base import ToolBase
-from .tool_config import ToolSpec, McpToolSpec, SseServerParameters
-from .execute_command_tool import ExecuteCommandTool
-from .file_parser_tool import FileParserTool
-from .file_system_tool import FileSystemTool
-from .task_interruption_tool import TaskInterruptionTool
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tool_manager import ToolManager
+    from .tool_proxy import ToolProxy
+    from .tool_schema import AgentToolSpec
+
+def __getattr__(name):
+    if name == "ToolManager":
+        from .tool_manager import ToolManager
+        return ToolManager
+    elif name == "ToolProxy":
+        from .tool_proxy import ToolProxy
+        return ToolProxy
+    elif name == "AgentToolSpec":
+        from .tool_schema import AgentToolSpec
+        return AgentToolSpec
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     'ToolManager',
-    'ToolBase',
-    'ToolSpec',
-    'McpToolSpec',
-    'SseServerParameters',
-    'TaskInterruptionTool',
-    'FileSystemTool',
-    'ExecuteCommandTool',
-    'FileParserTool'
+    'ToolProxy',
+    'AgentToolSpec',
 ]

@@ -1,45 +1,25 @@
 <template>
-  <div class="syntax-highlighter">
-    <div v-if="showHeader" class="code-header">
-      <span class="language-label">{{ language || 'text' }}</span>
+  <div class="rounded-lg border bg-muted/40 overflow-hidden my-4">
+    <div v-if="showHeader" class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b text-xs text-muted-foreground">
+      <span class="font-medium uppercase tracking-wider text-[10px]">{{ language || 'text' }}</span>
       <button 
         v-if="showCopyButton"
         @click="copyCode"
-        class="copy-button"
+        class="flex items-center gap-1 hover:text-foreground transition-colors focus:outline-none"
         :title="copyButtonText"
       >
-        <span v-if="!copied">📋</span>
-        <span v-else>✅</span>
+        <span v-if="!copied" class="text-xs">📋</span>
+        <span v-else class="text-xs">✅</span>
       </button>
     </div>
-    <pre class="code-block"><code :class="codeClass" v-html="highlightedCode"></code></pre>
+    <pre class="m-0 p-4 overflow-x-auto text-sm font-mono leading-relaxed bg-background/50"><code :class="['hljs', codeClass]" v-html="highlightedCode"></code></pre>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
-import Prism from 'prismjs'
-import 'prismjs/themes/prism-tomorrow.css'
-
-// 导入常用语言支持
-import 'prismjs/components/prism-javascript'
-import 'prismjs/components/prism-typescript'
-import 'prismjs/components/prism-jsx'
-import 'prismjs/components/prism-tsx'
-import 'prismjs/components/prism-python'
-import 'prismjs/components/prism-java'
-import 'prismjs/components/prism-css'
-import 'prismjs/components/prism-scss'
-import 'prismjs/components/prism-json'
-import 'prismjs/components/prism-yaml'
-import 'prismjs/components/prism-markdown'
-import 'prismjs/components/prism-bash'
-import 'prismjs/components/prism-sql'
-import 'prismjs/components/prism-go'
-import 'prismjs/components/prism-rust'
-import 'prismjs/components/prism-php'
-import 'prismjs/components/prism-c'
-import 'prismjs/components/prism-cpp'
+import { ref, computed } from 'vue'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
 
 const props = defineProps({
   code: {
@@ -67,13 +47,24 @@ const codeClass = computed(() => {
   return `language-${props.language}`
 })
 
+const escapeHtml = (text) => {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }
+  return text.replace(/[&<>"']/g, char => map[char])
+}
+
 const highlightedCode = computed(() => {
   if (!props.code) return ''
   
   try {
     // 检查语言是否支持
-    if (Prism.languages[props.language]) {
-      return Prism.highlight(props.code, Prism.languages[props.language], props.language)
+    if (props.language && props.language !== 'text' && hljs.getLanguage(props.language)) {
+      return hljs.highlight(props.code, { language: props.language }).value
     } else {
       // 如果不支持该语言，返回原始代码（HTML转义）
       return escapeHtml(props.code)
@@ -87,13 +78,6 @@ const highlightedCode = computed(() => {
 const copyButtonText = computed(() => {
   return copied.value ? '已复制' : '复制代码'
 })
-
-// 方法
-const escapeHtml = (text) => {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
-}
 
 const copyCode = async () => {
   try {
@@ -134,83 +118,3 @@ const fallbackCopy = () => {
   }
 }
 </script>
-
-<style scoped>
-.syntax-highlighter {
-  margin: 12px 0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #2d3748;
-  border: 1px solid #4a5568;
-}
-
-.code-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: #1a202c;
-  border-bottom: 1px solid #4a5568;
-}
-
-.language-label {
-  font-size: 12px;
-  color: #a0aec0;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.copy-button {
-  background: transparent;
-  border: 1px solid #4a5568;
-  color: #a0aec0;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s ease;
-}
-
-.copy-button:hover {
-  background: #4a5568;
-  color: #fff;
-}
-
-.code-block {
-  margin: 0;
-  padding: 16px;
-  overflow-x: auto;
-  background: #2d3748;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.code-block code {
-  background: none;
-  padding: 0;
-  border-radius: 0;
-  color: #e2e8f0;
-}
-
-/* 滚动条样式 */
-.code-block::-webkit-scrollbar {
-  height: 8px;
-}
-
-.code-block::-webkit-scrollbar-track {
-  background: #1a202c;
-}
-
-.code-block::-webkit-scrollbar-thumb {
-  background: #4a5568;
-  border-radius: 4px;
-}
-
-.code-block::-webkit-scrollbar-thumb:hover {
-  background: #718096;
-}
-
-
-</style>

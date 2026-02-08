@@ -1,81 +1,161 @@
 <template>
-  <div class="chat-page">
-    <div class="chat-header">
-      <div class="chat-controls">
-        <el-select v-model="selectedAgentId" class="agent-select" @change="handleAgentChange">
-          <el-option v-for="agent in (agents || [])" :key="agent.id" :label="agent.name" :value="agent.id" />
-        </el-select>
-        <el-button type="text" @click="showSettings = !showSettings" :title="t('chat.settings')">
-          <Settings :size="16" />
-        </el-button>
+  <div class="flex flex-col h-full bg-background">
+    <div class="flex-none h-16 flex items-center px-6 justify-end bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
+
+      <div class="flex items-center gap-2 ">
+        <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
+          <SelectTrigger class="w-[180px] h-9 text-xs border-muted-foreground/20 bg-muted/50 focus:ring-1 focus:ring-primary/20">
+            <SelectValue :placeholder="t('chat.selectAgent') || 'Select Agent'" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="agent in (agents || [])" :key="agent.id" :value="agent.id" class="text-xs">
+              {{ agent.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        
+        <div class="h-4 w-[1px] bg-border mx-1"></div>
+
+        <TooltipProvider>
+          <div class="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleWorkspacePanel">
+                  <FolderOpen class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('workspace.title') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare">
+                  <Share2 class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.share') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showTrace = !showTrace">
+                  <Activity class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.traceWorkflow') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showSettings = !showSettings">
+                  <Settings class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{{ t('chat.settings') }}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
       </div>
     </div>
-    <div class="chat-container">
-      <div class="chat-messages">
-        <div v-if="!messages || messages.length === 0" class="empty-state">
-          <Bot :size="48" class="empty-icon" />
-          <h3>{{ t('chat.emptyTitle') }}</h3>
-          <p>{{ t('chat.emptyDesc') }}</p>
-        </div>
-        <div v-else ref="messagesListRef" class="messages-list" @scroll="handleScroll">
-          <MessageRenderer v-for="(message, index) in (messages || [])" :key="message.id || index" :message="message"
-            :messages="messages || []" :message-index="index" @download-file="downloadFile"
-            @toolClick="handleToolClick" />
-          <div v-if="isLoading" class="loading-indicator">
-            <div class="loading-dots">
-              <span></span>
-              <span></span>
-              <span></span>
+    <div class="flex-1 overflow-hidden relative flex flex-row">
+      <div class="flex-1 flex flex-col min-w-0 bg-muted/5 relative">
+        <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
+          <div v-if="!messages || messages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
+            <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm">
+               <Bot :size="32" class="opacity-80 text-primary" />
+            </div>
+            <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
+            <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
+          </div>
+          <div v-else class="pb-8 max-w-4xl mx-auto w-full">
+            <MessageRenderer 
+              v-for="(message, index) in (messages || [])" 
+              :key="message.id || index" 
+              :message="message"
+              :messages="messages || []" 
+              :message-index="index" 
+              :is-loading="isLoading && index === (messages || []).length - 1"
+              @download-file="downloadFile"
+              @toolClick="handleToolClick" 
+              @sendMessage="handleSendMessage" 
+            />
+            
+            <!-- Global loading indicator when no messages or waiting for first chunk of response -->
+            <div v-if="isLoading && (!messages || messages.length === 0 || messages[messages.length - 1].role === 'user')" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+               <LoadingBubble />
             </div>
           </div>
+          <div ref="messagesEndRef" />
         </div>
-        <div ref="messagesEndRef" />
+        
+        <div class="flex-none p-4  bg-background" v-if="selectedAgent">
+            <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+        </div>
       </div>
 
-      <ToolDetailsPanel v-if="showToolDetails && selectedToolExecution" :tool-execution="selectedToolExecution"
-        :tool-result="toolResult" @close="showToolDetails = false" />
-
-      <TaskStatusPanel v-if="showTaskStatus" :task-status="taskStatus" :expanded-tasks="expandedTasks"
-        @toggle-task-expanded="toggleTaskExpanded" @close="showTaskStatus = false" />
-
-      <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles" :workspace-path="workspacePath"
+      <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles"
         @download-file="downloadFile" @close="showWorkspace = false" />
+
+      <WorkflowPanel v-if="showTrace && currentSessionId" :session-id="currentSessionId" @close="showTrace = false" />
 
       <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
         @config-change="updateConfig" @close="showSettings = false" />
-    </div>
-    <div class="chat-input-container">
-        <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Bot, Settings } from 'lucide-vue-next'
+import { useRoute } from 'vue-router'
+import { toast } from 'vue-sonner'
+import { Bot, Settings, Activity, Share2, FolderOpen } from 'lucide-vue-next'
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
-import TaskStatusPanel from '@/components/chat/TaskStatusPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
-import ToolDetailsPanel from '@/components/chat/ToolDetailsPanel.vue'
+import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
+import LoadingBubble from '@/components/chat/LoadingBubble.vue'
+
+// UI Components
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
 import { chatAPI } from '../api/chat.js'
 import { taskAPI } from '../api/task.js'
+import { isLoggedIn } from '@/utils/auth.js'
 
 // Props
 const props = defineProps({
   selectedConversation: {
     type: Object,
     default: null
+  },
+  chatResetToken: {
+    type: Number,
+    default: 0
   }
 })
 
 const { t } = useLanguage()
+const route = useRoute()
 
 // 状态管理
 const messagesEndRef = ref(null)
@@ -84,11 +164,13 @@ const showSettings = ref(false)
 const showToolDetails = ref(false)
 const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
+const showTrace = ref(false)
 const selectedToolExecution = ref(null)
 const toolResult = ref(null)
 
 // 滚动相关状态
 const isUserScrolling = ref(false)
+const isAutoScrolling = ref(false)
 const shouldAutoScroll = ref(true)
 const scrollTimeout = ref(null)
 
@@ -109,7 +191,6 @@ const config = ref({
 const userConfigOverrides = ref({});
 const taskStatus = ref(null);
 const workspaceFiles = ref([]);
-const workspacePath = ref(null);
 const lastMessageId = ref(null);
 
   // 获取任务状态
@@ -135,31 +216,49 @@ const fetchTaskStatus = async (sessionId) => {
     if (!sessionId) return;
     try {
       const data = await taskAPI.getWorkspaceFiles(sessionId);
-;
       workspaceFiles.value = data.files || [];
-      workspacePath.value = data.agent_workspace;
     } catch (error) {
       console.error('获取工作空间文件出错:', error);
     }
   };
 
+  const handleWorkspacePanel = () => {
+    showWorkspace.value = !showWorkspace.value;
+    if (showWorkspace.value) {
+      updateTaskAndWorkspace(currentSessionId.value);
+    }
+  }
+
   // 下载文件
-  const downloadWorkspaceFile = async (sessionId, filePath) => {
-    if (!sessionId || !filePath || !workspacePath.value) return;
+  const downloadWorkspaceFile = async (sessionId, itemOrPath) => {
+    if (!sessionId || !itemOrPath) return;
     
+    // 兼容处理：itemOrPath可能是字符串路径，也可能是文件对象
+    const filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path;
+    const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false;
+    
+    if (!filePath) return;
+
     try {
-      const blob = await taskAPI.downloadFile(filePath, workspacePath.value);
+      const blob = await taskAPI.downloadFile(sessionId, filePath);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = filePath.split('/').pop();
+      
+      let filename = filePath.split('/').pop();
+      if (isDirectory && !filename.endsWith('.zip')) {
+        filename += '.zip';
+      }
+      
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
       console.error('下载文件出错:', error);
+      toast.error(t('chat.downloadError') || `Download failed: ${error.message}`);
     }
   };
 
@@ -177,7 +276,6 @@ const toggleTaskExpanded = (taskId) => {
   // 更新任务和工作空间数据
   const updateTaskAndWorkspace = (sessionId, reason = 'unknown') => {
     if (sessionId) {
-      fetchTaskStatus(sessionId);
       fetchWorkspaceFiles(sessionId);
     }
   };
@@ -186,7 +284,6 @@ const toggleTaskExpanded = (taskId) => {
   const clearTaskAndWorkspace = () => {
     taskStatus.value = null;
     workspaceFiles.value = [];
-    workspacePath.value = null;
     expandedTasks.value = new Set();
     lastMessageId.value = null;
   };
@@ -197,6 +294,40 @@ const createSession = () => {
     const sessionId = `session_${Date.now()}`;
     currentSessionId.value = sessionId;
     return sessionId;
+  };
+
+  // 处理会话加载
+  const handleSessionLoad = async (sessionId) => {
+    if (!sessionId) return;
+    
+    currentSessionId.value = sessionId;
+    isLoading.value = true;
+    
+    try {
+      // 获取会话消息
+      const res = await chatAPI.getConversationMessages(sessionId);
+      if (res && res.messages) {
+        // 加载消息
+        messages.value = res.messages;
+        if (res.conversation_info) {
+          // 如果有 conversation_info，可以在这里恢复其他状态
+          // 比如选中的 agent
+          if (res.conversation_info.agent_id) {
+            const agent = agents.value.find(a => a.id === res.conversation_info.agent_id);
+            if (agent) {
+              selectAgent(agent);
+            }
+          }
+        }
+      }
+      
+    
+    } catch (e) {
+      console.error('加载会话失败:', e);
+      toast.error(t('chat.loadConversationError') || 'Failed to load conversation');
+    } finally {
+      isLoading.value = false;
+    }
   };
 
   // 更新配置
@@ -229,6 +360,17 @@ const updateConfig = (newConfig) => {
       localStorage.setItem('selectedAgentId', agent.id);
     }
   };
+
+  // 监听重置 Token
+  watch(() => props.chatResetToken, (newVal) => {
+    if (newVal) {
+      console.log('🔄 检测到重置信号，重置聊天状态');
+      resetChat();
+      if (isLoading.value) {
+        stopGeneration();
+      }
+    }
+  });
 
   // 从localStorage恢复选中的智能体
   const restoreSelectedAgent = (agentsList) => {
@@ -400,6 +542,9 @@ const handleMessage = (messageData) => {
       ...messageData,
       timestamp: messageData.timestamp || Date.now()
     });
+    // 新消息开始时强制滚动到底部
+    shouldAutoScroll.value = true
+    nextTick(() => scrollToBottom(true))
   }
   console.log('📝 处理消息:', newMessages);
   messages.value = newMessages;
@@ -460,13 +605,44 @@ const stopGeneration = async () => {
 // 计算属性
 const selectedAgentId = computed(() => selectedAgent.value?.id)
 
+const showLoadingBubble = computed(() => {
+  if (!isLoading.value) return false;
+  const msgs = messages.value;
+  if (!msgs || msgs.length === 0) return true;
+  
+  const lastMsg = msgs[msgs.length - 1];
+  if (lastMsg.role !== 'assistant') return true;
+  
+  // Assistant message exists.
+  // Hide loading if we are showing SOMETHING for this message.
+  
+  // Check error
+  if (lastMsg.type === 'error' || lastMsg.message_type === 'error') return false;
+  
+  // Check tools
+  if (lastMsg.tool_calls && lastMsg.tool_calls.length > 0) return false;
+  
+  // Check content
+  if (lastMsg.show_content) return false;
+  
+  // Otherwise, we are still waiting for content
+  return true;
+});
+
 // 滚动相关方法
 const scrollToBottom = (force = false) => {
   if (!shouldAutoScroll.value && !force) return
   
+  isAutoScrolling.value = true
   nextTick(() => {
     if (messagesListRef.value) {
       messagesListRef.value.scrollTop = messagesListRef.value.scrollHeight
+      // 这里的timeout是为了防止 programmatic scroll 触发 scroll 事件导致 shouldAutoScroll 被置为 false
+      setTimeout(() => {
+        isAutoScrolling.value = false
+      }, 100)
+    } else {
+      isAutoScrolling.value = false
     }
   })
 }
@@ -483,6 +659,7 @@ const isScrolledToBottom = () => {
 // 处理用户滚动
 const handleScroll = () => {
   if (!messagesListRef.value) return
+  if (isAutoScrolling.value) return
   
   // 清除之前的超时
   if (scrollTimeout.value) {
@@ -510,12 +687,20 @@ const handleScroll = () => {
 }
 
 const loadAgents = async () => {
+  // 如果未登录，不加载Agent列表，避免401导致无限循环
+  if (!isLoggedIn()) {
+    agents.value = []
+    return
+  }
   try {
     const response = await agentAPI.getAgents()
     agents.value = response || []
   } catch (error) {
     console.error('Failed to load agents:', error)
-    ElMessage.error(t('chat.loadAgentsError'))
+    // 只有在登录状态下才提示错误，避免未登录时的干扰
+    if (isLoggedIn()) {
+      toast.error(t('chat.loadAgentsError'))
+    }
   }
 }
 
@@ -532,6 +717,12 @@ const handleAgentChange = async (agentId) => {
 
 
 // 加载conversation数据
+const resetChat = () => {
+  clearMessages()
+  clearTaskAndWorkspace()
+  createSession()
+}
+
 const loadConversationData = async (conversation) => {
   try {
     // 清除当前消息
@@ -562,7 +753,7 @@ const loadConversationData = async (conversation) => {
 
   } catch (error) {
     console.error('Failed to load conversation data:', error)
-    ElMessage.error(t('chat.loadConversationError'))
+    toast.error(t('chat.loadConversationError'))
   }
 }
 
@@ -619,7 +810,7 @@ const handleSendMessage = async (content) => {
     })
   } catch (error) {
     console.error('❌ Chat.vue发送消息异常:', error);
-    ElMessage.error(t('chat.sendError'))
+    toast.error(t('chat.sendError'))
     isLoading.value = false
   }
 }
@@ -633,14 +824,14 @@ const handleToolClick = (toolExecution, result) => {
 }
 
 
-const downloadFile = async (filename) => {
+const downloadFile = async (item) => {
   try {
     if (currentSessionId.value) {
-      await downloadWorkspaceFile(currentSessionId.value, filename)
+      await downloadWorkspaceFile(currentSessionId.value, item)
     }
   } catch (error) {
     console.error('Failed to download file:', error)
-    ElMessage.error(t('chat.downloadError'))
+    toast.error(t('chat.downloadError'))
   }
 }
 
@@ -760,36 +951,74 @@ const sendMessageApi = async ({
   }
 };
 
+const copyToClipboard = (text) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  } else {
+    return new Promise((resolve, reject) => {
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) {
+          resolve();
+        } else {
+          reject(new Error('execCommand copy failed'));
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+};
+
+const handleShare = () => {
+  if (!currentSessionId.value) {
+    toast.error(t('chat.shareNoSession') || 'No active session to share')
+    return
+  }
+  const shareUrl = `${window.location.origin}/share/${currentSessionId.value}`
+  
+  copyToClipboard(shareUrl).then(() => {
+    toast.success(t('chat.shareSuccess') || 'Share link copied to clipboard')
+  }).catch(err => {
+    console.error('Copy failed:', err)
+    toast.error(t('chat.shareFailed') || 'Failed to copy link')
+  })
+}
 
 // 生命周期
 onMounted(async () => {
-  console.log('🚀 Chat组件已挂载，开始加载智能体列表');
-  await loadAgents()
-
-  // 检查是否有传递的conversation数据
-  if (props.selectedConversation) {
-    console.log('📝 加载指定的会话数据');
-    await loadConversationData(props.selectedConversation)
-  } else {
-    // 智能体的选择由 watch 监听器处理，这里只需要等待
-    // 如果没有当前会话，创建新会话（延迟执行，等待智能体选择完成）
-    nextTick(async () => {
-      if (!currentSessionId.value && selectedAgent.value) {
-        console.log('🆕 创建新会话');
-        await createSession()
-      }
-    })
+  if (typeof window !== 'undefined') {
+    window.addEventListener('user-updated', loadAgents)
   }
+
+  // 1. 获取Agent列表
+  await loadAgents()
   
-  // 初始化时滚动到底部
-  nextTick(() => {
-    shouldAutoScroll.value = true
-    scrollToBottom(true)
-  })
-})
+  // 2. 检查URL参数是否有session_id
+  const routeSessionId = route.query.session_id;
+  if (routeSessionId) {
+      console.log('🔗 从路由加载会话:', routeSessionId);
+      await handleSessionLoad(routeSessionId);
+  } else {
+      // 如果没有session_id，创建一个新的
+      createSession();
+  }
+});
 
 // 组件卸载时清理
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('user-updated', loadAgents)
+  }
+  
   if (scrollTimeout.value) {
     clearTimeout(scrollTimeout.value)
   }
@@ -803,12 +1032,30 @@ watch(() => agents.value, (newAgents) => {
     }
   });
 
-// 监听selectedConversation变化
+  // 监听selectedConversation变化
 watch(() => props.selectedConversation, async (newConversation) => {
   if (newConversation && agents.value.length > 0) {
     await loadConversationData(newConversation)
+  } else if (!newConversation) {
+    // 如果没有选中的会话，重置聊天状态
+    resetChat()
   }
 }, { immediate: false })
+
+// 监听路由参数变化
+watch(() => route.query.session_id, (newSessionId) => {
+  // 如果ID相同，不做处理
+  if (newSessionId === currentSessionId.value) return;
+  
+  if (newSessionId) {
+    console.log('🔗 路由session_id变化，加载会话:', newSessionId);
+    handleSessionLoad(newSessionId);
+  } else {
+    // 路由参数被清空（例如点击了新对话），重置聊天
+    console.log('🔗 路由session_id被清空，重置聊天');
+    resetChat();
+  }
+});
 
 // 监听消息变化，智能滚动到底部
 watch(messages, () => {
@@ -821,110 +1068,3 @@ watch(messages, () => {
 
 </script>
 
-<style scoped>
-.chat-page {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.chat-header {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid rgba(102, 96, 96, 0.207);
-}
-
-.chat-container {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-.chat-input-container {
-  padding: 16px;
-  background: white;
-  border-top: 1px solid #e1e5e9;
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-}
-
-.chat-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.agent-select {
-  min-width: 150px;
-}
-
-.chat-messages {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 2rem;
-  color: rgba(25, 25, 25, 0.7);
-}
-
-.empty-icon {
-  margin-bottom: 1rem;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.125rem;
-  font-weight: 500;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 0.875rem;
-}
-
-.messages-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-}
-
-.loading-indicator {
-  display: flex;
-  justify-content: center;
-  padding: 1rem;
-}
-
-.loading-dots {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.loading-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #667eea;
-  animation: loading-bounce 1.4s ease-in-out infinite both;
-}
-
-.loading-dots span:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.loading-dots span:nth-child(2) {
-  animation-delay: -0.16s;
-}
-</style>

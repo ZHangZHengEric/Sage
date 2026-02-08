@@ -158,22 +158,18 @@ class ToolManager:
         """
 ```
 
-#### register_tool_class()
+#### discover_tools_from_path()
 
 ```python
-def register_tool_class(self, tool_class: Type[ToolBase]) -> bool:
+def discover_tools_from_path(self, path: Optional[str] = None) -> None:
     """
-    从ToolBase子类注册所有工具
+    自动导入模块并注册使用 tool() 装饰器的函数
     
     Args:
-        tool_class: ToolBase的子类
-    
-    Returns:
-        bool: 注册是否成功
+        path: 可选的自定义扫描路径
     
     Example:
-        >>> from agents.tool.calculation_tool import Calculator
-        >>> tool_manager.register_tool_class(Calculator)
+        >>> tool_manager.discover_tools_from_path()
     """
 ```
 
@@ -300,33 +296,28 @@ class DirectExecutorAgent(AgentBase):
 
 ## 🛠️ 工具系统
 
-### ToolBase
+### 工具装饰器
 
-创建自定义工具的基类。
+用于创建自定义工具的函数装饰器。
 
 ```python
-class ToolBase:
-    """工具基类"""
-    
-    def __init__(self):
-        """初始化工具实例"""
+from sagents.tool.tool_base import tool
+
+class CustomTool:
+    @tool()
+    def my_function(self, param: str) -> dict:
+        return {"result": param}
 ```
 
 #### @tool() 装饰器
 
 ```python
-@classmethod
-def tool(cls):
-    """
-    用于注册工具方法的装饰器工厂
-    
-    Example:
-        >>> class MyTool(ToolBase):
-        ...     @ToolBase.tool()
-        ...     def my_function(self, param: str) -> dict:
-        ...         '''函数描述'''
-        ...         return {"result": param}
-    """
+from sagents.tool.tool_base import tool
+
+class MyTool:
+    @tool()
+    def my_function(self, param: str) -> dict:
+        return {"result": param}
 ```
 
 ### ToolSpec

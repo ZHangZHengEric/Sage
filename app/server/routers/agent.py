@@ -4,10 +4,11 @@ Agent 相关路由
 
 from typing import Any, Dict, List, Optional
 
-from core.render import Response
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from service.agent import (
+
+from ..core.render import Response
+from ..services.agent import (
     auto_generate_agent,
     create_agent,
     delete_agent,
@@ -17,18 +18,20 @@ from service.agent import (
     update_agent,
 )
 
-from sagents.utils.logger import logger
-
 # ============= Agent相关模型 =============
 
 
 class AgentConfigDTO(BaseModel):
     id: Optional[str] = None
+    user_id: Optional[str] = None
     name: str
     systemPrefix: Optional[str] = None
     systemContext: Optional[Dict[str, Any]] = None
     availableWorkflows: Optional[Dict[str, List[str]]] = None
     availableTools: Optional[List[str]] = None
+    availableSkills: Optional[List[str]] = None
+    availableKnowledgeBases: Optional[List[str]] = None
+    memoryType: Optional[str] = None
     maxLoopCount: Optional[int] = 10
     deepThinking: Optional[bool] = False
     llmConfig: Optional[Dict[str, Any]] = None
@@ -50,16 +53,23 @@ class SystemPromptOptimizeRequest(BaseModel):
     optimization_goal: Optional[str] = None  # 优化目标（可选）
 
 
-def convert_config_to_agent(agent_id: str, config: Dict[str, Any]) -> AgentConfigDTO:
+def convert_config_to_agent(
+    agent_id: str, config: Dict[str, Any], user_id: Optional[str] = None
+) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
     return AgentConfigDTO(
         id=agent_id,
+        user_id=user_id,
         name=config.get("name", f"Agent {agent_id}"),
         systemPrefix=config.get("systemPrefix") or config.get("system_prefix"),
         systemContext=config.get("systemContext") or config.get("system_context"),
         availableWorkflows=config.get("availableWorkflows")
         or config.get("available_workflows"),
         availableTools=config.get("availableTools") or config.get("available_tools"),
+        availableSkills=config.get("availableSkills") or config.get("available_skills"),
+        availableKnowledgeBases=config.get("availableKnowledgeBases")
+        or config.get("available_knowledge_bases"),
+        memoryType=config.get("memoryType") or config.get("memory_type"),
         maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
@@ -78,6 +88,9 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "systemContext": agent.systemContext,
         "availableWorkflows": agent.availableWorkflows,
         "availableTools": agent.availableTools,
+        "availableSkills": agent.availableSkills,
+        "availableKnowledgeBases": agent.availableKnowledgeBases,
+        "memoryType": agent.memoryType,
         "maxLoopCount": agent.maxLoopCount,
         "deepThinking": agent.deepThinking,
         "multiAgent": agent.multiAgent,
@@ -102,16 +115,14 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含所有Agent配置的标准响应
     """
-    # 从 handler 获取数据
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    all_configs = await list_agents(user_id)
+    all_configs = await list_agents()
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(agent_id, agent.config)
+        agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
         agents_data.append(agent_resp.model_dump())
-    logger.info(f"成功获取 {len(agents_data)} 个Agent配置")
+    # 根据agent名称排序
+    agents_data.sort(key=lambda x: x["name"])
     return await Response.succ(
         data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
     )
@@ -130,9 +141,9 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    agent_id = await create_agent(agent.name, convert_agent_to_config(agent), user_id)
+    created_agent = await create_agent(agent.name, convert_agent_to_config(agent), user_id)
     return await Response.succ(
-        data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 创建成功"
+        data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
 
 
@@ -150,7 +161,7 @@ async def get(agent_id: str, http_request: Request):
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     agent = await get_agent(agent_id, user_id)
-    agent_resp = convert_config_to_agent(agent_id, agent)
+    agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
     return await Response.succ(
         data={"agent": agent_resp.model_dump()}, message=f"获取Agent '{agent_id}' 成功"
     )
@@ -168,7 +179,8 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    await update_agent(agent_id, agent.name, convert_agent_to_config(agent), user_id)
+    role = claims.get("role") or "user"
+    await update_agent(agent_id, agent.name, convert_agent_to_config(agent), user_id, role)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
     )
@@ -185,7 +197,8 @@ async def delete(agent_id: str, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    await delete_agent(agent_id, user_id)
+    role = claims.get("role") or "user"
+    await delete_agent(agent_id, user_id, role)
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功"
     )

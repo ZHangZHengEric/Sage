@@ -1,4 +1,3 @@
-
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, AsyncGenerator, Optional
@@ -16,7 +15,7 @@ class TaskSummaryAgent(AgentBase):
         super().__init__(model, model_config, system_prefix)
         self.agent_name = "TaskSummaryAgent"
         self.agent_description = "任务总结智能体，专门负责生成任务执行的总结报告"
-        logger.info("TaskSummaryAgent 初始化完成")
+        logger.debug("TaskSummaryAgent 初始化完成")
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
@@ -33,7 +32,7 @@ class TaskSummaryAgent(AgentBase):
             history_messages = message_manager.extract_all_context_messages(recent_turns=3)
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
-        task_manager_status_and_results = task_manager.get_all_tasks_summary()
+        task_manager_status_and_results = await task_manager.get_all_tasks_summary()
 
         completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(task_manager_status_and_results)))
         completed_actions_messages.append(message_manager.get_last_observation_message())

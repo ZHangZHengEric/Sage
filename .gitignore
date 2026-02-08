@@ -4,6 +4,7 @@ mcp_servers/standard_search/*
 */workspace/*
 tests/
 node_modules/
+sage_demo_workspace/
 app/fastapi_react_demo/backend/config.yaml
 mcp_servers/mcp_setting.json
 app/fastapi_react_demo/frontend/node_modules/
@@ -191,3 +192,5 @@ agent_workspace
 .idea
 .github
 data
+.trae
+skills/*
