@@ -116,10 +116,6 @@
           </div>
         </Tabs>
 
-        <DialogFooter>
-          <Button variant="outline" @click="copyUsageCode">复制</Button>
-          <Button @click="showUsageModal = false">关闭</Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
     
@@ -650,38 +646,4 @@ const generateUsageCodes = (agent) => {
 
 const usageCodeMarkdown = computed(() => usageCodeMap.value[usageActiveTab.value] || '')
 
-const copyUsageCode = async () => {
-  // 直接从 raw map 获取纯净代码，避免正则处理错误
-  const raw = usageCodeRawMap.value[usageActiveTab.value] || ''
-  
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(raw)
-      toast.success('代码已复制到剪贴板')
-      return
-    }
-  } catch (_) {}
-
-  const ta = document.createElement('textarea')
-  ta.value = raw
-  ta.setAttribute('readonly', '')
-  ta.style.position = 'fixed'
-  ta.style.left = '-9999px'
-  ta.style.top = '0'
-  document.body.appendChild(ta)
-  ta.focus()
-  ta.select()
-  try {
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    if (ok) {
-      toast.success('代码已复制到剪贴板')
-    } else {
-      toast.error('复制失败')
-    }
-  } catch (e) {
-    document.body.removeChild(ta)
-    toast.error('复制失败')
-  }
-}
 </script>

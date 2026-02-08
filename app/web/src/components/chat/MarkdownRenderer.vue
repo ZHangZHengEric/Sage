@@ -455,7 +455,7 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     window.downloadMarkdownImage = downloadImage
     
-    window.copyToClipboard = (btn) => {
+    window.copyToClipboard = async (btn) => {
       const wrapper = btn.closest('.group')
       if (!wrapper) return
       
@@ -476,7 +476,33 @@ onMounted(() => {
         }, 2000)
       }
 
-      const fallbackCopy = () => {
+      const copyWithClipboardApi = async () => {
+        if (!navigator?.clipboard?.writeText) return false
+        try {
+          await navigator.clipboard.writeText(text)
+          return true
+        } catch (err) {
+          return false
+        }
+      }
+
+      const copyWithExecCommand = () => {
+        try {
+          const listener = (event) => {
+            event.clipboardData?.setData('text/plain', text)
+            event.preventDefault()
+          }
+          document.addEventListener('copy', listener, { once: true })
+          const ok = document.execCommand('copy')
+          document.removeEventListener('copy', listener)
+          if (ok) return true
+        } catch (err) {
+          console.error('复制失败:', err)
+        }
+        return false
+      }
+
+      const copyWithTextarea = () => {
         const ta = document.createElement('textarea')
         ta.value = text
         ta.setAttribute('readonly', '')
@@ -489,28 +515,25 @@ onMounted(() => {
         try {
           const ok = document.execCommand('copy')
           document.body.removeChild(ta)
-          if (ok) {
-            finishSuccess()
-          } else {
-            toast.error('复制失败')
-          }
+          return ok
         } catch (err) {
           document.body.removeChild(ta)
           console.error('复制失败:', err)
-          toast.error('复制失败')
+          return false
         }
       }
 
-      if (navigator?.clipboard?.writeText && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(() => {
-          finishSuccess()
-        }).catch(() => {
-          fallbackCopy()
-        })
+      if (!text) {
+        toast.error('复制失败')
         return
       }
 
-      fallbackCopy()
+      const ok = await copyWithClipboardApi() || copyWithExecCommand() || copyWithTextarea()
+      if (ok) {
+        finishSuccess()
+      } else {
+        toast.error('复制失败')
+      }
     }
   }
   
