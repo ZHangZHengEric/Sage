@@ -84,6 +84,28 @@
           <span>{{ displayedTools.length }} {{ t('tools.count') }}</span>
         </div>
         <div class="flex items-center gap-2">
+          <Button 
+            v-if="getGroupCategoryLabel(selectedGroupSource) === '外部MCP'"
+            variant="outline" 
+            size="sm" 
+            class="h-8" 
+            @click="showMcpDetails(selectedGroupSource)"
+          >
+            <Info class="mr-2 h-3.5 w-3.5" />
+            {{ t('tools.details') || 'Details' }}
+          </Button>
+
+          <Button 
+            v-if="canEditGroup(selectedGroupSource)"
+            variant="outline" 
+            size="sm" 
+            class="h-8" 
+            @click="handleEditMcpTool(selectedGroupSource)"
+          >
+            <Edit class="mr-2 h-3.5 w-3.5" />
+            {{ t('tools.edit') || 'Edit' }}
+          </Button>
+
           <Button variant="outline" size="sm" class="h-8" @click="handleRefreshMcpTool(selectedGroupSource)">
             <RefreshCw class="mr-2 h-3.5 w-3.5" />
             {{ t('tools.refresh') }}
@@ -144,22 +166,94 @@
       </ScrollArea>
     </div>
 
-    <!-- Add MCP Dialog -->
+    <!-- Add/Edit MCP Dialog -->
     <Dialog v-model:open="isAddMcpDialogOpen">
       <DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader class="px-6 py-4 border-b">
-          <DialogTitle>{{ t('tools.addMcpServer') }}</DialogTitle>
+          <DialogTitle>{{ isEditMode ? (t('tools.editMcpServer') || 'Edit MCP Server') : (t('tools.addMcpServer') || 'Add MCP Server') }}</DialogTitle>
           <DialogDescription class="hidden">
-             Add a new MCP server
+             {{ isEditMode ? 'Edit existing MCP server' : 'Add a new MCP server' }}
           </DialogDescription>
         </DialogHeader>
         <div class="flex-1 overflow-y-auto">
            <McpServerAdd 
             :loading="loading" 
+            :is-edit="isEditMode"
             @submit="handleMcpSubmit" 
             @cancel="isAddMcpDialogOpen = false"
             ref="mcpServerAddRef" 
           />
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- MCP Details Dialog -->
+    <Dialog v-model:open="isDetailsDialogOpen">
+      <DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-hidden flex flex-col p-0 gap-0">
+        <DialogHeader class="px-6 py-4 border-b">
+          <DialogTitle>{{ t('tools.mcpDetails') || 'MCP Server Details' }}</DialogTitle>
+          <DialogDescription class="hidden">
+             Details of the MCP server
+          </DialogDescription>
+        </DialogHeader>
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+           <!-- Name & Description -->
+           <div class="space-y-1">
+             <h3 class="text-lg font-semibold flex items-center gap-2">
+               <Server class="h-5 w-5" />
+               {{ mcpDetails.name }}
+             </h3>
+             <p class="text-muted-foreground">{{ mcpDetails.description || t('tools.noDescription') }}</p>
+           </div>
+
+           <div class="grid gap-4 py-4">
+             <div class="grid grid-cols-4 items-center gap-4">
+               <span class="font-medium text-right text-muted-foreground">{{ t('tools.protocol') }}</span>
+               <span class="col-span-3 font-mono text-sm bg-muted px-2 py-1 rounded">{{ mcpDetails.protocol }}</span>
+             </div>
+             
+             <!-- Protocol Specifics -->
+             <template v-if="mcpDetails.protocol === 'stdio'">
+               <div class="grid grid-cols-4 items-start gap-4">
+                 <span class="font-medium text-right text-muted-foreground mt-1">{{ t('tools.command') }}</span>
+                 <code class="col-span-3 text-sm bg-muted px-2 py-1 rounded break-all">{{ mcpDetails.command }}</code>
+               </div>
+               <div v-if="mcpDetails.args && mcpDetails.args.length" class="grid grid-cols-4 items-start gap-4">
+                 <span class="font-medium text-right text-muted-foreground mt-1">{{ t('tools.arguments') }}</span>
+                 <div class="col-span-3 flex flex-wrap gap-1">
+                   <Badge variant="secondary" v-for="(arg, idx) in mcpDetails.args" :key="idx" class="font-mono text-xs">
+                     {{ arg }}
+                   </Badge>
+                 </div>
+               </div>
+             </template>
+
+             <template v-if="mcpDetails.protocol === 'sse'">
+               <div class="grid grid-cols-4 items-start gap-4">
+                 <span class="font-medium text-right text-muted-foreground mt-1">SSE URL</span>
+                 <a :href="mcpDetails.sse_url" target="_blank" class="col-span-3 text-sm text-primary hover:underline break-all">{{ mcpDetails.sse_url }}</a>
+               </div>
+             </template>
+             
+             <template v-if="mcpDetails.protocol === 'streamable_http'">
+               <div class="grid grid-cols-4 items-start gap-4">
+                 <span class="font-medium text-right text-muted-foreground mt-1">Stream URL</span>
+                 <a :href="mcpDetails.streamable_http_url" target="_blank" class="col-span-3 text-sm text-primary hover:underline break-all">{{ mcpDetails.streamable_http_url }}</a>
+               </div>
+             </template>
+
+             <div class="grid grid-cols-4 items-center gap-4">
+               <span class="font-medium text-right text-muted-foreground">{{ t('tools.status') }}</span>
+               <Badge :variant="mcpDetails.status === 'disabled' ? 'destructive' : 'default'" class="w-fit col-span-3">
+                 {{ mcpDetails.status === 'disabled' ? (t('tools.disabled') || 'Disabled') : (t('tools.enabled') || 'Enabled') }}
+               </Badge>
+             </div>
+           </div>
+        </div>
+        <div class="p-6 pt-0 flex justify-end">
+          <Button @click="isDetailsDialogOpen = false">
+            {{ t('tools.close') || 'Close' }}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -169,7 +263,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
@@ -197,11 +291,15 @@ const searchTerm = ref('')
 const filterType = ref('all')
 const viewMode = ref('list') // 'list', 'detail'
 const isAddMcpDialogOpen = ref(false)
+const isDetailsDialogOpen = ref(false)
 const loading = ref(false)
 const mcpServerAddRef = ref(null)
 const currentUser = ref({ userid: '', role: 'user' })
 const selectedGroupSource = ref('')
 const isGridExpanded = ref(true)
+const isEditMode = ref(false)
+const editingServerName = ref('')
+const mcpDetails = ref({})
 
 // Computed
 const filteredTools = computed(() => {
@@ -325,24 +423,80 @@ const loadMcpServers = async () => {
 }
 
 const showAddMcpForm = () => {
+  isEditMode.value = false
+  editingServerName.value = ''
   if (mcpServerAddRef.value) {
     mcpServerAddRef.value.resetForm()
   }
   isAddMcpDialogOpen.value = true
 }
 
+const showMcpDetails = (sourceName) => {
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+  const server = mcpServers.value.find(s => s.name === serverName)
+  if (server) {
+    mcpDetails.value = server
+    isDetailsDialogOpen.value = true
+  }
+}
+
+const handleEditMcpTool = (sourceName) => {
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+  const server = mcpServers.value.find(s => s.name === serverName)
+  
+  if (server) {
+    isEditMode.value = true
+    editingServerName.value = serverName
+    isAddMcpDialogOpen.value = true
+    // Wait for dialog to open and ref to be available
+    setTimeout(() => {
+      if (mcpServerAddRef.value) {
+        mcpServerAddRef.value.setFormData(server)
+      }
+    }, 100)
+  }
+}
+
 const handleMcpSubmit = async (payload) => {
   loading.value = true
   try {
-    await toolAPI.addMcpServer(payload)
+    if (isEditMode.value) {
+      // Edit mode: Delete old -> Add new
+      await toolAPI.deleteMcpServer(editingServerName.value)
+      // Small delay to ensure deletion is processed if needed, though await should suffice
+      await toolAPI.addMcpServer(payload)
+      toast.success(t('tools.updateSuccess') || 'Server updated successfully')
+      
+      // Update selection if name changed
+      if (editingServerName.value !== payload.name) {
+         selectedGroupSource.value = `MCP Server: ${payload.name}`
+      }
+    } else {
+      // Add mode
+      await toolAPI.addMcpServer(payload)
+      toast.success(t('tools.addSuccess') || 'Server added successfully')
+    }
+    
     await loadMcpServers()
     await loadBasicTools()
     isAddMcpDialogOpen.value = false
   } catch (error) {
-    console.error('Failed to add MCP server:', error)
+    console.error('Failed to save MCP server:', error)
+    toast.error(error.message || (isEditMode.value ? t('tools.updateFailed') : t('tools.addFailed')))
   } finally {
     loading.value = false
   }
+}
+
+const canEditGroup = (sourceName) => {
+  if (!sourceName.startsWith('MCP Server: ')) return false
+  if (currentUser.value.role === 'admin') return true
+  
+  const serverName = sourceName.substring('MCP Server: '.length)
+  const server = mcpServers.value.find(s => s.name === serverName)
+  
+  if (!server || !server.user_id) return false
+  return server.user_id === currentUser.value.userid
 }
 
 const canManage = (tool) => {
