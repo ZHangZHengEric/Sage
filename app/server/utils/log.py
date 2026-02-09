@@ -1,3 +1,5 @@
+import json
+from collections import OrderedDict
 import logging
 import os
 import re
@@ -76,72 +78,59 @@ def init_logging(log_name="app", log_level="DEBUG"):
 
     logger.remove()  # Remove default handler
 
-    # Configure patcher to automatically inject request_id and process path
+    def formatting_payload(record):
+        extra = record["extra"]
+        file_path = extra.get("rel_path") or record["file"].path
+        file_value = f"{file_path}:{record['line']}"
+        payload = OrderedDict()
+        payload["level"] = record["level"].name
+        payload["time"] = record["time"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        payload["file"] = file_value
+        payload["msg"] = record["message"]
+        request_id = extra.get("request_id")
+        if request_id:
+            payload["requestId"] = request_id
+        session_id = extra.get("session_id")
+        if session_id:
+            payload["seesion_id"] = session_id
+        if record.get("exception"):
+            payload["exception"] = str(record["exception"])
+        return json.dumps(payload, ensure_ascii=False)
+
+    # Configure patcher to automatically inject request_id, path and JSON message
     def patcher(record):
-        # Request ID
         record["extra"]["request_id"] = get_request_id()
-        # Message normalization
         if "message" in record and isinstance(record["message"], str):
             record["message"] = re.sub(r"\s+", " ", record["message"]).strip()
-        
-        # Relative Path Handling
-        # 1. Try to get path from InterceptHandler (file.name) or original record path
+
         file_path = record["extra"].get("file.name")
         if not file_path:
             file_path = record["file"].path
-
-        # 2. Convert to relative path
         try:
             rel_path = os.path.relpath(file_path, os.getcwd())
             parts = rel_path.split(os.sep)
             if len(parts) > 2:
                 rel_path = os.path.join(*parts[-2:])
         except Exception:
-            rel_path = os.path.basename(file_path) # Fallback to basename
-
+            rel_path = os.path.basename(file_path)
         record["extra"]["rel_path"] = rel_path
-
-        # Override file.name and line if provided in extra (for InterceptHandler compatibility)
         if "file.name" in record["extra"]:
             record["file"].name = record["extra"]["file.name"]
         if "line" in record["extra"]:
             record["line"] = record["extra"]["line"]
 
+        record["message"] = formatting_payload(record)
+
     logger.configure(patcher=patcher)
 
-    def formatting_func(record):
-        fmt = "{time:YYYY-MM-DD HH:mm:ss,SSS} - {level: <8} - "
-
-        # Relative Path
-        fmt += "[{extra[rel_path]}:{line}] "
-
-        # Context Information
-        extra = record["extra"]
-        context_items = []
-
-        # Request ID
-        if extra.get("request_id") and extra.get("request_id") != "background":
-            context_items.append(f"req:{extra['request_id']}")
-
-        # Session ID
-        if extra.get("session_id"):
-            context_items.append(f"sid:{extra['session_id']}")
-
-        if context_items:
-            fmt += "[" + " ".join(context_items) + "] "
-
-        fmt += "- {message} "
-        fmt += "\n{exception}"
-        return fmt
-
-    logger.add(sys.stdout, level=log_level, format=formatting_func)
+    logger.add(sys.stdout, level=log_level, format="{message}")
 
     params = {
         "rotation": "100MB",
         "retention": 20,
         "compression": "zip",
         "encoding": "utf8",
-        "format": formatting_func,
+        "format": "{message}",
     }
     LOG_PATH = "./logs"
     if not os.path.exists(LOG_PATH):
@@ -160,7 +149,7 @@ def init_logging(log_name="app", log_level="DEBUG"):
             "retention": 10,
             "compression": "zip",
             "encoding": "utf8",
-            "format": formatting_func,
+            "format": "{message}",
         }
         logger.add(
             Path(LOG_PATH) / f"{log_name}_access.log",

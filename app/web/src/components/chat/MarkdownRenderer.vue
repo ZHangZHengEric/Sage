@@ -455,33 +455,85 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     window.downloadMarkdownImage = downloadImage
     
-    window.copyToClipboard = (btn) => {
+    window.copyToClipboard = async (btn) => {
       const wrapper = btn.closest('.group')
       if (!wrapper) return
       
       const codeBlock = wrapper.querySelector('code')
       if (!codeBlock) return
       
-      const text = codeBlock.innerText || codeBlock.textContent
-      
-      navigator.clipboard.writeText(text).then(() => {
-        // Toggle icons
-        const copyIcon = btn.querySelector('.lucide-copy')
-        const checkIcon = btn.querySelector('.lucide-check')
-        
+      const text = codeBlock.innerText || codeBlock.textContent || ''
+      const copyIcon = btn.querySelector('.lucide-copy')
+      const checkIcon = btn.querySelector('.lucide-check')
+
+      const finishSuccess = () => {
         if (copyIcon) copyIcon.classList.add('hidden')
         if (checkIcon) checkIcon.classList.remove('hidden')
-        
         toast.success('已复制到剪贴板')
-        
         setTimeout(() => {
           if (copyIcon) copyIcon.classList.remove('hidden')
           if (checkIcon) checkIcon.classList.add('hidden')
         }, 2000)
-      }).catch(err => {
-        console.error('复制失败:', err)
+      }
+
+      const copyWithClipboardApi = async () => {
+        if (!navigator?.clipboard?.writeText) return false
+        try {
+          await navigator.clipboard.writeText(text)
+          return true
+        } catch (err) {
+          return false
+        }
+      }
+
+      const copyWithExecCommand = () => {
+        try {
+          const listener = (event) => {
+            event.clipboardData?.setData('text/plain', text)
+            event.preventDefault()
+          }
+          document.addEventListener('copy', listener, { once: true })
+          const ok = document.execCommand('copy')
+          document.removeEventListener('copy', listener)
+          if (ok) return true
+        } catch (err) {
+          console.error('复制失败:', err)
+        }
+        return false
+      }
+
+      const copyWithTextarea = () => {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.setAttribute('readonly', '')
+        ta.style.position = 'fixed'
+        ta.style.left = '-9999px'
+        ta.style.top = '0'
+        document.body.appendChild(ta)
+        ta.focus()
+        ta.select()
+        try {
+          const ok = document.execCommand('copy')
+          document.body.removeChild(ta)
+          return ok
+        } catch (err) {
+          document.body.removeChild(ta)
+          console.error('复制失败:', err)
+          return false
+        }
+      }
+
+      if (!text) {
         toast.error('复制失败')
-      })
+        return
+      }
+
+      const ok = await copyWithClipboardApi() || copyWithExecCommand() || copyWithTextarea()
+      if (ok) {
+        finishSuccess()
+      } else {
+        toast.error('复制失败')
+      }
     }
   }
   
