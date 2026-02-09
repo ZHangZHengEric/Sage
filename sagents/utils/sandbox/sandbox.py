@@ -747,13 +747,15 @@ def _install_requirements(requirements: List[str], stdout_capture: Optional[Any]
         return
     import subprocess
     python_exec = sys.executable or "python3"
-    mirror = "https://mirrors.aliyun.com/pypi/simple"
+    # Use Tsinghua mirror for better connectivity in China
+    mirror = "https://pypi.tuna.tsinghua.edu.cn/simple"
+    trusted_host = "pypi.tuna.tsinghua.edu.cn"
     
     install_env = env or os.environ.copy()
     
     for requirement in requirements:
         # Note: If env contains PIP_TARGET, pip will automatically use it.
-        cmd = [python_exec, "-m", "pip", "install", requirement, "-i", mirror]
+        cmd = [python_exec, "-m", "pip", "install", requirement, "-i", mirror, "--trusted-host", trusted_host]
         
         result = subprocess.run(
             cmd,
