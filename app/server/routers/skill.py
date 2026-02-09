@@ -2,14 +2,14 @@
 工具执行接口路由模块
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel
 
 from ..core.render import Response
 from ..services import skill as skill_service
-
+from loguru import logger
 # 创建路由器
 skill_router = APIRouter(prefix="/api/skills")
 
@@ -18,7 +18,8 @@ class UrlImportRequest(BaseModel):
     url: str
 
 
-class SkillContentRequest(BaseModel):
+class SkillUpdateRequest(BaseModel):
+    name: str
     content: str
 
 
@@ -61,34 +62,37 @@ async def import_skill_from_url(request: UrlImportRequest, http_request: Request
     return await Response.succ(message=message, data={"user_id": user_id})
 
 
-@skill_router.delete("/{skill_name}")
-async def delete_skill(skill_name: str, http_request: Request):
+@skill_router.delete("")
+async def delete_skill(name: str, http_request: Request):
     """
     删除技能
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
+    # name is query param
+    await skill_service.delete_skill(name, user_id, role)
+    return await Response.succ(message=f"技能 '{name}' 删除成功")
 
-    await skill_service.delete_skill(skill_name, user_id, role)
-    return await Response.succ(message=f"技能 '{skill_name}' 删除成功")
 
-
-@skill_router.get("/{skill_name}/content")
-async def get_skill_content(skill_name: str, http_request: Request):
+@skill_router.get("/content")
+async def get_skill_content(name: str, http_request: Request):
     """
     获取技能内容 (SKILL.md)
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
-
-    content = await skill_service.get_skill_content(skill_name, user_id, role)
+    # name is query param, usually automatically decoded by FastAPI/Starlette, 
+    # but let's ensure it's handled if passed as part of query string.
+    # Actually FastAPI decodes query params automatically.
+    logger.info(f"get_skill_content name: {name}")
+    content = await skill_service.get_skill_content(name, user_id, role)
     return await Response.succ(data={"content": content})
 
 
-@skill_router.put("/{skill_name}/content")
-async def update_skill_content(skill_name: str, request: SkillContentRequest, http_request: Request):
+@skill_router.put("/content")
+async def update_skill_content(request: SkillUpdateRequest, http_request: Request):
     """
     更新技能内容 (SKILL.md)
     """
@@ -96,6 +100,5 @@ async def update_skill_content(skill_name: str, request: SkillContentRequest, ht
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
 
-    message = await skill_service.update_skill_content(skill_name, request.content, user_id, role)
+    message = await skill_service.update_skill_content(request.name, request.content , user_id, role)
     return await Response.succ(message=message)
-

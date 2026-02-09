@@ -41,7 +41,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   deleteSkill: async (skillName) => {
-    return await baseAPI.delete(`/api/skills/${skillName}`)
+    return await baseAPI.delete('/api/skills', { params: { name: skillName } })
   },
 
   /**
@@ -50,7 +50,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   getSkillContent: async (skillName) => {
-    return await baseAPI.get(`/api/skills/${skillName}/content`)
+    return await baseAPI.get('/api/skills/content', { name: skillName })
   },
 
   /**
@@ -60,6 +60,6 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   updateSkillContent: async (skillName, content) => {
-    return await baseAPI.put(`/api/skills/${skillName}/content`, { content })
+    return await baseAPI.put('/api/skills/content', { name: skillName, content: content })
   }
 }
