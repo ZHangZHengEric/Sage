@@ -28,6 +28,26 @@ def _get_skill_info_safe(tm, skill_name: str):
     return None
 
 
+import stat
+
+def _set_permissions_recursive(path, dir_mode=0o755, file_mode=0o644):
+    """
+    Recursively set permissions for a directory and its contents.
+    Ensures that the directory and files are writable/readable by the owner.
+    """
+    try:
+        if os.path.isdir(path):
+            os.chmod(path, dir_mode)
+            
+        for root, dirs, files in os.walk(path):
+            for d in dirs:
+                os.chmod(os.path.join(root, d), dir_mode)
+            for f in files:
+                os.chmod(os.path.join(root, f), file_mode)
+    except Exception as e:
+        logger.warning(f"Failed to set permissions for {path}: {e}")
+
+
 async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
     """获取可用技能列表"""
     tm = get_skill_manager()
@@ -146,16 +166,25 @@ async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> Non
     if role != "admin":
         if not owner:
             raise SageHTTPException(
-                status_code=403, detail="Permission denied: Cannot delete system skill"
+                status_code=500, detail="Permission denied: Cannot delete system skill"
             )
         if owner != user_id:
             raise SageHTTPException(status_code=500, detail="Permission denied")
 
     try:
+        # 1. Remove from SkillManager (Cache)
+        tm.remove_skill(skill_name)
+        
+        # 2. Delete files
         skill_path = os.path.join(tm.skill_workspace, skill_name)
         if os.path.exists(skill_path):
-            shutil.rmtree(skill_path)
+            try:
+                shutil.rmtree(skill_path)
+            except (PermissionError, OSError) as e:
+                logger.warning(f"Could not delete skill files for '{skill_name}' (possibly mounted): {e}")
+                # Continue to delete ownership so it's removed from the app view
 
+        # 3. Delete ownership (DB)
         await dao.delete_ownership(skill_name)
 
     except Exception as e:
@@ -322,6 +351,9 @@ async def _process_zip_and_register(
 
         # 移动到技能工作区
         shutil.copytree(source_dir, target_path, dirs_exist_ok=True)
+
+        # 确保文件权限正确，允许覆盖和删除
+        _set_permissions_recursive(target_path, dir_mode=0o755, file_mode=0o644)
 
         # 验证并注册
         if tm.register_new_skill(skill_dir_name):
