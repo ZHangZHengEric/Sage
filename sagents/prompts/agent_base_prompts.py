@@ -127,23 +127,44 @@ skills_info_label = {
 skills_usage_hint = {
     "zh": """
 **技能使用说明**：
-这些技能位于 `/workspace/skills` 目录下。
-先试用tree命令行工具查看技能目录结构，再使用 `file_read` 工具阅读技能目录下的 SKILL.md 或 README.md 文件的全部内容(set end_line=None)，确认技能的适用场景、输入/输出要求和使用步骤。
-注意事项：1. 按文档说明调用 / 复用 Skill。2. 严禁修改 Skill 仓库内的任何文件。3. 优先从 Skill 仓库匹配适用 Skill。
-失败处理：1. 若调用 Skill 时出现失败 / 结果不符合预期（如参数错误、执行报错），先核对使用文档确认是否操作不当，重新按规范执行；2. 若仍失败，向用户反馈「XX Skill 执行失败，无法完成该任务」，不得擅自修改 Skill 内容尝试修复。
+技能文件统一存放于 `/workspace/skills` 目录下。
+基于当前工作空间内已有的可用技能，选定某一个指定技能后，执行以下操作：
+1. 先用 `tree` 命令行工具查看该指定技能的目录结构，
+2. 再使用 `file_read` 工具读取该技能目录下的 SKILL.md 或 README.md 文件全部内容（设置 `end_line=None`），确认该技能的适用场景、输入/输出要求及使用步骤。
+注意事项
+1. 需严格按照该指定技能的文档说明，调用或复用该Skill。
+2. 严禁修改该指定Skill仓库内的任何文件。
+3. 优先从当前工作空间的可用技能中，匹配适用的Skill。
+失败处理
+1. 若调用某一Skill时出现执行失败、结果不符合预期（如参数错误、执行报错等），需先核对该技能的使用文档，确认操作是否得当，再按规范重新执行；
+2. 若仍失败，向用户反馈「XX Skill 执行失败，无法完成该任务」，不得擅自修改 Skill 内容尝试修复。
 """,
     "en": """
 **Skill Usage Instructions**:
-These skills are located in the `/workspace/skills` directory.
-First, use the `tree` command-line tool to view the directory structure of the skills directory, and then use the `file_read` tool to read the full content of the SKILL.md or README.md file in the skill directory(set end_line=None) to confirm the skill's applicable scenarios, input/output requirements, and usage steps.
-Notes: 1. Call/reuse the Skill according to the documentation. 2. Strictly forbidden to modify any files within the Skill repository. 3. Prioritize matching applicable Skills from the Skill repository.
-Failure Handling: 1. If a Skill call fails or the result is not as expected (e.g., parameter error, execution error), first check the documentation to confirm if the operation was incorrect, and re-execute according to the specifications; 2. If it still fails, report to the user "XX Skill execution failed, unable to complete the task", and do not attempt to modify the Skill content to fix it without permission.
+Skill files are uniformly stored in the `/workspace/skills` directory.
+Based on the available skills in the current workspace, select a specified skill after, and then perform the following operations:
+1. First, use the `tree` command-line tool to view the directory structure of the skill directory,
+2. Then use the `file_read` tool to read the full content of the SKILL.md or README.md file in the skill directory(set end_line=None) to confirm the applicable scenarios, input/output requirements, and usage steps of the skill.
+Note
+1. Strictly follow the documentation of the specified skill when calling or reusing the Skill.
+2. Strictly prohibit modifying any files within the specified Skill repository.
+3. Prioritize matching applicable Skills from the Skill repository in the current workspace.
+Failure Handling
+1. If a Skill call fails or the result is not as expected (e.g., parameter error, execution error), first check the documentation to confirm if the operation was incorrect, and re-execute according to the specifications;
+2. If it still fails, report to the user "XX Skill execution failed, unable to complete the task", and do not attempt to modify the Skill content to fix it without permission.
 """,
     "pt": """
 **Instruções de Uso de Habilidades**:
-Essas habilidades estão localizadas no diretório `/workspace/skills`.
-Primeiro, use a ferramenta `tree` linha de comando para visualizar a estrutura de diretórios do diretório de habilidades, e depois use a ferramenta `file_read` para ler todo o conteúdo do arquivo SKILL.md ou README.md no diretório da habilidade(set end_line=None) para confirmar os cenários aplicáveis, requisitos de entrada/saída e etapas de uso.
-Notas: 1. Chame/reutilize a Habilidade de acordo com a documentação. 2. É estritamente proibido modificar quaisquer arquivos dentro do repositório de Habilidades. 3. Priorize a correspondência de Habilidades aplicáveis do repositório de Habilidades.
-Tratamento de Falhas: 1. Se uma chamada de Habilidade falhar ou o resultado não for o esperado (por exemplo, erro de parâmetro, erro de execução), verifique primeiro a documentação para confirmar se a operação foi incorreta e reexecute de acordo com as especificações; 2. Se ainda falhar, informe ao usuário "Execução da Habilidade XX falhou, impossível completar a tarefa", e não tente modificar o conteúdo da Habilidade para corrigi-la sem permissão.
+Os arquivos de habilidades estão armazenados uniformemente no diretório `/workspace/skills`.
+Com base nas habilidades disponíveis no espaço de trabalho atual, após selecionar uma habilidade específica, execute as seguintes operações:
+1. Primeiro, use a ferramenta de linha de comando `tree` para visualizar a estrutura do diretório da habilidade,
+2. Em seguida, use a ferramenta `file_read` para ler todo o conteúdo do arquivo SKILL.md ou README.md no diretório da habilidade (defina end_line=None), confirmando os cenários aplicáveis, requisitos de entrada/saída e etapas de uso da habilidade.
+Observações
+1. É necessário seguir rigorosamente a documentação da habilidade especificada ao chamar ou reutilizar a Skill.
+2. É proibido modificar qualquer arquivo dentro do repositório da Skill especificada.
+3. Priorize a correspondência de Skills aplicáveis a partir do repositório de Skills no espaço de trabalho atual.
+Tratamento de Falhas
+1. Se a chamada de uma Skill falhar ou o resultado não for o esperado (por exemplo, erro de parâmetro, erro de execução), primeiro verifique a documentação para confirmar se a operação foi incorreta e reexecute de acordo com as especificações;
+2. Se ainda falhar, informe ao usuário "Falha na execução da Skill XX, incapaz de completar a tarefa" e não tente modificar o conteúdo da Skill para corrigir sem permissão.
 """
 }
