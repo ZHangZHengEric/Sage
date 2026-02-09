@@ -275,7 +275,17 @@ class AgentBase(ABC):
                     'agent_intro_template',
                     agent='common',
                     language=language,
-                    default=f"\n你是一个{self.__class__.__name__}智能体。"
+                    default="""
+你是一个专业、主动且充满韧性的AI智能体。你的核心使命是不惜一切代价，完整、高效地协助用户达成目标。
+
+## 核心原则
+1. **极致主动**：不要等待用户推动。一旦明确目标，就主动规划、执行、验证并推进任务，直到最终完成。
+2. **勇于尝试**：面对困难或不确定性，不要退缩或直接拒绝。优先选择尝试执行，即使可能失败，也要在失败中获取信息，调整策略再次尝试。
+3. **追求完整**：不满足于完成部分任务。致力于提供端到端的完整解决方案，确保交付物是经过验证且立即可用的。
+4. **结果导向**：所有的行动都应服务于“解决用户问题”这一最终目标。减少无意义的对话，增加有价值的行动。
+
+请展现出你的专业素养，成为用户最值得信赖的合作伙伴。
+"""
                 )
                 system_prefix += agent_intro.format(agent_name=self.__class__.__name__)
 
@@ -626,11 +636,14 @@ class AgentBase(ABC):
             if not tool_manager:
                 raise ValueError("Tool manager is not provided")
 
+            # 构造调用参数，确保 session_id 正确传递且不重复
+            call_kwargs = arguments.copy()
+            call_kwargs['session_id'] = session_id
+            
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=get_session_context(session_id),
-                session_id=session_id,
-                **arguments
+                **call_kwargs
             )
 
             # 检查是否为流式响应（AgentToolSpec）

@@ -7,6 +7,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.session_context import SessionContext, get_session_context, SessionStatus
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
+from sagents.tool.tool_schema import convert_spec_to_openai_format
 import json
 import uuid
 from copy import deepcopy
@@ -100,12 +101,12 @@ class SimpleAgent(AgentBase):
             tool for tool in tools_json
             if tool['function']['name'] in suggested_tools
         ]
-
+        
         if tools_suggest_json:
             tools_json = tools_suggest_json
 
         tool_names = [tool['function']['name'] for tool in tools_json]
-        logger.info(f"SimpleAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
+        logger.debug(f"SimpleAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
 
         return tools_json
 
@@ -219,7 +220,7 @@ class SimpleAgent(AgentBase):
 
             # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write update_file 这几个工具
             if session_context.skill_manager is not None:
-                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_shell_command', 'file_write', 'update_file'])
+                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_shell_command', 'file_write', 'update_file', 'load_skill'])
 
             if "sys_spawn_agent" in tool_names:
                 suggested_tools.extend(['sys_spawn_agent'])
@@ -389,6 +390,19 @@ class SimpleAgent(AgentBase):
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
+        
+        # 总是添加 load_skill 工具，如果有技能管理器
+        # 这确保了它不会被过滤掉，并且直接传递给 LLM
+        session_context = get_session_context(session_id)
+        # if session_context and session_context.skill_manager and tool_manager:
+        #     # 检查是否已经存在
+        #     if not any(t['function']['name'] == 'load_skill' for t in tools_json):
+        #         load_skill_tool = tool_manager.get_tool('load_skill')
+        #         if load_skill_tool:
+        #             skill_tool_schema = convert_spec_to_openai_format(load_skill_tool, lang=session_context.get_language())
+        #             tools_json.append(skill_tool_schema)
+        #             logger.debug("SimpleAgent: Added load_skill tool to tools_json via override logic")
+
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
 
