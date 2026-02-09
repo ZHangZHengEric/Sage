@@ -94,6 +94,9 @@ class AgentFlow:
 
                 logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
 
+                # 加载最近一次调用的skill到context
+                await session_context.load_recent_skill_to_context()
+
                 # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
                 session_context.set_history_context()
 

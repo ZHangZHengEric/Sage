@@ -3,9 +3,10 @@ from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator, cast, Union
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext
+from sagents.context.session_context import SessionContext, get_session_context
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
+from sagents.tool.tool_schema import convert_spec_to_openai_format
 import uuid
 
 
@@ -81,6 +82,19 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
+
+        # 总是添加 load_skill 工具，如果有技能管理器
+        # 这确保了它不会被过滤掉，并且直接传递给 LLM
+        session_context = get_session_context(session_id)
+        # if session_context and session_context.skill_manager and tool_manager:
+        #     # 检查是否已经存在
+        #     if not any(t['function']['name'] == 'load_skill' for t in tools_json):
+        #         load_skill_tool = tool_manager.get_tool('load_skill')
+        #         if load_skill_tool:
+        #             skill_tool_schema = convert_spec_to_openai_format(load_skill_tool, lang=session_context.get_language())
+        #             tools_json.append(skill_tool_schema)
+        #             logger.debug("TaskExecutorAgent: Added load_skill tool to tools_json via override logic")
+
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
 
@@ -186,11 +200,18 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         # 根据建议的工具进行过滤，同时移除掉complete_task 这个工具
         suggested_tools = subtask_info.get('required_tools', [])
+        
+        # 如果存在建议工具且有技能管理器，确保 load_skill 包含在内
+        if suggested_tools and session_context.skill_manager:
+            if 'load_skill' not in suggested_tools:
+                suggested_tools.append('load_skill')
+
         if suggested_tools:
             tools_suggest_json = [
                 tool for tool in tools_json
                 if tool['function']['name'] in suggested_tools and tool['function']['name'] != 'complete_task'
             ]
+            
             if tools_suggest_json:
                 tools_json = tools_suggest_json
 

@@ -616,7 +616,9 @@ class ToolManager:
         execution_start = time.time()
         logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
         logger.debug(f"Tool arguments: {kwargs}")
+        
         # Remove duplicate session_id from kwargs if present
+        # This is especially important for MCP tools which strictly follow the schema
         session_id = kwargs.pop("session_id", session_id)
 
         # Step 1: Tool Lookup
@@ -637,7 +639,9 @@ class ToolManager:
             if isinstance(tool, McpToolSpec):
                 final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
             elif isinstance(tool, SageMcpToolSpec):
-                final_result = await self._execute_standard_tool_async(tool, **kwargs)
+                # Ensure session_id is not in kwargs
+                kwargs.pop("session_id", None)
+                final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, ToolSpec):
                 # Check for sandbox execution
                 # Define sandbox tools (can be moved to config later)
@@ -677,12 +681,14 @@ class ToolManager:
                         else:
                              # Fallback to standard execution if no sandbox found (should not happen in new setup)
                             logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")
+                            kwargs.pop("session_id", None)
                             final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
 
                     except Exception as e:
                         logger.error(f"Sandbox execution failed for {tool.name}, aborting.")
                         raise e
                 else:
+                    kwargs.pop("session_id", None)
                     final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, AgentToolSpec):
                 # For AgentToolSpec, return a generator for streaming

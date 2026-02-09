@@ -85,6 +85,44 @@ class SkillManager:
             lines.append(f"- {metadata['name']}: {metadata['description']}")
         return lines
 
+    def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get metadata for a specific skill.
+        获取指定技能的元数据。
+        """
+        if name in self.skills:
+            skill = self.skills[name]
+            return {
+                "name": skill.name,
+                "description": skill.description
+            }
+        return None
+
+    def get_skill_instructions(self, name: str) -> str:
+        """
+        Get instructions for a specific skill.
+        获取指定技能的说明。
+        """
+        if name in self.skills:
+            return self.skills[name].instructions
+        return ""
+
+    def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
+        """
+        Get the path to a resource file within a skill.
+        获取技能中资源文件的路径。
+        """
+        if name not in self.skills:
+            return None
+            
+        skill_path = self.skills[name].path
+        resource_path = os.path.join(skill_path, resource_name)
+        
+        if os.path.exists(resource_path):
+            return resource_path
+        return None
+
+
     def _load_skills_from_workspace(self):
         """
         Internal method to scan and load skills from all configured skill directories.
