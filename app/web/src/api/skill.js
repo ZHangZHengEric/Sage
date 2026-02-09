@@ -42,5 +42,24 @@ export const skillAPI = {
    */
   deleteSkill: async (skillName) => {
     return await baseAPI.delete(`/api/skills/${skillName}`)
+  },
+
+  /**
+   * 获取技能内容
+   * @param {string} skillName - 技能名称
+   * @returns {Promise<Object>}
+   */
+  getSkillContent: async (skillName) => {
+    return await baseAPI.get(`/api/skills/${skillName}/content`)
+  },
+
+  /**
+   * 更新技能内容
+   * @param {string} skillName - 技能名称
+   * @param {string} content - 技能内容
+   * @returns {Promise<Object>}
+   */
+  updateSkillContent: async (skillName, content) => {
+    return await baseAPI.put(`/api/skills/${skillName}/content`, { content })
   }
 }
