@@ -60,7 +60,8 @@ class Request {
                 } else {
                     // 全局弹窗提示
                     if (response.message) {
-                        alert(response.message)
+                        // alert(response.message)
+                        console.error(response.message)
                     }
                     return {
                         success: false,
@@ -110,7 +111,7 @@ class Request {
                         code = 'NOT_FOUND'
                         break
                     case 500:
-                        alert(error.response.message)
+                        // alert(error.response.message)
                         message = error.response.message || '服务器内部错误'
                         code = 'SERVER_ERROR'
                         break
