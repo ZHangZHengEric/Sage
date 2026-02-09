@@ -167,6 +167,14 @@ class Request {
                 ...config
             })
 
+            // 处理查询参数
+            if (finalConfig.params) {
+                const queryString = new URLSearchParams(finalConfig.params).toString()
+                if (queryString) {
+                    finalConfig.url += (finalConfig.url.includes('?') ? '&' : '?') + queryString
+                }
+            }
+
             // 构建完整URL
             const url = finalConfig.url.startsWith('http')
                 ? finalConfig.url

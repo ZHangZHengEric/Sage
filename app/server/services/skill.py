@@ -174,9 +174,9 @@ async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> Non
     try:
         # 1. Remove from SkillManager (Cache)
         tm.remove_skill(skill_name)
-        
+
         # 2. Delete files
-        skill_path = os.path.join(tm.skill_workspace, skill_name)
+        skill_path = skill_info.path
         if os.path.exists(skill_path):
             try:
                 shutil.rmtree(skill_path)
@@ -212,7 +212,7 @@ async def get_skill_content(skill_name: str, user_id: str, role: str = "user") -
         if owner and owner != user_id:
             raise SageHTTPException(status_code=500, detail="Permission denied")
 
-    skill_path = os.path.join(tm.skill_workspace, skill_name, "SKILL.md")
+    skill_path = os.path.join(skill_info.path, "SKILL.md")
     if not os.path.exists(skill_path):
         raise SageHTTPException(status_code=500, detail="SKILL.md not found")
 
@@ -243,8 +243,8 @@ async def update_skill_content(skill_name: str, content: str, user_id: str, role
         if owner != user_id:
             raise SageHTTPException(status_code=500, detail="Permission denied")
 
-    skill_path = os.path.join(tm.skill_workspace, skill_name, "SKILL.md")
-
+    skill_path = os.path.join(skill_info.path, "SKILL.md")
+    
     # 0. Validate content format before saving
     try:
         metadata = {}
@@ -284,7 +284,9 @@ async def update_skill_content(skill_name: str, content: str, user_id: str, role
             f.write(content)
 
         # 3. Reload and validate skill
-        if tm.register_new_skill(skill_name):
+        # Get directory name from path
+        
+        if tm.reload_skill(skill_info.path):
             return "技能更新成功"
         else:
             # Validation failed, trigger rollback
@@ -298,13 +300,13 @@ async def update_skill_content(skill_name: str, content: str, user_id: str, role
             with open(skill_path, "w", encoding="utf-8") as f:
                 f.write(original_content)
             # Re-register original to ensure consistency
-            tm.register_new_skill(skill_name)
+            tm.reload_skill(skill_info.path)
             logger.info(f"Rolled back skill '{skill_name}' to original state")
         except Exception as rollback_error:
             logger.error(f"Rollback failed for skill '{skill_name}': {rollback_error}")
 
         if isinstance(e, ValueError) and str(e) == "Skill validation failed":
-            raise SageHTTPException(status_code=400, detail="技能格式验证失败，已还原修改。请检查 SKILL.md 格式。")
+            raise SageHTTPException(status_code=500, detail="技能格式验证失败，已还原修改。请检查 SKILL.md 格式。")
 
         raise SageHTTPException(status_code=500, detail=f"Failed to update skill content: {e}")
 
@@ -360,11 +362,12 @@ async def _process_zip_and_register(
         _set_permissions_recursive(target_path, dir_mode=0o755, file_mode=0o644)
 
         # 验证并注册
-        if tm.register_new_skill(skill_dir_name):
+        registered_name = tm.register_new_skill(skill_dir_name)
+        if registered_name:
             # Save ownership
             dao = models.SkillOwnershipDao()
-            await dao.set_owner(skill_dir_name, user_id)
-            return True, f"技能 '{skill_dir_name}' 导入成功"
+            await dao.set_owner(registered_name, user_id)
+            return True, f"技能 '{registered_name}' 导入成功"
         else:
             return False, "技能验证失败，请检查 SKILL.md 格式"
 
