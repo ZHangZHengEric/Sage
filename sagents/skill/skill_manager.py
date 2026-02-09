@@ -210,6 +210,14 @@ class SkillManager:
                 logger.error(f"Failed to remove invalid skill directory {skill_path}: {e}")
             return False
 
+    def remove_skill(self, skill_name: str) -> None:
+        """
+        Remove a skill from the manager (memory only).
+        """
+        if skill_name in self.skills:
+            del self.skills[skill_name]
+            logger.info(f"Removed skill from manager: {skill_name}")
+
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
         """

@@ -69,15 +69,24 @@
                     >
                       <Edit class="h-4 w-4" />
                     </Button>
-                    <Button 
-                      v-if="canDelete(skill)" 
-                      variant="ghost" 
-                      size="icon" 
-                      class="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                      @click.stop="deleteSkill(skill)"
-                    >
-                      <Trash2 class="h-4 w-4" />
-                    </Button>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button 
+                            v-if="canDelete(skill)" 
+                            variant="ghost" 
+                            size="icon" 
+                            class="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                            @click.stop="deleteSkill(skill)"
+                          >
+                            <Trash2 class="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{{ t('skills.delete') || 'Delete' }}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
                 </div>
                 <CardDescription class="line-clamp-2 text-xs">
@@ -301,7 +310,7 @@ const isImportDisabled = computed(() => {
 
 const canDelete = (skill) => {
   // If skill has no owner (system skill), user cannot delete
-  if (currentUser.value.role === 'admin') return true
+  if (currentUser.value.role && currentUser.value.role.toLowerCase() === 'admin') return true
   if (!skill.user_id) return false
   return skill.user_id === currentUser.value.userid
 }
