@@ -236,6 +236,72 @@ class ToolManager:
                     count += 1
         logger.info(f"Registered {count} tools from package_path")
 
+    def register_tools_from_object(self, obj: Any) -> int:
+        """
+        Register tools from an object instance or class.
+        Automatically discovers methods decorated with @tool and registers them.
+        If an instance is provided, methods are bound to the instance.
+        
+        Args:
+            obj: An object instance or class to scan for tools.
+            
+        Returns:
+            int: Number of tools successfully registered.
+        """
+        import inspect
+        import copy
+        
+        count = 0
+        logger.debug(f"Discovering tools from object: {obj}")
+        
+        # Iterate over all members of the object
+        for name, member in inspect.getmembers(obj):
+            # Check if member has _tool_spec (added by @tool decorator)
+            tool_spec = getattr(member, "_tool_spec", None)
+            
+            # If not found directly, check underlying function for bound methods
+            if not tool_spec and hasattr(member, "__func__"):
+                tool_spec = getattr(member.__func__, "_tool_spec", None)
+                
+            if not tool_spec:
+                continue
+                
+            # Skip if tool name already exists (subject to priority logic in register_tool)
+            # But here we let register_tool handle the decision
+            
+            # Handle instance binding
+            # If obj is an instance (not a class), we need to ensure the func in spec is bound
+            if not inspect.isclass(obj):
+                try:
+                    # Create a copy of the spec to avoid modifying the original class-level spec
+                    new_spec = copy.copy(tool_spec)
+                    
+                    # member is already a bound method when accessed from instance via inspect.getmembers
+                    # Verify it is bound
+                    if inspect.ismethod(member) and member.__self__ is obj:
+                         new_spec.func = member
+                    else:
+                        # Fallback or strict check?
+                        # If member is not bound but obj is instance, it might be a staticmethod or we need to bind it manually?
+                        # inspect.getmembers on instance returns bound methods for regular methods.
+                        new_spec.func = member
+                        
+                    if self.register_tool(new_spec):
+                        count += 1
+                except Exception as e:
+                    logger.error(f"Failed to register tool '{name}' from object: {e}")
+            else:
+                # obj is a class
+                # We register the unbound method? Or fail?
+                # Usually we want to register tools from instances to support state.
+                # If it's a class, the method must be static or class method, or handled appropriately.
+                # For now, we just try to register as is.
+                if self.register_tool(tool_spec):
+                    count += 1
+                    
+        logger.info(f"Registered {count} tools from object {obj}")
+        return count
+
     def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]):
         """Register a tool specification with priority-based replacement
 
@@ -611,13 +677,13 @@ class ToolManager:
                         else:
                              # Fallback to standard execution if no sandbox found (should not happen in new setup)
                             logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")
-                            final_result = await self._execute_standard_tool_async(tool, **kwargs)
+                            final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
 
                     except Exception as e:
                         logger.error(f"Sandbox execution failed for {tool.name}, aborting.")
                         raise e
                 else:
-                    final_result = await self._execute_standard_tool_async(tool, **kwargs)
+                    final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, AgentToolSpec):
                 # For AgentToolSpec, return a generator for streaming
                 return self._execute_agent_tool_streaming_async(
@@ -649,6 +715,25 @@ class ToolManager:
                     tool_name,
                     "INVALID_JSON",
                 )
+
+            # Special handling for load_skill: Intercept output and update session_context
+            if tool_name == 'load_skill':
+                try:
+                    result_data = json.loads(final_result)
+                    skill_content = result_data.get("content", "")
+                    
+                    # Update SessionContext: Store skill instruction in system_context
+                    # This automatically implements "replace existing" logic as we overwrite the key
+                    session_context.system_context['active_skill_instruction'] = skill_content
+                    
+                    # Modify the return result to be a simple confirmation
+                    new_message = "Skill loaded successfully. Please follow the instructions in the System Prompt."
+                    final_result = json.dumps({"content": new_message}, ensure_ascii=False, indent=2)
+                    
+                    logger.info(f"Intercepted load_skill output and updated session_context for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to process load_skill interception: {e}")
+                    # If interception fails, we continue with original result but log the error
 
             return final_result
 
@@ -695,11 +780,22 @@ class ToolManager:
             logger.error(f"MCP tool execution failed: {tool.name} - {str(e)}")
             raise
 
-    async def _execute_standard_tool_async(self, tool: ToolSpec, **kwargs) -> str:
+    async def _execute_standard_tool_async(self, tool: ToolSpec, session_id: str = "", **kwargs) -> str:
         """Execute standard tool and format result (async version)"""
         logger.debug(f"Executing standard tool: {tool.name}")
 
         try:
+            # Inject session_id if the tool function expects it
+            import inspect
+            func_to_inspect = tool.func
+            # Handle bound methods or wrapped functions
+            if hasattr(func_to_inspect, "__wrapped__"):
+                func_to_inspect = func_to_inspect.__wrapped__
+            
+            sig = inspect.signature(func_to_inspect)
+            if "session_id" in sig.parameters:
+                kwargs["session_id"] = session_id
+
             # Execute the tool function
             if hasattr(tool.func, "__self__"):
                 # Bound method
