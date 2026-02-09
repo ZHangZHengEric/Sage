@@ -117,7 +117,7 @@
           </Button>
           <Button type="submit" :disabled="loading">
             <Loader v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
-            {{ loading ? t('tools.adding') : t('tools.add') }}
+            {{ loading ? (isEdit ? t('tools.saving') : t('tools.adding')) : (isEdit ? t('tools.save') : t('tools.add')) }}
           </Button>
         </div>
       </form>
@@ -144,6 +144,10 @@ import {
 // Props
 const props = defineProps({
   loading: {
+    type: Boolean,
+    default: false
+  },
+  isEdit: {
     type: Boolean,
     default: false
   }
@@ -191,6 +195,22 @@ const handleSubmit = () => {
   emit('submit', payload)
 }
 
+// 设置表单数据
+const setFormData = (data) => {
+  form.name = data.name || ''
+  form.protocol = data.protocol || 'sse'
+  form.description = data.description || ''
+  
+  if (data.protocol === 'stdio') {
+    form.command = data.command || ''
+    form.args = Array.isArray(data.args) ? data.args.join(' ') : (data.args || '')
+  } else if (data.protocol === 'sse') {
+    form.sse_url = data.sse_url || ''
+  } else if (data.protocol === 'streamable_http') {
+    form.streamable_http_url = data.streamable_http_url || ''
+  }
+}
+
 // 重置表单的方法
 const resetForm = () => {
   form.name = ''
@@ -202,8 +222,9 @@ const resetForm = () => {
   form.description = ''
 }
 
-// 暴露重置方法给父组件
+// 暴露方法给父组件
 defineExpose({
-  resetForm
+  resetForm,
+  setFormData
 })
 </script>

@@ -60,7 +60,8 @@ class Request {
                 } else {
                     // 全局弹窗提示
                     if (response.message) {
-                        alert(response.message)
+                        // alert(response.message)
+                        console.error(response.message)
                     }
                     return {
                         success: false,
@@ -110,7 +111,7 @@ class Request {
                         code = 'NOT_FOUND'
                         break
                     case 500:
-                        alert(error.response.message)
+                        // alert(error.response.message)
                         message = error.response.message || '服务器内部错误'
                         code = 'SERVER_ERROR'
                         break
@@ -165,6 +166,14 @@ class Request {
                 credentials: this.withCredentials ? 'include' : 'omit',
                 ...config
             })
+
+            // 处理查询参数
+            if (finalConfig.params) {
+                const queryString = new URLSearchParams(finalConfig.params).toString()
+                if (queryString) {
+                    finalConfig.url += (finalConfig.url.includes('?') ? '&' : '?') + queryString
+                }
+            }
 
             // 构建完整URL
             const url = finalConfig.url.startsWith('http')

@@ -129,19 +129,19 @@ class SkillManager:
         内部方法：扫描并加载所有配置的技能目录中的技能。
         """
         self.skills.clear()
-        
+
         # Iterate over all configured skill directories
         for workspace in self.skill_dirs:
             if not os.path.exists(workspace):
                 logger.warning(f"Skill workspace directory not found: {workspace}")
                 continue
-                
+
             logger.info(f"Scanning skill workspace: {workspace}")
             try:
                 for item in os.listdir(workspace):
                     skill_path = os.path.join(workspace, item)
                     if os.path.isdir(skill_path):
-                        # Avoid duplicates if multiple workspaces have same skill name? 
+                        # Avoid duplicates if multiple workspaces have same skill name?
                         # Current logic: Last loaded overwrites previous if names collide.
                         self._load_skill_from_dir(skill_path)
             except Exception as e:
@@ -179,10 +179,10 @@ class SkillManager:
             return False
         return True
 
-    def _load_skill_from_dir(self, skill_path: str) -> bool:
+    def _load_skill_from_dir(self, skill_path: str) -> Optional[str]:
         """
         Load a skill from a directory.
-        Returns True if successful, False otherwise.
+        Returns skill name if successful, None otherwise.
         """
         skill_md_path = os.path.join(skill_path, "SKILL.md")
         if os.path.exists(skill_md_path):
@@ -201,7 +201,7 @@ class SkillManager:
                 # Validation for Claude Code Skills format
                 # Must have name, description
                 if not self._validate_skill_metadata(metadata, skill_path):
-                    return False
+                    return None
                 name = metadata.get("name")
                 description = metadata.get("description", "")
 
@@ -216,12 +216,12 @@ class SkillManager:
                     )
                     self.skills[name] = schema
                     logger.info(f"Successfully registered new skill: {name}")
-                    return True
+                    return name
             except Exception as e:
                 logger.error(f"Failed to load skill from {skill_path}: {e}")
-        return False
+        return None
 
-    def register_new_skill(self, skill_dir_name: str) -> bool:
+    def register_new_skill(self, skill_dir_name: str) -> Optional[str]:
         """
         Validate and register a new skill located in the skill workspace.
         If validation fails, the directory will be removed.
@@ -230,15 +230,16 @@ class SkillManager:
             skill_dir_name: The directory name of the skill in the workspace
             
         Returns:
-            bool: True if successful, False otherwise
+            Optional[str]: The skill name if successful, None otherwise
         """
         skill_path = os.path.join(self.skill_workspace, skill_dir_name)
         if not os.path.exists(skill_path):
             logger.error(f"Skill directory not found: {skill_path}")
-            return False
-            
-        if self._load_skill_from_dir(skill_path):
-            return True
+            return None
+
+        skill_name = self._load_skill_from_dir(skill_path)
+        if skill_name:
+            return skill_name
         else:
             # Validation failed, remove the directory
             try:
@@ -246,8 +247,30 @@ class SkillManager:
                 logger.warning(f"Removed invalid skill directory: {skill_path}")
             except Exception as e:
                 logger.error(f"Failed to remove invalid skill directory {skill_path}: {e}")
-            return False
+            return None
 
+    def reload_skill(self, skill_path: str) -> bool:
+        """
+        Reload an existing skill from the workspace.
+        Does NOT delete the directory if validation fails.
+        
+        Args:
+            skill_dir_name: The directory name of the skill in the workspace
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+
+        skill_name = self._load_skill_from_dir(skill_path)
+        return skill_name is not None
+
+    def remove_skill(self, skill_name: str) -> None:
+        """
+        Remove a skill from the manager (memory only).
+        """
+        if skill_name in self.skills:
+            del self.skills[skill_name]
+            logger.info(f"Removed skill from manager: {skill_name}")
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
         """
