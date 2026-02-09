@@ -344,7 +344,6 @@ const deleteSkill = async (skill) => {
     toast.success(t('skills.deleteSuccess'))
     await loadSkills()
   } catch (error) {
-    console.error('Failed to delete skill:', error)
     toast.error(t('skills.deleteFailed'), {
       description: error.message,
     })
@@ -364,7 +363,6 @@ const openEditModal = async (skill) => {
       skillContent.value = response.content
     }
   } catch (error) {
-    console.error('Failed to load skill content:', error)
     toast.error(t('skills.loadContentFailed'), {
       description: error.message
     })

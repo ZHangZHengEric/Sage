@@ -260,9 +260,13 @@ async def update_skill_content(skill_name: str, content: str, user_id: str, role
         if not name or not description:
              raise ValueError("Missing name or description in YAML frontmatter")
 
+        if name != skill_name:
+             raise ValueError(f"Skill name cannot be changed. Expected '{skill_name}', got '{name}'")
+
     except Exception as e:
         logger.warning(f"Skill validation failed before save: {e}")
-        raise SageHTTPException(status_code=500, detail="技能格式验证失败，请检查 SKILL.md 格式 (需包含 name 和 description)。")
+        detail_msg = str(e) if "Skill name cannot be changed" in str(e) else "技能格式验证失败，请检查 SKILL.md 格式 (需包含 name 和 description)。"
+        raise SageHTTPException(status_code=500, detail=detail_msg)
 
     # 1. Read original content for backup
     original_content = ""
