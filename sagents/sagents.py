@@ -40,7 +40,6 @@ import uuid
 import os
 import sys
 import asyncio
-import json
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -389,6 +388,9 @@ class SAgent:
 
                 logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
 
+                # 加载最近一次调用的skill到context
+                await session_context.load_recent_skill_to_context()
+
                 # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
                 session_context.set_history_context()
 
@@ -438,6 +440,11 @@ class SAgent:
                 if agent_mode is None:
                     router_agent = session_context.audit_status.get("router_agent", "单智能体")
                     agent_mode = 'multi' if router_agent != "单智能体" else 'simple'
+
+                # 根据 agent_mode 限制工具的使用 (屏蔽 fibre tools)
+                session_context.restrict_tools_for_mode(agent_mode)
+                # 更新本地 tool_manager 引用，因为 session_context.tool_manager 可能已被替换为 ToolProxy
+                tool_manager = session_context.tool_manager
 
                 # 1. 任务分析阶段
                 if deep_thinking:

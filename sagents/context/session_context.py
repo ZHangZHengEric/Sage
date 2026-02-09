@@ -63,6 +63,23 @@ class SessionContext:
         self.tool_manager = tool_manager # 存储工具管理器
         self.skill_manager = skill_manager
 
+        # Ensure load_skill tool is registered if skills are available
+        if self.skill_manager and self.tool_manager:
+            if not self.tool_manager.get_tool('load_skill'):
+                # Check if there are any skills to load?
+                # Even if no skills currently, the tool might be useful if skills are added dynamically?
+                # User said: "judge if skill_manager has skill"
+                if self.skill_manager.skills:
+                    try:
+                        from sagents.skill.skill_tool import SkillTool
+                        
+                        skill_tool = SkillTool()
+                        # Use the new helper method to register tools from the instance
+                        self.tool_manager.register_tools_from_object(skill_tool)
+                        logger.info("SessionContext: Automatically registered load_skill tool from SkillTool instance")
+                    except Exception as e:
+                        logger.error(f"SessionContext: Failed to register load_skill tool: {e}")
+
         self.init_more(workspace_root)
 
     def init_more(self, workspace_root: str):
@@ -77,26 +94,22 @@ class SessionContext:
 
         if not os.path.exists(self.session_workspace):
             os.makedirs(self.session_workspace)
-            # 创建agent 执行过程中保存内容的文件夹
-            if not os.path.exists(_agent_workspace_host_path):
-                os.makedirs(_agent_workspace_host_path)
+        
+        if not os.path.exists(_agent_workspace_host_path):
+            os.makedirs(_agent_workspace_host_path)
 
-        else:
-            # 只有当 agent_workspace 不存在且我们期望它存在时才创建
-            # 对于子会话，如果它被配置为共享父会话的 agent_workspace，它可能会在稍后被覆盖
-            # 但 SessionContext 初始化时，我们默认创建它自己的
-            if not os.path.exists(_agent_workspace_host_path):
-                os.makedirs(_agent_workspace_host_path)
-
-            # 加载save的session_status.json
-            session_status_path = os.path.join(self.session_workspace, "session_status.json")
-            if os.path.exists(session_status_path):
+        # 加载save的session_status.json
+        session_status_path = os.path.join(self.session_workspace, "session_status.json")
+        if os.path.exists(session_status_path):
+            try:
                 with open(session_status_path, "r") as f:
                     session_status = json.load(f)
                     self.status = SessionStatus(session_status["status"])
                     self.start_time = session_status["start_time"]
                     self.end_time = session_status["end_time"]
                     self.system_context = session_status["system_context"]
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to load session status: {e}")
         
         # 确保 llm_request 目录存在，用于存放请求日志
         self.llm_request_dir = os.path.join(self.session_workspace, "llm_request")
@@ -156,6 +169,94 @@ class SessionContext:
                 for message_item in messages:
                     self.message_manager.add_messages(MessageChunk(**message_item))
                 logger.info(f"已经成功加载{len(messages)}条历史消息，耗时: {time.time() - t2:.3f}s")
+
+    async def load_recent_skill_to_context(self):
+        """
+        检测历史消息，是否有使用 load_skill skill，如果有，并且当前还有该skill，加载到context 中。
+        """
+        if not self.skill_manager:
+            return
+
+        # 获取最后一次 load_skill 的调用
+        last_load_skill_call = None
+        
+        # 倒序遍历消息
+        # message_manager.messages is a list of MessageChunk
+        for msg in reversed(self.message_manager.messages):
+             if msg.role == 'assistant' and msg.tool_calls:
+                 for tool_call in msg.tool_calls:
+                     if tool_call.get('function', {}).get('name') == 'load_skill':
+                         last_load_skill_call = tool_call
+                         break
+             if last_load_skill_call:
+                 break
+        
+        if last_load_skill_call:
+            try:
+                # 解析参数，arguments 可能是字符串也可能是字典
+                arguments = last_load_skill_call['function']['arguments']
+                if isinstance(arguments, str):
+                    arguments = json.loads(arguments)
+            
+                skill_name = arguments.get('skill_name')
+            
+                if skill_name:
+                    logger.info(f"SessionContext: Found recent skill '{skill_name}', reloading via ToolManager...")
+                    # 使用 ToolManager 执行 load_skill，以保持逻辑一致性 (包括更新 system_context)
+                    # run_tool_async 会自动处理 system_context 的更新
+                    await self.tool_manager.run_tool_async(
+                        tool_name='load_skill',
+                        session_context=self,
+                        session_id=self.session_id,
+                        **arguments
+                    )
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to load recent skill to context: {e}")
+
+    def restrict_tools_for_mode(self, agent_mode: str):
+        """
+        根据 agent_mode 限制工具的使用。
+        如果不为 'fibre' 模式，屏蔽 Fibre 相关工具。
+        """
+        if agent_mode == 'fibre':
+            return
+
+        fibre_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task']
+        
+        # 避免循环引用
+        from sagents.tool.tool_manager import ToolManager
+        from sagents.tool.tool_proxy import ToolProxy
+        
+        current_manager = self.tool_manager
+        if not current_manager:
+            return
+
+        # 获取基础管理器和当前可用工具
+        base_manager = None
+        available_tools = set()
+
+        if isinstance(current_manager, ToolProxy):
+            base_manager = current_manager.tool_manager
+            # ToolProxy.list_all_tools_name 返回的是当前 proxy 可用的工具名
+            available_tools = set(current_manager.list_all_tools_name())
+        elif isinstance(current_manager, ToolManager):
+            base_manager = current_manager
+            available_tools = set(base_manager.list_all_tools_name())
+        else:
+            logger.warning(f"SessionContext: Unknown tool manager type: {type(current_manager)}")
+            return
+
+        # 检查是否包含需要屏蔽的工具
+        tools_to_remove = available_tools.intersection(set(fibre_tools))
+        
+        if tools_to_remove:
+            # 过滤掉 fibre tools
+            new_available = list(available_tools - tools_to_remove)
+            
+            # 创建新的 ToolProxy
+            self.tool_manager = ToolProxy(base_manager, new_available)
+            logger.info(f"SessionContext: Restricted tools for mode '{agent_mode}'. Removed: {tools_to_remove}")
+
 
     async def init_user_memory_context(self):
         """初始化用户记忆
