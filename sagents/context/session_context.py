@@ -16,6 +16,7 @@ from sagents.utils.logger import logger
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
 import json
 import os
+import re
 import datetime
 import pytz
 from sagents.utils.sandbox.sandbox import Sandbox
@@ -172,44 +173,66 @@ class SessionContext:
 
     async def load_recent_skill_to_context(self):
         """
-        检测历史消息，是否有使用 load_skill skill，如果有，并且当前还有该skill，加载到context 中。
+        检测历史消息，是否有使用 load_skill skill，或者用户消息中包含 <skill>name</skill>。
+        如果有，取最后一次出现的（优先级最高），加载到context 中。
         """
         if not self.skill_manager:
             return
 
-        # 获取最后一次 load_skill 的调用
-        last_load_skill_call = None
+        found_skill_name = None
+        found_arguments = None
         
         # 倒序遍历消息
-        # message_manager.messages is a list of MessageChunk
         for msg in reversed(self.message_manager.messages):
-             if msg.role == 'assistant' and msg.tool_calls:
+            # Check for <skill> tag in user message
+            if msg.role == 'user' and msg.content:
+                content_str = ""
+                if isinstance(msg.content, str):
+                    content_str = msg.content
+                elif isinstance(msg.content, list):
+                    # Handle multimodal content
+                    for part in msg.content:
+                        if isinstance(part, dict) and part.get('type') == 'text':
+                            content_str += part.get('text', '')
+                
+                # Check for <skill>...</skill>
+                matches = re.findall(r"<skill>(.*?)</skill>", content_str, re.DOTALL)
+                if matches:
+                    # Use the last match in the message content
+                    found_skill_name = matches[-1].strip()
+                    found_arguments = {"skill_name": found_skill_name}
+                    logger.info(f"SessionContext: Found skill tag in user message: {found_skill_name}")
+                    break
+
+            # Check for load_skill tool call
+            if msg.role == 'assistant' and msg.tool_calls:
                  for tool_call in msg.tool_calls:
                      if tool_call.get('function', {}).get('name') == 'load_skill':
-                         last_load_skill_call = tool_call
-                         break
-             if last_load_skill_call:
-                 break
+                         arguments = tool_call['function']['arguments']
+                         if isinstance(arguments, str):
+                             try:
+                                 arguments = json.loads(arguments)
+                             except Exception:
+                                 continue
+                         
+                         if isinstance(arguments, dict):
+                             found_skill_name = arguments.get('skill_name')
+                             found_arguments = arguments
+                             logger.info(f"SessionContext: Found recent skill tool call: {found_skill_name}")
+                             break
+            
+            if found_skill_name:
+                break
         
-        if last_load_skill_call:
+        if found_skill_name:
             try:
-                # 解析参数，arguments 可能是字符串也可能是字典
-                arguments = last_load_skill_call['function']['arguments']
-                if isinstance(arguments, str):
-                    arguments = json.loads(arguments)
-            
-                skill_name = arguments.get('skill_name')
-            
-                if skill_name:
-                    logger.info(f"SessionContext: Found recent skill '{skill_name}', reloading via ToolManager...")
-                    # 使用 ToolManager 执行 load_skill，以保持逻辑一致性 (包括更新 system_context)
-                    # run_tool_async 会自动处理 system_context 的更新
-                    await self.tool_manager.run_tool_async(
-                        tool_name='load_skill',
-                        session_context=self,
-                        session_id=self.session_id,
-                        **arguments
-                    )
+                logger.info(f"SessionContext: Reloading skill '{found_skill_name}' via ToolManager...")
+                await self.tool_manager.run_tool_async(
+                    tool_name='load_skill',
+                    session_context=self,
+                    session_id=self.session_id,
+                    **found_arguments
+                )
             except Exception as e:
                 logger.error(f"SessionContext: Failed to load recent skill to context: {e}")
 
