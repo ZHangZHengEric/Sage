@@ -120,11 +120,10 @@ cannot_extract_documents = {
 
 # Skills 相关提示
 skills_info_label = {
-    "zh": "\n当前工作空间可用技能（当任务与技能相关，优先使用技能来解决用户的需求）：\n",
-    "en": "\nAvailable Skills in Workspace(when tasks are related to skills, prioritize using skills to meet user needs) :\n",
-    "pt": "\nHabilidades Disponíveis no Espaço de Trabalho(quando as tarefas são relacionadas a habilidades, priorize o uso de habilidades para atender às necessidades dos usuários):\n"
+    "zh": "\n当前工作空间可用技能Skills（**重点：当任务与技能相关，优先使用技能来解决用户的需求**）：\n",
+    "en": "\nAvailable Skills in Workspace(**Priority: When tasks are related to skills, prioritize using skills to meet user needs**):\n",
+    "pt": "\nHabilidades Disponíveis no Espaço de Trabalho(**Prioridade: quando as tarefas são relacionadas a habilidades, priorize o uso de habilidades para atender às necessidades dos usuários**):\n"
 }
-
 skills_usage_hint = {
     "zh": """
 **技能使用说明**：
