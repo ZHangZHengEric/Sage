@@ -11,12 +11,21 @@ import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+import yaml
 from fastapi import UploadFile
 from loguru import logger
 from sagents.skill.skill_manager import get_skill_manager
 
 from .. import models
 from ..core.exceptions import SageHTTPException
+
+
+def _get_skill_info_safe(tm, skill_name: str):
+    """Safely get skill info from manager"""
+    for skill in tm.list_skill_info():
+        if skill.name == skill_name:
+            return skill
+    return None
 
 
 async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
@@ -127,7 +136,7 @@ async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> Non
     if not tm:
         raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
 
-    skill_info = tm.get_skill_info(skill_name)
+    skill_info = _get_skill_info_safe(tm, skill_name)
     if not skill_info:
         raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
 
@@ -152,6 +161,119 @@ async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> Non
     except Exception as e:
         logger.error(f"Delete skill failed: {e}")
         raise SageHTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+async def get_skill_content(skill_name: str, user_id: str, role: str = "user") -> str:
+    """获取技能内容 (SKILL.md)"""
+    tm = get_skill_manager()
+    if not tm:
+        raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+
+    # Check existence
+    skill_info = _get_skill_info_safe(tm, skill_name)
+    if not skill_info:
+        raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
+
+    # Check permission
+    dao = models.SkillOwnershipDao()
+    owner = await dao.get_owner(skill_name)
+
+    if role != "admin":
+        # User can read system skills (owner=None) and own skills
+        if owner and owner != user_id:
+            raise SageHTTPException(status_code=500, detail="Permission denied")
+
+    skill_path = os.path.join(tm.skill_workspace, skill_name, "SKILL.md")
+    if not os.path.exists(skill_path):
+        raise SageHTTPException(status_code=500, detail="SKILL.md not found")
+
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        logger.error(f"Read skill content failed: {e}")
+        raise SageHTTPException(status_code=500, detail=f"Failed to read skill content: {e}")
+
+
+async def update_skill_content(skill_name: str, content: str, user_id: str, role: str = "user") -> str:
+    """更新技能内容 (SKILL.md)"""
+    tm = get_skill_manager()
+    if not tm:
+        raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
+
+    skill_info = _get_skill_info_safe(tm, skill_name)
+    if not skill_info:
+        raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
+
+    dao = models.SkillOwnershipDao()
+    owner = await dao.get_owner(skill_name)
+
+    if role != "admin":
+        if not owner: # System skill
+            raise SageHTTPException(status_code=500, detail="Cannot modify system skill")
+        if owner != user_id:
+            raise SageHTTPException(status_code=500, detail="Permission denied")
+
+    skill_path = os.path.join(tm.skill_workspace, skill_name, "SKILL.md")
+
+    # 0. Validate content format before saving
+    try:
+        metadata = {}
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                yaml_content = parts[1]
+                metadata = yaml.safe_load(yaml_content) or {}
+        
+        name = metadata.get("name")
+        description = metadata.get("description")
+        
+        if not name or not description:
+             raise ValueError("Missing name or description in YAML frontmatter")
+
+    except Exception as e:
+        logger.warning(f"Skill validation failed before save: {e}")
+        raise SageHTTPException(status_code=500, detail="技能格式验证失败，请检查 SKILL.md 格式 (需包含 name 和 description)。")
+
+    # 1. Read original content for backup
+    original_content = ""
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            original_content = f.read()
+    except Exception as e:
+        logger.error(f"Read original skill content failed: {e}")
+        # If we can't read the original file, we probably shouldn't proceed with overwrite
+        raise SageHTTPException(status_code=500, detail=f"Failed to read original skill content: {e}")
+
+    try:
+        # 2. Write new content
+        with open(skill_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        # 3. Reload and validate skill
+        if tm.register_new_skill(skill_name):
+            return "技能更新成功"
+        else:
+            # Validation failed, trigger rollback
+            raise ValueError("Skill validation failed")
+
+    except Exception as e:
+        logger.error(f"Update skill content failed: {e}")
+
+        # 4. Rollback
+        try:
+            with open(skill_path, "w", encoding="utf-8") as f:
+                f.write(original_content)
+            # Re-register original to ensure consistency
+            tm.register_new_skill(skill_name)
+            logger.info(f"Rolled back skill '{skill_name}' to original state")
+        except Exception as rollback_error:
+            logger.error(f"Rollback failed for skill '{skill_name}': {rollback_error}")
+
+        if isinstance(e, ValueError) and str(e) == "Skill validation failed":
+            raise SageHTTPException(status_code=400, detail="技能格式验证失败，已还原修改。请检查 SKILL.md 格式。")
+
+        raise SageHTTPException(status_code=500, detail=f"Failed to update skill content: {e}")
 
 
 async def _process_zip_and_register(

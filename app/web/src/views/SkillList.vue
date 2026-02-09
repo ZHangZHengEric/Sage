@@ -59,15 +59,26 @@
                   <CardTitle class="text-base truncate" :title="skill.name">
                     {{ skill.name }}
                   </CardTitle>
-                  <Button 
-                    v-if="canDelete(skill)" 
-                    variant="ghost" 
-                    size="icon" 
-                    class="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity -mr-2 -mt-1"
-                    @click.stop="deleteSkill(skill)"
-                  >
-                    <Trash2 class="h-4 w-4" />
-                  </Button>
+                  <div class="flex items-center gap-0 -mr-2 -mt-1">
+                    <Button 
+                      v-if="canEdit(skill)" 
+                      variant="ghost" 
+                      size="icon" 
+                      class="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                      @click.stop="openEditModal(skill)"
+                    >
+                      <Edit class="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      v-if="canDelete(skill)" 
+                      variant="ghost" 
+                      size="icon" 
+                      class="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                      @click.stop="deleteSkill(skill)"
+                    >
+                      <Trash2 class="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <CardDescription class="line-clamp-2 text-xs">
                   {{ skill.description || t('skills.noDescription') }}
@@ -167,17 +178,45 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <!-- Edit Modal -->
+    <Dialog v-model:open="showEditModal">
+      <DialogContent class="sm:max-w-[800px] sm:h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>{{ t('skills.edit') }} - {{ editingSkill?.name }}</DialogTitle>
+          <DialogDescription>
+            {{ t('skills.editDesc') || 'Edit SKILL.md content' }}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="flex-1 min-h-0 py-4">
+          <Textarea 
+            v-model="skillContent" 
+            class="h-full font-mono text-sm resize-none"
+            :placeholder="t('skills.contentPlaceholder') || 'Enter markdown content...'" 
+          />
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showEditModal = false">{{ t('skills.cancel') }}</Button>
+          <Button type="primary" @click="saveSkillContent" :disabled="saving">
+            <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+            {{ t('skills.save') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield } from 'lucide-vue-next'
+import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield, Edit } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { skillAPI } from '../api/skill.js'
 import { getCurrentUser } from '../utils/auth.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
@@ -201,6 +240,11 @@ const importing = ref(false)
 const importError = ref('')
 const fileInput = ref(null)
 const currentUser = ref({ userid: '', role: 'user' })
+
+const showEditModal = ref(false)
+const editingSkill = ref(null)
+const skillContent = ref('')
+const saving = ref(false)
 
 // Groups Configuration
 const groups = computed(() => [
@@ -257,9 +301,13 @@ const isImportDisabled = computed(() => {
 
 const canDelete = (skill) => {
   // If skill has no owner (system skill), user cannot delete
-  if (!skill.user_id) return false
   if (currentUser.value.role === 'admin') return true
+  if (!skill.user_id) return false
   return skill.user_id === currentUser.value.userid
+}
+
+const canEdit = (skill) => {
+  return canDelete(skill)
 }
 
 // API Methods
@@ -284,17 +332,53 @@ const deleteSkill = async (skill) => {
   try {
     loading.value = true
     await skillAPI.deleteSkill(skill.name)
-    toast.success(t('common.success'), {
-      description: t('skills.deleteSuccess') || 'Skill deleted successfully',
-    })
+    toast.success(t('skills.deleteSuccess'))
     await loadSkills()
   } catch (error) {
     console.error('Failed to delete skill:', error)
-    toast.error(t('common.error'), {
-      description: error.message || t('skills.deleteFailed') || 'Failed to delete skill',
+    toast.error(t('skills.deleteFailed'), {
+      description: error.message,
     })
   } finally {
     loading.value = false
+  }
+}
+
+const openEditModal = async (skill) => {
+  editingSkill.value = skill
+  skillContent.value = ''
+  showEditModal.value = true
+  
+  try {
+    const response = await skillAPI.getSkillContent(skill.name)
+    if (response.content) {
+      skillContent.value = response.content
+    }
+  } catch (error) {
+    console.error('Failed to load skill content:', error)
+    toast.error(t('skills.loadContentFailed'), {
+      description: error.message
+    })
+    showEditModal.value = false
+  }
+}
+
+const saveSkillContent = async () => {
+  if (!editingSkill.value) return
+  
+  try {
+    saving.value = true
+    await skillAPI.updateSkillContent(editingSkill.value.name, skillContent.value)
+    toast.success(t('skills.updateSuccess'))
+    showEditModal.value = false
+    loadSkills()
+  } catch (error) {
+    console.error('Failed to update skill:', error)
+    toast.error(t('skills.updateFailed'), {
+      description: error.message 
+    })
+  } finally {
+    saving.value = false
   }
 }
 
