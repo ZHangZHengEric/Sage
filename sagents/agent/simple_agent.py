@@ -8,6 +8,7 @@ from sagents.context.session_context import SessionContext, get_session_context,
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.tool.tool_schema import convert_spec_to_openai_format
+from sagents.utils.content_saver import save_agent_response_content
 import json
 import uuid
 from copy import deepcopy
@@ -417,6 +418,7 @@ class SimpleAgent(AgentBase):
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
+        full_content_accumulator = ""
 
         # 处理流式响应块
         async for chunk in response:
@@ -452,11 +454,13 @@ class SimpleAgent(AgentBase):
                     break
 
                 if len(chunk.choices[0].delta.content) > 0:
+                    content_piece = chunk.choices[0].delta.content
+                    full_content_accumulator += content_piece
                     output_messages = [MessageChunk(
                         role='assistant',
-                        content=chunk.choices[0].delta.content,
+                        content=content_piece,
                         message_id=content_response_message_id,
-                        show_content=chunk.choices[0].delta.content,
+                        show_content=content_piece,
                         message_type=MessageType.DO_SUBTASK_RESULT.value,
                         agent_name=self.agent_name
                     )]
@@ -473,6 +477,14 @@ class SimpleAgent(AgentBase):
                         agent_name=self.agent_name
                     )]
                     yield (output_messages, False)
+        
+        # 处理完所有chunk后，尝试保存内容
+        if full_content_accumulator:
+             try:
+                 save_agent_response_content(full_content_accumulator, session_id)
+             except Exception as e:
+                 logger.error(f"SimpleAgent: Failed to save response content: {e}")
+
         # 处理工具调用
         if len(tool_calls) > 0:
             # 识别是否包含结束任务的工具调用

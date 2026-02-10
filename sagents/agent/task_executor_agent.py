@@ -7,6 +7,7 @@ from sagents.context.session_context import SessionContext, get_session_context
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.tool.tool_schema import convert_spec_to_openai_format
+from sagents.utils.content_saver import save_agent_response_content
 import uuid
 
 
@@ -109,6 +110,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         reasoning_content_response_message_id = str(uuid.uuid4())
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id: Optional[str] = None
+        full_content_accumulator = ""
 
         # 处理流式响应块
         async for chunk in response:
@@ -137,11 +139,13 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     break
 
                 if len(chunk.choices[0].delta.content) > 0:
+                    content_piece = chunk.choices[0].delta.content
+                    full_content_accumulator += content_piece
                     output_messages = [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content=chunk.choices[0].delta.content,
+                        content=content_piece,
                         message_id=content_response_message_id,
-                        show_content=chunk.choices[0].delta.content,
+                        show_content=content_piece,
                         message_type=MessageType.DO_SUBTASK_RESULT.value
                     )]
                     yield output_messages
@@ -156,6 +160,14 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
                     yield output_messages
+        
+        # 处理完所有chunk后，尝试保存内容
+        if full_content_accumulator:
+             try:
+                 save_agent_response_content(full_content_accumulator, session_id)
+             except Exception as e:
+                 logger.error(f"TaskExecutorAgent: Failed to save response content: {e}")
+
         # 处理工具调用
         if len(tool_calls) > 0:
             async for chunk in self._handle_tool_calls(
