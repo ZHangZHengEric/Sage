@@ -1,1 +1,1 @@
-3. 优化 `SkillManager.get_skill_description_lines` 的输出格式，现在明确标注了 `skill name` 和 `description`，例如 `- skill name: pdf, description: Process PDF files`，避免歧义。
+4. 修复 `agent_base.py` 中引用缺失的 `skills_info_label` 问题：在 `sagents/prompts/agent_base_prompts.py` 中补充了该提示词，并明确指引智能体使用 `load_skill` 加载可用技能。
