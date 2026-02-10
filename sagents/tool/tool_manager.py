@@ -653,7 +653,7 @@ class ToolManager:
                     "file_write", 
                     "search_content_in_file", 
                     "download_file_from_url", 
-                    "update_file",
+                    "file_update",
                     "extract_text_from_non_text_file"
                 ]
                 

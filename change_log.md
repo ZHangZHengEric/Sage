@@ -26,3 +26,7 @@
 2026-02-10 16:20:00
 1. 核心逻辑增强：优化 `SandboxFileSystem.get_file_tree` 方法，增加 `include_hidden` 参数（默认 False），支持灵活控制是否展示隐藏文件。
 2. 安全策略明确：即使开启 `include_hidden`，系统敏感目录（如 `.sandbox`, `.git`, `.idea`, `.vscode`, `node_modules` 等）仍会被强制隐藏，防止干扰 Agent 上下文或暴露系统结构。
+
+2026-02-10 16:45:00
+1. 错误修复：修复 `file_update` 工具无法识别沙箱虚拟路径的问题。通过将 `file_update` 加入 `ToolManager` 的 `SANDBOX_TOOLS` 列表，确保其在沙箱环境中执行并自动处理路径映射，无需修改工具本身代码。
+2. 稳定性增强：增强 Agent 参数解析逻辑，支持修正模型输出的非标准 JSON（如 Python 布尔值 `true`/`false`），减少因格式错误导致的工具调用失败。

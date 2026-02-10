@@ -552,7 +552,8 @@ class AgentBase(ABC):
                 function_params = json.loads(function_params)
             except json.JSONDecodeError:
                 try:
-                    function_params = eval(function_params)
+                    # 尝试使用 eval 解析，并注入 JSON 常量
+                    function_params = eval(function_params, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
                 except Exception:
                     logger.error(f"{self.agent_name}: 第一次参数解析报错，再次进行参数解析失败")
                     logger.error(f"{self.agent_name}: 原始参数: {tool_call['function']['arguments']}")
@@ -562,7 +563,8 @@ class AgentBase(ABC):
                     function_params = json.loads(function_params)
                 except json.JSONDecodeError:
                     try:
-                        function_params = eval(function_params)
+                        # 再次尝试使用 eval 解析
+                        function_params = eval(function_params, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
                     except Exception:
                         logger.error(f"{self.agent_name}: 解析完参数化依旧后是str，再次进行参数解析失败")
                         logger.error(f"{self.agent_name}: 原始参数: {tool_call['function']['arguments']}")
