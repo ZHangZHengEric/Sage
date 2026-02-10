@@ -132,9 +132,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader } from 'lucide-vue-next'
+import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
 import { getCurrentUser } from '../utils/auth.js'
@@ -175,9 +176,6 @@ const route = useRoute()
 const currentUser = ref(getCurrentUser())
 
 // 监听路由参数变化，处理刷新
-import { watch } from 'vue'
-import { useRoute } from 'vue-router'
-
 watch(() => route.query.refresh, () => {
   if (currentView.value !== 'list') {
     handleBackToList()
@@ -432,12 +430,27 @@ const handleCreateAgent = () => {
   showCreationModal.value = true
 }
 
-const handleBlankConfig = (selectedTools = []) => {
+const handleBlankConfig = async (selectedTools = []) => {
   showCreationModal.value = false
-  // 切换到创建视图，并预填可用工具
+  
+  let systemPrefix = ''
+  try {
+    // 强制使用中文模板
+    const response = await agentAPI.getDefaultSystemPrompt('zh')
+    if (response && response.data && response.data.content) {
+      systemPrefix = response.data.content
+    } else if (response && response.content) {
+      systemPrefix = response.content
+    }
+  } catch (error) {
+    console.error('Failed to load default system prompt:', error)
+  }
+
+  // 切换到创建视图，并预填可用工具和系统提示词
   editingAgent.value = {
     availableTools: Array.isArray(selectedTools) ? selectedTools : [],
-    availableSkills: []
+    availableSkills: [],
+    systemPrefix: systemPrefix
   }
   currentView.value = 'create'
 }
