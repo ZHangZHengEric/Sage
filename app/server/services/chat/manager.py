@@ -185,6 +185,10 @@ async def populate_request_from_agent_config(
             current_skills = []
             setattr(request, "available_skills", current_skills)
         need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
+        current_tools = getattr(request, "available_tools", [])
+        if current_tools is None:
+            current_tools = []
+            setattr(request, "available_tools", current_tools)
         for tool in need_tools:
             if tool not in current_tools:
                 current_tools.append(tool)
