@@ -1,1 +1,4 @@
-4. 修复 `agent_base.py` 中引用缺失的 `skills_info_label` 问题：在 `sagents/prompts/agent_base_prompts.py` 中补充了该提示词，并明确指引智能体使用 `load_skill` 加载可用技能。
+[2026-02-11] 5. 修复 `execute_python_code` 依赖检查逻辑：移除了错误的本地 `importlib` 检查，改为始终在沙箱中执行 `pip install`，解决了依赖包安装后无法找到的问题。同时优化了脚本目录解析逻辑，确保在提供 `session_id` 时正确创建 `agent_workspace/scripts` 目录。
+[2026-02-11] 6. Docker环境增强：在 `Sage/docker/Dockerfile.server` 中添加 `bun` 运行时支持（含 `unzip` 依赖），并配置环境变量 `BUN_INSTALL` 和 `PATH`。
+[2026-02-11] 7. 增强 `execute_command_tool` 沙箱集成：为 `SandboxFileSystem` 添加 `write_file` (支持追加)、`read_file` 和 `ensure_directory` 方法；全面重构 `_prepare_script_environment`、`_write_script_file` 和 `_log_shell_history` 以优先使用沙箱文件系统进行路径解析和IO操作，确保文件操作的隔离性和安全性；修复 `execute_javascript_code` 缺失 `session_id` 传递的 Bug。
+[2026-02-11] 8. 彻底移除 `execute_command_tool` 中的宿主路径硬编码：更新 `_prepare_script_environment` 使其返回沙箱虚拟路径（如 `/workspace/scripts`）；在 `execute_shell_command` 中动态解析虚拟路径到宿主路径；修复 `execute_javascript_code` 中 `package.json` 检查逻辑，使其能够正确处理虚拟工作目录。
