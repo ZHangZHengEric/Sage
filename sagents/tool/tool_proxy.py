@@ -93,6 +93,35 @@ class ToolProxy:
         self._check_tool_available(tool_name)
         return await self.tool_manager.run_tool_async(tool_name, session_context, **kwargs)
 
+    def register_tools_from_object(self, obj: Any) -> int:
+        """
+        Register tools from an object instance or class.
+        Delegates to ToolManager and updates available tools list.
+        """
+        # Delegate to base manager
+        count = self.tool_manager.register_tools_from_object(obj)
+        
+        if count > 0:
+            # If successful, we need to add the registered tools to available_tools
+            # We scan the object to find tool names
+            import inspect
+            
+            for name, member in inspect.getmembers(obj):
+                # Check if member has _tool_spec (added by @tool decorator)
+                tool_spec = getattr(member, "_tool_spec", None)
+                
+                # If not found directly, check underlying function for bound methods
+                if not tool_spec and hasattr(member, "__func__"):
+                    tool_spec = getattr(member.__func__, "_tool_spec", None)
+                    
+                if tool_spec:
+                    tool_name = tool_spec.name
+                    if tool_name not in self._available_tools:
+                        self._available_tools.add(tool_name)
+                        logger.info(f"ToolProxy: Added newly registered tool '{tool_name}' to available tools")
+                        
+        return count
+
 class ToolProxyFactory:
     """
     工具代理工厂类
