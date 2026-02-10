@@ -9,6 +9,7 @@ from sagents.utils.prompt_manager import PromptManager
 
 import json
 import uuid
+import ast
 
 
 class TaskPlanningAgent(AgentBase):
@@ -148,6 +149,34 @@ class TaskPlanningAgent(AgentBase):
                 message_type=MessageType.PLANNING.value
             )]
 
+    def _try_parse_list(self, content: str) -> Any:
+        """
+        尝试解析字符串为列表，支持 JSON 和 Python Literal (eval) 两种方式
+        如果解析失败，返回原始字符串
+        """
+        content = content.strip()
+        
+        # 1. 尝试 JSON 解析
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+            
+        # 2. 尝试 ast.literal_eval 解析 (类似 eval 但更安全)
+        try:
+            # 只有当看起来像列表时才尝试
+            if content.startswith('[') and content.endswith(']'):
+                parsed = ast.literal_eval(content)
+                if isinstance(parsed, list):
+                    return parsed
+        except Exception:
+            pass
+            
+        # 3. 如果都失败了，返回原字符串
+        return content
+
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
         logger.debug("PlanningAgent: 转换XML内容为JSON格式")
         logger.debug(f"PlanningAgent: XML内容: {xlm_content}")
@@ -161,6 +190,13 @@ class TaskPlanningAgent(AgentBase):
             required_tools = xlm_content.split('<required_tools>')[1].split('</required_tools>')[0].strip()
             expected_output = xlm_content.split('<expected_output>')[1].split('</expected_output>')[0].strip()
             success_criteria = xlm_content.split('<success_criteria>')[1].split('</success_criteria>')[0].strip()
+
+            # 使用封装的函数解析 required_tools
+            parsed_tools = self._try_parse_list(required_tools)
+            if isinstance(parsed_tools, list):
+                required_tools = parsed_tools
+            else:
+                logger.warning(f"PlanningAgent: 无法将 required_tools 解析为列表: {required_tools}, 将保持原样")
 
         except Exception as e:
             logger.error(f"PlanningAgent: XML转JSON失败: {str(e)}")
