@@ -2,4 +2,4 @@
 [2026-02-11] 6. Docker环境增强：在 `Sage/docker/Dockerfile.server` 中添加 `bun` 运行时支持（含 `unzip` 依赖），并配置环境变量 `BUN_INSTALL` 和 `PATH`。
 [2026-02-11] 7. 增强 `execute_command_tool` 沙箱集成：为 `SandboxFileSystem` 添加 `write_file` (支持追加)、`read_file` 和 `ensure_directory` 方法；全面重构 `_prepare_script_environment`、`_write_script_file` 和 `_log_shell_history` 以优先使用沙箱文件系统进行路径解析和IO操作，确保文件操作的隔离性和安全性；修复 `execute_javascript_code` 缺失 `session_id` 传递的 Bug。
 [2026-02-11] 8. 彻底移除 `execute_command_tool` 中的宿主路径硬编码：更新 `_prepare_script_environment` 使其返回沙箱虚拟路径（如 `/workspace/scripts`）；在 `execute_shell_command` 中动态解析虚拟路径到宿主路径；修复 `execute_javascript_code` 中 `package.json` 检查逻辑，使其能够正确处理虚拟工作目录。
-[2026-02-11] 9. Docker 构建加速优化与分层：将 `Dockerfile.server` 中 `bun` 的安装方式优化为从 `npmmirror` 下载 Release 包，并将其拆分为独立的 `RUN` 指令，以利用 Docker 缓存机制并提升构建速度。
+[2026-02-11] 9. Docker 构建加速优化与分层：将 `Dockerfile.server` 中 `bun` 的安装方式优化为从 `npmmirror` 下载 Release 包，并将其拆分为独立的 `RUN` 指令，以利用 Docker 缓存机制并提升构建速度；修复下载 URL 中缺少 `bun-` 前缀导致的 404 错误。
