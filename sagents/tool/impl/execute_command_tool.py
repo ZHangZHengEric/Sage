@@ -19,6 +19,7 @@ import hashlib
 import traceback
 from typing import Dict, List, Any, Optional, Tuple, Union
 
+from sagents.utils.common_utils import ensure_list
 from ..tool_base import tool
 from sagents.utils.logger import logger
 
@@ -308,6 +309,25 @@ class ExecuteCommandTool:
             if env_vars:
                 env.update(env_vars)
             
+            # 自动修复 PATH：将常见用户二进制目录添加到 PATH 中
+            # 解决如 "env: 'bun': No such file or directory" 等因 PATH 缺失导致的问题
+            common_bin_paths = [
+                os.path.expanduser("~/.bun/bin"),
+                os.path.expanduser("~/.local/bin"),
+                os.path.expanduser("~/.cargo/bin"),
+                os.path.expanduser("~/.deno/bin"),
+                "/opt/homebrew/bin",
+                "/usr/local/bin"
+            ]
+            
+            current_path = env.get("PATH", "")
+            for p in common_bin_paths:
+                if os.path.exists(p) and p not in current_path:
+                    # 将其添加到 PATH 的开头，以确保优先使用
+                    current_path = f"{p}:{current_path}"
+            
+            env["PATH"] = current_path
+
             # 自动修复权限：如果命令指向本地文件且没有执行权限，自动添加 +x
             try:
                 # 简单解析第一个命令段
@@ -500,21 +520,10 @@ class ExecuteCommandTool:
 
 
             if requirement_list is not None:
-                # 兼容 JSON 字符串形式的列表
-                if isinstance(requirement_list, str):
-                    try:
-                        requirement_list = json.loads(requirement_list)
-                    except json.JSONDecodeError:
-                        pass # 将在下面的 isinstance 检查中失败
+                requirement_list = ensure_list(requirement_list)
 
-                if not isinstance(requirement_list, list):
-                    return {
-                        "success": False,
-                        "error": "requirement_list 参数类型错误：仅允许 List[str]",
-                        "process_id": process_id,
-                    }
             if requirement_list:
-                parsed_requirements = [p.strip() for p in requirement_list if isinstance(p, str) and p.strip()]
+                parsed_requirements = [str(p).strip() for p in requirement_list if p]
                 if parsed_requirements:
                     logger.info(f"📦 依赖包处理: {parsed_requirements}")
                     for package in parsed_requirements:
@@ -669,21 +678,9 @@ class ExecuteCommandTool:
 
             # 处理npm包依赖
             if npm_packages:
-                # 兼容 JSON 字符串形式的列表
-                if isinstance(npm_packages, str):
-                    try:
-                        npm_packages = json.loads(npm_packages)
-                    except json.JSONDecodeError:
-                        pass # 将在下面的 isinstance 检查中失败
-
-                if not isinstance(npm_packages, list):
-                     return {
-                        "success": False,
-                        "error": "npm_packages 参数类型错误：仅允许 List[str]",
-                        "process_id": process_id,
-                    }
+                npm_packages = ensure_list(npm_packages)
                 
-                parsed_packages = [p.strip() for p in npm_packages if isinstance(p, str) and p.strip()]
+                parsed_packages = [str(p).strip() for p in npm_packages if p]
                 if parsed_packages:
                     logger.info(f"📦 npm依赖包处理: {parsed_packages}")
                     
