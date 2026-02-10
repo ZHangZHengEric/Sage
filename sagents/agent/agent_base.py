@@ -345,7 +345,7 @@ class AgentBase(ABC):
                 )
                 system_prefix += workspace_files.format(workspace=workspace_name)
                 
-                file_tree = file_system.get_file_tree()
+                file_tree = file_system.get_file_tree(include_hidden=True)
                 if not file_tree:
                     no_files = prompt_manager.get_prompt(
                         'no_files_message',
@@ -385,7 +385,7 @@ class AgentBase(ABC):
                         fs_obj = SandboxFileSystem(host_path=current_agent_workspace, virtual_path="/workspace")
                     
                     if fs_obj:
-                        file_tree = fs_obj.get_file_tree()
+                        file_tree = fs_obj.get_file_tree(include_hidden=True)
                         
                         if not file_tree:
                             no_files = prompt_manager.get_prompt(
