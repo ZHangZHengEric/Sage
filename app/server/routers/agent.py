@@ -17,6 +17,7 @@ from ..services.agent import (
     optimize_system_prompt,
     update_agent,
 )
+from sagents.utils.prompt_manager import PromptManager
 
 # ============= Agent相关模型 =============
 
@@ -126,6 +127,39 @@ async def list(http_request: Request):
     return await Response.succ(
         data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
     )
+
+
+@agent_router.get("/template/default_system_prompt")
+async def get_default_system_prompt(language: str = "zh"):
+    """
+    获取默认的System Prompt模板（用于创建空白Agent时的初始草稿）
+
+    Args:
+        language: 语言代码，默认为zh
+
+    Returns:
+        StandardResponse: 包含默认System Prompt的内容
+    """
+    try:
+        content = PromptManager().get_prompt(
+            'agent_intro_template',
+            agent='common',
+            language=language,
+            default=""
+        )
+        # 如果是模板格式（包含{agent_name}），可以预填一个默认值或者保留占位符
+        # 这里为了作为草稿，我们预填 Sage
+        if "{agent_name}" in content:
+            content = content.format(agent_name="Sage")
+            
+        return await Response.succ(
+            data={"content": content},
+            message="成功获取默认System Prompt模板"
+        )
+    except Exception as e:
+        return await Response.error(
+            message=f"获取默认System Prompt模板失败: {str(e)}"
+        )
 
 
 @agent_router.post("/create")

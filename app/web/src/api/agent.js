@@ -61,5 +61,14 @@ export const agentAPI = {
    */
   systemPromptOptimize: async (input) => {
     return await baseAPI.post(`/api/agent/system-prompt/optimize`, input)
+  },
+
+  /**
+   * 获取默认系统提示词模板
+   * @param {string} language - 语言代码 (默认 'zh')
+   * @returns {Promise<Object>}
+   */
+  getDefaultSystemPrompt: async (language = 'zh') => {
+    return await baseAPI.get('/api/agent/template/default_system_prompt', { params: { language } })
   }
 }
