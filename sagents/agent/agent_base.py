@@ -410,7 +410,8 @@ class AgentBase(ABC):
                 system_prefix += "\n"
 
             # 补充 Skills 信息
-            if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
+            # 确保不仅skill_manager存在，而且确实有技能可用
+            if hasattr(session_context, 'skill_manager') and session_context.skill_manager and session_context.skill_manager.list_skills():
                 skill_descriptions = session_context.skill_manager.get_skill_description_lines()
                 if skill_descriptions:
                     # 使用PromptManager获取多语言文本

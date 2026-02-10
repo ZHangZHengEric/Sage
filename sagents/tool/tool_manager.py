@@ -520,7 +520,7 @@ class ToolManager:
     def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec, AgentToolSpec]]:
         """Get a tool by name"""
         logger.debug(f"Getting tool by name: {name}")
-        return self.tools.get(name)
+        return self.tools.get(name, None)
 
     def list_tools(self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """List all available tools with metadata, supports language filtering via convert_spec_to_openai_format"""
