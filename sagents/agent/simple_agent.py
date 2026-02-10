@@ -318,12 +318,13 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
             )
             all_new_response_chunks = []
+            current_system_prefix = PromptManager().get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language())
 
             # 更新system message，确保包含最新的子智能体列表等上下文信息
             if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
                 system_message = self.prepare_unified_system_message(
                     session_id,
-                    custom_prefix=session_context.system_prompt if hasattr(session_context, 'system_prompt') else "",
+                    custom_prefix=current_system_prefix,
                     language=session_context.get_language(),
                 )
                 messages_input[0] = system_message
