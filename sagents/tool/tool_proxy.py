@@ -83,8 +83,11 @@ class ToolProxy:
         """
         根据名称获取工具（仅限可用工具）
         """
-        self._check_tool_available(name)
-        return self.tool_manager.get_tool(name)
+        try:
+            self._check_tool_available(name)
+            return self.tool_manager.get_tool(name)
+        except ValueError:
+            return None
     
     async def run_tool_async(self, tool_name: str, session_context: SessionContext, **kwargs) -> Any:
         """
