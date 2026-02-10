@@ -16,7 +16,7 @@ import shutil
 import json
 import hashlib
 import traceback
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
@@ -127,6 +127,108 @@ class ExecuteCommandTool:
         # 启用安全检查，但使用宽松的黑名单（允许 rm/nc 等）
         self.security_manager = SecurityManager(False)
         self.process_manager = ProcessManager()
+        # 默认脚本目录不应硬编码为 getcwd，应由调用方传入或回退到临时目录
+        self.default_script_dir = None
+
+    def _prepare_script_environment(self, workdir: Optional[str], process_id: str, extension: str, session_id: Optional[str] = None) -> Tuple[str, str]:
+        """准备脚本执行环境：确定工作目录和脚本路径
+        
+        Args:
+            workdir: 用户指定的工作目录。强烈建议由 Agent 传入 Session 相关的 workspace 路径。
+            process_id: 进程ID，用于生成文件名
+            extension: 脚本扩展名 (如 .py, .js)
+            session_id: 会话ID，用于查找默认的 Session Workspace
+            
+        Returns:
+            Tuple[str, str]: (脚本绝对路径, 有效工作目录)
+        """
+        effective_workdir = None
+
+        if workdir:
+            # 用户指定了目录，使用该目录
+            effective_workdir = os.path.abspath(workdir)
+        elif session_id:
+            # 尝试通过 session_id 获取 Session Workspace
+            try:
+                # 避免循环导入
+                from sagents.context.session_context import get_session_context
+                session_context = get_session_context(session_id)
+                if session_context and hasattr(session_context, 'agent_workspace'):
+                    # agent_workspace 是 SandboxFileSystem，host_path 是宿主机路径
+                    host_path = getattr(session_context.agent_workspace, 'host_path', None)
+                    if host_path:
+                        # 默认放在 agent_workspace/scripts 下
+                        effective_workdir = os.path.join(host_path, "scripts")
+                        logger.debug(f"通过 session_id {session_id} 定位到工作目录: {effective_workdir}")
+            except ImportError:
+                logger.warning("无法导入 get_session_context，跳过 Session 路径解析")
+            except Exception as e:
+                logger.warning(f"解析 Session Workspace 失败: {e}")
+
+        if not effective_workdir:
+            # 未指定目录且无法解析 Session 路径，为了避免污染项目根目录，回退到系统临时目录
+            # 注意：这意味着脚本文件可能不会持久化保留在 Session 目录下
+            effective_workdir = tempfile.mkdtemp(prefix=f"sage_agent_scripts_{process_id}_")
+            
+        # 确保目录存在
+        if not os.path.exists(effective_workdir):
+            try:
+                os.makedirs(effective_workdir, exist_ok=True)
+            except Exception as e:
+                logger.warning(f"创建目录失败 {effective_workdir}: {e}")
+                # 如果创建失败（可能是权限问题），回退到临时目录
+                effective_workdir = tempfile.mkdtemp(prefix="agent_scripts_")
+                
+        # 生成脚本路径
+        script_name = f"script_{process_id}.{extension}"
+        script_path = os.path.join(effective_workdir, script_name)
+        
+        return script_path, effective_workdir
+
+    def _write_script_file(self, file_path: str, content: str, workdir: str = None):
+        """写入脚本文件，包含沙箱权限处理"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except PermissionError:
+            # 如果直接写入被拦截，尝试使用命令行写入
+            logger.warning(f"直接写入文件被拦截，尝试使用命令行写入: {file_path}")
+            import shlex
+            escaped_content = shlex.quote(content)
+            # 使用 printf 写入
+            write_cmd = f"printf '%s' {escaped_content} > {file_path}"
+            self.execute_shell_command(write_cmd, workdir=workdir, timeout=10)
+
+    def _log_shell_history(self, command: str, workdir: Optional[str], success: bool, return_code: Optional[int], session_id: Optional[str]):
+        """记录 Shell 命令历史"""
+        if not session_id:
+            return
+
+        try:
+            # 避免循环导入
+            from sagents.context.session_context import get_session_context
+            session_context = get_session_context(session_id)
+            if not session_context or not hasattr(session_context, 'agent_workspace'):
+                return
+
+            host_path = getattr(session_context.agent_workspace, 'host_path', None)
+            if not host_path:
+                return
+
+            history_file = os.path.join(host_path, ".shell_history")
+            
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            status = "SUCCESS" if success else "FAILED"
+            rc_str = str(return_code) if return_code is not None else "N/A"
+            
+            log_entry = f"[{timestamp}] [{status}] [RC:{rc_str}] [WD:{workdir or 'CWD'}] {command}\n"
+            
+            # 使用 append 模式写入，简单文件锁机制在单 Agent 场景下通常不需要，多线程可能需要注意但此处为 Tool 调用
+            with open(history_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            logger.warning(f"记录 Shell 历史失败: {e}")
 
     @tool(
         description_i18n={
@@ -138,7 +240,8 @@ class ExecuteCommandTool:
             "command": {"zh": "待执行的Shell命令字符串", "en": "Shell command to execute", "pt": "Comando shell a executar"},
             "workdir": {"zh": "执行目录，默认当前目录", "en": "Working directory, defaults to current", "pt": "Diretório de trabalho, padrão atual"},
             "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
-            "env_vars": {"zh": "附加环境变量字典", "en": "Additional environment variables dict", "pt": "Dicionário de variáveis de ambiente adicionais"}
+            "env_vars": {"zh": "附加环境变量字典", "en": "Additional environment variables dict", "pt": "Dicionário de variáveis de ambiente adicionais"},
+            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
         },
         return_data={
             "type": "object",
@@ -153,14 +256,16 @@ class ExecuteCommandTool:
         }
     )
     def execute_shell_command(self, command: str, workdir: Optional[str] = None, 
-                             timeout: int = 30, env_vars: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                             timeout: int = 30, env_vars: Optional[Dict[str, str]] = None,
+                             session_id: Optional[str] = None) -> Dict[str, Any]:
         """在指定目录执行Shell命令，后台执行请通过command 进行设置
-
+        
         Args:
             command (str): 要执行的Shell命令
             workdir (str): 命令执行的工作目录（可选）
             timeout (int): 超时时间，默认30秒
             env_vars (dict): 自定义环境变量（可选）
+            session_id (str): 会话ID（可选，由ToolManager注入）
 
         Returns:
             Dict[str, Any]: 包含执行结果的字典
@@ -229,6 +334,9 @@ class ExecuteCommandTool:
                 # 移除进程
                 self.process_manager.remove_process(process_id)
                 
+                # 记录历史
+                self._log_shell_history(command, workdir, return_code == 0, return_code, session_id)
+
                 if return_code == 0:
                     logger.info(f"✅ 命令执行成功 [{process_id}] - 返回码: {return_code}, 执行耗时: {execution_time:.2f}秒, 总耗时: {total_time:.2f}秒")
                     
@@ -267,6 +375,9 @@ class ExecuteCommandTool:
                 execution_time = time.time() - exec_start_time
                 total_time = time.time() - start_time
                 
+                # 记录超时历史
+                self._log_shell_history(command, workdir, False, -1, session_id)
+
                 logger.error(f"⏰ 命令执行超时 [{process_id}] - 超时时间: {timeout}秒")
                 
                 return {
@@ -287,6 +398,9 @@ class ExecuteCommandTool:
                 self.process_manager.remove_process(process_id)
             
             error_time = time.time() - start_time
+            # 记录异常历史
+            self._log_shell_history(command, workdir, False, -2, session_id)
+
             logger.error(f"💥 命令执行异常 [{process_id}] - 错误: {str(e)}, 耗时: {error_time:.2f}秒")
             logger.error(traceback.format_exc())
             
@@ -312,18 +426,24 @@ class ExecuteCommandTool:
             "code": {"zh": "Python代码文本", "en": "Python code text", "pt": "Texto de código Python"},
             "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
             "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
-            "requirement_list": {"zh": "需要安装的包名称列表", "en": "List of packages to install", "pt": "Lista de pacotes para instalar"}
+            "requirement_list": {"zh": "需要安装的包名称列表", "en": "List of packages to install", "pt": "Lista de pacotes para instalar"},
+            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
         }
     )
-    def execute_python_code(self, code: str, workdir: Optional[str] = None, 
-                           timeout: int = 30, requirement_list: Optional[List[str]] = None) -> Dict[str, Any]:
-        """在临时执行Python代码，会话在执行完后会删除，不具有持久性
+    def execute_python_code(self, code: str, requirement_list: Optional[Union[List[str], str]] = None, 
+                           workdir: Optional[str] = None, timeout: int = 60,
+                           session_id: Optional[str] = None) -> Dict[str, Any]:
+        """在临时文件中运行Python代码，可选依赖安装
 
         Args:
-            code (str): 要执行的Python代码
-            workdir (str): 代码执行的工作目录（可选）
-            timeout (int): 超时时间，默认30秒
-            requirement_list (list): 需要安装的Python包列表（可选）
+            code (str): Python代码字符串
+            requirement_list (List[str] | str): 依赖包列表
+            workdir (str): 工作目录（可选）
+            timeout (int): 超时时间（秒）
+            session_id (str): 会话ID（可选，由ToolManager注入）
+
+        Returns:
+            Dict[str, Any]: 执行结果
         """
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
@@ -332,10 +452,12 @@ class ExecuteCommandTool:
         
         temp_file = None
         try:
-            # 创建临时Python文件
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(code)
-                temp_file = f.name
+            # 准备脚本环境：确定路径并确保目录存在
+            # 如果未指定workdir，将使用默认脚本目录进行备份和执行
+            temp_file, workdir = self._prepare_script_environment(workdir, process_id, "py", session_id)
+            
+            # 写入代码文件
+            self._write_script_file(temp_file, code, workdir)
             
             # 参数类型校验与依赖处理
             python_path = sys.executable
@@ -350,9 +472,15 @@ class ExecuteCommandTool:
             install_failed: List[Dict[str, Any]] = []
 
 
-            if requirement_list is not None and not isinstance(requirement_list, list):
-                # 明确只允许 List[str]
-                if not isinstance(json.loads(requirement_list), list):
+            if requirement_list is not None:
+                # 兼容 JSON 字符串形式的列表
+                if isinstance(requirement_list, str):
+                    try:
+                        requirement_list = json.loads(requirement_list)
+                    except json.JSONDecodeError:
+                        pass # 将在下面的 isinstance 检查中失败
+
+                if not isinstance(requirement_list, list):
                     return {
                         "success": False,
                         "error": "requirement_list 参数类型错误：仅允许 List[str]",
@@ -456,13 +584,8 @@ class ExecuteCommandTool:
                 "process_id": process_id
             }
         finally:
-            # 清理临时文件
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.unlink(temp_file)
-                    logger.debug(f"🗑️ 临时文件已删除: {temp_file}")
-                except Exception as e:
-                    logger.warning(f"⚠️ 删除临时文件失败: {str(e)}")
+            # 脚本文件保留用于备份，不自动删除
+            pass
 
     @tool(
         description_i18n={
@@ -474,18 +597,24 @@ class ExecuteCommandTool:
             "code": {"zh": "JavaScript代码文本", "en": "JavaScript code text", "pt": "Texto de código JavaScript"},
             "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
             "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
-            "npm_packages": {"zh": "需要安装的npm包列表", "en": "List of npm packages to install", "pt": "Lista de pacotes npm para instalar"}
+            "npm_packages": {"zh": "需要安装的npm包列表", "en": "List of npm packages to install", "pt": "Lista de pacotes npm para instalar"},
+            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
         }
     )
-    def execute_javascript_code(self, code: str, workdir: Optional[str] = None, 
-                           timeout: int = 30, npm_packages: Optional[List[str]] = None) -> Dict[str, Any]:
-        """在临时执行JavaScript代码，会话在执行完后会删除，不具有持久性
+    def execute_javascript_code(self, code: str, npm_packages: Optional[Union[List[str], str]] = None, 
+                              workdir: Optional[str] = None, timeout: int = 60,
+                              session_id: Optional[str] = None) -> Dict[str, Any]:
+        """在临时文件中运行JavaScript代码，可选依赖安装
         
         Args:
-            code (str): 要执行的JavaScript代码
-            workdir (str): 代码执行的工作目录（可选）
-            timeout (int): 超时时间，默认30秒
-            npm_packages (list): 需要安装的npm包列表（可选）
+            code (str): JavaScript代码文本
+            npm_packages (List[str] | str): 需要安装的npm包列表
+            workdir (str): 工作目录（可选）
+            timeout (int): 超时时间（秒）
+            session_id (str): 会话ID（可选，由ToolManager注入）
+
+        Returns:
+            Dict[str, Any]: 执行结果
         """
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
@@ -493,7 +622,7 @@ class ExecuteCommandTool:
         logger.info(f"📁 工作目录: {workdir or '临时目录'}, 超时: {timeout}秒")
         
         temp_file = None
-        temp_dir = None
+        # temp_dir = None
         
         try:
             # 检查node环境
@@ -501,24 +630,25 @@ class ExecuteCommandTool:
             if not node_path:
                 raise RuntimeError("未找到Node.js环境，请确保Node.js已正确安装")
             
-            # 如果需要安装包，最好在一个临时目录中进行，或者用户指定的workdir
-            # 为了避免污染当前目录，如果未指定workdir，创建一个临时目录
-            if not workdir:
-                temp_dir = tempfile.mkdtemp(prefix="js_run_")
-                workdir = temp_dir
+            # 准备脚本环境：确定路径并确保目录存在
+            # 如果未指定workdir，将使用默认脚本目录进行备份和执行
+            temp_file, workdir = self._prepare_script_environment(workdir, process_id, "js", session_id)
             
-            # 创建临时JS文件
-            # 如果指定了workdir，文件放在workdir下，否则在temp_dir下
-            file_path = os.path.join(workdir, f"script_{process_id}.js")
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(code)
-            temp_file = file_path
+            # 写入代码文件
+            self._write_script_file(temp_file, code, workdir)
             
             newly_installed: List[str] = []
             install_failed: List[Dict[str, Any]] = []
 
             # 处理npm包依赖
             if npm_packages:
+                # 兼容 JSON 字符串形式的列表
+                if isinstance(npm_packages, str):
+                    try:
+                        npm_packages = json.loads(npm_packages)
+                    except json.JSONDecodeError:
+                        pass # 将在下面的 isinstance 检查中失败
+
                 if not isinstance(npm_packages, list):
                      return {
                         "success": False,
@@ -640,18 +770,8 @@ class ExecuteCommandTool:
                 "process_id": process_id
             }
         finally:
-            # 清理临时文件
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
-            # 如果创建了临时目录，清理它
-            if temp_dir and os.path.exists(temp_dir):
-                try:
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
+            # 脚本文件保留用于备份，不自动删除
+            pass
 
     @tool(
         description_i18n={
