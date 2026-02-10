@@ -22,3 +22,7 @@
 2026-02-10 16:05:00
 1. 前端校验优化：修改 Agent 编辑页面的校验逻辑，允许 System Prompt 为空。
 2. 体验一致性：移除 System Prompt 必填标记，确保前端允许保存空 Prompt，从而让后端的默认增强逻辑生效。
+
+2026-02-10 16:20:00
+1. 核心逻辑增强：优化 `SandboxFileSystem.get_file_tree` 方法，增加 `include_hidden` 参数（默认 False），支持灵活控制是否展示隐藏文件。
+2. 安全策略明确：即使开启 `include_hidden`，系统敏感目录（如 `.sandbox`, `.git`, `.idea`, `.vscode`, `node_modules` 等）仍会被强制隐藏，防止干扰 Agent 上下文或暴露系统结构。
