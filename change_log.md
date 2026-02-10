@@ -1,32 +1,4 @@
 
-2026-02-10 14:35:00
-1. 功能增强：SimpleAgent 和 TaskExecutorAgent 现在支持自动提取并保存响应中的 Markdown 代码块到 `agent_workspace/artifacts` 目录。
-2. 命名规则：Markdown 文件使用首行作为文件名（如果存在），其他代码块使用时间戳自动命名。
-3. 架构优化：新增 `sagents/utils/content_saver.py` 工具模块，统一处理内容提取和保存逻辑，并将生成物归档至 `artifacts` 子目录。
-
-2026-02-10 15:00:00
-1. 体验优化：将 `update_file` 工具重命名为 `file_update`，并同步更新前端（Web/DevWeb）的标签和图标映射。
-2. 描述改进：优化 `file_update` 的多语言描述，明确其“局部修改”的特性，引导用户优先使用该工具进行增量更新。
-
-2026-02-10 15:10:00
-1. 文档更新：在 `file_update` 工具描述中明确 `search_pattern` 参数支持正则表达式（取决于 `use_regex` 参数），消除歧义。
-
-2026-02-10 15:20:00
-1. Prompt优化：更新 `agent_base_prompts.py` 中的 `agent_intro_template`，强化 Agent 的“极致主动”与“连续执行”能力。
-2. 行为调整：明确要求 Agent 默认获得授权，减少不必要的询问，除非遇到阻塞问题，否则应连续执行多个步骤直到任务完成。
-
-2026-02-10 15:35:00
-1. 全链路修复：修正前端 `Chat.vue` 在创建 Agent 时默认传递弱 System Prompt 的问题，改为空值以触发后端增强逻辑。
-2. 防御性编程：在 `sage_server.py` 中增加清洗逻辑，自动拦截并清除旧版默认 System Prompt，确保所有未配置 Agent 都能使用最新的高性能 Prompt。
-
-2026-02-10 16:05:00
-1. 前端校验优化：修改 Agent 编辑页面的校验逻辑，允许 System Prompt 为空。
-2. 体验一致性：移除 System Prompt 必填标记，确保前端允许保存空 Prompt，从而让后端的默认增强逻辑生效。
-
-2026-02-10 16:20:00
-1. 核心逻辑增强：优化 `SandboxFileSystem.get_file_tree` 方法，增加 `include_hidden` 参数（默认 False），支持灵活控制是否展示隐藏文件。
-2. 安全策略明确：即使开启 `include_hidden`，系统敏感目录（如 `.sandbox`, `.git`, `.idea`, `.vscode`, `node_modules` 等）仍会被强制隐藏，防止干扰 Agent 上下文或暴露系统结构。
-
-2026-02-10 16:45:00
-1. 错误修复：修复 `file_update` 工具无法识别沙箱虚拟路径的问题。通过将 `file_update` 加入 `ToolManager` 的 `SANDBOX_TOOLS` 列表，确保其在沙箱环境中执行并自动处理路径映射，无需修改工具本身代码。
-2. 稳定性增强：增强 Agent 参数解析逻辑，支持修正模型输出的非标准 JSON（如 Python 布尔值 `true`/`false`），减少因格式错误导致的工具调用失败。
+2026-02-10 18:15:00
+1. 提示词优化：更新 `agent_base_prompts.py` 中的 `skills_usage_hint`，明确 Skill 与 Tool 的区别。
+2. 概念澄清：强调 Skill 是“任务指南与手册”及配套工具箱，不能直接调用，需通过 `load_skill` 加载。

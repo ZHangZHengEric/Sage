@@ -329,10 +329,17 @@ class SimpleAgent(AgentBase):
                 )
                 messages_input[0] = system_message
 
+            # --- 上下文压缩检测逻辑 ---
+            # 调用 MessageManager 执行压缩检测和压缩
+            # 返回一个压缩（或者没有变化）后的 messages_for_llm，用于放到 _call_llm_and_process_response 中
+            messages_for_llm = session_context.message_manager.compress_messages_if_needed(
+                cast(List[MessageChunk], messages_input)
+            )
+
             # 调用LLM
             should_break = False
             async for chunks, is_complete in self._call_llm_and_process_response(
-                messages_input=messages_input,
+                messages_input=messages_for_llm,
                 tools_json=tools_json,
                 tool_manager=tool_manager,
                 session_id=session_id

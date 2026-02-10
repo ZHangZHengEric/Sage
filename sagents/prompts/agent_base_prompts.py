@@ -135,41 +135,71 @@ no_generated_documents = {
 skills_usage_hint = {
     "zh": """
 ## 技能使用指南
-当你遇到以下情况时，**必须优先**尝试使用 `load_skill` 工具加载新技能，而不是直接拒绝或尝试用现有工具硬解：
+**重要概念说明**：
+- **Skill 不是工具（Tool）**，不能被直接调用执行。
+- **Skill 是任务指南与手册**，它包含了完成特定领域任务的专业知识、步骤说明以及配套的基础工具（Functions）。
+- 当你加载一个 Skill 后，相当于你获得了一本“操作手册”和一套“专用工具箱”。
+
+**何时使用**：
+当你遇到以下情况时，**必须优先**尝试使用 `load_skill` 工具加载新技能：
 1. 用户的请求超出了你当前已有的工具能力范围。
 2. 你不知道该如何完成用户的任务。
 3. 现有的工具无法很好地解决用户的问题。
 4. 如果现有 Skill 的能力范围与用户的请求相关，也请优先加载使用。
 
+**注意**：
+- 同时只能加载一个 Skill。
+- 可以通过多次调用 `load_skill` 来切换加载不同的 Skill（新 Skill 会替换旧 Skill）。
+
 **使用步骤**：
 1. 分析用户的意图。
 2. 使用 `load_skill` 工具，根据用户意图提供相关的 `query`。
-3. **重要**：`load_skill` 执行成功后，新的技能说明会自动加载到系统指令中。你**必须**重新阅读并严格遵循系统指令中的新技能说明来执行任务。
+3. **重要**：`load_skill` 执行成功后，新的技能说明（指南）和配套工具会自动加载到系统上下文中。你**必须**重新阅读并严格遵循这些新指南来执行任务。
 """,
     "en": """
 ## Skill Usage Guide
-When you encounter the following situations, you **MUST prioritize** trying to use the `load_skill` tool to load new skills instead of refusing or trying to force a solution with existing tools:
+**Important Concepts**:
+- **A Skill is NOT a Tool**, and cannot be invoked directly.
+- **A Skill is a Guide and Manual**, containing domain-specific knowledge, step-by-step instructions, and a set of accompanying basic functions (tools).
+- Loading a Skill is like acquiring an "Operation Manual" and a "Specialized Toolkit".
+
+**When to Use**:
+You **MUST prioritize** using the `load_skill` tool to load a new skill when:
 1. The user's request is beyond the scope of your current tool capabilities.
 2. You don't know how to complete the user's task.
-3. Existing tools cannot solve the user's problem well.
-4. If the scope of an existing Skill is relevant to the user's request, please also prioritize loading and using it.
+3. Existing tools cannot solve the user's problem effectively.
+4. An existing Skill is relevant to the user's request.
+
+**Note**:
+- Only one Skill can be loaded at a time.
+- You can switch loaded Skills by calling `load_skill` multiple times (the new Skill will replace the old one).
 
 **Steps**:
 1. Analyze the user's intent.
-2. Use the `load_skill` tool to provide a relevant `query` based on the user's intent.
-3. **IMPORTANT**: After `load_skill` is executed successfully, the new skill instructions will be automatically loaded into the system instructions. You **MUST** re-read and strictly follow the new skill instructions in the system instructions to execute the task.
+2. Use the `load_skill` tool with a relevant `query`.
+3. **IMPORTANT**: After `load_skill` succeeds, the new skill instructions (guide) and tools are automatically loaded. You **MUST** re-read and strictly follow these new instructions to execute the task.
 """,
     "pt": """
 ## Guia de Uso de Habilidades
-Ao encontrar as seguintes situações, você **DEVE priorizar** tentar usar a ferramenta `load_skill` para carregar novas habilidades em vez de recusar ou tentar forçar uma solução com as ferramentas existentes:
-1. A solicitação do usuário está além do escopo de suas capacidades atuais de ferramentas.
+**Conceitos Importantes**:
+- **Uma Skill NÃO é uma Ferramenta (Tool)** e não pode ser invocada diretamente.
+- **Uma Skill é um Guia e Manual**, contendo conhecimento específico do domínio, instruções passo a passo e um conjunto de funções básicas (ferramentas) acompanhantes.
+- Carregar uma Skill é como adquirir um "Manual de Operações" e um "Kit de Ferramentas Especializado".
+
+**Quando Usar**:
+Você **DEVE priorizar** o uso da ferramenta `load_skill` para carregar uma nova habilidade quando:
+1. A solicitação do usuário está além do escopo de suas capacidades atuais.
 2. Você não sabe como completar a tarefa do usuário.
-3. As ferramentas existentes não conseguem resolver bem o problema do usuário.
-4. Se o escopo de uma Skill existente for relevante para a solicitação do usuário, priorize carregá-la e usá-la.
+3. As ferramentas existentes não resolvem o problema do usuário de forma eficaz.
+4. Uma Skill existente é relevante para a solicitação do usuário.
+
+**Nota**:
+- Apenas uma Skill pode ser carregada por vez.
+- Você pode alternar as Skills carregadas chamando `load_skill` várias vezes (a nova Skill substituirá a antiga).
 
 **Passos**:
 1. Analise a intenção do usuário.
-2. Use a ferramenta `load_skill` para fornecer uma `query` relevante com base na intenção do usuário.
-3. **IMPORTANTE**: Após a execução bem-sucedida de `load_skill`, as novas instruções de habilidade serão carregadas automaticamente nas instruções do sistema. Você **DEVE** reler e seguir rigorosamente as novas instruções de habilidade nas instruções do sistema para executar a tarefa.
+2. Use a ferramenta `load_skill` com uma `query` relevante.
+3. **IMPORTANTE**: Após o sucesso do `load_skill`, as novas instruções de habilidade (guia) e ferramentas são carregadas automaticamente. Você **DEVE** reler e seguir rigorosamente essas novas instruções para executar a tarefa.
 """
 }

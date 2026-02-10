@@ -16,7 +16,7 @@ MessageManager 优化版消息管理器
 
 import datetime
 import uuid
-from typing import Dict, List, Optional, Any, Union, Sequence
+from typing import Dict, List, Optional, Any, Union, Sequence, cast
 from copy import deepcopy
 from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
@@ -562,6 +562,208 @@ class MessageManager:
             if msg.content:
                 total_length += MessageManager.calculate_str_token_length(msg.content)
         return total_length
+
+    @staticmethod
+    def compress_messages(messages: List[MessageChunk], budget_info: Dict[str, int]) -> List[MessageChunk]:
+        """
+        根据预算信息压缩消息列表 (Zone A/B/C 策略)
+        
+        策略：
+        Zone A (Anchor): System Message 到 Last User Message -> 永久保留
+        Zone C (Active): 最近的N条消息 -> 保留 max_new_tokens 的 20%
+        Zone B (Middle): 中间过程消息 -> 压缩至 max_new_tokens 的 10%
+        
+        触发条件：通常在外部判断，但此方法会强制执行压缩以符合目标
+        
+        Args:
+            messages: 原始消息列表
+            budget_info: 预算信息，包含 max_new_tokens
+            
+        Returns:
+            List[MessageChunk]: 压缩后的消息列表副本
+        """
+        if not messages:
+            return []
+            
+        max_new_tokens = budget_info.get('max_new_tokens', 8000)
+        
+        # 预算分配
+        zone_c_budget = int(max_new_tokens * 0.2)
+        zone_b_budget = int(max_new_tokens * 0.1)
+        
+        # --- 1. 识别 Zone A (Anchor) ---
+        # 规则：从 System Message 到 Last User Message 中间的所有 message 都保留
+        zone_a: List[MessageChunk] = []
+        remain_messages: List[MessageChunk] = []
+        
+        last_user_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == MessageRole.USER.value:
+                last_user_idx = i
+                break
+        
+        if last_user_idx != -1:
+            zone_a = list(messages[:last_user_idx + 1])
+            remain_messages = list(messages[last_user_idx + 1:])
+        else:
+            # 如果没找到 User Message，保留 System Message (如果有)
+            if messages and messages[0].role == MessageRole.SYSTEM.value:
+                zone_a = [messages[0]]
+                remain_messages = list(messages[1:])
+            else:
+                zone_a = []
+                remain_messages = list(messages)
+        
+        # 如果剩余消息很少，直接返回
+        if not remain_messages:
+            return list(messages) # Shallow copy
+            
+        # --- 2. 识别 Zone C (Active) ---
+        # 从后往前扫描，直到 token 超过 zone_c_budget
+        zone_c: List[MessageChunk] = []
+        current_c_tokens = 0
+        split_idx = len(remain_messages) # 默认全在 Zone C (如果没有 Zone B)
+        
+        for i in range(len(remain_messages) - 1, -1, -1):
+            msg = remain_messages[i]
+            msg_tokens = MessageManager.calculate_str_token_length(msg.content or '')
+            if current_c_tokens + msg_tokens > zone_c_budget and zone_c:
+                # 如果加上这条就超了，且 Zone C 已经有内容了，就停止
+                # 保证至少有一条？
+                break
+            current_c_tokens += msg_tokens
+            split_idx = i
+            # 倒序添加，最后再反转
+            zone_c.append(msg)
+            
+        zone_c.reverse() # 恢复顺序
+        
+        # --- 3. 识别 Zone B (Middle) ---
+        zone_b_source = remain_messages[:split_idx]
+        
+        if not zone_b_source:
+            # 没有中间层，不需要压缩
+            return zone_a + zone_c
+            
+        # --- 4. 压缩 Zone B ---
+        # 目标：zone_b_budget
+        # 策略 1: 坍缩 Tool Output
+        zone_b_compressed: List[MessageChunk] = []
+        
+        # 预计算 Zone B Token
+        current_b_tokens = 0
+        for msg in zone_b_source:
+            current_b_tokens += MessageManager.calculate_str_token_length(msg.content or '')
+            
+        # 如果已经满足预算，直接返回
+        if current_b_tokens <= zone_b_budget:
+            return zone_a + zone_b_source + zone_c
+            
+        # 开始压缩：坍缩 Tool Output
+        # 我们创建一个新的列表，包含修改后的消息
+        # 必须使用 deepcopy 或创建新实例，以免修改原始引用
+        
+        for msg in zone_b_source:
+            new_msg = deepcopy(msg)
+            if new_msg.role == MessageRole.TOOL.value:
+                 # 坍缩 Tool Output
+                original_len = len(new_msg.content or '')
+                if original_len > 100: # 只有长的才压缩
+                    new_msg.content = f"[System: Tool output hidden to save context. Original length: {original_len} chars. Action was executed.]"
+            zone_b_compressed.append(new_msg)
+            
+        # 重新计算 Token
+        current_b_tokens = 0
+        for msg in zone_b_compressed:
+            current_b_tokens += MessageManager.calculate_str_token_length(msg.content or '')
+            
+        # 策略 2: 如果还不够，截断 Assistant Thought
+        if current_b_tokens > zone_b_budget:
+            for msg in zone_b_compressed:
+                if msg.role == MessageRole.ASSISTANT.value and msg.content:
+                    if len(msg.content) > 200:
+                        msg.content = msg.content[:200] + "... [Thought truncated]"
+            
+            # 重新计算
+            current_b_tokens = 0
+            for msg in zone_b_compressed:
+                current_b_tokens += MessageManager.calculate_str_token_length(msg.content or '')
+
+        # 策略 3: 如果还不够，丢弃旧消息 (History Drop)
+        # 从头开始丢弃，直到满足预算
+        if current_b_tokens > zone_b_budget:
+            final_zone_b: List[MessageChunk] = []
+            dropped_count = 0
+            
+            # 逆向构建，优先保留 Zone B 后部的消息（靠近 Active Zone）
+            temp_tokens = 0
+            temp_list = []
+            for msg in reversed(zone_b_compressed):
+                msg_tokens = MessageManager.calculate_str_token_length(msg.content or '')
+                if temp_tokens + msg_tokens > zone_b_budget:
+                    dropped_count += 1
+                    continue
+                temp_tokens += msg_tokens
+                temp_list.append(msg)
+            
+            final_zone_b = temp_list[::-1] # 反转回来
+            
+            if dropped_count > 0:
+                # 插入占位符
+                placeholder = MessageChunk(
+                    role=MessageRole.SYSTEM.value,
+                    content=f"[System: Previous {dropped_count} steps in the middle execution process have been omitted to save context window. Focus on the latest steps in Active Zone.]",
+                    type=MessageType.NORMAL.value
+                )
+                final_zone_b.insert(0, placeholder)
+            
+            zone_b_compressed = final_zone_b
+
+        return zone_a + zone_b_compressed + zone_c
+
+    def compress_messages_if_needed(self, messages: List[MessageChunk]) -> List[MessageChunk]:
+        """
+        如果上下文空间不足，则执行压缩；否则返回原列表。
+        
+        触发条件：
+        1. 剩余空间 < 20% * max_model_len
+        2. 或 剩余空间 < max_new_tokens
+        
+        Args:
+            messages: 原始消息列表
+            
+        Returns:
+            List[MessageChunk]: 压缩后的消息列表或原列表
+        """
+        # 计算预算 (使用缓存的预算)
+        budget_info = self.context_budget_manager.calculate_budget()
+        max_new_tokens = budget_info.get('max_new_tokens', 8000)
+        max_model_len = budget_info.get('max_model_len', 40000)
+
+        # 计算当前消息长度
+        current_tokens = MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], messages))
+        
+        # 阈值判断
+        remaining_tokens = max_model_len - current_tokens
+        
+        # 条件：剩余 < 20% 总容量 OR 剩余 < max_new_tokens
+        threshold_ratio = int(max_model_len * 0.2)
+        
+        if remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens:
+            logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}), 触发压缩...")
+            
+            # 执行压缩
+            compressed_messages = MessageManager.compress_messages(
+                messages, 
+                budget_info
+            )
+            
+            # 记录压缩效果
+            new_tokens = MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], compressed_messages))
+            logger.info(f"MessageManager: 临时压缩完成，Token从 {current_tokens} 降至 {new_tokens}")
+            return compressed_messages
+            
+        return messages
 
     @staticmethod
     def convert_messages_to_dict_for_request(messages: List[MessageChunk]) -> List[Dict[str, Any]]:
