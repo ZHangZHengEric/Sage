@@ -77,6 +77,11 @@ class FibreOrchestrator:
                 # 3. Inject Fibre Tools
                 fibre_tools_impl = FibreTools(self, session_context)
                 
+                # Register Fibre tools to tool_manager if not already there
+                # Use register_tools_from_object to correctly register bound methods
+                if tool_manager:
+                    tool_manager.register_tools_from_object(fibre_tools_impl)
+                
                 # 4. Initialize Core Agent (The Container)
                 # In Fibre architecture, the Container itself acts like a SimpleAgent 
                 # that can spawn others.
@@ -106,8 +111,14 @@ class FibreOrchestrator:
                 # The Container runs as the primary agent.
                 # When it calls sys_spawn_agent, we intercept and manage sub-agents.
                 
-                # Create a combined tool manager that includes Fibre tools
-                combined_tool_manager = self._create_combined_tool_manager(tool_manager, fibre_tools_impl, include_finish_task=False)
+                if tool_manager:
+                    # IMPORTANT: Main Agent (Orchestrator) is NOT allowed to use sys_finish_task
+                    # Use ToolProxy to restrict access instead of modifying the tool manager directly
+                    all_tools = tool_manager.list_all_tools_name()
+                    if 'sys_finish_task' in all_tools:
+                        allowed_tools = [t for t in all_tools if t != 'sys_finish_task']
+                        tool_manager = ToolProxy(tool_manager, allowed_tools)
+                        logger.info("FibreOrchestrator: Using ToolProxy to exclude sys_finish_task for Main Agent")
 
                 # A. Run Container Agent
                 # We need to run the container agent to get next actions
@@ -125,7 +136,7 @@ class FibreOrchestrator:
                         
                         async for chunks in container_agent.run_stream(
                             session_context=session_context,
-                            tool_manager=combined_tool_manager,
+                            tool_manager=tool_manager,
                             session_id=session_id
                         ):
                             await self.output_queue.put(chunks)
@@ -170,11 +181,30 @@ class FibreOrchestrator:
                     
     def _get_fibre_system_prompt_content(self, session_context: SessionContext) -> str:
         # Get the Mandatory Fibre Prompt
-        from sagents.prompts.fibre_agent_prompts import fibre_system_prompt
         
         # Determine language (default to 'en' or use context language)
         lang = session_context.get_language()
-        return fibre_system_prompt.get(lang, fibre_system_prompt.get("en", ""))
+        
+        # Load prompt parts
+        pm = PromptManager()
+        
+        # 1. Base Description (Sage Persona)
+        # Check if system_prompt is already provided in session context (from agent config)
+        base_desc = None
+        if session_context.agent_config:
+            base_desc = session_context.agent_config.get("systemPrefix")
+            
+        if not base_desc:
+            base_desc = pm.get_prompt('fibre_agent_description', agent='FibreAgent', language=lang)
+        
+        # 2. System Mechanics (Shared)
+        system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
+        
+        # 3. Main Agent Specifics (Orchestrator Role)
+        main_agent_rules = pm.get_prompt('main_agent_extra_prompt', agent='FibreAgent', language=lang)
+        
+        # Combine
+        return f"{base_desc}\n\n{system_mechanics}\n\n{main_agent_rules}"
 
     def _prepare_initial_messages(self, input_messages):
         # Helper to convert dicts to MessageChunks
@@ -186,43 +216,6 @@ class FibreOrchestrator:
                 else:
                     msgs.append(m)
         return msgs
-
-    def _create_combined_tool_manager(self, original_tm, fibre_tools_impl, include_finish_task=True):
-        # Create a new ToolManager to avoid side effects on the original one
-        # Copy tools from original_tm if provided
-        new_tm = ToolManager(is_auto_discover=False)
-        if original_tm:
-            new_tm.tools = original_tm.tools.copy()
-            if hasattr(original_tm, "_tool_instances"):
-                new_tm._tool_instances = original_tm._tool_instances.copy()
-        
-        # Add Fibre Tools using @tool decorator metadata
-        # We need to bind the tool spec to the instance method
-        
-        # Helper to register bound method
-        def register_bound_tool(bound_method):
-            if hasattr(bound_method, "_tool_spec"):
-                spec = copy.deepcopy(bound_method._tool_spec)
-                # Important: update func to be the bound method so 'self' is passed correctly
-                spec.func = bound_method
-                # Force register the tool, bypassing priority check if needed
-                new_tm.tools[spec.name] = spec
-            else:
-                logger.warning(f"FibreOrchestrator: {bound_method.__name__} has no _tool_spec")
-
-        register_bound_tool(fibre_tools_impl.sys_spawn_agent)
-        register_bound_tool(fibre_tools_impl.sys_delegate_task)
-        
-        if include_finish_task:
-            register_bound_tool(fibre_tools_impl.sys_finish_task)
-        
-        # Explicitly register the FibreTools instance to prevent ToolManager from trying to re-instantiate it
-        # This fixes the TypeError: FibreTools.__init__() missing required arguments
-        if not hasattr(new_tm, "_tool_instances"):
-            new_tm._tool_instances = {}
-        new_tm._tool_instances[fibre_tools_impl.__class__] = fibre_tools_impl
-        
-        return new_tm
 
     # Methods called by FibreTools
     async def spawn_agent(self, parent_context, name, role, system_prompt):
