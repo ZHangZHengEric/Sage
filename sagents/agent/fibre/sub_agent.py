@@ -7,6 +7,7 @@ from sagents.context.session_context_manager import session_manager
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.tool import ToolManager
+from sagents.utils.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
 
@@ -75,19 +76,30 @@ class FibreSubAgent:
         
         # 2. Setup System Prompt
         # Inject Fibre System Prompt
-        from sagents.prompts.fibre_agent_prompts import fibre_system_prompt, sub_agent_requirement_prompt
         lang = self.sub_session_context.get_language()
-        fibre_prompt_content = fibre_system_prompt.get(lang, fibre_system_prompt.get("en", ""))
-        sub_agent_req_content = sub_agent_requirement_prompt.get(lang, sub_agent_requirement_prompt.get("en", ""))
+        
+        # Get prompts via PromptManager
+        pm = PromptManager()
+        
+        # 1. Base Description (Sage Persona) - REMOVE
+        # base_desc = pm.get_prompt('fibre_agent_description', agent='FibreAgent', language=lang)
+        
+        # 2. System Mechanics (Shared)
+        system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
+        
+        # 3. Sub Agent Specifics (Strand Role)
+        sub_agent_rules = pm.get_prompt('sub_agent_extra_prompt', agent='FibreAgent', language=lang)
         
         # Combine instruction with some base sub-agent prompt
-        system_prompt = f"""You are a Sub-Agent named '{self.agent_name}'.
-Role: {self.system_prompt}
-You are working as part of a larger system.
+        system_prompt = f"""## Sub-Agent Identity
+You are a Sub-Agent named '{self.agent_name}', working as part of the Fibre Agent System.
 
-{fibre_prompt_content}
+## Specific Role & Task
+{self.system_prompt}
 
-{sub_agent_req_content}
+{system_mechanics}
+
+{sub_agent_rules}
 """
         # self.sub_session_context.add_and_update_system_context({"system_prompt": system_prompt})
         
@@ -149,9 +161,11 @@ You are working as part of a larger system.
                 from sagents.agent.fibre.tools import FibreTools
                 fibre_tools_impl = FibreTools(self.orchestrator, self.sub_session_context)
                 
-                # 2. Create combined tool manager
-                original_tm = self.sub_session_context.tool_manager
-                sub_agent_tm = self.orchestrator._create_combined_tool_manager(original_tm, fibre_tools_impl)
+                # 2. Register FibreTools for the sub-agent
+                # Note: We use the existing tool manager.
+                sub_agent_tm = self.sub_session_context.tool_manager
+                if sub_agent_tm:
+                    sub_agent_tm.register_tools_from_object(fibre_tools_impl)
                 
                 async for chunks in self.agent.run_stream(
                     session_context=self.sub_session_context,
