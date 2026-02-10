@@ -184,8 +184,7 @@ async def populate_request_from_agent_config(
         if current_skills is None:
             current_skills = []
             setattr(request, "available_skills", current_skills)
-        need_skills = ["file_read", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
+        need_skills = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
         for skill in need_skills:
             if skill not in current_skills:
                 current_skills.append(skill)
-    
