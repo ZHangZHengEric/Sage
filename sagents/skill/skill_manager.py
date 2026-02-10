@@ -82,7 +82,7 @@ class SkillManager:
             metadata = self.get_skill_metadata(name)
             if not metadata:
                 continue
-            lines.append(f"- {metadata['name']}: {metadata['description']}")
+            lines.append(f"- skill name: {metadata['name']}, description: {metadata['description']}")
         return lines
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
