@@ -11,6 +11,7 @@ import asyncio
 from ..tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.file_system_utils import SecurityValidator, FileMetadata, file_read_core
+from sagents.context.session_context import get_session_context
 class FileSystemError(Exception):
     """文件系统异常"""
     pass
