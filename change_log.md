@@ -18,3 +18,7 @@
 2026-02-10 15:35:00
 1. 全链路修复：修正前端 `Chat.vue` 在创建 Agent 时默认传递弱 System Prompt 的问题，改为空值以触发后端增强逻辑。
 2. 防御性编程：在 `sage_server.py` 中增加清洗逻辑，自动拦截并清除旧版默认 System Prompt，确保所有未配置 Agent 都能使用最新的高性能 Prompt。
+
+2026-02-10 16:05:00
+1. 前端校验优化：修改 Agent 编辑页面的校验逻辑，允许 System Prompt 为空。
+2. 体验一致性：移除 System Prompt 必填标记，确保前端允许保存空 Prompt，从而让后端的默认增强逻辑生效。
