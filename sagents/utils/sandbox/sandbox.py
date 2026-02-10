@@ -733,14 +733,65 @@ def _setup_sandbox_env(working_dir: str, env: Dict[str, str]):
     env['PIP_TARGET'] = pylibs_dir
     
     # Update PATH and PYTHONPATH
+    # Add node_modules/.bin to PATH for local execution
+    local_node_bin = os.path.join(working_dir, "node_modules", ".bin")
     current_path = env.get('PATH', '')
-    env['PATH'] = f"{npm_bin_dir}{os.pathsep}{pylibs_dir}/bin{os.pathsep}{current_path}"
+    env['PATH'] = f"{local_node_bin}{os.pathsep}{npm_bin_dir}{os.pathsep}{pylibs_dir}/bin{os.pathsep}{current_path}"
     
     current_pythonpath = env.get('PYTHONPATH', '')
     env['PYTHONPATH'] = f"{pylibs_dir}{os.pathsep}{working_dir}{os.pathsep}{current_pythonpath}"
     
     # Set non-interactive mode for apt-get
     env['DEBIAN_FRONTEND'] = 'noninteractive'
+
+def ensure_npm_dependencies(workdir: str, packages: List[str]) -> bool:
+    """确保指定目录下已安装npm依赖包"""
+    if not packages:
+        return True
+        
+    import shutil
+    try:
+        # 检查node环境
+        if not shutil.which("node"):
+            # 如果是找不到node，这里返回False，调用方应该处理这个错误
+            return False
+            
+        # 初始化 package.json
+        pkg_path = os.path.join(workdir, "package.json")
+        if not os.path.exists(pkg_path):
+             subprocess.run(["npm", "init", "-y"], cwd=workdir, check=True, capture_output=True)
+             
+        # 简单的优化：检查是否所有包都已安装
+        needs_install = True
+        try:
+            if os.path.exists(os.path.join(workdir, "node_modules")):
+                all_installed = True
+                for pkg in packages:
+                    # 处理包名，去掉版本号和scope
+                    pkg_name = pkg.split('@')[0] if '@' in pkg and not pkg.startswith('@') else pkg
+                    if pkg.startswith('@'): # scoped package
+                         parts = pkg.split('@')
+                         if len(parts) > 2: pkg_name = '@' + parts[1]
+                         else: pkg_name = pkg
+
+                    if not os.path.exists(os.path.join(workdir, "node_modules", pkg_name)):
+                        all_installed = False
+                        break
+                if all_installed:
+                    needs_install = False
+        except:
+            pass
+            
+        if needs_install:
+            # 安装包，使用国内镜像源
+            npm_registry = "https://registry.npmmirror.com/"
+            cmd = ["npm", "install", f"--registry={npm_registry}"] + packages
+            subprocess.run(cmd, cwd=workdir, check=True, capture_output=True)
+            
+        return True
+    except Exception as e:
+        # log error but don't crash
+        return False
 
 def _install_requirements(requirements: List[str], stdout_capture: Optional[Any], stderr_capture: Optional[Any], env: Optional[Dict[str, str]] = None):
     if not requirements:

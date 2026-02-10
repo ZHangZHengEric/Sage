@@ -466,6 +466,195 @@ class ExecuteCommandTool:
 
     @tool(
         description_i18n={
+            "zh": "在临时文件中运行JavaScript代码，可选依赖安装",
+            "en": "Run JavaScript code in a temp file, optionally install deps",
+            "pt": "Execute código JavaScript em arquivo temporário, opcionalmente instale dependências"
+        },
+        param_description_i18n={
+            "code": {"zh": "JavaScript代码文本", "en": "JavaScript code text", "pt": "Texto de código JavaScript"},
+            "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
+            "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
+            "npm_packages": {"zh": "需要安装的npm包列表", "en": "List of npm packages to install", "pt": "Lista de pacotes npm para instalar"}
+        }
+    )
+    def execute_javascript_code(self, code: str, workdir: Optional[str] = None, 
+                           timeout: int = 30, npm_packages: Optional[List[str]] = None) -> Dict[str, Any]:
+        """在临时执行JavaScript代码，会话在执行完后会删除，不具有持久性
+        
+        Args:
+            code (str): 要执行的JavaScript代码
+            workdir (str): 代码执行的工作目录（可选）
+            timeout (int): 超时时间，默认30秒
+            npm_packages (list): 需要安装的npm包列表（可选）
+        """
+        start_time = time.time()
+        process_id = self.process_manager.generate_process_id()
+        logger.info(f"📜 execute_javascript_code开始执行 [{process_id}] - 代码长度: {len(code)} 字符")
+        logger.info(f"📁 工作目录: {workdir or '临时目录'}, 超时: {timeout}秒")
+        
+        temp_file = None
+        temp_dir = None
+        
+        try:
+            # 检查node环境
+            node_path = shutil.which("node")
+            if not node_path:
+                raise RuntimeError("未找到Node.js环境，请确保Node.js已正确安装")
+            
+            # 如果需要安装包，最好在一个临时目录中进行，或者用户指定的workdir
+            # 为了避免污染当前目录，如果未指定workdir，创建一个临时目录
+            if not workdir:
+                temp_dir = tempfile.mkdtemp(prefix="js_run_")
+                workdir = temp_dir
+            
+            # 创建临时JS文件
+            # 如果指定了workdir，文件放在workdir下，否则在temp_dir下
+            file_path = os.path.join(workdir, f"script_{process_id}.js")
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(code)
+            temp_file = file_path
+            
+            newly_installed: List[str] = []
+            install_failed: List[Dict[str, Any]] = []
+
+            # 处理npm包依赖
+            if npm_packages:
+                if not isinstance(npm_packages, list):
+                     return {
+                        "success": False,
+                        "error": "npm_packages 参数类型错误：仅允许 List[str]",
+                        "process_id": process_id,
+                    }
+                
+                parsed_packages = [p.strip() for p in npm_packages if isinstance(p, str) and p.strip()]
+                if parsed_packages:
+                    logger.info(f"📦 npm依赖包处理: {parsed_packages}")
+                    
+                    # 检查是否需要初始化package.json (如果不存在)
+                    pkg_json_path = os.path.join(workdir, "package.json")
+                    if not os.path.exists(pkg_json_path):
+                         self.execute_shell_command("npm init -y", workdir=workdir, timeout=10)
+                    
+                    # 优化：检查是否所有包都已安装，避免重复运行 npm install
+                    packages_to_install = []
+                    try:
+                        # 简单的检查方式：查看 package.json 中的 dependencies
+                        # 更严谨的方式是 check node_modules，但这里先用 package.json 做快速筛选
+                        import json
+                        with open(pkg_json_path, 'r', encoding='utf-8') as f:
+                            pkg_data = json.load(f)
+                            dependencies = pkg_data.get('dependencies', {})
+                            
+                        for pkg in parsed_packages:
+                            # 处理带版本的包名 (e.g., "axios@1.0.0")
+                            pkg_name = pkg.split('@')[0] if '@' in pkg and not pkg.startswith('@') else pkg
+                            if pkg.startswith('@'): # scoped package @scope/pkg@ver
+                                parts = pkg.split('@')
+                                if len(parts) > 2: # has version
+                                    pkg_name = '@' + parts[1]
+                                else:
+                                    pkg_name = pkg
+                            
+                            if pkg_name not in dependencies:
+                                packages_to_install.append(pkg)
+                            elif not os.path.exists(os.path.join(workdir, "node_modules", pkg_name)):
+                                # 即使在 package.json 中，如果 node_modules 里没有，也需要安装
+                                packages_to_install.append(pkg)
+                    except Exception as e:
+                        # 如果解析出错，为了安全起见，全部尝试安装
+                        logger.warning(f"无法解析 package.json，将尝试安装所有包: {e}")
+                        packages_to_install = parsed_packages
+
+                    if packages_to_install:
+                        logger.info(f"需要安装的包: {packages_to_install}")
+                        # 批量安装，使用国内镜像源加速
+                        npm_registry = "https://registry.npmmirror.com/"
+                        npm_cmd = f"npm install --registry={npm_registry} {' '.join(packages_to_install)}"
+                        install_result = self.execute_shell_command(
+                            npm_cmd,
+                            workdir=workdir,
+                            timeout=120 # 安装依赖给更多时间
+                        )
+                        
+                        if install_result.get("success"):
+                            newly_installed.extend(packages_to_install)
+                        else:
+                            install_failed.append({
+                                "packages": packages_to_install,
+                                "return_code": install_result.get("return_code"),
+                                "stderr": install_result.get("stderr", ""),
+                                "stdout": install_result.get("stdout", "")
+                            })
+                    else:
+                        logger.info("所有依赖包已存在，跳过安装")
+
+            # 执行JS代码
+            exec_start_time = time.time()
+            logger.info(f"🚀 开始执行JavaScript代码 [{process_id}]")
+            
+            node_cmd = f"{node_path} {temp_file}"
+            result = self.execute_shell_command(
+                node_cmd,
+                workdir=workdir,
+                timeout=timeout
+            )
+            
+            execution_time = time.time() - exec_start_time
+            total_time = time.time() - start_time
+            
+            if result["success"]:
+                logger.info(f"✅ JavaScript代码执行成功 [{process_id}] - 执行耗时: {execution_time:.2f}秒")
+            else:
+                logger.error(f"❌ JavaScript代码执行失败 [{process_id}] - 返回码: {result.get('return_code', 'unknown')}")
+            
+            result.update({
+                "npm_packages": npm_packages,
+                "installed": newly_installed if npm_packages else None,
+                "total_execution_time": total_time
+            })
+            
+             # 如果执行失败，尽可能提供详细的错误trace
+            if not result.get("success"):
+                stderr_text = result.get("stderr") or ""
+                if stderr_text:
+                    result["error_traceback"] = stderr_text
+                if npm_packages:
+                    result["install_failed"] = install_failed or None
+            
+            if not result.get("success") and install_failed:
+                 result["error_hint"] = "检测到依赖安装失败，可能导致运行错误"
+
+            return result
+
+        except Exception as e:
+            error_time = time.time() - start_time
+            logger.error(f"💥 JavaScript代码执行异常 [{process_id}] - 错误: {str(e)}")
+            logger.error(traceback.format_exc())
+            
+            return {
+                "success": False,
+                "error": str(e),
+                "error_traceback": traceback.format_exc(),
+                "code": code,
+                "execution_time": error_time,
+                "process_id": process_id
+            }
+        finally:
+            # 清理临时文件
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            # 如果创建了临时目录，清理它
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except:
+                    pass
+
+    @tool(
+        description_i18n={
             "zh": "检查系统命令是否可用及其路径",
             "en": "Check whether system commands are available and their paths",
             "pt": "Verificar se comandos do sistema estão disponíveis e seus caminhos"
