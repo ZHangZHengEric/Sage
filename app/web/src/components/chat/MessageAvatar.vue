@@ -94,6 +94,11 @@ const getToolAvatar = (toolName) => {
       bgClass: 'bg-emerald-500',
       label: '编辑文件'
     },
+    'file_update': {
+      icon: Edit3,
+      bgClass: 'bg-emerald-500',
+      label: '编辑文件'
+    },
     'write_to_file': {
       icon: Save,
       bgClass: 'bg-pink-500',

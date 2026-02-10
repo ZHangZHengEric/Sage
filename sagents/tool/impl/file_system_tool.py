@@ -405,26 +405,26 @@ class FileSystemTool:
 
     @tool(
         description_i18n={
-            "zh": "在文件中搜索并替换文本，当需要修改文件内容时使用",
-            "en": "Search and replace text in file, when you need to modify file content",
-            "pt": "Busca e substitui texto no arquivo, quando você precisa modificar o conteúdo do arquivo"
+            "zh": "修改文件指定内容（搜索替换模式）。相比file_write，此工具更适合局部修改，能保留文件其他部分不变。",
+            "en": "Modify specific content in a file (Search & Replace). Preferred over file_write for partial edits as it preserves the rest of the file.",
+            "pt": "Modificar conteúdo específico em um arquivo (Busca e Substituição). Preferível ao file_write para edições parciais, pois preserva o restante do arquivo."
         },
         param_description_i18n={
             "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
-            "search_pattern": {"zh": "要搜索的模式或文本", "en": "Pattern or text to search", "pt": "Padrão ou texto a buscar"},
-            "replacement": {"zh": "替换文本", "en": "Replacement text", "pt": "Texto de substituição"},
-            "use_regex": {"zh": "是否使用正则表达式", "en": "Use regular expression", "pt": "Usar expressão regular"},
-            "case_sensitive": {"zh": "是否区分大小写", "en": "Case sensitive", "pt": "Diferenciar maiúsculas/minúsculas"}
+            "search_pattern": {"zh": "需要被替换的原始内容（支持普通文本或正则表达式，取决于 use_regex 参数）", "en": "Original content to be replaced (supports plain text or regex, depending on use_regex parameter)", "pt": "Conteúdo original a ser substituído (suporta texto simples ou regex, dependendo do parâmetro use_regex)"},
+            "replacement": {"zh": "新的内容（将替换掉search_pattern）", "en": "New content (will replace search_pattern)", "pt": "Novo conteúdo (substituirá search_pattern)"},
+            "use_regex": {"zh": "是否使用正则表达式匹配", "en": "Use regular expression matching", "pt": "Usar correspondência de expressão regular"},
+            "case_sensitive": {"zh": "是否区分大小写（默认True）", "en": "Case sensitive (default True)", "pt": "Diferenciar maiúsculas/minúsculas (padrão True)"}
         }
     )
-    def update_file(self, file_path: str, search_pattern: str, replacement: str, 
+    def file_update(self, file_path: str, search_pattern: str, replacement: str, 
                           use_regex: bool = False, case_sensitive: bool = True) -> Dict[str, Any]:
-        """更新文件中匹配的文本内容
+        """更新文件中匹配的文本内容（Search & Replace）
 
         Args:
             file_path (str): 文件绝对路径
-            search_pattern (str): 要搜索的模式
-            replacement (str): 替换文本
+            search_pattern (str): 要搜索的模式（原始内容，支持普通文本或正则表达式）
+            replacement (str): 替换文本（新内容）
             use_regex (bool): 是否使用正则表达式
             case_sensitive (bool): 是否区分大小写
 
