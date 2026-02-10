@@ -54,6 +54,7 @@ class ContextBudgetManager:
             f"ratios(h/a/n)={history_ratio}/{active_ratio}/{max_new_message_ratio}, "
             f"recent_turns={recent_turns}"
         )
+        self.budget_info = None
 
     @staticmethod
     def calculate_str_token_length(content: str) -> int:
@@ -115,8 +116,10 @@ class ContextBudgetManager:
         
         return chat_list
     
-    def calculate_budget(self, agent_config: Dict[str, Any]) -> Dict[str, int]:
+    def calculate_budget(self, agent_config: Dict[str, Any] = None) -> Dict[str, int]:
         """计算上下文 token 预算分配"""
+        if self.budget_info is not None and agent_config is None:
+            return self.budget_info
 
         config_str = json.dumps(agent_config, ensure_ascii=False) if agent_config else ""
         agent_config_tokens = ContextBudgetManager.calculate_str_token_length(config_str)
@@ -134,7 +137,8 @@ class ContextBudgetManager:
                 'available_tokens': 0,
                 'history_budget': 0,
                 'active_budget': 0,
-                'max_new_tokens': 0
+                'max_new_tokens': 0,
+                'max_model_len': self.max_model_len
             }
         
         # 按比例分配
@@ -143,7 +147,8 @@ class ContextBudgetManager:
             'available_tokens': available_tokens,
             'history_budget': int(available_tokens * self.history_ratio),
             'active_budget': int(available_tokens * self.active_ratio),
-            'max_new_tokens': int(available_tokens * self.max_new_message_ratio)
+            'max_new_tokens': int(available_tokens * self.max_new_message_ratio),
+            'max_model_len': self.max_model_len
         }
         
         logger.info(
@@ -153,6 +158,7 @@ class ContextBudgetManager:
             f"max_new={budget_info['max_new_tokens']}"
         )
         
+        self.budget_info = budget_info
         return budget_info
     
     def split_messages(
