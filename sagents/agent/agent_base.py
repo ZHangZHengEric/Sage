@@ -314,6 +314,7 @@ class AgentBase(ABC):
         if custom_prefix:
             role_content += f"\n\n{custom_prefix}"
 
+        system_prefix = ""
         system_prefix += f"<role_definition>\n{role_content}\n</role_definition>\n"
 
         # 根据session_id获取session_context信息（用于获取system_context和agent_workspace）
