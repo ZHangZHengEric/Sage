@@ -7,3 +7,6 @@
 
 2026-02-09 23:40:00
 1. Fix: Refactored session_id handling in ToolManager to enforce parameter safety. Added explicit checks to remove session_id from kwargs before standard and MCP tool execution, preventing duplicate argument errors.
+
+2026-02-10 10:51:00
+1. Fix: Implemented `register_tools_from_object` in `ToolProxy`. Now delegates registration to `ToolManager` and automatically adds newly registered tools (like `load_skill`) to the proxy's available tools whitelist, ensuring dynamic tool registration works in restricted modes.
