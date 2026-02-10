@@ -872,7 +872,7 @@ const sendMessageApi = async ({
         maxTokens: 4096,
         temperature: 0.7
       },
-      system_prefix: selectedAgent?.systemPrefix || 'You are a helpful AI assistant.',
+      system_prefix: selectedAgent?.systemPrefix || '',
       available_tools: selectedAgent?.availableTools || []
     };
 

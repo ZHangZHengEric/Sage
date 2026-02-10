@@ -14,3 +14,7 @@
 2026-02-10 15:20:00
 1. Prompt优化：更新 `agent_base_prompts.py` 中的 `agent_intro_template`，强化 Agent 的“极致主动”与“连续执行”能力。
 2. 行为调整：明确要求 Agent 默认获得授权，减少不必要的询问，除非遇到阻塞问题，否则应连续执行多个步骤直到任务完成。
+
+2026-02-10 15:35:00
+1. 全链路修复：修正前端 `Chat.vue` 在创建 Agent 时默认传递弱 System Prompt 的问题，改为空值以触发后端增强逻辑。
+2. 防御性编程：在 `sage_server.py` 中增加清洗逻辑，自动拦截并清除旧版默认 System Prompt，确保所有未配置 Agent 都能使用最新的高性能 Prompt。
