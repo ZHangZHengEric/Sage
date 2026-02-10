@@ -11,11 +11,10 @@
           class="resize-none" />
       </FormItem>
 
-      <FormItem :error="store.errors.systemPrefix" required>
+      <FormItem :error="store.errors.systemPrefix">
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-1">
             <Label :class="store.errors.systemPrefix ? 'text-destructive' : ''">{{ t('agent.systemPrefix') }}</Label>
-            <span class="text-destructive">*</span>
           </div>
           <Button size="sm" variant="ghost" class="flex items-center gap-1 text-black hover:bg-transparent"
             @click="showOptimizeModal = true" :disabled="isOptimizing">
