@@ -10,3 +10,7 @@
 
 2026-02-10 15:10:00
 1. 文档更新：在 `file_update` 工具描述中明确 `search_pattern` 参数支持正则表达式（取决于 `use_regex` 参数），消除歧义。
+
+2026-02-10 15:20:00
+1. Prompt优化：更新 `agent_base_prompts.py` 中的 `agent_intro_template`，强化 Agent 的“极致主动”与“连续执行”能力。
+2. 行为调整：明确要求 Agent 默认获得授权，减少不必要的询问，除非遇到阻塞问题，否则应连续执行多个步骤直到任务完成。
