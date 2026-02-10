@@ -8,6 +8,7 @@ Execute Command Tool
 
 import os
 import sys
+import stat
 import subprocess
 import tempfile
 import time
@@ -307,6 +308,32 @@ class ExecuteCommandTool:
             if env_vars:
                 env.update(env_vars)
             
+            # 自动修复权限：如果命令指向本地文件且没有执行权限，自动添加 +x
+            try:
+                # 简单解析第一个命令段
+                cmd_parts = command.strip().split()
+                if cmd_parts:
+                    exe_cmd = cmd_parts[0]
+                    # 确定当前工作目录
+                    current_cwd = workdir if workdir else os.getcwd()
+                    
+                    # 尝试解析文件路径
+                    target_file = None
+                    if os.path.isabs(exe_cmd):
+                        target_file = exe_cmd
+                    else:
+                        target_file = os.path.join(current_cwd, exe_cmd)
+                    
+                    # 检查文件是否存在且是文件
+                    if target_file and os.path.exists(target_file) and os.path.isfile(target_file):
+                        # 检查是否有执行权限
+                        if not os.access(target_file, os.X_OK):
+                            logger.info(f"🔧 [AutoFix] 检测到文件缺少执行权限，正在修复: {target_file}")
+                            st = os.stat(target_file)
+                            os.chmod(target_file, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            except Exception as e:
+                logger.warning(f"⚠️ 自动修复权限时发生错误 (非致命): {e}")
+
             # 执行命令
             exec_start_time = time.time()
             logger.info(f"🚀 开始执行命令 [{process_id}]: {command}")
