@@ -201,19 +201,42 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         # 根据建议的工具进行过滤，同时移除掉complete_task 这个工具
         suggested_tools = subtask_info.get('required_tools', [])
         
+        # 容错处理：确保 suggested_tools 是列表
+        if isinstance(suggested_tools, str):
+            suggested_tools = [suggested_tools]
+        elif not isinstance(suggested_tools, list):
+            logger.warning(f"TaskExecutorAgent: required_tools 类型错误 ({type(suggested_tools)}), 重置为空列表")
+            suggested_tools = []
+            
+        # 验证 suggested_tools 中的工具是否真实存在于 tool_manager 中
+        # 如果存在无效工具名，可能是模型幻觉，此时最好回退到使用所有工具，以免遗漏
+        available_tool_names = {tool['function']['name'] for tool in tools_json}
+        
+        # 过滤掉 load_skill 后再检查，因为 load_skill 稍后会特殊处理
+        tools_to_check = [t for t in suggested_tools if t != 'load_skill']
+        
+        if tools_to_check:
+            invalid_tools = [t for t in tools_to_check if t not in available_tool_names]
+            if invalid_tools:
+                logger.warning(f"TaskExecutorAgent: 发现无效的建议工具 {invalid_tools}，将忽略建议列表并使用所有工具")
+                suggested_tools = [] # 清空建议列表，触发后续使用全量工具逻辑
+        
         # 如果存在建议工具且有技能管理器，确保 load_skill 包含在内
-        if suggested_tools and session_context.skill_manager:
+        if suggested_tools and session_context.skill_manager and session_context.skill_manager.list_skills():
             if 'load_skill' not in suggested_tools:
                 suggested_tools.append('load_skill')
-
+        
         if suggested_tools:
             tools_suggest_json = [
                 tool for tool in tools_json
                 if tool['function']['name'] in suggested_tools and tool['function']['name'] != 'complete_task'
             ]
             
+            # 再次确认过滤后的列表非空（虽然前面已经做了校验，但双重保险）
             if tools_suggest_json:
                 tools_json = tools_suggest_json
+            else:
+                 logger.warning("TaskExecutorAgent: 过滤后工具列表为空，回退到使用所有工具")
 
         tool_names = [tool['function']['name'] for tool in tools_json]
         logger.info(f"ExecutorAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")

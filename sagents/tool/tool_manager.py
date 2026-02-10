@@ -648,6 +648,7 @@ class ToolManager:
                 SANDBOX_TOOLS = [
                     "execute_shell_command", 
                     "execute_python_code", 
+                    "execute_javascript_code",
                     "file_read", 
                     "file_write", 
                     "search_content_in_file", 
@@ -660,17 +661,24 @@ class ToolManager:
                     try:
                         # Use sandbox if available
                         if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                            # Check if pip is needed
+                            # Check if pip/npm is needed
                             needs_pip = False
+                            needs_npm = False
                             if tool.name == "execute_python_code" and kwargs.get("requirement_list"):
                                 needs_pip = True
+                            elif tool.name == "execute_javascript_code" and kwargs.get("npm_packages"):
+                                needs_npm = True
                             elif tool.name == "execute_shell_command":
                                 cmd = kwargs.get("command", "")
                                 if "pip " in cmd or "pip3 " in cmd:
                                     needs_pip = True
+                                if "npm " in cmd or "node " in cmd:
+                                    needs_npm = True
                             
                             if needs_pip:
                                 session_context.sandbox.ensure_pip()
+                            # We might want to ensure npm here too in future if sandbox environment management supports it
+                            # session_context.sandbox.ensure_npm() 
 
                             # Use run_tool which handles path mapping and execution
                             # We pass the function object from the tool spec
