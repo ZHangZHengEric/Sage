@@ -13,10 +13,14 @@ class SandboxFileSystem:
         self.virtual_path = virtual_path
         self.enable_path_mapping = enable_path_mapping
 
-    def get_file_tree(self) -> str:
+    def get_file_tree(self, include_hidden: bool = False) -> str:
         """
         Returns a formatted string of the file tree relative to the virtual root.
         This safely exposes the structure of the sandbox file system to the agent.
+        
+        Args:
+            include_hidden: Whether to include hidden files (starting with .) in the tree.
+                            Note: Sensitive directories like .sandbox, .git are always excluded.
         
         Example output:
         file1.txt
@@ -26,14 +30,21 @@ class SandboxFileSystem:
         system_prefix = ""
         if not os.path.exists(self.host_path):
             return system_prefix
+            
+        # Directories that are always hidden regardless of include_hidden
+        ALWAYS_HIDDEN_DIRS = {'.sandbox', '.git', '.idea', '.vscode', '__pycache__', 'node_modules', 'venv', '.DS_Store'}
 
         for root, dirs, files in os.walk(self.host_path):
-            # Filter hidden directories and .sandbox
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.sandbox']
+            # Filter directories
+            # 1. Always exclude ALWAYS_HIDDEN_DIRS
+            # 2. If include_hidden is False, also exclude directories starting with .
+            dirs[:] = [d for d in dirs if d not in ALWAYS_HIDDEN_DIRS and (include_hidden or not d.startswith('.'))]
             
             # Files
             for file_item in files:
-                if file_item.startswith('.'):
+                if file_item in ALWAYS_HIDDEN_DIRS:
+                    continue
+                if not include_hidden and file_item.startswith('.'):
                     continue
                 try:
                     abs_path = os.path.join(root, file_item)
