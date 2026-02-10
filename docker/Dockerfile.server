@@ -32,8 +32,8 @@ RUN BUN_VERSION=$(npm view bun dist-tags.latest) \
     && ARCH=$(uname -m) \
     && if [ "$ARCH" = "x86_64" ]; then BUN_ARCH="linux-x64"; elif [ "$ARCH" = "aarch64" ]; then BUN_ARCH="linux-aarch64"; else echo "Unsupported arch: $ARCH"; exit 1; fi \
     && echo "Downloading Bun v${BUN_VERSION} for ${BUN_ARCH}..." \
-    && (curl -fsSL "https://npmmirror.com/mirrors/bun/bun-v${BUN_VERSION}/${BUN_ARCH}.zip" -o bun.zip || \
-        curl -fsSL "https://npmmirror.com/mirrors/bun/v${BUN_VERSION}/${BUN_ARCH}.zip" -o bun.zip) \
+    && (curl -fsSL "https://npmmirror.com/mirrors/bun/bun-v${BUN_VERSION}/bun-${BUN_ARCH}.zip" -o bun.zip || \
+        curl -fsSL "https://npmmirror.com/mirrors/bun/v${BUN_VERSION}/bun-${BUN_ARCH}.zip" -o bun.zip) \
     && unzip bun.zip \
     && mkdir -p /root/.bun/bin \
     && mv ${BUN_ARCH}/bun /root/.bun/bin/bun \
