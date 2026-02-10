@@ -10,3 +10,9 @@
 
 2026-02-10 10:51:00
 1. Fix: Implemented `register_tools_from_object` in `ToolProxy`. Now delegates registration to `ToolManager` and automatically adds newly registered tools (like `load_skill`) to the proxy's available tools whitelist, ensuring dynamic tool registration works in restricted modes.
+
+2026-02-10 10:56:00
+1. Fix: Updated `SessionContext`, `AgentBase`, and `SimpleAgent` to verify `skill_manager.list_skills()` before enabling skill-related features. This ensures that an empty `SkillManager` is treated equivalent to `None`, preventing `load_skill` registration and skill prompts when no skills are available.
+
+2026-02-10 11:00:00
+1. Fix: Updated `ToolProxy.get_tool` to return `None` instead of raising `ValueError` when a tool is not available. This prevents crashes in `SessionContext` initialization when checking for tools (like `load_skill`) that haven't been registered yet.

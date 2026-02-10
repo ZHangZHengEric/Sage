@@ -65,21 +65,17 @@ class SessionContext:
         self.skill_manager = skill_manager
 
         # Ensure load_skill tool is registered if skills are available
-        if self.skill_manager and self.tool_manager:
+        if self.skill_manager and self.skill_manager.list_skills() and self.tool_manager:
             if not self.tool_manager.get_tool('load_skill'):
-                # Check if there are any skills to load?
-                # Even if no skills currently, the tool might be useful if skills are added dynamically?
-                # User said: "judge if skill_manager has skill"
-                if self.skill_manager.skills:
-                    try:
-                        from sagents.skill.skill_tool import SkillTool
-                        
-                        skill_tool = SkillTool()
-                        # Use the new helper method to register tools from the instance
-                        self.tool_manager.register_tools_from_object(skill_tool)
-                        logger.info("SessionContext: Automatically registered load_skill tool from SkillTool instance")
-                    except Exception as e:
-                        logger.error(f"SessionContext: Failed to register load_skill tool: {e}")
+                try:
+                    from sagents.skill.skill_tool import SkillTool
+                    
+                    skill_tool = SkillTool()
+                    # Use the new helper method to register tools from the instance
+                    self.tool_manager.register_tools_from_object(skill_tool)
+                    logger.info("SessionContext: Automatically registered load_skill tool from SkillTool instance")
+                except Exception as e:
+                    logger.error(f"SessionContext: Failed to register load_skill tool: {e}")
 
         self.init_more(workspace_root)
 
