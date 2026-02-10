@@ -219,9 +219,9 @@ class SimpleAgent(AgentBase):
             if 'complete_task' in suggested_tools:
                 suggested_tools.remove('complete_task')
 
-            # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write update_file 这几个工具
+            # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write file_update 这几个工具
             if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
-                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'update_file', 'load_skill'])
+                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'file_update', 'load_skill'])
 
             if "sys_spawn_agent" in tool_names:
                 suggested_tools.extend(['sys_spawn_agent'])
