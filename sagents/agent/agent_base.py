@@ -261,21 +261,20 @@ class AgentBase(ABC):
         Returns:
             MessageChunk: 系统消息
         """
-        system_prefix = ""
+        role_content = ""
         if system_prefix_override:
-            system_prefix = system_prefix_override
+            role_content = system_prefix_override
         elif hasattr(self, 'SYSTEM_PREFIX_FIXED'):
-            system_prefix = self.SYSTEM_PREFIX_FIXED
+            role_content = self.SYSTEM_PREFIX_FIXED
+        elif self.system_prefix:
+            role_content = self.system_prefix
         else:
-            if self.system_prefix:
-                system_prefix = self.system_prefix
-            else:
-                # 使用PromptManager获取多语言文本
-                agent_intro = prompt_manager.get_prompt(
-                    'agent_intro_template',
-                    agent='common',
-                    language=language,
-                    default="""
+            # 使用PromptManager获取多语言文本
+            agent_intro = prompt_manager.get_prompt(
+                'agent_intro_template',
+                agent='common',
+                language=language,
+                default="""
 你是一个专业、主动且充满韧性的AI智能体。你的核心使命是不惜一切代价，完整、高效地协助用户达成目标。
 
 ## 核心原则
@@ -286,11 +285,13 @@ class AgentBase(ABC):
 
 请展现出你的专业素养，成为用户最值得信赖的合作伙伴。
 """
-                )
-                system_prefix += agent_intro.format(agent_name=self.__class__.__name__)
+            )
+            role_content = agent_intro.format(agent_name=self.__class__.__name__)
 
         if custom_prefix:
-            system_prefix += custom_prefix + '\n'
+            role_content += f"\n\n{custom_prefix}"
+
+        system_prefix += f"<role_definition>\n{role_content}\n</role_definition>\n"
 
         # 根据session_id获取session_context信息（用于获取system_context和agent_workspace）
         session_context = None
@@ -301,27 +302,21 @@ class AgentBase(ABC):
             system_context_info = session_context.system_context
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
 
-            # 使用PromptManager获取多语言文本
-            additional_info = prompt_manager.get_prompt(
-                'additional_info_label',
-                agent='common',
-                language=language,
-                default="\n补充其他的信息：\n "
-            )
-            system_prefix += additional_info
-
+            system_prefix += "<system_context>\n"
             for key, value in system_context_info.items():
-                if isinstance(value, dict):
-                    # 如果值是字典，格式化显示
-                    formatted_dict = json.dumps(value, ensure_ascii=False, indent=2)
-                    system_prefix += f"{key}: {formatted_dict}\n"
-                elif isinstance(value, (list, tuple)):
-                    # 如果值是列表或元组，格式化显示
-                    formatted_list = json.dumps(list(value), ensure_ascii=False, indent=2)
-                    system_prefix += f"{key}: {formatted_list}\n"
+                if isinstance(value, (dict, list, tuple)):
+                    # 如果值是字典、列表或元组，格式化显示
+                    # 如果是元组，先转换为列表，确保序列化行为明确
+                    if isinstance(value, tuple):
+                        value = list(value)
+                    
+                    # 将value转换为JSON字符串
+                    formatted_val = json.dumps(value, ensure_ascii=False, indent=2)
+                    system_prefix += f"  <{key}>\n{formatted_val}\n  </{key}>\n"
                 else:
                     # 其他类型直接转换为字符串
-                    system_prefix += f"{key}: {str(value)}\n"
+                    system_prefix += f"  <{key}>{str(value)}</{key}>\n"
+            system_prefix += "</system_context>\n"
             logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
 
             # 补充当前工作空间中的文件情况
@@ -336,12 +331,13 @@ class AgentBase(ABC):
             if file_system:
                 workspace_name = session_context.system_context.get('file_workspace', '')
                 
+                system_prefix += "<workspace_files>\n"
                 # 使用PromptManager获取多语言文本
                 workspace_files = prompt_manager.get_prompt(
                     'workspace_files_label',
                     agent='common',
                     language=language,
-                    default=f"\n当前工作空间 {workspace_name} 的文件情况：\n"
+                    default=f"当前工作空间 {workspace_name} 的文件情况：\n"
                 )
                 system_prefix += workspace_files.format(workspace=workspace_name)
                 
@@ -356,19 +352,20 @@ class AgentBase(ABC):
                     system_prefix += no_files
                 else:
                     system_prefix += file_tree
-                system_prefix += "\n"
+                system_prefix += "</workspace_files>\n"
             
             # Fallback: 如果没有 file_system 对象但有 agent_workspace 路径 (兼容旧代码)
             elif session_context.agent_workspace:
                 current_agent_workspace = session_context.agent_workspace
                 workspace_name = session_context.system_context.get('file_workspace', '')
 
+                system_prefix += "<workspace_files>\n"
                 # 使用PromptManager获取多语言文本
                 workspace_files = prompt_manager.get_prompt(
                     'workspace_files_label',
                     agent='common',
                     language=language,
-                    default=f"\n当前工作空间 {workspace_name} 的文件情况：\n"
+                    default=f"当前工作空间 {workspace_name} 的文件情况：\n"
                 )
                 system_prefix += workspace_files.format(workspace=workspace_name)
 
@@ -407,19 +404,20 @@ class AgentBase(ABC):
                     )
                     system_prefix += no_files
                 
-                system_prefix += "\n"
+                system_prefix += "</workspace_files>\n"
 
             # 补充 Skills 信息
             # 确保不仅skill_manager存在，而且确实有技能可用
             if hasattr(session_context, 'skill_manager') and session_context.skill_manager and session_context.skill_manager.list_skills():
                 skill_descriptions = session_context.skill_manager.get_skill_description_lines()
                 if skill_descriptions:
+                    system_prefix += "<available_skills>\n"
                     # 使用PromptManager获取多语言文本
                     skills_header = prompt_manager.get_prompt(
                         'skills_info_label',
                         agent='common',
                         language=language,
-                        default="\n当前工作空间可用技能 / Available Skills in Workspace:\n"
+                        default="当前工作空间可用技能 / Available Skills in Workspace:\n"
                     )
                     system_prefix += skills_header
                     system_prefix += "\n".join(skill_descriptions)
@@ -432,7 +430,7 @@ class AgentBase(ABC):
                         default=""
                     )
                     system_prefix += skills_hint
-                    system_prefix += "\n"
+                    system_prefix += "\n</available_skills>\n"
 
         return MessageChunk(
             role=MessageRole.SYSTEM.value,
