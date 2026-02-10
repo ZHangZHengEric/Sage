@@ -20,7 +20,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     id: null,
     name: '',
     description: '',
-    systemPrefix: '你是一个有用的AI助手。',
+    systemPrefix: '',
     deepThinking: false,
     multiAgent: false,
     moreSuggest: false,
@@ -52,7 +52,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
 
   // Computed
   const isStep1Valid = computed(() => {
-    return !!formData.value.name && !!formData.value.systemPrefix
+    return !!formData.value.name
   })
 
   const isCurrentStepValid = computed(() => {
@@ -164,7 +164,6 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
   const validateStep1 = () => {
     const newErrors = {}
     if (!formData.value.name) newErrors.name = '名称不能为空'
-    if (!formData.value.systemPrefix) newErrors.systemPrefix = '系统提示词不能为空'
     
     // Character limits
     if (formData.value.description && formData.value.description.length > 500) {
