@@ -811,6 +811,11 @@ async def stream_chat(request: StreamRequest):
     if request.llm_model_config:
         request.llm_model_config = {k: v for k, v in request.llm_model_config.items() if v is not None and v != ''}
 
+    # 清洗 system_prefix，如果等于前端旧版默认值，则置为 None，以便触发后端的增强默认 Prompt
+    if request.system_prefix == 'You are a helpful AI assistant.':
+        logger.info("检测到默认 system_prefix，已自动清除以启用后端增强 Prompt")
+        request.system_prefix = None
+
     session_id = request.session_id or str(uuid.uuid4())
     logger.info(f"📥 API请求开始: 会话ID: {session_id}, 开始时间戳: {api_request_start_time:.3f}")
     
