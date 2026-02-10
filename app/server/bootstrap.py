@@ -7,6 +7,7 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from streamlit import form
 from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 
@@ -69,6 +70,7 @@ async def initialize_clients(cfg: StartupConfig):
 async def initialize_tool_manager():
     """初始化工具管理器"""
     try:
+        from sagents.skill.skill_tool import SkillTool
         tool_manager_instance = ToolManager.get_instance()
         return tool_manager_instance
     except Exception as e:
