@@ -36,9 +36,9 @@ RUN BUN_VERSION=$(npm view bun dist-tags.latest) \
         curl -fsSL "https://npmmirror.com/mirrors/bun/v${BUN_VERSION}/bun-${BUN_ARCH}.zip" -o bun.zip) \
     && unzip bun.zip \
     && mkdir -p /root/.bun/bin \
-    && mv ${BUN_ARCH}/bun /root/.bun/bin/bun \
+    && mv bun-${BUN_ARCH}/bun /root/.bun/bin/bun \
     && chmod +x /root/.bun/bin/bun \
-    && rm -rf bun.zip ${BUN_ARCH}
+    && rm -rf bun.zip bun-${BUN_ARCH}
 
 # 设置 Bun 环境变量
 ENV BUN_INSTALL="/root/.bun"
