@@ -11,12 +11,12 @@ _GLOBAL_SKILL_MANAGER: Optional["SkillManager"] = None
 
 
 def get_skill_manager() -> Optional["SkillManager"]:
-    return _GLOBAL_SKILL_MANAGER
+    return SkillManager()
 
 
 def set_skill_manager(tm: Optional["SkillManager"]) -> None:
-    global _GLOBAL_SKILL_MANAGER
-    _GLOBAL_SKILL_MANAGER = tm
+    SkillManager._instance = tm
+
 
 class SkillManager:
     """
@@ -30,7 +30,21 @@ class SkillManager:
     3. Loading (加载): Loads skill metadata and instructions (SKILL.md). (加载技能元数据和说明)
     4. Workspace Preparation (工作区准备): Copies skill files to the agent's workspace for execution. (将技能文件复制到智能体的工作区以供执行)
     """
+    _instance = None
+
+    def __new__(cls, skill_dirs: List[str] = None):
+        if cls._instance is None:
+            cls._instance = super(SkillManager, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self, skill_dirs: List[str] = None):
+        if getattr(self, '_initialized', False):
+            return
+
+        self._initialize(skill_dirs)
+        self._initialized = True
+
+    def _initialize(self, skill_dirs: List[str] = None):
         logger.info("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
@@ -46,11 +60,7 @@ class SkillManager:
         Get the global singleton instance of SkillManager.
         获取 SkillManager 的全局单例实例。
         """
-        tm = get_skill_manager()
-        if tm is None:
-            tm = SkillManager()
-            set_skill_manager(tm)
-        return tm
+        return cls()
 
     def list_skills(self) -> List[str]:
         """

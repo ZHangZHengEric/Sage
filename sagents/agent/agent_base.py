@@ -432,19 +432,13 @@ class AgentBase(ABC):
 
             # 补充 Skills 信息
             # 确保不仅skill_manager存在，而且确实有技能可用
-            if hasattr(session_context, 'skill_manager') and session_context.skill_manager and session_context.skill_manager.list_skills():
-                skill_descriptions = session_context.skill_manager.get_skill_description_lines()
-                if skill_descriptions:
+            if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
+                skill_infos = session_context.skill_manager.list_skill_info()
+                if skill_infos:
                     system_prefix += "<available_skills>\n"
-                    # 使用PromptManager获取多语言文本
-                    skills_header = prompt_manager.get_prompt(
-                        'skills_info_label',
-                        agent='common',
-                        language=language,
-                        default="当前工作空间可用技能 / Available Skills in Workspace:\n"
-                    )
-                    system_prefix += skills_header
-                    system_prefix += "\n".join(skill_descriptions)
+                    for skill in skill_infos:
+                        system_prefix += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description}</skill_description>\n</skill>\n"
+                    system_prefix += "</available_skills>\n"
                     
                     # 获取技能使用说明
                     skills_hint = prompt_manager.get_prompt(
@@ -453,8 +447,8 @@ class AgentBase(ABC):
                         language=language,
                         default=""
                     )
-                    system_prefix += skills_hint
-                    system_prefix += "\n</available_skills>\n"
+                    if skills_hint:
+                         system_prefix += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
 
         return MessageChunk(
             role=MessageRole.SYSTEM.value,

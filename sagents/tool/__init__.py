@@ -15,10 +15,14 @@ def __getattr__(name):
     elif name == "AgentToolSpec":
         from .tool_schema import AgentToolSpec
         return AgentToolSpec
+    elif name == "get_tool_manager":
+        from .tool_manager import get_tool_manager
+        return get_tool_manager
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     'ToolManager',
     'ToolProxy',
     'AgentToolSpec',
+    'get_tool_manager',
 ]
