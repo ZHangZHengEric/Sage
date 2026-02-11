@@ -70,12 +70,53 @@ class FibreOrchestrator:
                 if system_context:
                     session_context.add_and_update_system_context(system_context)
                 await session_context.init_user_memory_context()
-                
+
+                # 1.1 Load Custom Agents from Configuration
+                # Check if 'custom_sub_agents' are provided in session_context (new), agent_config or system_context
+                custom_sub_agents = getattr(session_context, 'custom_sub_agents', None) or session_context.agent_config.get("custom_sub_agents") or session_context.system_context.get("custom_sub_agents")
+                if custom_sub_agents and isinstance(custom_sub_agents, list):
+                    logger.info(f"FibreOrchestrator: Found {len(custom_sub_agents)} custom agents to initialize.")
+                    for agent_cfg in custom_sub_agents:
+                        # Support both dict and object (Pydantic model)
+                        if isinstance(agent_cfg, dict):
+                            agent_name = agent_cfg.get("name")
+                            agent_system_prompt = agent_cfg.get("system_prompt", "")
+                            agent_description = agent_cfg.get("description", "")
+                            agent_tools = agent_cfg.get("available_tools")
+                            agent_skills = agent_cfg.get("available_skills")
+                            agent_workflows = agent_cfg.get("available_workflows")
+                            agent_system_context = agent_cfg.get("system_context")
+                        else:
+                            # Assume object access
+                            agent_name = getattr(agent_cfg, "name", None)
+                            agent_system_prompt = getattr(agent_cfg, "system_prompt", "")
+                            agent_description = getattr(agent_cfg, "description", "")
+                            agent_tools = getattr(agent_cfg, "available_tools", None)
+                            agent_skills = getattr(agent_cfg, "available_skills", None)
+                            agent_workflows = getattr(agent_cfg, "available_workflows", None)
+                            agent_system_context = getattr(agent_cfg, "system_context", None)
+                        
+                        if agent_name:
+                            await self.spawn_agent(
+                                parent_context=session_context,
+                                name=agent_name,
+                                system_prompt=agent_system_prompt,
+                                description=agent_description,
+                                available_tools=agent_tools,
+                                available_skills=agent_skills,
+                                available_workflows=agent_workflows,
+                                system_context=agent_system_context
+                            )
+                            logger.info(f"FibreOrchestrator: Initialized custom sub-agent '{agent_name}'")
+
                 # 2. Get Fibre System Prompt
                 fibre_prompt = self._get_fibre_system_prompt_content(session_context)
                 
                 # 3. Inject Fibre Tools
-                fibre_tools_impl = FibreTools(self, session_context)
+                # Register self as orchestrator in session context so FibreTools can find it
+                session_context.orchestrator = self
+                
+                fibre_tools_impl = FibreTools()
                 
                 # Register Fibre tools to tool_manager if not already there
                 # Use register_tools_from_object to correctly register bound methods
@@ -105,7 +146,7 @@ class FibreOrchestrator:
                 initial_msgs = self._prepare_initial_messages(input_messages)
                 for msg in initial_msgs:
                     if msg.role != MessageRole.SYSTEM.value: # System prompt handled by context
-                        session_context.message_manager.add_messages(msg)
+                        session_context.add_messages(msg)
 
                 # 6. Main Execution Loop
                 # The Container runs as the primary agent.
@@ -173,11 +214,12 @@ class FibreOrchestrator:
                 session_context.status = SessionStatus.ERROR
                 raise
             finally:
-                logger.info(f"FibreOrchestrator: Saving session context for {session_id}")
-                try:
-                    session_context.save()
-                except Exception as e:
-                    logger.error(f"FibreOrchestrator: Failed to save session context: {e}", exc_info=True)
+                pass
+                # logger.info(f"FibreOrchestrator: Saving session context for {session_id}")
+                # try:
+                #     session_context.save()
+                # except Exception as e:
+                #     logger.error(f"FibreOrchestrator: Failed to save session context: {e}", exc_info=True)
                     
     def _get_fibre_system_prompt_content(self, session_context: SessionContext) -> str:
         # Get the Mandatory Fibre Prompt
@@ -218,7 +260,20 @@ class FibreOrchestrator:
         return msgs
 
     # Methods called by FibreTools
-    async def spawn_agent(self, parent_context, name, role, system_prompt):
+    async def spawn_agent(self, parent_context, name, system_prompt, description="", 
+                          available_tools=None, available_skills=None, available_workflows=None, system_context=None):
+        
+        # 1. Ensure unique name
+        base_name = name
+        counter = 1
+        # Check against existing sub-sessions to prevent collision
+        while name in self.sub_sessions:
+             name = f"{base_name}_{counter}"
+             counter += 1
+        
+        if name != base_name:
+            logger.info(f"FibreOrchestrator: Agent name '{base_name}' collision, renamed to '{name}'")
+
         logger.info(f"Spawning agent: {name}")
         # Create Sub Session ID: parent_session_id_{index}_{agent_name}
         # Index is 1-based based on current sub_sessions count
@@ -232,7 +287,11 @@ class FibreOrchestrator:
             session_id=sub_session_id,
             parent_context=parent_context,
             system_prompt=system_prompt,
-            orchestrator=self
+            orchestrator=self,
+            available_tools=available_tools,
+            available_skills=available_skills,
+            available_workflows=available_workflows,
+            system_context=system_context
         )
         self.sub_sessions[name] = sub_agent
         
@@ -241,8 +300,12 @@ class FibreOrchestrator:
             parent_context.system_context['available_sub_agents'] = []
             
         # Add new agent info if not exists
-        agent_info = {"id": name, "role": role}
-        if agent_info not in parent_context.system_context['available_sub_agents']:
+        # Use name as id, and simplified structure
+        agent_info = {"id": name, "description": description or system_prompt[:100]}
+        
+        # Check if already in list (by id) to avoid duplicates in the list
+        existing_ids = [a.get("id") for a in parent_context.system_context['available_sub_agents']]
+        if name not in existing_ids:
             parent_context.system_context['available_sub_agents'].append(agent_info)
         
         # We just return the name as ID. The agent is lazy-initialized on first message.
@@ -333,7 +396,12 @@ class FibreOrchestrator:
                 if sub_agent.agent and sub_agent.agent.model:
                      # Get prompt from PromptManager
                      language = sub_agent.parent_context.get_language() if sub_agent.parent_context else "en"
-                     summary_prompt_template = PromptManager().get_agent_prompt_auto('sub_agent_fallback_summary_prompt', language=language)
+                     # Use 'FibreAgent' as the agent identifier since prompts are defined in fibre_agent_prompts.py
+                     summary_prompt_template = PromptManager().get_agent_prompt(
+                         agent='FibreAgent', 
+                         key='sub_agent_fallback_summary_prompt', 
+                         language=language
+                     )
                      prompt = summary_prompt_template.format(history_str=history_str)
                      
                      # Use AgentBase's _call_llm_streaming method for consistent logging and handling
@@ -342,17 +410,18 @@ class FibreOrchestrator:
                      
                      # We need to access the private method, assuming we are in a trusted context (Orchestrator managing SubAgent)
                      # Or check if there is a public wrapper. SimpleAgent uses _call_llm_streaming internally.
-                     # We will use _call_llm_streaming and accumulate the result.
-                     response_stream = sub_agent.agent._call_llm_streaming(
-                         messages=messages_input,
-                         session_id=sub_agent.session_id,
-                         step_name="sub_agent_fallback_summary"
-                     )
-                     
-                     summary_content = ""
-                     async for chunk in response_stream:
-                         if chunk.choices and chunk.choices[0].delta.content:
-                             summary_content += chunk.choices[0].delta.content
+                     # Use sub_agent.session_id as this is an operation within the sub-agent's context
+                     with session_manager.session_context(sub_agent.session_id):
+                         response_stream = sub_agent.agent._call_llm_streaming(
+                             messages=messages_input,
+                             session_id=sub_agent.session_id,
+                             step_name="sub_agent_fallback_summary"
+                         )
+                         
+                         summary_content = ""
+                         async for chunk in response_stream:
+                             if chunk.choices and chunk.choices[0].delta.content:
+                                 summary_content += chunk.choices[0].delta.content
                              
                      return f"Sub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
             except Exception as e:

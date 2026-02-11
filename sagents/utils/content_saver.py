@@ -110,7 +110,14 @@ def save_agent_response_content(content: str, session_id: str):
                 if ext == 'dockerfile':
                     filename = f"Dockerfile_{timestamp_str}_{idx}"
                 else:
-                    filename = f"code_{timestamp_str}_{idx}.{ext}"
+                    # Use language name as prefix (consistent with file format)
+                    prefix = lang if lang else "snippet"
+                    # Sanitize prefix: c++ -> cpp, c# -> csharp
+                    prefix = prefix.replace('+', 'p').replace('#', 'sharp')
+                    prefix = re.sub(r'[^a-zA-Z0-9]', '', prefix)
+                    if not prefix:
+                        prefix = "snippet"
+                    filename = f"{prefix}_{timestamp_str}_{idx}.{ext}"
             
             # Save file
             try:

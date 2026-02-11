@@ -1,7 +1,19 @@
-[2026-02-11] 5. 修复 `execute_python_code` 依赖检查逻辑：移除了错误的本地 `importlib` 检查，改为始终在沙箱中执行 `pip install`，解决了依赖包安装后无法找到的问题。同时优化了脚本目录解析逻辑，确保在提供 `session_id` 时正确创建 `agent_workspace/scripts` 目录。
-[2026-02-11] 6. Docker环境增强：在 `Sage/docker/Dockerfile.server` 中添加 `bun` 运行时支持（含 `unzip` 依赖），并配置环境变量 `BUN_INSTALL` 和 `PATH`。
-[2026-02-11] 7. 增强 `execute_command_tool` 沙箱集成：为 `SandboxFileSystem` 添加 `write_file` (支持追加)、`read_file` 和 `ensure_directory` 方法；全面重构 `_prepare_script_environment`、`_write_script_file` 和 `_log_shell_history` 以优先使用沙箱文件系统进行路径解析和IO操作，确保文件操作的隔离性和安全性；修复 `execute_javascript_code` 缺失 `session_id` 传递的 Bug。
-[2026-02-11] 8. 彻底移除 `execute_command_tool` 中的宿主路径硬编码：更新 `_prepare_script_environment` 使其返回沙箱虚拟路径（如 `/workspace/scripts`）；在 `execute_shell_command` 中动态解析虚拟路径到宿主路径；修复 `execute_javascript_code` 中 `package.json` 检查逻辑，使其能够正确处理虚拟工作目录。
-[2026-02-11] 9. Docker 构建加速优化与分层：将 `Dockerfile.server` 中 `bun` 的安装方式优化为从 `npmmirror` 下载 Release 包，并将其拆分为独立的 `RUN` 指令，以利用 Docker 缓存机制并提升构建速度；修复下载 URL 中缺少 `bun-` 前缀导致的 404 错误以及解压目录名称不匹配 (`mv` 失败) 的问题。
-[2026-02-11] 10. `execute_shell_command` 功能增强：新增 Node.js/Bun 项目依赖自动安装功能。当检测到工作目录下存在 `package.json` 但缺失 `node_modules` 时，自动执行 `bun install`（配置 npmmirror 镜像源），解决 Skill 脚本因缺少依赖无法执行的问题。
-[2026-02-11] 11. 沙箱资源限制优化：调整 `SessionContext` 中沙箱初始化的资源限制，将默认 CPU 时间限制从 10秒 提升至 300秒，内存限制从 1GB 提升至 4GB，以支持 `bun install` 等高资源消耗任务。
+# Change Log
+
+## 2026-02-11
+- Designed and added a new SVG logo (`sage_logo.svg`) for the web frontend, featuring a stylized circuit 'S' design.
+- Updated `app/web/index.html` to use the new logo as the favicon.
+- Updated `sagents/prompts/task_decompose_prompts.py`: Added skill suggestion requirement (item 10) in zh/en/pt versions and fixed formatting issues.
+- Updated `sagents/agent/agent_base.py`: Implemented structured XML formatting for `<available_skills>` and added `<skill_usage>` tag.
+- Updated `sagents/skill/skill_proxy.py`: Added `list_skill_info` method to support detailed skill listing.
+- Removed `tests/agent/test_skill_formatting.py` as skill formatting testing was cancelled by user.
+- Added unit tests for ToolManager isolation and ToolProxy priority logic (`tests/test_tool_isolation.py`).
+- Added unit tests for FibreSubAgent integration and FibreTools parameter renaming (`tests/agent/test_fibre_integration.py`).
+- Fixed import errors in `sagents/tool/__init__.py` and `sagents/tool/tool_proxy.py` discovered during testing.
+- Refined ToolManager singleton logic: Restored `isolated` parameter and added `is_auto_discover` control for non-singleton instances.
+- Enhanced ToolProxy: 
+    - `register_tools_from_object` now registers tools into the existing highest-priority ToolManager (index 0) instead of creating a new one.
+    - Clarified tool priority logic: ToolManagers at the beginning of the list (index 0) have the highest priority.
+- Updated FibreSubAgent: Uses `ToolManager(isolated=True)` for local tool isolation.
+- Renamed `role_description` to `description` in FibreTools and removed `role` from FibreOrchestrator.
+- Removed `LocalToolManager` class in favor of `ToolManager(isolated=True)`.

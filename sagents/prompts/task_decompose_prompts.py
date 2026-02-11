@@ -40,6 +40,8 @@ decompose_template = {
 7. 子任务数量不要超过10个，较简单的子任务可以合并为一个子任务。
 8. 子任务描述中不要直接说出工具的原始名称，使用工具描述来表达工具。
 9. 只关注用户最新的需求或者任务进行拆分，不要关注用户历史对话中的其他任务。
+10. 如果当前存在可用的skills，并且这个子任务和某个skill非常契合，就声明一下使用对应的skill 。
+
 ## 输出格式
 ```
 <task_item>
@@ -71,6 +73,8 @@ Observe user latest needs or tasks through user's historical dialogue
 7. The number of subtasks should not exceed 10. Simpler subtasks can be merged into one subtask.
 8. Do not directly mention the original names of tools in subtask descriptions. Use tool descriptions to express tools.
 9. Only focus on user latest needs or tasks for decomposition, do not focus on other tasks in user historical dialogue.
+10. If there are available skills, and this subtask fits a specific skill well, just explicitly state that you will use the corresponding skill.
+
 ## Output Format
 ```
 <task_item>
@@ -102,6 +106,8 @@ Observe as necessidades ou tarefas mais recentes do usuário através do diálog
 7. O número de subtarefas não deve exceder 10. Subtarefas mais simples podem ser mescladas em uma subtarefa.
 8. Não mencione diretamente os nomes originais das ferramentas nas descrições das subtarefas. Use descrições de ferramentas para expressar ferramentas.
 9. Concentre-se apenas nas necessidades ou tarefas mais recentes do usuário para decomposição, não se concentre em outras tarefas no diálogo histórico do usuário.
+10. Se houver skills disponíveis e esta subtarefa se encaixar muito bem em uma skill específica, apenas declare explicitamente que usará a skill correspondente.
+
 ## Formato de Saída
 ```
 <task_item>

@@ -174,19 +174,35 @@ You are a **Sub-Agent** (Strand) spawned by the Parent Agent to perform a specif
 
 # Sub-Agent Fallback Summary Prompt
 sub_agent_fallback_summary_prompt = {
-    "en": """The sub-agent completed the execution but did not report the result. Please summarize the following execution log into a final result.
+    "en": """The sub-agent completed the execution but did not report the result. Please summarize the following execution log into a final result using a **professional reporting tone** (as if reporting to a superior).
+
 Format:
 Status: success/failure
-Result: <summary>
+Result: 
+**Executive Summary**: <Brief overview of task completion>
+**Key Deliverables**: 
+- <List generated resources/file paths>
+**Analysis & Conclusion**: <Specific findings or outcomes>
+**Execution Highlights**: <Brief recap of key steps>
 
 Execution Log:
 {history_str}""",
-    "zh": """子智能体完成了执行但没有报告结果。请将以下执行日志总结为最终结果。
-格式：
-Status: success/failure
-Result: <总结内容>
+    "zh": """子智能体任务执行完毕，但未通过标准接口提交最终报告。请根据下方执行日志，以**下级向上级汇报工作**的专业口吻，生成一份结构化总结。
 
-执行日志：
+【汇报要求】
+1. **态度严谨**：语言简练、客观、专业，结论先行。
+2. **要素完备**：必须包含执行过程摘要、关键产出（文件/资源路径）、核心结论。
+3. **格式规范**：严格遵守下方输出格式。
+
+【输出格式】
+Status: success/failure
+Result: 
+**执行摘要**：<简述任务执行的关键步骤与策略>
+**关键产出**：
+- <列出所有生成的代码文件、数据资源或系统路径>
+**分析结论**：<基于执行结果的最终判断或建议>
+
+【执行日志】
 {history_str}"""
 }
 
