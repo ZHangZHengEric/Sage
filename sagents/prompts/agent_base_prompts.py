@@ -274,3 +274,10 @@ Você **DEVE priorizar** o uso da ferramenta `load_skill` para carregar uma nova
 3. **IMPORTANTE**: Após o sucesso do `load_skill`, as novas instruções de habilidade (guia) e ferramentas são carregadas automaticamente. Você **DEVE** reler e seguir rigorosamente essas novas instruções para executar a tarefa.
 """
 }
+
+# 技能列表提示
+skills_info_label = {
+    "zh": "\n当前可用的技能列表 (Skills)，如需使用请调用 `load_skill` 工具加载：\n",
+    "en": "\nAvailable Skills List (Skills), please use `load_skill` tool to load if needed:\n",
+    "pt": "\nLista de Habilidades Disponíveis (Skills), use a ferramenta `load_skill` para carregar se necessário:\n"
+}
