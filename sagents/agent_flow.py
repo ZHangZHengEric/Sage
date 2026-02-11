@@ -87,7 +87,7 @@ class AgentFlow:
                 all_message_ids = [m.message_id for m in session_context.message_manager.messages]
                 for message in initial_messages:
                     if message.message_id not in all_message_ids:
-                        session_context.message_manager.add_messages(message)
+                        session_context.add_messages(message)
                     else:
                         # 如果message 存在，更新，以新的message 为准
                         session_context.message_manager.update_messages(message)
@@ -148,7 +148,7 @@ class AgentFlow:
                 ]
 
                 if messages_to_save:
-                    session_context.message_manager.add_messages(messages_to_save)
+                    session_context.add_messages(messages_to_save)
 
                 yield message_chunks
 

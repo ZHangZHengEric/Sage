@@ -87,27 +87,63 @@ def convert_spec_to_openai_format(
                 return i18n[fb]
         return base or ""
 
+    def _recursive_localize(node: Any):
+        if not isinstance(node, dict):
+            return
+
+        # 1. 本地化当前节点的 description
+        desc = node.get("description", "")
+        desc_i18n = node.get("description_i18n")
+        if isinstance(desc_i18n, dict):
+            node["description"] = _resolve_text(desc, desc_i18n)
+        
+        # 移除 description_i18n
+        if "description_i18n" in node:
+            node.pop("description_i18n", None)
+
+        # 2. 递归处理 properties (object)
+        if node.get("type") == "object" and "properties" in node and isinstance(node["properties"], dict):
+            for prop in node["properties"].values():
+                _recursive_localize(prop)
+
+        # 3. 递归处理 items (array)
+        if node.get("type") == "array" and "items" in node:
+            _recursive_localize(node["items"])
+
     # 工具描述本地化
     localized_desc = _resolve_text(getattr(tool_spec, "description", ""), getattr(tool_spec, "description_i18n", None))
 
     # 参数本地化
     param_i18n_map: Optional[Dict[str, Dict[str, str]]] = getattr(tool_spec, "param_description_i18n", None)
     localized_params: Dict[str, Any] = {}
-    for p_name, p_info in getattr(tool_spec, "parameters", {}).items():
+    
+    # 既然有了 param_schema 支持，我们需要更深度的拷贝和递归处理
+    # 为了避免修改原始数据，我们先进行深拷贝
+    import json as _json
+    raw_params = getattr(tool_spec, "parameters", {})
+    try:
+        # 使用 json 序列化反序列化进行深拷贝，确保彻底解耦
+        localized_params = _json.loads(_json.dumps(raw_params))
+    except Exception:
+        # 如果无法 json 序列化（极少情况），退回到简单的 dict 拷贝
+        localized_params = {k: dict(v) for k, v in raw_params.items()}
+
+    for p_name, p_info in localized_params.items():
+        # 优先处理顶层的 param_description_i18n 映射（兼容旧逻辑）
         p_desc = p_info.get("description", "")
         p_desc_i18n = p_info.get("description_i18n")
+        
         candidate_i18n = None
         if isinstance(p_desc_i18n, dict):
             candidate_i18n = p_desc_i18n
         elif isinstance(param_i18n_map, dict):
             candidate_i18n = param_i18n_map.get(p_name)
-
-        new_info = dict(p_info)
-        new_info["description"] = _resolve_text(p_desc, candidate_i18n)
-        # 导出时移除参数上的 description_i18n，以保持兼容
-        if "description_i18n" in new_info:
-            new_info.pop("description_i18n", None)
-        localized_params[p_name] = new_info
+        
+        if candidate_i18n:
+             p_info["description"] = _resolve_text(p_desc, candidate_i18n)
+        
+        # 递归处理该参数的内部结构（支持 param_schema 定义的深层 i18n）
+        _recursive_localize(p_info)
 
     # 返回结构本地化
     localized_returns = None

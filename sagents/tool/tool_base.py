@@ -17,6 +17,7 @@ def tool(
     param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None,
     return_data: Optional[Dict[str, Any]] = None,
     return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None,
+    param_schema: Optional[Dict[str, Dict[str, Any]]] = None,
 ):
     """Decorator factory for registering tool methods，如果disabled为True，则不注册该方法。
 
@@ -25,6 +26,7 @@ def tool(
     - param_description_i18n: 参数描述的多语言字典，形如 {param_name: {lang: text}}
     - return_data: 返回数据的结构描述（JSON Schema风格），如 {"type":"object","properties":{...}}
     - return_properties_i18n: 返回对象的根级 description 的多语言描述（仅根描述）
+    - param_schema: 参数的详细 Schema 定义，用于覆盖自动推断的类型或提供更复杂的结构（如 array items），形如 {param_name: {"type": "array", "items": {...}}}
     """
     def decorator(func):
         if disabled:
@@ -107,6 +109,9 @@ def tool(
 
             if name in _param_desc_i18n_map and isinstance(_param_desc_i18n_map[name], dict):
                 param_info["description_i18n"] = _param_desc_i18n_map[name]
+
+            if param_schema and name in param_schema and isinstance(param_schema[name], dict):
+                param_info.update(param_schema[name])
 
             if param.default == inspect.Parameter.empty:
                 required.append(name)

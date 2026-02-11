@@ -63,6 +63,8 @@ class SessionContext:
         self.user_memory_manager = user_memory_manager
         self.tool_manager = tool_manager # 存储工具管理器
         self.skill_manager = skill_manager
+        self.custom_sub_agents: List[Dict[str, Any]] = []
+        self.orchestrator: Optional[Any] = None  # Reference to the orchestrator (FibreOrchestrator)
 
         # Ensure load_skill tool is registered if skills are available
         if self.skill_manager and self.skill_manager.list_skills() and self.tool_manager:
@@ -78,6 +80,32 @@ class SessionContext:
                     logger.error(f"SessionContext: Failed to register load_skill tool: {e}")
 
         self.init_more(workspace_root)
+
+    def add_messages(self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]) -> None:
+        """
+        Add messages to the message manager with session_id validation.
+        
+        Args:
+            messages: A message chunk or a list of message chunks/dicts.
+        """
+        if not isinstance(messages, list):
+            messages_list = [messages]
+        else:
+            messages_list = messages
+            
+        valid_messages = []
+        for msg in messages_list:
+            msg_session_id = None
+            if isinstance(msg, MessageChunk):
+                msg_session_id = msg.session_id
+            elif isinstance(msg, dict):
+                msg_session_id = msg.get('session_id')
+                
+            if msg_session_id is None or msg_session_id == self.session_id:
+                valid_messages.append(msg)
+
+        if valid_messages:
+            self.message_manager.add_messages(valid_messages)
 
     def init_more(self, workspace_root: str):
         logger.info(f"SessionContext: 后初始化会话上下文，会话ID: {self.session_id}")

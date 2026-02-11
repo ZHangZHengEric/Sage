@@ -225,8 +225,8 @@ class SimpleAgent(AgentBase):
 
             if "sys_spawn_agent" in tool_names:
                 suggested_tools.extend(['sys_spawn_agent'])
-            if 'sys_send_message' in tool_names:
-                suggested_tools.extend(['sys_send_message'])
+            if 'sys_delegate_task' in tool_names:
+                suggested_tools.extend(['sys_delegate_task'])
             if 'sys_finish_task' in tool_names:
                 suggested_tools.append('sys_finish_task')
 

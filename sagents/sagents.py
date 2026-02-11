@@ -169,6 +169,7 @@ class SAgent:
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {},
         context_budget_config: Optional[Dict[str, Any]] = None,
+        custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
         """
         执行流式对话任务
@@ -255,6 +256,7 @@ class SAgent:
                 system_context=system_context,
                 available_workflows=available_workflows,
                 context_budget_config=context_budget_config,
+                custom_sub_agents=custom_sub_agents,
             ):
                 # 过滤掉空消息块
                 for message_chunk in message_chunks:
@@ -301,6 +303,7 @@ class SAgent:
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {},
         context_budget_config: Optional[Dict[str, Any]] = None,
+        custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[List["MessageChunk"], None]:
         """
         执行智能体任务的主流程
@@ -331,7 +334,30 @@ class SAgent:
         try:
             # 初始化会话
             # 初始化该session 的context 管理器
+            
+            # 如果没有提供 session_id，尝试从 input_messages 中推断
+            if not session_id and input_messages:
+                first_msg = input_messages[0]
+                if isinstance(first_msg, MessageChunk) and first_msg.session_id:
+                    session_id = first_msg.session_id
+                elif isinstance(first_msg, dict) and first_msg.get('session_id'):
+                    session_id = first_msg.get('session_id')
+
             session_id = session_id or str(uuid.uuid4())
+            
+            # 确保 input_messages 中的所有消息都有 session_id
+            if input_messages:
+                for i, msg in enumerate(input_messages):
+                    if isinstance(msg, MessageChunk):
+                        if not msg.session_id:
+                            msg.session_id = session_id
+                    elif isinstance(msg, dict):
+                        if not msg.get('session_id'):
+                            msg['session_id'] = session_id
+                    else:
+                        # 对于其他类型的消息，不做处理，或者可以考虑报错
+                        pass
+
             session_context = init_session_context(
                 session_id=session_id,
                 user_id=user_id,
@@ -343,6 +369,11 @@ class SAgent:
             )
             with session_manager.session_context(session_id):
                 logger.info(f"开始流式工作流，会话ID: {session_id}")
+                
+                # 设置 custom_sub_agents
+                if custom_sub_agents:
+                    session_context.custom_sub_agents = custom_sub_agents
+                    logger.info(f"SAgent: 设置了 {len(custom_sub_agents)} 个自定义 Sub Agent")
 
                 # 1. 设置传入的 system_context
                 if system_context:
@@ -381,7 +412,7 @@ class SAgent:
                 all_message_ids = [m.message_id for m in session_context.message_manager.messages]
                 for message in initial_messages:
                     if message.message_id not in all_message_ids:
-                        session_context.message_manager.add_messages(message)
+                        session_context.add_messages(message)
                     else:
                         # 如果message 存在，更新，以新的message 为准
                         session_context.message_manager.update_messages(message)
@@ -451,7 +482,7 @@ class SAgent:
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.task_analysis_agent, phase_name="任务分析"
                     ):
-                        session_context.message_manager.add_messages(message_chunks)
+                        session_context.add_messages(message_chunks)
                         yield message_chunks
 
                 # 2. 执行阶段
@@ -460,11 +491,11 @@ class SAgent:
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.fibre_agent, phase_name="Fibre执行"
                     ):
-                        session_context.message_manager.add_messages(message_chunks)
+                        session_context.add_messages(message_chunks)
                         yield message_chunks
                 elif agent_mode == 'multi':
                     async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
-                        session_context.message_manager.add_messages(message_chunks)
+                        session_context.add_messages(message_chunks)
                         yield message_chunks
                 else:
                     # 直接执行模式：可选的任务分析 + 直接执行
@@ -473,19 +504,19 @@ class SAgent:
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
                     ):
-                        session_context.message_manager.add_messages(message_chunks)
+                        session_context.add_messages(message_chunks)
                         yield message_chunks
 
                     if force_summary:
                         async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
-                            session_context.message_manager.add_messages(message_chunks)
+                            session_context.add_messages(message_chunks)
                             yield message_chunks
 
                 if more_suggest:
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.query_suggest_agent, phase_name="查询建议"
                     ):
-                        session_context.message_manager.add_messages(message_chunks)
+                        session_context.add_messages(message_chunks)
                         yield message_chunks
 
                 # 异步执行记忆提取，不阻塞主流程
@@ -508,7 +539,7 @@ class SAgent:
             if session_context:
                 session_context.status = SessionStatus.ERROR
                 async for message_chunks in self._handle_workflow_error(e):
-                    session_context.message_manager.add_messages(message_chunks)
+                    session_context.add_messages(message_chunks)
                     yield message_chunks
             else:
                  logger.error(f"Failed to initialize session: {e}")

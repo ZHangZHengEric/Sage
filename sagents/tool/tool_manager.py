@@ -83,9 +83,21 @@ def _raise_innermost_exception(exc: BaseException) -> None:
 
 
 class ToolManager:
-    def __init__(self, is_auto_discover=True):
+    _instance = None
+
+    def __new__(cls, is_auto_discover=True, isolated=False):
+        if isolated:
+            return super(ToolManager, cls).__new__(cls)
+        if cls._instance is None:
+            cls._instance = super(ToolManager, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self, is_auto_discover=True, isolated=False):
         """初始化工具管理器"""
-        logger.info("Initializing ToolManager")
+        if not isolated and getattr(self, '_initialized', False):
+            return
+
+        logger.info(f"Initializing ToolManager (isolated={isolated})")
 
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]] = {}
         self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
@@ -98,6 +110,9 @@ class ToolManager:
             # # 在测试环境中，我们不希望自动发现MCP工具
             # if not os.environ.get('TESTING'):
             #     logger.debug("Not in testing environment, discovering MCP tools")
+        
+        if not isolated:
+            self._initialized = True
             #     asyncio.run(self._discover_mcp_tools(mcp_setting_path=self._mcp_setting_path))
             # else:
             #     logger.debug("In testing environment, skipping MCP tool discovery")

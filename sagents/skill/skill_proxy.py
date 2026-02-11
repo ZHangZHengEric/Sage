@@ -71,6 +71,16 @@ class SkillProxy:
         """
         return [name for name in self.skill_manager.list_skills() if name in self._available_skills]
 
+    def list_skill_info(self) -> List[SkillSchema]:
+        """
+        List detailed information for available skills.
+        列出可用技能的详细信息。
+        """
+        return [
+            skill for skill in self.skill_manager.list_skill_info()
+            if skill.name in self._available_skills
+        ]
+
     def get_skill_description_lines(
         self,
     ) -> List[str]:

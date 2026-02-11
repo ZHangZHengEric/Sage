@@ -265,7 +265,8 @@ class SageStreamService:
                            max_loop_count=None, multi_agent=None, agent_mode=None, more_suggest=False,
                             system_context: Optional[Dict] = None, 
                            available_workflows: Optional[Dict] = None,
-                           force_summary: bool=False):
+                           force_summary: bool=False,
+                           custom_agents: Optional[List[Dict[str, Any]]] = None):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
         logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, agent_mode={agent_mode}, messages_count={len(messages)}")
@@ -316,7 +317,8 @@ class SageStreamService:
                 system_context=system_context,
                 available_workflows=available_workflows,
                 force_summary=force_summary,
-                context_budget_config=self.context_budget_config
+                context_budget_config=self.context_budget_config,
+                custom_agents=custom_agents
             )
             
             logger.info("✅ run_stream 调用成功，开始处理结果...")
@@ -613,6 +615,15 @@ class ChatMessage(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     session_id: Optional[str] = None
 
+class CustomSubAgentConfig(BaseModel):
+    name: str
+    system_prompt: Optional[str] = None
+    description: Optional[str] = None
+    available_tools: Optional[List[str]] = None
+    available_skills: Optional[List[str]] = None
+    available_workflows: Optional[List[str]] = None
+    system_context: Optional[Dict[str, Any]] = None
+
 class StreamRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: Optional[str] = None
@@ -631,6 +642,7 @@ class StreamRequest(BaseModel):
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None # Added for skill restriction
+    custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None # Added for custom agents
     
     def __init__(self, **data):
         # 处理字段兼容性
@@ -972,7 +984,8 @@ async def stream_chat(request: StreamRequest):
                 more_suggest=request.more_suggest,
                 system_context=request.system_context,
                 available_workflows=request.available_workflows,
-                force_summary=request.force_summary
+                force_summary=request.force_summary,
+                custom_sub_agents=[agent.model_dump() for agent in request.custom_sub_agents] if request.custom_sub_agents else None
             ):
                 # 更新流处理计数器和活动时间
                 stream_counter += 1

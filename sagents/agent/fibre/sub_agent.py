@@ -6,7 +6,8 @@ from sagents.context.session_context import SessionContext, init_session_context
 from sagents.context.session_context_manager import session_manager
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole
-from sagents.tool import ToolManager
+from sagents.tool import ToolManager, ToolProxy, get_tool_manager
+from sagents.skill import SkillManager, SkillProxy, get_skill_manager
 from sagents.utils.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,9 @@ class FibreSubAgent:
     A lightweight wrapper around a SimpleAgent running in its own sub-session.
     """
     
-    def __init__(self, agent_name: str, session_id: str, parent_context: SessionContext, system_prompt: str, orchestrator):
+    def __init__(self, agent_name: str, session_id: str, parent_context: SessionContext, system_prompt: str, orchestrator, 
+                 available_tools: Optional[List[str]] = None, available_skills: Optional[List[str]] = None,
+                 available_workflows: Optional[List[str]] = None, system_context: Optional[dict] = None):
         self.agent_name = agent_name
         self.session_id = session_id
         self.parent_context = parent_context
@@ -26,6 +29,10 @@ class FibreSubAgent:
         self.orchestrator = orchestrator
         self.status = "active"
         self.initialized = False
+        self.available_tools = available_tools
+        self.available_skills = available_skills
+        self.available_workflows = available_workflows
+        self.system_context = system_context
         
         # Sub-agent components
         self.sub_session_context: Optional[SessionContext] = None
@@ -64,6 +71,74 @@ class FibreSubAgent:
             tool_manager=self.parent_context.tool_manager,
             skill_manager=self.parent_context.skill_manager,
         )
+
+        # 1.0 Apply Tool Restrictions and Register FibreTools
+        # We use ToolProxy to manage multiple ToolManagers (Isolated + Global/Parent) with priority.
+        # Priority: Isolated ToolManager (FibreTools) > Parent/Global ToolManager
+
+        # 1.1 Create Isolated ToolManager for FibreTools
+        # Use isolated=True to create a standalone instance without affecting global state
+        from sagents.tool.tool_manager import ToolManager
+        from sagents.agent.fibre.tools import FibreTools
+
+        isolated_tm = ToolManager(is_auto_discover=False, isolated=True)
+        
+        # Register orchestrator in sub_session_context
+        self.sub_session_context.orchestrator = self.orchestrator
+        
+        fibre_tools_impl = FibreTools()
+        isolated_tm.register_tools_from_object(fibre_tools_impl)
+
+        # Get list of FibreTools names to ensure they are allowed
+        fibre_tool_names = isolated_tm.list_all_tools_name()
+
+        # 1.2 Determine managers and available tools
+        managers = [isolated_tm]
+        allowed_tools = None
+
+        if self.available_tools:
+            # Case A: Explicit restriction requested (Whitelist mode)
+            # Use Global ToolManager as base
+            base_tm = ToolManager.get_instance()
+            managers.append(base_tm)
+
+            # Combine user-allowed tools with FibreTools (system tools)
+            # We must explicitly allow FibreTools if filtering is active
+            allowed_tools = list(set(self.available_tools) | set(fibre_tool_names))
+
+            logger.info(f"SubAgent {self.agent_name}: Restricted available tools to {self.available_tools} + FibreTools")
+        else:
+            # Case B: Inherit from parent
+            # Use parent's tool manager as base
+            parent_tm = self.parent_context.tool_manager
+            managers.append(parent_tm)
+
+            # allowed_tools remains None -> Allow all tools from both managers
+            # (No need to explicitly list parent tools, ToolProxy handles inheritance)
+
+        # 1.3 Create Composite ToolProxy
+        sub_agent_tm = ToolProxy(managers, allowed_tools)
+
+        # Assign to context
+        self.sub_session_context.tool_manager = sub_agent_tm
+
+        if self.available_skills:
+            # Use global SkillManager singleton as base
+            base_sm = SkillManager.get_instance()
+            if base_sm:
+                self.sub_session_context.skill_manager = SkillProxy(
+                    base_sm,
+                    self.available_skills
+                )
+                logger.info(f"SubAgent {self.agent_name}: Restricted available skills to {self.available_skills}")
+        
+        # 1.2 Inherit system_context from parent
+        if self.parent_context.system_context:
+             self.sub_session_context.add_and_update_system_context(self.parent_context.system_context)
+
+        # 1.2 Update system_context with sub-agent specific configuration
+        if self.system_context:
+            self.sub_session_context.add_and_update_system_context(self.system_context)
 
         # SHARE AGENT WORKSPACE (SANDBOX) WITH PARENT
         # We want the sub-agent to operate on the same files as the parent
@@ -129,43 +204,14 @@ You are a Sub-Agent named '{self.agent_name}', working as part of the Fibre Agen
             message_type="text",
             session_id=self.session_id
         )
-        self.sub_session_context.message_manager.add_messages(msg)
+        self.sub_session_context.add_messages(msg)
         
         try:
             # 2. Run Agent
             # We need to use session_manager context
             with session_manager.session_context(self.session_id):
-                # We need to pass tools. 
-            # Use the tool_manager from context (which we inherited from parent)
-            # Ensure FibreTools are properly registered in the sub-agent's tool manager context
-            # The parent's tool manager might not have the FibreTools instance registered in the same way
-            # or it might be the original one without FibreTools.
-            # We need to make sure the sub-agent can call sys_finish_task.
-            
-            # The tool_manager passed to run_stream is self.sub_session_context.tool_manager
-            # which is self.parent_context.tool_manager.
-            
-            # If parent_context.tool_manager doesn't have FibreTools, we need to add them.
-            # But wait, the container agent uses a *combined* tool manager.
-            # The parent_context.tool_manager is the *original* one.
-            
-            # We need to inject FibreTools into the sub-agent's tool manager.
-            # We should create a new ToolManager for the sub-agent that includes FibreTools.
-            
-                # 1. Get FibreTools instance
-                # We can create a new one bound to the sub-agent's context?
-                # Or use the one from orchestrator?
-                # FibreTools needs orchestrator and session_context.
-                # If we bind it to sub_session_context, then sys_spawn_agent would spawn sub-sub-agents (which is allowed).
-                
-                from sagents.agent.fibre.tools import FibreTools
-                fibre_tools_impl = FibreTools(self.orchestrator, self.sub_session_context)
-                
-                # 2. Register FibreTools for the sub-agent
-                # Note: We use the existing tool manager.
+                # Use the tool_manager from context (which we configured in initialization)
                 sub_agent_tm = self.sub_session_context.tool_manager
-                if sub_agent_tm:
-                    sub_agent_tm.register_tools_from_object(fibre_tools_impl)
                 
                 async for chunks in self.agent.run_stream(
                     session_context=self.sub_session_context,
@@ -178,15 +224,15 @@ You are a Sub-Agent named '{self.agent_name}', working as part of the Fibre Agen
                     
                     # Sync to sub-session context immediately
                     if self.sub_session_context:
-                        self.sub_session_context.message_manager.add_messages(chunks)
+                        self.sub_session_context.add_messages(chunks)
 
                     yield chunks
             
             # Save session after agent execution
-            if self.sub_session_context:
-                logger.debug(f"SubAgent {self.agent_name}: Saving session context")
-                self.sub_session_context.save()
-                logger.info(f"SubAgent {self.agent_name}: Session saved successfully")
+            # if self.sub_session_context:
+            #     logger.debug(f"SubAgent {self.agent_name}: Saving session context")
+            #     self.sub_session_context.save()
+            #     logger.info(f"SubAgent {self.agent_name}: Session saved successfully")
 
         except Exception as e:
             logger.error(f"Error in SubAgent {self.agent_name}: {e}")
