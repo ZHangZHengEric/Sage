@@ -50,7 +50,7 @@ class FibreTools:
     @tool(
         description_i18n={"zh": "给子agent 分配具体任务并执行，支持并发执行多个子任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。"},
         param_description_i18n={
-            "tasks": {"zh": "任务列表，每个任务包含 'agent_id' 和 'content' 字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content', 'session_id' 字段。其中 'session_id' 为必填项，用于明确指定上下文。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。"}
         },
         param_schema={
             "tasks": {
@@ -67,9 +67,14 @@ class FibreTools:
                             "type": "string",
                             "description": "Detailed task description, context, requirements, and expected return format.",
                             "description_i18n": {"zh": "详细的任务描述、上下文信息、具体要求以及期望的返回格式。"}
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Specific session ID to reuse or create. If it's a new task, generate a new ID based on the agent name (e.g., 'session_python_expert_1_0').",
+                            "description_i18n": {"zh": "必填：指定 Session ID。如果是新任务，请基于 agent_id 生成一个新的（例如 'session_python_expert_1_0'）；如果是继续之前的任务，请复用旧的 ID。"}
                         }
                     },
-                    "required": ["agent_id", "content"]
+                    "required": ["agent_id", "content", "session_id"]
                 }
             }
         }
@@ -79,7 +84,8 @@ class FibreTools:
         Delegate tasks to existing sub-agents and wait for the results. Supports parallel execution.
 
         Args:
-            tasks: A list of tasks, where each task is a dictionary containing 'agent_id' and 'content'.
+            tasks: A list of tasks, where each task is a dictionary containing 'agent_id', 'content', and 'session_id'.
+                   'session_id' is required to explicitly manage conversation context.
                    'content' should be detailed and specify exactly what information needs to be returned via sys_finish_task.
             session_id: The current session ID (auto-injected)
         """
