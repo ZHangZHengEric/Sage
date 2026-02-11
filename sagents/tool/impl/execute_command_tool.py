@@ -155,13 +155,35 @@ class ExecuteCommandTool:
                 # 避免循环导入
                 from sagents.context.session_context import get_session_context
                 session_context = get_session_context(session_id)
-                if session_context and hasattr(session_context, 'agent_workspace'):
-                    # agent_workspace 是 SandboxFileSystem，host_path 是宿主机路径
-                    host_path = getattr(session_context.agent_workspace, 'host_path', None)
-                    if host_path:
-                        # 默认放在 agent_workspace/scripts 下
-                        effective_workdir = os.path.join(host_path, "scripts")
-                        logger.debug(f"通过 session_id {session_id} 定位到工作目录: {effective_workdir}")
+                
+                sandbox_fs = None
+                if session_context:
+                    # 优先使用 session_context.sandbox
+                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                        sandbox_fs = session_context.sandbox.file_system
+                    # 回退到 agent_workspace (通常也是 SandboxFileSystem)
+                    elif hasattr(session_context, 'agent_workspace'):
+                        sandbox_fs = session_context.agent_workspace
+                
+                if sandbox_fs:
+                    # 获取沙箱的虚拟路径，默认为 /workspace
+                    virtual_path = getattr(sandbox_fs, 'virtual_path', '/workspace')
+                    
+                    # 使用虚拟路径构建 effective_workdir
+                    effective_workdir = os.path.join(virtual_path, "scripts")
+                    
+                    # 确保 scripts 目录存在 (使用 ensure_directory，它会处理虚拟路径到宿主路径的转换)
+                    if hasattr(sandbox_fs, 'ensure_directory'):
+                        sandbox_fs.ensure_directory(effective_workdir)
+                    else:
+                        # 如果没有 ensure_directory，尝试手动解析并创建
+                        # 注意：如果 effective_workdir 是虚拟路径，必须先解析为 host_path 才能 os.makedirs
+                        if hasattr(sandbox_fs, 'to_host_path'):
+                             host_workdir = sandbox_fs.to_host_path(effective_workdir)
+                             if not os.path.exists(host_workdir):
+                                os.makedirs(host_workdir, exist_ok=True)
+
+                    logger.debug(f"通过 session_id {session_id} (Sandbox) 定位到虚拟工作目录: {effective_workdir}")
             except ImportError:
                 logger.warning("无法导入 get_session_context，跳过 Session 路径解析")
             except Exception as e:
@@ -170,16 +192,33 @@ class ExecuteCommandTool:
         if not effective_workdir:
             # 未指定目录且无法解析 Session 路径，为了避免污染项目根目录，回退到系统临时目录
             # 注意：这意味着脚本文件可能不会持久化保留在 Session 目录下
+            if session_id:
+                logger.warning(f"尽管提供了 session_id {session_id}，但未能解析到有效的 host_path，回退到临时目录")
             effective_workdir = tempfile.mkdtemp(prefix=f"sage_agent_scripts_{process_id}_")
             
-        # 确保目录存在
-        if not os.path.exists(effective_workdir):
-            try:
-                os.makedirs(effective_workdir, exist_ok=True)
-            except Exception as e:
-                logger.warning(f"创建目录失败 {effective_workdir}: {e}")
-                # 如果创建失败（可能是权限问题），回退到临时目录
-                effective_workdir = tempfile.mkdtemp(prefix="agent_scripts_")
+        # 确保目录存在 (非沙箱环境，或再次确认)
+        # 如果是沙箱环境，前面已经调用了 ensure_directory，这里 os.path.exists 可能会因为是虚拟路径而失败
+        # 所以我们需要判断是否是虚拟路径
+        is_virtual_path = False
+        if session_id:
+             try:
+                # 简单判断：如果 effective_workdir 以 /workspace 开头 (假设虚拟路径前缀)，或者是绝对路径但在当前系统不存在
+                # 更严谨的是复用前面的 sandbox_fs
+                from sagents.context.session_context import get_session_context
+                ctx = get_session_context(session_id)
+                if ctx and hasattr(ctx, 'sandbox') and ctx.sandbox:
+                    is_virtual_path = True
+             except:
+                pass
+
+        if not is_virtual_path:
+            if not os.path.exists(effective_workdir):
+                try:
+                    os.makedirs(effective_workdir, exist_ok=True)
+                except Exception as e:
+                    logger.warning(f"创建目录失败 {effective_workdir}: {e}")
+                    # 如果创建失败（可能是权限问题），回退到临时目录
+                    effective_workdir = tempfile.mkdtemp(prefix="agent_scripts_")
                 
         # 生成脚本路径
         script_name = f"script_{process_id}.{extension}"
@@ -187,8 +226,20 @@ class ExecuteCommandTool:
         
         return script_path, effective_workdir
 
-    def _write_script_file(self, file_path: str, content: str, workdir: str = None):
+    def _write_script_file(self, file_path: str, content: str, workdir: str = None, session_id: Optional[str] = None):
         """写入脚本文件，包含沙箱权限处理"""
+        # 尝试使用沙箱写入
+        if session_id:
+            try:
+                from sagents.context.session_context import get_session_context
+                session_context = get_session_context(session_id)
+                if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
+                    # 使用 SandboxFileSystem 的 write_file
+                    session_context.sandbox.file_system.write_file(file_path, content)
+                    return
+            except Exception as e:
+                logger.debug(f"沙箱写入失败，回退到普通写入: {e}")
+
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -210,7 +261,26 @@ class ExecuteCommandTool:
             # 避免循环导入
             from sagents.context.session_context import get_session_context
             session_context = get_session_context(session_id)
-            if not session_context or not hasattr(session_context, 'agent_workspace'):
+            if not session_context:
+                return
+
+            # 优先使用 sandbox 写入
+            if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                status = "SUCCESS" if success else "FAILED"
+                rc_str = str(return_code) if return_code is not None else "N/A"
+                log_entry = f"[{timestamp}] [{status}] [RC:{rc_str}] [WD:{workdir or 'CWD'}] {command}\n"
+                
+                try:
+                    # 使用 SandboxFileSystem 的 write_file (append=True)
+                    # 历史记录文件通常在 workspace 根目录下
+                    history_file_path = os.path.join(session_context.agent_workspace.host_path, ".shell_history")
+                    session_context.sandbox.file_system.write_file(history_file_path, log_entry, append=True)
+                    return
+                except Exception as e:
+                    logger.debug(f"沙箱写入历史失败，回退到普通写入: {e}")
+
+            if not hasattr(session_context, 'agent_workspace'):
                 return
 
             host_path = getattr(session_context.agent_workspace, 'host_path', None)
@@ -277,9 +347,44 @@ class ExecuteCommandTool:
         logger.info(f"🖥️ execute_shell_command开始执行 [{process_id}] - command: {command[:100]}{'...' if len(command) > 100 else ''}")
         logger.info(f"📁 工作目录: {workdir or '当前目录'}, 超时: {timeout}秒")
         
+        # 路径与命令解析（处理沙箱虚拟路径）
+        actual_command = command
+        actual_workdir = workdir
+
+        if session_id:
+            try:
+                from sagents.context.session_context import get_session_context
+                session_context = get_session_context(session_id)
+                sandbox_fs = None
+                if session_context:
+                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                        sandbox_fs = session_context.sandbox.file_system
+                    elif hasattr(session_context, 'agent_workspace'):
+                        sandbox_fs = session_context.agent_workspace
+                
+                if sandbox_fs:
+                    # 1. 转换 command 中的虚拟路径
+                    if hasattr(sandbox_fs, 'map_text_to_host'):
+                        actual_command = sandbox_fs.map_text_to_host(command)
+                        if actual_command != command:
+                             logger.debug(f"Command 路径映射: {command} -> {actual_command}")
+                    
+                    # 2. 转换 workdir 中的虚拟路径
+                    if workdir and hasattr(sandbox_fs, 'to_host_path'):
+                        # 检查是否看起来像虚拟路径 (不是绝对路径，或者是 /workspace 开头)
+                        # 这里简单处理：直接调用 to_host_path，它内部有判断逻辑
+                        actual_workdir = sandbox_fs.to_host_path(workdir)
+                        if actual_workdir != workdir:
+                            logger.debug(f"Workdir 路径映射: {workdir} -> {actual_workdir}")
+
+            except Exception as e:
+                logger.warning(f"沙箱路径解析失败 (session_id={session_id}): {e}")
+
         try:
-            # 安全检查
-            is_safe, reason = self.security_manager.is_command_safe(command)
+            # 安全检查 (使用原始命令，因为黑名单可能针对特定关键词，但也需要注意混淆)
+            # 最好检查 actual_command 吗？或者两者都检查？
+            # 这里的 SecurityManager 主要检查关键字，所以检查 actual_command 更安全
+            is_safe, reason = self.security_manager.is_command_safe(actual_command)
             if not is_safe:
                 error_time = time.time() - start_time
                 logger.error(f"❌ 安全检查失败 [{process_id}] - 原因: {reason}, 耗时: {error_time:.2f}秒")
@@ -292,13 +397,13 @@ class ExecuteCommandTool:
                 }
             
             # 验证工作目录
-            if workdir:
-                if not os.path.exists(workdir):
+            if actual_workdir:
+                if not os.path.exists(actual_workdir):
                     error_time = time.time() - start_time
-                    logger.error(f"❌ 工作目录不存在 [{process_id}] - 目录: {workdir}, 耗时: {error_time:.2f}秒")
+                    logger.error(f"❌ 工作目录不存在 [{process_id}] - 目录: {actual_workdir}, 耗时: {error_time:.2f}秒")
                     return {
                         "success": False,
-                        "error": f"工作目录不存在: {workdir}",
+                        "error": f"工作目录不存在: {workdir}", # 报错给用户时用原始路径
                         # "command": command,
                         "process_id": process_id,
                         "execution_time": error_time
@@ -331,11 +436,11 @@ class ExecuteCommandTool:
             # 自动修复权限：如果命令指向本地文件且没有执行权限，自动添加 +x
             try:
                 # 简单解析第一个命令段
-                cmd_parts = command.strip().split()
+                cmd_parts = actual_command.strip().split()
                 if cmd_parts:
                     exe_cmd = cmd_parts[0]
                     # 确定当前工作目录
-                    current_cwd = workdir if workdir else os.getcwd()
+                    current_cwd = actual_workdir if actual_workdir else os.getcwd()
                     
                     # 尝试解析文件路径
                     target_file = None
@@ -359,12 +464,12 @@ class ExecuteCommandTool:
             logger.info(f"🚀 开始执行命令 [{process_id}]: {command}")
             
             process = subprocess.Popen(
-                command,
+                actual_command,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd=workdir,
+                cwd=actual_workdir,
                 env=env
             )
             
@@ -504,7 +609,7 @@ class ExecuteCommandTool:
             temp_file, workdir = self._prepare_script_environment(workdir, process_id, "py", session_id)
             
             # 写入代码文件
-            self._write_script_file(temp_file, code, workdir)
+            self._write_script_file(temp_file, code, workdir, session_id)
             
             # 参数类型校验与依赖处理
             python_path = sys.executable
@@ -534,15 +639,10 @@ class ExecuteCommandTool:
                                 pure_name = pure_name.split(sep)[0]
                                 break
                         pure_name = pure_name.strip()
-                        module_name = pure_name  # 简单映射
-                        try:
-                            import importlib.util
-                            spec = importlib.util.find_spec(module_name)
-                            if spec is not None:
-                                already_available.append(package)
-                                continue
-                        except Exception:
-                            pass
+                        # 始终尝试安装，由 pip 处理是否已满足
+                        # module_name = pure_name
+                        # 移除本地 importlib 检查，因为这检查的是宿主环境而非沙箱环境
+                        # 且 pip install 本身是幂等的，如果已安装会跳过
                         install_cmd = f"{python_path} -m pip install {package} -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
                         install_result = self.execute_shell_command(
                             install_cmd,
@@ -671,7 +771,7 @@ class ExecuteCommandTool:
             temp_file, workdir = self._prepare_script_environment(workdir, process_id, "js", session_id)
             
             # 写入代码文件
-            self._write_script_file(temp_file, code, workdir)
+            self._write_script_file(temp_file, code, workdir, session_id)
             
             newly_installed: List[str] = []
             install_failed: List[Dict[str, Any]] = []
@@ -685,7 +785,20 @@ class ExecuteCommandTool:
                     logger.info(f"📦 npm依赖包处理: {parsed_packages}")
                     
                     # 检查是否需要初始化package.json (如果不存在)
-                    pkg_json_path = os.path.join(workdir, "package.json")
+                    # 注意：workdir 可能是虚拟路径，需要先解析为 host_path 才能检查文件是否存在
+                    host_workdir = workdir
+                    if session_id:
+                        try:
+                            from sagents.context.session_context import get_session_context
+                            session_context = get_session_context(session_id)
+                            if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
+                                sandbox_fs = session_context.sandbox.file_system
+                                if hasattr(sandbox_fs, 'to_host_path'):
+                                    host_workdir = sandbox_fs.to_host_path(workdir)
+                        except Exception as e:
+                            logger.warning(f"解析 Host Path 失败: {e}")
+
+                    pkg_json_path = os.path.join(host_workdir, "package.json")
                     if not os.path.exists(pkg_json_path):
                          self.execute_shell_command("npm init -y", workdir=workdir, timeout=10)
                     
@@ -711,7 +824,7 @@ class ExecuteCommandTool:
                             
                             if pkg_name not in dependencies:
                                 packages_to_install.append(pkg)
-                            elif not os.path.exists(os.path.join(workdir, "node_modules", pkg_name)):
+                            elif not os.path.exists(os.path.join(host_workdir, "node_modules", pkg_name)):
                                 # 即使在 package.json 中，如果 node_modules 里没有，也需要安装
                                 packages_to_install.append(pkg)
                     except Exception as e:
