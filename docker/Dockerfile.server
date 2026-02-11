@@ -24,9 +24,21 @@ RUN apt-get update && \
     bubblewrap \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && npm config set registry https://registry.npmmirror.com/ \
-    && curl -fsSL https://bun.sh/install | bash \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# 安装 Bun
+RUN BUN_VERSION=$(npm view bun dist-tags.latest) \
+    && ARCH=$(uname -m) \
+    && if [ "$ARCH" = "x86_64" ]; then BUN_ARCH="linux-x64"; elif [ "$ARCH" = "aarch64" ]; then BUN_ARCH="linux-aarch64"; else echo "Unsupported arch: $ARCH"; exit 1; fi \
+    && echo "Downloading Bun v${BUN_VERSION} for ${BUN_ARCH}..." \
+    && (curl -fsSL "https://npmmirror.com/mirrors/bun/bun-v${BUN_VERSION}/${BUN_ARCH}.zip" -o bun.zip || \
+        curl -fsSL "https://npmmirror.com/mirrors/bun/v${BUN_VERSION}/${BUN_ARCH}.zip" -o bun.zip) \
+    && unzip bun.zip \
+    && mkdir -p /root/.bun/bin \
+    && mv ${BUN_ARCH}/bun /root/.bun/bin/bun \
+    && chmod +x /root/.bun/bin/bun \
+    && rm -rf bun.zip ${BUN_ARCH}
 
 # 设置 Bun 环境变量
 ENV BUN_INSTALL="/root/.bun"
