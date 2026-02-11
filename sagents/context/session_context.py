@@ -119,9 +119,12 @@ class SessionContext:
         t0 = time.time()
         # 初始化沙箱环境 / Initialize sandbox environment
         # 沙箱内部会自动管理 SandboxFileSystem
+        # 增加资源限制以支持 heavy 任务 (如 bun install, build)
         self.sandbox = Sandbox(
             host_workspace=_agent_workspace_host_path,
-            virtual_workspace=self.virtual_workspace
+            virtual_workspace=self.virtual_workspace,
+            cpu_time_limit=300,    # 5分钟，支持长时间安装
+            memory_limit_mb=4096   # 4GB，防止 OOM
         )
         logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         

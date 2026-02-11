@@ -15,7 +15,7 @@ services:
       - 30050:8080
     env_file:
       - .env
-    mem_limit: 2g
+    mem_limit: 4g
     cpus: 1.0
 
   sage-web:
