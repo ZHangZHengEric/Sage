@@ -58,17 +58,6 @@ export const taskAPI = {
       }
     }
     
-    // 检查内容类型，如果是HTML则抛出错误（可能是登录页或错误页）
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('text/html')) {
-        // 尝试读取一小部分内容以提供更好的错误信息
-        const text = await response.text();
-        // 简单的检测是否是登录页
-        if (text.includes('<html') || text.includes('<!DOCTYPE html')) {
-             throw new Error('下载失败: 服务器返回了HTML页面，可能是因为未登录或会话过期。');
-        }
-        throw new Error('下载失败: 服务器返回了HTML内容而不是文件。');
-    }
 
     return response.blob()
   }
