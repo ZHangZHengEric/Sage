@@ -102,6 +102,62 @@ class SandboxFileSystem:
             
         return host_path
 
+    def write_file(self, path: str, content: str, encoding: str = 'utf-8', append: bool = False) -> str:
+        """
+        Writes content to a file in the sandbox.
+        Args:
+            path: Virtual path or host path (will be resolved to host path).
+            content: Content to write.
+            encoding: File encoding.
+            append: Whether to append to the file instead of overwriting.
+        Returns:
+            The absolute host path of the written file.
+        """
+        # Resolve to host path
+        if os.path.isabs(path) and path.startswith(self.host_path):
+             host_file_path = path
+        else:
+             host_file_path = self.to_host_path(path)
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(host_file_path), exist_ok=True)
+        
+        mode = 'a' if append else 'w'
+        with open(host_file_path, mode, encoding=encoding) as f:
+            f.write(content)
+            
+        return host_file_path
+
+    def read_file(self, path: str, encoding: str = 'utf-8') -> str:
+        """
+        Reads content from a file in the sandbox.
+        """
+        # Resolve to host path
+        if os.path.isabs(path) and path.startswith(self.host_path):
+             host_file_path = path
+        else:
+             host_file_path = self.to_host_path(path)
+             
+        with open(host_file_path, 'r', encoding=encoding) as f:
+            return f.read()
+
+    def ensure_directory(self, path: str) -> str:
+        """
+        Ensures that a directory exists in the sandbox.
+        Args:
+            path: Virtual path or host path.
+        Returns:
+            The absolute host path of the directory.
+        """
+        # Resolve to host path
+        if os.path.isabs(path) and path.startswith(self.host_path):
+             host_dir_path = path
+        else:
+             host_dir_path = self.to_host_path(path)
+        
+        os.makedirs(host_dir_path, exist_ok=True)
+        return host_dir_path
+
     def map_text_to_host(self, text: str) -> str:
         """
         Replaces all occurrences of virtual path with host path in a text string.
