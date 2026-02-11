@@ -10,7 +10,7 @@ from loguru import logger
 from ...core import config
 from ...core.exceptions import SageHTTPException
 
-MINIO_CLIENT: Optional["Minio"] = None
+S3_CLIENT: Optional["Minio"] = None
 
 
 def _ensure_bucket(client, bucket: str) -> None:
@@ -38,37 +38,37 @@ def _ensure_bucket(client, bucket: str) -> None:
                 ],
             }
             client.set_bucket_policy(bucket, json.dumps(policy))
-            logger.info(f"MinIO 桶创建并设置策略成功: {bucket}")
+            logger.info(f"RustFS 桶创建并设置策略成功: {bucket}")
     except Exception as e:
-        raise SageHTTPException(status_code=500, detail=f"MinIO 桶处理失败: {e}")
+        raise SageHTTPException(status_code=500, detail=f"RustFS 桶处理失败: {e}")
 
 
-async def init_minio_client(
+async def init_s3_client(
     cfg: Optional[config.StartupConfig] = None,
 ) -> Optional["Minio"]:
     """
-    初始化 MinIO 客户端
+    初始化 RustFS 客户端
     """
-    global MINIO_CLIENT
+    global S3_CLIENT
     try:
         from minio import Minio
     except ImportError:
-        logger.warning("MinIO 库未安装，跳过初始化")
+        logger.warning("RustFS 库未安装，跳过初始化")
         return None
 
     if cfg is None:
-        raise RuntimeError("StartupConfig is required to initialize MinIO client")
+        raise RuntimeError("StartupConfig is required to initialize RustFS client")
 
-    endpoint = cfg.minio_endpoint
-    ak = cfg.minio_access_key
-    sk = cfg.minio_secret_key
-    secure = bool(cfg.minio_secure)
-    bucket = cfg.minio_bucket_name
-    public_base = cfg.minio_public_base_url
+    endpoint = cfg.s3_endpoint
+    ak = cfg.s3_access_key
+    sk = cfg.s3_secret_key
+    secure = bool(cfg.s3_secure)
+    bucket = cfg.s3_bucket_name
+    public_base = cfg.s3_public_base_url
 
     if not endpoint or not ak or not sk or not bucket:
         logger.warning(
-            f"MinIO 参数不足，跳过初始化"
+            f"RustFS 参数不足，跳过初始化"
         )
         return None
 
@@ -86,22 +86,22 @@ async def init_minio_client(
         public_base = ("https://" if secure else "http://") + ep + f"/{bucket}"
 
     _ensure_bucket(client, bucket)
-    MINIO_CLIENT = client
-    logger.info(f"MinIO 客户端初始化成功: {endpoint}, 桶: {bucket}")
+    S3_CLIENT = client
+    logger.info(f"RustFS 客户端初始化成功: {endpoint}, 桶: {bucket}")
     return client
 
 
 async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str:
     """
-    上传文件到 MinIO 并返回公共 URL
+    上传文件到 RustFS 并返回公共 URL
     """
-    client = MINIO_CLIENT
+    client = S3_CLIENT
     cfg = config.get_startup_config()
-    bucket = cfg.minio_bucket_name if cfg else None
-    public_base = cfg.minio_public_base_url if cfg else None
+    bucket = cfg.s3_bucket_name if cfg else None
+    public_base = cfg.s3_public_base_url if cfg else None
 
     if not client or not bucket or not public_base:
-        raise SageHTTPException(status_code=500, detail="MinIO 未配置或未初始化")
+        raise SageHTTPException(status_code=500, detail="RustFS 未配置或未初始化")
 
     from ...utils.file import split_file_name
 
@@ -115,10 +115,10 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     return url
 
 
-async def close_minio_client() -> None:
+async def close_s3_client() -> None:
     """
-    清理 MinIO 客户端
+    清理 RustFS 客户端
     """
-    global MINIO_CLIENT
-    MINIO_CLIENT = None
-    logger.info("MinIO 客户端已关闭")
+    global S3_CLIENT
+    S3_CLIENT = None
+    logger.info("RustFS 客户端已关闭")

@@ -132,16 +132,16 @@ graph TD
 | `SAGE_ELASTICSEARCH_USERNAME` | string | None | Elasticsearch 用户名 |
 | `SAGE_ELASTICSEARCH_PASSWORD` | string | None | Elasticsearch 密码 |
 
-### MinIO 设置
+### RustFS 设置
 
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `SAGE_MINIO_ENDPOINT` | string | None | MinIO Endpoint |
-| `SAGE_MINIO_ACCESS_KEY` | string | None | MinIO Access Key |
-| `SAGE_MINIO_SECRET_KEY` | string | None | MinIO Secret Key |
-| `SAGE_MINIO_SECURE` | boolean | false | 是否使用 https |
-| `SAGE_MINIO_BUCKET_NAME` | string | None | MinIO Bucket |
-| `SAGE_MINIO_PUBLIC_BASE_URL` | string | None | MinIO 公网访问地址 |
+| `SAGE_S3_ENDPOINT` | string | None | RustFS Endpoint |
+| `SAGE_S3_ACCESS_KEY` | string | None | RustFS Access Key |
+| `SAGE_S3_SECRET_KEY` | string | None | RustFS Secret Key |
+| `SAGE_S3_SECURE` | boolean | false | 是否使用 https |
+| `SAGE_S3_BUCKET_NAME` | string | None | RustFS Bucket |
+| `SAGE_S3_PUBLIC_BASE_URL` | string | None | RustFS 公网访问地址 |
 
 ### Trace 设置
 
@@ -195,9 +195,9 @@ SAGE_DB_PATH=./data/
 
 # 存储设置
 SAGE_EMBEDDING_MODEL=text-embedding-3-large
-SAGE_MINIO_ENDPOINT=http://127.0.0.1:9000
-SAGE_MINIO_ACCESS_KEY=minioadmin
-SAGE_MINIO_SECRET_KEY=minioadmin
+SAGE_S3_ENDPOINT=http://127.0.0.1:9000
+SAGE_S3_ACCESS_KEY=minioadmin
+SAGE_S3_SECRET_KEY=minioadmin
 ```
 
 ## 📁 配置文件
