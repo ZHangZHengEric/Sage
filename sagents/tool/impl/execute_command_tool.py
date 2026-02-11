@@ -459,18 +459,51 @@ class ExecuteCommandTool:
             except Exception as e:
                 logger.warning(f"⚠️ 自动修复权限时发生错误 (非致命): {e}")
 
+            # 自动依赖安装检测 (针对 Node.js/Bun 项目)
+            # 如果目录中有 package.json 且 node_modules 不存在，自动执行 bun install
+            if actual_workdir:
+                pkg_json = os.path.join(actual_workdir, "package.json")
+                node_modules = os.path.join(actual_workdir, "node_modules")
+                if os.path.exists(pkg_json) and not os.path.exists(node_modules):
+                    logger.info(f"检测到 package.json 但缺失 node_modules，尝试自动安装依赖... [{actual_workdir}]")
+                    try:
+                        # 优先使用 bun install (速度快)，如果失败可以回退到 npm (这里暂只用 bun)
+                        # 使用 npmmirror 确保国内速度
+                        install_cmd = "bun install --registry=https://registry.npmmirror.com/"
+                        
+                        # 确保 bun 在 PATH 中 (虽然上面已经加了，但为了保险)
+                        install_env = env.copy()
+                        
+                        subprocess.run(
+                            install_cmd, 
+                            cwd=actual_workdir, 
+                            shell=True, 
+                            env=install_env, 
+                            check=True, 
+                            stdout=subprocess.PIPE, 
+                            stderr=subprocess.PIPE,
+                            timeout=120 # 安装依赖可能耗时
+                        )
+                        logger.info("自动依赖安装成功")
+                    except Exception as e:
+                        logger.warning(f"自动依赖安装失败: {e}")
+                        # 即使失败也继续执行原命令，也许用户有全局依赖或者是其他情况
+
             # 执行命令
             exec_start_time = time.time()
             logger.info(f"🚀 开始执行命令 [{process_id}]: {command}")
             
+            # 使用 shell=True 允许复杂的命令 (如 pipes, redirects)
+            # 注意：这在 windows 上和 unix 上行为不同
             process = subprocess.Popen(
                 actual_command,
+                cwd=actual_workdir,
                 shell=True,
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                cwd=actual_workdir,
-                env=env
+                text=True, # 自动解码
+                preexec_fn=os.setsid if platform.system() != "Windows" else None
             )
             
             # 添加到进程管理器
