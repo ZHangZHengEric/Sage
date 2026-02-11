@@ -3,3 +3,5 @@
 [2026-02-11] 7. 增强 `execute_command_tool` 沙箱集成：为 `SandboxFileSystem` 添加 `write_file` (支持追加)、`read_file` 和 `ensure_directory` 方法；全面重构 `_prepare_script_environment`、`_write_script_file` 和 `_log_shell_history` 以优先使用沙箱文件系统进行路径解析和IO操作，确保文件操作的隔离性和安全性；修复 `execute_javascript_code` 缺失 `session_id` 传递的 Bug。
 [2026-02-11] 8. 彻底移除 `execute_command_tool` 中的宿主路径硬编码：更新 `_prepare_script_environment` 使其返回沙箱虚拟路径（如 `/workspace/scripts`）；在 `execute_shell_command` 中动态解析虚拟路径到宿主路径；修复 `execute_javascript_code` 中 `package.json` 检查逻辑，使其能够正确处理虚拟工作目录。
 [2026-02-11] 9. Docker 构建加速优化与分层：将 `Dockerfile.server` 中 `bun` 的安装方式优化为从 `npmmirror` 下载 Release 包，并将其拆分为独立的 `RUN` 指令，以利用 Docker 缓存机制并提升构建速度；修复下载 URL 中缺少 `bun-` 前缀导致的 404 错误以及解压目录名称不匹配 (`mv` 失败) 的问题。
+[2026-02-11] 10. `execute_shell_command` 功能增强：新增 Node.js/Bun 项目依赖自动安装功能。当检测到工作目录下存在 `package.json` 但缺失 `node_modules` 时，自动执行 `bun install`（配置 npmmirror 镜像源），解决 Skill 脚本因缺少依赖无法执行的问题。
+[2026-02-11] 11. 沙箱资源限制优化：调整 `SessionContext` 中沙箱初始化的资源限制，将默认 CPU 时间限制从 10秒 提升至 300秒，内存限制从 1GB 提升至 4GB，以支持 `bun install` 等高资源消耗任务。
