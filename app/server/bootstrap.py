@@ -15,18 +15,18 @@ from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
 from .core.client.embed import close_embed_client, init_embed_client
 from .core.client.es import close_es_client, init_es_client
-from .core.client.minio import close_minio_client, init_minio_client
+from .core.client.s3 import close_s3_client, init_s3_client
 from .core.config import StartupConfig
 from .scheduler import add_doc_build_jobs, get_scheduler
 
 
 async def initialize_clients(cfg: StartupConfig):
     try:
-        minio_client = await init_minio_client(cfg)
-        if minio_client is not None:
-            logger.info("MinIO 客户端已初始化")
+        s3_client = await init_s3_client(cfg)
+        if s3_client is not None:
+            logger.info("RustFS 客户端已初始化")
     except Exception as e:
-        logger.error(f"MinIO 初始化失败: {e}")
+        logger.error(f"RustFS 初始化失败: {e}")
 
     try:
         chat_client = await init_chat_client(
@@ -280,9 +280,9 @@ async def shutdown_clients():
     """关闭所有第三方客户端"""
     # 关闭第三方客户端
     try:
-        await close_minio_client()
+        await close_s3_client()
     finally:
-        logger.info("MinIO客户端 已关闭")
+        logger.info("RustFS客户端 已关闭")
     try:
         await close_chat_client()
     finally:

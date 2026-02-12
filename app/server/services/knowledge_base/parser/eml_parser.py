@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from loguru import logger
 
 from .... import models
-from ....core.client.minio import upload_kdb_file
+from ....core.client.s3 import upload_kdb_file
 from ....utils.id import gen_id
 from .base import BaseParser
 

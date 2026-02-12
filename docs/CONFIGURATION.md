@@ -132,16 +132,16 @@ graph TD
 | `SAGE_ELASTICSEARCH_USERNAME` | string | None | Elasticsearch username |
 | `SAGE_ELASTICSEARCH_PASSWORD` | string | None | Elasticsearch password |
 
-### MinIO Settings
+### RustFS Settings
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SAGE_MINIO_ENDPOINT` | string | None | MinIO endpoint |
-| `SAGE_MINIO_ACCESS_KEY` | string | None | MinIO access key |
-| `SAGE_MINIO_SECRET_KEY` | string | None | MinIO secret key |
-| `SAGE_MINIO_SECURE` | boolean | false | Use https |
-| `SAGE_MINIO_BUCKET_NAME` | string | None | MinIO bucket |
-| `SAGE_MINIO_PUBLIC_BASE_URL` | string | None | MinIO public base URL |
+| `SAGE_S3_ENDPOINT` | string | None | RustFS endpoint |
+| `SAGE_S3_ACCESS_KEY` | string | None | RustFS access key |
+| `SAGE_S3_SECRET_KEY` | string | None | RustFS secret key |
+| `SAGE_S3_SECURE` | boolean | false | Use https |
+| `SAGE_S3_BUCKET_NAME` | string | None | RustFS bucket |
+| `SAGE_S3_PUBLIC_BASE_URL` | string | None | RustFS public base URL |
 
 ### Trace Settings
 
@@ -195,9 +195,9 @@ SAGE_DB_PATH=./data/
 
 # Storage Settings
 SAGE_EMBEDDING_MODEL=text-embedding-3-large
-SAGE_MINIO_ENDPOINT=http://127.0.0.1:9000
-SAGE_MINIO_ACCESS_KEY=minioadmin
-SAGE_MINIO_SECRET_KEY=minioadmin
+SAGE_S3_ENDPOINT=http://127.0.0.1:9000
+SAGE_S3_ACCESS_KEY=minioadmin
+SAGE_S3_SECRET_KEY=minioadmin
 ```
 
 ## 📁 Configuration Files

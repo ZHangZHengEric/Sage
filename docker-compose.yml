@@ -81,23 +81,35 @@ services:
       - ${ROOT_DATA_DIR}/es/data/node:/usr/share/elasticsearch/data
     mem_limit: 2g
     cpus: 1.0
-  sage-minio:
-    image: m.daocloud.io/quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
+  sage-rustfs:
+    image: docker.m.daocloud.io/rustfs/rustfs:latest
     ports:
       - 30054:9000
       - 30055:9001
     volumes:
-      - ${ROOT_DATA_DIR}/minio/data:/data
-    command: server /data --console-address ":9001"
-    container_name: sage-minio
+      - ${ROOT_DATA_DIR}/rustfs/data:/data
+    container_name: sage-rustfs
+    restart: always
     environment:
-      - MINIO_ROOT_USER=${SAGE_MINIO_ACCESS_KEY}
-      - MINIO_ROOT_PASSWORD=${SAGE_MINIO_SECRET_KEY}
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_ACCESS_KEY=${SAGE_S3_ACCESS_KEY}
+      - RUSTFS_SECRET_KEY=${SAGE_S3_SECRET_KEY}
+      - RUSTFS_OBS_LOGGER_LEVEL=info
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      test:
+        [
+          "CMD",
+          "sh", "-c",
+          "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health"
+        ]
       interval: 30s
-      timeout: 20s
+      timeout: 10s
       retries: 3
+      start_period: 40s
     mem_limit: 1g
     cpus: 0.5
   sage-jaeger:
