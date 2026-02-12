@@ -23,7 +23,7 @@
 ## ✨ **Key Features**
 
 - 🧠 **Multi-Agent Orchestration**: Support for both **TaskExecutor** (Sequential) and **FibreAgent** (Parallel) orchestration modes.
-- 🏗️ **Enterprise Architecture**: Robust storage layer powered by **Elasticsearch** (Vector), **MinIO** (Object), and **SQLAlchemy** (Relational).
+- 🏗️ **Enterprise Architecture**: Robust storage layer powered by **Elasticsearch** (Vector), **RustFS** (Object), and **SQLAlchemy** (Relational).
 - � **RAG Engine 2.0**: Advanced Retrieval-Augmented Generation with **RRF** (Reciprocal Rank Fusion) and hybrid search.
 - 🛡️ **Secure Sandbox**: Isolated execution environment (`sagents.utils.sandbox`) for safe agent code execution.
 - 👁️ **Full Observability**: Integrated **OpenTelemetry** tracing to visualize agent thought processes and execution paths.
@@ -89,7 +89,7 @@ graph TD
 
     subgraph Infra[Enterprise Infrastructure]
         RAG <--> ES[(Elasticsearch)]
-        Tools <--> MinIO[(MinIO)]
+        Tools <--> RustFS[(RustFS)]
         Orch <--> DB[(SQL Database)]
     end
     
@@ -98,7 +98,7 @@ graph TD
 
 ## 📅 **What's New in v0.9.8**
 
-- **Enterprise Storage**: Introduced Elasticsearch, MinIO, and SQL for robust data persistence.
+- **Enterprise Storage**: Introduced Elasticsearch, RustFS, and SQL for robust data persistence.
 - **Fibre Agent**: New parallel multi-agent orchestration architecture.
 - **RAG Engine**: Completely refactored retrieval engine with RRF support.
 - **Security**: Added code execution sandbox.

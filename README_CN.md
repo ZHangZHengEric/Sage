@@ -23,7 +23,7 @@
 ## ✨ **核心亮点**
 
 - 🧠 **多智能体编排**：支持 **TaskExecutor** (串行) 和 **FibreAgent** (并行) 两种编排模式。
-- 🏗️ **企业级架构**：基于 **Elasticsearch** (向量), **MinIO** (对象), 和 **SQLAlchemy** (关系型) 的强大存储层。
+- 🏗️ **企业级架构**：基于 **Elasticsearch** (向量), **RustFS** (对象), 和 **SQLAlchemy** (关系型) 的强大存储层。
 - 📚 **RAG 引擎 2.0**：支持 **RRF** (Reciprocal Rank Fusion) 和混合检索的全新检索增强生成引擎。
 - 🛡️ **安全沙箱**：提供隔离执行环境 (`sagents.utils.sandbox`) 确保智能体代码执行安全。
 - 👁️ **全链路可观测性**：集成 **OpenTelemetry** 追踪，可视化智能体思考与执行路径。
@@ -87,7 +87,7 @@ graph TD
 
     subgraph Infra[企业级基础设施]
         RAG <--> ES[(Elasticsearch)]
-        Tools <--> MinIO[(MinIO)]
+        Tools <--> RustFS[(RustFS)]
         Orch <--> DB[(SQL Database)]
     end
     
@@ -96,7 +96,7 @@ graph TD
 
 ## 📅 **v0.9.8 更新内容**
 
-- **企业级存储**：引入 Elasticsearch, MinIO, 和 SQL 实现稳健的数据持久化。
+- **企业级存储**：引入 Elasticsearch, RustFS, 和 SQL 实现稳健的数据持久化。
 - **Fibre Agent**：全新的并行多智能体编排架构。
 - **RAG 引擎**：完全重构的检索引擎，支持 RRF。
 - **安全性**：新增代码执行沙箱。
