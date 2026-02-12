@@ -6,6 +6,7 @@ import shutil
 
 from sagents.utils.logger import logger
 from sagents.skill.skill_schema import SkillSchema
+from sagents.utils.sandbox.filesystem import SANDBOX_WORKSPACE_ROOT
 
 _GLOBAL_SKILL_MANAGER: Optional["SkillManager"] = None
 
@@ -157,10 +158,7 @@ class SkillManager:
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
 
-    def _generate_file_tree(self, path: str, root_path: Optional[str] = None, prefix: str = "") -> str:
-        if root_path is None:
-            root_path = path
-
+    def _generate_file_list(self, path: str, root_path: str, skill_name: str) -> str:
         lines = []
         try:
             items = sorted(os.listdir(path))
@@ -168,18 +166,27 @@ class SkillManager:
             return ""
 
         # Filter items
-        items = [i for i in items if not i.startswith('.') and i != 'SKILL.md']
+        items = [i for i in items if not i.startswith('.')]
 
         for item in items:
             full_path = os.path.join(path, item)
+            rel_path = os.path.relpath(full_path, root_path)
+            rel_path = rel_path.replace(os.sep, '/')
+            
+            # Construct workspace path
+            # Use os.path.join for construction, then normalize to posix path
+            # But SANDBOX_WORKSPACE_ROOT is usually unix-style. 
+            # We assume SANDBOX_WORKSPACE_ROOT is like "/workspace"
+            
+            display_path = f"{SANDBOX_WORKSPACE_ROOT}/skills/{skill_name}/{rel_path}".replace('//', '/')
 
             if os.path.isdir(full_path):
-                lines.append(f"{prefix}- {item}/")
-                lines.append(self._generate_file_tree(full_path, root_path, prefix + "  "))
+                lines.append(f"{display_path}/")
+                lines.append(self._generate_file_list(full_path, root_path, skill_name))
             else:
-                lines.append(f"{prefix}- {item}")
+                lines.append(display_path)
 
-        return "\n".join(lines)
+        return "\n".join(filter(None, lines))
 
     def _validate_skill_metadata(self, metadata: Dict[str, Any], skill_path: str) -> bool:
         name = metadata.get("name")
@@ -216,7 +223,7 @@ class SkillManager:
                 description = metadata.get("description", "")
 
                 if name:
-                    file_list = self._generate_file_tree(skill_path)
+                    file_list = self._generate_file_list(skill_path, skill_path, name)
                     schema = SkillSchema(
                         name=name,
                         description=description,
