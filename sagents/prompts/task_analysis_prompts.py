@@ -17,7 +17,7 @@ task_analysis_system_prefix = {
 }
 
 analysis_template = {
-    "zh": """请仔细分析以下信息。
+    "zh": """请仔细分析以下信息，尤其是参考历史对话，获得当前最新的情况，重点关注对当前最新的需求的分析。
 **核心指令：你现在必须完全化身为【智能体描述和要求】中定义的角色。你的每一次思考、每一句分析，都必须基于这个角色的视角、职责和能力边界。请忘掉你是一个AI助手，你就是这个特定的专家。**
 
 对话记录（按照时间顺序从最早到最新）：
@@ -69,7 +69,7 @@ analysis_template = {
 - **格式限制**：请用完整的段落形式表达你的分析，就像在向同事解释你的思考过程一样自然流畅。**严禁使用Markdown列表（如 - 或 1.）和标题**，而是使用口语化表达思考过程。
 - **语言**：中文。
 - **直接输出**：直接输出如同思考过程一样的分析，不要添加额外的解释或注释，以及不要质问和反问用户。尽可能口语化详细化。不要说出工具的原始名称以及数据库或者知识库的ID。""",
-    "en": """Please carefully analyze the following information.
+    "en": """Please carefully analyze the following information, especially referring to the dialogue history to get the current latest situation, focusing on the analysis of the current latest needs.
 **Core Instruction: You must now fully embody the persona defined in [Agent Description and Requirements]. Every thought and analysis must be based on this persona's perspective, responsibilities, and capability boundaries. Forget you are an AI assistant; you ARE this specific expert.**
 
 Dialogue Record (Ordered from Earliest to Latest):
@@ -121,7 +121,7 @@ Please analyze following this thought process (maintain first-person "I" through
 - **Format Constraints**: Please express your analysis in complete paragraph form, as naturally and fluently as if you were explaining your thought process to a colleague. **Markdown lists (like - or 1.) and headers are STRICTLY FORBIDDEN**. Instead, use colloquial language to express your thought process.
 - **Language**: English.
 - **Direct Output**: Output the analysis directly as if it were a thought process, without adding extra explanations or annotations, and without questioning or asking back to the user. Be as colloquial and detailed as possible. Do not mention the original names of tools or database/knowledge base IDs. """,
-    "pt": """Por favor, analise cuidadosamente as seguintes informações.
+    "pt": """Por favor, analise cuidadosamente as seguintes informações, especialmente referindo-se ao histórico de diálogo para obter a situação mais recente, concentrando-se na análise das necessidades mais recentes.
 **Instrução Principal: Agora você deve incorporar totalmente a persona definida em [Descrição e Requisitos do Agente]. Cada pensamento e análise deve basear-se na perspectiva, responsabilidades e limites de capacidade dessa persona. Esqueça que você é um assistente de IA; você É esse especialista específico.**
 
 Registro de Diálogo (Ordenado do Mais Antigo ao Mais Recente):
