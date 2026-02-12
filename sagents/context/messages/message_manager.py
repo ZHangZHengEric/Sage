@@ -353,7 +353,7 @@ class MessageManager:
         filtered_messages = deepcopy(accept_messages)
         return filtered_messages
 
-    def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True) -> List[MessageChunk]:
+    def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True, allowed_message_types: Optional[List[str]] = None) -> List[MessageChunk]:
         """
         提取所有有意义的上下文消息，包括用户消息和助手消息，最后一个消息对话，可选是否只提取用户消息，如果只提取用户消息，即是本次请求的上下文，否则带上本次执行已有内容
         
@@ -362,6 +362,7 @@ class MessageManager:
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
             last_turn_user_only: 是否只提取最后一个对话轮的用户消息，默认是True
+            allowed_message_types: 允许保留的消息类型列表，默认为 None (使用内置默认列表)
 
         Returns:
             提取后的消息列表
@@ -369,6 +370,17 @@ class MessageManager:
         logger.info(f"MessageManager: 提取所有上下文消息，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}")
         all_context_messages = []
         chat_list = []
+
+        # 默认允许的消息类型
+        if allowed_message_types is None:
+            allowed_message_types = [
+                MessageType.FINAL_ANSWER.value,
+                MessageType.DO_SUBTASK_RESULT.value,
+                MessageType.TOOL_CALL.value,
+                MessageType.TASK_ANALYSIS.value,
+                MessageType.TOOL_CALL_RESULT.value,
+                MessageType.SKILL_OBSERVATION.value
+            ]
 
         if self.active_start_index is not None:
             active_messages = self.messages[self.active_start_index:]
@@ -397,12 +409,7 @@ class MessageManager:
             merged_messages.append(chat[0])
             
             for msg in chat[1:]:
-                if msg.type in [MessageType.FINAL_ANSWER.value,
-                                MessageType.DO_SUBTASK_RESULT.value,
-                                MessageType.TOOL_CALL.value,
-                                MessageType.TASK_ANALYSIS.value,
-                                MessageType.TOOL_CALL_RESULT.value,
-                                MessageType.SKILL_OBSERVATION.value]:
+                if msg.type in allowed_message_types:
                     merged_messages.append(msg)
             
             all_context_messages.extend(merged_messages[::-1])
