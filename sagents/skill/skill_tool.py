@@ -3,6 +3,8 @@ from sagents.tool.tool_base import tool
 from sagents.skill.skill_manager import get_skill_manager
 from sagents.utils.logger import logger
 
+from sagents.utils.sandbox.filesystem import SANDBOX_WORKSPACE_ROOT
+
 class SkillTool:
     """
     Skill Tool
@@ -74,7 +76,9 @@ class SkillTool:
         
         result = [
             f"## Skill: {skill.name}",
-            f"Description: {skill.description}",
+            "",
+            "### Skill Folder Path:",
+            f"{SANDBOX_WORKSPACE_ROOT}/skills/{skill.name}/",
             "",
             "### File Structure:",
             skill.file_list,
