@@ -31,7 +31,15 @@ class TaskAnalysisAgent(AgentBase):
                 message_type=MessageType.NORMAL.value
             )])
         else:
-            recent_message = message_manager.extract_all_context_messages(recent_turns=5)
+            recent_message = message_manager.extract_all_context_messages(
+                recent_turns=5,
+                allowed_message_types=[
+                    MessageType.FINAL_ANSWER.value,
+                    MessageType.DO_SUBTASK_RESULT.value,
+                    MessageType.TOOL_CALL.value,
+                    MessageType.TOOL_CALL_RESULT.value
+                ]
+            )
             recent_message_str = MessageManager.convert_messages_to_str(recent_message)
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
@@ -49,9 +57,7 @@ class TaskAnalysisAgent(AgentBase):
 
         prompt = PromptManager().get_agent_prompt_auto('analysis_template', language=session_context.get_language()).format(
             conversation=recent_message_str,
-            available_tools=available_tools_str,
-            available_skills=available_skills_str,
-            agent_description = self.system_prefix
+            available_tools=available_tools_str
         )
 
         # 为整个分析流程生成统一的message_id
@@ -67,7 +73,12 @@ class TaskAnalysisAgent(AgentBase):
         )]
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
+            self.prepare_unified_system_message(
+                session_id=session_id,
+                language=session_context.get_language(),
+                system_prefix_override=current_system_prefix,
+                include_sections=['role_definition', 'system_context', 'workspace_files', 'available_skills']
+            ),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
