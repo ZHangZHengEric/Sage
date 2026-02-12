@@ -69,13 +69,13 @@ class StartupConfig:
     es_username: Optional[str] = None
     es_password: Optional[str] = None
 
-    # MinIO
-    minio_endpoint: Optional[str] = None
-    minio_access_key: Optional[str] = None
-    minio_secret_key: Optional[str] = None
-    minio_secure: bool = False
-    minio_bucket_name: Optional[str] = None
-    minio_public_base_url: Optional[str] = None
+    # S3
+    s3_endpoint: Optional[str] = None
+    s3_access_key: Optional[str] = None
+    s3_secret_key: Optional[str] = None
+    s3_secure: bool = False
+    s3_bucket_name: Optional[str] = None
+    s3_public_base_url: Optional[str] = None
 
     # Trace
     trace_jaeger_endpoint: Optional[str] = None
@@ -118,13 +118,13 @@ class ENV:
     LEGACY_LLM_API_BASE_URL = "LLM_API_BASE_URL"
     LEGACY_LLM_MODEL_NAME = "LLM_MODEL_NAME"
 
-    # MinIO
-    MINIO_ENDPOINT = "SAGE_MINIO_ENDPOINT"
-    MINIO_ACCESS_KEY = "SAGE_MINIO_ACCESS_KEY"
-    MINIO_SECRET_KEY = "SAGE_MINIO_SECRET_KEY"
-    MINIO_SECURE = "SAGE_MINIO_SECURE"
-    MINIO_BUCKET_NAME = "SAGE_MINIO_BUCKET_NAME"
-    MINIO_PUBLIC_BASE_URL = "SAGE_MINIO_PUBLIC_BASE_URL"
+    # S3
+    S3_ENDPOINT = "SAGE_S3_ENDPOINT"
+    S3_ACCESS_KEY = "SAGE_S3_ACCESS_KEY"
+    S3_SECRET_KEY = "SAGE_S3_SECRET_KEY"
+    S3_SECURE = "SAGE_S3_SECURE"
+    S3_BUCKET_NAME = "SAGE_S3_BUCKET_NAME"
+    S3_PUBLIC_BASE_URL = "SAGE_S3_PUBLIC_BASE_URL"
 
     # Knowledge Base MCP 接口
     KB_MCP_URL = "SAGE_KB_MCP_URL"
@@ -367,31 +367,31 @@ def create_argument_parser():
         help=f"Elasticsearch Password (环境变量: {ENV.ES_PASSWORD})",
     )
 
-    # MinIO 配置
+    # S3 配置
     parser.add_argument(
-        "--minio_endpoint",
-        help=f"MinIO Endpoint (环境变量: {ENV.MINIO_ENDPOINT})",
+        "--s3_endpoint",
+        help=f"S3 Endpoint (环境变量: {ENV.S3_ENDPOINT})",
     )
     parser.add_argument(
-        "--minio_access_key",
-        help=f"MinIO Access Key (环境变量: {ENV.MINIO_ACCESS_KEY})",
+        "--s3_access_key",
+        help=f"S3 Access Key (环境变量: {ENV.S3_ACCESS_KEY})",
     )
     parser.add_argument(
-        "--minio_secret_key",
-        help=f"MinIO Secret Key (环境变量: {ENV.MINIO_SECRET_KEY})",
+        "--s3_secret_key",
+        help=f"S3 Secret Key (环境变量: {ENV.S3_SECRET_KEY})",
     )
     parser.add_argument(
-        "--minio_secure",
+        "--s3_secure",
         action="store_true",
-        help=f"MinIO 使用 https (环境变量: {ENV.MINIO_SECURE})",
+        help=f"S3 使用 https (环境变量: {ENV.S3_SECURE})",
     )
     parser.add_argument(
-        "--minio_bucket_name",
-        help=f"MinIO Bucket (环境变量: {ENV.MINIO_BUCKET_NAME})",
+        "--s3_bucket_name",
+        help=f"S3 Bucket (环境变量: {ENV.S3_BUCKET_NAME})",
     )
     parser.add_argument(
-        "--minio_public_base_url",
-        help=f"MinIO Public Base URL (环境变量: {ENV.MINIO_PUBLIC_BASE_URL})",
+        "--s3_public_base_url",
+        help=f"S3 Public Base URL (环境变量: {ENV.S3_PUBLIC_BASE_URL})",
     )
 
     # Trace 配置
@@ -540,27 +540,27 @@ def build_startup_config() -> StartupConfig:
         es_password=pick_str(
             args.es_password, ENV.ES_PASSWORD, StartupConfig.es_password
         ),
-        minio_endpoint=pick_str(
-            args.minio_endpoint, ENV.MINIO_ENDPOINT, StartupConfig.minio_endpoint
+        s3_endpoint=pick_str(
+            args.s3_endpoint, ENV.S3_ENDPOINT, StartupConfig.s3_endpoint
         ),
-        minio_access_key=pick_str(
-            args.minio_access_key, ENV.MINIO_ACCESS_KEY, StartupConfig.minio_access_key
+        s3_access_key=pick_str(
+            args.s3_access_key, ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key
         ),
-        minio_secret_key=pick_str(
-            args.minio_secret_key, ENV.MINIO_SECRET_KEY, StartupConfig.minio_secret_key
+        s3_secret_key=pick_str(
+            args.s3_secret_key, ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key
         ),
-        minio_secure=pick_bool(
-            args.minio_secure, ENV.MINIO_SECURE, StartupConfig.minio_secure
+        s3_secure=pick_bool(
+            args.s3_secure, ENV.S3_SECURE, StartupConfig.s3_secure
         ),
-        minio_bucket_name=pick_str(
-            args.minio_bucket_name,
-            ENV.MINIO_BUCKET_NAME,
-            StartupConfig.minio_bucket_name,
+        s3_bucket_name=pick_str(
+            args.s3_bucket_name,
+            ENV.S3_BUCKET_NAME,
+            StartupConfig.s3_bucket_name,
         ),
-        minio_public_base_url=pick_str(
-            args.minio_public_base_url,
-            ENV.MINIO_PUBLIC_BASE_URL,
-            StartupConfig.minio_public_base_url,
+        s3_public_base_url=pick_str(
+            args.s3_public_base_url,
+            ENV.S3_PUBLIC_BASE_URL,
+            StartupConfig.s3_public_base_url,
         ),
         trace_jaeger_endpoint=pick_str(
             args.trace_jaeger_endpoint,

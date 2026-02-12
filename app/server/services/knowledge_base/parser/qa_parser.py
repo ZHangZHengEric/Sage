@@ -34,22 +34,22 @@ class QAParser(BaseParser):
         try:
             file_path = file.path
             
-            # 尝试解决 MinIO 内部访问问题
+            # 尝试解决 S3 内部访问问题
             cfg = config.get_startup_config()
-            if cfg.minio_public_base_url and file_path.startswith(cfg.minio_public_base_url) and cfg.minio_endpoint and cfg.minio_bucket_name:
+            if cfg.s3_public_base_url and file_path.startswith(cfg.s3_public_base_url) and cfg.s3_endpoint and cfg.s3_bucket_name:
                 # 提取对象名称
-                object_name = file_path[len(cfg.minio_public_base_url):].lstrip("/")
+                object_name = file_path[len(cfg.s3_public_base_url):].lstrip("/")
                 # 构建内部访问 URL
-                scheme = "https" if cfg.minio_secure else "http"
-                # 处理 minio_endpoint 可能包含 http 前缀的情况
-                endpoint = cfg.minio_endpoint
+                scheme = "https" if cfg.s3_secure else "http"
+                # 处理 s3_endpoint 可能包含 http 前缀的情况
+                endpoint = cfg.s3_endpoint
                 if endpoint.startswith("http://"):
                     endpoint = endpoint[7:]
                 elif endpoint.startswith("https://"):
                     endpoint = endpoint[8:]
                     
-                internal_url = f"{scheme}://{endpoint}/{cfg.minio_bucket_name}/{object_name}"
-                logger.info(f"[QAParser] 转换 MinIO URL: {file_path} -> {internal_url}")
+                internal_url = f"{scheme}://{endpoint}/{cfg.s3_bucket_name}/{object_name}"
+                logger.info(f"[QAParser] 转换 S3 URL: {file_path} -> {internal_url}")
                 file_path = internal_url
 
             # Check if it looks like a URL
