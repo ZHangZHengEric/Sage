@@ -2,13 +2,15 @@ import os
 import re
 from typing import List, Optional
 
+SANDBOX_WORKSPACE_ROOT = "/workspace"
+
 class SandboxFileSystem:
     """
     Represents the file system within the sandbox environment.
     It manages the mapping between the host file system and the virtual sandbox path,
     providing a safe view of the file tree for the agent.
     """
-    def __init__(self, host_path: str, virtual_path: str = "/workspace", enable_path_mapping: bool = True):
+    def __init__(self, host_path: str, virtual_path: str = SANDBOX_WORKSPACE_ROOT, enable_path_mapping: bool = True):
         self.host_path = host_path
         self.virtual_path = virtual_path
         self.enable_path_mapping = enable_path_mapping
