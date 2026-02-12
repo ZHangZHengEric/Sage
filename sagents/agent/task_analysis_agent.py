@@ -79,7 +79,7 @@ class TaskAnalysisAgent(AgentBase):
                 session_id=session_id,
                 language=session_context.get_language(),
                 system_prefix_override=current_system_prefix,
-                include_sections=['role_definition', 'system_context', 'workspace_files', 'available_skills']
+                include_sections=['role_definition', 'system_context', 'workspace_files']
             ),
             MessageChunk(
                 role=MessageRole.USER.value,
