@@ -13,7 +13,7 @@ from fastapi import UploadFile
 from loguru import logger
 
 from .. import models
-from ..core.client.minio import upload_kdb_file
+from ..core.client.s3 import upload_kdb_file
 from ..core.exceptions import SageHTTPException
 from ..services.knowledge_base import DocumentService
 from ..utils.id import gen_id

@@ -20,7 +20,7 @@ This document provides detailed instructions for deploying Sage Server using Doc
 
 ### 1. Docker Compose Deployment (Recommended)
 
-We highly recommend using **Docker Compose** for one-click deployment, which automatically manages all dependent services (MySQL, Elasticsearch, MinIO, Jaeger, etc.).
+We highly recommend using **Docker Compose** for one-click deployment, which automatically manages all dependent services (MySQL, Elasticsearch, RustFS, Jaeger, etc.).
 
 #### Start Services
 Execute in the project root directory:
@@ -220,15 +220,15 @@ Sage Server supports configuration via **Command Line Arguments** or **Environme
 | `--es_username` | `SAGE_ELASTICSEARCH_USERNAME` | Elasticsearch Username |
 | `--es_password` | `SAGE_ELASTICSEARCH_PASSWORD` | Elasticsearch Password |
 
-### 6. MinIO Object Storage Configuration
+### 6. RustFS Object Storage Configuration
 
 | Command Line Argument | Environment Variable | Description |
 | :--- | :--- | :--- |
-| `--minio_endpoint` | `SAGE_MINIO_ENDPOINT` | MinIO Service Address |
-| `--minio_access_key` | `SAGE_MINIO_ACCESS_KEY` | Access Key |
-| `--minio_secret_key` | `SAGE_MINIO_SECRET_KEY` | Secret Key |
-| `--minio_bucket_name` | `SAGE_MINIO_BUCKET_NAME` | Bucket Name |
-| `--minio_secure` | `SAGE_MINIO_SECURE` | Whether to use HTTPS (Default False) |
+| `--s3_endpoint` | `SAGE_S3_ENDPOINT` | RustFS Service Address |
+| `--s3_access_key` | `SAGE_S3_ACCESS_KEY` | Access Key |
+| `--s3_secret_key` | `SAGE_S3_SECRET_KEY` | Secret Key |
+| `--s3_bucket_name` | `SAGE_S3_BUCKET_NAME` | Bucket Name |
+| `--s3_secure` | `SAGE_S3_SECURE` | Whether to use HTTPS (Default False) |
 
 ### 7. Observability (Jaeger) Configuration
 

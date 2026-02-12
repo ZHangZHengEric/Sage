@@ -28,7 +28,7 @@ docker build -f app/server/docker/Dockerfile -t sage-server:latest .
 
 ### 2. 运行 Docker 容器
 
-推荐使用 **Docker Compose** 进行一键部署，它能自动管理所有依赖服务（MySQL, Elasticsearch, MinIO, Jaeger 等）。
+推荐使用 **Docker Compose** 进行一键部署，它能自动管理所有依赖服务（MySQL, Elasticsearch, RustFS, Jaeger 等）。
 
 #### 使用 Docker Compose 部署（推荐）
 
@@ -53,7 +53,7 @@ docker-compose up -d
 - **Web 界面**: `http://localhost:30051`
 - **API 文档**: `http://localhost:30050/docs`
 - **Jaeger UI**: `http://localhost:30056`
-- **MinIO Console**: `http://localhost:30055`
+- **RustFS Console**: `http://localhost:30055`
 
 #### 单独运行容器（仅测试用）
 
@@ -205,15 +205,15 @@ Sage Server 支持通过 **命令行参数** 或 **环境变量** 进行配置�
 | `--es_username` | `SAGE_ELASTICSEARCH_USERNAME` | Elasticsearch 用户名 |
 | `--es_password` | `SAGE_ELASTICSEARCH_PASSWORD` | Elasticsearch 密码 |
 
-### 6. MinIO 对象存储配置
+### 6. RustFS 对象存储配置
 
 | 命令行参数 | 环境变量 | 说明 |
 | :--- | :--- | :--- |
-| `--minio_endpoint` | `SAGE_MINIO_ENDPOINT` | MinIO 服务地址 |
-| `--minio_access_key` | `SAGE_MINIO_ACCESS_KEY` | Access Key |
-| `--minio_secret_key` | `SAGE_MINIO_SECRET_KEY` | Secret Key |
-| `--minio_bucket_name` | `SAGE_MINIO_BUCKET_NAME` | Bucket 名称 |
-| `--minio_secure` | `SAGE_MINIO_SECURE` | 是否使用 HTTPS (默认 False) |
+| `--s3_endpoint` | `SAGE_S3_ENDPOINT` | RustFS 服务地址 |
+| `--s3_access_key` | `SAGE_S3_ACCESS_KEY` | Access Key |
+| `--s3_secret_key` | `SAGE_S3_SECRET_KEY` | Secret Key |
+| `--s3_bucket_name` | `SAGE_S3_BUCKET_NAME` | Bucket 名称 |
+| `--s3_secure` | `SAGE_S3_SECURE` | 是否使用 HTTPS (默认 False) |
 
 ### 7. 可观测性 (Jaeger) 配置
 
