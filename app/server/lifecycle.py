@@ -21,7 +21,7 @@ from .utils.async_utils import create_safe_task
 
 
 async def initialize_system(cfg: StartupConfig):
-    logger.info("开始初始化 Sage Server...")
+    logger.info("sage-server：开始初始化")
 
     # 1. 优先初始化数据库连接 (Initialize DB connection first)
     await initialize_db_connection(cfg)
@@ -46,19 +46,19 @@ async def initialize_system(cfg: StartupConfig):
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)
 
-    logger.info("初始化 Sage Server完毕")
+    logger.info("sage-server：初始化完成")
 
 
 def post_initialize_task():
     """
     服务启动完成后执行一次的后置任务
     """
-    logger.info("开始 Sage Server 启动后的后置任务...")
+    logger.info("sage-server：启动的后置任务...")
     return create_safe_task(validate_and_disable_mcp_servers(), name="post_initialize")
 
 
 async def cleanup_system():
-    logger.info("正在清理 Sage Server 资源...")
+    logger.info("sage-server：正在清理资源...")
     await shutdown_scheduler()
     # 关闭 观测链路上报 (需在 DB 关闭前)
     await close_observability()
@@ -67,8 +67,8 @@ async def cleanup_system():
     try:
         await close_skill_manager()
     finally:
-        logger.info("技能管理器 已关闭")
+        logger.info("sage-server：技能管理器 已关闭")
     try:
         await close_tool_manager()
     finally:
-        logger.info("工具管理器 已关闭")
+        logger.info("sage-server：工具管理器 已关闭")

@@ -38,7 +38,6 @@ def _ensure_bucket(client, bucket: str) -> None:
                 ],
             }
             client.set_bucket_policy(bucket, json.dumps(policy))
-            logger.info(f"RustFS 桶创建并设置策略成功: {bucket}")
     except Exception as e:
         raise SageHTTPException(status_code=500, detail=f"RustFS 桶处理失败: {e}")
 
@@ -87,7 +86,7 @@ async def init_s3_client(
 
     _ensure_bucket(client, bucket)
     S3_CLIENT = client
-    logger.info(f"RustFS 客户端初始化成功: {endpoint}, 桶: {bucket}")
+    logger.debug(f"RustFS 客户端初始化成功: {endpoint}, 桶: {bucket}")
     return client
 
 

@@ -97,7 +97,7 @@ class ToolManager:
         if not isolated and getattr(self, '_initialized', False):
             return
 
-        logger.info(f"Initializing ToolManager (isolated={isolated})")
+        logger.debug(f"Initializing ToolManager (isolated={isolated})")
 
         self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]] = {}
         self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
@@ -249,7 +249,7 @@ class ToolManager:
                             func.__objclass__ = target
                 if self.register_tool(tool_spec):
                     count += 1
-        logger.info(f"Registered {count} tools from package_path")
+        logger.debug(f"Registered {count} tools from package_path")
 
     def register_tools_from_object(self, obj: Any) -> int:
         """
@@ -367,7 +367,7 @@ class ToolManager:
         # 工具不存在，直接注册
         self.tools[tool_spec.name] = tool_spec
         tool_type = type(tool_spec).__name__
-        logger.info(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
+        logger.debug(f"Successfully registered new tool: {tool_spec.name} ({tool_type})")
         return True
 
     async def remove_tool_by_mcp(self, server_name: str) -> bool:

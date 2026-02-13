@@ -80,7 +80,7 @@ async def init_es_client(
         # # 尝试自动修复磁盘阈值问题
         # await _configure_disk_thresholds(ES_CLIENT)
         
-        logger.info(f"ES 客户端初始化成功: {base}")
+        logger.debug(f"ES 客户端初始化成功: {base}")
         return ES_CLIENT
     except Exception as e:
         logger.error(f"ES 客户端初始化失败: {e}")

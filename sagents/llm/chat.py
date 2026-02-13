@@ -59,7 +59,7 @@ class ChatClientPool:
 
     def set_default_model(self, model_name: str):
         self.default_model_name = model_name
-        logger.info(f"Set default model to {model_name}")
+        logger.debug(f"Set default model to {model_name}")
 
     def get_client(self, model_name: Optional[str] = None) -> Optional[OpenAIChat]:
         """
