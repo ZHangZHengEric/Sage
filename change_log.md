@@ -17,3 +17,6 @@
 - Updated FibreSubAgent: Uses `ToolManager(isolated=True)` for local tool isolation.
 - Renamed `role_description` to `description` in FibreTools and removed `role` from FibreOrchestrator.
 - Removed `LocalToolManager` class in favor of `ToolManager(isolated=True)`.
+
+## 2026-02-13
+- 新增 `brave_search` MCP 服务 (`mcp_servers/search/brave_search_server.py`)，支持双模式搜索（反爬虫抓取 + API 降级）及网页内容提取 (`visit_page`)。添加了单元测试及 `markdownify`/`beautifulsoup4` 依赖。
