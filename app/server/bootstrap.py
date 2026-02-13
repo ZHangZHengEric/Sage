@@ -380,9 +380,9 @@ async def ensure_system_init(cfg: StartupConfig):
             max_model_len=max_model_len
         )
         await dao.save(provider)
-        logger.info("Initialized default LLM Provider from environment variables.")
+        logger.debug("Initialized default LLM Provider from environment variables.")
     else:
-        logger.info("Default LLM Provider already exists. need update.")
+        logger.debug("Default LLM Provider already exists. need update.")
         default_provider.base_url = base_url
         default_provider.api_keys = keys
         default_provider.model = model
@@ -393,4 +393,4 @@ async def ensure_system_init(cfg: StartupConfig):
         default_provider.max_model_len = max_model_len
             
         await dao.save(default_provider)
-        logger.info("Default LLM Provider updated.")
+        logger.debug("Default LLM Provider updated.")
