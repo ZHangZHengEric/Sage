@@ -30,6 +30,10 @@ class TaskSummaryAgent(AgentBase):
             )])
         else:
             history_messages = message_manager.extract_all_context_messages(recent_turns=3)
+            # 根据 active_budget 压缩消息
+            budget_info = message_manager.context_budget_manager.budget_info
+            if budget_info:
+                history_messages = MessageManager.compress_messages(history_messages, int(budget_info.get('max_model_len', 20000)*0.6))
             task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         task_manager_status_and_results = await task_manager.get_all_tasks_summary()
