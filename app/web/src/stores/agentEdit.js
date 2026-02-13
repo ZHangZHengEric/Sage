@@ -5,8 +5,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
   // Constants
   const STEPS = [
     { id: 1, key: 'basic', label: '基础配置' },
-    { id: 2, key: 'capabilities', label: '能力扩展' },
-    { id: 3, key: 'advanced', label: '高级参数' }
+    { id: 2, key: 'capabilities', label: '能力扩展' }
   ]
 
   // State
@@ -22,25 +21,24 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     description: '',
     systemPrefix: '',
     deepThinking: false,
-    multiAgent: false,
+    agentMode: 'simple',
     moreSuggest: false,
     memoryType: "session",
     maxLoopCount: 10,
     llmConfig: {
-      apiKey: '',
-      baseUrl: '',
-      model: '',
+      providerId: null,
       maxTokens: 4096,
       temperature: 0.2,
       topP: 0.9,
       presencePenalty: 0.0,
       maxModelLen: 54000
     },
+    systemContext: {},
     availableTools: [],
     availableSkills: [],
     availableKnowledgeBases: [],
-    systemContext: {},
-    availableWorkflows: {}
+    availableWorkflows: {},
+    availableSubAgentIds: []
   }
 
   const formData = ref(JSON.parse(JSON.stringify(defaultFormData)))
@@ -138,6 +136,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       if (!Array.isArray(formData.value.availableTools)) formData.value.availableTools = []
       if (!Array.isArray(formData.value.availableSkills)) formData.value.availableSkills = []
       if (!Array.isArray(formData.value.availableKnowledgeBases)) formData.value.availableKnowledgeBases = []
+      if (!Array.isArray(formData.value.availableSubAgentIds)) formData.value.availableSubAgentIds = []
       if (!formData.value.systemContext || typeof formData.value.systemContext !== 'object') formData.value.systemContext = {}
       if (!formData.value.availableWorkflows || typeof formData.value.availableWorkflows !== 'object') formData.value.availableWorkflows = {}
       if (!formData.value.llmConfig || typeof formData.value.llmConfig !== 'object') {

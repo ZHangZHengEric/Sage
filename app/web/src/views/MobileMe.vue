@@ -215,6 +215,7 @@ const handleChangePassword = async () => {
     handleLogout()
   } catch (error) {
     console.error(error)
+    toast.error(error.message || '修改失败')
   } finally {
     changingPassword.value = false
   }

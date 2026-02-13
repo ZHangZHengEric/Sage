@@ -243,9 +243,8 @@ const loadKnowledgeBases = async () => {
   try {
     loading.value = true
     const response = await knowledgeBaseAPI.getKnowledgeBases({ page: 1, page_size: 1000 })
-    if (response.data && response.data.list) {
-      knowledgeBases.value = response.data.list
-    }
+    const { list } = response || {}
+    knowledgeBases.value = list || []
   } catch (error) {
     console.error('Failed to load knowledge bases:', error)
   } finally {

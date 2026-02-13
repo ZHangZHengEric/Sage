@@ -1,47 +1,48 @@
-import request from '../utils/request.js'
+import { baseAPI } from './base.js'
 
 // 用户API接口
 export const userAPI = {
-  login: (usernameOrEmail, password) => {
-    return request.post('/api/user/login', {
+  login: async (usernameOrEmail, password) => {
+    return await baseAPI.post('/api/user/login', {
       username_or_email: usernameOrEmail,
       password
     })
   },
-  register: (username, password, email = '', phonenum = '') => {
-    return request.post('/api/user/register', {
+  register: async (username, password, email = '', phonenum = '') => {
+    return await baseAPI.post('/api/user/register', {
       username,
       password,
       email,
       phonenum
     })
   },
-  checkLogin: () => {
-    return request.get('/api/user/check_login')
+  checkLogin: async () => {
+    return await baseAPI.get('/api/user/check_login')
   },
-  getUserInfo: () => {
-    return request.get('/api/user/check_login')
+  getUserInfo: async () => {
+    return await baseAPI.get('/api/user/check_login')
   },
-  refreshToken: () => {
-    return request.post('/api/user/refresh-token')
+  refreshToken: async () => {
+    return await baseAPI.post('/api/user/refresh-token')
   },
-  changePassword: (oldPassword, newPassword) => {
-    return request.post('/api/user/change-password', {
+  changePassword: async (oldPassword, newPassword) => {
+    return await baseAPI.post('/api/user/change-password', {
       old_password: oldPassword,
       new_password: newPassword
     })
   },
-  updateProfile: (userData) => {
-    return request.put('/api/user/profile', userData)
+  updateProfile: async (userData) => {
+    return await baseAPI.put('/api/user/profile', userData)
   },
-  getUserList: (page, pageSize) => {
-      return request.get('/api/user/list', { params: { page, page_size: pageSize } })
+  getUserList: async (page, pageSize) => {
+    // baseAPI.get(url, params) - params directly passed as second argument
+    return await baseAPI.get('/api/user/list', { page, page_size: pageSize })
   },
-  deleteUser: (userId) => {
-      return request.post('/api/user/delete', { user_id: userId })
+  deleteUser: async (userId) => {
+    return await baseAPI.post('/api/user/delete', { user_id: userId })
   },
-  addUser: (data) => {
-      return request.post('/api/user/add', data)
+  addUser: async (data) => {
+    return await baseAPI.post('/api/user/add', data)
   }
 }
 
