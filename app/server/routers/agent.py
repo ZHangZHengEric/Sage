@@ -16,10 +16,16 @@ from ..services.agent import (
     list_agents,
     optimize_system_prompt,
     update_agent,
+    get_agent_authorized_users,
+    update_agent_authorizations,
 )
 from sagents.utils.prompt_manager import PromptManager
 
 # ============= Agent相关模型 =============
+
+
+class AuthorizationRequest(BaseModel):
+    user_ids: List[str]
 
 
 class AgentConfigDTO(BaseModel):
@@ -30,6 +36,7 @@ class AgentConfigDTO(BaseModel):
     systemContext: Optional[Dict[str, Any]] = None
     availableWorkflows: Optional[Dict[str, List[str]]] = None
     availableTools: Optional[List[str]] = None
+    availableSubAgentIds: Optional[List[str]] = None
     availableSkills: Optional[List[str]] = None
     availableKnowledgeBases: Optional[List[str]] = None
     memoryType: Optional[str] = None
@@ -76,6 +83,7 @@ def convert_config_to_agent(
         availableWorkflows=config.get("availableWorkflows")
         or config.get("available_workflows"),
         availableTools=config.get("availableTools") or config.get("available_tools"),
+        availableSubAgentIds=config.get("availableSubAgentIds") or config.get("available_sub_agent_ids"),
         availableSkills=config.get("availableSkills") or config.get("available_skills"),
         availableKnowledgeBases=config.get("availableKnowledgeBases")
         or config.get("available_knowledge_bases"),
@@ -99,6 +107,7 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "systemContext": agent.systemContext,
         "availableWorkflows": agent.availableWorkflows,
         "availableTools": agent.availableTools,
+        "availableSubAgentIds": agent.availableSubAgentIds,
         "availableSkills": agent.availableSkills,
         "availableKnowledgeBases": agent.availableKnowledgeBases,
         "memoryType": agent.memoryType,
@@ -127,7 +136,13 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含所有Agent配置的标准响应
     """
-    all_configs = await list_agents()
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
+    # Admin sees all (user_id=None), User sees own (user_id=user_id)
+    target_user_id = None if role == "admin" else user_id
+    all_configs = await list_agents(target_user_id)
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
@@ -205,7 +220,10 @@ async def get(agent_id: str, http_request: Request):
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-    agent = await get_agent(agent_id, user_id)
+    role = claims.get("role") or "user"
+    
+    target_user_id = None if role == "admin" else user_id
+    agent = await get_agent(agent_id, target_user_id)
     agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
     return await Response.succ(
         data={"agent": agent_resp.model_dump()}, message=f"获取Agent '{agent_id}' 成功"
@@ -283,3 +301,29 @@ async def optimize(request: SystemPromptOptimizeRequest):
         optimization_goal=request.optimization_goal,
     )
     return await Response.succ(data=res, message="系统提示词优化成功")
+
+
+@agent_router.get("/{agent_id}/auth")
+async def get_auth(agent_id: str, http_request: Request):
+    """
+    获取Agent的授权用户列表
+    """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
+    users = await get_agent_authorized_users(agent_id, user_id, role)
+    return await Response.succ(data=users, message="获取授权用户列表成功")
+
+
+@agent_router.post("/{agent_id}/auth")
+async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Request):
+    """
+    更新Agent的授权用户列表
+    """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+    
+    await update_agent_authorizations(agent_id, req.user_ids, user_id, role)
+    return await Response.succ(data={}, message="更新授权成功")

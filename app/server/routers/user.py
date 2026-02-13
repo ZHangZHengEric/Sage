@@ -14,9 +14,33 @@ from ..schemas.user import (
     UserAddRequest, 
     ChangePasswordRequest,
 )
-from ..services.user import login_user, register_user, get_user_list, delete_user, add_user, change_password
+from ..services.user import (
+    login_user,
+    register_user,
+    get_user_list,
+    delete_user,
+    add_user,
+    change_password,
+    get_user_options,
+)
 
 user_router = APIRouter(prefix="/api/user", tags=["User"])
+
+
+@user_router.get("/options", response_model=BaseResponse[list])
+async def user_options(request: Request):
+    """
+    Get simplified user list for selection dropdowns.
+    Authenticated users only.
+    """
+    claims = getattr(request.state, "user_claims", None)
+    if not claims:
+        return await Response.error(
+            code=401, message="未登录", error_detail="no claims"
+        )
+    
+    options = await get_user_options()
+    return await Response.succ(data=options, message="获取用户列表成功")
 
 
 @user_router.post("/register", response_model=BaseResponse[RegisterResponse])
