@@ -38,7 +38,7 @@
              <div class="space-y-3 text-sm">
                 <div class="flex justify-between">
                    <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
-                   <span class="font-medium truncate max-w-[120px]" :title="agent.llmConfig?.model">{{ agent.llmConfig?.model || t('agent.defaultModel') }}</span>
+                   <span class="font-medium truncate max-w-[120px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
                 </div>
                 <div class="flex justify-between items-center">
                    <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
@@ -146,6 +146,7 @@ import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, Us
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
+import { modelProviderAPI } from '../api/modelProvider.js'
 import { getCurrentUser } from '../utils/auth.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
@@ -154,6 +155,7 @@ import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
+import { useAgentEditStore } from '../stores/agentEdit'
 
 // UI Components
 import { Button } from '@/components/ui/button'
@@ -170,6 +172,7 @@ const error = ref(null)
 const tools = ref([])
 const skills = ref([])
 const knowledgeBases = ref([])
+const modelProviders = ref([])
 const showCreationModal = ref(false)
 const currentView = ref('list') // 'list', 'create', 'edit', 'view'
 const editingAgent = ref(null)
@@ -187,6 +190,8 @@ const authAgentId = ref('')
 const { t } = useLanguage()
 const route = useRoute()
 const currentUser = ref(getCurrentUser())
+const agentEditStore = useAgentEditStore()
+const { listModelProviders } = modelProviderAPI
 
 // 监听路由参数变化，处理刷新
 watch(() => route.query.refresh, () => {
@@ -216,6 +221,7 @@ const canDelete = (agent) => {
 // 生命周期
 onMounted(async () => {
   await loadAgents()
+  await loadModelProviders()
   await loadAvailableTools()
   await loadAvailableSkills()
   await loadKnowledgeBases()
@@ -262,6 +268,16 @@ const loadKnowledgeBases = async () => {
     console.error('Failed to load knowledge bases:', error)
   } finally {
     loading.value = false
+  }
+}
+
+const loadModelProviders = async () => {
+  try {
+    const response = await listModelProviders()
+    modelProviders.value = response || []
+  } catch (error) {
+    console.error('Failed to load model providers:', error)
+    modelProviders.value = []
   }
 }
 
@@ -354,7 +370,7 @@ const handleExport = (agent) => {
     multiAgent: agent.multiAgent,
     moreSupport: agent.moreSupport,
     maxLoopCount: agent.maxLoopCount,
-    llmConfig: agent.llmConfig,
+    llm_provider_id: agent.llm_provider_id,
     availableTools: agent.availableTools,
     availableSkills: agent.availableSkills,
     availableKnowledgeBases: agent.availableKnowledgeBases,
@@ -406,7 +422,7 @@ const handleImport = () => {
         // 创建新的Agent配置
         const newAgent = {
           name: importedConfig.name + t('agent.importSuffix'),
-          llmConfig: importedConfig.llmConfig || {},
+          llm_provider_id: importedConfig.llm_provider_id || null,
           description: importedConfig.description || '',
           systemPrefix: importedConfig.systemPrefix || '',
           deepThinking: importedConfig.deepThinking || false,
@@ -485,11 +501,13 @@ const handleViewAgent = (agent) => {
 const handleBackToList = () => {
   currentView.value = 'list'
   editingAgent.value = null
+  agentEditStore.currentStep = 1
 }
 
 const handleCloseEdit = () => {
   currentView.value = 'list'
   editingAgent.value = null
+  agentEditStore.currentStep = 1
 }
 
 const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null) => {
@@ -499,6 +517,7 @@ const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null
     if (shouldExit) {
       currentView.value = 'list'
       editingAgent.value = null
+      agentEditStore.currentStep = 1
     } else {
       // 如果是创建操作且不退出，需要更新editingAgent为新创建的agent
       if (!agentData.id) {
@@ -532,6 +551,23 @@ const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null
   } finally {
     if (doneCallback) doneCallback()
   }
+}
+
+const modelProviderMap = computed(() => {
+  const map = {}
+  modelProviders.value.forEach((provider) => {
+    if (provider && provider.id != null) {
+      map[provider.id] = provider
+    }
+  })
+  return map
+})
+
+const getModelLabel = (providerId) => {
+  if (!providerId) return t('agent.defaultModel')
+  const provider = modelProviderMap.value[providerId]
+  if (!provider) return providerId
+  return provider.name 
 }
 
 const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {
@@ -617,7 +653,7 @@ const generateUsageCodes = (agent) => {
     system_prefix: agent.systemPrefix || '',
     system_context: agent.systemContext || {},
     available_workflows: agent.availableWorkflows || {},
-    llm_model_config: agent.llmConfig || null,
+    llm_provider_id: agent.llm_provider_id || null,
     available_tools: agent.availableTools || [],
     available_skills: agent.availableSkills || []
   }

@@ -220,6 +220,7 @@ export default {
   'agent.nameLength': 'Name must be 2-50 characters',
   'agent.descriptionLength': 'Description max 200 characters',
   'agent.systemPrefixRequired': 'Please enter System Prompt',
+  'agent.selectModelProvider': 'Select Custom Model Provider',
   // Agent Creation Modal
   'agentCreation.title': 'Create New Agent',
   'agentCreation.blankConfig': 'Blank Config',
@@ -315,6 +316,16 @@ export default {
   'tools.source.builtin': 'Built-in',
   'tools.source.system': 'System',
   'tools.sourceGroups': 'Source Groups',
+  'tools.details': 'Details',
+  'tools.edit': 'Edit',
+  'tools.close': 'Close',
+  'tools.editMcpServer': 'Edit MCP Server',
+  'tools.mcpDetails': 'MCP Server Details',
+  'tools.status': 'Status',
+  'tools.addSuccess': 'MCP server added',
+  'tools.addFailed': 'Failed to add MCP server',
+  'tools.updateSuccess': 'MCP server updated',
+  'tools.updateFailed': 'Failed to update MCP server',
 
   // Skills
   'skills.title': 'Skills',

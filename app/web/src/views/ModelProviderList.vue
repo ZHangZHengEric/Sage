@@ -90,6 +90,31 @@
              <Input v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" />
              <p class="text-xs text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
           </div>
+          
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label>{{ t('agent.maxTokens') }}</Label>
+              <Input type="number" v-model.number="form.maxTokens" placeholder="4096" />
+            </div>
+            <div class="grid gap-2">
+              <Label>{{ t('agent.temperature') }}</Label>
+              <Input type="number" v-model.number="form.temperature" step="0.1" placeholder="0.7" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label>{{ t('agent.topP') }}</Label>
+              <Input type="number" v-model.number="form.topP" step="0.1" placeholder="0.9" />
+            </div>
+            <div class="grid gap-2">
+              <Label>{{ t('agent.presencePenalty') }}</Label>
+              <Input type="number" v-model.number="form.presencePenalty" step="0.1" placeholder="0.0" />
+            </div>
+          </div>
+          <div class="grid gap-2">
+              <Label>{{ t('agent.maxModelLen') }}</Label>
+              <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
@@ -140,7 +165,12 @@ const form = reactive({
   name: '',
   base_url: '',
   api_keys_str: '',
-  model: ''
+  model: '',
+  maxTokens: 4096,
+  temperature: 0.7,
+  topP: 0.9,
+  presencePenalty: 0.0,
+  maxModelLen: 32000
 })
 
 const fetchProviders = async () => {
@@ -160,6 +190,11 @@ const handleCreate = () => {
   form.base_url = ''
   form.api_keys_str = ''
   form.model = ''
+  form.maxTokens = 4096
+  form.temperature = 0.7
+  form.topP = 0.9
+  form.presencePenalty = 0.0
+  form.maxModelLen = 32000
   dialogOpen.value = true
 }
 
@@ -175,6 +210,11 @@ const handleEdit = (provider) => {
   // The backend router returns full DTO.
   form.api_keys_str = (provider.api_keys || []).join('\n')
   form.model = provider.model
+  form.maxTokens = provider.max_tokens ?? 4096
+  form.temperature = provider.temperature ?? 0.7
+  form.topP = provider.top_p ?? 0.9
+  form.presencePenalty = provider.presence_penalty ?? 0.0
+  form.maxModelLen = provider.max_model_len ?? 32000
   dialogOpen.value = true
 }
 
@@ -195,7 +235,12 @@ const submitForm = async () => {
     name: form.name,
     base_url: form.base_url,
     api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-    model: form.model
+    model: form.model,
+    max_tokens: form.maxTokens,
+    temperature: form.temperature,
+    top_p: form.topP,
+    presence_penalty: form.presencePenalty,
+    max_model_len: form.maxModelLen
   }
   
   try {
@@ -205,7 +250,7 @@ const submitForm = async () => {
       await createModelProvider(data)
     }
     
-    toast.success(t('common.saveSuccess'))
+    toast.success(t('common.success'))
     dialogOpen.value = false
     fetchProviders()
   } catch (error) {
