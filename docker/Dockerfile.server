@@ -22,6 +22,7 @@ RUN apt-get update && \
     nodejs \
     npm \
     bubblewrap \
+    tree \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && npm config set registry https://registry.npmmirror.com/ \
     && apt-get clean \
