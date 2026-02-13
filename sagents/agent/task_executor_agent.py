@@ -41,6 +41,11 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=12)
             history_messages.extend(messages_after_last_user)
 
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+             history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
+
         last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
 
         prompt = self.TASK_EXECUTION_PROMPT_TEMPLATE.format(

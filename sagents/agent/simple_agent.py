@@ -48,6 +48,12 @@ class SimpleAgent(AgentBase):
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info(f"SimpleAgent: 全部消息长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], message_manager.messages))}")
         history_messages = message_manager.extract_all_context_messages(recent_turns=20, last_turn_user_only=False)
+        
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+             history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
+        
         logger.info(f'SimpleAgent: 获取历史消息的条数:{len(history_messages)}，历史消息的content长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages))}')
         # 获取后续可能使用到的工具建议
         if tool_manager:

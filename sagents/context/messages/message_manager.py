@@ -141,7 +141,22 @@ class MessageManager:
         )
         
         # 3. 设置活跃消息起始索引
-        self.set_active_start_index(len(split_result['history_messages']))
+        # self.set_active_start_index(len(split_result['history_messages']))
+        split_index = len(split_result['history_messages'])
+        
+        # 查找最近两轮对话的起始索引 (User + AI + User + AI + User)
+        # 即倒数第3个User消息的索引
+        user_indices = [i for i, msg in enumerate(self.messages) if msg.role == MessageRole.USER.value]
+        if len(user_indices) >= 3:
+            two_rounds_index = user_indices[-3]
+        elif len(user_indices) > 0:
+            two_rounds_index = user_indices[0]
+        else:
+            two_rounds_index = 0
+            
+        # 取最小值，确保至少包含最近两轮对话
+        final_index = min(split_index, two_rounds_index)
+        self.set_active_start_index(final_index)
         
         # 4. 提取最新用户查询
         current_query = self._extract_current_query()
@@ -571,7 +586,7 @@ class MessageManager:
         return total_length
 
     @staticmethod
-    def compress_messages(messages: List[MessageChunk], budget_info: Dict[str, int]) -> List[MessageChunk]:
+    def compress_messages(messages: List[MessageChunk], budget_limit: int) -> List[MessageChunk]:
         """
         根据预算信息压缩消息列表 (Zone A/B/C 策略)
         
@@ -584,7 +599,7 @@ class MessageManager:
         
         Args:
             messages: 原始消息列表
-            budget_info: 预算信息，包含 max_new_tokens
+            budget_limit: 预算限制 (active_budget 或 max_new_tokens)
             
         Returns:
             List[MessageChunk]: 压缩后的消息列表副本
@@ -592,14 +607,16 @@ class MessageManager:
         if not messages:
             return []
             
-        max_new_tokens = budget_info.get('max_new_tokens', 8000)
+        # 使用传入的 limit 作为压缩基准
+        active_budget = budget_limit
         
-        # 预算分配
-        zone_c_budget = int(max_new_tokens * 0.2)
-        zone_b_budget = int(max_new_tokens * 0.1)
+        # 调整预算分配比例，基于 active_budget
+        zone_c_budget = int(active_budget * 0.7) # 最近消息保留 70%
+        zone_b_budget = int(active_budget * 0.2) # 中间消息保留 20%
         
         # --- 1. 识别 Zone A (Anchor) ---
-        # 规则：从 System Message 到 Last User Message 中间的所有 message 都保留
+        # 规则：System Message 和 Last User Message 永久保留
+        # 中间的消息进入候选区 (Zone B/C)
         zone_a: List[MessageChunk] = []
         remain_messages: List[MessageChunk] = []
         
@@ -610,8 +627,22 @@ class MessageManager:
                 break
         
         if last_user_idx != -1:
-            zone_a = list(messages[:last_user_idx + 1])
-            remain_messages = list(messages[last_user_idx + 1:])
+            # 1. System Message (如果存在且在开头)
+            start_idx = 0
+            if messages and messages[0].role == MessageRole.SYSTEM.value:
+                zone_a.append(messages[0])
+                start_idx = 1
+            
+            # 2. 中间消息 (System之后，Last User之前)
+            if last_user_idx > start_idx:
+                remain_messages.extend(messages[start_idx:last_user_idx])
+            
+            # 3. Last User Message (加入 Zone A)
+            zone_a.append(messages[last_user_idx])
+            
+            # 4. Last User 之后的消息 (加入 remain，作为 Zone C 的主要来源)
+            remain_messages.extend(messages[last_user_idx + 1:])
+            
         else:
             # 如果没找到 User Message，保留 System Message (如果有)
             if messages and messages[0].role == MessageRole.SYSTEM.value:
@@ -744,7 +775,7 @@ class MessageManager:
         """
         # 计算预算 (使用缓存的预算)
         budget_info = self.context_budget_manager.calculate_budget()
-        max_new_tokens = budget_info.get('max_new_tokens', 8000)
+        max_new_tokens = budget_info.get('max_new_tokens', 20000)
         max_model_len = budget_info.get('max_model_len', 40000)
 
         # 计算当前消息长度
@@ -762,7 +793,7 @@ class MessageManager:
             # 执行压缩
             compressed_messages = MessageManager.compress_messages(
                 messages, 
-                budget_info
+                max_new_tokens
             )
             
             # 记录压缩效果
