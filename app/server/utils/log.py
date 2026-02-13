@@ -24,19 +24,30 @@ class InterceptHandler(logging.Handler):
         except ValueError:
             level = record.levelno
 
+        record_name = record.name or ""
+        record_path = getattr(record, "pathname", "") or ""
+        record_filename = getattr(record, "filename", "") or ""
+        normalized_path = record_path.replace(os.sep, "/")
+
         # 降级 apscheduler 的 INFO 日志到 DEBUG
-        if record.name.startswith("apscheduler") and level == "INFO":
+        if record_name.startswith("apscheduler") and level == "INFO":
             level = "DEBUG"
 
         # 降级 httpx 的 INFO 日志到 DEBUG
-        if record.name.startswith("httpx") and level == "INFO":
+        if record_name.startswith("httpx") and level == "INFO":
             level = "DEBUG"
 
         # 降级 httptools_impl 的 INFO 日志到 DEBUG
-        if record.name.startswith("http/httptools_impl") and level == "INFO":
+        if (
+            ("http/httptools_impl" in normalized_path or "http/httptools_impl" in record_filename)
+            and level == "INFO"
+        ):
             level = "DEBUG"
         # 降级 client/streamable_http 的 INFO 日志到 DEBUG
-        if record.name.startswith("client/streamable_http") and level == "INFO":
+        if (
+            ("client/streamable_http" in normalized_path or "client/streamable_http" in record_filename)
+            and level == "INFO"
+        ):
             level = "DEBUG"
         
         # Find caller from where originated the logged message
