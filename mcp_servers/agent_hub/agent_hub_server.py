@@ -4,6 +4,7 @@ import time
 import sqlite3
 import threading
 import logging
+import httpx
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
@@ -13,6 +14,10 @@ from sagents.tool.mcp_tool_base import sage_mcp_tool
 
 # Initialize FastMCP server
 mcp = FastMCP("Agent Hub Service")
+
+# Constants
+SAGE_API_BASE_URL = os.getenv("SAGE_API_BASE_URL", "http://localhost:8080")
+logger = logging.getLogger("AgentHub")
 
 # Base storage path - relative to execution directory
 BASE_DIR = Path("./data/mcp/agent_hub")
@@ -124,6 +129,17 @@ class AgentHubDB:
             """, (now,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def claim_message(self, msg_id: int) -> bool:
+        """
+        Attempt to claim a message for processing.
+        Returns True if successfully changed status from 'pending' to 'processing'.
+        """
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE messages SET status = 'processing' WHERE id = ? AND status = 'pending'", (msg_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def update_message_status(self, msg_id: int, status: str, sent_at: Optional[str] = None):
         with self._get_conn() as conn:
             cursor = conn.cursor()
@@ -138,29 +154,145 @@ db = AgentHubDB(DB_PATH)
 
 # --- Scheduler for Message Delivery ---
 
-def _deliver_message(message: Dict[str, Any]):
+def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
     """
-    Placeholder for actual message delivery logic.
+    Deliver message to recipient (User or Agent).
+    Returns the response content if available (for blocking calls).
     """
     msg_id = message['id']
+    from_agent_id = message['from_agent_id']
     to_agent_id = message['to_agent_id']
     content = message['content']
     msg_type = message['msg_type']
     
-    logger.info(f"Delivering message {msg_id} to {to_agent_id} (Type: {msg_type}): {content[:50]}...")
+    # Try to claim the message to prevent double-processing
+    if not db.claim_message(msg_id):
+        logger.info(f"Message {msg_id} already being processed or not pending. Skipping.")
+        return None
     
-    # TODO: Implement actual delivery logic here (e.g., HTTP request, WebSocket, etc.)
-    # For now, we simulate success.
-    
-    if "user_" in to_agent_id or to_agent_id == "HUMAN":  # Simple check for user IDs
-        logger.info(f"Notification sent to User {to_agent_id}: {content}")
-        # In a real scenario, this might trigger a push notification or UI alert.
-    else:
-        logger.info(f"Message sent to agent {to_agent_id}")
+    logger.info(f"Processing message {msg_id} from {from_agent_id} to {to_agent_id} (Type: {msg_type})")
 
-    # Mark as sent
-    sent_at = datetime.now().isoformat()
-    db.update_message_status(msg_id, 'sent', sent_at)
+    # 1. Handle Human Messages (Notifications/Approvals)
+    if "user_" in to_agent_id or to_agent_id == "HUMAN":
+        # In a real scenario, this might trigger a push notification or UI alert.
+        # For now, we assume it's delivered to the system that polls for user messages.
+        logger.info(f"Notification sent to User {to_agent_id}: {content}")
+        
+        # Mark as sent immediately for user messages
+        sent_at = datetime.utcnow().isoformat()
+        db.update_message_status(msg_id, 'sent', sent_at)
+        return None
+
+    # 2. Handle Agent Messages (Task Execution)
+    try:
+        # Generate a unique session ID for this interaction or reuse if context allows
+        # For agent-to-agent communication, we create a specific session
+        session_id = f"hub_{from_agent_id}_{to_agent_id}_{msg_id}"
+        
+        payload = {
+            "agent_id": to_agent_id,
+            "messages": [{"role": "user", "content": content}],
+            "session_id": session_id,
+            "force_summary": True,
+            "user_id": from_agent_id  # The sender agent acts as the user
+        }
+
+        logger.info(f"Sending task to agent {to_agent_id} via API...")
+        
+        # We need to capture the full response to extract summary
+        full_response_text = ""
+        
+        # Use synchronous client inside the thread
+        with httpx.Client(timeout=300.0) as client: # Long timeout for agent execution
+            # Note: We use the non-streaming endpoint if available for simplicity, 
+            # or stream and concatenate. Chat endpoint is usually streaming.
+            # /api/chat is the endpoint.
+            response = client.post(f"{SAGE_API_BASE_URL}/api/chat", json=payload)
+            response.raise_for_status()
+            
+            # The API returns a stream. We need to iterate over lines if it's SSE, 
+            # or just read text if it's a simple stream.
+            # Sage API returns text/plain stream of chunks.
+            full_response_text = response.text
+
+        logger.info(f"Agent {to_agent_id} completed task. Response length: {len(full_response_text)}")
+
+        # 3. Check if the agent replied using 'send_message'
+        # We check the DB for any NEW messages from to_agent_id to from_agent_id 
+        # created AFTER we started processing this message.
+        # Ideally, we should check timestamps, but IDs are auto-increment.
+        # Let's get the max ID before we started (we can't easily do that without race conditions, 
+        # but we can check if there are any messages with created_at > now)
+        
+        # However, a simpler heuristic requested by user:
+        # "If the returned info contains ... send_message ... ignore result."
+        # "If not ... extract summary and auto-reply."
+        
+        # We can check the DB for messages from to_agent_id -> from_agent_id 
+        # that were created in the last few seconds (during execution).
+        time.sleep(1) # Give DB a moment to sync if async
+        
+        # Get recent messages from recipient back to sender
+        recent_replies = db.get_message_history(to_agent_id, from_agent_id, limit=5)
+        
+        # Filter for messages created AFTER the current task started processing
+        # This is a bit loose, but practical.
+        has_replied_via_tool = False
+        reply_content = None
+        # Use UTC to match SQLite CURRENT_TIMESTAMP
+        current_time_ts = datetime.utcnow().timestamp()
+        
+        for reply in recent_replies:
+            # Filter only messages FROM the recipient agent
+            if reply['from_agent_id'] != to_agent_id:
+                continue
+                
+            # Parse created_at
+            try:
+                # SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS"
+                created_at_str = reply['created_at'].replace(" ", "T")
+                reply_time = datetime.fromisoformat(created_at_str).timestamp()
+                # If reply was created after we started (approx), it's a response
+                # We allow a small buffer or just check if it's very recent
+                if reply_time > (current_time_ts - 300): # Within last 5 mins (execution time)
+                    # We assume this is the reply
+                    has_replied_via_tool = True
+                    reply_content = reply['content']
+                    logger.info(f"Agent {to_agent_id} replied via tool (Msg ID: {reply['id']}).")
+                    break
+            except Exception:
+                pass
+        
+        if not has_replied_via_tool:
+            # 4. Auto-reply with summary
+            logger.info(f"Agent {to_agent_id} did not reply via tool. Sending auto-reply with summary.")
+            
+            # Extract summary: We assume the full text is the summary or the last part.
+            # For now, we use the full text as the summary.
+            summary_content = f"Task Execution Result from {to_agent_id}:\n\n{full_response_text}"
+            
+            # Send the reply back to the original sender
+            db.add_message(
+                from_agent_id=to_agent_id,
+                to_agent_id=from_agent_id,
+                content=summary_content,
+                msg_type='auto_reply'
+            )
+            reply_content = summary_content
+
+        # Mark original message as sent (processed)
+        sent_at = datetime.utcnow().isoformat()
+        db.update_message_status(msg_id, 'sent', sent_at)
+        
+        return reply_content
+
+    except Exception as e:
+        logger.error(f"Failed to deliver message {msg_id} to agent {to_agent_id}: {e}")
+        # Mark as failed or reset to pending?
+        # For now, let's leave it as processing or mark failed
+        # db.update_message_status(msg_id, 'failed')
+        return None
+
 
 def scheduler_loop():
     """Background loop to check for pending messages."""
@@ -192,7 +324,9 @@ async def list_agents() -> str:
     List all known agents in the system.
     
     [Effect]
-    - Returns a JSON list of all agents that have ever sent or received messages.
+    - Fetches the latest agent list from the Sage Platform API.
+    - Updates the local Agent Hub database with any new agents.
+    - Returns a JSON list of all available agents with their metadata.
     
     [When to Use]
     - Use this tool to discover available agent IDs when you need to choose a recipient for a task or message.
@@ -201,6 +335,39 @@ async def list_agents() -> str:
     Returns:
         JSON string containing list of agents.
     """
+    try:
+        # 1. Fetch from Sage API
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{SAGE_API_BASE_URL}/api/agent/list")
+            if response.status_code == 200:
+                data = response.json()
+                # Expected format: { "code": 0, "data": [...], "message": "..." }
+                # or similar StandardResponse
+                # Check structure
+                agents_list = []
+                if isinstance(data, dict) and "data" in data:
+                    agents_list = data["data"]
+                elif isinstance(data, list):
+                    agents_list = data
+                
+                # 2. Update local DB
+                for agent in agents_list:
+                    # Map API fields to DB fields
+                    # API: id, name, description
+                    agent_id = agent.get("id")
+                    name = agent.get("name", "")
+                    description = agent.get("description", "")
+                    
+                    if agent_id:
+                        db.register_agent(agent_id, name, description)
+            else:
+                logger.warning(f"Failed to fetch agents from API: {response.status_code}")
+                
+    except Exception as e:
+        logger.error(f"Error fetching agents from API: {e}")
+        # Fallback to local DB if API fails
+    
+    # 3. Return from local DB (now updated)
     agents = db.list_agents()
     return json.dumps(agents, indent=2, ensure_ascii=False)
 
@@ -264,8 +431,29 @@ async def send_message(from_agent_id: str, to_agent_id: str, content: str, sched
             
         msg_id = db.add_message(from_agent_id, to_agent_id, content, msg_type='text', scheduled_at=scheduled_at)
         
-        status_msg = "scheduled" if scheduled_at else "queued for immediate delivery"
-        return f"Message {msg_id} {status_msg}."
+        if scheduled_at:
+            return f"Message {msg_id} scheduled for {scheduled_at}."
+        else:
+            # Immediate execution - Blocking
+            # Manually trigger delivery and wait for result
+            message_data = {
+                'id': msg_id,
+                'from_agent_id': from_agent_id,
+                'to_agent_id': to_agent_id,
+                'content': content,
+                'msg_type': 'text'
+            }
+            
+            try:
+                # _deliver_message handles status updates and claiming
+                result_content = _deliver_message(message_data)
+                
+                if result_content:
+                    return f"Message {msg_id} sent and processed.\n\n[Response from {to_agent_id}]\n{result_content}"
+                else:
+                    return f"Message {msg_id} sent. No immediate response content available."
+            except Exception as e:
+                return f"Message {msg_id} queued, but immediate delivery failed: {str(e)}"
     except ValueError:
         return "Error: Invalid scheduled_at format. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
     except Exception as e:
