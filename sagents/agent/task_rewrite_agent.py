@@ -28,6 +28,10 @@ class TaskRewriteAgent(AgentBase):
 
         message_manager = session_context.message_manager
         history_messages = message_manager.extract_all_context_messages(recent_turns=3)
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+            history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
         dialogue_history = MessageManager.convert_messages_to_dict_for_request(history_messages)
 
         last_user_message = message_manager.get_last_user_message()

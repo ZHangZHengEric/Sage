@@ -25,6 +25,10 @@ class QuerySuggestAgent(AgentBase):
         message_manager = session_context.message_manager
 
         conversation_messages = message_manager.extract_all_context_messages(recent_turns=2, last_turn_user_only=False)
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+            conversation_messages = MessageManager.compress_messages(conversation_messages, budget_info.get('active_budget', 8000))
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         suggest_template = PromptManager().get_agent_prompt_auto('suggest_template', language=session_context.get_language())
         prompt = suggest_template.format(

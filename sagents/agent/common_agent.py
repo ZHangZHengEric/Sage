@@ -1,5 +1,5 @@
 import traceback
-from typing import Any, Dict, List, Optional, Generator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 import json
 import uuid
 
@@ -20,7 +20,7 @@ class CommonAgent(AgentBase):
         self.tools_name = tools_name
         self.max_history_context_length = max_model_len
 
-    def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> Generator[List[MessageChunk], None, None]:
+    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> AsyncGenerator[List[MessageChunk], None]:
         """
         运行智能体，返回消息流
 
@@ -34,7 +34,14 @@ class CommonAgent(AgentBase):
         """
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(recent_turns=10, max_length=self.max_history_context_length, last_turn_user_only=False)
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+            all_messages = MessageManager.compress_messages(all_messages, budget_info.get('active_budget', 8000))
         # all_messages  = message_manager.messages
+        if tool_manager is None:
+            tool_manager = session_context.tool_manager
+        
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
         tools_json = [tools_json[tool_name] for tool_name in self.tools_name if tool_name in tools_json]
 
@@ -42,19 +49,20 @@ class CommonAgent(AgentBase):
             self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language())
         ]
         llm_request_message.extend(all_messages)
-        yield from self._call_llm_and_process_response(
+        async for msg in self._call_llm_and_process_response(
             messages_input=llm_request_message,
             tools_json=tools_json,
             tool_manager=tool_manager,
             session_id=session_id
-        )
+        ):
+            yield msg
 
-    def _call_llm_and_process_response(self,
+    async def _call_llm_and_process_response(self,
                                        messages_input: List[MessageChunk],
                                        tools_json: List[Dict[str, Any]],
                                        tool_manager: Optional[ToolManager],
                                        session_id: str
-                                       ) -> Generator[List[MessageChunk], None, None]:
+                                       ) -> AsyncGenerator[List[MessageChunk], None]:
 
         clean_message_input = MessageManager.convert_messages_to_dict_for_request(messages_input)
         logger.info(f"CommonAgent: 准备了 {len(clean_message_input)} 条消息用于LLM")
@@ -77,7 +85,7 @@ class CommonAgent(AgentBase):
         last_tool_call_id = None
 
         # 处理流式响应块
-        for chunk in response:
+        async for chunk in response:
             # print(chunk)
             if len(chunk.choices) == 0:
                 continue
@@ -124,12 +132,13 @@ class CommonAgent(AgentBase):
                     yield output_messages
         # 处理工具调用
         if len(tool_calls) > 0:
-            yield from self._handle_tool_calls(
+            async for msg in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
                 session_id=session_id
-            )
+            ):
+                yield msg
         else:
             # 发送换行消息（也包含usage信息）
             output_messages = [MessageChunk(
@@ -141,11 +150,11 @@ class CommonAgent(AgentBase):
             )]
             yield output_messages
 
-    def _handle_tool_calls(self,
+    async def _handle_tool_calls(self,
                            tool_calls: Dict[str, Any],
                            tool_manager: Optional[Any],
                            messages_input: List[Dict[str, Any]],
-                           session_id: str) -> Generator[List[MessageChunk], None, None]:
+                           session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具调用
 
@@ -183,7 +192,7 @@ class CommonAgent(AgentBase):
             yield output_messages
 
             # 执行工具
-            for message_chunk_list in self._execute_tool(
+            async for message_chunk_list in self._execute_tool(
                 tool_call=tool_call,
                 tool_manager=tool_manager,
                 messages_input=messages_input,
@@ -264,11 +273,11 @@ class CommonAgent(AgentBase):
             show_content=f"{tool_name}({formatted_params})"
         )]
 
-    def _execute_tool(self,
+    async def _execute_tool(self,
                       tool_call: Dict[str, Any],
                       tool_manager: Optional[Any],
                       messages_input: List[Dict[str, Any]],
-                      session_id: str) -> Generator[List[MessageChunk], None, None]:
+                      session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
         """
         执行工具
 
@@ -287,10 +296,11 @@ class CommonAgent(AgentBase):
             # 解析并执行工具调用
             arguments = json.loads(tool_call['function']['arguments'])
             if not isinstance(arguments, dict):
-                yield from self._handle_tool_error(tool_call['id'], tool_name, "工具参数格式错误")
+                async for msg in self._handle_tool_error(tool_call['id'], tool_name, "工具参数格式错误"):
+                    yield msg
                 return
             logger.info(f"CommonAgent: 执行工具 {tool_name}")
-            tool_response = tool_manager.run_tool(
+            tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=get_session_context(session_id),
                 session_id=session_id,
@@ -298,7 +308,10 @@ class CommonAgent(AgentBase):
             )
 
             # 检查是否为流式响应（AgentToolSpec）
-            if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
+            is_async_iter = hasattr(tool_response, '__aiter__')
+            is_sync_iter = hasattr(tool_response, '__iter__')
+            
+            if (is_async_iter or is_sync_iter) and not isinstance(tool_response, (str, bytes)):
                 # 检查是否为专业agent工具
                 tool_spec = tool_manager.get_tool(tool_name) if tool_manager else None
                 is_agent_tool = isinstance(tool_spec, AgentToolSpec)
@@ -306,44 +319,82 @@ class CommonAgent(AgentBase):
                 # 处理流式响应
                 logger.debug(f"CommonAgent: 收到流式工具响应，工具类型: {'专业Agent' if is_agent_tool else '普通工具'}")
                 try:
-                    for chunk in tool_response:
-                        if is_agent_tool:
-                            # 专业agent工具：直接返回原始结果，不做任何处理
-                            if isinstance(chunk, list):
-                                yield chunk
+                    if is_async_iter:
+                        async for chunk in tool_response:
+                            if is_agent_tool:
+                                # 专业agent工具：直接返回原始结果，不做任何处理
+                                if isinstance(chunk, list):
+                                    yield chunk
+                                else:
+                                    yield [chunk]
                             else:
-                                yield [chunk]
-                        else:
-                            # 普通工具：添加必要的元数据
-                            if isinstance(chunk, list):
-                                # 转化成message chunk
-                                message_chunks = []
-                                for message in chunk:
-                                    if isinstance(message, dict):
-                                        message_chunks.append(MessageChunk(
+                                # 普通工具：添加必要的元数据
+                                if isinstance(chunk, list):
+                                    # 转化成message chunk
+                                    message_chunks = []
+                                    for message in chunk:
+                                        if isinstance(message, dict):
+                                            message_chunks.append(MessageChunk(
+                                                role=MessageRole.TOOL.value,
+                                                content=message['content'],
+                                                tool_call_id=tool_call['id'],
+                                                message_id=str(uuid.uuid4()),
+                                                message_type=MessageType.TOOL_CALL_RESULT.value,
+                                                show_content=message['content']
+                                            ))
+                                    yield message_chunks
+                                else:
+                                    # 单个消息
+                                    if isinstance(chunk, dict):
+                                        message_chunk_ = MessageChunk(
                                             role=MessageRole.TOOL.value,
-                                            content=message['content'],
+                                            content=chunk['content'],
                                             tool_call_id=tool_call['id'],
                                             message_id=str(uuid.uuid4()),
                                             message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            show_content=message['content']
-                                        ))
-                                yield message_chunks
+                                            show_content=chunk['content']
+                                        )
+                                        yield [message_chunk_]
+                    else:
+                        for chunk in tool_response:
+                            if is_agent_tool:
+                                # 专业agent工具：直接返回原始结果，不做任何处理
+                                if isinstance(chunk, list):
+                                    yield chunk
+                                else:
+                                    yield [chunk]
                             else:
-                                # 单个消息
-                                if isinstance(chunk, dict):
-                                    message_chunk_ = MessageChunk(
-                                        role=MessageRole.TOOL.value,
-                                        content=chunk['content'],
-                                        tool_call_id=tool_call['id'],
-                                        message_id=str(uuid.uuid4()),
-                                        message_type=MessageType.TOOL_CALL_RESULT.value,
-                                        show_content=chunk['content']
-                                    )
-                                    yield [message_chunk_]
+                                # 普通工具：添加必要的元数据
+                                if isinstance(chunk, list):
+                                    # 转化成message chunk
+                                    message_chunks = []
+                                    for message in chunk:
+                                        if isinstance(message, dict):
+                                            message_chunks.append(MessageChunk(
+                                                role=MessageRole.TOOL.value,
+                                                content=message['content'],
+                                                tool_call_id=tool_call['id'],
+                                                message_id=str(uuid.uuid4()),
+                                                message_type=MessageType.TOOL_CALL_RESULT.value,
+                                                show_content=message['content']
+                                            ))
+                                    yield message_chunks
+                                else:
+                                    # 单个消息
+                                    if isinstance(chunk, dict):
+                                        message_chunk_ = MessageChunk(
+                                            role=MessageRole.TOOL.value,
+                                            content=chunk['content'],
+                                            tool_call_id=tool_call['id'],
+                                            message_id=str(uuid.uuid4()),
+                                            message_type=MessageType.TOOL_CALL_RESULT.value,
+                                            show_content=chunk['content']
+                                        )
+                                        yield [message_chunk_]
                 except Exception as e:
                     logger.error(f"CommonAgent: 处理流式工具响应时发生错误: {str(e)}")
-                    yield from self._handle_tool_error(tool_call['id'], tool_name, e)
+                    async for msg in self._handle_tool_error(tool_call['id'], tool_name, e):
+                        yield msg
             else:
                 # 处理非流式响应
                 logger.debug("CommonAgent: 收到非流式工具响应，正在处理")
@@ -354,9 +405,10 @@ class CommonAgent(AgentBase):
         except Exception as e:
             logger.error(f"CommonAgent: 执行工具 {tool_name} 时发生错误: {str(e)}")
             logger.error(f"CommonAgent: 执行工具 {tool_name} 时发生错误: {traceback.format_exc()}")
-            yield from self._handle_tool_error(tool_call['id'], tool_name, e)
+            async for msg in self._handle_tool_error(tool_call['id'], tool_name, e):
+                yield msg
 
-    def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> Generator[List[MessageChunk], None, None]:
+    async def _handle_tool_error(self, tool_call_id: str, tool_name: str, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
         """
         处理工具执行错误
 

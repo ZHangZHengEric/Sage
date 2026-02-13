@@ -40,6 +40,10 @@ class TaskAnalysisAgent(AgentBase):
                     MessageType.TOOL_CALL_RESULT.value
                 ]
             )
+            # 根据 active_budget 压缩消息
+            budget_info = message_manager.context_budget_manager.budget_info
+            if budget_info:
+                recent_message = MessageManager.compress_messages(recent_message, budget_info.get('active_budget', 8000))
             recent_message_str = MessageManager.convert_messages_to_str(recent_message)
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
