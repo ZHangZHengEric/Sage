@@ -50,7 +50,7 @@ class AgentBase(ABC):
         # 实际的上下文长度由 SessionContext 中的 context_budget_manager 动态管理
         # 这里只是作为兜底的安全阈值
 
-        self.max_model_input_len = 50000
+        self.max_model_input_len = 1000000
 
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}")
 
