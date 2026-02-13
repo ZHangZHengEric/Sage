@@ -20,7 +20,16 @@ from .core.config import StartupConfig
 from .scheduler import add_doc_build_jobs, get_scheduler
 
 
-async def initialize_clients(cfg: StartupConfig):
+async def initialize_db_connection(cfg: StartupConfig):
+    try:
+        db_client = await init_db_client(cfg)
+        if db_client is not None:
+            logger.info(f"数据库客户端已初始化 ({cfg.db_type})")
+    except Exception as e:
+        logger.error(f"数据库客户端初始化失败: {e}")
+
+
+async def initialize_global_clients(cfg: StartupConfig):
     try:
         s3_client = await init_s3_client(cfg)
         if s3_client is not None:
@@ -29,11 +38,18 @@ async def initialize_clients(cfg: StartupConfig):
         logger.error(f"RustFS 初始化失败: {e}")
 
     try:
+        # Load default provider settings first
+        from .models.llm_provider import LLMProviderDao
+        llm_dao = LLMProviderDao()
+        default_provider = await llm_dao.get_default()
+
+        api_key = default_provider.api_keys[0] if default_provider.api_keys else None
+        base_url = default_provider.base_url 
+        model_name = default_provider.model
         chat_client = await init_chat_client(
-            api_key=cfg.default_llm_api_key,
-            base_url=cfg.default_llm_api_base_url,
-            model_name=cfg.default_llm_model_name,
-            extra_configs=cfg.extra_llm_configs,
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
         )
         if chat_client is not None:
             logger.info("LLM Chat 客户端已初始化")
@@ -58,13 +74,6 @@ async def initialize_clients(cfg: StartupConfig):
             logger.info("Elasticsearch 客户端已初始化")
     except Exception as e:
         logger.error(f"Elasticsearch 初始化失败: {e}")
-
-    try:
-        db_client = await init_db_client(cfg)
-        if db_client is not None:
-            logger.info(f"数据库客户端已初始化 ({cfg.db_type})")
-    except Exception as e:
-        logger.error(f"数据库客户端初始化失败: {e}")
 
 
 async def initialize_tool_manager():
@@ -301,7 +310,7 @@ async def shutdown_clients():
         logger.info("数据库客户端 已关闭")
 
 
-async def ensure_system_init():
+async def ensure_system_init(cfg: StartupConfig):
     """Ensure system tables and default data exist."""
     from . import models
     from .services.user import _hash_password
@@ -337,3 +346,28 @@ async def ensure_system_init():
         )
         await user_dao.save(admin_user)
         logger.info(f"初始化默认管理员用户. 用户名: admin, 密码: {admin_password}")
+
+    dao = models.LLMProviderDao()
+    default_provider = await dao.get_default()
+    if not cfg.default_llm_api_key or not cfg.default_llm_api_base_url:
+        logger.warning("Environment variables for default LLM provider missing. Skipping default provider creation.")
+        return
+    # Split keys if comma separated
+    keys = [k.strip() for k in cfg.default_llm_api_key.split(",") if k.strip()]
+    # Models
+    model = cfg.default_llm_model_name or "gpt-4o"
+    base_url = cfg.default_llm_api_base_url or "https://api.openai.com/v1"
+
+    if not default_provider:
+        import uuid
+        provider_id = str(uuid.uuid4())
+        provider = models.LLMProvider(id=provider_id, name="Default LLM Provider", base_url=base_url, api_keys=keys, model=model, is_default=True, user_id="")
+        await dao.save(provider)
+        logger.info("Initialized default LLM Provider from environment variables.")
+    else:
+        logger.info("Default LLM Provider already exists. need update.")
+        default_provider.base_url = base_url
+        default_provider.api_keys = keys
+        default_provider.model = model
+        await dao.save(default_provider)
+        logger.info("Default LLM Provider updated.")
