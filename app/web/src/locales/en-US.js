@@ -656,4 +656,15 @@ export default {
   'skills.loadContentFailed': 'Load failed',
   'skills.updateSuccess': 'Update success',
   'skills.updateFailed': 'Update failed',
+
+  // Agent Auth
+  'agent.auth.title': 'Authorize Users',
+  'agent.auth.description': 'Select users to authorize for this Agent',
+  'agent.auth.searchPlaceholder': 'Search users...',
+  'agent.auth.selectedCount': '{count} users selected',
+  'agent.auth.loadError': 'Failed to load auth data',
+  'agent.auth.saveSuccess': 'Authorization saved',
+  'agent.auth.saveError': 'Failed to save authorization',
+  'common.you': 'You',
+  'agent.authorize': 'Authorize',
 }

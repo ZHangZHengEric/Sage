@@ -62,6 +62,9 @@
             <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
               <Edit class="h-4 w-4" />
             </Button>
+            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleAuthorize(agent)" :title="t('agent.authorize')">
+              <UserPlus class="h-4 w-4" />
+            </Button>
             <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
               <Upload class="h-4 w-4" />
             </Button>
@@ -128,19 +131,25 @@
       @close="showCreationModal = false" 
     />
 
+    <AgentAuthModal 
+      v-model:visible="showAuthModal"
+      :agentId="authAgentId"
+    />
+
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, UserPlus } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
 import { getCurrentUser } from '../utils/auth.js'
 import AgentCreationOption from '../components/AgentCreationOption.vue'
 import AgentEdit from '../components/AgentEdit.vue'
+import AgentAuthModal from '../components/AgentAuthModal.vue'
 import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
@@ -169,6 +178,10 @@ const usageAgent = ref(null)
 const usageActiveTab = ref('curl')
 const usageCodeMap = ref({ curl: '', python: '', go: '' })
 const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
+
+// Authorization Modal
+const showAuthModal = ref(false)
+const authAgentId = ref('')
 
 // Composables
 const { t } = useLanguage()
@@ -457,6 +470,11 @@ const handleBlankConfig = async (selectedTools = []) => {
 const handleEditAgent = (agent) => {
   editingAgent.value = agent
   currentView.value = 'edit'
+}
+
+const handleAuthorize = (agent) => {
+  authAgentId.value = agent.id
+  showAuthModal.value = true
 }
 
 const handleViewAgent = (agent) => {

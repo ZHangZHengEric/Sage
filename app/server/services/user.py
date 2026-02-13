@@ -1,5 +1,5 @@
 import time
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 
 import jwt
 from argon2 import PasswordHasher
@@ -169,3 +169,11 @@ async def add_user(
     await dao.save(user)
     logger.info(f"管理员添加用户成功: {username}")
     return user_id
+
+
+async def get_user_options() -> List[dict]:
+    """Get simplified user list for selection options"""
+    dao = models.UserDao()
+    # Fetch up to 1000 users for dropdown
+    users = await dao.get_list(limit=1000)
+    return [{"label": u.username, "value": u.user_id} for u in users]

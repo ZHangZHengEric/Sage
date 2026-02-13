@@ -24,6 +24,14 @@ class BaseChatRequest(BaseModel):
                     self.messages[i] = Message(**msg)
                 elif not hasattr(msg, "role") or not hasattr(msg, "content"):
                     raise ValueError(f"消息 {i} 缺少必要的 'role' 或 'content' 字段")
+class CustomSubAgentConfig(BaseModel):
+    name: str
+    system_prompt: Optional[str] = None
+    description: Optional[str] = None
+    available_tools: Optional[List[str]] = None
+    available_skills: Optional[List[str]] = None
+    available_workflows: Optional[List[str]] = None
+    system_context: Optional[Dict[str, Any]] = None
 
 class StreamRequest(BaseChatRequest):
     """流式请求，包含所有流式控制参数"""
@@ -41,6 +49,7 @@ class StreamRequest(BaseChatRequest):
     available_skills: Optional[List[str]] = None
     force_summary: Optional[bool] = False
     memory_type: Optional[str] = "session"
+    custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None
 
 
 
