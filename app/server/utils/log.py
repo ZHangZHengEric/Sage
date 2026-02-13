@@ -28,7 +28,7 @@ class InterceptHandler(logging.Handler):
         record_path = getattr(record, "pathname", "") or ""
         record_filename = getattr(record, "filename", "") or ""
         normalized_path = record_path.replace(os.sep, "/")
-
+ 
         # 降级 apscheduler 的 INFO 日志到 DEBUG
         if record_name.startswith("apscheduler") and level == "INFO":
             level = "DEBUG"
@@ -39,13 +39,13 @@ class InterceptHandler(logging.Handler):
 
         # 降级 httptools_impl 的 INFO 日志到 DEBUG
         if (
-            ("http/httptools_impl" in normalized_path or "http/httptools_impl" in record_filename)
+            ("httptools_impl" in normalized_path or "httptools_impl" in record_filename)
             and level == "INFO"
         ):
             level = "DEBUG"
         # 降级 client/streamable_http 的 INFO 日志到 DEBUG
         if (
-            ("client/streamable_http" in normalized_path or "client/streamable_http" in record_filename)
+            ("streamable_http" in normalized_path or "streamable_http" in record_filename)
             and level == "INFO"
         ):
             level = "DEBUG"
@@ -63,16 +63,10 @@ class InterceptHandler(logging.Handler):
             depth += 1
 
         payload = {"logger_name": record.name}
-        if hasattr(record, "session_id"):
+        if hasattr(record, "session_id") and record.session_id != "NO_SESSION":
             payload["session_id"] = record.session_id
-        # Also check for session_id in extra if not in record attributes (though loguru usually puts bound vars in extra)
-        # However, InterceptHandler receives a standard logging.LogRecord.
-        # Standard logging doesn't have 'session_id' unless added.
-        # But if we use logger.bind(session_id=...), loguru handles it.
-        # This emit is for standard logging interception.
-        
         if hasattr(record, "caller_filename"):
-            payload["file.name"] = record.caller_filename
+            payload["file"] = record.caller_filename
         if hasattr(record, "caller_lineno"):
             payload["line"] = record.caller_lineno
         logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(level, record.getMessage())
@@ -151,25 +145,22 @@ def init_logging(log_name="app", log_level="DEBUG"):
     logger.add(Path(LOG_PATH) / f"{log_name}_info.log", level="INFO", **params)
     logger.add(Path(LOG_PATH) / f"{log_name}_error.log", level="ERROR", **params)
 
-    # 检查是否启用访问日志
-    access_log_enabled = True
-    if access_log_enabled:
-        # 添加专门的访问日志文件
-        access_params = {
-            "rotation": "10MB",
-            "retention": 10,
-            "compression": "zip",
-            "encoding": "utf8",
-            "format": "{message}",
-        }
-        logger.add(
-            Path(LOG_PATH) / f"{log_name}_access.log",
-            level="INFO",
-            filter=lambda record: "REQUEST_START" in record["message"]
-            or "REQUEST_END" in record["message"]
-            or record["extra"].get("logger_name") == "uvicorn.access",
-            **access_params,
-        )
+    # 添加专门的访问日志文件
+    access_params = {
+        "rotation": "10MB",
+        "retention": 10,
+        "compression": "zip",
+        "encoding": "utf8",
+        "format": "{message}",
+    }
+    logger.add(
+        Path(LOG_PATH) / f"{log_name}_access.log",
+        level="INFO",
+        filter=lambda record: "REQUEST_START" in record["message"]
+        or "REQUEST_END" in record["message"]
+        or record["extra"].get("logger_name") == "uvicorn.access",
+        **access_params,
+    )
     # 拦截标准日志
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
 

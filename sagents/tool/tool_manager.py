@@ -394,7 +394,7 @@ class ToolManager:
             for tool_name in to_delete:
                 del self.tools[tool_name]
                 removed = True
-                logger.info(
+                logger.debug(
                     f"Removed MCP tool '{tool_name}' from server '{server_name}'"
                 )
             if not removed:
