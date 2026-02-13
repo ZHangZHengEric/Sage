@@ -43,6 +43,9 @@ export const userAPI = {
   },
   addUser: async (data) => {
     return await baseAPI.post('/api/user/add', data)
+  },
+  getUserOptions: async () => {
+    return await baseAPI.get('/api/user/options')
   }
 }
 

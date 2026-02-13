@@ -29,11 +29,11 @@ def generate_agent_id() -> str:
 # ================= 业务函数 =================
 
 
-async def list_agents() -> List[models.Agent]:
+async def list_agents(user_id: Optional[str] = None) -> List[models.Agent]:
     """获取所有 Agent 的配置并转换为响应结构"""
     dao = models.AgentConfigDao()
-    # Admin can see all agents; regular users only see their own
-    all_configs = await dao.get_list()
+    # Admin can see all agents; regular users only see their own OR authorized ones
+    all_configs = await dao.get_list_with_auth(user_id)
     return all_configs
 
 
@@ -71,12 +71,49 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agen
             error_detail=f"Agent '{agent_id}' 不存在",
         )
     if user_id and existing.user_id != user_id:
-        raise SageHTTPException(
-            status_code=403,
-            detail="无权访问该Agent",
-            error_detail="forbidden",
-        )
+        # Check if user is authorized
+        authorized_users = await dao.get_authorized_users(agent_id)
+        if user_id not in authorized_users:
+            raise SageHTTPException(
+                status_code=403,
+                detail="无权访问该Agent",
+                error_detail="forbidden",
+            )
     return existing
+
+
+async def get_agent_authorized_users(agent_id: str, user_id: str, role: str) -> List[str]:
+    """Get list of authorized user IDs for an agent"""
+    dao = models.AgentConfigDao()
+    agent = await dao.get_by_id(agent_id)
+    if not agent:
+        raise SageHTTPException(status_code=404, detail="Agent不存在", error_detail="not found")
+    
+    # Only Admin or Owner can view authorized users
+    if role != "admin" and agent.user_id != user_id:
+        raise SageHTTPException(status_code=403, detail="无权查看授权用户", error_detail="forbidden")
+        
+    return await dao.get_authorized_users(agent_id)
+
+
+async def update_agent_authorizations(
+    agent_id: str, authorized_user_ids: List[str], user_id: str, role: str
+) -> None:
+    """Update authorized users for an agent"""
+    dao = models.AgentConfigDao()
+    agent = await dao.get_by_id(agent_id)
+    if not agent:
+        raise SageHTTPException(status_code=404, detail="Agent不存在", error_detail="not found")
+    
+    # Only Admin or Owner can update authorizations
+    if role != "admin" and agent.user_id != user_id:
+        raise SageHTTPException(status_code=403, detail="无权修改授权", error_detail="forbidden")
+    
+    # Remove owner from list if present (redundant)
+    if agent.user_id in authorized_user_ids:
+        authorized_user_ids.remove(agent.user_id)
+        
+    await dao.update_authorizations(agent_id, authorized_user_ids)
 
 
 async def update_agent(

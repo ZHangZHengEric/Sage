@@ -10,7 +10,7 @@ from sagents.context.session_context import (
 
 from ... import models
 from ...core.exceptions import SageHTTPException
-from ...schemas.chat import StreamRequest
+from ...schemas.chat import StreamRequest, CustomSubAgentConfig
 
 
 class SessionLockContext:
@@ -144,14 +144,9 @@ async def populate_request_from_agent_config(
         if provider:
             if request.llm_model_config is None:
                 request.llm_model_config = {}
-            
-            # 只有当 request 中没有这些配置时才填充
-            if not request.llm_model_config.get("baseUrl"):
-                request.llm_model_config["baseUrl"] = provider.base_url
-            
-            if not request.llm_model_config.get("apiKey") and provider.api_keys:
-                request.llm_model_config["apiKey"] = ",".join(provider.api_keys)
-
+            request.llm_model_config["baseUrl"] = provider.base_url
+            request.llm_model_config["apiKey"] = ",".join(provider.api_keys)
+            request.llm_model_config["model"] = provider.model
     _fill_if_none("available_tools", agent.config.get("availableTools", []))
     _fill_if_none("available_skills", agent.config.get("availableSkills", []))
     _merge_dict("available_workflows", agent.config.get("availableWorkflows", {}))
@@ -211,3 +206,22 @@ async def populate_request_from_agent_config(
         for tool in need_tools:
             if tool not in current_tools:
                 current_tools.append(tool)
+    # 处理可用子Agent
+    available_sub_agent_ids = agent.config.get("availableSubAgentIds", [])
+    if available_sub_agent_ids:
+        # 从数据库获取所有子Agent配置
+        sub_agent_dao = models.AgentConfigDao()
+        sub_agents = await sub_agent_dao.get_by_ids(available_sub_agent_ids)
+        # 转成CustomSubAgentConfig
+        custom_sub_agents = [
+            CustomSubAgentConfig(
+               name=sub_agent.name,
+               description=sub_agent.config.get("description", ""),
+               available_workflows=sub_agent.config.get("availableWorkflows", []),
+               system_context=sub_agent.config.get("systemContext", {}),
+               available_tools=sub_agent.config.get("availableTools", []),
+               available_skills=sub_agent.config.get("availableSkills", []),
+            )
+            for sub_agent in sub_agents
+        ]
+        setattr(request, "custom_sub_agents", custom_sub_agents)

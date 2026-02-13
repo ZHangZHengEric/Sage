@@ -70,5 +70,24 @@ export const agentAPI = {
    */
   getDefaultSystemPrompt: async (language = 'zh') => {
     return await baseAPI.get('/api/agent/template/default_system_prompt', { params: { language } })
+  },
+
+  /**
+   * 获取Agent授权用户列表
+   * @param {string} agentId - Agent ID
+   * @returns {Promise<Array>}
+   */
+  getAgentAuth: async (agentId) => {
+    return await baseAPI.get(`/api/agent/${agentId}/auth`)
+  },
+
+  /**
+   * 更新Agent授权用户列表
+   * @param {string} agentId - Agent ID
+   * @param {Array<string>} userIds - 用户ID列表
+   * @returns {Promise<Object>}
+   */
+  updateAgentAuth: async (agentId, userIds) => {
+    return await baseAPI.post(`/api/agent/${agentId}/auth`, { user_ids: userIds })
   }
 }
