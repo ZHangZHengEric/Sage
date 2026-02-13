@@ -658,4 +658,15 @@ export default {
   'skills.loadContentFailed': '加载技能内容失败',
   'skills.updateSuccess': '技能更新成功',
   'skills.updateFailed': '技能更新失败',
+
+  // Agent授权
+  'agent.auth.title': '授权用户',
+  'agent.auth.description': '选择要授权使用该Agent的用户',
+  'agent.auth.searchPlaceholder': '搜索用户...',
+  'agent.auth.selectedCount': '已选择 {count} 个用户',
+  'agent.auth.loadError': '加载授权数据失败',
+  'agent.auth.saveSuccess': '授权保存成功',
+  'agent.auth.saveError': '授权保存失败',
+  'common.you': '你自己',
+  'agent.authorize': '授权',
 }

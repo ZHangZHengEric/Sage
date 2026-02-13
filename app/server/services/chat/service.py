@@ -135,6 +135,7 @@ class SageStreamService:
         available_workflows=None,
         force_summary=False,
         context_budget_config=None,
+        custom_sub_agents=None,
     ):
         if max_loop_count is None:
             max_loop_count = 10
@@ -156,6 +157,7 @@ class SageStreamService:
                 available_workflows=available_workflows,
                 force_summary=force_summary,
                 context_budget_config=context_budget_config,
+                custom_sub_agents=custom_sub_agents,
             )
 
             async for chunk in stream_result:
@@ -234,8 +236,7 @@ async def _generate_stream_lines(
         'active_ratio': server_config.context_active_ratio,
         'max_new_message_ratio': server_config.context_max_new_message_ratio,
         'recent_turns': server_config.context_recent_turns
-    }
-
+    } 
     async for result in stream_service.process_stream(
         messages=messages,
         session_id=session_id,
@@ -249,6 +250,7 @@ async def _generate_stream_lines(
         available_workflows=getattr(request, "available_workflows", None),
         force_summary=getattr(request, "force_summary", False),
         context_budget_config=context_budget_config,
+        custom_sub_agents=[agent.model_dump() for agent in request.custom_sub_agents] if request.custom_sub_agents else None
     ):
         stream_counter += 1
         current_time = time.time()

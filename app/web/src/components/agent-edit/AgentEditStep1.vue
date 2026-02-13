@@ -71,24 +71,51 @@
           <FormItem v-if="store.formData.agentMode === 'fibre'" label="子智能体">
               <DropdownMenu>
                 <DropdownMenuTrigger as-child>
-                  <Button variant="outline" class="w-full justify-between px-3 text-left font-normal">
-                    <span class="truncate block">{{ selectedSubAgentsLabel }}</span>
-                    <ChevronDown class="ml-2 h-4 w-4 opacity-50 shrink-0" />
-                  </Button>
+                  <button
+                    type="button"
+                    class="flex min-h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  >
+                    <div class="flex flex-1 flex-wrap gap-1 overflow-hidden">
+                      <span v-if="selectedSubAgents.length === 0" class="text-muted-foreground">选择子智能体</span>
+                      <span
+                        v-for="agent in selectedSubAgents"
+                        :key="agent.id"
+                        class="inline-flex items-center rounded-sm bg-muted px-2 py-0.5 text-xs text-foreground"
+                      >
+                        {{ agent.name }}
+                      </span>
+                    </div>
+                    <ChevronDown class="h-4 w-4 opacity-50 shrink-0" />
+                  </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent class="w-[--radix-dropdown-menu-trigger-width] min-w-[200px]">
-                  <div class="max-h-[300px] overflow-y-auto">
-                    <DropdownMenuCheckboxItem
-                      v-for="agent in filteredAgents"
-                      :key="agent.id"
-                      :checked="isSubAgentSelected(agent.id)"
-                      @select.prevent
-                      @update:checked="(checked) => toggleSubAgent(agent.id, checked)"
-                    >
-                      {{ agent.name }}
-                    </DropdownMenuCheckboxItem>
-                  </div>
-                </DropdownMenuContent>
+                <DropdownMenuPortal>
+                  <DropdownMenuContent
+                    side="bottom"
+                    align="start"
+                    :side-offset="4"
+                    class="z-50 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 w-[--reka-dropdown-menu-trigger-width] min-w-[--reka-dropdown-menu-trigger-width]"
+                  >
+                    <div class="max-h-[300px] overflow-y-auto p-1">
+                      <DropdownMenuCheckboxItem
+                        v-for="agent in filteredAgents"
+                        :key="agent.id"
+                        :model-value="isSubAgentSelected(agent.id)"
+                        class="relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                        @update:model-value="(checked) => toggleSubAgent(agent.id, checked)"
+                      >
+                        <span class="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+                          <DropdownMenuItemIndicator>
+                            <Check class="h-4 w-4" />
+                          </DropdownMenuItemIndicator>
+                        </span>
+                        {{ agent.name }}
+                      </DropdownMenuCheckboxItem>
+                      <div v-if="filteredAgents.length === 0" class="px-2 py-2 text-sm text-muted-foreground">
+                        暂无可选子智能体
+                      </div>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenuPortal>
               </DropdownMenu>
           </FormItem>
 
@@ -297,7 +324,7 @@ import { useLanguage } from '../../utils/i18n.js'
 import { agentAPI } from '../../api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider'
 const { listModelProviders } = modelProviderAPI
-import { Loader, Trash2, Plus, ChevronDown, ChevronUp, ChevronRight, Workflow, Database, GripVertical, Sparkles, Bot, Cpu } from 'lucide-vue-next'
+import { Loader, Trash2, Plus, ChevronDown, ChevronUp, ChevronRight, Workflow, Database, GripVertical, Sparkles, Bot, Cpu, Check } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
 // UI Components
@@ -312,14 +339,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import {
-  DropdownMenu,
+  DropdownMenuRoot as DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
+  DropdownMenuPortal,
   DropdownMenuTrigger,
-  DropdownMenuCheckboxItem
-} from '@/components/ui/dropdown-menu'
+  DropdownMenuCheckboxItem,
+  DropdownMenuItemIndicator
+} from 'reka-ui'
 
 const store = useAgentEditStore()
 const { t } = useLanguage()
@@ -477,16 +503,12 @@ const filteredAgents = computed(() => {
   return allAgents.value.filter(a => a.id !== store.formData.id)
 })
 
-const selectedSubAgentsLabel = computed(() => {
+const selectedSubAgents = computed(() => {
   const ids = store.formData.availableSubAgentIds || []
-  if (ids.length === 0) return '选择子智能体'
-  
-  const names = ids.map(id => {
-    const agent = allAgents.value.find(a => a.id === id)
-    return agent ? agent.name : ''
-  }).filter(Boolean)
-  
-  return names.join(', ')
+  if (ids.length === 0) return []
+  return ids
+    .map(id => allAgents.value.find(agent => agent.id === id))
+    .filter(Boolean)
 })
 
 const isSubAgentSelected = (id) => {

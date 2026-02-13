@@ -1,4 +1,4 @@
-from .agent import Agent, AgentConfigDao
+from .agent import Agent, AgentConfigDao, AgentAuthorization
 from .base import Base, BaseDao
 from .conversation import Conversation, ConversationDao
 from .file import File, FileDao
@@ -14,6 +14,7 @@ from .llm_provider import LLMProvider, LLMProviderDao
 __all__ = [
     "Agent",
     "AgentConfigDao",
+    "AgentAuthorization",
     "Conversation",
     "ConversationDao",
     "User",
