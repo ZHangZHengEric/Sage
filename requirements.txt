@@ -9,6 +9,8 @@ aiofiles>=0.8.0
 tqdm>=4.66.0
 chardet>=5.0.0
 html2text>=2020.1.16
+markdownify>=0.11.6
+beautifulsoup4>=4.12.0
 
 ##############################
 # 数据处理 / 文档解析
