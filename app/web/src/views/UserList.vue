@@ -167,9 +167,7 @@ const fetchUsers = async () => {
     try {
         loading.value = true
         const res = await userAPI.getUserList(page.value, pageSize.value)
-        if (res.success) {
-            userList.value = res.data.items || []
-        }
+        userList.value = res.items || []
     } finally {
         loading.value = false
     }
@@ -188,26 +186,33 @@ const nextPage = () => {
 }
 
 const handleAddUser = async () => {
-    const res = await userAPI.addUser(newUser.value)
-    if (res.success) {
+    try {
+        await userAPI.addUser(newUser.value)
         toast.success(t('user.addSuccess'))
         showAddUserDialog.value = false
+        // 重置表单
+        newUser.value = {
+            username: '',
+            password: '',
+            email: '',
+            phonenum: ''
+        }
         fetchUsers()
-        newUser.value = { username: '', password: '', role: 'user' }
-    } else {
-        toast.error(res.message || t('user.addError'))
+    } catch (e) {
+        toast.error(e.message || t('user.addError'))
     }
 }
 
-const confirmDelete = async (user) => {
-    if (confirm(t('user.deleteConfirm').replace('{name}', user.username))) {
-        const res = await userAPI.deleteUser(user.id)
-        if (res.success) {
-            toast.success(t('user.deleteSuccess'))
-            fetchUsers()
-        } else {
-             toast.error(res.message || t('user.deleteError'))
-        }
+const confirmDelete = async () => {
+    if (!userToDelete.value) return
+    
+    try {
+        await userAPI.deleteUser(userToDelete.value.id)
+        toast.success(t('user.deleteSuccess'))
+        showDeleteDialog.value = false
+        fetchUsers()
+    } catch (e) {
+        toast.error(e.message || t('user.deleteError'))
     }
 }
 

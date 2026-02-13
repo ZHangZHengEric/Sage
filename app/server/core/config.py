@@ -37,7 +37,6 @@ class StartupConfig:
 
     # LLM defaults
     default_llm_api_key: str = ""
-    extra_llm_configs: Optional[Dict[str, List[Dict[str, str]]]] = None
     default_llm_api_base_url: str = "https://api.deepseek.com/v1"
     default_llm_model_name: str = "deepseek-chat"
     default_llm_max_tokens: int = 4096
@@ -84,7 +83,6 @@ class StartupConfig:
 class ENV:
     # 新版 LLM 相关
     DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
-    EXTRA_LLM_CONFIGS = "SAGE_EXTRA_LLM_CONFIGS"
     DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
     DEFAULT_LLM_MODEL_NAME = "SAGE_DEFAULT_LLM_MODEL_NAME"
     DEFAULT_LLM_MAX_TOKENS = "SAGE_DEFAULT_LLM_MAX_TOKENS"
@@ -250,10 +248,7 @@ def create_argument_parser():
         "--default_llm_api_key",
         help=f"默认LLM API Key (环境变量: {ENV.DEFAULT_LLM_API_KEY})",
     )
-    parser.add_argument(
-        "--extra_llm_configs",
-        help=f"额外的LLM配置字典 (JSON字符串), 如: '{{\"model_name\": [{{\"api_key\":\"...\", \"base_url\":\"...\"}}]}}' (环境变量: {ENV.EXTRA_LLM_CONFIGS})",
-    )
+
     parser.add_argument(
         "--default_llm_api_base_url",
         help=f"默认LLM API Base (环境变量: {ENV.DEFAULT_LLM_API_BASE_URL})",
@@ -457,11 +452,6 @@ def build_startup_config() -> StartupConfig:
             args.default_llm_api_key,
             ENV.DEFAULT_LLM_API_KEY,
             StartupConfig.default_llm_api_key,
-        ),
-        extra_llm_configs=pick_json_dict_list(
-            args.extra_llm_configs,
-            ENV.EXTRA_LLM_CONFIGS,
-            StartupConfig.extra_llm_configs,
         ),
         default_llm_api_base_url=pick_str(
             args.default_llm_api_base_url,

@@ -338,6 +338,7 @@ const handleChangePassword = async () => {
     handleLogout()
   } catch (error) {
     console.error(error)
+    toast.error(error.message || '修改失败')
   } finally {
     changingPassword.value = false
   }
@@ -367,10 +368,11 @@ const predefinedServices = computed(() => {
     { id: 'svc_history', nameKey: 'sidebar.sessions', url: 'History', isInternal: true },
     { id: 'svc_agent', key: 'agent_list', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true },
     {
-      id: 'cat2',
-      key: 'agent_capabilities',
-      nameKey: 'sidebar.capabilityModules',
+      id: 'cat_personal',
+      key: 'personal_center',
+      nameKey: 'sidebar.personalCenter',
       children: [
+        { id: 'svc_model_provider', nameKey: 'modelProvider.menuTitle', url: 'ModelProviderList', isInternal: true },
         { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
         { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
         { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseList', url: 'KnowledgeBase', isInternal: true }
@@ -415,6 +417,7 @@ const getCategoryIcon = (key) => {
   const map = {
     new_chat: MessageSquare,
     agent_list: Bot,
+    personal_center: Users,
     agent_capabilities: Wrench,
     skills: Zap,
     knowledge_base: Book,

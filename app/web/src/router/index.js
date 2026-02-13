@@ -109,6 +109,14 @@ const routes = [
     }
   },
   {
+    path: '/personal/model-providers',
+    name: 'ModelProviderList',
+    component: () => import('../views/ModelProviderList.vue'),
+    meta: {
+      title: 'modelProvider.title'
+    }
+  },
+  {
     path: '/me',
     name: 'MobileMe',
     component: () => import('../views/MobileMe.vue'),

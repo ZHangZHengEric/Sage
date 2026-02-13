@@ -78,7 +78,6 @@ import {
 import AgentEditProgress from './agent-edit/AgentEditProgress.vue'
 import AgentEditStep1 from './agent-edit/AgentEditStep1.vue'
 import AgentEditStep2 from './agent-edit/AgentEditStep2.vue'
-import AgentEditStep3 from './agent-edit/AgentEditStep3.vue'
 
 // UI Components
 import { Button } from '@/components/ui/button'
@@ -102,7 +101,6 @@ const currentStepComponent = computed(() => {
   switch(store.currentStep) {
     case 1: return AgentEditStep1
     case 2: return AgentEditStep2
-    case 3: return AgentEditStep3
     default: return AgentEditStep1
   }
 })

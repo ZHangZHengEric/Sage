@@ -17,39 +17,38 @@ import { userAPI } from '../api/user.js'
 export const loginAPI = async (username, password) => {
   try {
     const res = await userAPI.login(username, password)
-    if (res.success) {
-      const { access_token, refresh_token, expires_in } = res.data || {}
-      if (access_token) localStorage.setItem('access_token', access_token)
-      if (refresh_token) localStorage.setItem('refresh_token', refresh_token)
-      localStorage.setItem('token_expires_in', String(expires_in || 0))
-      localStorage.setItem('isLoggedIn', 'true')
-      localStorage.setItem('loginTime', Date.now().toString())
+    // res is data
+    const { access_token, refresh_token, expires_in } = res || {}
+    if (access_token) localStorage.setItem('access_token', access_token)
+    if (refresh_token) localStorage.setItem('refresh_token', refresh_token)
+    localStorage.setItem('token_expires_in', String(expires_in || 0))
+    localStorage.setItem('isLoggedIn', 'true')
+    localStorage.setItem('loginTime', Date.now().toString())
+    
+    try {
       const me = await userAPI.checkLogin()
-      if (me && me.success) {
-        localStorage.setItem('userInfo', JSON.stringify(me.data?.user || {}))
-        setCookie('username', (me.data?.user?.username) || username)
+      if (me) {
+        localStorage.setItem('userInfo', JSON.stringify(me.user || {}))
+        setCookie('username', (me.user?.username) || username)
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('user-updated'))
         }
       }
-      return res
-    }
-    return res
+    } catch (e) { console.error('Failed to fetch user info after login', e) }
+
+    return { success: true, data: res }
   } catch (error) {
-    return { success: false, message: '网络请求失败，请检查网络连接' }
+    return { success: false, message: error.message || '网络请求失败，请检查网络连接' }
   }
 }
 
 export const registerAPI = async (username, password, email = '', phonenum = '') => {
   try {
-    const res = await userAPI.register(username, password, email, phonenum)
-    if (res && res.success) {
-      const loginRes = await loginAPI(username, password)
-      return loginRes
-    }
-    return res
+    await userAPI.register(username, password, email, phonenum)
+    const loginRes = await loginAPI(username, password)
+    return loginRes
   } catch (error) {
-    return { success: false, message: '网络请求失败，请检查网络连接' }
+    return { success: false, message: error.message || '网络请求失败，请检查网络连接' }
   }
 }
 
@@ -58,22 +57,16 @@ export const checkLoginAPI = async () => {
   try {
     const result = await userAPI.checkLogin()
     
+    // 服务器确认登录有效，更新本地状态
+    localStorage.setItem('isLoggedIn', 'true')
+    localStorage.setItem('loginTime', Date.now().toString())
     
-    if (result.success) {
-      // 服务器确认登录有效，更新本地状态
-      localStorage.setItem('isLoggedIn', 'true')
-      localStorage.setItem('loginTime', Date.now().toString())
-      
-      // 如果服务器返回了用户信息，更新本地用户信息
-      if (result.data && result.data.user) {
-        localStorage.setItem('userInfo', JSON.stringify(result.data.user))
-      }
-    } else {
-      // 服务器确认登录无效，清除本地状态
-      clearLocalLoginState()
+    // 如果服务器返回了用户信息，更新本地用户信息
+    if (result && result.user) {
+      localStorage.setItem('userInfo', JSON.stringify(result.user))
     }
     
-    return result
+    return { success: true, data: result }
   } catch (error) {
     
     // 网络错误时的处理策略
