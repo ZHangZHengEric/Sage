@@ -317,11 +317,13 @@ const allowedExts = computed(() => {
 })
 
 const loadInfo = async () => {
-  const res = await knowledgeBaseAPI.getKnowledgeBase(kdbId)
-  if (res && res.success) {
-    kbInfo.value = res.data || {}
+  try {
+    const res = await knowledgeBaseAPI.getKnowledgeBase(kdbId)
+    kbInfo.value = res || {}
     editForm.value.name = kbInfo.value.name || ''
     editForm.value.intro = kbInfo.value.intro || ''
+  } catch (e) {
+    console.error(e)
   }
 }
 
@@ -338,9 +340,11 @@ const saveSettings = async () => {
 const confirmDelete = async () => {
   const ok = window.confirm(t('knowledgeBase.deleteConfirm').replace('{name}', kbInfo.value.name || ''))
   if (!ok) return
-  const res = await knowledgeBaseAPI.deleteKnowledgeBase(kdbId)
-  if (res && res.success) {
+  try {
+    await knowledgeBaseAPI.deleteKnowledgeBase(kdbId)
     goBack()
+  } catch (e) {
+    console.error(e)
   }
 }
 
@@ -369,11 +373,9 @@ const loadDocs = async () => {
   try {
     docLoading.value = true
     const res = await knowledgeBaseAPI.getDocuments({ kdb_id: kdbId, query_name: docQueryName.value, page: docPageNo.value, page_size: docPageSize.value })
-    if (res && res.success) {
-      const { list = [], total = 0 } = res.data || {}
-      docList.value = list
-      docTotal.value = total
-    }
+    const { list = [], total = 0 } = res || {}
+    docList.value = list
+    docTotal.value = total
   } finally {
     docLoading.value = false
   }
@@ -406,29 +408,27 @@ const addByFiles = async () => {
   if (!selectedFiles.value.length) return
   try {
     docLoading.value = true
-    const res = await knowledgeBaseAPI.addDocumentsByFiles({ kdb_id: kdbId, files: selectedFiles.value, override: false })
-    if (res && res.success) {
-      await loadDocs()
-      selectedFiles.value = []
-      if (fileInputRef.value) fileInputRef.value.value = ''
-    }
+    await knowledgeBaseAPI.addDocumentsByFiles({ kdb_id: kdbId, files: selectedFiles.value, override: false })
+    await loadDocs()
+    selectedFiles.value = []
+    if (fileInputRef.value) fileInputRef.value.value = ''
   } finally {
     docLoading.value = false
   }
 }
 
 const deleteDoc = async (d) => {
-  const res = await knowledgeBaseAPI.deleteDocument(d.id)
-  if (res && res.success) {
+  try {
+    await knowledgeBaseAPI.deleteDocument(d.id)
     await loadDocs()
-  }
+  } catch (e) { console.error(e) }
 }
 
 const redoDoc = async (d) => {
-  const res = await knowledgeBaseAPI.redoDocument(d.id)
-  if (res && res.success) {
+  try {
+    await knowledgeBaseAPI.redoDocument(d.id)
     await loadDocs()
-  }
+  } catch (e) { console.error(e) }
 }
 
 const prevPage = () => {
@@ -469,10 +469,8 @@ const runRecall = async () => {
   try {
     recallLoading.value = true
     const res = await knowledgeBaseAPI.retrieve({ kdb_id: kdbId, query: recallQuery.value, top_k: 10 })
-    if (res && res.success) {
-      const list = Array.isArray(res.data.results) ? res.data.results : []
-      recallResults.value = list
-    }
+    const list = Array.isArray(res?.results) ? res.results : []
+    recallResults.value = list
   } finally {
     recallLoading.value = false
   }
