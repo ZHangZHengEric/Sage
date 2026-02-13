@@ -9,6 +9,7 @@ from .skill import SkillOwnership, SkillOwnershipDao
 from .trace import TraceDao, TraceSpan
 from .user import User, UserDao
 from .system import SystemInfo, SystemInfoDao
+from .llm_provider import LLMProvider, LLMProviderDao
 
 __all__ = [
     "Agent",
@@ -34,4 +35,6 @@ __all__ = [
     "SystemInfoDao",
     "SkillOwnership",
     "SkillOwnershipDao",
+    "LLMProvider",
+    "LLMProviderDao",
 ]

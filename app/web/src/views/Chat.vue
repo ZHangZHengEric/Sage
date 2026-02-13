@@ -184,7 +184,7 @@ const currentSessionId = ref(null);
 const selectedAgent = ref(null);
 const config = ref({
     deepThinking: true,
-    multiAgent: true,
+    agentMode: 'simple',
     moreSuggest: false,
     maxLoopCount: 10
 });
@@ -353,7 +353,7 @@ const updateConfig = (newConfig) => {
       // 配置设置的优先级高于agent配置：用户手动修改的配置项优先，其次是agent配置，最后是默认值
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
-        multiAgent: userConfigOverrides.value.multiAgent !== undefined ? userConfigOverrides.value.multiAgent : agent.multiAgent,
+        agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : (agent.agentMode || 'simple'),
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 10)
       };
@@ -860,7 +860,7 @@ const sendMessageApi = async ({
       }],
       session_id: sessionId,
       deep_thinking: config.deepThinking,
-      multi_agent: config.multiAgent,
+      agent_mode: config.agentMode,
       more_suggest: config.moreSuggest,
       max_loop_count: config.maxLoopCount,
       agent_id: selectedAgent?.id || "default_agent",
@@ -880,7 +880,7 @@ const sendMessageApi = async ({
     console.log('📥 传入的config对象:', config);
     console.log('🚀 聊天请求配置参数:', {
       deep_thinking: config.deepThinking,
-      multi_agent: config.multiAgent,
+      agent_mode: config.agentMode,
       more_suggest: config.moreSuggest,
       max_loop_count: config.maxLoopCount
     });

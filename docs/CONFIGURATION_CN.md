@@ -71,7 +71,6 @@ graph TD
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
 | `SAGE_DEFAULT_LLM_API_KEY` | string | "" | 默认 LLM API Key |
-| `SAGE_EXTRA_LLM_CONFIGS` | string | None | 额外 LLM 配置列表（JSON 字符串） |
 | `SAGE_DEFAULT_LLM_API_BASE_URL` | string | "https://api.deepseek.com/v1" | 默认 LLM API Base URL |
 | `SAGE_DEFAULT_LLM_MODEL_NAME` | string | "deepseek-chat" | 默认 LLM 模型名称 |
 | `SAGE_DEFAULT_LLM_MAX_TOKENS` | integer | 4096 | 最大生成 Token 数 |

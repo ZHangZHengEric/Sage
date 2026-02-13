@@ -33,6 +33,143 @@
 
     <div class="space-y-6">
 
+      <!-- Strategy Settings (Moved from Step 3) -->
+      <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+        <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('strategy')">
+          <div class="flex items-center gap-2">
+            <Cpu class="h-5 w-5" />
+            <CardTitle class="text-base">{{ t('agent.strategy') }}</CardTitle>
+          </div>
+          <ChevronDown v-if="sections.strategy" class="h-4 w-4" />
+          <ChevronUp v-else class="h-4 w-4" />
+        </CardHeader>
+        <div v-show="!sections.strategy" class="px-5 pb-5 pt-4 space-y-6">
+          <FormItem :label="t('agent.memoryType')">
+             <Select v-model="store.formData.memoryType">
+               <SelectTrigger>
+                 <SelectValue />
+               </SelectTrigger>
+               <SelectContent>
+                 <SelectItem value="session">{{ t('agent.sessionMemory') }}</SelectItem>
+                 <SelectItem value="user">{{ t('agent.userMemory') }}</SelectItem>
+               </SelectContent>
+             </Select>
+          </FormItem>
+
+          <FormItem :label="t('agent.agentMode')">
+              <Select v-model="store.formData.agentMode">
+                  <SelectTrigger><SelectValue :placeholder="t('agent.modeAuto')" /></SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
+                      <SelectItem value="simple">{{ t('agent.modeSimple') }}</SelectItem>
+                      <SelectItem value="multi">{{ t('agent.modeMulti') }}</SelectItem>
+                  </SelectContent>
+              </Select>
+          </FormItem>
+
+          <!-- Sub Agent Selection for Fibre Mode -->
+          <FormItem v-if="store.formData.agentMode === 'fibre'" label="子智能体">
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <Button variant="outline" class="w-full justify-between px-3 text-left font-normal">
+                    <span class="truncate block">{{ selectedSubAgentsLabel }}</span>
+                    <ChevronDown class="ml-2 h-4 w-4 opacity-50 shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent class="w-[--radix-dropdown-menu-trigger-width] min-w-[200px]">
+                  <div class="max-h-[300px] overflow-y-auto">
+                    <DropdownMenuCheckboxItem
+                      v-for="agent in filteredAgents"
+                      :key="agent.id"
+                      :checked="isSubAgentSelected(agent.id)"
+                      @select.prevent
+                      @update:checked="(checked) => toggleSubAgent(agent.id, checked)"
+                    >
+                      {{ agent.name }}
+                    </DropdownMenuCheckboxItem>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+          </FormItem>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+             <FormItem :label="t('agent.deepThinking')">
+                <Tabs :model-value="getSelectValue(store.formData.deepThinking)" @update:model-value="(v) => setSelectValue('deepThinking', v)" class="w-full">
+                  <TabsList class="grid w-full grid-cols-3">
+                    <TabsTrigger value="auto">{{ t('agent.auto') }}</TabsTrigger>
+                    <TabsTrigger value="enabled">{{ t('agent.enabled') }}</TabsTrigger>
+                    <TabsTrigger value="disabled">{{ t('agent.disabled') }}</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+             </FormItem>
+            <FormItem :label="t('agent.moreSuggest')">
+               <div class="flex items-center h-10 gap-2 border rounded-md px-3">
+                 <Switch :checked="store.formData.moreSuggest" @update:checked="(v) => store.formData.moreSuggest = v" />
+                 <span class="text-sm text-muted-foreground">{{ store.formData.moreSuggest ? t('agent.enabled') : t('agent.disabled') }}</span>
+               </div>
+            </FormItem>
+            <FormItem :label="t('agent.maxLoopCount')">
+              <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="50" />
+            </FormItem>
+          </div>
+        </div>
+      </Card>
+      <!-- LLM Config (Moved from Step 3) -->
+      <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+        <CardHeader
+          class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl"
+          @click="toggleSection('llm')">
+          <div class="flex items-center gap-2">
+            <Bot class="h-5 w-5" />
+            <CardTitle class="text-base">{{ t('agent.llmConfig') }}</CardTitle>
+          </div>
+          <ChevronDown v-if="sections.llm" class="h-4 w-4" />
+          <ChevronUp v-else class="h-4 w-4" />
+        </CardHeader>
+        <div v-show="!sections.llm" class="px-5 pb-5 pt-4 space-y-4">
+          <FormItem :label="t('agent.modelProvider')">
+            <div v-if="providers.length === 0"
+              class="text-sm text-muted-foreground border border-dashed rounded-md p-3 text-center">
+              {{ t('agent.noProviders') || 'No model providers available.' }}
+            </div>
+            <Select v-else v-model="computedProviderId">
+              <SelectTrigger>
+                <SelectValue :placeholder="t('agent.selectProvider')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__system_default__">
+                  <span class="text-muted-foreground">{{ t('agent.useSystemDefault') || 'System Default' }}</span>
+                </SelectItem>
+                <SelectItem v-for="p in providers" :key="p.id" :value="p.id">
+                  <span class="font-medium">{{ p.name }}</span>
+                  <span class="ml-2 text-xs text-muted-foreground">({{ t('agent.model') || 'Model' }}: {{ p.model
+                  }})</span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FormItem>
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <FormItem :label="t('agent.maxTokens')">
+              <Input type="number" v-model.number="store.formData.llmConfig.maxTokens" placeholder="4096" />
+            </FormItem>
+            <FormItem :label="t('agent.temperature')">
+              <Input type="number" v-model.number="store.formData.llmConfig.temperature" step="0.1" placeholder="0.2" />
+            </FormItem>
+            <FormItem :label="t('agent.topP')">
+              <Input type="number" v-model.number="store.formData.llmConfig.topP" step="0.1" placeholder="0.9" />
+            </FormItem>
+            <FormItem :label="t('agent.presencePenalty')">
+              <Input type="number" v-model.number="store.formData.llmConfig.presencePenalty" step="0.1"
+                placeholder="0.0" />
+            </FormItem>
+            <FormItem :label="t('agent.maxModelLen')">
+              <Input type="number" v-model.number="store.formData.llmConfig.maxModelLen" placeholder="54000" />
+            </FormItem>
+          </div>
+
+        </div>
+      </Card>
+
       <!-- System Context -->
       <Card class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
         <CardHeader
@@ -42,7 +179,7 @@
             <Database class="h-5 w-5" />
             <CardTitle class="text-base">{{ t('agent.systemContext') }}</CardTitle>
             <span class="text-xs text-muted-foreground ml-2">({{store.systemContextPairs.filter(p => p.key).length
-            }})</span>
+              }})</span>
           </div>
           <ChevronDown v-if="sections.context" class="h-4 w-4" />
           <ChevronUp v-else class="h-4 w-4" />
@@ -66,21 +203,19 @@
       </Card>
       <!-- Workflows -->
       <Card class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
-        <CardHeader
-          class="pb-3 pt-4 px-5 bg-muted/30 flex flex-row items-center justify-between rounded-t-xl">
+        <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 flex flex-row items-center justify-between rounded-t-xl">
           <div class="flex items-center gap-2">
             <Workflow class="h-5 w-5" />
             <CardTitle class="text-base">{{ t('agent.workflows') }}</CardTitle>
             <span class="text-xs text-muted-foreground ml-2">({{store.workflowPairs.filter(w => w.key).length
-              }})</span>
+            }})</span>
           </div>
         </CardHeader>
         <div class="px-5 pb-5 pt-4 space-y-4">
           <div v-for="(workflow, index) in store.workflowPairs" :key="index"
             class="rounded-lg p-3 bg-muted/20 hover:bg-muted/40 transition-colors border border-transparent hover:border-border/50">
             <div class="flex items-center gap-2 mb-2">
-              <Button variant="ghost" size="sm" class="h-8 w-8 p-0"
-                @click="toggleWorkflow(index)">
+              <Button variant="ghost" size="sm" class="h-8 w-8 p-0" @click="toggleWorkflow(index)">
                 <ChevronDown v-if="isWorkflowExpanded(index)" class="h-4 w-4" />
                 <ChevronRight v-else class="h-4 w-4" />
               </Button>
@@ -91,9 +226,12 @@
                 <Trash2 class="h-4 w-4" />
               </Button>
             </div>
-            <div v-show="isWorkflowExpanded(index)" :ref="el => setStepListRef(el, index)" class="pl-10 space-y-2" :key="workflowRenderKeys[index] || 0">
-                <div v-for="(step, stepIndex) in workflow.steps" :key="`${workflowRenderKeys[index] || 0}-${stepIndex}`" class="flex items-start gap-2 group">
-                <div class="drag-handle cursor-move mt-2.5 text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted flex-shrink-0">
+            <div v-show="isWorkflowExpanded(index)" :ref="el => setStepListRef(el, index)" class="pl-10 space-y-2"
+              :key="workflowRenderKeys[index] || 0">
+              <div v-for="(step, stepIndex) in workflow.steps" :key="`${workflowRenderKeys[index] || 0}-${stepIndex}`"
+                class="flex items-start gap-2 group">
+                <div
+                  class="drag-handle cursor-move mt-2.5 text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted flex-shrink-0">
                   <GripVertical class="h-4 w-4" />
                 </div>
                 <Textarea :model-value="step" :placeholder="`${t('agent.step')} ${stepIndex + 1}`"
@@ -114,6 +252,7 @@
           </Button>
         </div>
       </Card>
+
 
     </div>
     <!-- Optimize Modal -->
@@ -152,11 +291,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount, computed } from 'vue'
 import { useAgentEditStore } from '../../stores/agentEdit'
 import { useLanguage } from '../../utils/i18n.js'
 import { agentAPI } from '../../api/agent.js'
-import { Loader, Trash2, Plus, ChevronDown, ChevronUp, ChevronRight, Workflow, Database, GripVertical, Sparkles   } from 'lucide-vue-next'
+import { modelProviderAPI } from '@/api/modelProvider'
+const { listModelProviders } = modelProviderAPI
+import { Loader, Trash2, Plus, ChevronDown, ChevronUp, ChevronRight, Workflow, Database, GripVertical, Sparkles, Bot, Cpu } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
 // UI Components
@@ -167,13 +308,27 @@ import { FormItem } from '@/components/ui/form'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuCheckboxItem
+} from '@/components/ui/dropdown-menu'
 
 const store = useAgentEditStore()
 const { t } = useLanguage()
 
 // Collapsed state
 const sections = reactive({
-  context: false
+  context: false,
+  strategy: false,
+  llm: false
 })
 
 const toggleSection = (key) => {
@@ -292,5 +447,96 @@ const initSortable = (index, el) => {
 onBeforeUnmount(() => {
   sortableInstances.forEach(instance => instance.destroy())
   sortableInstances.clear()
+})
+
+// Step 3 Logic (Merged)
+const providers = ref([])
+const allAgents = ref([])
+
+const computedProviderId = computed({
+  get: () => store.formData.llmConfig.providerId || '__system_default__',
+  set: (val) => {
+    store.formData.llmConfig.providerId = val === '__system_default__' ? null : val
+  }
+})
+
+// Helpers for Selects
+const getSelectValue = (val) => {
+  if (val === null) return 'auto'
+  return val ? 'enabled' : 'disabled'
+}
+
+const setSelectValue = (field, val) => {
+  if (val === 'auto') store.formData[field] = null
+  else if (val === 'enabled') store.formData[field] = true
+  else store.formData[field] = false
+}
+
+// Sub-agent Logic
+const filteredAgents = computed(() => {
+  return allAgents.value.filter(a => a.id !== store.formData.id)
+})
+
+const selectedSubAgentsLabel = computed(() => {
+  const ids = store.formData.availableSubAgentIds || []
+  if (ids.length === 0) return '选择子智能体'
+  
+  const names = ids.map(id => {
+    const agent = allAgents.value.find(a => a.id === id)
+    return agent ? agent.name : ''
+  }).filter(Boolean)
+  
+  return names.join(', ')
+})
+
+const isSubAgentSelected = (id) => {
+  return store.formData.availableSubAgentIds?.includes(id) || false
+}
+
+const toggleSubAgent = (id, checked) => {
+  const currentIds = [...(store.formData.availableSubAgentIds || [])]
+  
+  if (checked) {
+    if (!currentIds.includes(id)) {
+      currentIds.push(id)
+    }
+  } else {
+    const index = currentIds.indexOf(id)
+    if (index > -1) {
+      currentIds.splice(index, 1)
+    }
+  }
+  
+  store.formData.availableSubAgentIds = currentIds
+}
+
+onMounted(async () => {
+   // Ensure defaults
+   if (!store.formData.memoryType) {
+     store.formData.memoryType = 'session'
+   }
+   if (!store.formData.agentMode) {
+     store.formData.agentMode = 'simple'
+   }
+
+   try {
+     const [providersRes, agentsRes] = await Promise.all([
+        listModelProviders(),
+        agentAPI.getAgents()
+     ])
+     providers.value = providersRes || []
+     
+     if (agentsRes && agentsRes.agents) {
+        allAgents.value = agentsRes.agents
+     } else if (Array.isArray(agentsRes)) {
+        allAgents.value = agentsRes
+     } else {
+        allAgents.value = []
+     }
+   } catch (e) {
+     console.error('Failed to load data', e)
+     providers.value = []
+     allAgents.value = []
+   }
 })
 </script>

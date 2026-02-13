@@ -71,7 +71,6 @@ graph TD
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SAGE_DEFAULT_LLM_API_KEY` | string | "" | Default LLM API key |
-| `SAGE_EXTRA_LLM_CONFIGS` | string | None | Extra LLM config list (JSON string) |
 | `SAGE_DEFAULT_LLM_API_BASE_URL` | string | "https://api.deepseek.com/v1" | Default LLM API base URL |
 | `SAGE_DEFAULT_LLM_MODEL_NAME` | string | "deepseek-chat" | Default LLM model name |
 | `SAGE_DEFAULT_LLM_MAX_TOKENS` | integer | 4096 | Max generated tokens |
