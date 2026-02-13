@@ -32,6 +32,7 @@ class StreamRequest(BaseChatRequest):
     deep_thinking: Optional[bool] = None
     max_loop_count: Optional[int] = 10
     multi_agent: Optional[bool] = None
+    agent_mode: Optional[str] = None
     more_suggest: Optional[bool] = None
     available_workflows: Optional[Dict[str, List[str]]] = None
     llm_model_config: Optional[Dict[str, Any]] = None

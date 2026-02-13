@@ -165,11 +165,8 @@ const handleSubmit = async () => {
     }
 
     const response = await knowledgeBaseAPI.addKnowledgeBase(data)
-
-    if (response && response.success) {
-      emit('success', response.data)
-      resetForm()
-    }
+    emit('success', response)
+    resetForm()
   } catch (error) {
     console.error('Failed to add knowledge base:', error)
   } finally {
