@@ -1,11 +1,9 @@
 import json
 import re
-import uuid
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 from loguru import logger
 
-from ...schemas.chat import Message
 
 
 class ContentProcessor:
@@ -105,45 +103,3 @@ class ContentProcessor:
                         if isinstance(val, str) and len(val) > max_len:
                             item[field] = val[:max_len] + '...[TRUNCATED]'
 
-def _prepare_messages(request_messages: List[Message]) -> List[Dict[str, Any]]:
-    """准备和格式化消息"""
-    messages = []
-    for msg in request_messages:
-        message_dict = msg.model_dump()
-        if "message_id" not in message_dict or not message_dict["message_id"]:
-            message_dict["message_id"] = str(uuid.uuid4())
-        if message_dict.get("content"):
-            message_dict["content"] = str(message_dict["content"])
-        messages.append(message_dict)
-    return messages
-
-def _initialize_message_collector(messages):
-    """初始化消息收集器"""
-    message_collector = {}
-    message_order = []
-    for msg in messages:
-        msg_id = msg["message_id"]
-        message_collector[msg_id] = msg
-        message_order.append(msg_id)
-    return message_collector, message_order
-
-def update_message_collector(message_collector, message_order, result):
-    """更新消息收集器"""
-    if not isinstance(result, dict) or not result.get("message_id"):
-        return
-    message_id = result["message_id"]
-    if message_id not in message_collector:
-        message_collector[message_id] = result
-        message_order.append(message_id)
-    else:
-        if result.get("role") != "tool":
-            if result.get("content"):
-                if "content" not in message_collector[message_id]:
-                    message_collector[message_id]["content"] = ""
-                message_collector[message_id]["content"] += str(result["content"])
-            if result.get("show_content"):
-                if "show_content" not in message_collector[message_id]:
-                    message_collector[message_id]["show_content"] = ""
-                message_collector[message_id]["show_content"] += str(
-                    result["show_content"]
-                )

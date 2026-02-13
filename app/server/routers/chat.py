@@ -10,7 +10,6 @@ from sagents.context.session_context import delete_session_run_lock
 
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
-from ..core.render import Response
 
 # 导入新模型
 from ..schemas.chat import ChatRequest, StreamRequest
@@ -20,7 +19,6 @@ from ..services.chat import (
     execute_chat_session,
     populate_request_from_agent_config,
     prepare_session,
-    run_async_chat_task,
 )
 from ..services.conversation import interrupt_session
 
@@ -115,11 +113,14 @@ async def chat(request: ChatRequest, http_request: Request):
 
     await populate_request_from_agent_config(inner_request, require_agent_id=True)
 
-    session_id, stream_service, lock = await prepare_session(inner_request)
-
+    stream_service, lock = await prepare_session(inner_request)
+    session_id = inner_request.session_id
     return StreamingResponse(
         stream_with_disconnect_check(
-            execute_chat_session(inner_request, "chat", session_id, stream_service),
+            execute_chat_session(
+                mode="chat",
+                stream_service=stream_service,
+            ),
             http_request,
             lock,
             session_id
@@ -132,14 +133,16 @@ async def chat(request: ChatRequest, http_request: Request):
 async def stream_chat(request: StreamRequest, http_request: Request):
     """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
     validate_and_prepare_request(request, http_request)
-
     await populate_request_from_agent_config(request, require_agent_id=False)
-
-    session_id, stream_service, lock = await prepare_session(request)
+    stream_service, lock = await prepare_session(request)
+    session_id = request.session_id
 
     return StreamingResponse(
         stream_with_disconnect_check(
-            execute_chat_session(request, "stream", session_id, stream_service),
+            execute_chat_session(
+                mode="stream",
+                stream_service=stream_service,
+            ),
             http_request,
             lock,
             session_id
@@ -150,15 +153,19 @@ async def stream_chat(request: StreamRequest, http_request: Request):
 
 @chat_router.post("/api/web-stream")
 async def stream_chat_web(request: StreamRequest, http_request: Request):
-    """流式聊天接口， 与chat不同的是入参不能够指定agent_id"""
+    """这个接口有用户鉴权"""
     validate_and_prepare_request(request, http_request)
 
     await populate_request_from_agent_config(request, require_agent_id=False)
-    session_id, stream_service, lock = await prepare_session(request)
+    stream_service, lock = await prepare_session(request)
+    session_id = request.session_id
 
     return StreamingResponse(
         stream_with_disconnect_check(
-            execute_chat_session(request, "stream", session_id, stream_service),
+            execute_chat_session(
+                mode="stream",
+                stream_service=stream_service,
+            ),
             http_request,
             lock,
             session_id,
@@ -166,15 +173,3 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
         media_type="text/plain",
     )
 
-
-@chat_router.post("/api/stream/submit_task")
-async def submit_stream_task(request: StreamRequest, http_request: Request):
-    validate_and_prepare_request(request, http_request)
-    
-    await populate_request_from_agent_config(request, require_agent_id=False)
-    
-    session_id = await run_async_chat_task(request)
-    
-    return await Response.succ(
-        data={"session_id": session_id}, message="异步任务已提交"
-    )

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import os
+from re import S
 import time
 import traceback
 import uuid
@@ -15,131 +16,229 @@ from sagents.context.session_context import (
 )
 from sagents.sagents import SAgent
 
-from ...core.config import get_startup_config
+from ... import models
 from ...core.exceptions import SageHTTPException
-from ...schemas.chat import StreamRequest
-from ...utils.async_utils import create_safe_task
-from .manager import _ensure_conversation, _save_single_message
+from ...schemas.chat import StreamRequest, CustomSubAgentConfig
+from ...core.config import get_startup_config
 from .processor import (
     ContentProcessor,
-    _initialize_message_collector,
-    _prepare_messages,
-    update_message_collector,
 )
 from .utils import (
     create_model_client,
     create_skill_proxy,
     create_tool_proxy,
-    resolve_llm_config,
     send_chunked_json,
 )
 
 _SAGENT_CACHE = {}
 
 
+async def populate_request_from_agent_config(
+    request: StreamRequest, *, require_agent_id: bool = False
+) -> None:
+    if request.agent_id is None:
+        # 如果要求必须有 Agent ID，则抛出异常
+        if require_agent_id:
+            raise SageHTTPException(status_code=500, detail="Agent ID 不能为空")
+        return
+    agent_dao = models.AgentConfigDao()
+    agent = await agent_dao.get_by_id(request.agent_id)
+    if not agent or not agent.config:
+        # 如果要求必须有 Agent ID，但 Agent 不存在，则抛出异常
+        if require_agent_id:
+            raise SageHTTPException(status_code=500, detail="Agent 不存在")
+        logger.warning(f"Agent {request.agent_id} not found")
+        return
+
+    request.agent_name = agent.name or "Sage Assistant"
+
+    def _fill_if_none(field, value):
+        if getattr(request, field) is None:
+            setattr(request, field, value)
+
+    def _merge_dict(field, value):
+        current = getattr(request, field)
+        if current is None:
+            setattr(request, field, value)
+        elif isinstance(current, dict) and isinstance(value, dict):
+            # Request 优先，所以 Agent 配置作为 base
+            merged = value.copy()
+            merged.update(current)
+            setattr(request, field, merged)
+    # 注入 llm_config 配置
+    if request.llm_model_config is None:
+        request.llm_model_config = {}
+    provider_dao = models.LLMProviderDao()
+    provider_id = agent.config.get("llm_provider_id")
+    if provider_id: # 有指定则全量替换
+        provider = await provider_dao.get_by_id(provider_id)
+        request.llm_model_config["base_url"] = provider.base_url
+        request.llm_model_config["api_key"] = ",".join(provider.api_keys)
+        request.llm_model_config["model"] = provider.model
+        request.llm_model_config["max_tokens"] = provider.max_tokens
+        request.llm_model_config["temperature"] = provider.temperature
+        request.llm_model_config["top_p"] = provider.top_p
+        request.llm_model_config["presence_penalty"] = provider.presence_penalty
+        request.llm_model_config["max_model_len"] = provider.max_model_len 
+    else: # 填充空字段
+        provider = await provider_dao.get_default()
+        if request.llm_model_config.get("base_url") is None:
+            request.llm_model_config["base_url"] = provider.base_url
+        if request.llm_model_config.get("api_key") is None:
+            request.llm_model_config["api_key"] = ",".join(provider.api_keys)
+        if request.llm_model_config.get("model") is None:
+            request.llm_model_config["model"] = provider.model
+        if request.llm_model_config.get("max_tokens") is None:
+            request.llm_model_config["max_tokens"] = provider.max_tokens
+        if request.llm_model_config.get("temperature") is None:
+            request.llm_model_config["temperature"] = provider.temperature
+        if request.llm_model_config.get("top_p") is None:
+            request.llm_model_config["top_p"] = provider.top_p
+        if request.llm_model_config.get("presence_penalty") is None:
+            request.llm_model_config["presence_penalty"] = provider.presence_penalty
+        if request.llm_model_config.get("max_model_len") is None:
+            request.llm_model_config["max_model_len"] = provider.max_model_len 
+        
+    if request.max_loop_count is None:
+        request.max_loop_count = 10
+    _fill_if_none("available_tools", agent.config.get("availableTools", []))
+    _fill_if_none("available_tools", agent.config.get("availableTools", []))
+    _fill_if_none("available_skills", agent.config.get("availableSkills", []))
+    _merge_dict("available_workflows", agent.config.get("availableWorkflows", {}))
+    _fill_if_none("deep_thinking", agent.config.get("deepThinking", False))
+    _fill_if_none("max_loop_count", agent.config.get("maxLoopCount", 10))
+    _fill_if_none("multi_agent", agent.config.get("multiAgent", False))
+    _fill_if_none("more_suggest", agent.config.get("moreSuggest", False))
+    _merge_dict("system_context", agent.config.get("systemContext", {}))
+    _fill_if_none("system_prefix", agent.config.get("systemPrefix", ""))
+    _fill_if_none("memory_type", agent.config.get("memoryType", "session"))
+    user = {"本次会话用户id": request.user_id or "default_user"}
+    _merge_dict("system_context", user)
+
+    # 处理可用知识库
+    available_knowledge_bases = agent.config.get("availableKnowledgeBases", [])
+    if available_knowledge_bases:
+        kdb_dao = models.KdbDao()
+        # 分页获取所有关联的知识库
+        kdbs, _ = await kdb_dao.get_kdbs_paginated(
+            kdb_ids=available_knowledge_bases,
+            data_type=None,
+            query_name=None,
+            page=1,
+            page_size=1000,
+        )
+
+        if kdbs:
+            # 1. 注入 system_context
+            kdb_context = {}
+            for kdb in kdbs:
+                index_name = kdb.get_index_name()
+                kdb_context[f"{kdb.name}数据库的index_name"] = index_name
+
+            _merge_dict("system_context", kdb_context)
+
+            # 2. 添加 retrieve_on_zavixai_db 工具
+            current_tools = getattr(request, "available_tools", [])
+            if current_tools is None:
+                current_tools = []
+                setattr(request, "available_tools", current_tools)
+
+            if "retrieve_on_zavixai_db" not in current_tools:
+                current_tools.append("retrieve_on_zavixai_db")
+    # 处理可用技能
+    available_skills = agent.config.get("availableSkills", [])
+    if available_skills:
+        # file_read execute_python_code execute_shell_command file_write update_file 五种工具注入
+        current_skills = getattr(request, "available_skills", [])
+        if current_skills is None:
+            current_skills = []
+            setattr(request, "available_skills", current_skills)
+        need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
+        current_tools = getattr(request, "available_tools", [])
+        if current_tools is None:
+            current_tools = []
+            setattr(request, "available_tools", current_tools)
+        for tool in need_tools:
+            if tool not in current_tools:
+                current_tools.append(tool)
+    # 处理可用子Agent
+    available_sub_agent_ids = agent.config.get("availableSubAgentIds", [])
+    if available_sub_agent_ids:
+        # 从数据库获取所有子Agent配置
+        sub_agent_dao = models.AgentConfigDao()
+        sub_agents = await sub_agent_dao.get_by_ids(available_sub_agent_ids)
+        # 转成CustomSubAgentConfig
+        custom_sub_agents = [
+            CustomSubAgentConfig(
+               name=sub_agent.name,
+               description=sub_agent.config.get("description", ""),
+               available_workflows=sub_agent.config.get("availableWorkflows", []),
+               system_context=sub_agent.config.get("systemContext", {}),
+               available_tools=sub_agent.config.get("availableTools", []),
+               available_skills=sub_agent.config.get("availableSkills", []),
+            )
+            for sub_agent in sub_agents
+        ]
+        setattr(request, "custom_sub_agents", custom_sub_agents)
+
+    # 从配置获取 context_budget_config
+    from ...core.config import get_startup_config
+    server_config = get_startup_config()
+
+    # 尝试从 llm_model_config 中获取 max_model_len
+    llm_config = request.llm_model_config or {}
+
+    context_budget_config = {
+        'max_model_len': llm_config.get("max_model_len"),
+        'history_ratio': server_config.context_history_ratio,
+        'active_ratio': server_config.context_active_ratio,
+        'max_new_message_ratio': server_config.context_max_new_message_ratio,
+        'recent_turns': server_config.context_recent_turns
+    }
+    request.context_budget_config = context_budget_config
+
 class SageStreamService:
     """Sage 流式服务类"""
 
     def __init__(self, request: StreamRequest):
         self.request = request
-        # 1. 配置准备
-        server_args = get_startup_config()
-
-        _, final_model_config, client_params = resolve_llm_config(
-            request.llm_model_config, server_args
-        )
-
         # 2. 工具代理
-        tool_proxy = create_tool_proxy(request.available_tools, request.multi_agent)
+        tool_proxy = create_tool_proxy(request.available_tools)
         self.tool_manager = tool_proxy
         # 3. 技能代理
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
-
-        # 3. 路径处理
-        workspace = server_args.workspace
+        # 4. 路径处理
+        config = get_startup_config()
+        workspace = config.workspace
         if workspace:
             workspace = os.path.abspath(workspace)
             if not workspace.endswith('/'):
                 workspace += '/'
 
-        cache_key = self._build_sagent_cache_key(
-            request=request,
-            server_args=server_args,
-            final_model_config=final_model_config,
-            client_params=client_params,
-            workspace=workspace,
-        )
-        cached_engine = _SAGENT_CACHE.get(cache_key)
-        if cached_engine:
-            logger.info(f"从缓存中获取 SAgent 实例")
-            self.sage_engine = cached_engine
-        else:
-            # Check if using default client
-            if client_params.get("use_default_client"):
-                 # Use get_chat_client() which returns a client from the pool (rotated)
-                 from ...core.client.chat import get_chat_client
-                 model_client = get_chat_client(model_name=final_model_config["model"])
-            else:
-                 model_client = create_model_client(client_params, final_model_config["model"])
-            
-            self.sage_engine = SAgent(
+        # 5. 构造模型客户端
+        model_client = create_model_client(request.llm_model_config)
+        self.sage_engine = SAgent(
                 model=model_client,
-                model_config=final_model_config,
+                model_config=request.llm_model_config,
                 system_prefix=request.system_prefix,
                 workspace=workspace,
                 memory_type=request.memory_type,
             )
-            _SAGENT_CACHE[cache_key] = self.sage_engine
 
-    @staticmethod
-    def _build_sagent_cache_key(
-        request: StreamRequest,
-        server_args,
-        final_model_config,
-        client_params,
-        workspace,
-    ) -> str:
-        api_key = client_params.get("api_key")
-        api_key_hash = (
-            hashlib.sha256(str(api_key).encode("utf-8")).hexdigest()
-            if api_key is not None
-            else None
-        )
-        key_data = {
-            "agent_id": request.agent_id,
-            "agent_name": request.agent_name,
-            "system_prefix": request.system_prefix,
-            "llm_model_config": final_model_config,
-            "llm_client": {
-                "use_default_client": client_params.get("use_default_client"),
-                "base_url": client_params.get("base_url"),
-                "api_key_hash": api_key_hash,
-            },
-            "workspace": workspace,
-            "memory_type": request.memory_type,
-        }
-        return json.dumps(key_data, sort_keys=True, ensure_ascii=False)
-
-    async def process_stream(
-        self,
-        messages,
-        session_id=None,
-        user_id=None,
-        deep_thinking=None,
-        max_loop_count=None,
-        multi_agent=None,
-        agent_mode=None,
-        more_suggest=False,
-        system_context=None,
-        available_workflows=None,
-        force_summary=False,
-        context_budget_config=None,
-        custom_sub_agents=None,
-    ):
-        if max_loop_count is None:
-            max_loop_count = 10
+    async def process_stream(self):
         """处理流式聊天请求"""
+        session_id = self.request.session_id
+        """准备和格式化消息"""
+        messages = []
+        for msg in self.request.messages:
+            message_dict = msg.model_dump()
+            if "message_id" not in message_dict or not message_dict["message_id"]:
+                message_dict["message_id"] = str(uuid.uuid4())
+            if message_dict.get("content"):
+                message_dict["content"] = str(message_dict["content"])
+            messages.append(message_dict)
+        await _ensure_conversation(self.request)
         logger.bind(session_id=session_id).info("🚀 SageStreamService.process_stream 开始")
         try:
             stream_result = self.sage_engine.run_stream(
@@ -147,17 +246,17 @@ class SageStreamService:
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
                 session_id=session_id,
-                user_id=user_id,
-                deep_thinking=deep_thinking,
-                max_loop_count=max_loop_count,
-                multi_agent=multi_agent,
-                agent_mode=agent_mode,
-                more_suggest=more_suggest,
-                system_context=system_context,
-                available_workflows=available_workflows,
-                force_summary=force_summary,
-                context_budget_config=context_budget_config,
-                custom_sub_agents=custom_sub_agents,
+                user_id=self.request.user_id,
+                deep_thinking=self.request.deep_thinking,
+                max_loop_count=self.request.max_loop_count,
+                multi_agent=self.request.multi_agent,
+                agent_mode=self.request.agent_mode,
+                more_suggest=self.request.more_suggest,
+                system_context=self.request.system_context,
+                available_workflows=self.request.available_workflows,
+                force_summary=self.request.force_summary,
+                context_budget_config=self.request.context_budget_config,
+                custom_sub_agents=[agent.model_dump() for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
             )
 
             async for chunk in stream_result:
@@ -189,13 +288,9 @@ async def prepare_session(request: StreamRequest):
     """准备会话：获取锁并初始化服务"""
     session_id = request.session_id or str(uuid.uuid4())
     request.session_id = session_id
-    
-    logger.bind(session_id=session_id).info(f"Server: 请求参数摘要 - Agent: {request.agent_name}, 消息数: {len(request.messages) if request.messages else 0}, 技能数: {len(request.available_skills or [])}, 工具数: {len(request.available_tools or [])}")
-    # logger.bind(session_id=session_id).debug(f"Server: 完整请求参数: {request}")
-    
+    logger.bind(session_id=session_id).info(f"Server: 请求参数 - 「{request.model_dump()}」")
     lock = get_session_run_lock(session_id)
     acquired = False
-    
     if lock.locked():
         ctx = get_session_context(session_id)
         if not ctx or ctx.status != SessionStatus.INTERRUPTED:
@@ -209,59 +304,32 @@ async def prepare_session(request: StreamRequest):
 
     try:
         stream_service = SageStreamService(request)
-        return session_id, stream_service, lock
+        return  stream_service, lock
     except Exception:
         if acquired and lock.locked():
             await lock.release()
         raise
 
-async def _generate_stream_lines(
-    *,
-    stream_service: SageStreamService,
-    request: StreamRequest,
-    session_id: str,
-    mode: str,
-):
-    messages = _prepare_messages(request.messages)
-    await _ensure_conversation(session_id, request)
 
+async def execute_chat_session(
+    mode: str,
+    stream_service: SageStreamService,
+):
+    """
+    执行聊天会话逻辑（仅生成流，不处理锁释放）
+    """
+    session_id = stream_service.request.session_id
     stream_counter = 0
     last_activity_time = time.time()
-
-    # 从配置获取 context_budget_config
-    server_config = get_startup_config()
-    context_budget_config = {
-        'max_model_len': server_config.default_llm_max_model_len,
-        'history_ratio': server_config.context_history_ratio,
-        'active_ratio': server_config.context_active_ratio,
-        'max_new_message_ratio': server_config.context_max_new_message_ratio,
-        'recent_turns': server_config.context_recent_turns
-    } 
-    async for result in stream_service.process_stream(
-        messages=messages,
-        session_id=session_id,
-        user_id=getattr(request, "user_id", None),
-        deep_thinking=getattr(request, "deep_thinking", None),
-        max_loop_count=getattr(request, "max_loop_count", None),
-        multi_agent=getattr(request, "multi_agent", None),
-        agent_mode=getattr(request, "agent_mode", None),
-        more_suggest=getattr(request, "more_suggest", False),
-        system_context=getattr(request, "system_context", None),
-        available_workflows=getattr(request, "available_workflows", None),
-        force_summary=getattr(request, "force_summary", False),
-        context_budget_config=context_budget_config,
-        custom_sub_agents=[agent.model_dump() for agent in request.custom_sub_agents] if request.custom_sub_agents else None
-    ):
+    async for result in stream_service.process_stream():
         stream_counter += 1
         current_time = time.time()
         time_since_last = current_time - last_activity_time
         last_activity_time = current_time
-
         if stream_counter % 100 == 0:
             logger.bind(session_id=session_id).info(
                 f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
             )
-
         if mode == "chat":
             yield_result = result.copy()
             yield_result.pop("message_type", None)
@@ -294,24 +362,6 @@ async def _generate_stream_lines(
     )
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
-async def execute_chat_session(
-    request: StreamRequest,
-    mode: str,
-    session_id: str,
-    stream_service: SageStreamService,
-):
-    """
-    执行聊天会话逻辑（仅生成流，不处理锁释放）
-    """
-    # 2. 生成流
-    async for line in _generate_stream_lines(
-        stream_service=stream_service,
-        request=request,
-        session_id=session_id,
-        mode=mode,
-    ):
-        yield line
-
 
 async def run_chat_session(
     request: StreamRequest,
@@ -339,73 +389,25 @@ async def run_chat_session(
         delete_session_run_lock(session_id)
         logger.bind(session_id=session_id).info("资源已清理")
 
+async def _ensure_conversation(request: StreamRequest) -> None:
+    conversation_dao = models.ConversationDao()
+    existing_conversation = await conversation_dao.get_by_session_id(request.session_id)
+    if not existing_conversation:
+        conversation_title = await create_conversation_title(request)
+        await conversation_dao.save_conversation(
+            user_id=request.user_id or "default_user",
+            agent_id=request.agent_id or "default_agent",
+            agent_name=request.agent_name or "Sage Assistant",
+            messages=[],
+            session_id=request.session_id,
+            title=conversation_title,
+        )
 
-async def _execute_chat_task(
-    request: StreamRequest,
-    session_id: str,
-    stream_service: SageStreamService,
-    lock,
-) -> None:
-    """执行异步聊天任务"""
-    acquired = False
-    try:
-        acquired = True
-        messages = _prepare_messages(request.messages)
-        message_collector, message_order = _initialize_message_collector(messages)
-        await _ensure_conversation(session_id, request)
-        # 将用户消息保存到conversation
-        for message in messages:
-            if message.get("role") == "user":
-                await _save_single_message(
-                    session_id, message_collector, message.get("message_id")
-                )
-        current_message_id: str | None = None
-        saved_ids: set[str] = set()
-        async for result in stream_service.process_stream(
-            messages=messages,
-            session_id=session_id,
-            user_id=request.user_id,
-            deep_thinking=request.deep_thinking,
-            max_loop_count=request.max_loop_count,
-            multi_agent=request.multi_agent,
-            agent_mode=request.agent_mode,
-            more_suggest=request.more_suggest,
-            system_context=request.system_context,
-            available_workflows=request.available_workflows,
-            force_summary=request.force_summary,
-        ):
-            update_message_collector(message_collector, message_order, result)
-            mid = result.get("message_id")
-            if current_message_id is None:
-                current_message_id = mid
-            elif mid and mid != current_message_id and current_message_id not in saved_ids:
-                await _save_single_message(session_id, message_collector, current_message_id)
-                saved_ids.add(current_message_id)
-                current_message_id = mid
-        if current_message_id and current_message_id not in saved_ids:
-            await _save_single_message(session_id, message_collector, current_message_id)
-        # 补全 end_data
-        end_data = {
-            "message_id": str(uuid.uuid4()),
-            "type": "stream_end",
-            "session_id": session_id,
-            "timestamp": time.time(),
-        }
-        message_collector[end_data["message_id"]] = end_data
-        # 保存stream_end消息到conversation
-        await _save_single_message(session_id, message_collector, end_data["message_id"])
-    except Exception:
-        pass
-    finally:
-        if acquired and lock.locked():
-            await lock.release()
-        delete_session_run_lock(session_id)
+async def create_conversation_title(request: StreamRequest):
+    """创建会话标题"""
+    if not request.messages or len(request.messages) == 0:
+        return "新会话"
 
-async def run_async_chat_task(request: StreamRequest) -> str:
-    """提交异步聊天任务，返回 session_id"""
-    session_id, stream_service, lock = await prepare_session(request)
-    create_safe_task(
-        _execute_chat_task(request, session_id, stream_service, lock),
-        name=f"chat_task_{session_id}"
-    )
-    return session_id
+    first_message = request.messages[0].content
+    conversation_title = (first_message[:50] + "..." if len(first_message) > 50 else first_message)
+    return conversation_title

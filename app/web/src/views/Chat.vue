@@ -863,27 +863,8 @@ const sendMessageApi = async ({
       agent_mode: config.agentMode,
       more_suggest: config.moreSuggest,
       max_loop_count: config.maxLoopCount,
-      agent_id: selectedAgent?.id || "default_agent",
-      agent_name: selectedAgent?.name || "Sage Assistant",
-      system_context: selectedAgent?.systemContext || {},
-      available_workflows: selectedAgent?.availableWorkflows || {},
-      llm_model_config: selectedAgent?.llmConfig || {
-        model: '',
-        maxTokens: 4096,
-        temperature: 0.7
-      },
-      system_prefix: selectedAgent?.systemPrefix || '',
-      available_tools: selectedAgent?.availableTools || []
+      agent_id: selectedAgent.id,
     };
-
-    // 在浏览器控制台显示聊天时的配置参数
-    console.log('📥 传入的config对象:', config);
-    console.log('🚀 聊天请求配置参数:', {
-      deep_thinking: config.deepThinking,
-      agent_mode: config.agentMode,
-      more_suggest: config.moreSuggest,
-      max_loop_count: config.maxLoopCount
-    });
     const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value);
 
     if (!response.ok) {
