@@ -133,6 +133,25 @@ async def populate_request_from_agent_config(
             setattr(request, field, merged)
 
     _merge_dict("llm_model_config", agent.config.get("llmConfig", {}))
+    
+    # 注入 Provider 配置
+    llm_config = getattr(request, "llm_model_config", {}) or {}
+    provider_id = llm_config.get("providerId") or llm_config.get("provider_id")
+    if provider_id:
+        from ...models.llm_provider import LLMProviderDao
+        provider_dao = LLMProviderDao()
+        provider = await provider_dao.get_by_id(provider_id)
+        if provider:
+            if request.llm_model_config is None:
+                request.llm_model_config = {}
+            
+            # 只有当 request 中没有这些配置时才填充
+            if not request.llm_model_config.get("baseUrl"):
+                request.llm_model_config["baseUrl"] = provider.base_url
+            
+            if not request.llm_model_config.get("apiKey") and provider.api_keys:
+                request.llm_model_config["apiKey"] = ",".join(provider.api_keys)
+
     _fill_if_none("available_tools", agent.config.get("availableTools", []))
     _fill_if_none("available_skills", agent.config.get("availableSkills", []))
     _merge_dict("available_workflows", agent.config.get("availableWorkflows", {}))

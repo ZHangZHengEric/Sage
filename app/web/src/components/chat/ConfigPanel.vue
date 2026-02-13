@@ -20,14 +20,23 @@
         />
       </div>
 
-      <!-- 多智能体协作 -->
+      <!-- Agent 模式 -->
       <div class="space-y-2">
-        <ThreeOptionSwitch
-          :value="config.multiAgent"
-          @change="(value) => handleConfigChange({ multiAgent: value })"
-          :label="t('config.multiAgent')"
-          :description="t('config.multiAgentDesc')"
-        />
+        <Label>{{ t('config.agentMode') }}</Label>
+        <Select :model-value="config.agentMode || 'auto'" @update:model-value="(v) => handleConfigChange({ agentMode: v })">
+          <SelectTrigger class="w-full">
+            <SelectValue :placeholder="t('config.modeAuto')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{{ t('config.modeAuto') }}</SelectItem>
+            <SelectItem value="fibre">{{ t('config.modeFibre') }}</SelectItem>
+            <SelectItem value="simple">{{ t('config.modeSimple') }}</SelectItem>
+            <SelectItem value="multi">{{ t('config.modeMulti') }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p class="text-xs text-muted-foreground">
+          {{ t('config.agentModeDesc') }}
+        </p>
       </div>
 
       <!-- 更多建议 -->
@@ -74,6 +83,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { X } from 'lucide-vue-next'
 
 // Props

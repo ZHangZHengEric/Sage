@@ -75,7 +75,14 @@ class SageStreamService:
             logger.info(f"从缓存中获取 SAgent 实例")
             self.sage_engine = cached_engine
         else:
-            model_client = create_model_client(client_params, final_model_config["model"])
+            # Check if using default client
+            if client_params.get("use_default_client"):
+                 # Use get_chat_client() which returns a client from the pool (rotated)
+                 from ...core.client.chat import get_chat_client
+                 model_client = get_chat_client(model_name=final_model_config["model"])
+            else:
+                 model_client = create_model_client(client_params, final_model_config["model"])
+            
             self.sage_engine = SAgent(
                 model=model_client,
                 model_config=final_model_config,
@@ -109,15 +116,6 @@ class SageStreamService:
                 "base_url": client_params.get("base_url"),
                 "api_key_hash": api_key_hash,
             },
-            # "available_tools": request.available_tools,  # 动态参数，不影响 SAgent 初始化
-            # "available_skills": request.available_skills, # 动态参数
-            # "available_workflows": request.available_workflows, # 动态参数
-            # "deep_thinking": request.deep_thinking, # 运行时参数
-            # "max_loop_count": request.max_loop_count, # 运行时参数
-            # "multi_agent": request.multi_agent, # 运行时参数
-            # "more_suggest": request.more_suggest, # 运行时参数
-            # "system_context": request.system_context, # 运行时参数
-            # "force_summary": request.force_summary, # 运行时参数
             "workspace": workspace,
             "memory_type": request.memory_type,
         }
@@ -131,6 +129,7 @@ class SageStreamService:
         deep_thinking=None,
         max_loop_count=None,
         multi_agent=None,
+        agent_mode=None,
         more_suggest=False,
         system_context=None,
         available_workflows=None,
@@ -151,6 +150,7 @@ class SageStreamService:
                 deep_thinking=deep_thinking,
                 max_loop_count=max_loop_count,
                 multi_agent=multi_agent,
+                agent_mode=agent_mode,
                 more_suggest=more_suggest,
                 system_context=system_context,
                 available_workflows=available_workflows,
@@ -243,6 +243,7 @@ async def _generate_stream_lines(
         deep_thinking=getattr(request, "deep_thinking", None),
         max_loop_count=getattr(request, "max_loop_count", None),
         multi_agent=getattr(request, "multi_agent", None),
+        agent_mode=getattr(request, "agent_mode", None),
         more_suggest=getattr(request, "more_suggest", False),
         system_context=getattr(request, "system_context", None),
         available_workflows=getattr(request, "available_workflows", None),
@@ -365,6 +366,7 @@ async def _execute_chat_task(
             deep_thinking=request.deep_thinking,
             max_loop_count=request.max_loop_count,
             multi_agent=request.multi_agent,
+            agent_mode=request.agent_mode,
             more_suggest=request.more_suggest,
             system_context=request.system_context,
             available_workflows=request.available_workflows,

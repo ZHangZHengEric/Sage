@@ -37,6 +37,7 @@ class AgentConfigDTO(BaseModel):
     deepThinking: Optional[bool] = False
     llmConfig: Optional[Dict[str, Any]] = None
     multiAgent: Optional[bool] = False
+    agentMode: Optional[str] = None
     description: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -58,6 +59,14 @@ def convert_config_to_agent(
     agent_id: str, config: Dict[str, Any], user_id: Optional[str] = None
 ) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
+    llm_config = config.get("llmConfig", {})
+    # Strip sensitive info if present
+    if isinstance(llm_config, dict):
+        if "apiKey" in llm_config:
+            llm_config = llm_config.copy()
+            llm_config.pop("apiKey", None)
+            llm_config.pop("baseUrl", None) # Also strip baseUrl as per requirement
+
     return AgentConfigDTO(
         id=agent_id,
         user_id=user_id,
@@ -74,10 +83,11 @@ def convert_config_to_agent(
         maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
+        agentMode=config.get("agentMode") or config.get("agent_mode"),
         description=config.get("description"),
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
-        llmConfig=config.get("llmConfig", {}),
+        llmConfig=llm_config,
     )
 
 
@@ -95,6 +105,7 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "maxLoopCount": agent.maxLoopCount,
         "deepThinking": agent.deepThinking,
         "multiAgent": agent.multiAgent,
+        "agentMode": agent.agentMode,
         "description": agent.description,
         "created_at": agent.created_at,
         "updated_at": agent.updated_at,
