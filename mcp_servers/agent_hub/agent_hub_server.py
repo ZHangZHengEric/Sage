@@ -154,6 +154,70 @@ db = AgentHubDB(DB_PATH)
 
 # --- Scheduler for Message Delivery ---
 
+def _process_message_object(obj: Dict[str, Any], full_content: List[str]):
+    """Helper to extract content from message objects."""
+    role = obj.get("role")
+    content = obj.get("content")
+    
+    if role == "assistant" and content:
+        # Check if it's a valid string content
+        if isinstance(content, str):
+            full_content.append(content)
+
+def _parse_stream_response(response: httpx.Response) -> str:
+    """
+    Parse the streaming response from Sage API.
+    Handles both simple NDJSON lines and chunked JSON protocol.
+    Accumulates content from 'assistant' messages.
+    """
+    buffer = {} # message_id -> list of chunks
+    full_content = []
+    
+    for line in response.iter_lines():
+        if not line:
+            continue
+            
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+            
+        # Handle Protocol Chunking
+        msg_type = data.get("type")
+        
+        if msg_type == "chunk_start":
+            # Initialize buffer for this message_id
+            total_chunks = data.get("total_chunks", 0)
+            if total_chunks > 0:
+                buffer[data["message_id"]] = [""] * total_chunks
+            continue
+            
+        elif msg_type == "json_chunk":
+            msg_id = data.get("message_id")
+            idx = data.get("chunk_index")
+            if msg_id in buffer and idx is not None:
+                # Ensure list is large enough
+                if idx < len(buffer[msg_id]):
+                    buffer[msg_id][idx] = data.get("chunk_data", "")
+            continue
+            
+        elif msg_type == "chunk_end":
+            msg_id = data.get("message_id")
+            if msg_id in buffer:
+                full_json_str = "".join(buffer[msg_id])
+                del buffer[msg_id]
+                try:
+                    obj = json.loads(full_json_str)
+                    _process_message_object(obj, full_content)
+                except json.JSONDecodeError:
+                    pass
+            continue
+        
+        # Handle Normal Message
+        _process_message_object(data, full_content)
+        
+    return "".join(full_content)
+
 def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
     """
     Deliver message to recipient (User or Agent).
@@ -204,16 +268,12 @@ def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
         
         # Use synchronous client inside the thread
         with httpx.Client(timeout=300.0) as client: # Long timeout for agent execution
-            # Note: We use the non-streaming endpoint if available for simplicity, 
-            # or stream and concatenate. Chat endpoint is usually streaming.
-            # /api/chat is the endpoint.
-            response = client.post(f"{SAGE_API_BASE_URL}/api/chat", json=payload)
-            response.raise_for_status()
-            
-            # The API returns a stream. We need to iterate over lines if it's SSE, 
-            # or just read text if it's a simple stream.
-            # Sage API returns text/plain stream of chunks.
-            full_response_text = response.text
+            # Use /api/stream with streaming response as requested
+            with client.stream("POST", f"{SAGE_API_BASE_URL}/api/stream", json=payload) as response:
+                response.raise_for_status()
+                
+                # Parse the streaming response
+                full_response_text = _parse_stream_response(response)
 
         logger.info(f"Agent {to_agent_id} completed task. Response length: {len(full_response_text)}")
 
@@ -318,7 +378,7 @@ scheduler_thread.start()
 # --- MCP Tools ---
 
 @mcp.tool()
-@sage_mcp_tool(server_name="agent_hub")
+# @sage_mcp_tool(server_name="agent_hub")
 async def list_agents() -> str:
     """
     List all known agents in the system.
@@ -372,7 +432,7 @@ async def list_agents() -> str:
     return json.dumps(agents, indent=2, ensure_ascii=False)
 
 @mcp.tool()
-@sage_mcp_tool(server_name="agent_hub")
+# @sage_mcp_tool(server_name="agent_hub")
 async def get_message_history(current_agent_id: str, target_agent_id: str, limit: int = 50) -> str:
     """
     Get message history between two agents.
@@ -398,7 +458,7 @@ async def get_message_history(current_agent_id: str, target_agent_id: str, limit
     return json.dumps(messages, indent=2, ensure_ascii=False)
 
 @mcp.tool()
-@sage_mcp_tool(server_name="agent_hub")
+# @sage_mcp_tool(server_name="agent_hub")
 async def send_message(from_agent_id: str, to_agent_id: str, content: str, scheduled_at: Optional[str] = None) -> str:
     """
     Send a message to another agent.
@@ -460,7 +520,7 @@ async def send_message(from_agent_id: str, to_agent_id: str, content: str, sched
         return f"Error sending message: {str(e)}"
 
 @mcp.tool()
-@sage_mcp_tool(server_name="agent_hub")
+# @sage_mcp_tool(server_name="agent_hub")
 async def send_human_message(from_agent_id: str, to_user_id: str, content: str, type: str = "notification", options: Optional[List[str]] = None, context: Optional[str] = None) -> str:
     """
     Send a message to a human user (e.g., for approval or notification).
