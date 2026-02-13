@@ -67,7 +67,6 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含MCP服务器列表的标准响应
     """
-    logger.info("获取MCP服务器列表")
 
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
@@ -133,7 +132,6 @@ async def refresh(server_name: str, http_request: Request):
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
 
-    logger.info(f"开始刷新MCP server: {server_name}")
 
     status = await refresh_mcp_server(server_name, user_id, role)
     return await Response.succ(data={"server_name": server_name, "status": status})
