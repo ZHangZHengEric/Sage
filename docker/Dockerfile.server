@@ -53,6 +53,7 @@ RUN apt-get update && \
     shared-mime-info \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && npm config set registry https://registry.npmmirror.com/ \
+    && npm install -g npm@latest \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
