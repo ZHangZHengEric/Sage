@@ -109,7 +109,7 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
                                     current_message_box.finish()
 
                                 # 创建新的消息框
-                                if chunk.show_content and chunk.type:
+                                if chunk.content and chunk.type:
                                     message_type = chunk.type or chunk.message_type or 'normal'
                                     current_message_box = StreamingMessageBox(console, message_type)
 
@@ -117,9 +117,9 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
                         except Exception:
                             print(chunk)
 
-                        if chunk.show_content and current_message_box:
-                            # 确保 show_content 是字符串
-                            content_to_print = str(chunk.show_content)
+                        if chunk.content and current_message_box:
+                            # 确保 content 是字符串
+                            content_to_print = str(chunk.content)
                             for char in content_to_print:
                                 current_message_box.add_content(char)
 
@@ -221,7 +221,7 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
                                 if isinstance(chunk, MessageChunk):
                                     all_chunks.append(deepcopy(chunk))
                                     try:
-                                        if chunk.show_content and chunk.type:
+                                        if chunk.content and chunk.type:
                                             agent_name = chunk.agent_name or "FibreAgent"
                                             
                                             if agent_name not in active_states:
@@ -250,7 +250,7 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
                                                 state['type'] = chunk.type or chunk.message_type or 'normal'
                                                 state['content'] = ""
                                             
-                                            content_to_add = str(chunk.show_content)
+                                            content_to_add = str(chunk.content)
                                             state['content'] += content_to_add
                                             live.update(generate_live_view(), refresh=True)
                                             

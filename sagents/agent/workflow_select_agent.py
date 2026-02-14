@@ -50,7 +50,6 @@ class WorkflowSelectAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.GUIDE.value
             )
         ]
@@ -96,6 +95,5 @@ class WorkflowSelectAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=f"WorkflowSelector: 无法从LLM响应中提取JSON内容，原始响应: {all_content}",
                 message_id=str(uuid.uuid4()),
-                show_content="",
                 message_type=MessageType.GUIDE.value
             )]

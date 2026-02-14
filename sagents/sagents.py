@@ -236,7 +236,7 @@ class SAgent:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
 
         try:
-            # 统计耗时：首个非空 show_content 与完整执行总耗时
+            # 统计耗时：首个非空 content 与完整执行总耗时
             _start_time = time.time()
             _first_show_time = None
 
@@ -260,18 +260,18 @@ class SAgent:
             ):
                 # 过滤掉空消息块
                 for message_chunk in message_chunks:
-                    # 记录首个 show_content 不为空的耗时
-                    if _first_show_time is None:
-                        try:
-                            sc = getattr(message_chunk, "show_content", None)
-                            if sc and str(sc).strip():
-                                _first_show_time = time.time()
-                                _delta_ms = int((_first_show_time - _start_time) * 1000)
-                                logger.info(f"SAgent: 会话 {session_id} 首个可显示内容耗时 {_delta_ms} ms")
-                        except Exception as _e:
-                            logger.error(f"SAgent: 统计首个show_content耗时出错: {_e}\n{traceback.format_exc()}")
-                    if message_chunk.content or message_chunk.show_content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
-                        yield [message_chunk]
+                    # 记录首个 content 不为空的耗时
+                        if _first_show_time is None:
+                            try:
+                                sc = message_chunk.content
+                                if sc and str(sc).strip():
+                                    _first_show_time = time.time()
+                                    _delta_ms = int((_first_show_time - _start_time) * 1000)
+                                    logger.info(f"SAgent: 会话 {session_id} 首个可显示内容耗时 {_delta_ms} ms")
+                            except Exception as _e:
+                                logger.error(f"SAgent: 统计首个content耗时出错: {_e}\n{traceback.format_exc()}")
+                        if message_chunk.content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
+                            yield [message_chunk]
 
             # 流结束后记录完整执行总耗时
             _end_time = time.time()
@@ -685,7 +685,7 @@ class SAgent:
         error_message = f"工作流执行失败: {str(error)}"
         message_id = str(uuid.uuid4())
 
-        yield [MessageChunk(role="assistant", content=error_message, type="final_answer", message_id=message_id, show_content=error_message)]
+        yield [MessageChunk(role="assistant", content=error_message, type="final_answer", message_id=message_id)]
 
     def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
 

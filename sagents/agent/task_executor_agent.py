@@ -56,8 +56,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             role=MessageRole.ASSISTANT.value,
             type=MessageType.EXECUTION.value,
             content=prompt,
-            message_id=str(uuid.uuid4()),
-            show_content=""
+            message_id=str(uuid.uuid4())
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language())
@@ -133,7 +132,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     role=MessageRole.ASSISTANT.value,
                     content="",
                     message_id=content_response_message_id,
-                    show_content="",
                     message_type=MessageType.EMPTY.value
                 )]
                 yield output_messages
@@ -150,7 +148,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                         role=MessageRole.ASSISTANT.value,
                         content=content_piece,
                         message_id=content_response_message_id,
-                        show_content=content_piece,
                         message_type=MessageType.DO_SUBTASK_RESULT.value
                     )]
                     yield output_messages
@@ -159,9 +156,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
                     output_messages = [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content="",
+                        content=chunk.choices[0].delta.reasoning_content,
                         message_id=reasoning_content_response_message_id,
-                        show_content=chunk.choices[0].delta.reasoning_content,
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
                     yield output_messages
@@ -186,9 +182,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             # 发送换行消息（也包含usage信息）
             output_messages = [MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='',
+                content='\n',
                 message_id=content_response_message_id,
-                show_content='\n',
                 message_type=MessageType.DO_SUBTASK_RESULT.value
             )]
             yield output_messages
@@ -292,7 +287,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     role=MessageRole.ASSISTANT.value,
                     content='已经完成了满足用户的所有要求',
                     message_id=str(uuid.uuid4()),
-                    show_content='已经完成了满足用户的所有要求',
                     message_type=MessageType.DO_SUBTASK_RESULT.value
                 )]
                 return

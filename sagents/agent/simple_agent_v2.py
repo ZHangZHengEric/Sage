@@ -456,7 +456,6 @@
 #                     role=MessageRole.ASSISTANT.value,
 #                     content="",
 #                     message_id=content_response_message_id,
-#                     show_content="",
 #                     message_type=MessageType.EMPTY.value
 #                 )]
 #                 yield (output_messages, False)
@@ -470,7 +469,6 @@
 #                         role='assistant',
 #                         content=chunk.choices[0].delta.content,
 #                         message_id=content_response_message_id,
-#                         show_content=chunk.choices[0].delta.content,
 #                         message_type=MessageType.DO_SUBTASK_RESULT.value
 #                     )]
 #                     yield (output_messages, False)
@@ -479,9 +477,8 @@
 #                 if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
 #                     output_messages = [MessageChunk(
 #                         role='assistant',
-#                         content="",
+#                         content=chunk.choices[0].delta.reasoning_content,
 #                         message_id=reasoning_content_response_message_id,
-#                         show_content=chunk.choices[0].delta.reasoning_content,
 #                         message_type=MessageType.TASK_ANALYSIS.value
 #                     )]
 #                     yield (output_messages, False)
@@ -497,9 +494,8 @@
 #             # 发送换行消息（也包含usage信息）
 #             output_messages = [MessageChunk(
 #                 role=MessageRole.ASSISTANT.value,
-#                 content='',
+#                 content='\n',
 #                 message_id=content_response_message_id,
-#                 show_content='\n',
 #                 message_type=MessageType.DO_SUBTASK_RESULT.value
 #             )]
 #             yield (output_messages, False)
@@ -648,7 +644,7 @@
 #             }],
 #             message_type=MessageType.TOOL_CALL.value,
 #             message_id=str(uuid.uuid4()),
-#             show_content=f"{tool_name}({formatted_params})"
+#             content=f"{tool_name}({formatted_params})"
 #         )]
 
 #     def _execute_tool(self,
@@ -790,7 +786,6 @@
 #                     tool_call_id=tool_call_id,
 #                     message_id=str(uuid.uuid4()),
 #                     message_type=MessageType.TOOL_CALL_RESULT.value,
-#                     show_content='\n```json\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\n```\n'
 #                 )]
 #             elif 'messages' in tool_response_dict:
 #                 result = [MessageChunk(
@@ -819,11 +814,10 @@
 #             logger.warning("DirectExecutorAgent: 处理工具响应时JSON解码错误")
 #             return [MessageChunk(
 #                 role='tool',
-#                 content='\n' + tool_response + '\n',
+#                 content=f"工具调用失败\n\n{tool_response}",
 #                 tool_call_id=tool_call_id,
 #                 message_id=str(uuid.uuid4()),
 #                 message_type=MessageType.TOOL_CALL_RESULT.value,
-#                 show_content="工具调用失败\n\n"
 #             )]
 
 
