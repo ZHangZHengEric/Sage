@@ -166,11 +166,11 @@ const form = reactive({
   base_url: '',
   api_keys_str: '',
   model: '',
-  maxTokens: 4096,
+  maxTokens: 8192,
   temperature: 0.7,
-  topP: 0.9,
-  presencePenalty: 0.0,
-  maxModelLen: 32000
+  topP: 0.95,
+  presencePenalty: 0,
+  maxModelLen: 64000
 })
 
 const fetchProviders = async () => {
@@ -190,11 +190,11 @@ const handleCreate = () => {
   form.base_url = ''
   form.api_keys_str = ''
   form.model = ''
-  form.maxTokens = 4096
+  form.maxTokens = 8192
   form.temperature = 0.7
-  form.topP = 0.9
-  form.presencePenalty = 0.0
-  form.maxModelLen = 32000
+  form.topP = 0.95
+  form.presencePenalty = 0
+  form.maxModelLen = 64000
   dialogOpen.value = true
 }
 

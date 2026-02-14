@@ -181,25 +181,19 @@ class ToolProxy:
 
         # Register to the highest priority manager (index 0)
         target_tm = self.tool_managers[0]
-        count = target_tm.register_tools_from_object(obj)
+        # ToolManager.register_tools_from_object now returns List[str] (names of registered tools)
+        registered_tool_names = target_tm.register_tools_from_object(obj)
+        count = len(registered_tool_names)
         
         if count > 0:
-            # If we have a whitelist, we might need to update it?
-            # User intent: "register to current highest priority". 
-            # If the whitelist exists, and we register a new tool, it won't be visible unless added.
+            # Update whitelist only with the newly registered tools
             if self._available_tools is not None:
-                # We can't easily know exactly which names were added without checking before/after or parsing.
-                # But typically register_tools_from_object returns count.
-                # We can list all tools from target_tm and add them?
-                # Or just assume if the user registers it, they want it.
-                # For now, let's just log. The user might need to manage available_tools manually if they use strict filtering.
-                # However, usually local registration implies availability.
-                # Let's try to update available_tools with all tools from the target manager to be safe?
-                # Or maybe just leave it to the user.
-                # Given the context of FibreSubAgent, we added "FibreTools" and then updated the whitelist.
-                # Here we are just registering.
-                pass
-            
+                try:
+                    self._available_tools.update(registered_tool_names)
+                    logger.info(f"ToolProxy: Added {count} newly registered tools to whitelist: {registered_tool_names}")
+                except Exception as e:
+                    logger.warning(f"ToolProxy: Failed to update available_tools after registration: {e}")
+
             logger.info(f"ToolProxy: Registered {count} tools from {obj} into highest priority manager")
             
         return count
