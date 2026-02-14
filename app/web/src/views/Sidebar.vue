@@ -1,6 +1,6 @@
 <template>
   <div 
-    class="group flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
+    class="group relative flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
     :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
   >
     <!-- Header -->
@@ -33,7 +33,7 @@
          size="icon"
          @click="toggleCollapse"
          title="展开"
-         class="absolute -right-3 top-6 bg-background border shadow-sm rounded-full h-6 w-6 p-0 hover:bg-accent z-50 hidden group-hover:flex"
+         class="absolute -right-3 top-6 bg-background border shadow-sm rounded-full h-6 w-6 p-0 hover:bg-accent z-50 flex items-center justify-center"
       >
          <PanelLeftOpen class="h-3 w-3" />
       </Button>
