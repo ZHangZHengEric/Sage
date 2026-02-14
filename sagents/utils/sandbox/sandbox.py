@@ -725,6 +725,9 @@ def _setup_sandbox_env(working_dir: str, env: Dict[str, str]):
     npm_global_dir = os.path.join(working_dir, ".npm_global")
     npm_bin_dir = os.path.join(npm_global_dir, "bin")
     env['NPM_CONFIG_PREFIX'] = npm_global_dir
+    # Redirect npm cache to local directory to avoid permission issues
+    env['npm_config_cache'] = os.path.join(working_dir, ".npm_cache")
+    env['npm_config_userconfig'] = os.path.join(working_dir, ".npmrc")
     
     # Python isolation
     # We use PIP_TARGET to install packages into a local directory
@@ -1078,14 +1081,18 @@ timeout = 120
             "(allow process-exec*)",
             "(allow process-fork)",
             "(allow signal)",
-            "(allow sysctl-read)",
-            "(allow ipc-posix-shm)",
+            "(allow sysctl*)",
+            "(allow ipc-posix*)",
+            "(allow mach-lookup)",
+            "(allow file-map-executable)",
             "(allow network*)",
             '(allow file-read* (subpath "/"))', 
             f'(allow file-write* (subpath "{self.sandbox_dir}"))',
             '(allow file-write* (subpath "/private/var/folders"))',
             '(allow file-write* (subpath "/tmp"))',
             '(allow file-write* (subpath "/dev/null"))',
+            '(allow file-write* (subpath "/dev/tty"))',
+            '(allow file-ioctl)',
         ]
         
         for p in self.limits.get('allowed_paths', []) + additional_write_paths:
@@ -1136,11 +1143,28 @@ timeout = 120
         try:
             t0 = time.time()
             logger.debug(f"Starting sandbox subprocess (mode=seatbelt, id={run_id})")
+            
+            # Prepare environment with sandbox configurations (e.g. npm cache)
+            env = os.environ.copy()
+            _setup_sandbox_env(cwd or self.sandbox_dir, env)
+            
+            # Ensure npm cache is in sandbox_dir to avoid permission issues and pollution
+            env['npm_config_cache'] = os.path.join(self.sandbox_dir, ".npm_cache")
+            env['npm_config_userconfig'] = os.path.join(self.sandbox_dir, ".npmrc")
+            
+            # Redirect HOME and XDG paths to sandbox_dir to contain application data
+            # This prevents tools from trying to write to ~/.config or ~/Library which is blocked
+            env['HOME'] = self.sandbox_dir
+            env['XDG_DATA_HOME'] = os.path.join(self.sandbox_dir, ".local", "share")
+            env['XDG_CONFIG_HOME'] = os.path.join(self.sandbox_dir, ".config")
+            env['XDG_CACHE_HOME'] = os.path.join(self.sandbox_dir, ".cache")
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=cwd or self.sandbox_dir
+                cwd=cwd or self.sandbox_dir,
+                env=env
             )
             logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             
