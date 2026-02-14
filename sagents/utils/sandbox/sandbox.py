@@ -74,13 +74,24 @@ def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
         target = int(limits['memory'])
     except Exception:
         return None
-    cgroup_limit = _get_cgroup_memory_limit_bytes()
-    if cgroup_limit is not None:
-        target = min(target, cgroup_limit)
+    
+    # Check cgroup limit only for logging or soft reference, but do NOT use it 
+    # to restrict RLIMIT_AS (Virtual Memory). Cgroups control physical memory.
+    # RLIMIT_AS controls virtual address space, which must be much larger 
+    # for V8/WebAssembly (often 10GB+ for guard regions).
+    # Using cgroup limit (e.g. 512MB) to cap RLIMIT_AS would crash V8 immediately.
+    
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     if hard != resource.RLIM_INFINITY:
         target = min(target, hard)
-    return target
+    
+    # Increase memory limit for Node.js / V8 (WebAssembly)
+    # V8 requires large address space reservation (often 10GB+).
+    # We multiply the limit by 32 to ensure we cover the 10GB+ requirement 
+    # even if the base limit is small (e.g. 512MB * 32 = 16GB).
+    # This is safe because RLIMIT_AS is virtual memory, not physical RAM.
+    # Physical RAM is constrained by cgroups (in Docker) or system load.
+    return max(target * 32, 16 * 1024 * 1024 * 1024)  # Ensure at least 16GB
 
 # --- Launcher Script Content ---
 LAUNCHER_SCRIPT = """
@@ -674,6 +685,10 @@ def _apply_limits(limits: Dict[str, Any], restrict_files: bool = True):
         if target is not None:
             soft, hard = resource.getrlimit(resource.RLIMIT_AS)
             try:
+                # We calculate a large virtual memory limit in _effective_memory_limit (e.g. 32x),
+                # but we must ensure we don't exceed the system's hard limit.
+                if hard != resource.RLIM_INFINITY:
+                    target = min(target, hard)
                 resource.setrlimit(resource.RLIMIT_AS, (target, hard))
             except (ValueError, OSError):
                 pass
