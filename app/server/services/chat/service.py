@@ -264,15 +264,12 @@ class SageStreamService:
                     continue
                 for message in chunk:
                     result = message.to_dict()
-                    result['session_id'] = session_id
                     result['timestamp'] = time.time()
 
                     result = ContentProcessor.clean_content(result)
 
                     yield result
-
-            logger.bind(session_id=session_id).info("🏁 流式处理完成")
-
+                    
         except Exception as e:
             logger.bind(session_id=session_id).error(f"❌ 流式处理异常: {traceback.format_exc()}")
             error_result = {
