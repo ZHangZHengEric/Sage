@@ -65,14 +65,14 @@ async def stream_with_disconnect_check(
             logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
 
         # 清理资源
-        logger.bind(session_id=session_id).info("流处理结束，清理会话资源")
+        logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
         try:
             if lock.locked():
                 await lock.release()
             delete_session_run_lock(session_id)
             logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
-            logger.bind(session_id=session_id).error(f"Error releasing resources: {e}")
+            logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
 
 
 def validate_and_prepare_request(
