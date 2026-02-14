@@ -343,7 +343,14 @@ class AgentBase(ABC):
             # 2. System Context
             if 'system_context' in include_sections:
                 system_prefix += "<system_context>\n"
+                
+                # Exclude external_paths from generic system_context display as they are handled separately
+                excluded_keys = {'active_skill_instruction', '可以访问的其他路径文件夹', 'external_paths'}
+                
                 for key, value in system_context_info.items():
+                    if key in excluded_keys:
+                        continue
+                        
                     if isinstance(value, (dict, list, tuple)):
                         # 如果值是字典、列表或元组，格式化显示
                         # 如果是元组，先转换为列表，确保序列化行为明确
@@ -452,6 +459,53 @@ class AgentBase(ABC):
                         system_prefix += no_files
                     
                     system_prefix += "</workspace_files>\n"
+
+                # 4.1 External/Additional Paths
+                # Support accessing other directories on the host machine if specified in system_context
+                # Key: '可以访问的其他路径文件夹' or 'external_paths'
+                external_paths = session_context.system_context.get('可以访问的其他路径文件夹') or session_context.system_context.get('external_paths')
+                
+                if external_paths and isinstance(external_paths, list):
+                    system_prefix += "<external_paths>\n"
+                    ext_paths_intro = prompt_manager.get_prompt(
+                        'external_paths_intro',
+                        agent='common',
+                        language=language,
+                        default="您还可以访问以下外部目录（访问深度不受限，此处仅展示前2层文件）：\n"
+                    )
+                    system_prefix += ext_paths_intro
+
+                    # Ensure we have a file system object
+                    fs_for_external = file_system
+                    if not fs_for_external:
+                         # Try to create a temporary one
+                         try:
+                            from sagents.utils.sandbox.filesystem import SandboxFileSystem
+                            # We just need it for reading, host_path doesn't matter much if we provide root_path
+                            # Use current working directory as a safe default if available, else /
+                            fs_for_external = SandboxFileSystem(host_path=os.getcwd(), virtual_path="/workspace") 
+                         except:
+                            pass
+                    
+                    if fs_for_external:
+                        for ext_path in external_paths:
+                            if isinstance(ext_path, str):
+                                if os.path.exists(ext_path):
+                                    system_prefix += f"Path: {ext_path}\n"
+                                    try:
+                                        # Limit depth to 1 to avoid context overflow
+                                        ext_tree = fs_for_external.get_file_tree(include_hidden=True, root_path=ext_path, max_depth=2)
+                                        if ext_tree:
+                                            system_prefix += ext_tree
+                                        else:
+                                            system_prefix += "(Empty)\n"
+                                    except Exception as e:
+                                        system_prefix += f"(Error listing files: {e})\n"
+                                else:
+                                     system_prefix += f"Path: {ext_path} (Not found)\n"
+                                system_prefix += "\n"
+                    
+                    system_prefix += "</external_paths>\n"
 
             # 5. Available Skills
             if 'available_skills' in include_sections:
