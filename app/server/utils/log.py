@@ -65,8 +65,9 @@ class InterceptHandler(logging.Handler):
         payload = {"logger_name": record.name}
         if hasattr(record, "session_id") and record.session_id != "NO_SESSION":
             payload["session_id"] = record.session_id
+    
         if hasattr(record, "caller_filename"):
-            payload["file"] = record.caller_filename
+            payload["file.name"] = record.caller_filename
         if hasattr(record, "caller_lineno"):
             payload["line"] = record.caller_lineno
         logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(level, record.getMessage())
