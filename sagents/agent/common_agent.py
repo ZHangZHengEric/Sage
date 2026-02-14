@@ -100,7 +100,6 @@ class CommonAgent(AgentBase):
                     role=MessageRole.ASSISTANT.value,
                     content="",
                     message_id=content_response_message_id,
-                    show_content="",
                     message_type=MessageType.EMPTY.value
                 )]
                 yield output_messages
@@ -115,7 +114,6 @@ class CommonAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content=chunk.choices[0].delta.content,
                         message_id=content_response_message_id,
-                        show_content=chunk.choices[0].delta.content,
                         message_type=MessageType.DO_SUBTASK_RESULT.value
                     )]
                     yield output_messages
@@ -124,9 +122,8 @@ class CommonAgent(AgentBase):
                 if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
                     output_messages = [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content="",
+                        content=chunk.choices[0].delta.reasoning_content,
                         message_id=reasoning_content_response_message_id,
-                        show_content=chunk.choices[0].delta.reasoning_content,
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
                     yield output_messages
@@ -145,7 +142,6 @@ class CommonAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content='',
                 message_id=content_response_message_id,
-                show_content='\n',
                 message_type=MessageType.DO_SUBTASK_RESULT.value
             )]
             yield output_messages
@@ -182,7 +178,6 @@ class CommonAgent(AgentBase):
                     role=MessageRole.ASSISTANT.value,
                     content='已经完成了满足用户的所有要求',
                     message_id=str(uuid.uuid4()),
-                    show_content='已经完成了满足用户的所有要求',
                     message_type=MessageType.DO_SUBTASK_RESULT.value
                 )]
                 return
@@ -256,7 +251,7 @@ class CommonAgent(AgentBase):
 
         tool_name = tool_call['function']['name']
 
-        # 将show_content 整理成函数调用的形式
+        # 将content 整理成函数调用的形式
         # func_name(param1 = ,param2)
         return [MessageChunk(
             role=MessageRole.ASSISTANT.value,
@@ -270,7 +265,7 @@ class CommonAgent(AgentBase):
             }],
             message_type=MessageType.TOOL_CALL.value,
             message_id=str(uuid.uuid4()),
-            show_content=f"{tool_name}({formatted_params})"
+            content=f"{tool_name}({formatted_params})"
         )]
 
     async def _execute_tool(self,
@@ -340,7 +335,6 @@ class CommonAgent(AgentBase):
                                                 tool_call_id=tool_call['id'],
                                                 message_id=str(uuid.uuid4()),
                                                 message_type=MessageType.TOOL_CALL_RESULT.value,
-                                                show_content=message['content']
                                             ))
                                     yield message_chunks
                                 else:
@@ -352,7 +346,6 @@ class CommonAgent(AgentBase):
                                             tool_call_id=tool_call['id'],
                                             message_id=str(uuid.uuid4()),
                                             message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            show_content=chunk['content']
                                         )
                                         yield [message_chunk_]
                     else:
@@ -376,8 +369,8 @@ class CommonAgent(AgentBase):
                                                 tool_call_id=tool_call['id'],
                                                 message_id=str(uuid.uuid4()),
                                                 message_type=MessageType.TOOL_CALL_RESULT.value,
-                                                show_content=message['content']
-                                            ))
+                                            # show_content=message['content']
+                                        ))
                                     yield message_chunks
                                 else:
                                     # 单个消息
@@ -388,7 +381,6 @@ class CommonAgent(AgentBase):
                                             tool_call_id=tool_call['id'],
                                             message_id=str(uuid.uuid4()),
                                             message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            show_content=chunk['content']
                                         )
                                         yield [message_chunk_]
                 except Exception as e:
@@ -429,7 +421,6 @@ class CommonAgent(AgentBase):
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.TOOL_CALL_RESULT.value,
-            show_content=error_message
         )
 
         yield [error_chunk]
@@ -456,8 +447,7 @@ class CommonAgent(AgentBase):
                     content=tool_response,
                     tool_call_id=tool_call_id,
                     message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content='\n```json\n' + json.dumps(tool_response_dict['content'], ensure_ascii=False, indent=2) + '\n```\n'
+                    message_type=MessageType.TOOL_CALL_RESULT.value
                 )]
             elif 'messages' in tool_response_dict:
                 result = [MessageChunk(
@@ -465,8 +455,7 @@ class CommonAgent(AgentBase):
                     content=msg,
                     tool_call_id=tool_call_id,
                     message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content=msg
+                    message_type=MessageType.TOOL_CALL_RESULT.value
                 ) for msg in tool_response_dict['messages']]
             else:
                 # 默认处理
@@ -475,8 +464,7 @@ class CommonAgent(AgentBase):
                     content=tool_response,
                     tool_call_id=tool_call_id,
                     message_id=str(uuid.uuid4()),
-                    message_type=MessageType.TOOL_CALL_RESULT.value,
-                    show_content='\n' + tool_response + '\n'
+                    message_type=MessageType.TOOL_CALL_RESULT.value
                 )]
 
             logger.debug("CommonAgent: 工具响应处理成功")
@@ -489,6 +477,5 @@ class CommonAgent(AgentBase):
                 content=tool_response,
                 tool_call_id=tool_call_id,
                 message_id=str(uuid.uuid4()),
-                message_type=MessageType.TOOL_CALL_RESULT.value,
-                show_content='\n' + tool_response + '\n'
+                message_type=MessageType.TOOL_CALL_RESULT.value
             )]

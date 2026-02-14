@@ -641,7 +641,7 @@ class AgentBase(ABC):
             }],
             message_type=MessageType.TOOL_CALL.value,
             message_id=str(uuid.uuid4()),
-            show_content=f"{tool_name}({formatted_params})",
+            content=f"{tool_name}({formatted_params})",
             agent_name=self.agent_name
         )]
 
@@ -719,7 +719,6 @@ class AgentBase(ABC):
                                             tool_call_id=tool_call['id'],
                                             message_id=str(uuid.uuid4()),
                                             message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            show_content=message['content'],
                                             agent_name=self.agent_name
                                         ))
                                 yield message_chunks
@@ -732,7 +731,6 @@ class AgentBase(ABC):
                                         tool_call_id=tool_call['id'],
                                         message_id=str(uuid.uuid4()),
                                         message_type=MessageType.TOOL_CALL_RESULT.value,
-                                        show_content=chunk['content'],
                                         agent_name=self.agent_name
                                     )
                                     yield [message_chunk_]
@@ -774,7 +772,6 @@ class AgentBase(ABC):
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.TOOL_CALL_RESULT.value,
-            show_content=error_message
         )
 
         yield [error_chunk]
@@ -814,7 +811,6 @@ class AgentBase(ABC):
             tool_call_id=tool_call_id,
             message_id=str(uuid.uuid4()),
             message_type=MessageType.TOOL_CALL_RESULT.value,
-            show_content=content,
             agent_name=self.agent_name
         )]
 

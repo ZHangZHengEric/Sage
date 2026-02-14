@@ -95,7 +95,6 @@ class TaskStageSummaryAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.STAGE_SUMMARY.value
             )
         ]
@@ -125,8 +124,7 @@ class TaskStageSummaryAgent(AgentBase):
             message_id=str(uuid.uuid4()),
             role=MessageRole.ASSISTANT.value,
             content=stage_summary_label+json.dumps(summary_result, ensure_ascii=False),
-            message_type=MessageType.STAGE_SUMMARY.value,
-            show_content=""
+            message_type=MessageType.STAGE_SUMMARY.value
         )]
 
     def convert_xml_to_json(self, xml_content: str) -> Dict[str, Any]:

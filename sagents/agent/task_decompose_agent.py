@@ -53,7 +53,6 @@ class TaskDecomposeAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.TASK_DECOMPOSITION.value
             )
         ]
@@ -83,34 +82,40 @@ class TaskDecomposeAgent(AgentBase):
                             if last_tag_type != 'task_item':
                                 yield [MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
-                                    content='',
+                                    content='\n- ',
                                     message_id=message_id,
-                                    show_content='\n- ',
                                     message_type=MessageType.TASK_DECOMPOSITION.value
                                 )]
 
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content="",
+                                content=delta_content_all,
                                 message_id=message_id,
-                                show_content=delta_content_all,
                                 message_type=MessageType.TASK_DECOMPOSITION.value
                             )]
                         last_tag_type = delta_content_type
-
-        async for chunk in self._finalize_decomposition_result(full_response, message_id, task_manager, session_context.get_language()):
+        
+        async for chunk in self._finalize_decomposition_result(full_response, message_id, task_manager, session_context):
             yield chunk
 
     async def _finalize_decomposition_result(self, 
                                      full_response: str, 
                                      message_id: str,
                                      task_manager: Optional[TaskManager] = None,
-                                     language: str = 'zh') -> AsyncGenerator[List[MessageChunk], None]:
+                                     session_context: SessionContext = None) -> AsyncGenerator[List[MessageChunk], None]:
         logger.debug("TaskDecomposeAgent: 处理最终任务分解结果")
+        language = session_context.get_language() if session_context else 'zh'
         try:
             # 解析任务列表
             tasks = self._convert_xlm_to_json(full_response)
             logger.info(f"TaskDecomposeAgent: 成功分解为 {len(tasks)} 个子任务")
+
+            # 将解析后的任务数据存储到 session_context.audit_status
+            if session_context:
+                if 'task_decomposition_results' not in session_context.audit_status:
+                    session_context.audit_status['task_decomposition_results'] = []
+                session_context.audit_status['task_decomposition_results'] = tasks
+                logger.info("TaskDecomposeAgent: 已将任务分解结果存储到 session_context.audit_status")
 
             # 如果有TaskManager，将子任务存储到任务管理器中
             if task_manager:
@@ -143,13 +148,14 @@ class TaskDecomposeAgent(AgentBase):
                 language=language,
                 default='任务拆解规划：'
             )
-            result_content = planning_label + '\n' + json.dumps({"tasks": tasks}, ensure_ascii=False)
+            result_content = planning_label + '\n'
+            for task in tasks:
+                result_content += f"- {task.get('description', '')}\n"
 
             result_message = MessageChunk(
                 role=MessageRole.ASSISTANT.value,
                 content=result_content,
                 message_id=message_id,
-                show_content='',
                 message_type=MessageType.TASK_DECOMPOSITION.value
             )
 
@@ -167,7 +173,6 @@ class TaskDecomposeAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=error_content,
                 message_id=str(uuid.uuid4()),
-                show_content=error_content,
                 message_type=MessageType.TASK_DECOMPOSITION.value
             )]
     def _convert_xlm_to_json(self, content: str) -> List[Dict[str, Any]]:

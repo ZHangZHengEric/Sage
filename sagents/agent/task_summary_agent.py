@@ -55,7 +55,6 @@ class TaskSummaryAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.FINAL_ANSWER.value
             )
         ]
@@ -71,6 +70,5 @@ class TaskSummaryAgent(AgentBase):
                     role=MessageRole.ASSISTANT.value,
                     content=llm_repsonse_chunk.choices[0].delta.content,
                     message_id=message_id,
-                    show_content=llm_repsonse_chunk.choices[0].delta.content,
                     message_type=MessageType.FINAL_ANSWER.value
                 )]

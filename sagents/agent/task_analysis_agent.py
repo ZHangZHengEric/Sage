@@ -74,7 +74,6 @@ class TaskAnalysisAgent(AgentBase):
             role=MessageRole.ASSISTANT.value,
             content=task_analysis_prompt,
             message_id=message_id,
-            show_content="",
             message_type=MessageType.TASK_ANALYSIS.value
         )]
 
@@ -89,7 +88,6 @@ class TaskAnalysisAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.TASK_ANALYSIS.value
             )
         ]
@@ -108,7 +106,6 @@ class TaskAnalysisAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content=llm_repsonse_chunk.choices[0].delta.content,
                         message_id=message_id,
-                        show_content=llm_repsonse_chunk.choices[0].delta.content,
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
             elif hasattr(llm_repsonse_chunk.choices[0].delta, 'reasoning_content') and llm_repsonse_chunk.choices[0].delta.reasoning_content is not None:
@@ -116,7 +113,6 @@ class TaskAnalysisAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content="",
                         message_id=message_id,
-                        show_content="",
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
         session_context.audit_status['task_analysis'] = all_analysis_chunks_content
