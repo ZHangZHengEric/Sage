@@ -64,7 +64,6 @@ class TaskObservationAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.OBSERVATION.value
             )
         ]
@@ -96,15 +95,13 @@ class TaskObservationAgent(AgentBase):
                                     role=MessageRole.ASSISTANT.value,
                                     content='',
                                     message_id=message_id,
-                                    show_content='\n\n',
                                     message_type=MessageType.OBSERVATION.value
                                 )]
 
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content='',
+                                content=delta_content_all,
                                 message_id=message_id,
-                                show_content=delta_content_all,
                                 message_type=MessageType.OBSERVATION.value
                             )]
                         last_tag_type = tag_type
@@ -135,7 +132,6 @@ class TaskObservationAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=PromptManager().get_agent_prompt_auto('execution_evaluation_prompt', language=session_context.get_language()) + json.dumps(response_json, ensure_ascii=False),
                 message_id=message_id,
-                show_content='\n',
                 message_type=MessageType.OBSERVATION.value
             )
 
@@ -148,7 +144,6 @@ class TaskObservationAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=f"任务观测失败: {str(e)}",
                 message_id=str(uuid.uuid4()),
-                show_content=f"任务观测失败: {str(e)}",
                 message_type=MessageType.OBSERVATION.value
             )]
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:

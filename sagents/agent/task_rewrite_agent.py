@@ -49,7 +49,6 @@ class TaskRewriteAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.TASK_ANALYSIS.value
             )
         ]
@@ -68,7 +67,6 @@ class TaskRewriteAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content=llm_repsonse_chunk.choices[0].delta.content,
                         message_id=message_id,
-                        show_content="",
                         message_type=MessageType.REWRITE.value
                     )]
             elif hasattr(llm_repsonse_chunk.choices[0].delta, 'reasoning_content') and llm_repsonse_chunk.choices[0].delta.reasoning_content is not None:
@@ -76,7 +74,6 @@ class TaskRewriteAgent(AgentBase):
                     role=MessageRole.ASSISTANT.value,
                     content="",
                     message_id=message_id,
-                    show_content="",
                     message_type=MessageType.TASK_ANALYSIS.value
                 )]
         try:
