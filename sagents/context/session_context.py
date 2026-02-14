@@ -172,7 +172,11 @@ class SessionContext:
         if self.skill_manager:
             # Create a dedicated manager for session-specific skills
             # This manager watches the session skill directory
-            session_local_manager = SkillManager(skill_dirs=[self.session_skill_dir], isolated=True)
+            session_local_manager = SkillManager(
+                skill_dirs=[self.session_skill_dir], 
+                isolated=True,
+                include_global_skills=False  # Do NOT load global skills into this local manager
+            )
             
             # Compose a new SkillProxy that wraps both the session-local manager and the existing manager
             # Priority: Session Local Manager > Existing Manager (Global or Proxy)

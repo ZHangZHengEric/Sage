@@ -33,18 +33,18 @@ class SkillManager:
     """
     _instance = None
 
-    def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False):
+    def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False, include_global_skills: bool = True):
         if isolated:
             return super(SkillManager, cls).__new__(cls)
         if cls._instance is None:
             cls._instance = super(SkillManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, skill_dirs: List[str] = None, isolated: bool = False):
+    def __init__(self, skill_dirs: List[str] = None, isolated: bool = False, include_global_skills: bool = True):
         if not isolated and getattr(self, '_initialized', False):
             return
 
-        self._initialize(skill_dirs)
+        self._initialize(skill_dirs, include_global_skills)
         self._initialized = True
 
     def add_skill_dir(self, path: str):
@@ -56,14 +56,19 @@ class SkillManager:
             self.skill_dirs.append(path)
             self.reload()
 
-    def _initialize(self, skill_dirs: List[str] = None):
+    def _initialize(self, skill_dirs: List[str] = None, include_global_skills: bool = True):
         logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.skill_workspace = os.path.join(base_dir, "skills")
+        
         # Combine custom directories with the default workspace (合并自定义目录和默认工作区)
-        self.skill_dirs = list(dict.fromkeys((skill_dirs or []) + [self.skill_workspace]))
+        dirs = skill_dirs or []
+        if include_global_skills:
+             dirs.append(self.skill_workspace)
+             
+        self.skill_dirs = list(dict.fromkeys(dirs))
         self._load_skills_from_workspace()
 
     @classmethod
