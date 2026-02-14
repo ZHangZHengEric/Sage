@@ -139,7 +139,7 @@ async def file_read_core(file_path: str, start_line: int = 0, end_line: Optional
             encoding = file_info.get("encoding", "utf-8")
 
         def skill_read_file_lines():
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, 'r', encoding=encoding, errors='replace') as f:
                 return f.readlines()
 
         lines = await asyncio.to_thread(skill_read_file_lines)
