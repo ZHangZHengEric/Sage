@@ -88,10 +88,9 @@ def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
     # V8/WebAssembly requires huge virtual memory (Guard Regions).
     # Setting RLIMIT_AS can causing immediate crashes (OOM) even if physical memory is sufficient.
     # In Docker/Kubernetes, physical memory is already constrained by cgroups.
-    # We effectively disable RLIMIT_AS by setting it to a very high value (1TB) to accommodate V8 requirements,
-    # while maintaining a theoretical upper bound for runaway processes.
+    # We effectively disable RLIMIT_AS by setting it to None (Unlimited) to accommodate V8 requirements.
     # See: https://github.com/nodejs/node/issues/24649
-    return 1024 * 1024 * 1024 * 1024  # 1TB Virtual Memory Limit
+    return None
 
 # --- Launcher Script Content ---
 LAUNCHER_SCRIPT = """
@@ -134,15 +133,15 @@ def _apply_limits_internal(limits, restrict_files=True):
             pass
 
     # Set Memory limit (in bytes)
-    if 'memory' in limits:
-        target = int(limits['memory'])
-        try:
-            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-            if hard != resource.RLIM_INFINITY:
-                target = min(target, hard)
-            resource.setrlimit(resource.RLIMIT_AS, (target, hard))
-        except Exception:
-            pass
+    # if 'memory' in limits:
+    #     target = int(limits['memory'])
+    #     try:
+    #         soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    #         if hard != resource.RLIM_INFINITY:
+    #             target = min(target, hard)
+    #         # resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+    #     except Exception:
+    #         pass
 
     # Simple file system restriction (logical)
     if restrict_files and 'allowed_paths' in limits:
