@@ -189,9 +189,7 @@ class SessionManager:
                     except Exception as e:
                         logger.error(f"MySQL 连接验证失败: {e}")
                         raise e
-
-                logger.info(f"数据库连接初始化完成 ({self._engine_name})")
-
+                        
         except Exception as e:
             err_msg = str(e)
             logger.error(f"数据库初始化失败: {err_msg}")
