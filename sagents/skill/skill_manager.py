@@ -46,7 +46,7 @@ class SkillManager:
         self._initialized = True
 
     def _initialize(self, skill_dirs: List[str] = None):
-        logger.info("Initializing SkillManager")
+        logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -140,7 +140,7 @@ class SkillManager:
         内部方法：扫描并加载所有配置的技能目录中的技能。
         """
         self.skills.clear()
-
+        count = 0
         # Iterate over all configured skill directories
         for workspace in self.skill_dirs:
             if not os.path.exists(workspace):
@@ -154,9 +154,14 @@ class SkillManager:
                     if os.path.isdir(skill_path):
                         # Avoid duplicates if multiple workspaces have same skill name?
                         # Current logic: Last loaded overwrites previous if names collide.
-                        self._load_skill_from_dir(skill_path)
+                        name = self._load_skill_from_dir(skill_path)
+                        if name:
+                            count += 1
+                
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
+        logger.debug(f"Total skills loaded: {count}")
+
 
     def _generate_file_list(self, path: str, root_path: str, skill_name: str) -> str:
         lines = []
@@ -232,7 +237,7 @@ class SkillManager:
                         file_list=file_list, 
                     )
                     self.skills[name] = schema
-                    logger.info(f"Successfully registered new skill: {name}")
+                    logger.debug(f"Successfully registered new skill: {name}")
                     return name
             except Exception as e:
                 logger.error(f"Failed to load skill from {skill_path}: {e}")
