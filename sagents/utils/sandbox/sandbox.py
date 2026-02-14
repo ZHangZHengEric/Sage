@@ -74,13 +74,23 @@ def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
         target = int(limits['memory'])
     except Exception:
         return None
-    cgroup_limit = _get_cgroup_memory_limit_bytes()
-    if cgroup_limit is not None:
-        target = min(target, cgroup_limit)
+    
+    # Check cgroup limit only for logging or soft reference, but do NOT use it 
+    # to restrict RLIMIT_AS (Virtual Memory). Cgroups control physical memory.
+    # RLIMIT_AS controls virtual address space, which must be much larger 
+    # for V8/WebAssembly (often 10GB+ for guard regions).
+    # Using cgroup limit (e.g. 512MB) to cap RLIMIT_AS would crash V8 immediately.
+    
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     if hard != resource.RLIM_INFINITY:
         target = min(target, hard)
-    return target
+    
+    # V8/WebAssembly requires huge virtual memory (Guard Regions).
+    # Setting RLIMIT_AS can causing immediate crashes (OOM) even if physical memory is sufficient.
+    # In Docker/Kubernetes, physical memory is already constrained by cgroups.
+    # We effectively disable RLIMIT_AS by setting it to None (Unlimited) to accommodate V8 requirements.
+    # See: https://github.com/nodejs/node/issues/24649
+    return None
 
 # --- Launcher Script Content ---
 LAUNCHER_SCRIPT = """
@@ -123,15 +133,15 @@ def _apply_limits_internal(limits, restrict_files=True):
             pass
 
     # Set Memory limit (in bytes)
-    if 'memory' in limits:
-        target = int(limits['memory'])
-        try:
-            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-            if hard != resource.RLIM_INFINITY:
-                target = min(target, hard)
-            resource.setrlimit(resource.RLIMIT_AS, (target, hard))
-        except Exception:
-            pass
+    # if 'memory' in limits:
+    #     target = int(limits['memory'])
+    #     try:
+    #         soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    #         if hard != resource.RLIM_INFINITY:
+    #             target = min(target, hard)
+    #         # resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+    #     except Exception:
+    #         pass
 
     # Simple file system restriction (logical)
     if restrict_files and 'allowed_paths' in limits:
@@ -674,6 +684,10 @@ def _apply_limits(limits: Dict[str, Any], restrict_files: bool = True):
         if target is not None:
             soft, hard = resource.getrlimit(resource.RLIMIT_AS)
             try:
+                # We calculate a large virtual memory limit in _effective_memory_limit (e.g. 32x),
+                # but we must ensure we don't exceed the system's hard limit.
+                if hard != resource.RLIM_INFINITY:
+                    target = min(target, hard)
                 resource.setrlimit(resource.RLIMIT_AS, (target, hard))
             except (ValueError, OSError):
                 pass
@@ -725,6 +739,9 @@ def _setup_sandbox_env(working_dir: str, env: Dict[str, str]):
     npm_global_dir = os.path.join(working_dir, ".npm_global")
     npm_bin_dir = os.path.join(npm_global_dir, "bin")
     env['NPM_CONFIG_PREFIX'] = npm_global_dir
+    # Redirect npm cache to local directory to avoid permission issues
+    env['npm_config_cache'] = os.path.join(working_dir, ".npm_cache")
+    env['npm_config_userconfig'] = os.path.join(working_dir, ".npmrc")
     
     # Python isolation
     # We use PIP_TARGET to install packages into a local directory
@@ -913,6 +930,54 @@ class Sandbox:
             if self.sandbox_dir not in self.limits['allowed_paths']:
                 self.limits['allowed_paths'].append(self.sandbox_dir)
 
+        # Initialize CWD to host_workspace (or virtual_workspace if mapping enabled? No, execution happens in host path)
+        # But we want to store the "Current" directory.
+        # Since subprocess.Popen uses host paths, we store host path here.
+        self.cwd = self.host_workspace
+
+    def get_cwd(self) -> Optional[str]:
+        """Get the current working directory of the sandbox (host path)."""
+        return self.cwd
+
+    def wrap_command_with_cwd_capture(self, command: str, process_id: str = "") -> str:
+        """
+        Wraps a shell command to capture the resulting CWD.
+        Appends '; echo __SAGE_CWD_MARKER__; pwd' etc.
+        """
+        cwd_marker = f"__SAGE_CWD_{process_id}__"
+        # 使用分号追加 echo 和 pwd，并保留原始命令的返回码
+        # 注意：仅适用于 Unix-like shell，Windows 暂不支持完美保留
+        if platform.system() != "Windows":
+            return f"{command}; __SAGE_RET=$?; echo '{cwd_marker}'; pwd; exit $__SAGE_RET"
+        else:
+            return f"{command} & echo {cwd_marker} & cd"
+
+    def update_cwd_from_output(self, stdout: str, process_id: str = "") -> str:
+        """
+        Parses the stdout, extracts the new CWD, updates self.cwd, and returns cleaned stdout.
+        """
+        cwd_marker = f"__SAGE_CWD_{process_id}__"
+        if cwd_marker in stdout:
+            try:
+                parts = stdout.split(cwd_marker)
+                # The part before marker is actual stdout
+                cleaned_stdout = parts[0]
+                
+                # The part after marker should be "\n/path/to/cwd\n"
+                if len(parts) > 1:
+                    new_cwd = parts[1].strip()
+                    if new_cwd and os.path.exists(new_cwd):
+                        self.cwd = new_cwd
+                        logger.debug(f"Sandbox CWD updated to: {self.cwd}")
+                    else:
+                         logger.debug(f"Ignored invalid CWD update: {new_cwd}")
+                
+                return cleaned_stdout
+            except Exception as e:
+                logger.warning(f"Failed to parse CWD from output: {e}")
+                return stdout
+        return stdout
+
     def _resolve_linux_mode(self, mode: str) -> str:
         if mode != 'auto':
             return mode
@@ -1030,14 +1095,18 @@ timeout = 120
             "(allow process-exec*)",
             "(allow process-fork)",
             "(allow signal)",
-            "(allow sysctl-read)",
-            "(allow ipc-posix-shm)",
+            "(allow sysctl*)",
+            "(allow ipc-posix*)",
+            "(allow mach-lookup)",
+            "(allow file-map-executable)",
             "(allow network*)",
             '(allow file-read* (subpath "/"))', 
             f'(allow file-write* (subpath "{self.sandbox_dir}"))',
             '(allow file-write* (subpath "/private/var/folders"))',
             '(allow file-write* (subpath "/tmp"))',
             '(allow file-write* (subpath "/dev/null"))',
+            '(allow file-write* (subpath "/dev/tty"))',
+            '(allow file-ioctl)',
         ]
         
         for p in self.limits.get('allowed_paths', []) + additional_write_paths:
@@ -1088,11 +1157,28 @@ timeout = 120
         try:
             t0 = time.time()
             logger.debug(f"Starting sandbox subprocess (mode=seatbelt, id={run_id})")
+            
+            # Prepare environment with sandbox configurations (e.g. npm cache)
+            env = os.environ.copy()
+            _setup_sandbox_env(cwd or self.sandbox_dir, env)
+            
+            # Ensure npm cache is in sandbox_dir to avoid permission issues and pollution
+            env['npm_config_cache'] = os.path.join(self.sandbox_dir, ".npm_cache")
+            env['npm_config_userconfig'] = os.path.join(self.sandbox_dir, ".npmrc")
+            
+            # Redirect HOME and XDG paths to sandbox_dir to contain application data
+            # This prevents tools from trying to write to ~/.config or ~/Library which is blocked
+            env['HOME'] = self.sandbox_dir
+            env['XDG_DATA_HOME'] = os.path.join(self.sandbox_dir, ".local", "share")
+            env['XDG_CONFIG_HOME'] = os.path.join(self.sandbox_dir, ".config")
+            env['XDG_CACHE_HOME'] = os.path.join(self.sandbox_dir, ".cache")
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=cwd or self.sandbox_dir
+                cwd=cwd or self.sandbox_dir,
+                env=env
             )
             logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             

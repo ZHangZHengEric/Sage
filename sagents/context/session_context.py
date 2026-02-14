@@ -164,6 +164,26 @@ class SessionContext:
         # 为了兼容性，保留 file_system 引用
         self.file_system = self.sandbox.file_system
         
+        # Define session skill directory and update SkillManager
+        self.session_skill_dir = os.path.join(self.agent_workspace.host_path, "skills")
+        if not os.path.exists(self.session_skill_dir):
+            os.makedirs(self.session_skill_dir)
+
+        if self.skill_manager:
+            # Create a dedicated manager for session-specific skills
+            # This manager watches the session skill directory
+            session_local_manager = SkillManager(
+                skill_dirs=[self.session_skill_dir], 
+                isolated=True,
+                include_global_skills=False  # Do NOT load global skills into this local manager
+            )
+            
+            # Compose a new SkillProxy that wraps both the session-local manager and the existing manager
+            # Priority: Session Local Manager > Existing Manager (Global or Proxy)
+            # This ensures session-specific skills override global ones if names collide,
+            # and new session skills are immediately available.
+            self.skill_manager = SkillProxy(skill_managers=[session_local_manager, self.skill_manager])
+
         # Copy skills to workspace if skill manager is available
         if self.skill_manager:
             logger.info(f"SessionContext: 准备复制技能到工作区: {self.agent_workspace.host_path}")
@@ -185,7 +205,15 @@ class SessionContext:
         #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
         self.system_context['session_id'] = self.session_id
         # self.system_context['文件权限'] = "只允许在 "+self.system_context['file_workspace']+" 目录下操作读写文件，并且使用绝对路径"
-        self.system_context['file_permission'] = "only allow read and write files in the "+self.system_context['file_workspace']+" directory, and use absolute path"
+        
+        # Check for external paths to include in permissions
+        external_paths = self.system_context.get('可以访问的其他路径文件夹') or self.system_context.get('external_paths')
+        permission_paths = [self.system_context['file_workspace']]
+        if external_paths and isinstance(external_paths, list):
+             permission_paths.extend([str(p) for p in external_paths])
+        
+        paths_str = ", ".join(permission_paths)
+        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str}, and use absolute path"
         self.system_context['response_language'] = "zh-CN(简体中文)"
 
         # 如果有历史的messages.json，则加载messages.json
