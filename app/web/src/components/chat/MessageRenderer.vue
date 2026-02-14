@@ -136,9 +136,11 @@ import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
 import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
 import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
+import AgentCardMessage from './tools/AgentCardMessage.vue'
+
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
-
+  sys_spawn_agent: AgentCardMessage
 }
 
 const props = defineProps({
