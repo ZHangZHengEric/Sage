@@ -913,6 +913,54 @@ class Sandbox:
             if self.sandbox_dir not in self.limits['allowed_paths']:
                 self.limits['allowed_paths'].append(self.sandbox_dir)
 
+        # Initialize CWD to host_workspace (or virtual_workspace if mapping enabled? No, execution happens in host path)
+        # But we want to store the "Current" directory.
+        # Since subprocess.Popen uses host paths, we store host path here.
+        self.cwd = self.host_workspace
+
+    def get_cwd(self) -> Optional[str]:
+        """Get the current working directory of the sandbox (host path)."""
+        return self.cwd
+
+    def wrap_command_with_cwd_capture(self, command: str, process_id: str = "") -> str:
+        """
+        Wraps a shell command to capture the resulting CWD.
+        Appends '; echo __SAGE_CWD_MARKER__; pwd' etc.
+        """
+        cwd_marker = f"__SAGE_CWD_{process_id}__"
+        # 使用分号追加 echo 和 pwd，并保留原始命令的返回码
+        # 注意：仅适用于 Unix-like shell，Windows 暂不支持完美保留
+        if platform.system() != "Windows":
+            return f"{command}; __SAGE_RET=$?; echo '{cwd_marker}'; pwd; exit $__SAGE_RET"
+        else:
+            return f"{command} & echo {cwd_marker} & cd"
+
+    def update_cwd_from_output(self, stdout: str, process_id: str = "") -> str:
+        """
+        Parses the stdout, extracts the new CWD, updates self.cwd, and returns cleaned stdout.
+        """
+        cwd_marker = f"__SAGE_CWD_{process_id}__"
+        if cwd_marker in stdout:
+            try:
+                parts = stdout.split(cwd_marker)
+                # The part before marker is actual stdout
+                cleaned_stdout = parts[0]
+                
+                # The part after marker should be "\n/path/to/cwd\n"
+                if len(parts) > 1:
+                    new_cwd = parts[1].strip()
+                    if new_cwd and os.path.exists(new_cwd):
+                        self.cwd = new_cwd
+                        logger.debug(f"Sandbox CWD updated to: {self.cwd}")
+                    else:
+                         logger.debug(f"Ignored invalid CWD update: {new_cwd}")
+                
+                return cleaned_stdout
+            except Exception as e:
+                logger.warning(f"Failed to parse CWD from output: {e}")
+                return stdout
+        return stdout
+
     def _resolve_linux_mode(self, mode: str) -> str:
         if mode != 'auto':
             return mode
