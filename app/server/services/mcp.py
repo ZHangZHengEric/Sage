@@ -45,7 +45,6 @@ async def add_mcp_server(
     user_id: Optional[str] = None,
 ) -> str:
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
-    logger.info(f"开始添加MCP server: {name}")
 
     dao = models.MCPServerDao()
     # 检查服务器名称是否已存在
@@ -75,7 +74,6 @@ async def add_mcp_server(
 
 async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServer]:
     """获取所有 MCP 服务器并转换为简化响应结构"""
-    logger.info("获取MCP服务器列表")
     dao = models.MCPServerDao()
     mcp_servers = await dao.get_list(user_id)
     return mcp_servers
@@ -83,7 +81,6 @@ async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServ
 
 async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
     """删除 MCP 服务器，返回 server_name"""
-    logger.info(f"开始删除MCP server: {server_name}")
     tm = get_tool_manager()
 
     dao = models.MCPServerDao()
@@ -118,7 +115,6 @@ async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
 
 async def toggle_mcp_server(server_name: str) -> (bool, str):
     """切换 MCP 服务器启用/禁用状态，返回 (disabled, status_text)"""
-    logger.info(f"开始切换MCP server状态: {server_name}")
     tm = get_tool_manager()
 
     dao = models.MCPServerDao()
@@ -153,7 +149,6 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
 
 async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
     """刷新 MCP 服务器连接，返回是否成功"""
-    logger.info(f"开始刷新MCP server: {server_name}")
     tm = get_tool_manager()
     dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
