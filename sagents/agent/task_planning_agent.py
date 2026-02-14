@@ -68,7 +68,6 @@ class TaskPlanningAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.PLANNING.value
             )
         ]
@@ -99,17 +98,15 @@ class TaskPlanningAgent(AgentBase):
                             if tag_type != last_tag_type:
                                 yield [MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
-                                    content='',
+                                    content='\n\n',
                                     message_id=message_id,
-                                    show_content='\n\n',
                                     message_type=MessageType.PLANNING.value
                                 )]
 
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content="",
+                                content=delta_content_char,
                                 message_id=message_id,
-                                show_content=delta_content_char,
                                 message_type=MessageType.PLANNING.value
                             )]
                         last_tag_type = tag_type
@@ -138,7 +135,6 @@ class TaskPlanningAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=PromptManager().get_agent_prompt_auto('next_step_planning_prompt', language=session_context.get_language()) + json.dumps(response_json, ensure_ascii=False),
                 message_id=message_id,
-                show_content='',
                 message_type=MessageType.PLANNING.value
             )
             yield [result_message]
@@ -149,7 +145,6 @@ class TaskPlanningAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=f"任务规划失败: {str(e)}",
                 message_id=str(uuid.uuid4()),
-                show_content=f"任务规划失败: {str(e)}",
                 message_type=MessageType.PLANNING.value
             )]
 

@@ -187,8 +187,8 @@ class MessageManager:
                 if message.role == MessageRole.SYSTEM.value:
                     self.stats['system_messages_rejected'] += 1
                     continue
-                # 过滤 show_content 以及content 以及 tool_calls 都是空字符串或者None的消息
-                if not message.show_content and not message.content and not message.tool_calls:
+                # 过滤 content 以及 tool_calls 都是空字符串或者None的消息
+                if not message.content and not message.tool_calls:
                     self.stats['filtered_messages'] += 1
                     continue
             except Exception:
@@ -284,9 +284,7 @@ class MessageManager:
         if existing_message:
             # 流式消息的特点是每次传递的都是新的增量内容
             if new_message.content is not None:
-                existing_message.content = (existing_message.content or '') + new_message.content
-            if new_message.show_content is not None:
-                existing_message.show_content = (existing_message.show_content or '') + new_message.show_content                    
+                existing_message.content = (existing_message.content or '') + new_message.content                    
         else:                    
             old_messages.append(new_message)
             # logger.debug(f"MessageManager: 创建新消息 {new_message.message_id[:8]}... ")

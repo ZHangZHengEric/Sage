@@ -40,7 +40,6 @@ class QuerySuggestAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.QUERY_SUGGEST.value
             )
         ]
@@ -70,36 +69,38 @@ class QuerySuggestAgent(AgentBase):
                             if last_tag_type != 'suggest_item':
                                 yield [MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
-                                    content='',
+                                    content='\n- ',
                                     message_id=message_id,
-                                    show_content='\n- ',
                                     message_type=MessageType.QUERY_SUGGEST.value
                                 )]
                             
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content="",
+                                content=delta_content_all,
                                 message_id=message_id,
-                                show_content=delta_content_all,
                                 message_type=MessageType.QUERY_SUGGEST.value
                             )]
                         last_tag_type = delta_content_type
 
-        async for chunk in self._finalize_query_suggest_result(full_response, message_id):
+        async for chunk in self._finalize_query_suggest_result(full_response, message_id, session_context):
             yield chunk
 
-    async def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> AsyncGenerator[List[MessageChunk], None]:
+    async def _finalize_query_suggest_result(self, full_response: str, message_id: str, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
         logger.debug("QuerySuggestAgent: 处理最终查询建议结果")
         try:
             # 解析查询建议列表
             suggest_items = self._convert_xlm_to_json(full_response)
             logger.info(f"QuerySuggestAgent: 成功生成 {len(suggest_items)} 条查询建议")
+            
+            # 将建议结果保存到 audit_status
+            session_context.audit_status['query_suggestions'] = suggest_items
+            
             # 生成查询建议消息
+            # content 为空，保持之前流式输出的内容显示
             yield [MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content=json.dumps(suggest_items),
+                content='',
                 message_id=message_id,
-                show_content='',
                 message_type=MessageType.QUERY_SUGGEST.value
             )]
         except Exception as e:
@@ -107,9 +108,8 @@ class QuerySuggestAgent(AgentBase):
             logger.error(traceback.format_exc())
             yield [MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content="",
+                content="查询建议生成失败",
                 message_id=message_id,
-                show_content="查询建议生成失败",
                 message_type=MessageType.QUERY_SUGGEST.value
             )]
             

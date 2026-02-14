@@ -66,7 +66,6 @@ class TaskCompletionJudgeAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.OBSERVATION.value
             )
         ]
@@ -106,7 +105,6 @@ class TaskCompletionJudgeAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=f"任务完成判断失败: {str(e)}",
                 message_id=str(uuid.uuid4()),
-                show_content=f"任务完成判断失败: {str(e)}",
                 message_type=MessageType.OBSERVATION.value
             )]
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
