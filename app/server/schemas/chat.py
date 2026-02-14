@@ -4,8 +4,9 @@ from pydantic import BaseModel
 
 
 class Message(BaseModel):
+    message_id: Optional[str] = None
     role: str
-    content: Union[str, List[Dict[str, Any]]]
+    content: str
 
 class BaseChatRequest(BaseModel):
     """基础聊天请求，包含公共字段"""
@@ -50,7 +51,7 @@ class StreamRequest(BaseChatRequest):
     force_summary: Optional[bool] = False
     memory_type: Optional[str] = "session"
     custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None
-
+    context_budget_config: Optional[Dict[str, Any]] = None
 
 
 class ChatRequest(BaseChatRequest):

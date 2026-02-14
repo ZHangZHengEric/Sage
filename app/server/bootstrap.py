@@ -357,11 +357,28 @@ async def ensure_system_init(cfg: StartupConfig):
     # Models
     model = cfg.default_llm_model_name or "gpt-4o"
     base_url = cfg.default_llm_api_base_url or "https://api.openai.com/v1"
-
+    max_tokens = cfg.default_llm_max_tokens or 4096
+    temperature = cfg.default_llm_temperature or 0.7
+    max_model_len = cfg.default_llm_max_model_len or 54000
+    top_p = cfg.default_llm_top_p or 0.9
+    presence_penalty = cfg.default_llm_presence_penalty or 0.0
     if not default_provider:
         import uuid
         provider_id = str(uuid.uuid4())
-        provider = models.LLMProvider(id=provider_id, name="Default LLM Provider", base_url=base_url, api_keys=keys, model=model, is_default=True, user_id="")
+        provider = models.LLMProvider(
+            id=provider_id, 
+            name="Default LLM Provider", 
+            base_url=base_url, 
+            api_keys=keys, 
+            model=model, 
+            is_default=True, 
+            user_id="",
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            presence_penalty=presence_penalty,
+            max_model_len=max_model_len
+        )
         await dao.save(provider)
         logger.info("Initialized default LLM Provider from environment variables.")
     else:
@@ -369,5 +386,11 @@ async def ensure_system_init(cfg: StartupConfig):
         default_provider.base_url = base_url
         default_provider.api_keys = keys
         default_provider.model = model
+        default_provider.max_tokens = max_tokens
+        default_provider.temperature = temperature
+        default_provider.top_p = top_p
+        default_provider.presence_penalty = presence_penalty
+        default_provider.max_model_len = max_model_len
+            
         await dao.save(default_provider)
         logger.info("Default LLM Provider updated.")

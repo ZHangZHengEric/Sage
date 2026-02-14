@@ -87,7 +87,7 @@ class SAgent:
             # 注意：这会拦截 self.model 的调用以记录 LLM 事件
             self.model = ObservableAsyncOpenAI(self.model, self.observability_manager)
             
-        logger.info("SAgent: 智能体控制器初始化完成 (Lazy Loading Enabled)")
+        logger.info("SAgent: 智能体控制器初始化完成")
 
     def _get_agent(self, agent_cls: Type[AgentBase], name: str) -> AgentBase:
         if name not in self._agents:

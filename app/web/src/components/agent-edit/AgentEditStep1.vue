@@ -140,63 +140,25 @@
             </FormItem>
           </div>
         </div>
-      </Card>
-      <!-- LLM Config (Moved from Step 3) -->
-      <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
-        <CardHeader
-          class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl"
-          @click="toggleSection('llm')">
-          <div class="flex items-center gap-2">
-            <Bot class="h-5 w-5" />
-            <CardTitle class="text-base">{{ t('agent.llmConfig') }}</CardTitle>
-          </div>
-          <ChevronDown v-if="sections.llm" class="h-4 w-4" />
-          <ChevronUp v-else class="h-4 w-4" />
-        </CardHeader>
         <div v-show="!sections.llm" class="px-5 pb-5 pt-4 space-y-4">
           <FormItem :label="t('agent.modelProvider')">
-            <div v-if="providers.length === 0"
-              class="text-sm text-muted-foreground border border-dashed rounded-md p-3 text-center">
-              {{ t('agent.noProviders') || 'No model providers available.' }}
-            </div>
-            <Select v-else v-model="computedProviderId">
+            <Select v-model="llmProviderSelectValue">
               <SelectTrigger>
-                <SelectValue :placeholder="t('agent.selectProvider')" />
+                <SelectValue :placeholder="t('agent.selectModelProvider')" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__system_default__">
-                  <span class="text-muted-foreground">{{ t('agent.useSystemDefault') || 'System Default' }}</span>
-                </SelectItem>
-                <SelectItem v-for="p in providers" :key="p.id" :value="p.id">
-                  <span class="font-medium">{{ p.name }}</span>
-                  <span class="ml-2 text-xs text-muted-foreground">({{ t('agent.model') || 'Model' }}: {{ p.model
-                  }})</span>
+                <SelectItem :value="defaultProviderOption">{{ t('agent.useSystemDefault') }}</SelectItem>
+                <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
+                  {{ provider.name }} ({{ provider.model }})
                 </SelectItem>
               </SelectContent>
             </Select>
           </FormItem>
-          <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <FormItem :label="t('agent.maxTokens')">
-              <Input type="number" v-model.number="store.formData.llmConfig.maxTokens" placeholder="4096" />
-            </FormItem>
-            <FormItem :label="t('agent.temperature')">
-              <Input type="number" v-model.number="store.formData.llmConfig.temperature" step="0.1" placeholder="0.2" />
-            </FormItem>
-            <FormItem :label="t('agent.topP')">
-              <Input type="number" v-model.number="store.formData.llmConfig.topP" step="0.1" placeholder="0.9" />
-            </FormItem>
-            <FormItem :label="t('agent.presencePenalty')">
-              <Input type="number" v-model.number="store.formData.llmConfig.presencePenalty" step="0.1"
-                placeholder="0.0" />
-            </FormItem>
-            <FormItem :label="t('agent.maxModelLen')">
-              <Input type="number" v-model.number="store.formData.llmConfig.maxModelLen" placeholder="54000" />
-            </FormItem>
-          </div>
+
 
         </div>
       </Card>
-
+ 
       <!-- System Context -->
       <Card class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
         <CardHeader
@@ -477,14 +439,16 @@ onBeforeUnmount(() => {
 
 // Step 3 Logic (Merged)
 const providers = ref([])
-const allAgents = ref([])
-
-const computedProviderId = computed({
-  get: () => store.formData.llmConfig.providerId || '__system_default__',
+const defaultProviderOption = '__default__'
+const llmProviderSelectValue = computed({
+  get: () => store.formData.llm_provider_id ?? defaultProviderOption,
   set: (val) => {
-    store.formData.llmConfig.providerId = val === '__system_default__' ? null : val
+    store.formData.llm_provider_id = val === defaultProviderOption ? null : val
   }
 })
+const allAgents = ref([])
+
+
 
 // Helpers for Selects
 const getSelectValue = (val) => {
