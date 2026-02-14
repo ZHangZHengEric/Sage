@@ -350,11 +350,33 @@ class ExecuteCommandTool:
         # 路径与命令解析（处理沙箱虚拟路径）
         actual_command = command
         actual_workdir = workdir
+        
+        # CWD 保持逻辑
+        target_workdir = workdir
+        should_update_cwd = False
+        cwd_marker = f"__SAGE_CWD_{process_id}__"
+
+        # 检查是否禁用 CWD 更新 (内部调用标记)
+        no_update_cwd = False
+        if env_vars and env_vars.get('_SAGE_NO_UPDATE_CWD'):
+            no_update_cwd = True
 
         if session_id:
             try:
                 from sagents.context.session_context import get_session_context
                 session_context = get_session_context(session_id)
+                
+                # 尝试应用 Session CWD (from Sandbox)
+                if not target_workdir and not no_update_cwd and session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
+                     # sandbox.cwd is a host path. execute_shell_command expects a path that might be virtual.
+                     # But here we are setting actual_workdir (host path) directly?
+                     # Wait, execute_shell_command takes 'workdir' argument.
+                     # If we use sandbox.cwd (host path), we should set actual_workdir directly?
+                     # Or should we convert it back to virtual?
+                     # Let's set actual_workdir directly since we are bypassing the virtual-to-host mapping for this case.
+                     target_workdir = session_context.sandbox.get_cwd()
+                     actual_workdir = target_workdir 
+                
                 sandbox_fs = None
                 if session_context:
                     if hasattr(session_context, 'sandbox') and session_context.sandbox:
@@ -370,12 +392,21 @@ class ExecuteCommandTool:
                              logger.debug(f"Command 路径映射: {command} -> {actual_command}")
                     
                     # 2. 转换 workdir 中的虚拟路径
-                    if workdir and hasattr(sandbox_fs, 'to_host_path'):
+                    # Only map if target_workdir was NOT set from sandbox.cwd (which is already host path)
+                    # How to distinguish? logic above sets actual_workdir.
+                    # If workdir argument was provided, we need to map it.
+                    if workdir and target_workdir == workdir and hasattr(sandbox_fs, 'to_host_path'):
                         # 检查是否看起来像虚拟路径 (不是绝对路径，或者是 /workspace 开头)
                         # 这里简单处理：直接调用 to_host_path，它内部有判断逻辑
-                        actual_workdir = sandbox_fs.to_host_path(workdir)
-                        if actual_workdir != workdir:
-                            logger.debug(f"Workdir 路径映射: {workdir} -> {actual_workdir}")
+                        actual_workdir = sandbox_fs.to_host_path(target_workdir)
+                        if actual_workdir != target_workdir:
+                            logger.debug(f"Workdir 路径映射: {target_workdir} -> {actual_workdir}")
+                    
+                    # 3. 注入 CWD 捕获逻辑 (Delegate to Sandbox)
+                    if not no_update_cwd and session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
+                        should_update_cwd = True
+                        actual_command = session_context.sandbox.wrap_command_with_cwd_capture(actual_command, process_id)
+
 
             except Exception as e:
                 logger.warning(f"沙箱路径解析失败 (session_id={session_id}): {e}")
@@ -512,6 +543,11 @@ class ExecuteCommandTool:
             try:
                 # 等待命令完成
                 stdout, stderr = process.communicate(timeout=timeout)
+                
+                # CWD 捕获与清理 (Delegate to Sandbox)
+                if should_update_cwd and session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
+                    stdout = session_context.sandbox.update_cwd_from_output(stdout, process_id)
+
                 execution_time = time.time() - exec_start_time
                 total_time = time.time() - start_time
                 return_code = process.returncode
