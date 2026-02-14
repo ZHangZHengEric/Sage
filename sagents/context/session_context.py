@@ -164,6 +164,22 @@ class SessionContext:
         # 为了兼容性，保留 file_system 引用
         self.file_system = self.sandbox.file_system
         
+        # Define session skill directory and update SkillManager
+        self.session_skill_dir = os.path.join(self.agent_workspace.host_path, "skills")
+        if not os.path.exists(self.session_skill_dir):
+            os.makedirs(self.session_skill_dir)
+
+        if self.skill_manager:
+            # Create a dedicated manager for session-specific skills
+            # This manager watches the session skill directory
+            session_local_manager = SkillManager(skill_dirs=[self.session_skill_dir], isolated=True)
+            
+            # Compose a new SkillProxy that wraps both the session-local manager and the existing manager
+            # Priority: Session Local Manager > Existing Manager (Global or Proxy)
+            # This ensures session-specific skills override global ones if names collide,
+            # and new session skills are immediately available.
+            self.skill_manager = SkillProxy(skill_managers=[session_local_manager, self.skill_manager])
+
         # Copy skills to workspace if skill manager is available
         if self.skill_manager:
             logger.info(f"SessionContext: 准备复制技能到工作区: {self.agent_workspace.host_path}")

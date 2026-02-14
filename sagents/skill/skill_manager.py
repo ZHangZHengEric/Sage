@@ -33,17 +33,28 @@ class SkillManager:
     """
     _instance = None
 
-    def __new__(cls, skill_dirs: List[str] = None):
+    def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False):
+        if isolated:
+            return super(SkillManager, cls).__new__(cls)
         if cls._instance is None:
             cls._instance = super(SkillManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, skill_dirs: List[str] = None):
-        if getattr(self, '_initialized', False):
+    def __init__(self, skill_dirs: List[str] = None, isolated: bool = False):
+        if not isolated and getattr(self, '_initialized', False):
             return
 
         self._initialize(skill_dirs)
         self._initialized = True
+
+    def add_skill_dir(self, path: str):
+        """
+        Add a new directory to scan for skills.
+        添加一个新的技能扫描目录。
+        """
+        if path not in self.skill_dirs:
+            self.skill_dirs.append(path)
+            self.reload()
 
     def _initialize(self, skill_dirs: List[str] = None):
         logger.debug("Initializing SkillManager")
@@ -62,6 +73,14 @@ class SkillManager:
         获取 SkillManager 的全局单例实例。
         """
         return cls()
+
+    def reload(self):
+        """
+        Reload all skills from disk.
+        从磁盘重新加载所有技能。
+        """
+        logger.info("Reloading skills...")
+        self._load_skills_from_workspace()
 
     def list_skills(self) -> List[str]:
         """
