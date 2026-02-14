@@ -72,6 +72,10 @@ export default {
   'chat.noMessages': '暂无消息',
   'chat.share': '分享当前会话',
   'chat.traceWorkflow': '跟踪工作流',
+  'chat.agentSpawned': '子智能体',
+  'chat.agentName': '智能体名称',
+  'chat.agentDescription': '智能体描述',
+  'chat.agentSystemPrompt': '系统提示词',
   
   // Agent配置页面
   'agent.title': 'Agent配置',

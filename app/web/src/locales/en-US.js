@@ -72,6 +72,10 @@ export default {
   'chat.noMessages': 'No messages',
   'chat.share': 'Share Session',
   'chat.traceWorkflow': 'Trace Workflow',
+  'chat.agentSpawned': 'Agent Spawned',
+  'chat.agentName': 'Agent Name',
+  'chat.agentDescription': 'Description',
+  'chat.agentSystemPrompt': 'System Prompt',
 
   // Agent Config
   'agent.title': 'Agent Config',
