@@ -512,6 +512,13 @@ class AgentBase(ABC):
                 # 补充 Skills 信息
                 # 确保不仅skill_manager存在，而且确实有技能可用
                 if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
+                    # 尝试重新加载技能，以确保新安装的技能能被发现
+                    try:
+                        if hasattr(session_context.skill_manager, 'reload'):
+                            session_context.skill_manager.reload()
+                    except Exception as e:
+                        logger.warning(f"Failed to reload skills: {e}")
+
                     skill_infos = session_context.skill_manager.list_skill_info()
                     if skill_infos:
                         system_prefix += "<available_skills>\n"
