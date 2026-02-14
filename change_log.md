@@ -18,5 +18,5 @@
 - Renamed `role_description` to `description` in FibreTools and removed `role` from FibreOrchestrator.
 - Removed `LocalToolManager` class in favor of `ToolManager(isolated=True)`.
 
-## 2026-02-13
-- 新增 `brave_search` MCP 服务 (`mcp_servers/search/brave_search_server.py`)，支持双模式搜索（反爬虫抓取 + API 降级）及网页内容提取 (`visit_page`)。添加了单元测试及 `markdownify`/`beautifulsoup4` 依赖。
+## 2026-02-14
+- 修复 ToolProxy 无法将已存在的工具加入白名单的问题。修改 ToolManager.register_tools_from_object 使其始终返回工具名称，即使该工具已注册。新增单元测试 tests/test_tool_proxy_registration.py 验证修复效果。

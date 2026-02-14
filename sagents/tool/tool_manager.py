@@ -301,8 +301,8 @@ class ToolManager:
                         # inspect.getmembers on instance returns bound methods for regular methods.
                         new_spec.func = member
                         
-                    if self.register_tool(new_spec):
-                        registered_tools.append(new_spec.name)
+                    self.register_tool(new_spec)
+                    registered_tools.append(new_spec.name)
                 except Exception as e:
                     logger.error(f"Failed to register tool '{name}' from object: {e}")
             else:
@@ -311,8 +311,8 @@ class ToolManager:
                 # Usually we want to register tools from instances to support state.
                 # If it's a class, the method must be static or class method, or handled appropriately.
                 # For now, we just try to register as is.
-                if self.register_tool(tool_spec):
-                    registered_tools.append(tool_spec.name)
+                self.register_tool(tool_spec)
+                registered_tools.append(tool_spec.name)
                     
         logger.info(f"Registered {len(registered_tools)} tools from object {obj}")
         return registered_tools
