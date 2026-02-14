@@ -116,7 +116,7 @@ export default {
   'agent.maxTokens': '最大Token',
   'agent.temperature': '温度值',
   'agent.topP': 'Top P',
-  'agent.presencePenalty': '惩罚系数',
+  'agent.presencePenalty': '重复惩罚系数',
   'agent.maxModelLen': '最大模型长度',
   'agent.systemContext': '系统上下文',
   'agent.workflows': '工作流',
