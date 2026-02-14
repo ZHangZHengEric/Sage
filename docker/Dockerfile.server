@@ -24,9 +24,9 @@ RUN apt-get update && \
     bubblewrap \
     tree \
     file \
-    libpango1.0-0 \
+    libpango-1.0-0 \
     libcairo2 \
-    libgdk-pixbuf2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     libffi-dev \
     shared-mime-info \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
