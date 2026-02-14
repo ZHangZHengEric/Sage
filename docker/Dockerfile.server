@@ -24,10 +24,32 @@ RUN apt-get update && \
     bubblewrap \
     tree \
     file \
+    chromium \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libgbm1 \
+    libasound2 \
+    libatspi2.0-0 \
+    libxshmfence1 \
+    libnss3 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
     libpango-1.0-0 \
-    libcairo2 \
+    libpangoft2-1.0-0 \
+    libpangocairo-1.0-0 \
+    libcairo2-dev \
+    libcairo-gobject2 \
     libgdk-pixbuf-2.0-0 \
+    libgdk-pixbuf-2.0-dev \
+    libfontconfig1-dev \
+    libfreetype6-dev \
+    fonts-dejavu-core \
+    fonts-wqy-microhei \
+    libcairo2 \
     libffi-dev \
+    gnupg \
     shared-mime-info \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && npm config set registry https://registry.npmmirror.com/ \
@@ -50,6 +72,25 @@ RUN BUN_VERSION=$(npm view bun dist-tags.latest) \
 # 设置 Bun 环境变量
 ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
+
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 验证 Node/npm 安装成功
+RUN node -v && npm -v
+
+# 第三步：直接安装 Puppeteer（无需 package.json）
+# 核心修改：跳过 package.json，直接 npm install puppeteer
+# --registry：国内源加速；--unsafe-perm：解决非 root 安装权限问题；--save：可选（会生成 package.json，不影响使用）
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+# 2. 指定 Puppeteer 使用系统安装的 Chromium 路径（Debian 系固定路径）
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# 第三步：安装 Puppeteer（此时不会下载 Chrome，仅装核心代码）
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install -g puppeteer --unsafe-perm
+
 
 # 复制 requirements.txt 文件
 COPY requirements.txt .
