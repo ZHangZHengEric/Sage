@@ -85,13 +85,13 @@ def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
     if hard != resource.RLIM_INFINITY:
         target = min(target, hard)
     
-    # Increase memory limit for Node.js / V8 (WebAssembly)
-    # V8 requires large address space reservation (often 10GB+).
-    # We multiply the limit by 32 to ensure we cover the 10GB+ requirement 
-    # even if the base limit is small (e.g. 512MB * 32 = 16GB).
-    # This is safe because RLIMIT_AS is virtual memory, not physical RAM.
-    # Physical RAM is constrained by cgroups (in Docker) or system load.
-    return max(target * 32, 16 * 1024 * 1024 * 1024)  # Ensure at least 16GB
+    # V8/WebAssembly requires huge virtual memory (Guard Regions).
+    # Setting RLIMIT_AS can causing immediate crashes (OOM) even if physical memory is sufficient.
+    # In Docker/Kubernetes, physical memory is already constrained by cgroups.
+    # We effectively disable RLIMIT_AS by setting it to a very high value (1TB) to accommodate V8 requirements,
+    # while maintaining a theoretical upper bound for runaway processes.
+    # See: https://github.com/nodejs/node/issues/24649
+    return 1024 * 1024 * 1024 * 1024  # 1TB Virtual Memory Limit
 
 # --- Launcher Script Content ---
 LAUNCHER_SCRIPT = """
