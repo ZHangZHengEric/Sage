@@ -1,25 +1,41 @@
 <template>
   <div 
-    class="flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
+    class="group flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
     :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
   >
     <!-- Header -->
     <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
-      <h2 
-        v-if="!isCollapsed" 
-        class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
-      >
-        Zavixai Agent
-      </h2>
+      <div v-if="!isCollapsed" class="flex items-center gap-2 overflow-hidden">
+        <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
+        <h2 
+          class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
+        >
+          Sage
+        </h2>
+      </div>
+      <div v-else class="flex justify-center w-full">
+         <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
+      </div>
+
       <Button 
+        v-if="!isCollapsed"
         variant="ghost" 
         size="icon" 
         @click="toggleCollapse"
         :title="isCollapsed ? '展开' : '收起'"
-        class="text-muted-foreground hover:text-foreground shrink-0"
+        class="text-muted-foreground hover:text-foreground shrink-0 ml-1"
       >
-        <PanelLeftOpen v-if="isCollapsed" class="h-4 w-4" />
-        <PanelLeftClose v-else class="h-4 w-4" />
+        <PanelLeftClose class="h-4 w-4" />
+      </Button>
+      <Button 
+         v-else
+         variant="ghost"
+         size="icon"
+         @click="toggleCollapse"
+         title="展开"
+         class="absolute -right-3 top-6 bg-background border shadow-sm rounded-full h-6 w-6 p-0 hover:bg-accent z-50 hidden group-hover:flex"
+      >
+         <PanelLeftOpen class="h-3 w-3" />
       </Button>
     </div>
 

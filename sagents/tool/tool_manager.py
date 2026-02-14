@@ -251,7 +251,7 @@ class ToolManager:
                     count += 1
         logger.debug(f"Registered {count} tools from package_path")
 
-    def register_tools_from_object(self, obj: Any) -> int:
+    def register_tools_from_object(self, obj: Any) -> List[str]:
         """
         Register tools from an object instance or class.
         Automatically discovers methods decorated with @tool and registers them.
@@ -261,12 +261,12 @@ class ToolManager:
             obj: An object instance or class to scan for tools.
             
         Returns:
-            int: Number of tools successfully registered.
+            List[str]: List of names of successfully registered tools.
         """
         import inspect
         import copy
         
-        count = 0
+        registered_tools = []
         logger.debug(f"Discovering tools from object: {obj}")
         
         # Iterate over all members of the object
@@ -302,7 +302,7 @@ class ToolManager:
                         new_spec.func = member
                         
                     if self.register_tool(new_spec):
-                        count += 1
+                        registered_tools.append(new_spec.name)
                 except Exception as e:
                     logger.error(f"Failed to register tool '{name}' from object: {e}")
             else:
@@ -312,10 +312,10 @@ class ToolManager:
                 # If it's a class, the method must be static or class method, or handled appropriately.
                 # For now, we just try to register as is.
                 if self.register_tool(tool_spec):
-                    count += 1
+                    registered_tools.append(tool_spec.name)
                     
-        logger.info(f"Registered {count} tools from object {obj}")
-        return count
+        logger.info(f"Registered {len(registered_tools)} tools from object {obj}")
+        return registered_tools
 
     def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]):
         """Register a tool specification with priority-based replacement
