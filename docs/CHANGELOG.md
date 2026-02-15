@@ -183,14 +183,13 @@ description: "Sage Examples and Server Changelog"
 - Removed reference to `self.pending_chunks` in `clear_messages` method.
 
 ### 5. Fix Content Duplication in planning_agent.py
-- Modified `show_content` assignment in `_execute_streaming_planning` method.
 - Changed from `delta_content_all` to `delta_content_char`, ensuring content yielded each time is not duplicated.
 
 ### 6. Re-optimize add_messages Method in message_manager.py
 - **First Fix**: Added check for `is_final` attribute, replacing content if `is_final=True`, otherwise appending.
 - **Second Optimization**: Removed check for `message.is_final` based on user feedback.
 - **Final Optimization**: Simplified logic, directly appending incremental content for streaming messages, removing unnecessary attribute updates.
-- Solved `content` and `show_content` duplication issues.
+- Solved `content` duplication issues.
 - Streaming messages feature incremental content delivery, requiring no complex judgment logic.
 
 ## 2025-01-25 Major Issues Fixed
@@ -198,7 +197,7 @@ description: "Sage Examples and Server Changelog"
 1. **AttributeError**: 'MessageChunk' object has no attribute 'get'
 2. **Type Mismatch**: List[Dict[str, Any]] vs List[MessageChunk]
 3. **Content Duplication**: Streaming message content repeatedly accumulated
-4. **Incorrect show_content Display**: Displayed content did not match actual content
+4. **Incorrect content Display**: Displayed content did not match actual content
 
 ## 2025-01-25 Technical Highlights
 

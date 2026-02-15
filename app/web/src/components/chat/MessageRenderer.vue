@@ -10,7 +10,7 @@
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
         </div>
         <div class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-6 py-4 shadow-sm overflow-hidden break-words w-full">
-          <div class="opacity-90 text-[15px] leading-7 font-medium">{{ message.show_content || message.content || t('error.unknown') }}</div>
+          <div class="opacity-90 text-[15px] leading-7 font-medium">{{ message.content || t('error.unknown') }}</div>
         </div>
       </div>
     </div>
@@ -52,7 +52,7 @@
         </div>
         <div class="w-full">
            <TaskAnalysisMessage 
-             :content="message.show_content || message.content" 
+             :content="message.content" 
              :isStreaming="isStreaming"
            />
         </div>
@@ -60,7 +60,7 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.show_content" class="flex flex-row items-start gap-3 px-4">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" />
       </div>
@@ -73,7 +73,7 @@
         </div>
         <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
           <MarkdownRenderer
-            :content="formatMessageContent(message.show_content)"
+            :content="formatMessageContent(message.content)"
             :components="markdownComponents"
           />
         </div>

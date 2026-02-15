@@ -24,12 +24,6 @@ task_summary_template = {
 原始任务: 
 {task_description}
 
-TaskManager状态及执行结果:
-{task_manager_status_and_results}
-
-## 近期完成动作详情
-{execution_results}
-
 你的回答应该:
 1. 直接了当的回答原始任务，不做任何解释。
 2. 使用清晰详细的语言，但要保证回答的完整性和准确性，保留任务执行过程中的关键结果。
@@ -47,12 +41,6 @@ You can use markdown format to organize content.
 Original Task: 
 {task_description}
 
-TaskManager Status and Execution Results:
-{task_manager_status_and_results}
-
-## Recent Completed Action Details
-{execution_results}
-
 Your answer should:
 1. Directly answer the original task without any explanation.
 2. Use clear and detailed language, but ensure the completeness and accuracy of the answer, retaining key results from the task execution process.
@@ -69,12 +57,6 @@ Você pode usar o formato markdown para organizar o conteúdo.
 
 Tarefa Original: 
 {task_description}
-
-Status e Resultados de Execução do TaskManager:
-{task_manager_status_and_results}
-
-## Detalhes de Ações Concluídas Recentemente
-{execution_results}
 
 Sua resposta deve:
 1. Responder diretamente a tarefa original sem qualquer explicação.

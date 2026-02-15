@@ -3,11 +3,9 @@ from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, AsyncGenerator, Optional
 from sagents.utils.logger import logger
-from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.context.tasks.task_manager import TaskManager
-from sagents.context.tasks.task_base import TaskStatus
 import json
 import uuid
 
@@ -23,227 +21,175 @@ class TaskObservationAgent(AgentBase):
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_observation_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
+        
 
-        if 'task_rewrite' in session_context.audit_status:
-            task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
-                role=MessageRole.USER.value,
-                content = session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
-            )])
-        else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3)
-            # 根据 active_budget 压缩消息
-            budget_info = message_manager.context_budget_manager.budget_info
-            if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
-            task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
+        history_messages = message_manager.extract_all_context_messages(recent_turns=3)
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+            history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('active_budget', 8000), 8000))
+        history_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
-        if task_manager:
-            task_manager_status = task_manager.get_status_description(language=session_context.get_language())
-        else:
-            task_manager_status = PromptManager().get_prompt(
-                'task_manager_none',
-                agent='common',
-                language=session_context.get_language(),
-                default='无任务管理器'
-            )
+        # 获取近期执行结果
+        # recent_execution_results_messages = message_manager.extract_after_last_observation_messages()
+        # recent_execution_results_messages_str = MessageManager.convert_messages_to_str(recent_execution_results_messages)
 
-        recent_execution_results_messages = message_manager.extract_after_last_observation_messages()
-        recent_execution_results_messages_str = MessageManager.convert_messages_to_str(recent_execution_results_messages)
+        # 合并为 task_description
+        # task_description_messages_str = f"{history_messages_str}\n\nRecent Execution Results:\n{recent_execution_results_messages_str}"
 
+        # 构建 Prompt
         prompt = PromptManager().get_agent_prompt_auto('observation_template', language=session_context.get_language()).format(
-            task_description=task_description_messages_str,
-            task_manager_status=task_manager_status,
-            execution_results=recent_execution_results_messages_str,
+            task_description=history_messages_str,
             agent_description=self.system_prefix
         )
+
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language(), system_prefix_override=current_system_prefix),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.OBSERVATION.value
             )
         ]
+
+        # 准备工具 - 只使用 todo_write
+        tools_json = []
+        if tool_manager:
+            # 获取所有工具并筛选 todo_write
+            all_tools = tool_manager.get_openai_tools(lang=session_context.get_language())
+            todo_write_tool = next((t for t in all_tools if t['function']['name'] == 'todo_write'), None)
+            
+            if todo_write_tool:
+                tools_json.append(todo_write_tool)
+
         message_id = str(uuid.uuid4())
-        unknown_content = ''
         all_content = ''
-        last_tag_type = None
-        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
-                                                                 session_id=session_id,
-                                                                 step_name="observation"):
-            if len(llm_repsonse_chunk.choices) == 0:
-                continue
-            if llm_repsonse_chunk.choices[0].delta.content:
-                delta_content = llm_repsonse_chunk.choices[0].delta.content
-                for delta_content_char in delta_content:
-                    delta_content_all = unknown_content + delta_content_char
-                    # 判断delta_content的类型
-                    tag_type = self._judge_delta_content_type(delta_content_all, all_content, tag_type=['analysis','completed_task_ids','pending_task_ids','failed_task_ids'])
-                    all_content += delta_content_char
-
-                    if tag_type == 'unknown':
-                        unknown_content = delta_content_all
-                        continue
-                    else:
-                        unknown_content = ''
-                        if tag_type in ['analysis']:
-                            if tag_type != last_tag_type:
-                                yield [MessageChunk(
-                                    role=MessageRole.ASSISTANT.value,
-                                    content='',
-                                    message_id=message_id,
-                                    show_content='\n\n',
-                                    message_type=MessageType.OBSERVATION.value
-                                )]
-
-                            yield [MessageChunk(
-                                role=MessageRole.ASSISTANT.value,
-                                content='',
-                                message_id=message_id,
-                                show_content=delta_content_all,
-                                message_type=MessageType.OBSERVATION.value
-                            )]
-                        last_tag_type = tag_type
-        async for chunk in self._finalize_observation_result(
+        
+        # 调用 LLM 并处理响应（包括工具调用）
+        # 这里我们使用类似 SimpleAgent 的逻辑，处理流式输出和工具调用
+        # 由于 ObservationAgent 通常只进行一次分析和状态更新，我们不需要复杂的循环
+        
+        async for chunk in self._call_llm_and_process_response(
+            messages=llm_request_message,
+            tools_json=tools_json,
+            tool_manager=tool_manager,
             session_context=session_context,
-            all_content=all_content, 
-            message_id=message_id,
-            task_manager = task_manager
+            session_id=session_id,
+            step_name="observation"
         ):
+            # 过滤掉工具调用的中间消息，只保留文本内容作为 observation 输出
+            # 或者，我们可以让用户看到工具调用（更新任务状态），这通常是有帮助的
+            # 但为了保持 observation 的纯净，我们可能只想输出分析文本
+            
+            # 这里我们直接透传 chunk，因为 AgentBase 的 _call_llm_and_process_response 已经处理好了格式
+            # 但是要注意 message_type，我们需要保持一致性
+            for msg in chunk:
+                if msg.role == MessageRole.ASSISTANT.value and msg.content:
+                    all_content += msg.content
+                # 强制设置 message_type 为 OBSERVATION
+                msg.message_type = MessageType.OBSERVATION.value
             yield chunk
-    async def _finalize_observation_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
+
+        # 保存简单的文本观测结果
+        if "all_observations" not in session_context.audit_status:
+            session_context.audit_status["all_observations"] = []
+        
+        session_context.audit_status["all_observations"].append({
+            "analysis": all_content,
+            "timestamp": str(uuid.uuid4()) # 简单的时间戳或ID
+        })
+
+        # 检查是否所有任务都已完成
+        # 重新获取最新的 todo_list (因为工具调用可能更新了它)
+        latest_todo_list = session_context.system_context.get('todo_list', [])
+        if latest_todo_list:
+            all_completed = all(todo.get('completed', False) for todo in latest_todo_list)
+            if all_completed:
+                logger.info(f"ObservationAgent: 检测到所有任务均已完成 (共 {len(latest_todo_list)} 个)")
+                session_context.audit_status['task_completed'] = True
+            else:
+                session_context.audit_status['task_completed'] = False
+                # 计算完成进度
+                completed_count = sum(1 for todo in latest_todo_list if todo.get('completed', False))
+                logger.info(f"ObservationAgent: 任务进度: {completed_count}/{len(latest_todo_list)}")
+
+    async def _call_llm_and_process_response(
+        self, 
+        messages: List[MessageChunk], 
+        tools_json: List[Dict], 
+        tool_manager: ToolManager, 
+        session_context: SessionContext, 
+        session_id: str, 
+        step_name: str
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
-        最终化观测结果
+        辅助方法：调用 LLM，处理流式文本输出，并自动执行工具调用
         """
-        try:
-            response_json = self.convert_xlm_to_json(all_content)
-            logger.info(f"ObservationAgent: 观察分析结果: {response_json}")
-            if "all_observations" not in session_context.audit_status:
-                session_context.audit_status["all_observations"] = []
-            session_context.audit_status["all_observations"].append(response_json)
+        # 第一次调用 LLM
+        response_message = MessageChunk(role=MessageRole.ASSISTANT.value, content="")
+        tool_calls = []
+        model_config_override = {'tools': tools_json if tools_json else None}
+        async for chunk in self._call_llm_streaming(
+            messages=messages,
+            session_id=session_id,
+            step_name=step_name,
+            model_config_override=model_config_override
+        ):
+            # 处理 delta
+            if chunk.choices and chunk.choices[0].delta:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    response_message.content += delta.content
+                    yield [MessageChunk(
+                        role=MessageRole.ASSISTANT.value,
+                        content=delta.content,
+                        message_id=response_message.message_id,
+                        message_type=MessageType.OBSERVATION.value
+                    )]
+                
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        if len(tool_calls) <= tc.index:
+                            tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        if tc.id:
+                            tool_calls[tc.index]["id"] += tc.id
+                        if tc.function.name:
+                            tool_calls[tc.index]["function"]["name"] += tc.function.name
+                        if tc.function.arguments:
+                            tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
 
-            # 更新TaskManager中的任务状态
-            if task_manager:
-                self._update_task_manager_status(task_manager, response_json)
+        # 如果有工具调用，执行它们
+        if tool_calls:
+            # 记录工具调用消息
+            response_message.tool_calls = tool_calls
+            
+            messages.append(response_message)
+            
+            # 发送工具调用消息
+            for tool_call in tool_calls:
+                yield self._create_tool_call_message(tool_call)
 
-            # 创建最终结果消息（不需要usage信息，因为这是转换过程）
-            result_message = MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content=PromptManager().get_agent_prompt_auto('execution_evaluation_prompt', language=session_context.get_language()) + json.dumps(response_json, ensure_ascii=False),
-                message_id=message_id,
-                show_content='\n',
-                message_type=MessageType.OBSERVATION.value
-            )
-
-            yield [result_message]
-
-        except Exception as e:
-            logger.error(f"ObservationAgent: 解析观察结果时发生错误: {str(e)}")
-            logger.error(f"ObservationAgent: 原始XML内容: {all_content}")
-            yield [MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content=f"任务观测失败: {str(e)}",
-                message_id=str(uuid.uuid4()),
-                show_content=f"任务观测失败: {str(e)}",
-                message_type=MessageType.OBSERVATION.value
-            )]
-    def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:
-
-        logger.debug("ObservationAgent: 转换XML内容为JSON格式")
-        try:
-            # 提取analysis
-            analysis = xlm_content.split('<analysis>')[1].split('</analysis>')[0].strip()
-
-            # 提取completed_task_ids
-            completed_task_ids: List[str] = []
-            if '<completed_task_ids>' in xlm_content and '</completed_task_ids>' in xlm_content:
-                completed_task_ids_str = xlm_content.split('<completed_task_ids>')[1].split('</completed_task_ids>')[0].strip()
-                try:
-                    completed_task_ids = json.loads(completed_task_ids_str) if completed_task_ids_str else []
-                except Exception:
-                    completed_task_ids = []
-
-            # 提取pending_task_ids
-            pending_task_ids: List[str] = []
-            if '<pending_task_ids>' in xlm_content and '</pending_task_ids>' in xlm_content:
-                pending_task_ids_str = xlm_content.split('<pending_task_ids>')[1].split('</pending_task_ids>')[0].strip()
-                try:
-                    pending_task_ids = json.loads(pending_task_ids_str) if pending_task_ids_str else []
-                except Exception:
-                    pending_task_ids = []
-
-            # 提取failed_task_ids
-            failed_task_ids: List[str] = []
-            if '<failed_task_ids>' in xlm_content and '</failed_task_ids>' in xlm_content:
-                failed_task_ids_str = xlm_content.split('<failed_task_ids>')[1].split('</failed_task_ids>')[0].strip()
-                try:
-                    failed_task_ids = json.loads(failed_task_ids_str) if failed_task_ids_str else []
-                except Exception:
-                    failed_task_ids = []
-
-            # 构建响应JSON - 只保留简化后的字段
-            response_json = {
-                "analysis": analysis,
-                "completed_task_ids": completed_task_ids,
-                "pending_task_ids": pending_task_ids,
-                "failed_task_ids": failed_task_ids
-            }
-
-            logger.debug(f"ObservationAgent: XML转JSON完成: {response_json}")
-            return response_json
-
-        except Exception as e:
-            logger.error(f"ObservationAgent: XML转JSON失败: {str(e)}")
-            raise
-
-    def _update_task_manager_status(self, task_manager: TaskManager, observation_result: Dict[str, Any]) -> None:
-        try:
-            # 获取任务状态信息
-            completed_task_ids = observation_result['completed_task_ids'] if 'completed_task_ids' in observation_result else []
-            failed_task_ids = observation_result['failed_task_ids'] if 'failed_task_ids' in observation_result else []
-            logger.info(f"ObservationAgent: 观察分析结果中完成任务: {completed_task_ids}，失败任务: {failed_task_ids}")
-            # 更新已完成的任务状态
-            for task_id in completed_task_ids:
-                try:
-                    if hasattr(task_manager, 'update_task_status'):
-                        task_manager.update_task_status(task_id, TaskStatus.COMPLETED)
-                        logger.info(f"ObservationAgent: 已将任务 {task_id} 标记为完成")
-
-                        # 尝试更新任务的执行结果
-                        task = task_manager.get_task(task_id)
-                        if task and hasattr(task_manager, 'complete_task'):
-                            # 使用观察结果的分析作为任务结果
-                            analysis = observation_result['analysis'] if 'analysis' in observation_result else ''
-                            if analysis:
-                                task_manager.complete_task(
-                                    task_id=task_id,
-                                    result=analysis,
-                                    execution_details={
-                                        'observation_analysis': analysis,
-                                        'completion_detected_by': 'ObservationAgent'
-                                    }
-                                )
-                                logger.info(f"ObservationAgent: 已更新任务 {task_id} 的执行结果")
-                    else:
-                        logger.warning("ObservationAgent: TaskManager没有update_task_status方法")
-                except Exception as e:
-                    logger.warning(f"ObservationAgent: 更新任务 {task_id} 状态为完成时出错: {str(e)}")
-
-            # 更新失败的任务状态
-            for task_id in failed_task_ids:
-                try:
-                    if hasattr(task_manager, 'update_task_status'):
-                        task_manager.update_task_status(task_id, TaskStatus.FAILED)
-                        logger.info(f"ObservationAgent: 已将任务 {task_id} 标记为失败")
-                    else:
-                        logger.warning("ObservationAgent: TaskManager没有update_task_status方法")
-                except Exception as e:
-                    logger.warning(f"ObservationAgent: 更新任务 {task_id} 状态为失败时出错: {str(e)}")
-
-            logger.info(f"ObservationAgent: 任务状态更新完成，完成任务: {completed_task_ids}，失败任务: {failed_task_ids}")
-        except Exception as e:
-            logger.error(f"ObservationAgent: 更新TaskManager任务状态时发生错误: {str(e)}")
+            for tool_call in tool_calls:
+                function_name = tool_call["function"]["name"]
+                arguments = tool_call["function"]["arguments"]
+                tool_call_id = tool_call["id"]
+                
+                logger.info(f"ObservationAgent: 执行工具 {function_name}")
+                
+                # 执行工具
+                # 使用基类的 _execute_tool 方法
+                # 构造符合 _execute_tool 要求的 tool_call 结构
+                # _execute_tool 需要 tool_call 字典，包含 function: {name, arguments}
+                # 这里 accumulated tool_calls 已经是这个结构了
+                
+                # 构造 messages_input (虽然 _execute_tool 可能不需要它来执行工具，但为了接口一致)
+                messages_input = messages
+                
+                async for chunk in self._execute_tool(
+                    tool_call=tool_call,
+                    tool_manager=tool_manager,
+                    messages_input=messages_input,
+                    session_id=session_id
+                ):
+                    yield chunk

@@ -251,7 +251,7 @@ print("🔄 Streaming execution with real-time monitoring:")
 
 for chunk in controller.run_stream(messages, tool_manager, deep_thinking=True):
     for message in chunk:
-        print(f"🤖 [{message.get('type', 'unknown')}] {message['role']}: {message.get('show_content', '')[:100]}...")
+        print(f"🤖 [{message.get('type', 'unknown')}] {message['role']}: {message.get('content', '')[:100]}...")
         
         # Track token usage in real-time
         if 'usage' in message:

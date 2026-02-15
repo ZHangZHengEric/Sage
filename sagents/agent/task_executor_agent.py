@@ -9,6 +9,8 @@ from sagents.utils.prompt_manager import PromptManager
 from sagents.tool.tool_schema import convert_spec_to_openai_format
 from sagents.utils.content_saver import save_agent_response_content
 import uuid
+import json
+import traceback
 
 
 class TaskExecutorAgent(AgentBase):
@@ -28,45 +30,40 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('task_executor_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager
-        if 'task_rewrite' in session_context.audit_status:
-            rewrite_user = [MessageChunk(
-                role=MessageRole.USER.value,
-                content=session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
-            )]
-            messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=10)
-            history_messages = rewrite_user + messages_after_last_user
-        else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=10, last_turn_user_only=True)
-            messages_after_last_user = message_manager.get_all_execution_messages_after_last_user(recent_turns=12)
-            history_messages.extend(messages_after_last_user)
+       
+        history_messages = message_manager.extract_all_context_messages(recent_turns=10, last_turn_user_only=False)
 
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-             history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
+             history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('active_budget', 8000), 8000))
 
         last_planning_message_dict = session_context.audit_status['all_plannings'][-1]['next_step']
 
         prompt = self.TASK_EXECUTION_PROMPT_TEMPLATE.format(
-            next_subtask_description=last_planning_message_dict['description'],
-            next_expected_output=last_planning_message_dict['expected_output']
+            next_subtask_description=last_planning_message_dict['description']
         )
         prompt_message_chunk = MessageChunk(
             role=MessageRole.ASSISTANT.value,
             type=MessageType.EXECUTION.value,
             content=prompt,
-            message_id=str(uuid.uuid4()),
-            show_content=""
+            message_id=str(uuid.uuid4())
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language())
         ]
         llm_request_message.extend(history_messages)
         llm_request_message.append(prompt_message_chunk)
-        yield [prompt_message_chunk]
+        # yield [prompt_message_chunk]
 
-        tools_json = self._prepare_tools(tool_manager, last_planning_message_dict, session_context)
+        # 1. 获取建议工具
+        if tool_manager:
+            suggested_tools = await self._get_suggested_tools(history_messages, tool_manager, session_id or "", session_context)
+        else:
+            suggested_tools = []
+        
+        # 2. 准备工具
+        tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
 
         async for chunk in self._call_llm_and_process_response(
             messages_input=llm_request_message,
@@ -75,6 +72,103 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             session_id=session_id or ""
         ):
             yield chunk
+
+    async def _get_suggested_tools(self,
+                                   messages_input: List[MessageChunk],
+                                   tool_manager: ToolManager,
+                                   session_id: str,
+                                   session_context: SessionContext) -> List[str]:
+        """
+        基于用户输入和历史对话获取建议工具
+        """
+        logger.info(f"TaskExecutorAgent: 开始获取建议工具，会话ID: {session_id}")
+
+        if not messages_input or not tool_manager:
+            logger.warning("TaskExecutorAgent: 未提供消息或工具管理器，返回空列表")
+            return []
+        try:
+            # 获取可用工具，只提取工具名称
+            available_tools = tool_manager.list_tools_simplified()
+
+            tool_names = [tool['name'] for tool in available_tools] if available_tools else []
+            if len(tool_names) <= 10:
+                logger.info(f"TaskExecutorAgent: 可用工具数量小于等于9个，直接返回所有工具: {tool_names}")
+                if 'complete_task' in tool_names:
+                    tool_names.remove('complete_task')
+                return tool_names
+            available_tools_str = ", ".join(tool_names) if tool_names else '无可用工具'
+
+            # 准备消息
+            clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+
+            # 重新获取agent_custom_system_prefix以支持动态语言切换
+            current_system_prefix = PromptManager().get_agent_prompt_auto("task_executor_system_prefix", language=session_context.get_language())
+
+            # 生成提示
+            tool_suggestion_template = PromptManager().get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
+            prompt = tool_suggestion_template.format(
+                session_id=session_id,
+                available_tools_str=available_tools_str,
+                agent_config=self.prepare_unified_system_message(
+                    session_id,
+                    custom_prefix=current_system_prefix,
+                    language=session_context.get_language(),
+                ).content,
+                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+            )
+
+            # 调用LLM获取建议
+            suggested_tools = await self._get_tool_suggestions(prompt, session_id)
+
+            # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write file_update 这几个工具
+            if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
+                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'file_update', 'load_skill'])
+
+            if "sys_spawn_agent" in tool_names:
+                suggested_tools.extend(['sys_spawn_agent'])
+            if 'sys_delegate_task' in tool_names:
+                suggested_tools.extend(['sys_delegate_task'])
+            if 'sys_finish_task' in tool_names:
+                suggested_tools.append('sys_finish_task')
+
+            # 去重
+            suggested_tools = list(set(suggested_tools))    
+
+            logger.info(f"TaskExecutorAgent: 获取到建议工具: {suggested_tools}")
+            return suggested_tools
+
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            logger.error(f"TaskExecutorAgent: 获取建议工具时发生错误: {str(e)}")
+            return []
+
+    async def _get_tool_suggestions(self, prompt: str, session_id: str) -> List[str]:
+        """
+        调用LLM获取工具建议（流式调用）
+        """
+        logger.debug("TaskExecutorAgent: 调用LLM获取工具建议（流式）")
+
+        messages_input = [{'role': 'user', 'content': prompt}]
+        # 使用基类的流式调用方法，自动处理LLM request日志
+        response = self._call_llm_streaming(
+            messages=messages_input,
+            session_id=session_id,
+            step_name="tool_suggestion"
+        )
+        # 收集流式响应内容
+        all_content = ""
+        async for chunk in response:
+            if len(chunk.choices) == 0:
+                continue
+            if chunk.choices[0].delta.content:
+                all_content += chunk.choices[0].delta.content
+        try:
+            result_clean = MessageChunk.extract_json_from_markdown(all_content)
+            suggested_tools = json.loads(result_clean)
+            return suggested_tools
+        except json.JSONDecodeError:
+            logger.warning("TaskExecutorAgent: 解析工具建议响应时JSON解码错误")
+            return []
 
     async def _call_llm_and_process_response(self,
                                              messages_input: List[MessageChunk],
@@ -92,14 +186,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         # 总是添加 load_skill 工具，如果有技能管理器
         # 这确保了它不会被过滤掉，并且直接传递给 LLM
         session_context = get_session_context(session_id)
-        # if session_context and session_context.skill_manager and tool_manager:
-        #     # 检查是否已经存在
-        #     if not any(t['function']['name'] == 'load_skill' for t in tools_json):
-        #         load_skill_tool = tool_manager.get_tool('load_skill')
-        #         if load_skill_tool:
-        #             skill_tool_schema = convert_spec_to_openai_format(load_skill_tool, lang=session_context.get_language())
-        #             tools_json.append(skill_tool_schema)
-        #             logger.debug("TaskExecutorAgent: Added load_skill tool to tools_json via override logic")
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
@@ -133,7 +219,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     role=MessageRole.ASSISTANT.value,
                     content="",
                     message_id=content_response_message_id,
-                    show_content="",
                     message_type=MessageType.EMPTY.value
                 )]
                 yield output_messages
@@ -150,7 +235,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                         role=MessageRole.ASSISTANT.value,
                         content=content_piece,
                         message_id=content_response_message_id,
-                        show_content=content_piece,
                         message_type=MessageType.DO_SUBTASK_RESULT.value
                     )]
                     yield output_messages
@@ -159,9 +243,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
                     output_messages = [MessageChunk(
                         role=MessageRole.ASSISTANT.value,
-                        content="",
+                        content=chunk.choices[0].delta.reasoning_content,
                         message_id=reasoning_content_response_message_id,
-                        show_content=chunk.choices[0].delta.reasoning_content,
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
                     yield output_messages
@@ -186,23 +269,48 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             # 发送换行消息（也包含usage信息）
             output_messages = [MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='',
+                content='\n',
                 message_id=content_response_message_id,
-                show_content='\n',
                 message_type=MessageType.DO_SUBTASK_RESULT.value
             )]
             yield output_messages
 
+    async def _handle_tool_calls(self,
+                                 tool_calls: Dict[str, Any],
+                                 tool_manager: Optional[ToolManager],
+                                 messages_input: List[Dict[str, Any]],
+                                 session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
+        """
+        处理工具调用
+        """
+        logger.info(f"TaskExecutorAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
+        
+        for tool_call_id, tool_call in tool_calls.items():
+            tool_name = tool_call['function']['name']
+            logger.info(f"TaskExecutorAgent: 执行工具 {tool_name}")
+            
+            # 发送工具调用消息
+            yield self._create_tool_call_message(tool_call)
+            
+            # 执行工具
+            async for chunk in self._execute_tool(
+                tool_call=tool_call,
+                tool_manager=tool_manager,
+                messages_input=messages_input,
+                session_id=session_id
+            ):
+                yield chunk
+
     def _prepare_tools(self,
                        tool_manager: Optional[ToolManager],
-                       subtask_info: Dict[str, Any],
+                       suggested_tools: List[str],
                        session_context: SessionContext) -> List[Dict[str, Any]]:
         """
         准备工具列表
 
         Args:
             tool_manager: 工具管理器
-            subtask_info: 子任务信息
+            suggested_tools: 建议工具列表
             session_context: 会话上下文
 
         Returns:
@@ -216,15 +324,8 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
         # 根据建议的工具进行过滤，同时移除掉complete_task 这个工具
-        suggested_tools = subtask_info.get('required_tools', [])
+        # suggested_tools 已经是 List[str] 了，直接使用
         
-        # 容错处理：确保 suggested_tools 是列表
-        if isinstance(suggested_tools, str):
-            suggested_tools = [suggested_tools]
-        elif not isinstance(suggested_tools, list):
-            logger.warning(f"TaskExecutorAgent: required_tools 类型错误 ({type(suggested_tools)}), 重置为空列表")
-            suggested_tools = []
-            
         # 验证 suggested_tools 中的工具是否真实存在于 tool_manager 中
         # 如果存在无效工具名，可能是模型幻觉，此时最好回退到使用所有工具，以免遗漏
         available_tool_names = {tool['function']['name'] for tool in tools_json}
@@ -253,7 +354,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             if tools_suggest_json:
                 tools_json = tools_suggest_json
             else:
-                 logger.warning("TaskExecutorAgent: 过滤后工具列表为空，回退到使用所有工具")
+                logger.warning("TaskExecutorAgent: 过滤后工具列表为空，回退到使用所有工具")
 
         tool_names = [tool['function']['name'] for tool in tools_json]
         logger.info(f"ExecutorAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
@@ -292,7 +393,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                     role=MessageRole.ASSISTANT.value,
                     content='已经完成了满足用户的所有要求',
                     message_id=str(uuid.uuid4()),
-                    show_content='已经完成了满足用户的所有要求',
                     message_type=MessageType.DO_SUBTASK_RESULT.value
                 )]
                 return

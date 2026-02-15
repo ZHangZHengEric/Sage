@@ -669,7 +669,9 @@ class ToolManager:
                     "search_content_in_file", 
                     "download_file_from_url", 
                     "file_update",
-                    "extract_text_from_non_text_file"
+                    "extract_text_from_non_text_file",
+                    "todo_read",
+                    "todo_write"
                 ]
                 
                 if tool.name in SANDBOX_TOOLS:
@@ -695,12 +697,68 @@ class ToolManager:
                             # We might want to ensure npm here too in future if sandbox environment management supports it
                             # session_context.sandbox.ensure_npm() 
 
+                            # Inject session_id if the tool function expects it
+                            import inspect
+                            func_to_inspect = tool.func
+                            # Handle bound methods or wrapped functions
+                            if hasattr(func_to_inspect, "__wrapped__"):
+                                func_to_inspect = func_to_inspect.__wrapped__
+                            
+                            sig = inspect.signature(func_to_inspect)
+                            if "session_id" in sig.parameters:
+                                kwargs["session_id"] = session_id
+
                             # Use run_tool which handles path mapping and execution
                             # We pass the function object from the tool spec
                             # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
                             # usually it's bound method if created from class)
                             result = session_context.sandbox.run_tool(tool.func, kwargs)
                             final_result = json.dumps({"content": result}, ensure_ascii=False, indent=2)
+
+                            # Sync context for ToDo tools after successful sandbox execution
+                            if tool.name in ["todo_write", "todo_read", "todo_update"]:
+                                try:
+                                    # logger.info(f"Syncing session_context for {tool.name} after sandbox execution")
+                                    # Get tool class directly
+                                    from sagents.tool.impl.todo_tool import ToDoTool
+                                    
+                                    # Read directly from sandbox file system
+                                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                                         # Use sandbox to read file content (ensure we get the file from sandbox perspective)
+                                         # But wait, we need the path.
+                                         # We can reconstruct the path logic or just read "todo_list.md" from workspace root
+                                         # SandboxFileSystem maps workspace root.
+                                         
+                                         # Let's try to read "todo_list.md" from the sandbox current working directory
+                                         # We can use 'cat todo_list.md' or similar via sandbox, OR use file_read tool logic?
+                                         # Actually, if we are in the main process, we can access the file via the host path if we know it.
+                                         # session_context.agent_workspace might be a string (host path) or SandboxFileSystem.
+                                         
+                                         host_todo_path = None
+                                         if isinstance(session_context.agent_workspace, str):
+                                             host_todo_path = os.path.join(session_context.agent_workspace, "todo_list.md")
+                                         elif hasattr(session_context.agent_workspace, 'host_path'):
+                                             host_todo_path = os.path.join(session_context.agent_workspace.host_path, "todo_list.md")
+                                         
+                                         if host_todo_path and os.path.exists(host_todo_path):
+                                             with open(host_todo_path, 'r', encoding='utf-8') as f:
+                                                 content = f.read()
+                                             
+                                             tasks = ToDoTool.parse_todo_list(content)
+                                             
+                                             # Update main process memory directly
+                                             if not hasattr(session_context, 'system_context') or not isinstance(session_context.system_context, dict):
+                                                 logger.warning("session_context.system_context is invalid")
+                                             else:
+                                                 if 'todo_list' not in session_context.system_context:
+                                                     session_context.system_context.update({'todo_list': []})
+                                                 session_context.system_context.update({'todo_list': tasks})
+                                                 logger.info(f"Session context synced successfully via file read. Tasks: {len(tasks)}")
+                                         else:
+                                             logger.warning(f"Could not locate todo_list.md at {host_todo_path}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to sync session context after sandbox execution: {e}")
+
                         else:
                              # Fallback to standard execution if no sandbox found (should not happen in new setup)
                             logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")

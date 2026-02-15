@@ -24,27 +24,21 @@ class TaskAnalysisAgent(AgentBase):
         # 从消息管理实例中，获取满足context 长度限制的消息
         logger.info("TaskAnalysisAgent: 开始执行流式任务分析")
         # recent_message 中只保留 user 以及final answer
-        if 'task_rewrite' in session_context.audit_status:
-            recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
-                role=MessageRole.USER.value,
-                content = session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
-            )])
-        else:
-            recent_message = message_manager.extract_all_context_messages(
-                recent_turns=5,
-                allowed_message_types=[
-                    MessageType.FINAL_ANSWER.value,
-                    MessageType.DO_SUBTASK_RESULT.value,
-                    MessageType.TOOL_CALL.value,
-                    MessageType.TOOL_CALL_RESULT.value
-                ]
-            )
-            # 根据 active_budget 压缩消息
-            budget_info = message_manager.context_budget_manager.budget_info
-            if budget_info:
-                recent_message = MessageManager.compress_messages(recent_message, budget_info.get('active_budget', 8000))
-            recent_message_str = MessageManager.convert_messages_to_str(recent_message)
+
+        recent_message = message_manager.extract_all_context_messages(
+            recent_turns=5,
+            allowed_message_types=[
+                MessageType.FINAL_ANSWER.value,
+                MessageType.DO_SUBTASK_RESULT.value,
+                MessageType.TOOL_CALL.value,
+                MessageType.TOOL_CALL_RESULT.value
+            ]
+        )
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+            recent_message = MessageManager.compress_messages(recent_message, min(budget_info.get('active_budget', 8000), 4000))
+        recent_message_str = MessageManager.convert_messages_to_str(recent_message)
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
 
@@ -74,7 +68,6 @@ class TaskAnalysisAgent(AgentBase):
             role=MessageRole.ASSISTANT.value,
             content=task_analysis_prompt,
             message_id=message_id,
-            show_content="",
             message_type=MessageType.TASK_ANALYSIS.value
         )]
 
@@ -89,7 +82,6 @@ class TaskAnalysisAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.TASK_ANALYSIS.value
             )
         ]
@@ -108,7 +100,6 @@ class TaskAnalysisAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content=llm_repsonse_chunk.choices[0].delta.content,
                         message_id=message_id,
-                        show_content=llm_repsonse_chunk.choices[0].delta.content,
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
             elif hasattr(llm_repsonse_chunk.choices[0].delta, 'reasoning_content') and llm_repsonse_chunk.choices[0].delta.reasoning_content is not None:
@@ -116,7 +107,6 @@ class TaskAnalysisAgent(AgentBase):
                         role=MessageRole.ASSISTANT.value,
                         content="",
                         message_id=message_id,
-                        show_content="",
                         message_type=MessageType.TASK_ANALYSIS.value
                     )]
         session_context.audit_status['task_analysis'] = all_analysis_chunks_content

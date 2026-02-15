@@ -25,12 +25,6 @@ task_completion_judge_template = {
 ## 用户历史对话
 {task_description}
 
-## 任务管理器状态
-{task_manager_status}
-
-## 近期完成动作详情以及分析
-{execution_results}
-
 ## 分析要求
 finish_percent：子任务完成数量的百分比数字，格式：30，范围0-100，100表示所有的子任务都完成，且满足用户需求。
 completion_status：任务完成状态，
@@ -61,12 +55,6 @@ completion_status：任务完成状态，
 ## User Historical Dialogue
 {task_description}
 
-## Task Manager Status
-{task_manager_status}
-
-## Recent Completed Action Details and Analysis
-{execution_results}
-
 ## Analysis Requirements
 finish_percent: A numeric percentage of subtask completion, format: 30, range 0-100, 100 means all subtasks are completed and user needs are satisfied.
 completion_status: Task completion status,
@@ -95,12 +83,6 @@ completion_status: Task completion status,
 
 ## Diálogo Histórico do Usuário
 {task_description}
-
-## Status do Gerenciador de Tarefas
-{task_manager_status}
-
-## Detalhes e Análise de Ações Concluídas Recentemente
-{execution_results}
 
 ## Requisitos de Análise
 finish_percent: Um percentual numérico de conclusão de subtarefas, formato: 30, intervalo 0-100, 100 significa que todas as subtarefas estão concluídas e as necessidades do usuário estão satisfeitas.

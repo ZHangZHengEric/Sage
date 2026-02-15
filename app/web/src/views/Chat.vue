@@ -527,11 +527,10 @@ const handleMessage = (messageData) => {
         timestamp: messageData.timestamp || Date.now()
       };
     } else {
-      // 对于其他消息类型，合并show_content和content
+      // 对于其他消息类型，合并content
       newMessages[existingIndex] = {
         ...existing,
         ...messageData,
-        show_content: (existing.show_content || '') + (messageData.show_content || ''),
         content: (existing.content || '') + (messageData.content || ''),
         timestamp: messageData.timestamp || Date.now()
       };
@@ -623,7 +622,7 @@ const showLoadingBubble = computed(() => {
   if (lastMsg.tool_calls && lastMsg.tool_calls.length > 0) return false;
   
   // Check content
-  if (lastMsg.show_content) return false;
+  if (lastMsg.content) return false;
   
   // Otherwise, we are still waiting for content
   return true;
