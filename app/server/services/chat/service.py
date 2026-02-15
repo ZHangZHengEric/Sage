@@ -330,7 +330,6 @@ async def execute_chat_session(
         if mode == "chat":
             yield_result = result.copy()
             yield_result.pop("message_type", None)
-            yield_result.pop("show_content", None)
             yield_result.pop("is_final", None)
             yield_result.pop("is_chunk", None)
             if yield_result.get("type") == "token_usage":

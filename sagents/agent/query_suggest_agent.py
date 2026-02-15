@@ -28,7 +28,7 @@ class QuerySuggestAgent(AgentBase):
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            conversation_messages = MessageManager.compress_messages(conversation_messages, budget_info.get('active_budget', 8000))
+            conversation_messages = MessageManager.compress_messages(conversation_messages, min(budget_info.get('active_budget', 8000),4000))
         recent_message_str = MessageManager.convert_messages_to_str(conversation_messages)
         suggest_template = PromptManager().get_agent_prompt_auto('suggest_template', language=session_context.get_language())
         prompt = suggest_template.format(
@@ -40,7 +40,6 @@ class QuerySuggestAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.QUERY_SUGGEST.value
             )
         ]
@@ -70,62 +69,19 @@ class QuerySuggestAgent(AgentBase):
                             if last_tag_type != 'suggest_item':
                                 yield [MessageChunk(
                                     role=MessageRole.ASSISTANT.value,
-                                    content='',
+                                    content='\n- ',
                                     message_id=message_id,
-                                    show_content='\n- ',
                                     message_type=MessageType.QUERY_SUGGEST.value
                                 )]
                             
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content="",
+                                content=delta_content_all,
                                 message_id=message_id,
-                                show_content=delta_content_all,
                                 message_type=MessageType.QUERY_SUGGEST.value
                             )]
                         last_tag_type = delta_content_type
 
-        async for chunk in self._finalize_query_suggest_result(full_response, message_id):
-            yield chunk
-
-    async def _finalize_query_suggest_result(self, full_response: str, message_id: str) -> AsyncGenerator[List[MessageChunk], None]:
-        logger.debug("QuerySuggestAgent: 处理最终查询建议结果")
-        try:
-            # 解析查询建议列表
-            suggest_items = self._convert_xlm_to_json(full_response)
-            logger.info(f"QuerySuggestAgent: 成功生成 {len(suggest_items)} 条查询建议")
-            # 生成查询建议消息
-            yield [MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content=json.dumps(suggest_items),
-                message_id=message_id,
-                show_content='',
-                message_type=MessageType.QUERY_SUGGEST.value
-            )]
-        except Exception as e:
-            logger.error(f"QuerySuggestAgent: 处理最终查询建议结果失败，错误信息: {str(e)}")
-            logger.error(traceback.format_exc())
-            yield [MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content="",
-                message_id=message_id,
-                show_content="查询建议生成失败",
-                message_type=MessageType.QUERY_SUGGEST.value
-            )]
-            
-    def _convert_xlm_to_json(self, xml_str: str) -> List[Dict[str, str]]:
-        # 使用正则表达式提取 <suggest_item> 标签中的内容
-        pattern = r'<suggest_item>(.*?)</suggest_item>'
-        suggest_items = re.findall(pattern, xml_str, re.DOTALL)
-        logger.debug(f"QuerySuggestAgent: 原始XML字符串: {xml_str}")
-        logger.debug(f"QuerySuggestAgent: 提取的建议列表: {suggest_items}")
-        suggests = []
-        for suggest_item in suggest_items:
-            suggests.append({
-                "suggest": suggest_item.strip()
-            })
-        logger.debug(f"QuerySuggestAgent: 成功提取 {len(suggests)} 条查询建议")
-        return suggests
 
         
         
