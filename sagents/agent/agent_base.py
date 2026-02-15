@@ -150,6 +150,7 @@ class AgentBase(ABC):
         # 移除不是OpenAI API标准参数的配置项
         final_config.pop('max_model_len', None)
         final_config.pop('api_key', None)
+        final_config.pop('maxTokens', None)
         final_config.pop('base_url', None)
         all_chunks = []
 
