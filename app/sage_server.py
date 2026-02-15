@@ -409,7 +409,6 @@ class SageStreamService:
                 'role': 'assistant',
                 'message_id': str(uuid.uuid4()),
                 'session_id': session_id,
-                # 'show_content': f"处理失败: {str(e)}"
             }
             yield error_result
     
@@ -580,7 +579,6 @@ class ChatMessage(BaseModel):
     message_id: Optional[str] = None
     type: Optional[str] = "normal"
     tool_calls: Optional[List[Dict[str, Any]]] = None
-    # show_content: Optional[str] = None
     type: Optional[str] = None
     # 添加历史对话中可能存在的字段
     message_type: Optional[str] = None
