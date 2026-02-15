@@ -19,7 +19,6 @@ class TaskSummaryAgent(AgentBase):
 
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
 
         # 提取任务描述
         if 'task_rewrite' in session_context.audit_status:
@@ -33,21 +32,13 @@ class TaskSummaryAgent(AgentBase):
             # 根据 active_budget 压缩消息
             budget_info = message_manager.context_budget_manager.budget_info
             if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, int(budget_info.get('max_model_len', 20000)*0.6))
-            task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
-
-        task_manager_status_and_results = await task_manager.get_all_tasks_summary()
-
-        completed_actions_messages = message_manager.get_all_execution_messages_after_last_user(max_content_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str)-MessageManager.calculate_str_token_length(task_manager_status_and_results)))
-        completed_actions_messages.append(message_manager.get_last_observation_message())
-        completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
+                history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('max_model_len', 20000)*0.6, 10000))
+            history_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         # 使用PromptManager获取模板，传入语言参数
         summary_template = PromptManager().get_agent_prompt_auto("task_summary_template", language=session_context.get_language())
         prompt = summary_template.format(
-            task_description=task_description_messages_str,
-            task_manager_status_and_results=task_manager_status_and_results,
-            execution_results=completed_actions_messages_str,
+            task_description=history_messages_str,
         )
         llm_request_message = [
             self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),

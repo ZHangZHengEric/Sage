@@ -35,22 +35,14 @@ decompose_template = {
 2. 子任务的分解要考虑可用的工具的能力范围。
 3. 确保每个子任务都是原子性的，且尽量相互独立，避免人为拆分无实际意义的任务。
 4. 考虑任务之间的依赖关系，输出的列表必须是有序的，按照优先级从高到低排序，优先级相同的任务按照依赖关系排序。
-5. 输出格式必须严格遵守以下要求。
+5. 你必须使用 `todo_write` 工具来输出分析出的任务清单，而不是直接在回复中列出。
 6. 如果有任务Thinking的过程，子任务要与Thinking的处理逻辑一致。
 7. 子任务数量不要超过10个，较简单的子任务可以合并为一个子任务。
 8. 子任务描述中不要直接说出工具的原始名称，使用工具描述来表达工具。
 9. 只关注用户最新的需求或者任务进行拆分，不要关注用户历史对话中的其他任务。
 10. 如果当前存在可用的skills，并且这个子任务和某个skill非常契合，就声明一下使用对应的skill 。
 
-## 输出格式
-```
-<task_item>
-子任务1描述
-</task_item>
-<task_item>
-子任务2描述
-</task_item>
-```""",
+请调用 `todo_write` 工具来输出分析出的任务清单。""",
     "en": """# Task Decomposition Guide
 Observe user latest needs or tasks through user's historical dialogue
 
@@ -68,22 +60,14 @@ Observe user latest needs or tasks through user's historical dialogue
 2. Subtask decomposition should consider the capability range of available tools.
 3. Ensure each subtask is atomic and as independent as possible, avoiding artificial splitting of meaningless tasks.
 4. Consider dependencies between tasks. The output list must be ordered, sorted by priority from high to low. Tasks with the same priority should be sorted by dependency relationship.
-5. Output format must strictly follow the requirements below.
+5. You MUST use the `todo_write` tool to output the analyzed task list instead of listing them in the response.
 6. If there is a task Thinking process, subtasks should be consistent with the Thinking processing logic.
 7. The number of subtasks should not exceed 10. Simpler subtasks can be merged into one subtask.
 8. Do not directly mention the original names of tools in subtask descriptions. Use tool descriptions to express tools.
 9. Only focus on user latest needs or tasks for decomposition, do not focus on other tasks in user historical dialogue.
 10. If there are available skills, and this subtask fits a specific skill well, just explicitly state that you will use the corresponding skill.
 
-## Output Format
-```
-<task_item>
-Subtask 1 description
-</task_item>
-<task_item>
-Subtask 2 description
-</task_item>
-```""",
+Please call the `todo_write` tool to output the analyzed task list.""",
     "pt": """# Guia de Decomposição de Tarefas
 Observe as necessidades ou tarefas mais recentes do usuário através do diálogo histórico do usuário
 
@@ -108,13 +92,6 @@ Observe as necessidades ou tarefas mais recentes do usuário através do diálog
 9. Concentre-se apenas nas necessidades ou tarefas mais recentes do usuário para decomposição, não se concentre em outras tarefas no diálogo histórico do usuário.
 10. Se houver skills disponíveis e esta subtarefa se encaixar muito bem em uma skill específica, apenas declare explicitamente que usará a skill correspondente.
 
-## Formato de Saída
-```
-<task_item>
-Descrição da subtarefa 1
-</task_item>
-<task_item>
-Descrição da subtarefa 2
-</task_item>
-```"""
+Por favor, chame a ferramenta `todo_write` para saída da lista de tarefas analisadas.
+"""
 }
