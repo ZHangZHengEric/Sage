@@ -111,7 +111,6 @@ Each message chunk contains:
     'role': str,                 # Agent role ('assistant', 'user', etc.)
     'content': str,              # Message content
     'type': str,                 # Message type (e.g., 'task_analysis', 'final_answer')
-    'show_content': str,         # Formatted content for display
     'usage': Dict[str, Any]      # Token usage for this message (optional)
 }
 ```
