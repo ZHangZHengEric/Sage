@@ -268,13 +268,13 @@ def convert_messages_for_show(messages: List[Dict[str, Any]]) -> List[Dict[str, 
     new_messages = []
 
     for message in messages:
-        if not message.get('show_content'):
+        if not message.get('content'):
             continue
 
         new_message = {
             'message_id': message.get('message_id', str(uuid.uuid4())),
             'role': 'assistant' if message['role'] != 'user' else 'user',
-            'content': message.get('show_content')
+            'content': message.get('content')
         }
         new_messages.append(new_message)
 

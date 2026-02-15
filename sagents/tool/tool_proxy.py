@@ -210,18 +210,22 @@ class ToolProxyFactory:
     PREDEFINED_TOOL_SETS = {
         'im_invitation': [
             'calculate', 'factorial', 'file_read', 'file_write', 
-            'execute_python_code', 'complete_task'
+            'execute_python_code', 'complete_task',
+            'todo_write', 'todo_read'
         ],
         'sales_assistant': [
             'calculate', 'file_read', 'file_write', 'web_search', 
-            'send_email', 'complete_task'
+            'send_email', 'complete_task',
+            'todo_write', 'todo_read'
         ],
         'batch_operation': [
             'file_read', 'file_write', 'execute_python_code', 
-            'batch_process', 'complete_task'
+            'batch_process', 'complete_task',
+            'todo_write', 'todo_read'
         ],
         'basic': [
-            'calculate', 'factorial', 'complete_task'
+            'calculate', 'factorial', 'complete_task',
+            'todo_write', 'todo_read'
         ]
     }
     

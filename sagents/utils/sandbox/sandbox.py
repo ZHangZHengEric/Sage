@@ -1194,7 +1194,7 @@ timeout = 120
             if res['status'] == 'success':
                 return res['result']
             else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
                 
         finally:
             if os.path.exists(input_pkl):
@@ -1253,7 +1253,7 @@ timeout = 120
             if res['status'] == 'success':
                 return res['result']
             else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
                 
         finally:
             if os.path.exists(input_pkl):
@@ -1321,7 +1321,7 @@ timeout = 120
             if res['status'] == 'success':
                 return res['result']
             else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
                 
         finally:
             if os.path.exists(input_pkl):
@@ -1421,7 +1421,7 @@ timeout = 120
             if res['status'] == 'success':
                 return res['result']
             else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}")
+                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
         
         except FileNotFoundError:
              raise SandboxError("Bubblewrap (bwrap) executable not found. Please install bubblewrap (e.g., `apt install bubblewrap` or `yum install bubblewrap`).")

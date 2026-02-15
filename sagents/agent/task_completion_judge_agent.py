@@ -6,7 +6,6 @@ from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.context.tasks.task_manager import TaskManager
 import uuid
 import json
 
@@ -22,7 +21,6 @@ class TaskCompletionJudgeAgent(AgentBase):
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_completion_judge_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
 
         if 'task_rewrite' in session_context.audit_status:
             task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
@@ -35,29 +33,11 @@ class TaskCompletionJudgeAgent(AgentBase):
             # 根据 active_budget 压缩消息
             budget_info = message_manager.context_budget_manager.budget_info
             if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, int(budget_info.get('max_model_len', 20000)*0.6))
-            task_description_messages_str = MessageManager.convert_messages_to_str(history_messages)
-
-        if task_manager:
-            task_manager_status = task_manager.get_status_description(language=session_context.get_language())
-        else:
-            from sagents.utils.prompt_manager import prompt_manager
-            task_manager_status = prompt_manager.get_prompt(
-                'task_manager_none',
-                agent='common',
-                language=session_context.get_language(),
-                default='无任务管理器'
-            )
-
-        # recent_execution_results_messages = message_manager.extract_after_last_observation_messages()
-        # recent_execution_results_messages_str = MessageManager.convert_messages_to_str(recent_execution_results_messages)
-        completed_actions_messages = message_manager.extract_after_last_stage_summary_messages(max_length=(self.max_model_input_len-MessageManager.calculate_str_token_length(task_description_messages_str) - MessageManager.calculate_str_token_length(task_manager_status))//2)
-        completed_actions_messages_str = MessageManager.convert_messages_to_str(completed_actions_messages)
+                history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('max_model_len', 20000)*0.6,4000))
+            history_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         prompt = PromptManager().get_agent_prompt_auto('task_completion_judge_template', language=session_context.get_language()).format(
-            task_description=task_description_messages_str,
-            task_manager_status=task_manager_status,
-            execution_results=completed_actions_messages_str,
+            task_description=history_messages_str,
             agent_description=self.system_prefix
         )
         llm_request_message = [
@@ -66,7 +46,6 @@ class TaskCompletionJudgeAgent(AgentBase):
                 role=MessageRole.USER.value,
                 content=prompt,
                 message_id=str(uuid.uuid4()),
-                show_content=prompt,
                 message_type=MessageType.OBSERVATION.value
             )
         ]
@@ -84,11 +63,10 @@ class TaskCompletionJudgeAgent(AgentBase):
             session_context=session_context,
             all_content=all_content, 
             message_id=message_id,
-            task_manager = task_manager
         ):
             yield result
 
-    def _finalize_task_completion_judge_result(self,session_context:SessionContext,all_content:str,message_id:str,task_manager:TaskManager):
+    def _finalize_task_completion_judge_result(self,session_context:SessionContext,all_content:str,message_id:str):
         """
         最终化任务完成判断结果
         """
@@ -106,7 +84,6 @@ class TaskCompletionJudgeAgent(AgentBase):
                 role=MessageRole.ASSISTANT.value,
                 content=f"任务完成判断失败: {str(e)}",
                 message_id=str(uuid.uuid4()),
-                show_content=f"任务完成判断失败: {str(e)}",
                 message_type=MessageType.OBSERVATION.value
             )]
     def convert_xlm_to_json(self, xlm_content: str) -> Dict[str, Any]:

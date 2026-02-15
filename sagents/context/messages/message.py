@@ -76,11 +76,10 @@ class MessageChunk:
     # 消息标识
     message_id: Optional[str] = None  # 消息唯一标识符
     
-    # 工具相关字段
+    # 工具调用ID（tool角色消息必需）
     tool_call_id: Optional[str] = None  # 工具调用ID（tool角色消息必需）
     
     # 显示和类型字段
-    show_content: Optional[str] = None  # 显示内容（用于前端展示）
     type: Optional[str] = None  # 消息类型（兼容现有系统）
     message_type: Optional[str] = None  # 消息类型（备用字段）
     
@@ -202,12 +201,10 @@ class MessageChunk:
     def get_content(self) -> Optional[str]:
         """获取消息内容
         
-        优先返回 show_content，如果不存在则返回 content
-        
         Returns:
             Optional[str]: 消息内容
         """
-        return self.show_content if self.show_content else self.content
+        return self.content
 
     @classmethod
     def extract_json_from_markdown(cls, content: str) -> str:

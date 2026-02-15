@@ -457,7 +457,6 @@ class SimpleAgent(AgentBase):
                     role=MessageRole.ASSISTANT.value,
                     content="",
                     message_id=content_response_message_id,
-                    show_content="",
                     message_type=MessageType.EMPTY.value
                 )]
                 yield (output_messages, False)
@@ -474,7 +473,6 @@ class SimpleAgent(AgentBase):
                         role='assistant',
                         content=content_piece,
                         message_id=content_response_message_id,
-                        show_content=content_piece,
                         message_type=MessageType.DO_SUBTASK_RESULT.value,
                         agent_name=self.agent_name
                     )]
@@ -484,9 +482,8 @@ class SimpleAgent(AgentBase):
                 if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content is not None:
                     output_messages = [MessageChunk(
                         role='assistant',
-                        content="",
+                        content=chunk.choices[0].delta.reasoning_content,
                         message_id=reasoning_content_response_message_id,
-                        show_content=chunk.choices[0].delta.reasoning_content,
                         message_type=MessageType.TASK_ANALYSIS.value,
                         agent_name=self.agent_name
                     )]
@@ -530,9 +527,8 @@ class SimpleAgent(AgentBase):
             # 发送换行消息（也包含usage信息）
             output_messages = [MessageChunk(
                 role=MessageRole.ASSISTANT.value,
-                content='',
+                content='\n',
                 message_id=content_response_message_id,
-                show_content='\n',
                 message_type=MessageType.DO_SUBTASK_RESULT.value,
                 agent_name=self.agent_name
             )]
