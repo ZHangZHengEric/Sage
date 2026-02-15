@@ -5,12 +5,12 @@ from sagents.utils.logger import logger
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.messages.message import MessageChunk, MessageRole,MessageType
 from sagents.context.session_context import SessionContext
-from sagents.context.tasks.task_base import TaskBase
-from sagents.context.tasks.task_manager import TaskManager
 from sagents.utils.prompt_manager import PromptManager
 import json
 import uuid
 import re
+from sagents.tool.tool_schema import convert_spec_to_openai_format
+
 
 class TaskDecomposeAgent(AgentBase):
     def __init__(self, model: Any, model_config: Dict[str, Any], system_prefix: str = ""):
@@ -18,6 +18,7 @@ class TaskDecomposeAgent(AgentBase):
         self.agent_name = "TaskDecomposeAgent"
         self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
         logger.debug("TaskDecomposeAgent 初始化完成")
+
     async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
         # 重新获取系统前缀，使用正确的语言
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix', language=session_context.get_language())
@@ -36,8 +37,26 @@ class TaskDecomposeAgent(AgentBase):
             # 根据 active_budget 压缩消息
             budget_info = message_manager.context_budget_manager.budget_info
             if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
+                history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('active_budget', 8000), 4000))
             recent_message_str = MessageManager.convert_messages_to_str(history_messages)        
+
+        # 准备 todo_write 工具
+        tools_json = []
+        if tool_manager:
+            todo_tool = tool_manager.get_tool('todo_write')
+            if todo_tool:
+                tools_json.append(convert_spec_to_openai_format(todo_tool, lang=session_context.get_language()))
+            else:
+                # 如果 tool_manager 中没有，尝试手动加载（虽然不太可能，但为了健壮性）
+                try:
+                    from sagents.tool.impl.todo_tool import ToDoTool
+                    temp_tool = ToDoTool()
+                    # 这里我们只是临时用一下 schema，不注册
+                    # 但是 convert_spec_to_openai_format 需要 tool_func
+                    # 我们暂时跳过，假设 tool_manager 会有
+                    logger.warning("TaskDecomposeAgent: todo_write tool not found in tool_manager")
+                except ImportError:
+                    pass
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []
         available_tools_str = ", ".join(available_tools_name) if available_tools_name else "无可用工具"
@@ -56,139 +75,83 @@ class TaskDecomposeAgent(AgentBase):
                 message_type=MessageType.TASK_DECOMPOSITION.value
             )
         ]
+        
+        model_config_override = {}
+        if tools_json:
+            model_config_override['tools'] = tools_json
+            model_config_override['tool_choice'] = 'required' # 强制使用工具
+
         message_id = str(uuid.uuid4())
-        unknown_content = ''
-        full_response = ''
-        last_tag_type = ''
-        async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
+        
+        # 类似 SimpleAgent 的流式处理和工具调用逻辑
+        tool_calls: Dict[str, Any] = {}
+        last_tool_call_id = None
+        
+        async for chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
-                                             step_name="task_decompose"):
-            if len(llm_repsonse_chunk.choices) == 0:
+                                             step_name="task_decompose",
+                                             model_config_override=model_config_override):
+            if len(chunk.choices) == 0:
                 continue
-            if llm_repsonse_chunk.choices[0].delta.content:
-                delta_content = llm_repsonse_chunk.choices[0].delta.content
+                
+            delta = chunk.choices[0].delta
+            
+            # 处理工具调用
+            if delta.tool_calls:
+                self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
+                for tool_call in delta.tool_calls:
+                    if tool_call.id:
+                        last_tool_call_id = tool_call.id
+            
+            # 处理内容（如果 LLM 输出思考过程或解释）
+            if delta.content:
+                 yield [MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content=delta.content,
+                    message_id=message_id,
+                    message_type=MessageType.TASK_DECOMPOSITION.value
+                )]
 
-                for delta_content_char in delta_content:
-                    delta_content_all = unknown_content+ delta_content_char
-                    delta_content_type = self._judge_delta_content_type(delta_content_all, full_response, ['task_item'])
+        # 执行工具调用
+        if tool_calls:
+            # 发送工具调用消息
+            for tool_call in tool_calls.values():
+                 yield self._create_tool_call_message(tool_call)
 
-                    full_response += delta_content_char
-                    if delta_content_type == 'unknown':
-                        unknown_content = delta_content_all
-                        continue
-                    else:
-                        unknown_content = ''
-                        if delta_content_type == 'task_item':
-                            if last_tag_type != 'task_item':
-                                yield [MessageChunk(
-                                    role=MessageRole.ASSISTANT.value,
-                                    content='\n- ',
-                                    message_id=message_id,
-                                    message_type=MessageType.TASK_DECOMPOSITION.value
-                                )]
+            for tool_call_id, tool_call_info in tool_calls.items():
+                function_name = tool_call_info['function']['name']
+                arguments = tool_call_info['function']['arguments']
+                
+                # 构造消息输入上下文（虽然这里可能不需要完整的上下文，但为了接口一致性）
+                messages_input = [
+                    {'role': 'user', 'content': prompt} 
+                ] # 简化版，或者使用 llm_request_message
 
+                async for message_chunk_list in self._execute_tool(
+                    tool_call=tool_call_info,
+                    tool_manager=tool_manager,
+                    messages_input=messages_input,
+                    session_id=session_id
+                ):
+                    # 如果是 todo_write 的结果，我们希望它作为 TASK_DECOMPOSITION 类型返回
+                    # 但 _execute_tool 返回的是 TOOL_RESPONSE 类型
+                    # 我们可以转换一下，或者让它保持 TOOL_RESPONSE
+                    
+                    # 之前的逻辑是：
+                    # content=f"\n\n任务清单已生成：\n{result}",
+                    # message_type=MessageType.TASK_DECOMPOSITION.value
+                    
+                    # 这里为了保持行为一致，我们可以手动包装一下，或者信任 _execute_tool 的输出
+                    # _execute_tool 输出的是 list[MessageChunk]
+                    
+                    for chunk in message_chunk_list:
+                        if chunk.role == MessageRole.TOOL.value:
+                            # 我们可以发送一个额外的消息来说明任务已生成
                             yield [MessageChunk(
                                 role=MessageRole.ASSISTANT.value,
-                                content=delta_content_all,
-                                message_id=message_id,
+                                content=f"\n\n任务清单已生成：\n{chunk.content}",
+                                message_id=str(uuid.uuid4()),
                                 message_type=MessageType.TASK_DECOMPOSITION.value
                             )]
-                        last_tag_type = delta_content_type
-        
-        async for chunk in self._finalize_decomposition_result(full_response, message_id, task_manager, session_context):
-            yield chunk
-
-    async def _finalize_decomposition_result(self, 
-                                     full_response: str, 
-                                     message_id: str,
-                                     task_manager: Optional[TaskManager] = None,
-                                     session_context: SessionContext = None) -> AsyncGenerator[List[MessageChunk], None]:
-        logger.debug("TaskDecomposeAgent: 处理最终任务分解结果")
-        language = session_context.get_language() if session_context else 'zh'
-        try:
-            # 解析任务列表
-            tasks = self._convert_xlm_to_json(full_response)
-            logger.info(f"TaskDecomposeAgent: 成功分解为 {len(tasks)} 个子任务")
-
-            # 将解析后的任务数据存储到 session_context.audit_status
-            if session_context:
-                if 'task_decomposition_results' not in session_context.audit_status:
-                    session_context.audit_status['task_decomposition_results'] = []
-                session_context.audit_status['task_decomposition_results'] = tasks
-                logger.info("TaskDecomposeAgent: 已将任务分解结果存储到 session_context.audit_status")
-
-            # 如果有TaskManager，将子任务存储到任务管理器中
-            if task_manager:
-                logger.info("TaskDecomposeAgent: 将分解的子任务存储到TaskManager")
-                task_objects = []
-
-                for i, task_data in enumerate(tasks):
-                    # 创建TaskBase对象
-                    task_obj = TaskBase(
-                        description=task_data.get('description'),
-                        task_type='subtask',
-                        status='pending',
-                        priority=i,  # 按分解顺序设置优先级
-                        assigned_to='ExecutorAgent'
-                    )
-                    task_objects.append(task_obj)
-
-                # 批量添加任务到TaskManager
-                task_ids = task_manager.add_tasks_batch(task_objects)
-                logger.info(f"TaskDecomposeAgent: 成功将 {len(task_ids)} 个子任务添加到TaskManager")
-
-                # 将任务ID添加到原始任务数据中（用于后续引用）
-                for task_data, task_id in zip(tasks, task_ids):
-                    task_data['task_id'] = task_id
-
-            # 返回最终结果（保持原有流式输出格式）
-            planning_label = PromptManager().get_prompt(
-                'task_decomposition_planning',
-                agent='common',
-                language=language,
-                default='任务拆解规划：'
-            )
-            result_content = planning_label + '\n'
-            for task in tasks:
-                result_content += f"- {task.get('description', '')}\n"
-
-            result_message = MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content=result_content,
-                message_id=message_id,
-                message_type=MessageType.TASK_DECOMPOSITION.value
-            )
-
-            yield [result_message]
-        except Exception as e:
-            logger.error(f"TaskDecomposeAgent: 处理最终结果时发生错误: {str(e)}")
-            failed_message = PromptManager().get_prompt(
-                'task_decomposition_failed',
-                agent='common',
-                language=language,
-                default=f"任务分解失败: {str(e)}"
-            )
-            error_content = failed_message.format(error=str(e))
-            yield [MessageChunk(
-                role=MessageRole.ASSISTANT.value,
-                content=error_content,
-                message_id=str(uuid.uuid4()),
-                message_type=MessageType.TASK_DECOMPOSITION.value
-            )]
-    def _convert_xlm_to_json(self, content: str) -> List[Dict[str, Any]]:
-        try:
-            tasks = []
-            task_items = re.findall(r'<task_item>(.*?)</task_item>', content, re.DOTALL)
-
-            for item in task_items:
-                task = {
-                    "description": item.strip(),
-                }
-                tasks.append(task)
-
-            logger.debug(f"TaskDecomposeAgent: XML转JSON完成，共提取 {len(tasks)} 个任务")
-            return tasks
-
-        except Exception as e:
-            logger.error(f"TaskDecomposeAgent: XML转JSON失败: {str(e)}")
-            raise
+                        else:
+                            yield [chunk]

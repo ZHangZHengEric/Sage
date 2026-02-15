@@ -198,6 +198,13 @@ class SessionContext:
                     self.message_manager.add_messages(MessageChunk(**message_item))
                 logger.info(f"已经成功加载{len(messages)}条历史消息，耗时: {time.time() - t2:.3f}s")
 
+        # 尝试清理过期的 todo 任务
+        try:
+            from sagents.tool.impl.todo_tool import ToDoTool
+            ToDoTool().clean_old_tasks(session_id=self.session_id, session_context=self)
+        except Exception as e:
+            logger.warning(f"SessionContext: 清理过期任务失败: {e}")
+
     async def load_recent_skill_to_context(self):
         """
         检测历史消息，是否有使用 load_skill skill，或者用户消息中包含 <skill>name</skill>。

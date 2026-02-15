@@ -30,7 +30,7 @@ class WorkflowSelectAgent(AgentBase):
             # 根据 active_budget 压缩消息
             budget_info = message_manager.context_budget_manager.budget_info
             if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
+                history_messages = MessageManager.compress_messages(history_messages, max(budget_info.get('active_budget', 8000),2000))
             recent_message_str = MessageManager.convert_messages_to_str(history_messages)
 
         # 使用WorkflowManager格式化工作流列表
