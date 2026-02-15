@@ -14,11 +14,9 @@ from sagents.context.session_context_manager import session_manager
 from sagents.utils.logger import logger
 from sagents.agent import (
     TaskRouterAgent,
-    TaskRewriteAgent,
     QuerySuggestAgent,
     TaskCompletionJudgeAgent,
     WorkflowSelectAgent,
-    TaskStageSummaryAgent,
     TaskSummaryAgent,
     TaskPlanningAgent,
     TaskObservationAgent,
@@ -30,6 +28,7 @@ from sagents.agent import (
     FibreAgent,
 )
 from sagents.tool import ToolManager, ToolProxy
+from sagents.tool.impl.todo_tool import ToDoTool
 from sagents.skill import SkillManager, SkillProxy
 from sagents.context.user_memory import UserMemoryManager, MemoryExtractor
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, AgentRuntime, ObservableAsyncOpenAI
@@ -128,10 +127,6 @@ class SAgent:
     @property
     def task_summary_agent(self):
         return self._get_agent(TaskSummaryAgent, "task_summary_agent")
-
-    @property
-    def task_stage_summary_agent(self):
-        return self._get_agent(TaskStageSummaryAgent, "task_stage_summary_agent")
 
     @property
     def workflow_select_agent(self):
@@ -425,18 +420,6 @@ class SAgent:
                 # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
                 session_context.set_history_context()
 
-                # 先检查历史对话的文本长度，如果超过一定30000token 则用一下rewrite
-                # if session_context.message_manager.get_all_messages_content_length() > 30000:
-                #     for message_chunks in self._execute_agent_phase(
-                #         session_context=session_context,
-                #         tool_manager=tool_manager,
-                #         session_id=session_id,
-                #         agent=self.task_rewrite_agent,
-                #         phase_name="任务重写"
-                #     ):
-                #         session_context.message_manager.add_messages(message_chunks)
-                #         yield message_chunks
-
                 # 检查WorkflowManager中是否有工作流
                 if session_context.workflow_manager.list_workflows():
                     if len(session_context.workflow_manager.list_workflows()) > 5:
@@ -494,6 +477,13 @@ class SAgent:
                         session_context.add_messages(message_chunks)
                         yield message_chunks
                 elif agent_mode == 'multi':
+                    # 注册 ToDoTool 到工具管理器
+                    # 参考 FibreOrchestrator 的做法，确保工具在 multi 模式下可用
+                    from sagents.tool.impl.todo_tool import ToDoTool
+                    todo_tool_impl = ToDoTool()
+                    if tool_manager:
+                         tool_manager.register_tools_from_object(todo_tool_impl)
+
                     async for message_chunks in self._execute_multi_agent_workflow(session_context=session_context, tool_manager=tool_manager, session_id=session_id, max_loop_count=max_loop_count):
                         session_context.add_messages(message_chunks)
                         yield message_chunks
@@ -573,7 +563,26 @@ class SAgent:
         # 执行任务分解
         async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_decompose_agent, "任务分解"):
             yield chunk
-        current_completed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
+
+        # 通过 todo_read 工具刷新任务状态并检查
+        if tool_manager:
+            todo_read_result = await tool_manager.run_tool_async(
+                "todo_read",
+                session_context=session_context,
+                session_id=session_id
+            )
+            logger.info(f"SAgent: 初始任务检查结果: {todo_read_result}")
+        else:
+            logger.warning("SAgent: tool_manager 为空，跳过初始任务检查")
+        
+        # 初始化已完成任务计数
+        current_todo_list = session_context.system_context.get('todo_list', [])
+        pending_tasks = [t for t in current_todo_list if not t.get('completed', False)]
+        
+        if not pending_tasks:
+             logger.info(f"SAgent: 任务分解后无未完成任务，直接结束会话ID: {session_id}")
+             return
+
         loop_count = 0
         while True:
             loop_count += 1
@@ -599,23 +608,10 @@ class SAgent:
             if session_context.status == SessionStatus.INTERRUPTED:
                 logger.info(f"SAgent: 规划-执行-观察循环第 {loop_count} 轮被中断，会话ID: {session_id}")
                 return
-            # 从message 中查看observation 信息
-            now_completed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
-            if len(now_completed_tasks) > len(current_completed_tasks):
-                logger.info(f"SAgent: 检测到任务状态变化，完成任务数从 {len(current_completed_tasks)} 增加到 {len(now_completed_tasks)}")
-                async for chunk in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_stage_summary_agent, "任务阶段总结"):
-                    yield chunk
-                current_completed_tasks = now_completed_tasks
 
-            # 从任务管理器当前的最新状态，如果完成的任务数与失败的任务数之和等于总任务数，将 observation_result 的completion_status 设为 completed
-            completed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.COMPLETED)
-            failed_tasks = session_context.task_manager.get_tasks_by_status(TaskStatus.FAILED)
-
-            # 判断是否需要继续执行
-            if len(completed_tasks) + len(failed_tasks) == len(session_context.task_manager.get_all_tasks()):
-                logger.info(
-                    f"SAgent: 规划-执行-观察循环完成，通过判断任务管理器中所有任务状态，完成任务数 {len(completed_tasks)} 加上失败任务数 {len(failed_tasks)} 等于总任务数 {len(session_context.task_manager.get_all_tasks())}，会话ID: {session_id}"
-                )
+            # 从 audit_status 判断任务是否全部完成
+            if session_context.audit_status.get('task_completed', False):
+                logger.info(f"SAgent: 规划-执行-观察循环完成，检测到所有任务已完成，会话ID: {session_id}")
                 break
             if "completion_status" not in session_context.audit_status:
                 continue
