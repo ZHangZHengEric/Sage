@@ -506,6 +506,12 @@ class SAgent:
                 else:
                     # 直接执行模式：可选的任务分析 + 直接执行
                     logger.info("SAgent: 开始简化工作流")
+                    
+                    # 注册 ToDoTool 到工具管理器，确保 SimpleAgent 可以使用
+                    from sagents.tool.impl.todo_tool import ToDoTool
+                    todo_tool_impl = ToDoTool()
+                    if tool_manager:
+                         tool_manager.register_tools_from_object(todo_tool_impl)
 
                     async for message_chunks in self._execute_agent_phase(
                         session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
