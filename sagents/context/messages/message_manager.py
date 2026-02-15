@@ -15,6 +15,8 @@ MessageManager 优化版消息管理器
 """
 
 import datetime
+import time
+import re
 import uuid
 from typing import Dict, List, Optional, Any, Union, Sequence, cast
 from copy import deepcopy
@@ -584,178 +586,254 @@ class MessageManager:
         return total_length
 
     @staticmethod
-    def compress_messages(messages: List[MessageChunk], budget_limit: int) -> List[MessageChunk]:
+    def _apply_compression_level(msg: MessageChunk, level: int) -> MessageChunk:
         """
-        根据预算信息压缩消息列表 (Zone A/B/C 策略)
-        
-        策略：
-        Zone A (Anchor): System Message 到 Last User Message -> 永久保留
-        Zone C (Active): 最近的N条消息 -> 保留 max_new_tokens 的 20%
-        Zone B (Middle): 中间过程消息 -> 压缩至 max_new_tokens 的 10%
-        
-        触发条件：通常在外部判断，但此方法会强制执行压缩以符合目标
+        应用特定等级的压缩 (Level 1 / Level 2)
         
         Args:
-            messages: 原始消息列表
-            budget_limit: 预算限制 (active_budget 或 max_new_tokens)
+            msg: 原始消息
+            level: 压缩等级 (1: 轻度, 2: 强力)
             
         Returns:
-            List[MessageChunk]: 压缩后的消息列表副本
+            MessageChunk: 压缩后的消息副本
+        """
+        new_msg = deepcopy(msg)
+        content = new_msg.content or ""
+        
+        if level == 1:
+            # Level 1: Tool Output 截断 (100+100), Remove Thinking
+            if new_msg.role == MessageRole.TOOL.value:
+                if len(content) > 200:
+                    new_msg.content = content[:100] + f"\n...[Tool output truncated, total {len(content)} chars]...\n" + content[-100:]
+            elif new_msg.role == MessageRole.ASSISTANT.value:
+                # 移除 <thinking>
+                if "<thinking>" in content:
+                    new_msg.content = re.sub(r'<thinking>.*?</thinking>', '', content, flags=re.DOTALL).strip()
+                
+        elif level == 2:
+            # Level 2: 强力截断 (100 chars)
+            if new_msg.role == MessageRole.TOOL.value:
+                if len(content) > 100:
+                    new_msg.content = content[:100] + f"...[Tool output omitted, length: {len(content)}]"
+            elif new_msg.role == MessageRole.ASSISTANT.value:
+                if len(content) > 100:
+                    new_msg.content = content[:100] + "...[Content truncated]"
+                    
+        return new_msg
+
+    @staticmethod
+    def _group_messages_indices(messages: List[MessageChunk]) -> List[List[int]]:
+        """
+        将消息索引分组
+        规则：User 消息标志着新组的开始
+        Group Structure:
+        - Group 0 (Maybe System/Orphan): [0, ..., k]
+        - Group 1 (User+): [u1, ..., u2-1]
+        """
+        groups = []
+        if not messages:
+            return []
+            
+        current_group = []
+        for i, msg in enumerate(messages):
+            if msg.role == MessageRole.USER.value:
+                if current_group:
+                    groups.append(current_group)
+                current_group = [i]
+            else:
+                current_group.append(i)
+        
+        if current_group:
+            groups.append(current_group)
+            
+        return groups
+
+    @staticmethod
+    def compress_messages(messages: List[MessageChunk], budget_limit: int, time_limit_hours: float = 24.0) -> List[MessageChunk]:
+        """
+        根据预算限制压缩消息列表（分层压缩策略）。
+        
+        策略详情：
+        Level 0 (保护区):
+            - System Message: 永久保留，不做任何处理。
+            - Last Group (最后一组): 包含最后一个 User 及其后续所有消息，永久保留。
+            - User Message Content: User 消息的内容在 Level 1/2 阶段不被修改（受保护内容），但在 Level 3 阶段可以被整组丢弃。
+            - Recent Messages (最近消息): 从后往前计算，累积 Token 占用不超过总预算 20% 的连续消息组，受到完全保护（不压缩、不丢弃）。
+            
+        Level 0.5 (老化策略):
+            - 规则: 超过 time_limit_hours (默认24小时) 的非保护区消息。
+            - 动作: 直接应用 Level 2 (强力压缩)，优先释放陈旧消息的空间。
+            
+        Level 1 (轻度压缩): 
+            - Tool Output: 截断保留前 100 字符 + 后 100 字符，中间省略。
+            - Assistant: 移除 <thinking>...</thinking> 思考过程，保留核心回复。
+            
+        Level 2 (强力压缩): 
+            - 触发: Level 1 处理后仍超出 Budget。
+            - Tool Output: 仅保留前 100 字符 + 占位符 "...[Tool output omitted...]"。
+            - Assistant: 仅保留前 100 字符 + 占位符 "...[Content truncated]"。
+            
+        Level 3 (历史丢弃 - 基于组): 
+            - 触发: Level 2 处理后仍超出 Budget。
+            - 策略: 按组（User + 后续 Followers）从旧到新进行丢弃。
+            - Step A (丢弃 Followers): 保留 Group Head (User)，丢弃该组内所有 Assistant/Tool 消息，插入一条 "...[Execution process omitted]..." 作为占位符。
+            - Step B (丢弃 User): 如果 Step A 后仍超标，则丢弃该组的 User 消息（及占位符），整组消失。
+            
+        Args:
+            messages: 原始消息列表。
+            budget_limit: 预算限制 (Token 数)。
+            time_limit_hours: 老化时间阈值 (小时)，默认 24.0。
+            
+        Returns:
+            List[MessageChunk]: 压缩后的消息列表副本。
         """
         if not messages:
             return []
             
-        # 使用传入的 limit 作为压缩基准
-        active_budget = budget_limit
+        # 复制消息列表 (浅拷贝列表，元素在修改时 deepcopy)
+        working_messages = deepcopy(messages)
         
-        # 调整预算分配比例，基于 active_budget
-        zone_c_budget = int(active_budget * 0.7) # 最近消息保留 70%
-        zone_b_budget = int(active_budget * 0.2) # 中间消息保留 20%
+        # 辅助函数：计算当前 Token
+        def current_usage():
+            return MessageManager.calculate_messages_token_length(working_messages)
+            
+        if current_usage() <= budget_limit:
+            return working_messages
+            
+        # --- 1. 分组与保护区识别 ---
+        # 将消息按 User 分组，每组包含一个 User 和其后的 Followers (Assistant/Tool)
+        groups = MessageManager._group_messages_indices(working_messages)
         
-        # --- 1. 识别 Zone A (Anchor) ---
-        # 规则：System Message 和 Last User Message 永久保留
-        # 中间的消息进入候选区 (Zone B/C)
-        zone_a: List[MessageChunk] = []
-        remain_messages: List[MessageChunk] = []
+        protected_indices = set()
+        protected_group_indices = set()
         
-        last_user_idx = -1
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].role == MessageRole.USER.value:
-                last_user_idx = i
-                break
+        # 1.1 System Group 保护 (如果第一组以 System 开头)
+        if groups and working_messages[groups[0][0]].role == MessageRole.SYSTEM.value:
+            protected_group_indices.add(0)
+            # System 消息内容受保护
+            for idx in groups[0]:
+                if working_messages[idx].role == MessageRole.SYSTEM.value:
+                    protected_indices.add(idx)
+                    
+        # 1.2 Last Group 保护 (最后一组始终保留，不参与丢弃)
+        if groups:
+            last_group_idx = len(groups) - 1
+            protected_group_indices.add(last_group_idx)
+            # 最后一个非 Tool 消息的内容受保护
+            last_msg_idx = len(working_messages) - 1
+            if working_messages[last_msg_idx].role != MessageRole.TOOL.value:
+                protected_indices.add(last_msg_idx)
+                
+        # 1.3 User 消息内容保护 (在压缩阶段不截断 User 内容)
+        for i, msg in enumerate(working_messages):
+            if msg.role == MessageRole.USER.value:
+                protected_indices.add(i)
+
+        # 1.4 近期消息保护 (20% Budget)
+        # 策略：从后往前遍历 Group，只要累积 Token < 20% Budget，则该 Group 及其消息均受保护
+        # 这里的保护意味着：不被 Level 1/2 压缩，也不被 Level 3 丢弃
+        recent_token_limit = budget_limit * 0.2
+        current_accumulated_tokens = 0
         
-        if last_user_idx != -1:
-            # 1. System Message (如果存在且在开头)
-            start_idx = 0
-            if messages and messages[0].role == MessageRole.SYSTEM.value:
-                zone_a.append(messages[0])
-                start_idx = 1
+        # 倒序遍历 Groups
+        for gi in range(len(groups) - 1, -1, -1):
+            group_indices = groups[gi]
+            # 计算该组 Token
+            group_msgs = [working_messages[k] for k in group_indices]
+            group_token_count = MessageManager.calculate_messages_token_length(group_msgs)
             
-            # 2. 中间消息 (System之后，Last User之前)
-            if last_user_idx > start_idx:
-                remain_messages.extend(messages[start_idx:last_user_idx])
-            
-            # 3. Last User Message (加入 Zone A)
-            zone_a.append(messages[last_user_idx])
-            
-            # 4. Last User 之后的消息 (加入 remain，作为 Zone C 的主要来源)
-            remain_messages.extend(messages[last_user_idx + 1:])
-            
-        else:
-            # 如果没找到 User Message，保留 System Message (如果有)
-            if messages and messages[0].role == MessageRole.SYSTEM.value:
-                zone_a = [messages[0]]
-                remain_messages = list(messages[1:])
+            if current_accumulated_tokens + group_token_count <= recent_token_limit:
+                # 标记为保护
+                protected_group_indices.add(gi)
+                for idx in group_indices:
+                    protected_indices.add(idx)
+                
+                current_accumulated_tokens += group_token_count
             else:
-                zone_a = []
-                remain_messages = list(messages)
-        
-        # 如果剩余消息很少，直接返回
-        if not remain_messages:
-            return list(messages) # Shallow copy
-            
-        # --- 2. 识别 Zone C (Active) ---
-        # 从后往前扫描，直到 token 超过 zone_c_budget
-        zone_c: List[MessageChunk] = []
-        current_c_tokens = 0
-        split_idx = len(remain_messages) # 默认全在 Zone C (如果没有 Zone B)
-        
-        for i in range(len(remain_messages) - 1, -1, -1):
-            msg = remain_messages[i]
-            msg_tokens = MessageManager.calculate_str_token_length(msg.content or '')
-            if current_c_tokens + msg_tokens > zone_c_budget and zone_c:
-                # 如果加上这条就超了，且 Zone C 已经有内容了，就停止
-                # 保证至少有一条？
+                # 一旦超过，就不再继续向前保护了（保持最近的连续性）
                 break
-            current_c_tokens += msg_tokens
-            split_idx = i
-            # 倒序添加，最后再反转
-            zone_c.append(msg)
-            
-        zone_c.reverse() # 恢复顺序
-        
-        # --- 3. 识别 Zone B (Middle) ---
-        zone_b_source = remain_messages[:split_idx]
-        
-        if not zone_b_source:
-            # 没有中间层，不需要压缩
-            return zone_a + zone_c
-            
-        # --- 4. 压缩 Zone B ---
-        # 目标：zone_b_budget
-        # 策略 1: 坍缩 Tool Output
-        zone_b_compressed: List[MessageChunk] = []
-        
-        # 预计算 Zone B Token
-        current_b_tokens = 0
-        for msg in zone_b_source:
-            current_b_tokens += MessageManager.calculate_str_token_length(msg.content or '')
-            
-        # 如果已经满足预算，直接返回
-        if current_b_tokens <= zone_b_budget:
-            return zone_a + zone_b_source + zone_c
-            
-        # 开始压缩：坍缩 Tool Output
-        # 我们创建一个新的列表，包含修改后的消息
-        # 必须使用 deepcopy 或创建新实例，以免修改原始引用
-        
-        for msg in zone_b_source:
-            new_msg = deepcopy(msg)
-            if new_msg.role == MessageRole.TOOL.value:
-                 # 坍缩 Tool Output
-                original_len = len(new_msg.content or '')
-                if original_len > 100: # 只有长的才压缩
-                    new_msg.content = f"[System: Tool output hidden to save context. Original length: {original_len} chars. Action was executed.]"
-            zone_b_compressed.append(new_msg)
-            
-        # 重新计算 Token
-        current_b_tokens = 0
-        for msg in zone_b_compressed:
-            current_b_tokens += MessageManager.calculate_str_token_length(msg.content or '')
-            
-        # 策略 2: 如果还不够，截断 Assistant Thought
-        if current_b_tokens > zone_b_budget:
-            for msg in zone_b_compressed:
-                if msg.role == MessageRole.ASSISTANT.value and msg.content:
-                    if len(msg.content) > 200:
-                        msg.content = msg.content[:200] + "... [Thought truncated]"
-            
-            # 重新计算
-            current_b_tokens = 0
-            for msg in zone_b_compressed:
-                current_b_tokens += MessageManager.calculate_str_token_length(msg.content or '')
 
-        # 策略 3: 如果还不够，丢弃旧消息 (History Drop)
-        # 从头开始丢弃，直到满足预算
-        if current_b_tokens > zone_b_budget:
-            final_zone_b: List[MessageChunk] = []
-            dropped_count = 0
+        # --- Level 0.5 & 1 & 2: 消息级压缩 ---
+        now = time.time()
+        aging_threshold = now - (time_limit_hours * 3600)
+        aged_indices = set()
+        
+        def apply_levels(level_to_apply):
+            # 遍历所有消息
+            for i, msg in enumerate(working_messages):
+                if i in protected_indices: continue
+                
+                # Level 0.5: 老化策略 (直接应用 Level 2)
+                if level_to_apply == 0.5:
+                    if msg.timestamp and msg.timestamp < aging_threshold:
+                         working_messages[i] = MessageManager._apply_compression_level(msg, 2)
+                         aged_indices.add(i)
+                # Level 1: 轻度压缩
+                elif level_to_apply == 1:
+                    if i in aged_indices: continue
+                    working_messages[i] = MessageManager._apply_compression_level(working_messages[i], 1)
+                # Level 2: 强力压缩
+                elif level_to_apply == 2:
+                    if i in aged_indices: continue
+                    working_messages[i] = MessageManager._apply_compression_level(working_messages[i], 2)
+        
+        # 应用 Level 0.5 (老化)
+        apply_levels(0.5)
+        if current_usage() <= budget_limit: return working_messages
+        
+        # 应用 Level 1 (轻度)
+        apply_levels(1)
+        if current_usage() <= budget_limit: return working_messages
+        
+        # 应用 Level 2 (强力)
+        apply_levels(2)
+        if current_usage() <= budget_limit: return working_messages
+
+        # --- Level 3: 历史丢弃 (基于组) ---
+        # 目标: 未在 protected_group_indices 中的组
+        droppable_group_indices = [gi for gi in range(len(groups)) if gi not in protected_group_indices]
+        
+        for gi in droppable_group_indices:
+            group_msgs_indices = groups[gi]
             
-            # 逆向构建，优先保留 Zone B 后部的消息（靠近 Active Zone）
-            temp_tokens = 0
-            temp_list = []
-            for msg in reversed(zone_b_compressed):
-                msg_tokens = MessageManager.calculate_str_token_length(msg.content or '')
-                if temp_tokens + msg_tokens > zone_b_budget:
-                    dropped_count += 1
-                    continue
-                temp_tokens += msg_tokens
-                temp_list.append(msg)
+            # Step A: 丢弃 Followers (保留 User 头)
+            followers = group_msgs_indices[1:]
             
-            final_zone_b = temp_list[::-1] # 反转回来
-            
-            if dropped_count > 0:
-                # 插入占位符
-                placeholder = MessageChunk(
-                    role=MessageRole.SYSTEM.value,
-                    content=f"[System: Previous {dropped_count} steps in the middle execution process have been omitted to save context window. Focus on the latest steps in Active Zone.]",
-                    type=MessageType.NORMAL.value
+            if followers:
+                # Replace first follower with placeholder
+                first_f = followers[0]
+                working_messages[first_f] = MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="...[Execution process omitted]...",
+                    type=MessageType.DO_SUBTASK_RESULT.value
                 )
-                final_zone_b.insert(0, placeholder)
+                # 清空其余 Followers
+                for f_idx in followers[1:]:
+                    working_messages[f_idx].content = None
+                    working_messages[f_idx].tool_calls = None
+                    
+                if current_usage() <= budget_limit: break 
             
-            zone_b_compressed = final_zone_b
+            # Step B: 丢弃 User 头 (整组消失)
+            # 包括 Step A 可能产生的占位符
+            head_idx = group_msgs_indices[0]
+            working_messages[head_idx].content = None
+            working_messages[head_idx].tool_calls = None
+            
+            # 如果 Step A 产生了占位符，也一并丢弃
+            if followers:
+                working_messages[followers[0]].content = None
+                working_messages[followers[0]].tool_calls = None
+                
+            if current_usage() <= budget_limit: break
 
-        return zone_a + zone_b_compressed + zone_c
+        # 清理已标记为删除的消息 (Content 为 None 的)
+        final_messages = [
+            m for m in working_messages 
+            if m.content is not None or (m.tool_calls and len(m.tool_calls) > 0)
+        ]
+        
+        return final_messages
 
     def compress_messages_if_needed(self, messages: List[MessageChunk]) -> List[MessageChunk]:
         """
@@ -791,7 +869,7 @@ class MessageManager:
             # 执行压缩
             compressed_messages = MessageManager.compress_messages(
                 messages, 
-                max_new_tokens
+                int(max_new_tokens * 0.3)
             )
             
             # 记录压缩效果
@@ -820,7 +898,7 @@ class MessageManager:
         new_messages = []
         for msg in messages:
             # 去掉empty消息
-            if msg.message_type == MessageType.EMPTY.value:
+            if msg.type == MessageType.EMPTY.value:
                 logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
                 continue
             clean_msg = {

@@ -27,7 +27,7 @@ class TaskRouterAgent(AgentBase):
         # 根据 active_budget 压缩消息
         budget_info = message_manager.context_budget_manager.budget_info
         if budget_info:
-            history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
+            history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('active_budget', 8000),2000))
         task_desc = MessageManager.convert_messages_to_dict_for_request(history_messages)
 
         available_tools_name = tool_manager.list_all_tools_name() if tool_manager else []

@@ -396,8 +396,8 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--memory_root', type=str, default=None, help='记忆根目录')
     parser.add_argument('--tools_folders', nargs='+', default=[], help='工具目录路径（多个路径用空格分隔）')
     parser.add_argument('--skills_path', type=str, default=None, help='技能目录路径')
+    parser.add_argument('--deepthink', action='store_true', default=None, help='开启深度思考')
     parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
-    parser.add_argument('--no-multi-agent', action='store_true', default=None, help='禁用多智能体推理 (Deprecated, use --agent_mode simple)')
     parser.add_argument('--agent_mode', type=str, default=None, choices=['fibre', 'simple', 'multi'], help='智能体模式: fibre, simple, multi')
     
     parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
@@ -422,14 +422,19 @@ def parse_arguments() -> Dict[str, Any]:
     # 确定 agent_mode
     agent_mode = args.agent_mode
     if agent_mode is None:
-        if args.no_multi_agent is True:
-            agent_mode = 'simple'
-        elif preset_running_agent_config.get('agentMode'):
+        if preset_running_agent_config.get('agentMode'):
             agent_mode = preset_running_agent_config.get('agentMode')
         elif preset_running_agent_config.get('multiAgent') is True:
             agent_mode = 'multi'
         else:
             agent_mode = 'simple' # 默认为 simple
+
+    # 确定 use_deepthink
+    use_deepthink = preset_running_agent_config.get('deepThinking', False)
+    if args.deepthink is not None:
+        use_deepthink = args.deepthink
+    elif args.no_deepthink is not None:
+        use_deepthink = not args.no_deepthink
             
     # 合并命令行参数和配置文件内容，命令行参数优先
     config = {
@@ -443,7 +448,7 @@ def parse_arguments() -> Dict[str, Any]:
         'max_model_len': args.default_llm_max_model_len,
         'top_p': args.default_llm_top_p,
         'presence_penalty': args.default_llm_presence_penalty,
-        'use_deepthink': not args.no_deepthink if args.no_deepthink is not None else preset_running_agent_config.get('deepThinking', False),
+        'use_deepthink': use_deepthink,
         'agent_mode': agent_mode,
         'workspace': args.workspace,
         'mcp_setting_path': args.mcp_setting_path,

@@ -23,42 +23,20 @@ planning_template = {
 ## 智能体的描述和要求
 {agent_description}
 
-## 完整任务描述
-{task_description}
-
-## 任务管理器状态
-{task_manager_status}
-
-## 近期完成工作
-{completed_actions}
+## 最近的执行结果
+{recent_execution_messages}
 
 ## 可用工具
 {available_tools_str}
 
 ## 规划规则
-1. 根据我们的当前任务以及近期完成工作，为了达到逐步完成任务管理器的未完成子任务或者完整的任务，清晰描述接下来要执行的具体的任务名称。
+1. 根据我们当前最近的执行结果，为了达到逐步完成未完成的任务或者完整的用户任务，清晰描述接下来要执行的具体的任务名称。
 2. 确保接下来的任务可执行且可衡量
 3. 优先使用现有工具
-4. 设定明确的成功标准
-5. 只输出以下格式的XLM，不要输出其他内容,不要输出```, <tag>标志位必须在单独一行
-6. required_tools至少包含5个可能需要的工具的名称，最多10个。
-7. expected_output预期结果描述，不要要求太详细，只需要描述主要的结果即可。
+4. 直接输出一段话，描述接下来要执行的任务。不要输出其他内容。
 
 ## 输出格式
-```
-<next_step_description>
-子任务的清晰描述，一段话不要有换行
-</next_step_description>
-<required_tools>
-["tool1_name","tool2_name"]
-</required_tools>
-<expected_output>
-预期结果描述，一段话不要有换行
-</expected_output>
-<success_criteria>
-如何验证完成，一段话不要有换行
-</success_criteria>
-```""",
+直接输出一段话，描述接下来要执行的任务。""",
     "en": """# Task Planning Guide
 
 ## Agent Description and Requirements
@@ -67,38 +45,20 @@ planning_template = {
 ## Complete Task Description
 {task_description}
 
-## Task Manager Status
-{task_manager_status}
-
-## Recently Completed Work
-{completed_actions}
+## Recent Execution Results
+{recent_execution_messages}
 
 ## Available Tools
 {available_tools_str}
 
 ## Planning Rules
-1. Based on our current tasks and recently completed work, clearly describe the specific task name to be executed next.
+1. Based on our current recent execution results, clearly describe the specific task name to be executed next.
 2. Ensure the next task is executable and measurable.
 3. Prioritize using existing tools.
-4. Set clear success criteria.
-5. Only output XML in the following format, do not output other content, do not output ```, <tag> markers must be on separate lines
-6. required_tools should include at least 5 and at most 10 possible tool names needed.
+4. Directly output a paragraph describing the task to be executed next. Do not output other content.
 
 ## Output Format
-```
-<next_step_description>
-Clear description of the subtask, one paragraph without line breaks
-</next_step_description>
-<required_tools>
-["tool1_name","tool2_name"]
-</required_tools>
-<expected_output>
-Expected result description, one paragraph without line breaks
-</expected_output>
-<success_criteria>
-How to verify completion, one paragraph without line breaks
-</success_criteria>
-```""",
+Directly output a paragraph describing the task to be executed next.""",
     "pt": """# Guia de Planejamento de Tarefas
 
 ## Descrição e Requisitos do Agente
@@ -107,37 +67,20 @@ How to verify completion, one paragraph without line breaks
 ## Descrição Completa da Tarefa
 {task_description}
 
-## Status do Gerenciador de Tarefas
-{task_manager_status}
+## Resultados Recentes da Execução
+{recent_execution_messages}
 
-## Trabalho Concluído Recentemente
-{completed_actions}
-
+## Ferramentas Disponíveis
+{available_tools_str}
 
 ## Regras de Planejamento
-1. Com base em nossas tarefas atuais e no trabalho concluído recentemente, descreva claramente o nome específico da tarefa a ser executada em seguida para completar gradualmente as subtarefas não concluídas ou tarefas completas no gerenciador de tarefas.
-2. Garanta que a próxima tarefa seja executável e mensurável
-3. Priorize o uso de ferramentas existentes
-4. Defina critérios de sucesso claros
-5. Produza apenas XML no formato a seguir, não produza outro conteúdo, não produza ```, os marcadores <tag> devem estar em linhas separadas
-6. Não inclua nomes reais de ferramentas na descrição
-7. required_tools deve incluir pelo menos 5 e no máximo 10 nomes de ferramentas possíveis necessários.
+1. Com base em nossas recentes execuções, descreva claramente o nome da tarefa específica a ser executada a seguir.
+2. Certifique-se de que a próxima tarefa seja executável e mensurável.
+3. Priorize o uso de ferramentas existentes.
+4. Produza diretamente um parágrafo descrevendo a tarefa a ser executada a seguir. Não produza outro conteúdo.
 
 ## Formato de Saída
-```
-<next_step_description>
-Descrição clara da subtarefa, um parágrafo sem quebras de linha
-</next_step_description>
-<required_tools>
-["nome_ferramenta1","nome_ferramenta2"]
-</required_tools>
-<expected_output>
-Descrição do resultado esperado, um parágrafo sem quebras de linha
-</expected_output>
-<success_criteria>
-Como verificar a conclusão, um parágrafo sem quebras de linha
-</success_criteria>
-```"""
+Produza diretamente um parágrafo descrevendo a tarefa a ser executada a seguir."""
 }
 
 # 下一步规划提示文本 - 用于显示给用户的规划开始提示

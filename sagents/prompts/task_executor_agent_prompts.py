@@ -55,17 +55,86 @@ Se o conjunto de ferramentas contiver a ferramenta de função file_write, os re
 task_execution_template = {
     "zh": """请执行以下需求或者任务：{next_subtask_description}
 
-期望输出：{next_expected_output}
-
 请直接开始执行任务，观察历史对话，不要做重复性的工作，并且不需要给出下一步的建议或者计划。""",
     "en": """Please execute the following requirements or tasks: {next_subtask_description}
-
-Expected output: {next_expected_output}
 
 Please start executing the task directly, observe the conversation history, and don't do repetitive work. Don't give any next step suggestions or plans.""",
     "pt": """Por favor, execute os seguintes requisitos ou tarefas: {next_subtask_description}
 
-Saída esperada: {next_expected_output}
-
 Por favor, comece a executar a tarefa diretamente, observe o histórico de conversas e não faça trabalho repetitivo. Não dê sugestões ou planos para os próximos passos."""
+}
+
+tool_suggestion_template = {
+    "zh": """你是一个工具推荐专家，你的任务是根据用户的需求，为用户推荐合适的工具。
+你要根据历史的对话以及用户的请求，以及agent的配置，获取解决用户请求用到的所有可能的工具。
+
+## agent的配置要求
+{agent_config}
+
+## 可用工具
+{available_tools_str}
+
+## 用户的对话历史以及新的请求
+{messages}
+
+输出格式：
+```json
+[
+    "工具名称1",
+    "工具名称2",
+    ...
+]
+```
+注意：
+1. 工具名称必须是可用工具中的名称。
+2. 返回所有可能用到的工具名称，对于不可能用到的工具，不要返回。
+3. 可能的工具最多返回7个。""",
+    "en": """You are a tool recommendation expert. Your task is to recommend suitable tools for users based on their needs.
+You need to identify all possible tools that could be used to solve the user's request based on the conversation history, user's request, and agent configuration.
+
+## Agent Configuration Requirements
+{agent_config}
+
+## Available Tools
+{available_tools_str}
+
+## User's Conversation History and New Request
+{messages}
+
+Output Format:
+```json
+[
+    "tool_name1",
+    "tool_name2",
+    ...
+]
+```
+Notes:
+1. Tool names must be from the available tools list.
+2. Return all possible tool names that might be used. Do not return tools that are unlikely to be used.
+3. Return at most 7 possible tools.""",
+    "pt": """Você é um especialista em recomendação de ferramentas. Sua tarefa é recomendar ferramentas adequadas para os usuários com base em suas necessidades.
+Você precisa identificar todas as ferramentas possíveis que podem ser usadas para resolver a solicitação do usuário com base no histórico de conversas, solicitação do usuário e configuração do agente.
+
+## Requisitos de Configuração do Agente
+{agent_config}
+
+## Ferramentas Disponíveis
+{available_tools_str}
+
+## Histórico de Conversas do Usuário e Nova Solicitação
+{messages}
+
+Formato de Saída:
+```json
+[
+    "nome_ferramenta1",
+    "nome_ferramenta2",
+    ...
+]
+```
+Notas:
+1. Os nomes das ferramentas devem ser da lista de ferramentas disponíveis.
+2. Retorne todos os nomes de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
+3. Retorne no máximo 7 ferramentas possíveis."""
 }
