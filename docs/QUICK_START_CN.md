@@ -251,7 +251,7 @@ print("🔄 带实时监控的流式执行:")
 
 for chunk in controller.run_stream(messages, tool_manager, deep_thinking=True):
     for message in chunk:
-        print(f"🤖 [{message.get('type', 'unknown')}] {message['role']}: {message.get('show_content', '')[:100]}...")
+        print(f"🤖 [{message.get('type', 'unknown')}] {message['role']}: {message.get('content', '')[:100]}...")
         
         # 实时跟踪token使用
         if 'usage' in message:

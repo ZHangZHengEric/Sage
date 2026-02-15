@@ -13,10 +13,6 @@ class ContentProcessor:
 
     @classmethod
     def clean_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
-        # 1. 清理 show_content 中的 Base64 图片
-        if 'show_content' in result:
-            result['show_content'] = cls._clean_show_content(result['show_content'])
-
         # 2. 处理工具调用结果（解析 JSON、扁平化、裁剪）
         if result.get('role') == 'tool':
             content = result.get('content')
@@ -25,27 +21,6 @@ class ContentProcessor:
         
         return result
 
-    @classmethod
-    def _clean_show_content(cls, content: Any) -> Any:
-        """清理展示内容中的 Base64 图片"""
-        if not isinstance(content, str):
-            return content
-        
-        # 快速检查，避免不必要的正则或 JSON 解析
-        if 'data:image' not in content:
-            return content
-
-        # 尝试作为 JSON 处理
-        if content.strip().startswith('{'):
-            try:
-                data = json.loads(content)
-                if cls._remove_base64_from_results(data):
-                    return json.dumps(data, ensure_ascii=False)
-            except json.JSONDecodeError:
-                pass
-        
-        # 如果不是 JSON 或解析失败，使用正则替换
-        return cls.BASE64_PATTERN.sub('[BASE64_IMAGE_REMOVED_FOR_DISPLAY]', content)
 
     @classmethod
     def _remove_base64_from_results(cls, data: Any) -> bool:

@@ -248,7 +248,6 @@ const responseParams = [
   { name: 'is_final', type: 'boolean', required: false, desc: '是否最终消息' },
   { name: 'session_id', type: 'string', required: false, desc: '会话ID' },
   { name: 'content', type: 'string', required: false, desc: '原始内容，可能为空' },
-  { name: 'show_content', type: 'string', required: false, desc: '展示内容，优先用于渲染' },
   { name: 'tool_calls', type: 'Array<Object>', required: false, desc: '工具调用列表' },
   { name: 'tool_call_id', type: 'string', required: false, desc: '工具调用结果关联ID，仅 role=tool 时存在' },
   { name: 'metadata', type: 'object', required: false, desc: '附加信息', children: [
@@ -276,7 +275,7 @@ const chunkParams = [
 
 const typeList = computed(() => Array.from(messageTypeLabels.entries()).map(([key, label]) => ({ key, label })))
 
-const exampleStreamResponse = `{"role": "assistant", "content": "您好", "message_id": "8c89c757-1ce5-4860-9ad5-6d20d6defdef", "show_content": "您好", "type": "do_subtask_result", "message_type": "do_subtask_result", "timestamp": 1764040749.2765763, "chunk_id": "81d993e8-6013-4862-b083-bdaeac8b5f15", "is_final": false, "is_chunk": false, "metadata": {}, "session_id": "demo-session"}
+const exampleStreamResponse = `{"role": "assistant", "content": "您好", "message_id": "8c89c757-1ce5-4860-9ad5-6d20d6defdef",  "type": "do_subtask_result", "message_type": "do_subtask_result", "timestamp": 1764040749.2765763, "chunk_id": "81d993e8-6013-4862-b083-bdaeac8b5f15", "is_final": false, "is_chunk": false, "metadata": {}, "session_id": "demo-session"}
 {"role": "assistant", "content": "", "message_id": "98516185-a102-47b8-acfa-b4320f988f54", "type": "token_usage", "message_type": "token_usage", "timestamp": 1764040752.8867667, "chunk_id": "d16899a8-e8bd-40f5-97b1-b1f1ab774806", "is_final": false, "is_chunk": false, "metadata": {"token_usage": {"total_info": {"completion_tokens": 146, "prompt_tokens": 1583, "total_tokens": 1729}, "per_step_info": [{"step_name": "direct_execution", "usage": {"completion_tokens": 123, "prompt_tokens": 1067, "total_tokens": 1190, "completion_tokens_details": null, "prompt_tokens_details": null}}, {"step_name": "task_complete_judge", "usage": {"completion_tokens": 23, "prompt_tokens": 516, "total_tokens": 539, "completion_tokens_details": null, "prompt_tokens_details": null}}]}, "session_id": "demo-session"}, "session_id": "demo-session"}
 {"type": "stream_end", "session_id": "demo-session", "timestamp": 1764040752.909369, "total_stream_count": 29}`
 
