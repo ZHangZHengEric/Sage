@@ -628,7 +628,7 @@ class AgentBase(ABC):
 
         tool_name = tool_call['function']['name']
 
-        # 将show_content 整理成函数调用的形式
+        # 将content 整理成函数调用的形式
         return [MessageChunk(
             role='assistant',
             tool_calls=[{
