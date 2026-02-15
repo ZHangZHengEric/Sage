@@ -51,8 +51,8 @@ export const exportToMarkdown = (conversation, agentName, visibleMessages) => {
     if (message.role === 'user') {
       markdown += `## 用户 ${index + 1}\n\n${message.content}\n\n`
     } else if (message.role === 'assistant') {
-      if (message.show_content) {
-        markdown += `## 助手 ${index + 1}\n\n${message.show_content}\n\n`
+      if (message.content) {
+        markdown += `## 助手 ${index + 1}\n\n${message.content}\n\n`
       } else if (message.tool_calls) {
         markdown += `## 助手 ${index + 1} (工具调用)\n\n`
         message.tool_calls.forEach(tool => {
@@ -170,9 +170,9 @@ const generateHTMLContent = (conversation, visibleMessages) => {
               </div>
             </div>`
         })
-      } else if (message.show_content) {
+      } else if (message.content) {
         // AI助手回复
-        const content = renderMarkdown(message.show_content)
+        const content = renderMarkdown(message.content)
         const label = getMessageLabel({
           role: message.role,
           type: message.type,

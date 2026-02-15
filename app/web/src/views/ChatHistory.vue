@@ -338,10 +338,10 @@ const formatMessageForExport = (messages) => {
           role: 'assistant',
           tool_calls: message.tool_calls
         }
-      } else if (message.show_content && message.show_content !== '' && message.show_content !== false) {
+      } else if (message.content && message.content !== '' && message.content !== false) {
         return {
           role: 'assistant',
-          show_content: message.show_content
+          content: message.content
         }
       }
     } else if (message.role === 'tool') {
@@ -358,7 +358,7 @@ const formatMessageForExport = (messages) => {
 const getVisibleMessageCount = () => {
   if (!shareConversation.value?.messages) return 0
   return shareConversation.value.messages.filter(msg => 
-    msg.role === 'user' || (msg.role === 'assistant' && msg.message_type !== 'token_usage' && msg.show_content && msg.show_content !== '' && msg.show_content !== false)
+    msg.role === 'user' || (msg.role === 'assistant' && msg.message_type !== 'token_usage' && msg.content && msg.content !== '' && msg.content !== false)
   ).length
 }
 
