@@ -275,32 +275,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
             )]
             yield output_messages
 
-    async def _handle_tool_calls(self,
-                                 tool_calls: Dict[str, Any],
-                                 tool_manager: Optional[ToolManager],
-                                 messages_input: List[Dict[str, Any]],
-                                 session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
-        """
-        处理工具调用
-        """
-        logger.info(f"TaskExecutorAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
-        
-        for tool_call_id, tool_call in tool_calls.items():
-            tool_name = tool_call['function']['name']
-            logger.info(f"TaskExecutorAgent: 执行工具 {tool_name}")
-            
-            # 发送工具调用消息
-            yield self._create_tool_call_message(tool_call)
-            
-            # 执行工具
-            async for chunk in self._execute_tool(
-                tool_call=tool_call,
-                tool_manager=tool_manager,
-                messages_input=messages_input,
-                session_id=session_id
-            ):
-                yield chunk
-
     def _prepare_tools(self,
                        tool_manager: Optional[ToolManager],
                        suggested_tools: List[str],
