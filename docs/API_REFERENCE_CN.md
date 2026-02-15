@@ -489,7 +489,6 @@ def risky_function():
     "content": str,        # 消息内容
     "type": str,           # "normal" | "tool_call" | "tool_result" | "thinking" | "final_answer"
     "message_id": str,     # 唯一消息标识符 (可选)
-    "show_content": str,   # 显示内容 (可选)
     "tool_calls": List,    # 工具调用信息 (可选)
     "tool_call_id": str,   # 工具调用标识符 (可选)
 }

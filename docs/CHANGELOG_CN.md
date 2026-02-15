@@ -183,14 +183,13 @@ description: "Sage 示例和服务器更新日志"
 - 移除 `clear_messages` 方法中对 `self.pending_chunks` 的引用
 
 ### 5. 修复 planning_agent.py 中 content 重复问题
-- 修改 `_execute_streaming_planning` 方法中 `show_content` 的赋值
 - 从 `delta_content_all` 修改为 `delta_content_char`，确保每次 yield 的内容不重复
 
 ### 6. 重新优化 message_manager.py 中 add_messages 方法
 - **第一次修复**: 添加了对 `is_final` 属性的判断，当 `is_final=True` 时直接替换内容，否则追加内容
 - **第二次优化**: 根据用户反馈，移除了对 `message.is_final` 的判断
 - **最终优化**: 简化逻辑，对于流式消息直接追加增量内容，移除不必要的属性更新
-- 解决了 `content` 和 `show_content` 重复的问题
+- 解决了 `content` 重复的问题
 - 流式消息的特点是每次传递的都是新的增量内容，无需复杂的判断逻辑
 
 ## 2025-01-25 修复的主要问题
@@ -198,7 +197,6 @@ description: "Sage 示例和服务器更新日志"
 1. **AttributeError**: 'MessageChunk' object has no attribute 'get'
 2. **类型不匹配**: List[Dict[str, Any]] vs List[MessageChunk]
 3. **content 重复**: 流式消息内容被重复累积
-4. **show_content 显示不正确**: 显示内容与实际内容不符
 
 ## 2025-01-25 技术要点
 
