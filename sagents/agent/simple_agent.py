@@ -104,9 +104,12 @@ class SimpleAgent(AgentBase):
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
 
         # 根据建议过滤工具
+        # 强制包含 todo 工具，如果它们存在于可用工具中
+        always_include = ['todo_write', 'todo_read']
+        
         tools_suggest_json = [
             tool for tool in tools_json
-            if tool['function']['name'] in suggested_tools
+            if tool['function']['name'] in suggested_tools or tool['function']['name'] in always_include
         ]
         
         if tools_suggest_json:

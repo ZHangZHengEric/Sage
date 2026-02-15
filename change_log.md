@@ -2,3 +2,4 @@
 2026-02-15 21:30:00 Fixed AttributeError in TaskObservationAgent by replacing non-existent tool_manager.get_tool_config with get_openai_tools. Verified AgentBase._execute_tool compatibility with ToolProxy via get_tool.
 2026-02-15 22:00:00 Optimized ToDoTool: updated todo_write to support partial updates. Existing tasks only require id and changed fields, while new tasks require content.
 2026-02-15 22:30:00 Updated sage_cli.py: Removed deprecated --no-multi-agent argument. Added --deepthink argument to explicitly enable deep thinking mode, alongside existing configuration options.
+2026-02-15 23:00:00 Enhanced SimpleAgent: Enabled ToDoTool for SimpleAgent in simple mode. Updated SimpleAgent prompts to instruct mandatory usage of todo_write for task creation and status updates. Ensured ToDoTool registration in SAgent's simple workflow.
