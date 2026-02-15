@@ -162,30 +162,6 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
 
         # 处理大内容的特殊情况
         content = result.get('content', '')
-        show_content = result.get('show_content', '')
-
-        # 清理show_content中的base64图片数据，避免JSON过大，但保留content中的base64
-        if isinstance(show_content, str) and 'data:image' in show_content:
-            try:
-                # 如果show_content是JSON字符串，解析并清理
-                if show_content.strip().startswith('{'):
-                    show_content_data = json.loads(show_content)
-                    if isinstance(show_content_data, dict) and 'results' in show_content_data:
-                        if isinstance(show_content_data['results'], list):
-                            for item in show_content_data['results']:
-                                if isinstance(item, dict) and 'image' in item:
-                                    if item['image'] and isinstance(item['image'], str) and item['image'].startswith('data:image'):
-                                        item['image'] = '[BASE64_IMAGE_REMOVED_FOR_DISPLAY]'
-                    result['show_content'] = json.dumps(show_content_data, ensure_ascii=False)
-                else:
-                    # 如果不是JSON，直接使用正则表达式清理
-                    import re
-                    result['show_content'] = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[BASE64_IMAGE_REMOVED_FOR_DISPLAY]', show_content)
-            except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"清理 show_content 失败: {e}")
-                # 如果清理失败，使用正则表达式移除base64数据
-                import re
-                result['show_content'] = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[BASE64_IMAGE_REMOVED_FOR_DISPLAY]', show_content)
 
         # 特殊处理工具调用结果，避免JSON嵌套问题
         if result.get('role') == 'tool' and isinstance(content, str):
