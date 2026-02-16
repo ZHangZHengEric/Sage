@@ -11,3 +11,4 @@
 2026-02-15 22:00:00 Optimized ToDoTool: updated todo_write to support partial updates. Existing tasks only require id and changed fields, while new tasks require content.
 2026-02-15 22:30:00 Updated sage_cli.py: Removed deprecated --no-multi-agent argument. Added --deepthink argument to explicitly enable deep thinking mode, alongside existing configuration options.
 2026-02-15 23:00:00 Enhanced SimpleAgent: Enabled ToDoTool for SimpleAgent in simple mode. Updated SimpleAgent prompts to instruct mandatory usage of todo_write for task creation and status updates. Ensured ToDoTool registration in SAgent's simple workflow.
+2026-02-16 10:00:00 Frontend Update: Added YAML export support for Agent configuration. Users can now choose between JSON and YAML formats in the export dialog. Implemented using `js-yaml`.
