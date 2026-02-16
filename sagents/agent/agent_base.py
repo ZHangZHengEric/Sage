@@ -467,6 +467,7 @@ class AgentBase(ABC):
                             else:
                                 system_prefix += file_tree
                     except Exception as e:
+                        logger.error(f"AgentBase: 获取工作空间文件树时出错: {e}")
                         # 如果发生错误，仅显示无文件提示，避免暴露宿主机路径
                         no_files = prompt_manager.get_prompt(
                             'no_files_message',
@@ -502,7 +503,8 @@ class AgentBase(ABC):
                             # We just need it for reading, host_path doesn't matter much if we provide root_path
                             # Use current working directory as a safe default if available, else /
                             fs_for_external = SandboxFileSystem(host_path=os.getcwd(), virtual_path="/workspace") 
-                         except:
+                         except Exception as e:
+                            logger.error(f"AgentBase: 创建外部路径文件系统时出错: {e}")
                             pass
                     
                     if fs_for_external:
