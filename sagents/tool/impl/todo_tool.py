@@ -232,7 +232,7 @@ class ToDoTool:
             logger.error(f"ToDoTool: Failed to save tasks to {file_path}", session_id=session_id)
             return "保存任务清单失败。"
 
-    def clean_old_tasks(self, session_id: Optional[str] = None, session_context: Optional[Any] = None):
+    def clean_old_tasks(self, session_id: Optional[str] = None, session_context: Optional[Any] = None, time_threshold: int = 300):
         """
         清理过期的任务（超过5分钟未更新的任务）
         """
@@ -248,7 +248,7 @@ class ToDoTool:
             if updated_at_str:
                 try:
                     updated_at = datetime.datetime.strptime(updated_at_str, '%Y-%m-%d %H:%M:%S')
-                    if (now - updated_at).total_seconds() <= 300: # 5 minutes
+                    if (now - updated_at).total_seconds() <= time_threshold: # 5 minutes
                         filtered_tasks.append(t)
                     else:
                         # 超过5分钟的任务，直接丢弃
