@@ -521,7 +521,9 @@ class SAgent:
 
                     # 如果force_summary 为 True 或者 最后一个消息是role 为tool 的消息，也需要总结。
                     # 最后一个消息，从 session_context 中的message_manager 中获取
-                    if force_summary or session_context.message_manager.messages[-1].get('role') == MessageRole.TOOL.value:
+                    last_msg = session_context.message_manager.messages[-1]
+                    last_msg_role = last_msg.role if isinstance(last_msg, MessageChunk) else last_msg.get('role')
+                    if force_summary or last_msg_role == MessageRole.TOOL.value:
                         async for message_chunks in self._execute_agent_phase(session_context, tool_manager, session_id, self.task_summary_agent, "任务总结"):
                             session_context.add_messages(message_chunks)
                             yield message_chunks
