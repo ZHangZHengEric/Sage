@@ -229,7 +229,7 @@ class SessionContext:
         # 尝试清理过期的 todo 任务
         try:
             from sagents.tool.impl.todo_tool import ToDoTool
-            ToDoTool().clean_old_tasks(session_id=self.session_id, session_context=self)
+            ToDoTool().clean_old_tasks(session_id=self.session_id, session_context=self, time_threshold=1800)
         except Exception as e:
             logger.warning(f"SessionContext: 清理过期任务失败: {e}")
 

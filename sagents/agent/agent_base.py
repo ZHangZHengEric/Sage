@@ -118,6 +118,21 @@ class AgentBase(ABC):
             new_messages.append(msg)
         return new_messages
 
+    def _remove_content_if_tool_calls(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        如果 assistant 消息包含 tool_calls，则移除 content 字段
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            List[Dict[str, Any]]: 处理后的消息列表
+        """
+        for msg in messages:
+            if msg.get('role') == MessageRole.ASSISTANT.value and msg.get('tool_calls'):
+                msg.pop('content', None)
+        return messages
+
     async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
         """
         通用的流式模型调用方法，有这个封装，主要是为了将
@@ -181,6 +196,8 @@ class AgentBase(ABC):
 
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
+            # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
+            serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
 
             stream = await self.model.chat.completions.create(
                 model=model_name,
