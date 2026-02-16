@@ -93,6 +93,39 @@
       @update:visible="handleCloseEdit" 
     />
     </div>
+    <!-- Export Dialog -->
+    <Dialog :open="showExportDialog" @update:open="showExportDialog = $event">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('agent.exportTitle') }}</DialogTitle>
+          <DialogDescription>
+            {{ t('agent.exportDescription') }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid grid-cols-4 items-center gap-4">
+            <Label class="text-right">
+              {{ t('agent.exportFormat') }}
+            </Label>
+            <div class="col-span-3 flex gap-4">
+               <div class="flex items-center space-x-2">
+                  <input type="radio" id="json" value="json" v-model="exportFormat" class="accent-primary h-4 w-4" />
+                  <label for="json" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">JSON</label>
+               </div>
+               <div class="flex items-center space-x-2">
+                  <input type="radio" id="yaml" value="yaml" v-model="exportFormat" class="accent-primary h-4 w-4" />
+                  <label for="yaml" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">YAML</label>
+               </div>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showExportDialog = false">{{ t('agent.cancel') }}</Button>
+          <Button @click="confirmExport">{{ t('agent.export') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Usage Dialog -->
     <Dialog :open="showUsageModal" @update:open="showUsageModal = $event">
       <DialogContent class="sm:max-w-[80vw] overflow-hidden">
@@ -156,12 +189,14 @@ import { skillAPI } from '../api/skill.js'
 import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
+import { dump } from 'js-yaml'
 
 // UI Components
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
@@ -181,6 +216,11 @@ const usageAgent = ref(null)
 const usageActiveTab = ref('curl')
 const usageCodeMap = ref({ curl: '', python: '', go: '' })
 const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
+
+// Export Dialog State
+const showExportDialog = ref(false)
+const exportFormat = ref('json')
+const agentToExport = ref(null)
 
 // Authorization Modal
 const showAuthModal = ref(false)
@@ -360,6 +400,15 @@ const handleDelete = async (agent) => {
 }
 
 const handleExport = (agent) => {
+  agentToExport.value = agent
+  exportFormat.value = 'json'
+  showExportDialog.value = true
+}
+
+const confirmExport = () => {
+  if (!agentToExport.value) return
+  const agent = agentToExport.value
+  
   // 创建导出的配置对象
   const exportConfig = {
     id: agent.id,
@@ -380,21 +429,37 @@ const handleExport = (agent) => {
     version: '1.0'
   }
 
+  let dataStr = ''
+  let mimeType = ''
+  let extension = ''
+
+  if (exportFormat.value === 'json') {
+    dataStr = JSON.stringify(exportConfig, null, 2)
+    mimeType = 'application/json'
+     extension = 'json'
+   } else {
+     dataStr = dump(exportConfig)
+     mimeType = 'application/x-yaml'
+     extension = 'yaml'
+   }
+
   // 创建下载链接
-  const dataStr = JSON.stringify(exportConfig, null, 2)
-  const dataBlob = new Blob([dataStr], { type: 'application/json' })
+  const dataBlob = new Blob([dataStr], { type: mimeType })
   const url = URL.createObjectURL(dataBlob)
 
   // 创建下载链接并触发下载
   const link = document.createElement('a')
   link.href = url
-  link.download = `agent_${agent.name}_${new Date().toISOString().split('T')[0]}.json`
+  link.download = `agent_${agent.name}_${new Date().toISOString().split('T')[0]}.${extension}`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
 
   // 清理URL对象
   URL.revokeObjectURL(url)
+  
+  showExportDialog.value = false
+  agentToExport.value = null
 }
 
 const handleImport = () => {
