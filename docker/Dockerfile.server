@@ -51,7 +51,8 @@ RUN apt-get update && \
     libffi-dev \
     gnupg \
     shared-mime-info \
-    texlive-full \
+    texlive-xetex \
+    texlive-lang-chinese \
     latexmk \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && npm config set registry https://registry.npmmirror.com/ \
