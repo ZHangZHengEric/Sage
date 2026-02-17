@@ -22,8 +22,18 @@ export default {
   'sidebar.systemManagement': 'System',
   'sidebar.userList': 'Users',
   'sidebar.systemSettings': 'Settings',
+  'system.generalSettings': 'General Settings',
+  'system.allowRegistration': 'Allow Registration',
+  'system.allowRegistrationDesc': 'If enabled, new users can register',
+  'system.updateSuccess': 'Settings updated successfully',
+  'system.updateError': 'Failed to update settings',
+  'system.themeDesc': 'Set the appearance of the application',
   'sidebar.userProfile': 'Me',
   'sidebar.personalCenter': 'Personal Center',
+  'sidebar.theme': 'Theme',
+  'sidebar.themeLight': 'Light',
+  'sidebar.themeDark': 'Dark',
+  'sidebar.themeSystem': 'System',
   'auth.logout': 'Logout',
 
   // Model Provider

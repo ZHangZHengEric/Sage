@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full flex flex-col bg-slate-50">
+  <div class="h-full flex flex-col bg-muted/30">
     <!-- Header -->
-    <div class="bg-white border-b px-4 py-3 sm:px-6 sm:py-4 flex justify-between items-center">
+    <div class="bg-card border-b px-4 py-3 sm:px-6 sm:py-4 flex justify-between items-center">
       <h2 class="text-lg font-semibold">{{ t('sidebar.userList') }}</h2>
       <Button @click="showAddUserDialog = true">
         <Plus class="w-4 h-4 mr-2" />

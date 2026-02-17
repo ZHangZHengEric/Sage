@@ -7,6 +7,7 @@ import App from './App.vue'
 import router from './router'
 import { createPinia } from 'pinia'
 import { useLanguageStore } from './utils/i18n.js'
+import { useThemeStore } from './stores/theme.js'
 
 const pinia = createPinia()
 
@@ -18,10 +19,12 @@ app.use(pinia)
 // 初始化应用状态
 const initializeApp = async () => {
   const appStore = useLanguageStore()
+  const themeStore = useThemeStore()
   
   try {
     // 初始化应用设置
     appStore.initialize()
+    themeStore.initTheme()
     console.log('Application initialized successfully')
   } catch (error) {
     console.error('Failed to initialize application:', error)

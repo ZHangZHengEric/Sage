@@ -52,6 +52,8 @@ class StreamRequest(BaseChatRequest):
     memory_type: Optional[str] = "session"
     custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None
     context_budget_config: Optional[Dict[str, Any]] = None
+    # 额外的mcp配置
+    extra_mcp_config: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 class ChatRequest(BaseChatRequest):
