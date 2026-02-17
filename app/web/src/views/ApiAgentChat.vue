@@ -145,7 +145,7 @@
           </CardHeader>
             <CardContent v-show="showResponseExample" class="p-0">
               <pre
-                class="bg-slate-950 text-slate-50 p-4 overflow-auto rounded-b-lg text-sm whitespace-pre-wrap break-words">
+                class="bg-muted text-foreground p-4 overflow-auto rounded-b-lg text-sm whitespace-pre-wrap break-words">
     <code>{{ exampleStreamResponse }}</code>
   </pre>
             </CardContent>

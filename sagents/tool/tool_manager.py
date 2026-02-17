@@ -29,6 +29,11 @@ except NameError:
         pass
 from .mcp_proxy import McpProxy
 
+class RegisteredToolList(list):
+    """List of registered tools that evaluates to True for backward compatibility."""
+    def __bool__(self):
+        return True
+
 _GLOBAL_TOOL_MANAGER: Optional["ToolManager"] = None
 
 
@@ -442,6 +447,7 @@ class ToolManager:
                     - sse_url: SSE server URL
         """
         bool_registered = False
+        registered_tools = RegisteredToolList()
         logger.info(f"Registering MCP server: {server_name}")
         if config.get("disabled", True):
             logger.debug(f"Server {server_name} is disabled, skipping")
@@ -471,13 +477,14 @@ class ToolManager:
             mcp_tools = await mcp_proxy.get_mcp_tools(server_name, server_params)
             for mcp_tool in mcp_tools:
                 await self._register_mcp_tool(server_name, mcp_tool, server_params)
+                registered_tools.append(mcp_tool)
         except Exception as e:
             error_detail = _innermost_exception_message(e)
             logger.warning(f"Error registering MCP server {server_name}: {error_detail}")
             return bool_registered
         bool_registered = True
         logger.info(f"Successfully registered MCP server: {server_name}")
-        return bool_registered
+        return registered_tools
 
     async def _register_mcp_tool(
         self,

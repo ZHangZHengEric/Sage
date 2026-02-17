@@ -23,11 +23,11 @@
             </div>
             <div class="relative group" v-if="!parsedArguments">
               <div class="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-background/10 pointer-events-none rounded-lg border border-transparent group-hover:border-border/50 transition-colors"></div>
-              <div class="bg-slate-950 dark:bg-black rounded-lg border border-border/40 overflow-hidden shadow-inner">
-                 <div class="flex items-center justify-between px-4 py-2 bg-slate-900/50 border-b border-border/10">
+              <div class="bg-muted rounded-lg border border-border/40 overflow-hidden shadow-inner">
+                 <div class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b border-border/10">
                     <span class="text-[10px] text-muted-foreground font-mono">JSON</span>
                  </div>
-                <pre class="p-4 text-xs font-mono text-slate-50 overflow-auto max-h-[200px] custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(toolExecution?.function?.arguments) }}</pre>
+                <pre class="p-4 text-xs font-mono text-foreground overflow-auto max-h-[200px] custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(toolExecution?.function?.arguments) }}</pre>
               </div>
             </div>
             
@@ -56,11 +56,11 @@
                </div>
             </div>
 
-            <div v-else class="bg-slate-950 dark:bg-black rounded-lg border border-border/40 overflow-hidden shadow-inner">
-               <div class="flex items-center justify-between px-4 py-2 bg-slate-900/50 border-b border-border/10">
+            <div v-else class="bg-muted rounded-lg border border-border/40 overflow-hidden shadow-inner">
+               <div class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b border-border/10">
                   <span class="text-[10px] text-muted-foreground font-mono">Output</span>
                </div>
-               <pre class="p-4 text-xs font-mono text-slate-50 overflow-x-auto max-h-[200px]  custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(formatToolResult(toolResult)) }}</pre>
+               <pre class="p-4 text-xs font-mono text-foreground overflow-x-auto max-h-[200px]  custom-scrollbar whitespace-pre-wrap break-all">{{ formatJsonParams(formatToolResult(toolResult)) }}</pre>
             </div>
           </div>
         </div>

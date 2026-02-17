@@ -87,6 +87,7 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from 'vue'
+import { useThemeStore } from '@/stores/theme'
 import EChartsRenderer from './EChartsRenderer.vue'
 import { traceApi } from '@/api/trace'
 import { Button } from '@/components/ui/button'
@@ -99,6 +100,7 @@ const props = defineProps({
 
 defineEmits(['close'])
 
+const themeStore = useThemeStore()
 const loading = ref(false)
 const error = ref(null)
 const traces = ref([])
@@ -135,11 +137,11 @@ const treeData = computed(() => {
       
       // Node styling
       itemStyle: {
-        color: '#ffffff',
+        color: themeStore.isDark ? '#1e293b' : '#ffffff',
         borderColor: color,
         borderWidth: 1,
         shadowBlur: 8,
-        shadowColor: 'rgba(0,0,0,0.04)',
+        shadowColor: themeStore.isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.04)',
         shadowOffsetY: 3,
         borderRadius: 8
       },
@@ -163,13 +165,13 @@ const treeData = computed(() => {
           t: { 
             fontSize: 13, 
             fontWeight: 600, 
-            color: '#0f172a', // slate-900
+            color: themeStore.isDark ? '#f1f5f9' : '#0f172a', // slate-100 : slate-900
             lineHeight: 20,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
           },
           d: { 
             fontSize: 11, 
-            color: '#64748b', // slate-500
+            color: themeStore.isDark ? '#94a3b8' : '#64748b', // slate-400 : slate-500
             lineHeight: 16,
             padding: [4, 0, 0, 0],
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
@@ -206,8 +208,8 @@ const treeData = computed(() => {
     symbol: 'roundRect',
     symbolSize: [160, 40],
     itemStyle: { 
-        color: '#f8fafc', 
-        borderColor: '#cbd5e1', 
+        color: themeStore.isDark ? '#0f172a' : '#f8fafc', 
+        borderColor: themeStore.isDark ? '#334155' : '#cbd5e1', 
         borderWidth: 1,
         shadowBlur: 2,
         shadowColor: 'rgba(0,0,0,0.05)'
@@ -215,7 +217,7 @@ const treeData = computed(() => {
     label: {
       show: true,
       position: 'inside',
-      color: '#475569',
+      color: themeStore.isDark ? '#94a3b8' : '#475569',
       fontWeight: 600,
       formatter: 'Session Root'
     },
@@ -259,29 +261,31 @@ const chartOption = computed(() => ({
   backgroundColor: 'transparent',
   tooltip: {
     trigger: 'item',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderColor: '#e2e8f0',
+    backgroundColor: themeStore.isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+    borderColor: themeStore.isDark ? '#334155' : '#e2e8f0',
     borderWidth: 1,
     padding: [12, 16],
     textStyle: {
-      color: '#0f172a'
+      color: themeStore.isDark ? '#f1f5f9' : '#0f172a'
     },
     extraCssText: 'box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 8px;',
     formatter: p => {
       const d = p.data
       const statusColor = d.status === 'ERROR' ? 'text-red-500' : 'text-green-500'
       const statusText = d.status || 'OK'
+      const labelColor = themeStore.isDark ? 'text-slate-400' : 'text-slate-500'
+      const labelColorDark = themeStore.isDark ? 'text-slate-300' : 'text-slate-600'
       
       return `
         <div class="font-sans">
           <div class="font-semibold text-sm mb-1">${d.name}</div>
-          <div class="text-xs text-slate-500 mb-2 font-mono">${d.startTime || '-'}</div>
+          <div class="text-xs ${labelColor} mb-2 font-mono">${d.startTime || '-'}</div>
           <div class="flex items-center justify-between gap-4 text-xs">
-            <span class="text-slate-600">Status:</span>
+            <span class="${labelColorDark}">Status:</span>
             <span class="font-medium ${statusColor}">${statusText}</span>
           </div>
           <div class="flex items-center justify-between gap-4 text-xs mt-1">
-            <span class="text-slate-600">Duration:</span>
+            <span class="${labelColorDark}">Duration:</span>
             <span class="font-medium font-mono">${d.value?.toFixed(2) || 0} ms</span>
           </div>
         </div>
@@ -307,7 +311,7 @@ const chartOption = computed(() => ({
       
       // Smooth curves
       lineStyle: {
-        color: '#cbd5e1',
+        color: themeStore.isDark ? '#475569' : '#cbd5e1',
         width: 1.5,
         curveness: 0.5
       },
