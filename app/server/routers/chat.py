@@ -32,48 +32,45 @@ async def stream_with_disconnect_check(
     lock: asyncio.Lock,
     session_id: str
 ):
-    """
-    Wrap the generator to monitor client disconnection.
-    If client disconnects, stop the generator (which triggers its finally block).
-    """
     try:
         async for chunk in generator:
+            # 仅用于提前结束流，不中断会话
             if await request.is_disconnected():
-                logger.bind(session_id=session_id).info("Client disconnection detected")
-                # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
-                raise GeneratorExit
+                logger.bind(session_id=session_id).info("Client disconnected (SSE closed)")
+                break   # 不 raise，不触发中断逻辑
+
             yield chunk
-    except (asyncio.CancelledError, GeneratorExit) as e:        
-        # 标记会话中断，让内部逻辑有机会感知并处理
-        try:
-            await interrupt_session(session_id, "客户端断开连接")
-        except Exception as ex:
-            logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
-            
-        # 重新抛出异常，确保生成器正确关闭
-        raise e
+
+    # ⭐ 客户端断开时的正常路径
+    except asyncio.CancelledError:
+        logger.bind(session_id=session_id).info("Streaming task cancelled (client likely disconnected)")
+        # 不 interrupt_session
+        raise  # 必须继续抛出，让 ASGI 正确处理取消
+
+    # ⭐ 业务逻辑异常
     except Exception as e:
         logger.bind(session_id=session_id).error(f"Stream generator error: {e}")
-        raise e
+        raise
+
     finally:
-        # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
-        # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
+        # 仅关闭 streaming generator
         try:
-            if hasattr(generator, 'aclose'):
+            if hasattr(generator, "aclose"):
                 await generator.aclose()
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
 
-        # 清理资源
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
+
         try:
             if lock.locked():
-                await lock.release()
+                lock.release()  # 不要 await，这不是 async
+
             delete_session_run_lock(session_id)
+
             logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
-
 
 def validate_and_prepare_request(
     request: ChatRequest | StreamRequest, http_request: Request
