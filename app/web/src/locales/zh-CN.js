@@ -22,8 +22,18 @@ export default {
   'sidebar.systemManagement': '系统管理',
   'sidebar.userList': '用户列表',
   'sidebar.systemSettings': '系统设置',
+  'system.generalSettings': '通用设置',
+  'system.allowRegistration': '允许注册',
+  'system.allowRegistrationDesc': '开启后，新用户可以注册账号',
+  'system.updateSuccess': '设置更新成功',
+  'system.updateError': '设置更新失败',
+  'system.themeDesc': '设置应用程序的外观',
   'sidebar.userProfile': '我的',
   'sidebar.personalCenter': '个人中心',
+  'sidebar.theme': '主题',
+  'sidebar.themeLight': '浅色',
+  'sidebar.themeDark': '深色',
+  'sidebar.themeSystem': '系统',
   'auth.logout': '退出',
 
   // Model Provider
