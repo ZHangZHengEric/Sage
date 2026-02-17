@@ -15,7 +15,7 @@ from sagents.context.session_context import (
     get_session_run_lock,
 )
 from sagents.sagents import SAgent
-
+from sagents.tool import ToolManager, get_tool_manager
 from ... import models
 from ...core.exceptions import SageHTTPException
 from ...schemas.chat import StreamRequest, CustomSubAgentConfig
@@ -102,7 +102,6 @@ async def populate_request_from_agent_config(
     if request.max_loop_count is None:
         request.max_loop_count = 10
     _fill_if_none("available_tools", agent.config.get("availableTools", []))
-    _fill_if_none("available_tools", agent.config.get("availableTools", []))
     _fill_if_none("available_skills", agent.config.get("availableSkills", []))
     _merge_dict("available_workflows", agent.config.get("availableWorkflows", {}))
     _fill_if_none("deep_thinking", agent.config.get("deepThinking", False))
@@ -138,13 +137,10 @@ async def populate_request_from_agent_config(
             _merge_dict("system_context", kdb_context)
 
             # 2. 添加 retrieve_on_zavixai_db 工具
-            current_tools = getattr(request, "available_tools", [])
-            if current_tools is None:
-                current_tools = []
-                setattr(request, "available_tools", current_tools)
-
+            current_tools = request.available_tools
             if "retrieve_on_zavixai_db" not in current_tools:
                 current_tools.append("retrieve_on_zavixai_db")
+
     # 处理可用技能
     available_skills = agent.config.get("availableSkills", [])
     if available_skills:
@@ -154,10 +150,7 @@ async def populate_request_from_agent_config(
             current_skills = []
             setattr(request, "available_skills", current_skills)
         need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
-        current_tools = getattr(request, "available_tools", [])
-        if current_tools is None:
-            current_tools = []
-            setattr(request, "available_tools", current_tools)
+        current_tools = request.available_tools
         for tool in need_tools:
             if tool not in current_tools:
                 current_tools.append(tool)
@@ -197,6 +190,42 @@ async def populate_request_from_agent_config(
     }
     request.context_budget_config = context_budget_config
 
+    # 处理可用覆盖mcp配置，注册到tool_manager
+    if request.extra_mcp_config:
+        tm = get_tool_manager()
+        if tm:
+            for key, value in request.extra_mcp_config.items():
+                if not isinstance(value, dict):
+                    logger.warning(f"Invalid MCP config for {key}: expected dict, got {type(value)}")
+                    continue
+                
+                # 默认启用
+                if "disabled" not in value:
+                    value["disabled"] = False
+                
+                # 简单校验必要参数
+                if not any(k in value for k in ["command", "sse_url", "url", "streamable_http_url"]):
+                    logger.warning(f"Invalid MCP config for {key}: missing connection parameters")
+                    continue
+
+                registered_tools = await tm.register_mcp_server(key, value)
+                if registered_tools:
+                    new_tool_names = []
+                    for tool in registered_tools:
+                        tool_name = None
+                        if isinstance(tool, dict):
+                            tool_name = tool.get("name")
+                        else:
+                            tool_name = getattr(tool, "name", None)
+                        
+                        if tool_name:
+                            new_tool_names.append(tool_name)
+                    
+                    if new_tool_names:
+                        request.available_tools.extend(new_tool_names)
+                        logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
+
+            
 class SageStreamService:
     """Sage 流式服务类"""
 

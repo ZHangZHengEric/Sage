@@ -1,6 +1,6 @@
 <template>
   <div 
-    class="group relative flex flex-col h-full bg-slate-100/60 border-r-0 transition-all duration-300 ease-in-out"
+    class="group relative flex flex-col h-full bg-muted/40 border-r transition-all duration-300 ease-in-out"
     :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
   >
     <!-- Header -->
@@ -108,7 +108,7 @@
                     size="icon" 
                     :class="[
                       'transition-all duration-200',
-                      isCategoryActive(item) ? 'bg-white shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                      isCategoryActive(item) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
                     ]"
                   >
                      <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
@@ -136,7 +136,7 @@
                :title="t(item.nameKey)"
                :class="[
                  'transition-all duration-200',
-                 isCurrentService(item.url, item.isInternal) ? 'bg-white shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                 isCurrentService(item.url, item.isInternal) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
                ]"
                @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
             >
@@ -170,8 +170,8 @@
                     variant="ghost"
                     class="w-full justify-start h-9 pl-9 mb-0.5 text-sm font-normal text-muted-foreground"
                     :class="cn(
-                      'hover:bg-white hover:shadow-sm hover:text-primary transition-all duration-200',
-                      isCurrentService(service.url, service.isInternal) && 'bg-white shadow text-primary font-semibold'
+                      'hover:bg-background hover:shadow-sm hover:text-primary transition-all duration-200',
+                      isCurrentService(service.url, service.isInternal) && 'bg-background shadow text-primary font-semibold'
                     )"
                     @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
                   >
@@ -185,10 +185,10 @@
             <Button
               v-else
               variant="ghost"
-              class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-white hover:shadow-sm transition-all duration-200 mb-1"
-              :class="cn(
-                isCurrentService(item.url, item.isInternal) && 'bg-white shadow text-primary font-bold'
-              )"
+            class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-background hover:shadow-sm transition-all duration-200 mb-1"
+            :class="cn(
+              isCurrentService(item.url, item.isInternal) && 'bg-background shadow text-primary font-bold'
+            )"
               @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
             >
               <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
@@ -205,10 +205,10 @@
       <DropdownMenu v-model:open="isDropdownOpen">
         <DropdownMenuTrigger as-child>
           <div 
-            class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-white hover:shadow-sm transition-all duration-200 w-full group"
+            class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-background hover:shadow-sm transition-all duration-200 w-full group"
             :class="{'justify-center': isCollapsed}"
           >
-            <Avatar class="h-9 w-9 border-2 border-white shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
+            <Avatar class="h-9 w-9 border-2 border-background shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
               <AvatarImage :src="currentUser.avatar" />
               <AvatarFallback class="bg-primary/10 text-primary font-bold">
                 {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
@@ -238,6 +238,33 @@
              <Globe class="mr-2 h-4 w-4" />
              <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
           </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Sun v-if="themeStore.theme === 'light'" class="mr-2 h-4 w-4" />
+              <Moon v-else-if="themeStore.theme === 'dark'" class="mr-2 h-4 w-4" />
+              <Monitor v-else class="mr-2 h-4 w-4" />
+              <span>{{ t('sidebar.theme') }}</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem @click="themeStore.setTheme('light')">
+                  <Sun class="mr-2 h-4 w-4" />
+                  <span>{{ t('sidebar.themeLight') }}</span>
+                  <Check v-if="themeStore.theme === 'light'" class="ml-auto h-4 w-4" />
+                </DropdownMenuItem>
+                <DropdownMenuItem @click="themeStore.setTheme('dark')">
+                  <Moon class="mr-2 h-4 w-4" />
+                  <span>{{ t('sidebar.themeDark') }}</span>
+                  <Check v-if="themeStore.theme === 'dark'" class="ml-auto h-4 w-4" />
+                </DropdownMenuItem>
+                <DropdownMenuItem @click="themeStore.setTheme('system')">
+                  <Monitor class="mr-2 h-4 w-4" />
+                  <span>{{ t('sidebar.themeSystem') }}</span>
+                  <Check v-if="themeStore.theme === 'system'" class="ml-auto h-4 w-4" />
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
           <DropdownMenuItem @select.prevent="showChangePasswordDialog = true">
             <KeyRound class="mr-2 h-4 w-4" />
             <span>修改密码</span>
@@ -272,9 +299,14 @@ import {
   Users,
   KeyRound,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Sun,
+  Moon,
+  Monitor,
+  Check
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
+import { useThemeStore } from '../stores/theme.js'
 import { getCurrentUser, logout } from '../utils/auth.js'
 import { userAPI } from '@/api/user'
 import { toast } from 'vue-sonner'
@@ -290,6 +322,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuPortal
 } from '@/components/ui/dropdown-menu'
 import {
   Dialog,
@@ -310,6 +346,7 @@ import { cn } from '@/utils/cn'
 const router = useRouter()
 const route = useRoute()
 const { toggleLanguage, t, isZhCN } = useLanguage()
+const themeStore = useThemeStore()
 const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
