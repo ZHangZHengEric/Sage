@@ -36,6 +36,7 @@ _SAGENT_CACHE = {}
 async def populate_request_from_agent_config(
     request: StreamRequest, *, require_agent_id: bool = False
 ) -> None:
+    agent = None
     if request.agent_id is None:
         # 如果要求必须有 Agent ID，则抛出异常
         if require_agent_id:
@@ -51,8 +52,42 @@ async def populate_request_from_agent_config(
             if require_agent_id:
                 raise SageHTTPException(status_code=500, detail="Agent 不存在")
             logger.warning(f"Agent {request.agent_id} not found")
-            return
-        request.agent_name = agent.name or "Sage Assistant"
+            agent = None
+        else:
+            request.agent_name = agent.name or "Sage Assistant"
+
+    agent_config = agent.config if agent and agent.config else None
+
+    if agent_config:
+        if agent_config.get("name") is not None:
+            request.agent_name = agent_config.get("name")
+        if agent_config.get("availableTools") is not None:
+            request.available_tools = agent_config.get("availableTools")
+        if agent_config.get("availableSkills") is not None:
+            request.available_skills = agent_config.get("availableSkills")
+        if agent_config.get("availableWorkflows") is not None:
+            request.available_workflows = agent_config.get("availableWorkflows")
+        if agent_config.get("deepThinking") is not None:
+            request.deep_thinking = agent_config.get("deepThinking")
+        if agent_config.get("maxLoopCount") is not None:
+            request.max_loop_count = agent_config.get("maxLoopCount")
+        if agent_config.get("multiAgent") is not None:
+            request.multi_agent = agent_config.get("multiAgent")
+        if agent_config.get("moreSuggest") is not None:
+            request.more_suggest = agent_config.get("moreSuggest")
+        if agent_config.get("systemContext") is not None:
+            request.system_context = agent_config.get("systemContext")
+        if agent_config.get("systemPrefix") is not None:
+            request.system_prefix = agent_config.get("systemPrefix")
+        if agent_config.get("memoryType") is not None:
+            request.memory_type = agent_config.get("memoryType")
+        if agent_config.get("availableKnowledgeBases") is not None:
+            request.available_knowledge_bases = agent_config.get("availableKnowledgeBases")
+        if agent_config.get("availableSubAgentIds") is not None:
+            request.available_sub_agent_ids = agent_config.get("availableSubAgentIds")
+
+    if request.agent_name is None:
+        request.agent_name = "Sage Assistant"
 
     def _fill_if_none(field, value):
         if getattr(request, field) is None:
@@ -71,7 +106,7 @@ async def populate_request_from_agent_config(
     if request.llm_model_config is None:
         request.llm_model_config = {}
     provider_dao = models.LLMProviderDao()
-    provider_id = agent.config.get("llm_provider_id")
+    provider_id = agent_config.get("llm_provider_id") if agent_config else None
     if provider_id: # 有指定则全量替换
         provider = await provider_dao.get_by_id(provider_id)
         request.llm_model_config["base_url"] = provider.base_url
@@ -102,22 +137,23 @@ async def populate_request_from_agent_config(
             request.llm_model_config["max_model_len"] = provider.max_model_len 
         
     if request.max_loop_count is None:
-        request.max_loop_count = 10
-    _fill_if_none("available_tools", agent.config.get("availableTools", []))
-    _fill_if_none("available_skills", agent.config.get("availableSkills", []))
-    _merge_dict("available_workflows", agent.config.get("availableWorkflows", {}))
-    _fill_if_none("deep_thinking", agent.config.get("deepThinking", False))
-    _fill_if_none("max_loop_count", agent.config.get("maxLoopCount", 10))
-    _fill_if_none("multi_agent", agent.config.get("multiAgent", False))
-    _fill_if_none("more_suggest", agent.config.get("moreSuggest", False))
-    _merge_dict("system_context", agent.config.get("systemContext", {}))
-    _fill_if_none("system_prefix", agent.config.get("systemPrefix", ""))
-    _fill_if_none("memory_type", agent.config.get("memoryType", "session"))
+        request.max_loop_count = 50
+    _fill_if_none("available_tools", [])
+    _fill_if_none("available_skills", [])
+    _merge_dict("available_workflows", {})
+    _fill_if_none("deep_thinking", False)
+    _fill_if_none("multi_agent", False)
+    _fill_if_none("more_suggest", False)
+    _merge_dict("system_context", {})
+    _fill_if_none("system_prefix", "")
+    _fill_if_none("memory_type", "session")
+    _fill_if_none("available_knowledge_bases", [])
+    _fill_if_none("available_sub_agent_ids", [])
     user = {"本次会话用户id": request.user_id or "default_user"}
     _merge_dict("system_context", user)
 
     # 处理可用知识库
-    available_knowledge_bases = agent.config.get("availableKnowledgeBases", [])
+    available_knowledge_bases = request.available_knowledge_bases
     if available_knowledge_bases:
         kdb_dao = models.KdbDao()
         # 分页获取所有关联的知识库
@@ -144,7 +180,7 @@ async def populate_request_from_agent_config(
                 current_tools.append("retrieve_on_zavixai_db")
 
     # 处理可用技能
-    available_skills = agent.config.get("availableSkills", [])
+    available_skills = request.available_skills
     if available_skills:
         # file_read execute_python_code execute_shell_command file_write update_file 五种工具注入
         current_skills = getattr(request, "available_skills", [])
@@ -157,7 +193,7 @@ async def populate_request_from_agent_config(
             if tool not in current_tools:
                 current_tools.append(tool)
     # 处理可用子Agent
-    available_sub_agent_ids = agent.config.get("availableSubAgentIds", [])
+    available_sub_agent_ids = request.available_sub_agent_ids
     if available_sub_agent_ids:
         # 从数据库获取所有子Agent配置
         sub_agent_dao = models.AgentConfigDao()
