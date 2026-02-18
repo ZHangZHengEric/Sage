@@ -194,6 +194,7 @@ async def populate_request_from_agent_config(
     if request.extra_mcp_config:
         tm = get_tool_manager()
         if tm:
+            logger.info(f"Registering {len(request.extra_mcp_config)} extra MCP servers")
             for key, value in request.extra_mcp_config.items():
                 if not isinstance(value, dict):
                     logger.warning(f"Invalid MCP config for {key}: expected dict, got {type(value)}")
@@ -224,7 +225,10 @@ async def populate_request_from_agent_config(
                     # if new_tool_names:
                         # request.available_tools.extend(new_tool_names)
                         # logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
-
+                else:
+                    logger.warning(f"Failed to register MCP server {key} with tools")
+        else:
+            logger.warning("ToolManager not available, cannot register MCP servers")
             
 class SageStreamService:
     """Sage 流式服务类"""
