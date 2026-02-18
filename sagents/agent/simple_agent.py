@@ -142,6 +142,14 @@ class SimpleAgent(AgentBase):
 
         task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())
         prompt = task_complete_template.format(
+            system_prompt=self.prepare_unified_system_message(
+                session_id,
+                custom_prefix=PromptManager().get_agent_prompt_auto(
+                                                "agent_custom_system_prefix", language=session_context.get_language()
+                                            ),
+                language=session_context.get_language(),
+                include_sections=["role_definition"]
+            ),
             session_id=session_id,
             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
         )
