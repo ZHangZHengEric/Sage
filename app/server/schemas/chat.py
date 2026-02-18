@@ -48,6 +48,8 @@ class StreamRequest(BaseChatRequest):
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
+    available_knowledge_bases: Optional[List[str]] = None
+    available_sub_agent_ids: Optional[List[str]] = None
     force_summary: Optional[bool] = False
     memory_type: Optional[str] = "session"
     custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None
