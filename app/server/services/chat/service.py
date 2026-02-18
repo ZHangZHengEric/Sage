@@ -52,8 +52,7 @@ async def populate_request_from_agent_config(
                 raise SageHTTPException(status_code=500, detail="Agent 不存在")
             logger.warning(f"Agent {request.agent_id} not found")
             return
-
-    request.agent_name = agent.name or "Sage Assistant"
+        request.agent_name = agent.name or "Sage Assistant"
 
     def _fill_if_none(field, value):
         if getattr(request, field) is None:
