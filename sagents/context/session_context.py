@@ -204,16 +204,16 @@ class SessionContext:
         # if self.system_context['file_workspace'].startswith('/'):
         #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
         self.system_context['session_id'] = self.session_id
-        # self.system_context['文件权限'] = "只允许在 "+self.system_context['file_workspace']+" 目录下操作读写文件，并且使用绝对路径"
         
         # Check for external paths to include in permissions
+
         external_paths = self.system_context.get('可以访问的其他路径文件夹') or self.system_context.get('external_paths')
         permission_paths = [self.system_context['file_workspace']]
         if external_paths and isinstance(external_paths, list):
              permission_paths.extend([str(p) for p in external_paths])
-        
         paths_str = ", ".join(permission_paths)
         self.system_context['file_permission'] = f"only allow read and write files in: {paths_str}, and use absolute path"
+
         self.system_context['response_language'] = "zh-CN(简体中文)"
 
         # 如果有历史的messages.json，则加载messages.json
