@@ -221,9 +221,9 @@ async def populate_request_from_agent_config(
                         if tool_name:
                             new_tool_names.append(tool_name)
                     
-                    if new_tool_names:
-                        request.available_tools.extend(new_tool_names)
-                        logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
+                    # if new_tool_names:
+                        # request.available_tools.extend(new_tool_names)
+                        # logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
 
             
 class SageStreamService:
