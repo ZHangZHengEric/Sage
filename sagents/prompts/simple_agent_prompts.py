@@ -113,7 +113,7 @@ Notas:
 
 # 任务完成判断模板
 task_complete_template = {
-    "zh": """你要根据历史的对话以及用户的请求，判断是否需要中断执行任务。
+    "zh": """你要根据历史的对话以及用户的请求，以及agent的配置中对于事情的执行要求，判断是否需要中断执行任务。
 
 ## 是否中断执行任务判断规则
 1. 中断执行任务：
@@ -128,6 +128,9 @@ task_complete_template = {
 
 ## 输出内容一致对齐逻辑
 1. 如果reason 是等待工具调用，则task_interrupted是false
+
+## agent的配置要求
+{system_prompt}
 
 ## 用户的对话历史以及新的请求的执行过程
 {messages}
