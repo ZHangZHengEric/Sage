@@ -164,7 +164,17 @@ class SkillManager:
         内部方法：扫描并加载所有配置的技能目录中的技能。
         """
         self.skills.clear()
+        self.load_new_skills()
+
+    def load_new_skills(self):
+        """
+        Load new skills from disk without reloading existing ones.
+        """
         count = 0
+        
+        # Build a set of existing skill paths for fast lookup
+        existing_paths = {skill.path for skill in self.skills.values()}
+        
         # Iterate over all configured skill directories
         for workspace in self.skill_dirs:
             if not os.path.exists(workspace):
@@ -176,15 +186,19 @@ class SkillManager:
                 for item in os.listdir(workspace):
                     skill_path = os.path.join(workspace, item)
                     if os.path.isdir(skill_path):
+                        # Skip if path is already loaded
+                        if skill_path in existing_paths:
+                            continue
+                            
                         # Avoid duplicates if multiple workspaces have same skill name?
                         # Current logic: Last loaded overwrites previous if names collide.
-                        name = self._load_skill_from_dir(skill_path)
+                        name = self._load_skill_from_dir(skill_path, skip_if_loaded=True)
                         if name:
                             count += 1
                 
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
-        logger.debug(f"Total skills loaded: {count}")
+        logger.debug(f"Total skills loaded/checked: {count}")
 
 
     def _generate_file_list(self, path: str, root_path: str, skill_name: str) -> str:
@@ -225,7 +239,7 @@ class SkillManager:
             return False
         return True
 
-    def _load_skill_from_dir(self, skill_path: str) -> Optional[str]:
+    def _load_skill_from_dir(self, skill_path: str, skip_if_loaded: bool = False) -> Optional[str]:
         """
         Load a skill from a directory.
         Returns skill name if successful, None otherwise.
@@ -252,6 +266,9 @@ class SkillManager:
                 description = metadata.get("description", "")
 
                 if name:
+                    if skip_if_loaded and name in self.skills:
+                        return name
+
                     file_list = self._generate_file_list(skill_path, skill_path, name)
                     schema = SkillSchema(
                         name=name,
