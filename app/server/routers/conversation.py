@@ -160,11 +160,11 @@ async def list_conversations(
     return await Response.succ(data=result, message="获取会话列表成功")
 
 
-@conversation_router.get("/api/conversations/{conversation_id}/messages")
-async def get_messages(conversation_id: str, request: Request):
+@conversation_router.get("/api/conversations/{session_id}/messages")
+async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
 
-    data = await get_conversation_messages(conversation_id)
+    data = await get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取消息成功")
 
 
