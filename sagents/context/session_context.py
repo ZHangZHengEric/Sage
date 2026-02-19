@@ -141,6 +141,15 @@ class SessionContext:
         if not os.path.exists(self.llm_request_dir):
             os.makedirs(self.llm_request_dir)
 
+        # 初始化 external_paths
+        self.external_paths = self.system_context.get('可以访问的其他路径文件夹') or self.system_context.get('external_paths') or []
+        self.system_context.pop("可以访问的其他路径文件夹",None)
+        self.system_context.pop("external_paths",None)
+        if isinstance(self.external_paths, str):
+            self.external_paths = [self.external_paths]
+            
+        self.system_context['external_paths'] = self.external_paths
+
         current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
         self.system_context['current_time'] = current_time_str
         logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {_agent_workspace_host_path}")
@@ -152,7 +161,8 @@ class SessionContext:
             host_workspace=_agent_workspace_host_path,
             virtual_workspace=self.virtual_workspace,
             cpu_time_limit=300,    # 5分钟，支持长时间安装
-            memory_limit_mb=4096   # 4GB，防止 OOM
+            memory_limit_mb=4096,  # 4GB，防止 OOM
+            allowed_paths=self.external_paths
         )
         logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         
@@ -197,22 +207,22 @@ class SessionContext:
         else:
             logger.warning("SessionContext: SkillManager 未初始化，跳过技能复制")
         
-        # file_workspace 使用虚拟路径，避免暴露宿主机绝对路径
-        self.system_context['file_workspace'] = self.virtual_workspace
+        # private_workspace 使用虚拟路径，避免暴露宿主机绝对路径
+        self.system_context['private_workspace'] = self.virtual_workspace
         if self.user_id:
             self.system_context['user_id'] = self.user_id
-        # if self.system_context['file_workspace'].startswith('/'):
-        #     self.system_context['file_workspace'] = self.system_context['file_workspace'][1:]
+        # if self.system_context['private_workspace'].startswith('/'):
+        #     self.system_context['private_workspace'] = self.system_context['private_workspace'][1:]
         self.system_context['session_id'] = self.session_id
         
         # Check for external paths to include in permissions
+        # external_paths 已经在上面初始化并在 system_context 中设置了
 
-        external_paths = self.system_context.get('可以访问的其他路径文件夹') or self.system_context.get('external_paths')
-        permission_paths = [self.system_context['file_workspace']]
-        if external_paths and isinstance(external_paths, list):
-             permission_paths.extend([str(p) for p in external_paths])
+        permission_paths = [self.system_context['private_workspace']]
+        if self.external_paths and isinstance(self.external_paths, list):
+             permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
-        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str}, and use absolute path"
+        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str} (Note: {self.virtual_workspace} is your private sandbox), and use absolute path"
 
         self.system_context['response_language'] = "zh-CN(简体中文)"
 
