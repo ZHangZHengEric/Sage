@@ -481,8 +481,8 @@ class AgentBase(ABC):
 
                 # 4.1 External/Additional Paths
                 # Support accessing other directories on the host machine if specified in system_context
-                # Key: '可以访问的其他路径文件夹' or 'external_paths'
-                external_paths = session_context.system_context.get('可以访问的其他路径文件夹') or session_context.system_context.get('external_paths')
+                # Key: 'external_paths'
+                external_paths = session_context.system_context.get('external_paths')
                 
                 if external_paths and isinstance(external_paths, list):
                     system_prefix += "<external_paths>\n"
