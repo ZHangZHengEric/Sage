@@ -1,4 +1,5 @@
 # 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
+from math import log
 import time
 import threading
 from typing import Dict, Any, Optional, List, Union
@@ -220,6 +221,7 @@ class SessionContext:
         # external_paths 已经在上面初始化并在 system_context 中设置了
 
         permission_paths = [self.system_context['private_workspace']]
+        logger.info(f"self.external_paths: {self.external_paths}")
         if self.external_paths and isinstance(self.external_paths, list):
              permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
