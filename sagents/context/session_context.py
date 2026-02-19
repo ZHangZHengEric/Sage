@@ -511,13 +511,55 @@ class SessionContext:
         # return 'zh' if 'zh' in response_language or '中文' in response_language else 'en'
         return self.match_language(str(response_language or 'zh'))
 
+    def _normalize_external_paths(self, external_paths: Any) -> List[str]:
+        if external_paths is None:
+            return []
+        if isinstance(external_paths, str):
+            return [external_paths]
+        if isinstance(external_paths, list):
+            return [str(p) for p in external_paths if p is not None]
+        return []
+
+    def _refresh_file_permission(self):
+        private_workspace = self.system_context.get('private_workspace') or getattr(self, 'virtual_workspace', '/workspace')
+        permission_paths = [private_workspace]
+        if self.external_paths and isinstance(self.external_paths, list):
+            permission_paths.extend([str(p) for p in self.external_paths])
+        paths_str = ", ".join(permission_paths)
+        virtual_workspace = getattr(self, 'virtual_workspace', '/workspace')
+        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str} (Note: {virtual_workspace} is your private sandbox), and use absolute path"
+
     # 注意：自动记忆提取功能已迁移到sagents层面
     # 现在由sagents直接调用MemoryExtractionAgent来处理记忆提取和更新
 
     def add_and_update_system_context(self, new_system_context: Dict[str, Any]):
         """添加并更新系统上下文"""
         if new_system_context:
+            external_paths_value = None
+            has_external_paths = False
+            if "external_paths" in new_system_context:
+                has_external_paths = True
+                external_paths_value = new_system_context.get("external_paths")
+            elif "可以访问的其他路径文件夹" in new_system_context:
+                has_external_paths = True
+                external_paths_value = new_system_context.get("可以访问的其他路径文件夹")
             self.system_context.update(new_system_context)
+            if has_external_paths:
+                normalized_external_paths = self._normalize_external_paths(external_paths_value)
+                previous_external_paths = list(self.external_paths or [])
+                self.external_paths = normalized_external_paths
+                self.system_context['external_paths'] = normalized_external_paths
+                if "可以访问的其他路径文件夹" in self.system_context:
+                    self.system_context.pop("可以访问的其他路径文件夹", None)
+                if self.sandbox and hasattr(self.sandbox, 'limits'):
+                    allowed_paths = list(self.sandbox.limits.get('allowed_paths', []))
+                    if previous_external_paths:
+                        allowed_paths = [p for p in allowed_paths if p not in previous_external_paths]
+                    for path in normalized_external_paths:
+                        if path not in allowed_paths:
+                            allowed_paths.append(path)
+                    self.sandbox.limits['allowed_paths'] = allowed_paths
+                self._refresh_file_permission()
 
     def add_llm_request(self, request: Dict[str, Any], response: Optional[Dict[str, Any]]):
         """添加LLM请求"""
