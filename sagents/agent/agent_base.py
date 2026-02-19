@@ -401,7 +401,7 @@ class AgentBase(ABC):
                     file_system = session_context.file_system
 
                 if file_system:
-                    workspace_name = session_context.system_context.get('file_workspace', '')
+                    workspace_name = session_context.system_context.get('private_workspace', '')
                     
                     system_prefix += "<workspace_files>\n"
                     # 使用PromptManager获取多语言文本
@@ -429,7 +429,7 @@ class AgentBase(ABC):
                 # Fallback: 如果没有 file_system 对象但有 agent_workspace 路径 (兼容旧代码)
                 elif session_context.agent_workspace:
                     current_agent_workspace = session_context.agent_workspace
-                    workspace_name = session_context.system_context.get('file_workspace', '')
+                    workspace_name = session_context.system_context.get('private_workspace', '')
 
                     system_prefix += "<workspace_files>\n"
                     # 使用PromptManager获取多语言文本
