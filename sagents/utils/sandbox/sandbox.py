@@ -1390,6 +1390,20 @@ timeout = 120
             "--bind", self.sandbox_dir, self.sandbox_dir
         ])
 
+        # Bind additional allowed paths (read-write)
+        # Note: We bind them to the same absolute path inside the sandbox
+        for path in self.limits.get('allowed_paths', []):
+             if path and os.path.exists(path):
+                 abs_path = os.path.abspath(path)
+                 # Skip if it matches host_workspace or sandbox_dir (already handled above)
+                 if abs_path == os.path.abspath(self.host_workspace):
+                     continue
+                 if abs_path == os.path.abspath(self.sandbox_dir):
+                     continue
+                     
+                 cmd.extend(["--bind", abs_path, abs_path])
+
+
         cmd.extend(["--chdir", cwd or self.virtual_workspace])
         
         # Add the command to run
