@@ -13,7 +13,7 @@ import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import SessionStatus, get_session_context, get_session_messages, _get_workspace_root
+from sagents.context.session_context import SessionStatus, get_session_context, get_session_messages, _get_workspace_root, get_sub_session_messages
 
 from .. import models
 from ..core.exceptions import SageHTTPException
@@ -207,6 +207,29 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
                 pass
 
         messages.append(result)
+
+        # 处理 sys_delegate_task，将子任务的对话记录拼接在后面
+        if result.get('role') == 'assistant' and result.get('tool_calls'):
+            for tool_call in result['tool_calls']:
+                if tool_call.get('function', {}).get('name') == 'sys_delegate_task':
+                    try:
+                        arguments = tool_call['function']['arguments']
+                        if isinstance(arguments, str):
+                            args = json.loads(arguments)
+                        else:
+                            args = arguments
+                        
+                        tasks = args.get('tasks', [])
+                        if isinstance(tasks, list):
+                            for task in tasks:
+                                if isinstance(task, dict):
+                                    sub_session_id = task.get('session_id')
+                                    if sub_session_id:
+                                        sub_msgs = get_sub_session_messages(conversation_id, sub_session_id)
+                                        for sub_msg in sub_msgs:
+                                            messages.append(sub_msg.to_dict())
+                    except Exception as e:
+                        logger.warning(f"处理子任务消息失败: {e}")
     return {
         "conversation_id": conversation_id,
         "messages": messages,
