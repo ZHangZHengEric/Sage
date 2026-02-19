@@ -335,7 +335,6 @@ class SageStreamService:
                     continue
                 for message in chunk:
                     result = message.to_dict()
-                    result['timestamp'] = time.time()
 
                     result = ContentProcessor.clean_content(result)
 

@@ -17,7 +17,7 @@ from sagents.context.session_context import SessionStatus, get_session_context, 
 
 from .. import models
 from ..core.exceptions import SageHTTPException
-
+from .chat.processor import ContentProcessor
 
 async def interrupt_session(
     session_id: str, message: str = "用户请求中断"
@@ -159,53 +159,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
     messages = []
     for m in get_session_messages(conversation_id):
         result = m.to_dict()
-
-        # 处理大内容的特殊情况
-        content = result.get('content', '')
-
-        # 特殊处理工具调用结果，避免JSON嵌套问题
-        if result.get('role') == 'tool' and isinstance(content, str):
-            try:
-                # 尝试解析content中的JSON数据
-                if content.strip().startswith('{'):
-                    parsed_content = json.loads(content)
-
-                    # 检查是否是嵌套的JSON结构
-                    if isinstance(parsed_content, dict) and 'content' in parsed_content:
-                        inner_content = parsed_content['content']
-                        if isinstance(inner_content, str) and inner_content.strip().startswith('{'):
-                            try:
-                                # 解析内层JSON，这通常是实际的工具结果
-                                tool_data = json.loads(inner_content)
-
-                                # 清理工具结果中的大数据，避免JSON过大
-                                if isinstance(tool_data, dict) and 'results' in tool_data:
-                                    if isinstance(tool_data['results'], list):
-                                        for item in tool_data['results']:
-                                            if isinstance(item, dict):
-                                                # 限制文本字段长度，但保留所有字段
-                                                for field in ['snippet', 'description', 'content']:
-                                                    if field in item and isinstance(item[field], str):
-                                                        if len(item[field]) > 1000:
-                                                            item[field] = item[field][:1000] + '...[TRUNCATED]'
-
-                                # 直接使用解析后的数据
-                                result['content'] = tool_data
-                            except json.JSONDecodeError:
-                                # 内层解析失败，使用外层数据
-                                result['content'] = parsed_content
-                        else:
-                            # 内层不是JSON字符串，直接使用
-                            result['content'] = parsed_content
-                    else:
-                        # 不是嵌套结构，直接使用
-                        result['content'] = parsed_content
-
-            except json.JSONDecodeError as e:
-                logger.warning(f"解析工具结果JSON失败: {e}")
-                # 保持原始字符串
-                pass
-
+        result = ContentProcessor.clean_content(result)
         messages.append(result)
 
         # 处理 sys_delegate_task，将子任务的对话记录拼接在后面
@@ -227,7 +181,9 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
                                     if sub_session_id:
                                         sub_msgs = get_sub_session_messages(conversation_id, sub_session_id)
                                         for sub_msg in sub_msgs:
-                                            messages.append(sub_msg.to_dict())
+                                            sub_result = sub_msg.to_dict()
+                                            sub_result = ContentProcessor.clean_content(sub_result)
+                                            messages.append(sub_result)
                     except Exception as e:
                         logger.warning(f"处理子任务消息失败: {e}")
     return {
