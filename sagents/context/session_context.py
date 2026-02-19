@@ -141,8 +141,9 @@ class SessionContext:
         if not os.path.exists(self.llm_request_dir):
             os.makedirs(self.llm_request_dir)
 
+        logger.info(f"SessionContext: system_context: {self.system_context}")
         # 初始化 external_paths
-        self.external_paths = self.system_context.get('可以访问的其他路径文件夹') or self.system_context.get('external_paths') or []
+        self.external_paths = self.system_context.get('external_paths') or []
         self.system_context.pop("可以访问的其他路径文件夹",None)
         self.system_context.pop("external_paths",None)
         if isinstance(self.external_paths, str):
