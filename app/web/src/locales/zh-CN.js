@@ -86,6 +86,16 @@ export default {
   'chat.agentName': '智能体名称',
   'chat.agentDescription': '智能体描述',
   'chat.agentSystemPrompt': '系统提示词',
+  'chat.taskDelegation': '任务委派',
+  'chat.targetAgent': '目标智能体',
+  'chat.taskContent': '任务内容',
+  'chat.viewSubSession': '查看子会话',
+  'chat.subSessionTitle': '子会话详情',
+  'chat.loadingMessages': '加载消息中...',
+  'status.failed': '失败',
+  'status.completed': '完成',
+  'status.inProgress': '进行中',
+  'error.unknown': '未知错误',
   
   // Agent配置页面
   'agent.title': 'Agent配置',
