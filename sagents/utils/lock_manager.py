@@ -1,6 +1,7 @@
 import asyncio
 import os
-from typing import Dict
+import time
+from typing import Dict, Any
 from sagents.utils.logger import logger
 
 try:
@@ -49,9 +50,11 @@ class UnifiedLock:
 
 class LockManager:
     _instance = None
-    _memory_locks: Dict[str, asyncio.Lock] = {}
+    _memory_locks: Dict[str, Dict[str, Any]] = {}
     _redis_client = None
     use_redis = False
+    _lock_expire_seconds = 1800  # 默认1小时过期
+    _last_cleanup_time = 0
 
     def __new__(cls):
         if cls._instance is None:
@@ -62,6 +65,12 @@ class LockManager:
     def _initialize(self):
         self.use_redis = os.getenv("ENABLE_REDIS_LOCK", "false").lower() == "true"
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        
+        # 从环境变量获取过期时间配置
+        try:
+            self._lock_expire_seconds = int(os.getenv("MEMORY_LOCK_EXPIRE_SECONDS", "1800"))
+        except ValueError:
+            self._lock_expire_seconds = 1800
 
         if self.use_redis:
             if not REDIS_AVAILABLE:
@@ -85,6 +94,31 @@ class LockManager:
                     )
                     self.use_redis = False
 
+    def _cleanup_expired_locks(self):
+        """清理过期的内存锁"""
+        now = time.time()
+        # 每分钟最多清理一次
+        if now - self._last_cleanup_time < 60:
+            return
+            
+        self._last_cleanup_time = now
+        expired_keys = []
+        
+        # 找出过期且未被锁定的锁
+        for key, entry in self._memory_locks.items():
+            if (now - entry['last_accessed'] > self._lock_expire_seconds and 
+                not entry['lock'].locked()):
+                expired_keys.append(key)
+        
+        # 删除过期锁
+        if expired_keys:
+            logger.debug(f"Cleaning up {len(expired_keys)} expired memory locks")
+            for key in expired_keys:
+                # 再次检查以确保安全
+                if (key in self._memory_locks and 
+                    not self._memory_locks[key]['lock'].locked()):
+                    del self._memory_locks[key]
+
     def get_lock(self, key: str) -> UnifiedLock:
         """获取锁实例"""
         if self.use_redis and self._redis_client:
@@ -92,9 +126,19 @@ class LockManager:
             redis_lock = self._redis_client.lock(lock_key, timeout=30)
             return UnifiedLock(redis_lock, is_redis=True)
         else:
+            # 尝试清理过期锁
+            self._cleanup_expired_locks()
+            
+            now = time.time()
             if key not in self._memory_locks:
-                self._memory_locks[key] = asyncio.Lock()
-            return UnifiedLock(self._memory_locks[key], is_redis=False)
+                self._memory_locks[key] = {
+                    'lock': asyncio.Lock(),
+                    'last_accessed': now
+                }
+            
+            # 更新访问时间
+            self._memory_locks[key]['last_accessed'] = now
+            return UnifiedLock(self._memory_locks[key]['lock'], is_redis=False)
 
     async def close(self):
         if self._redis_client:
