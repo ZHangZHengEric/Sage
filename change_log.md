@@ -17,3 +17,5 @@
 2026-02-18 11:30:00 调整为先覆盖request再全部基于request判断，新增可用知识库与子Agent字段。
 2026-02-19 10:00:00 修复 external_paths 更新后同步沙箱允许路径与权限提示。
 2026-02-20 10:00:00 对齐 FibreAgent 与 SimpleAgent 的 run_stream 参数。
+2026-02-20 11:00:00 Fibre 子Agent 初始化后设置 agent_config，并补充 availableSkills 支持。
+2026-02-20 11:20:00 SessionContext 配置移除 multiAgent 并新增 agentMode。

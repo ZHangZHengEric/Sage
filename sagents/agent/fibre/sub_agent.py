@@ -71,6 +71,7 @@ class FibreSubAgent:
             tool_manager=self.parent_context.tool_manager,
             skill_manager=self.parent_context.skill_manager,
         )
+        
 
         # 1.0 Apply Tool Restrictions and Register FibreTools
         # We use ToolProxy to manage multiple ToolManagers (Isolated + Global/Parent) with priority.
@@ -177,7 +178,35 @@ You are a Sub-Agent named '{self.agent_name}', working as part of the Fibre Agen
 {sub_agent_rules}
 """
         # self.sub_session_context.add_and_update_system_context({"system_prompt": system_prompt})
+
+        available_tools = []
+        if self.sub_session_context.tool_manager:
+            available_tools = self.sub_session_context.tool_manager.list_all_tools_name()
+
+        available_skills = []
+        if self.sub_session_context.skill_manager:
+            available_skills = self.sub_session_context.skill_manager.list_skills()
+
+        max_loop_count = 10
+        if isinstance(self.parent_context.agent_config, dict):
+            max_loop_count = self.parent_context.agent_config.get("maxLoopCount", 10)
         
+        agent_mode = None
+        if isinstance(self.parent_context.agent_config, dict):
+            agent_mode = self.parent_context.agent_config.get("agentMode")
+
+        self.sub_session_context.set_agent_config(
+            model=self.orchestrator.agent.model,
+            model_config=self.orchestrator.agent.model_config,
+            system_prefix=system_prompt,
+            available_tools=available_tools,
+            available_skills=available_skills,
+            system_context=self.sub_session_context.system_context,
+            available_workflows=self.available_workflows or {},
+            agent_mode=agent_mode,
+            max_loop_count=max_loop_count,
+        )
+
         # 3. Initialize Agent
         # We use SimpleAgent for the logic
         self.agent = SimpleAgent(
