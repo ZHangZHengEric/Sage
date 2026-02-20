@@ -147,7 +147,7 @@ class LockManager:
     def delete_lock_ref(self, key: str):
         """仅用于清理内存锁引用，Redis锁不需要手动删除key"""
         if not self.use_redis and key in self._memory_locks:
-            if not self._memory_locks[key].locked():
+            if not self._memory_locks[key]['lock'].locked():
                 del self._memory_locks[key]
 
 
