@@ -86,6 +86,16 @@ export default {
   'chat.agentName': 'Agent Name',
   'chat.agentDescription': 'Description',
   'chat.agentSystemPrompt': 'System Prompt',
+  'chat.taskDelegation': 'Task Delegation',
+  'chat.targetAgent': 'Target Agent',
+  'chat.taskContent': 'Task Content',
+  'chat.viewSubSession': 'View Sub-Session',
+  'chat.subSessionTitle': 'Sub-Session Details',
+  'chat.loadingMessages': 'Loading messages...',
+  'status.failed': 'Failed',
+  'status.completed': 'Completed',
+  'status.inProgress': 'In Progress',
+  'error.unknown': 'Unknown Error',
 
   // Agent Config
   'agent.title': 'Agent Config',

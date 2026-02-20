@@ -835,6 +835,33 @@ def get_session_messages(session_id: str) -> List[MessageChunk]:
     return messages
 
 
+def get_sub_session_messages(session_id: str, sub_session_id: str) -> List[MessageChunk]:
+    workspace_root = _get_workspace_root()
+    messages_path = os.path.join(workspace_root, session_id, "sub_sessions", sub_session_id, "messages.json")
+    if not os.path.exists(messages_path):
+        return []
+    try:
+        with open(messages_path, "r", encoding="utf-8") as f:
+            raw_messages = json.load(f)
+    except Exception as e:
+        logger.error(f"SessionContext: 读取 messages.json 失败: {e}")
+        return []
+
+    if not isinstance(raw_messages, list):
+        return []
+
+    messages: List[MessageChunk] = []
+    for msg in raw_messages:
+        if isinstance(msg, MessageChunk):
+            messages.append(msg)
+            continue
+        if isinstance(msg, dict):
+            try:
+                messages.append(MessageChunk.from_dict(msg))
+            except Exception:
+                continue
+    return messages
+
 def init_session_context(
     session_id: str,
     workspace_root: str,

@@ -25,6 +25,58 @@ from ..services.conversation import interrupt_session
 # 创建路由器
 chat_router = APIRouter()
 
+async def stream_api_with_disconnect_check(
+    generator, 
+    request: Request,
+    lock: asyncio.Lock,
+    session_id: str
+):
+    """
+    Wrap the generator to monitor client disconnection.
+    If client disconnects, stop the generator (which triggers its finally block).
+    """
+    try:
+        async for chunk in generator:
+            if await request.is_disconnected():
+                logger.bind(session_id=session_id).info("Client disconnection detected")
+                # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
+                raise GeneratorExit
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit) as e:        
+        # 标记会话中断，让内部逻辑有机会感知并处理
+        try:
+            await interrupt_session(session_id, "客户端断开连接")
+        except Exception as ex:
+            logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
+            
+        # 重新抛出异常，确保生成器正确关闭
+        raise e
+    except Exception as e:
+        logger.bind(session_id=session_id).error(f"Stream generator error: {e}")
+        raise e
+    finally:
+        # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
+        # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
+        try:
+            if hasattr(generator, 'aclose'):
+                await generator.aclose()
+        except Exception as e:
+            logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
+
+        # 清理资源
+        logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
+        try:
+            if hasattr(lock, "locked") and lock.locked():
+                await lock.release()
+            elif isinstance(lock, dict):
+                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
+
+            delete_session_run_lock(session_id)
+            logger.bind(session_id=session_id).info("资源已清理")
+        except Exception as e:
+            logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
+
+
 
 async def stream_with_disconnect_check(
     generator, 
@@ -63,8 +115,10 @@ async def stream_with_disconnect_check(
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
 
         try:
-            if lock.locked():
-                lock.release()  # 不要 await，这不是 async
+            if hasattr(lock, "locked") and lock.locked():
+                await lock.release()
+            elif isinstance(lock, dict):
+                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
 
             delete_session_run_lock(session_id)
 
@@ -113,7 +167,7 @@ async def chat(request: ChatRequest, http_request: Request):
     stream_service, lock = await prepare_session(inner_request)
     session_id = inner_request.session_id
     return StreamingResponse(
-        stream_with_disconnect_check(
+        stream_api_with_disconnect_check(
             execute_chat_session(
                 mode="chat",
                 stream_service=stream_service,
@@ -135,7 +189,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
     session_id = request.session_id
 
     return StreamingResponse(
-        stream_with_disconnect_check(
+        stream_api_with_disconnect_check(
             execute_chat_session(
                 mode="stream",
                 stream_service=stream_service,

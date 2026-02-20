@@ -104,8 +104,9 @@
                :toolResult="getParsedToolResult(toolCall)"
                :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
                @sendMessage="handleSendMessage"
-               @click="handleToolClick"
-             />
+              @openSubSession="emit('openSubSession', $event)"
+              @click="handleToolClick"
+            />
            </div>
          </div>
       </div>
@@ -137,10 +138,12 @@ import ToolDefaultCard from './tools/ToolDefaultCard.vue'
 import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
 import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
+import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
-  sys_spawn_agent: AgentCardMessage
+  sys_spawn_agent: AgentCardMessage,
+  sys_delegate_task: SysDelegateTaskMessage
 }
 
 const props = defineProps({
@@ -166,7 +169,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage'])
+const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSession'])
 
 const { t } = useLanguage()
 
