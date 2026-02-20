@@ -7,7 +7,6 @@ import logging
 from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionContext
 from sagents.tool import ToolManager, ToolProxy
-from sagents.skill import SkillManager, SkillProxy
 from sagents.agent.fibre.orchestrator import FibreOrchestrator
 from sagents.context.user_memory import UserMemoryManager
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
@@ -58,22 +57,19 @@ class FibreAgent(AgentBase):
 
     async def run_stream(
         self,
-        input_messages: Optional[Union[List[Dict[str, Any]], List[MessageChunk]]] = None,
+        session_context: SessionContext,
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
-        skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        system_context: Optional[Dict[str, Any]] = None,
-        context_budget_config: Optional[Dict[str, Any]] = None,
-        max_loop_count: int = 10,
-        session_context: Optional[SessionContext] = None,
-        **kwargs
     ) -> AsyncGenerator[List["MessageChunk"], None]:
-        
-        session_id = session_id or str(uuid.uuid4())
-        
-        if input_messages is None:
-            input_messages = []
+        session_id = session_id or getattr(session_context, "session_id", None) or str(uuid.uuid4())
+        input_messages = list(session_context.message_manager.messages) if session_context else []
+        tool_manager = tool_manager or getattr(session_context, "tool_manager", None)
+        skill_manager = getattr(session_context, "skill_manager", None) if session_context else None
+        user_id = getattr(session_context, "user_id", None) if session_context else None
+        system_context = getattr(session_context, "system_context", None) if session_context else None
+        max_loop_count = 50
+        if session_context and isinstance(getattr(session_context, "agent_config", None), dict):
+            max_loop_count = session_context.agent_config.get("max_loop_count", 50)
         
         if self.observability_manager:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
@@ -89,7 +85,6 @@ class FibreAgent(AgentBase):
                 session_id=session_id,
                 user_id=user_id,
                 system_context=system_context,
-                context_budget_config=context_budget_config,
                 max_loop_count=max_loop_count,
                 session_context=session_context
             ):
