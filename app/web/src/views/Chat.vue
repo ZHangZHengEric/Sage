@@ -77,19 +77,20 @@
           </div>
           <div v-else class="pb-8 max-w-4xl mx-auto w-full">
             <MessageRenderer 
-              v-for="(message, index) in (messages || [])" 
+              v-for="(message, index) in filteredMessages" 
               :key="message.id || index" 
               :message="message"
-              :messages="messages || []" 
+              :messages="filteredMessages" 
               :message-index="index" 
-              :is-loading="isLoading && index === (messages || []).length - 1"
-              @download-file="downloadFile"
+              :is-loading="isLoading && index === filteredMessages.length - 1"
+              @download-file="downloadWorkspaceFile"
               @toolClick="handleToolClick" 
               @sendMessage="handleSendMessage" 
+              @openSubSession="handleOpenSubSession"
             />
             
             <!-- Global loading indicator when no messages or waiting for first chunk of response -->
-            <div v-if="isLoading && (!messages || messages.length === 0 || messages[messages.length - 1].role === 'user')" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+            <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
                <LoadingBubble />
             </div>
           </div>
@@ -100,6 +101,17 @@
             <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
+
+      <SubSessionPanel 
+        :is-open="!!activeSubSessionId"
+        :session-id="activeSubSessionId"
+        :messages="subSessionMessages"
+        :is-loading="isLoading"
+        @close="handleCloseSubSession"
+        @download-file="downloadWorkspaceFile"
+        @toolClick="handleToolClick"
+        @openSubSession="handleOpenSubSession"
+      />
 
       <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles"
         @download-file="downloadFile" @close="showWorkspace = false" />
@@ -125,6 +137,7 @@ import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
+import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 
 // UI Components
 import { Button } from '@/components/ui/button'
@@ -192,24 +205,27 @@ const userConfigOverrides = ref({});
 const taskStatus = ref(null);
 const workspaceFiles = ref([]);
 const lastMessageId = ref(null);
+const activeSubSessionId = ref(null);
+const isHistoryLoading = ref(false);
 
-  // 获取任务状态
-const fetchTaskStatus = async (sessionId) => {
-    if (!sessionId) return;
-    try {
-      const data = await taskAPI.getTaskStatus(sessionId);
-      const tasksObj = data.tasks_status?.tasks || {};
-      // 将任务对象转换为数组
-      const tasks = Object.values(tasksObj);
-      tasks.forEach((task, index) => {
-        if (task.execution_summary) {
-        }
-      });
-      taskStatus.value = tasks;
-    } catch (error) {
-      console.error('获取任务状态出错:', error);
-    }
-  };
+const filteredMessages = computed(() => {
+  if (!messages.value) return [];
+  return messages.value.filter(m => !m.session_id || m.session_id === currentSessionId.value);
+});
+
+const subSessionMessages = computed(() => {
+  if (!activeSubSessionId.value) return [];
+  return messages.value.filter(m => m.session_id === activeSubSessionId.value);
+});
+
+const handleOpenSubSession = (sessionId) => {
+  activeSubSessionId.value = sessionId;
+};
+
+const handleCloseSubSession = () => {
+  activeSubSessionId.value = null;
+};
+
 
   // 获取工作空间文件
   const fetchWorkspaceFiles = async (sessionId) => {
@@ -302,6 +318,7 @@ const createSession = () => {
     
     currentSessionId.value = sessionId;
     isLoading.value = true;
+    isHistoryLoading.value = true;
     
     try {
       // 获取会话消息
@@ -327,6 +344,10 @@ const createSession = () => {
       toast.error(t('chat.loadConversationError') || 'Failed to load conversation');
     } finally {
       isLoading.value = false;
+      // 使用 nextTick 确保 watcher 已经执行完毕后再重置 flag
+      nextTick(() => {
+        isHistoryLoading.value = false;
+      });
     }
   };
 
@@ -606,25 +627,9 @@ const selectedAgentId = computed(() => selectedAgent.value?.id)
 
 const showLoadingBubble = computed(() => {
   if (!isLoading.value) return false;
-  const msgs = messages.value;
+  const msgs = filteredMessages.value;
   if (!msgs || msgs.length === 0) return true;
-  
-  const lastMsg = msgs[msgs.length - 1];
-  if (lastMsg.role !== 'assistant') return true;
-  
-  // Assistant message exists.
-  // Hide loading if we are showing SOMETHING for this message.
-  
-  // Check error
-  if (lastMsg.type === 'error' || lastMsg.message_type === 'error') return false;
-  
-  // Check tools
-  if (lastMsg.tool_calls && lastMsg.tool_calls.length > 0) return false;
-  
-  // Check content
-  if (lastMsg.content) return false;
-  
-  // Otherwise, we are still waiting for content
+
   return true;
 });
 
@@ -1046,5 +1051,66 @@ watch(messages, () => {
 }, { deep: true })
 
 
+  // 自动打开/关闭子会话面板
+  watch(() => messages.value, (newMessages) => {
+    if (!newMessages || newMessages.length === 0) return;
+    const lastMsg = newMessages[newMessages.length - 1];
+    
+    // 1. 检查是否是 sys_delegate_task，自动打开
+    if (lastMsg.role === 'assistant' && lastMsg.tool_calls) {
+      const delegateCall = lastMsg.tool_calls.find(c => c.function?.name === 'sys_delegate_task');
+      if (delegateCall) {
+        try {
+          const args = typeof delegateCall.function.arguments === 'string' 
+            ? JSON.parse(delegateCall.function.arguments) 
+            : delegateCall.function.arguments;
+            
+          const sessionId = args.tasks?.[0]?.session_id;
+          if (sessionId && activeSubSessionId.value !== sessionId) {
+             // 只有当这个消息是新的（比如刚生成的）才自动打开
+             // 并且不是在加载历史记录
+             if (isLoading.value && !isHistoryLoading.value) {
+                activeSubSessionId.value = sessionId;
+             }
+          }
+        } catch (e) {
+          console.error('Failed to parse sys_delegate_task arguments:', e);
+        }
+      }
+    }
+    
+    // 2. 检查是否是 tool result (sys_delegate_task)，自动关闭
+    if (lastMsg.role === 'tool' && activeSubSessionId.value) {
+      // 查找对应的 tool call
+      const toolCallId = lastMsg.tool_call_id;
+      // 在 messages 中找到对应的 assistant message
+      // 反向查找
+      for (let i = newMessages.length - 2; i >= 0; i--) {
+        const msg = newMessages[i];
+        if (msg.role === 'assistant' && msg.tool_calls) {
+           const matchingCall = msg.tool_calls.find(c => c.id === toolCallId);
+           if (matchingCall && matchingCall.function?.name === 'sys_delegate_task') {
+             // 找到了对应的 tool call，检查其 session_id 是否匹配当前 activeSubSessionId
+             try {
+               const args = typeof matchingCall.function.arguments === 'string'
+                 ? JSON.parse(matchingCall.function.arguments)
+                 : matchingCall.function.arguments;
+               
+               const sessionId = args.tasks?.[0]?.session_id;
+               if (sessionId === activeSubSessionId.value) {
+                 // 任务完成，关闭子会话
+                 console.log('✅ 子任务完成，关闭子会话面板:', sessionId);
+                 activeSubSessionId.value = null;
+               }
+             } catch (e) {
+               console.error('Failed to check tool result for auto-close:', e);
+             }
+             break; // 找到对应消息后停止搜索
+           }
+        }
+      }
+    }
+    
+  }, { deep: true });
 </script>
 
