@@ -336,6 +336,7 @@ class FibreOrchestrator:
 
     async def delegate_task(self, agent_id, content, session_id):
         if agent_id in self.sub_agents:
+            
             agent_def = self.sub_agents[agent_id]
             parent_context = agent_def['parent_context']
             
@@ -431,52 +432,50 @@ class FibreOrchestrator:
                     accumulated_messages = MessageManager.merge_new_messages_to_old_messages(
                         all_filtered_chunks, []
                     )
+                # If sys_finish_task was called, return its result.
+                if task_result:
+                    return f"SubSessionID: {sub_session_id}\n{task_result}"
+                # If sub-agent finished without calling sys_finish_task, summarize the history
+                try:
+                    history_str = MessageManager.convert_messages_to_str(accumulated_messages)
+                    if sub_agent.agent and sub_agent.agent.model:
+                        # Get prompt from PromptManager
+                        language = sub_agent.parent_context.get_language() if sub_agent.parent_context else "en"
+                        # Use 'FibreAgent' as the agent identifier since prompts are defined in fibre_agent_prompts.py
+                        summary_prompt_template = PromptManager().get_agent_prompt(
+                            agent='FibreAgent', 
+                            key='sub_agent_fallback_summary_prompt', 
+                            language=language
+                        )
+                        prompt = summary_prompt_template.format(history_str=history_str)
+                        
+                        # Use AgentBase's _call_llm_streaming method for consistent logging and handling
+                        # We wrap the prompt in a user message
+                        messages_input = [{'role': 'user', 'content': prompt}]
+                        
+                        # We need to access the private method, assuming we are in a trusted context (Orchestrator managing SubAgent)
+                        # Or check if there is a public wrapper. SimpleAgent uses _call_llm_streaming internally.
+                        # Use sub_agent.session_id as this is an operation within the sub-agent's context
+                        with session_manager.session_context(sub_agent.session_id):
+                            response_stream = sub_agent.agent._call_llm_streaming(
+                                messages=messages_input,
+                                session_id=sub_agent.session_id,
+                                step_name="sub_agent_fallback_summary"
+                            )
+                            
+                            summary_content = ""
+                            async for chunk in response_stream:
+                                if chunk.choices and chunk.choices[0].delta.content:
+                                    summary_content += chunk.choices[0].delta.content
+                                
+                        return f"SubSessionID: {sub_session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
+                except Exception as e:
+                    logger.error(f"Error generating summary: {e}")
+                    history_str = MessageManager.convert_messages_to_str(accumulated_messages)
+                    return f"SubSessionID: {sub_session_id}\nSub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{history_str}"
             except Exception as e:
                 logger.error(f"Error executing sub-agent task: {e}", exc_info=True)
                 return f"Error executing sub-agent task: {e}"
-            
-            # If sys_finish_task was called, return its result.
-            if task_result:
-                return f"SubSessionID: {sub_session_id}\n{task_result}"
-            
-            # If sub-agent finished without calling sys_finish_task, summarize the history
-            try:
-                history_str = MessageManager.convert_messages_to_str(accumulated_messages)
-                if sub_agent.agent and sub_agent.agent.model:
-                     # Get prompt from PromptManager
-                     language = sub_agent.parent_context.get_language() if sub_agent.parent_context else "en"
-                     # Use 'FibreAgent' as the agent identifier since prompts are defined in fibre_agent_prompts.py
-                     summary_prompt_template = PromptManager().get_agent_prompt(
-                         agent='FibreAgent', 
-                         key='sub_agent_fallback_summary_prompt', 
-                         language=language
-                     )
-                     prompt = summary_prompt_template.format(history_str=history_str)
-                     
-                     # Use AgentBase's _call_llm_streaming method for consistent logging and handling
-                     # We wrap the prompt in a user message
-                     messages_input = [{'role': 'user', 'content': prompt}]
-                     
-                     # We need to access the private method, assuming we are in a trusted context (Orchestrator managing SubAgent)
-                     # Or check if there is a public wrapper. SimpleAgent uses _call_llm_streaming internally.
-                     # Use sub_agent.session_id as this is an operation within the sub-agent's context
-                     with session_manager.session_context(sub_agent.session_id):
-                         response_stream = sub_agent.agent._call_llm_streaming(
-                             messages=messages_input,
-                             session_id=sub_agent.session_id,
-                             step_name="sub_agent_fallback_summary"
-                         )
-                         
-                         summary_content = ""
-                         async for chunk in response_stream:
-                             if chunk.choices and chunk.choices[0].delta.content:
-                                 summary_content += chunk.choices[0].delta.content
-                             
-                     return f"SubSessionID: {sub_session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
-            except Exception as e:
-                 logger.error(f"Error generating summary: {e}")
-                 history_str = MessageManager.convert_messages_to_str(accumulated_messages)
-                 return f"SubSessionID: {sub_session_id}\nSub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{history_str}"
             finally:
                 # Ensure sub-session state is saved
                 if sub_agent.sub_session_context:
