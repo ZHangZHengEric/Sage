@@ -391,10 +391,11 @@ class SAgent:
                     model_config=self.model_config,
                     system_prefix=self.system_prefix,
                     available_tools=tool_manager.list_all_tools_name() if tool_manager else [],
+                    available_skills=skill_manager.list_skills() if skill_manager else [],
                     system_context=session_context.system_context,  # 使用最新的完整上下文
                     available_workflows=available_workflows,
                     deep_thinking=deep_thinking if isinstance(deep_thinking, bool) else False,
-                    multi_agent=multi_agent if isinstance(multi_agent, bool) else False,
+                    agent_mode=agent_mode,
                     more_suggest=more_suggest,
                     max_loop_count=max_loop_count,
                 )

@@ -381,9 +381,9 @@ class SessionContext:
                 # self.user_memory_manager = None # 不要置空全局实例
 
     def set_agent_config(self, model: Optional[str] = None, model_config: Optional[dict] = None, system_prefix: Optional[str] = None,
-                         available_tools: Optional[list] = None, system_context: Optional[dict] = None,
+                         available_tools: Optional[list] = None, available_skills: Optional[list] = None, system_context: Optional[dict] = None,
                          available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
-                         multi_agent: Optional[bool] = None, more_suggest: bool = False,
+                         agent_mode: Optional[str] = None, more_suggest: bool = False,
                          max_loop_count: int = 10):
         """设置agent配置信息
 
@@ -393,10 +393,11 @@ class SessionContext:
             system_prefix: 系统前缀
 
             available_tools: 可用工具列表
+            available_skills: 可用技能列表
             system_context: 系统上下文
             available_workflows: 可用工作流
             deep_thinking: 深度思考模式
-            multi_agent: 多智能体模式
+            agent_mode: 智能体运行模式
             more_suggest: 更多建议模式
             max_loop_count: 最大循环次数
         """
@@ -418,11 +419,12 @@ class SessionContext:
             "description": f"Agent configuration for session {self.session_id}",
             "systemPrefix": system_prefix or "",
             "deepThinking": deep_thinking if deep_thinking is not None else False,
-            "multiAgent": multi_agent if multi_agent is not None else False,
+            "agentMode": agent_mode,
             "moreSupport": more_suggest,
             "maxLoopCount": max_loop_count,
             "llmConfig": llm_config,
             "availableTools": available_tools or [],
+            "availableSkills": available_skills or [],
             "systemContext": system_context or {},
             "availableWorkflows": available_workflows or {},
             "exportTime": current_time.isoformat(),
