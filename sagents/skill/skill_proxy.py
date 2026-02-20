@@ -96,6 +96,22 @@ class SkillProxy:
             # if we are in restricted mode. This is expected behavior for restricted mode.
             pass
 
+    def load_new_skills(self) -> None:
+        """
+        Load new skills from disk for all managers without reloading existing ones.
+        """
+        for sm in self.skill_managers:
+            if hasattr(sm, 'load_new_skills'):
+                sm.load_new_skills()
+            else:
+                sm.reload()
+            
+        if self._is_all_skills_mode:
+            # Re-fetch all skills from all managers
+            self._available_skills = set()
+            for sm in self.skill_managers:
+                self._available_skills.update(sm.list_skills())
+
     def _check_skill_available(self, skill_name: str) -> None:
         """
         Verify if a skill is available in this proxy.
