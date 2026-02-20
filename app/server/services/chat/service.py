@@ -67,13 +67,13 @@ async def populate_request_from_agent_config(
             request.available_skills = agent_config.get("availableSkills")
         if agent_config.get("availableWorkflows") is not None:
             request.available_workflows = agent_config.get("availableWorkflows")
-        if agent_config.get("deepThinking") is not None:
+        if agent_config.get("deepThinking") is not None and request.deep_thinking is None:
             request.deep_thinking = agent_config.get("deepThinking")
-        if agent_config.get("maxLoopCount") is not None:
+        if agent_config.get("maxLoopCount") is not None and request.max_loop_count is None:
             request.max_loop_count = agent_config.get("maxLoopCount")
-        if agent_config.get("multiAgent") is not None:
-            request.multi_agent = agent_config.get("multiAgent")
-        if agent_config.get("moreSuggest") is not None:
+        if agent_config.get("agentMode") is not None and request.agent_mode is None:
+            request.agent_mode = agent_config.get("agentMode")
+        if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
         if agent_config.get("systemContext") is not None:
             request.system_context = agent_config.get("systemContext")
