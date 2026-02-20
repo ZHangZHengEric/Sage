@@ -223,22 +223,6 @@ class SAgent:
                 异步生成的流式消息块列表。每个块可能包含部分文本内容、工具调用信息或状态更新。
         """
 
-        # DEBUG: Log skill manager details
-        if skill_manager:
-            try:
-                # 获取可用技能列表
-                skills = skill_manager.list_skills()
-                logger.info(f"[SAgent] run_stream skill_manager type: {type(skill_manager)}")
-                logger.info(f"[SAgent] run_stream available skills ({len(skills)}): {skills}")
-                
-                # 如果是 SkillProxy，打印更详细的信息
-                if isinstance(skill_manager, SkillProxy):
-                    logger.info(f"[SAgent] SkillProxy details - managers count: {len(skill_manager.skill_managers)}")
-                    logger.info(f"[SAgent] SkillProxy is_all_skills_mode: {getattr(skill_manager, '_is_all_skills_mode', 'Unknown')}")
-                    logger.info(f"[SAgent] SkillProxy _available_skills: {getattr(skill_manager, '_available_skills', 'Unknown')}")
-            except Exception as e:
-                logger.error(f"[SAgent] Failed to log skill manager details: {e}")
-
         # 确保 session_id 存在，用于 trace
         session_id = session_id or str(uuid.uuid4())
 
