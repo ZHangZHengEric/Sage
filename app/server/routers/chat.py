@@ -66,8 +66,11 @@ async def stream_api_with_disconnect_check(
         # 清理资源
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
         try:
-            if lock.locked():
+            if hasattr(lock, "locked") and lock.locked():
                 await lock.release()
+            elif isinstance(lock, dict):
+                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
+
             delete_session_run_lock(session_id)
             logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
@@ -112,8 +115,10 @@ async def stream_with_disconnect_check(
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
 
         try:
-            if lock.locked():
-                await lock.release()  
+            if hasattr(lock, "locked") and lock.locked():
+                await lock.release()
+            elif isinstance(lock, dict):
+                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
 
             delete_session_run_lock(session_id)
 
