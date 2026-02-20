@@ -3,7 +3,8 @@ import re
 from typing import Any, Dict, Union
 
 from loguru import logger
-
+import time
+from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 
 
 class ContentProcessor:
@@ -13,6 +14,10 @@ class ContentProcessor:
 
     @classmethod
     def clean_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
+        result['timestamp'] = time.time()
+        # 1. 处理tool_calls 的content 内容
+        if result.get('role') == MessageRole.ASSISTANT.value and result.get('tool_calls'):
+            result.pop('content', None)
         # 2. 处理工具调用结果（解析 JSON、扁平化、裁剪）
         if result.get('role') == 'tool':
             content = result.get('content')
