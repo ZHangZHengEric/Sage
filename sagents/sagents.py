@@ -156,7 +156,7 @@ class SAgent:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         deep_thinking: Optional[Union[bool, str]] = None,
-        max_loop_count: int = 10,
+        max_loop_count: int = 50,
         multi_agent: Optional[bool] = None,
         agent_mode: Optional[str] = None,
         more_suggest: bool = False,
