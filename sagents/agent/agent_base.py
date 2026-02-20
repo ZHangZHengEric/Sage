@@ -454,7 +454,7 @@ class AgentBase(ABC):
                             fs_obj = SandboxFileSystem(host_path=current_agent_workspace, virtual_path="/workspace")
                         
                         if fs_obj:
-                            file_tree = fs_obj.get_file_tree(include_hidden=True)
+                            file_tree = fs_obj.get_file_tree(include_hidden=True,max_depth=2)
                             
                             if not file_tree:
                                 no_files = prompt_manager.get_prompt(
