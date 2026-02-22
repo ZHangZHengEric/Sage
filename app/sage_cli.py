@@ -9,16 +9,14 @@ import traceback
 import uuid
 from copy import deepcopy
 from typing import Any, Dict, Optional, Union
-import select
-import tty
-import termios
 
 from openai import AsyncOpenAI
 from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
-from rich.console import Group
-from rich import box
+from prompt_toolkit import Application
+from prompt_toolkit.layout import Layout, HSplit, VSplit
+from prompt_toolkit.widgets import Frame, TextArea, Label
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.filters import to_filter
 
 sys.path.append((os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 print(f'添加路径：{(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))}')
@@ -31,8 +29,7 @@ from sagents.skill import SkillManager, SkillProxy
 from sagents.utils.logger import logger
 from sagents.utils.streaming_message_box import (
     StreamingMessageBox,
-    display_items_in_columns,
-    get_message_type_style
+    display_items_in_columns
 )
 
 
@@ -145,221 +142,252 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
     """
     原 fibre_cli.py 的对话逻辑，适用于 fibre 模式，支持多 Agent 面板显示和键盘中断
     """
-    console = Console()
-    display_tools(console, tool_manager)
-
-    if skill_manager:
-        console.print(f"[cyan]已加载技能: {skill_manager.list_skills()}[/cyan]")
-
-    console.print(f"[green]欢迎使用 SAgent CLI (Fibre 模式)。输入 'exit' 或 'quit' 退出。[/green]")
-    
-    session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_'+str(uuid.uuid4())[:4]
-    console.print(f"[dim]当前session id: {session_id}[/dim]")
-
+    session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_' + str(uuid.uuid4())[:4]
     messages = []
     agent_task = None
-    monitor_task = None
+    active_states: Dict[str, Dict[str, Any]] = {session_id: {"order": [], "messages": {}}}
+    panels: Dict[str, TextArea] = {}
+    frames: Dict[str, Frame] = {}
+    panel_order = [session_id]
+    input_area = TextArea(height=5, prompt="> ", multiline=True, focus_on_click=True)
+    input_area.buffer.complete_while_typing = to_filter(False)
+    layout = Layout(HSplit([Label(text=" ")]))
+    kb = KeyBindings()
+    app = None
+    execution_status = "就绪"
+
+    def build_tools_text():
+        if hasattr(tool_manager, 'list_tools_simplified'):
+            available_tools = tool_manager.list_tools_simplified()
+        elif hasattr(tool_manager, 'tool_manager') and hasattr(tool_manager.tool_manager, 'list_tools_simplified'):
+            available_tools = tool_manager.tool_manager.list_tools_simplified()
+        else:
+            available_tools = []
+        if not available_tools:
+            return "未检测到可用工具。"
+        tool_names = [tool.get('name', '未知工具') for tool in available_tools]
+        tool_names.sort()
+        lines = [f"{idx + 1}. {name}" for idx, name in enumerate(tool_names)]
+        return "📋 可用工具列表(共{}个)：\n{}".format(len(tool_names), "\n".join(lines))
+
+    def append_log(text):
+        msg_id = str(uuid.uuid4())
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        active_states.setdefault(session_id, {"order": [], "messages": {}})
+        active_states[session_id]["messages"][msg_id] = {
+            "agent_name": "System",
+            "content": text,
+            "timestamp": timestamp,
+            "type": "system"
+        }
+        active_states[session_id]["order"].append(msg_id)
+
+    def ensure_panel(sid: str):
+        if sid in panels:
+            return
+        panel = TextArea(text="", read_only=True, scrollbar=True, focusable=True, focus_on_click=True)
+        panels[sid] = panel
+        title = f"主会话 {sid}" if sid == session_id else f"子会话 {sid}"
+        frames[sid] = Frame(panel, title=title)
+        if sid not in panel_order:
+            panel_order.append(sid)
+        rebuild_layout()
+
+    def rebuild_layout():
+        panel_frames = [frames[sid] for sid in panel_order if sid in frames]
+        if not panel_frames:
+            panel_frames = [Frame(TextArea(text="暂无内容", read_only=True), title="Session")]
+        if len(panel_frames) == 1:
+            panel_row = panel_frames[0]
+        else:
+            panel_row = VSplit(panel_frames, padding=1)
+        layout.container = HSplit([panel_row, input_area])
+
+    def render_session_text(sid: str):
+        session_states = active_states.get(sid, {})
+        if not session_states:
+            return ""
+        session_messages = session_states.get("messages", {})
+        session_order = session_states.get("order", [])
+        if not session_messages:
+            return ""
+        message_lines = []
+        for message_id in session_order[-1000:]:
+            state = session_messages.get(message_id)
+            if not state:
+                continue
+            agent_name = state.get('agent_name') or 'FibreAgent'
+            timestamp = state.get('timestamp') or ""
+            content = state.get('content') or ""
+            
+            if not content or not content.strip():
+                continue
+
+            prefix = f"[{timestamp}] {agent_name}" if timestamp else f"{agent_name}"
+            content_lines = content.splitlines()
+            
+            if content_lines:
+                # 消息头单独一行
+                message_lines.append(f"{prefix}:")
+                # 消息内容另起一行
+                for line in content_lines:
+                    message_lines.append(line)
+            message_lines.append("")
+        if message_lines and message_lines[-1] == "":
+            message_lines.pop()
+        return "\n".join(message_lines)
+
+    def update_panel_text(sid: str):
+        panel = panels.get(sid)
+        if not panel:
+            return
+        session_text = render_session_text(sid)
+        panel.text = session_text
+        panel.buffer.cursor_position = len(panel.text)
+
+    def refresh_all():
+        for sid in list(panels.keys()):
+            update_panel_text(sid)
+            if sid in frames:
+                base_title = f"主会话 {sid}" if sid == session_id else f"子会话 {sid}"
+                frames[sid].title = f"{base_title} ({execution_status})"
+        if app:
+            app.invalidate()
+
+    append_log(build_tools_text())
+    if skill_manager:
+        append_log(f"已加载技能: {skill_manager.list_skills()}")
+    append_log("欢迎使用 SAgent CLI (Fibre 模式)。输入 'exit' 或 'quit' 退出。")
+    append_log("输入：Enter 发送，Meta+Enter (Option+Enter) 换行")
+    append_log(f"当前session id: {session_id}")
+    ensure_panel(session_id)
+    refresh_all()
+
+    @kb.add('c-c')
+    def _(event):
+        event.app.exit()
     
-    while True:
+    @kb.add('enter')
+    def _(event):
+        event.app.current_buffer.validate_and_handle()
+
+    @kb.add('escape', 'enter')
+    def _(event):
+        event.app.current_buffer.insert_text('\n')
+
+    async def run_agent_execution(user_input: str):
+        nonlocal messages, agent_task, execution_status
+        execution_status = "执行中"
+        # 记录用户消息
+        user_msg_id = str(uuid.uuid4())
+        user_timestamp = time.strftime("%H:%M:%S", time.localtime())
+        active_states.setdefault(session_id, {"order": [], "messages": {}})
+        active_states[session_id]["messages"][user_msg_id] = {
+            "agent_name": "你",
+            "content": user_input,
+            "timestamp": user_timestamp,
+            "type": "user"
+        }
+        active_states[session_id]["order"].append(user_msg_id)
+        
+        refresh_all()
+        messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
+        all_chunks = []
         try:
-            user_input = console.input("[bold blue]你: [/bold blue]")
-            if user_input.lower() in ['exit', 'quit']:
-                console.print("[green]再见！[/green]")
-                break
-
-            console.print("[magenta]FibreAgent:[/magenta]")
-            
-            # 添加用户输入到消息列表
-            messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
-            
-            # 定义执行任务
-            async def run_agent_execution():
-                nonlocal messages
-                all_chunks = []
-                
-                # 用于 Live Display 的状态管理
-                active_states = {}
-                
-                def generate_live_view():
-                    panels = []
-                    for name in sorted(active_states.keys()):
-                        state = active_states[name]
-                        color, label = get_message_type_style(state['type'])
-                        
-                        display_label = f"{label} | {name}"
-                        
-                        content = state['content']
-                        lines = content.split('\n')
-                        if len(lines) > 20:
-                            content = "...\n" + "\n".join(lines[-20:])
-                        
-                        panels.append(Panel(
-                            content,
-                            title=display_label,
-                            border_style=color,
-                            box=box.ROUNDED,
-                            padding=(0, 1)
-                        ))
-                    return Group(*panels)
-
-                try:
-                    with Live(generate_live_view(), console=console, auto_refresh=False, vertical_overflow="visible") as live:
-                        async for chunks in agent.run_stream(
-                            input_messages=messages,
-                            tool_manager=tool_manager,
-                            skill_manager=skill_manager,
-                            session_id=session_id,
-                            user_id=config.get('user_id'),
-                            deep_thinking=config.get('use_deepthink'), # Fibre 模式下也传入 deep_thinking
-                            agent_mode='fibre', # 强制 Fibre 模式
-                            available_workflows=config.get('available_workflows'),
-                            system_context=config.get('system_context'),
-                            context_budget_config=context_budget_config,
-                            max_loop_count=config.get('max_loop_count', 10)
-                        ):
-                            for chunk in chunks:
-                                if isinstance(chunk, MessageChunk):
-                                    all_chunks.append(deepcopy(chunk))
-                                    try:
-                                        if chunk.content and chunk.type:
-                                            agent_name = chunk.agent_name or "FibreAgent"
-                                            
-                                            if agent_name not in active_states:
-                                                active_states[agent_name] = {
-                                                    'id': chunk.message_id,
-                                                    'type': chunk.type or chunk.message_type or 'normal',
-                                                    'content': ''
-                                                }
-                                            
-                                            state = active_states[agent_name]
-                                            
-                                            if state['id'] != chunk.message_id:
-                                                if state['content']:
-                                                    color, label = get_message_type_style(state['type'])
-                                                    display_label = f"{label} | {agent_name}"
-                                                    static_panel = Panel(
-                                                        state['content'],
-                                                        title=display_label,
-                                                        border_style=color,
-                                                        box=box.ROUNDED,
-                                                        padding=(0, 1)
-                                                    )
-                                                    live.console.print(static_panel)
-                                                
-                                                state['id'] = chunk.message_id
-                                                state['type'] = chunk.type or chunk.message_type or 'normal'
-                                                state['content'] = ""
-                                            
-                                            content_to_add = str(chunk.content)
-                                            state['content'] += content_to_add
-                                            live.update(generate_live_view(), refresh=True)
-                                            
-                                    except Exception:
-                                        pass
-
-                        for name in sorted(active_states.keys()):
-                            state = active_states[name]
-                            if state['content']:
-                                color, label = get_message_type_style(state['type'])
-                                display_label = f"{label} | {name}"
-                                final_panel = Panel(
-                                    state['content'],
-                                    title=display_label,
-                                    border_style=color,
-                                    box=box.ROUNDED,
-                                    padding=(0, 1)
-                                )
-                                live.console.print(final_panel)
-                    
-                    console.print("")
-                    
-                    main_session_chunks = [
-                        c for c in all_chunks 
-                        if c.session_id == session_id or c.session_id is None
-                    ]
-                    messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
-                    
-                except asyncio.CancelledError:
-                    if all_chunks:
-                        main_session_chunks = [
-                            c for c in all_chunks 
-                            if c.session_id == session_id or c.session_id is None
-                        ]
-                        messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
-                    raise
-
-            # 定义键盘监听任务
-            async def monitor_keyboard():
-                while True:
-                    if select.select([sys.stdin], [], [], 0.1)[0]:
-                        try:
-                            key = sys.stdin.read(1)
-                            if key.lower() == 'q':
-                                return True
-                        except IOError:
-                            pass
-                    await asyncio.sleep(0.05)
-
-            # 并发执行 Agent 和 键盘监听
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            try:
-                tty.setcbreak(fd)
-                
-                agent_task = asyncio.create_task(run_agent_execution())
-                monitor_task = asyncio.create_task(monitor_keyboard())
-                
-                done, pending = await asyncio.wait(
-                    [agent_task, monitor_task],
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-                
-                if monitor_task in done:
-                    # 用户按了 q
-                    console.print("\n[yellow]检测到中断请求 (Q)，正在停止...[/yellow]")
-                    agent_task.cancel()
-                    try:
-                        await agent_task
-                    except asyncio.CancelledError:
-                        pass
-                else:
-                    # Agent 执行完成
-                    monitor_task.cancel()
-                    try:
-                        await monitor_task
-                    except asyncio.CancelledError:
-                        pass
-                        
-            except Exception as e:
-                console.print(f"[red]执行出错: {e}[/red]")
-                traceback.print_exc()
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            
-        except KeyboardInterrupt:
-            console.print("\n[yellow]检测到中断 (Ctrl+C)，正在停止...[/yellow]")
-            if agent_task and not agent_task.done():
-                agent_task.cancel()
-                try:
-                    await agent_task
-                except asyncio.CancelledError:
-                    pass
-            if monitor_task and not monitor_task.done():
-                monitor_task.cancel()
-                try:
-                    await monitor_task
-                except asyncio.CancelledError:
-                    pass
-
-            console.print("[green]再见！[/green]")
-            break
-        except EOFError:
-            console.print("[green]再见！[/green]")
-            break
+            async for chunks in agent.run_stream(
+                input_messages=messages,
+                tool_manager=tool_manager,
+                skill_manager=skill_manager,
+                session_id=session_id,
+                user_id=config.get('user_id'),
+                deep_thinking=config.get('use_deepthink'),
+                agent_mode='fibre',
+                available_workflows=config.get('available_workflows'),
+                system_context=config.get('system_context'),
+                context_budget_config=context_budget_config,
+                max_loop_count=config.get('max_loop_count', 10)
+            ):
+                for chunk in chunks:
+                    if isinstance(chunk, MessageChunk):
+                        all_chunks.append(deepcopy(chunk))
+                        if chunk.content is not None or chunk.type:
+                            agent_name = chunk.agent_name or "FibreAgent"
+                            chunk_session_id = chunk.session_id or session_id
+                            session_states = active_states.setdefault(chunk_session_id, {"order": [], "messages": {}})
+                            session_messages = session_states["messages"]
+                            message_id = chunk.message_id
+                            state = session_messages.get(message_id)
+                            if not state:
+                                state = {
+                                    'type': chunk.type or chunk.message_type or 'normal',
+                                    'content': '',
+                                    'agent_name': agent_name,
+                                    'timestamp': time.strftime("%H:%M:%S", time.localtime())
+                                }
+                                session_messages[message_id] = state
+                                session_states["order"].append(message_id)
+                            state['type'] = chunk.type or chunk.message_type or 'normal'
+                            if chunk.content is not None:
+                                content_to_add = str(chunk.content)
+                                # 始终追加内容，避免相同 message_id 的内容被覆盖
+                                state['content'] += content_to_add
+                            ensure_panel(chunk_session_id)
+                            refresh_all()
+            main_session_chunks = [
+                c for c in all_chunks
+                if c.session_id == session_id or c.session_id is None
+            ]
+            messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
+        except asyncio.CancelledError:
+            if all_chunks:
+                main_session_chunks = [
+                    c for c in all_chunks
+                    if c.session_id == session_id or c.session_id is None
+                ]
+                messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
+            raise
         except Exception as e:
-            console.print(f"[red]发生错误: {e}[/red]")
+            append_log(f"执行出错: {e}")
+            refresh_all()
             traceback.print_exc()
-            exit(0)
+        finally:
+            agent_task = None
+            execution_status = "已完成"
+            refresh_all()
+
+    def accept(buff):
+        nonlocal agent_task
+        cmd = buff.text.strip()
+        if not cmd:
+            return False
+        if cmd.lower() in ['exit', 'quit']:
+            if app:
+                app.exit()
+            return False
+        if agent_task and not agent_task.done():
+            append_log("当前有任务执行中，请稍候。")
+            refresh_all()
+            buff.text = ""
+            return False
+        agent_task = asyncio.create_task(run_agent_execution(cmd))
+        buff.text = ""
+        return False
+
+    input_area.accept_handler = accept
+    input_area.buffer.completer = None
+
+    @kb.add('c-s')
+    def _(event):
+        event.app.current_buffer.validate_and_handle()
+
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        full_screen=True,
+        mouse_support=True
+    )
+
+    await app.run_async()
 
 
 def parse_arguments() -> Dict[str, Any]:
