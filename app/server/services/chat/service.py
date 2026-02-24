@@ -151,6 +151,8 @@ async def populate_request_from_agent_config(
     _fill_if_none("available_sub_agent_ids", [])
     user = {"本次会话用户id": request.user_id or "default_user"}
     _merge_dict("system_context", user)
+    if request.agent_id and agent:
+        _merge_dict("system_context", {"当前AgentId": request.agent_id})
 
     # 处理可用知识库
     available_knowledge_bases = request.available_knowledge_bases
