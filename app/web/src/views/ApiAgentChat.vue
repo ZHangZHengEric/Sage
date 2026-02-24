@@ -10,7 +10,7 @@
     <Card class="mb-8">
       <CardContent class="flex items-center gap-4 p-4">
         <Badge variant="secondary" class="font-bold text-primary">POST</Badge>
-        <span class="break-all font-mono font-medium">{{ endpoint }}/api/stream</span>
+        <span class="break-all font-mono font-medium">{{ endpoint }}/api/chat</span>
       </CardContent>
     </Card>
 
@@ -207,35 +207,15 @@ const params = [
     { name: 'message_type', type: 'string', required: false, desc: '可选类型标识' }
   ] },
   { name: 'session_id', type: 'string', required: true, desc: '会话唯一标识，需为不同对话设置不同值' },
-  { name: 'deep_thinking', type: 'boolean', required: false, desc: '是否启用深度思考，不传表示由服务端自动决定' },
-  { name: 'multi_agent', type: 'boolean', required: false, desc: '是否启用多智能体协作，不传表示由服务端自动决定' },
-  { name: 'max_loop_count', type: 'number', required: false, desc: '最大循环次数，控制思考或协作迭代上限' },
-  { name: 'system_prefix', type: 'string', required: false, desc: '系统提示前缀，用于设定助手的行为或语气' },
-  { name: 'system_context', type: 'object', required: false, desc: '系统上下文信息，根据真实业务值填写' },
-  { name: 'available_workflows', type: 'object', required: false, desc: '可用工作流定义，用于扩展处理流程' },
-  { name: 'llm_model_config', type: 'object', required: false, desc: '模型配置', children: [
-    { name: 'model', type: 'string', required: false, desc: '模型名称' },
-    { name: 'max_tokens', type: 'number', required: false, desc: '最大生成长度' },
-    { name: 'temperature', type: 'number', required: false, desc: '采样温度' }
-  ] },
-  { name: 'available_tools', type: 'Array<Object>', required: false, desc: '可用工具列表', children: [
-    { name: 'name', type: 'string', required: true, desc: '工具名称' },
-    { name: 'description', type: 'string', required: false, desc: '工具描述' },
-    { name: 'parameters', type: 'object', required: false, desc: '参数字典，按工具定义为准' }
-  ] }
+  { name: 'agent_id', type: 'string', required: true, desc: 'Agent唯一标识' },
+  { name: 'system_context', type: 'object', required: false, desc: '系统上下文信息，根据真实业务值填写' }
 ]
 
 const exampleBody = {
   messages: [ { role: 'user', content: '你好，请帮我处理一个任务' } ],
   session_id: 'demo-session',
-  deep_thinking: null,
-  multi_agent: null,
-  max_loop_count: 20,
-  system_prefix: '',
-  system_context: {},
-  available_workflows: {},
-  llm_model_config: null,
-  available_tools: []
+  agent_id: 'agent-id',
+  system_context: {}
 }
 
 const responseParams = [
