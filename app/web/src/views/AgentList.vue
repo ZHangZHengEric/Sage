@@ -711,21 +711,13 @@ const generateUsageCodes = (agent) => {
       { role: 'user', content: '你好，请帮我处理一个任务' }
     ],
     session_id: 'demo-session',
-    memory_type: agent.memoryType || 'session',
-    deep_thinking: agent.deepThinking ?? null,
-    multi_agent: agent.multiAgent ?? null,
-    max_loop_count: agent.maxLoopCount ?? 20,
-    system_prefix: agent.systemPrefix || '',
-    system_context: agent.systemContext || {},
-    available_workflows: agent.availableWorkflows || {},
-    llm_provider_id: agent.llm_provider_id || null,
-    available_tools: agent.availableTools || [],
-    available_skills: agent.availableSkills || []
+    agent_id: agent.id,
+    system_context: agent.systemContext || {}
   }
 
   const jsonStr = JSON.stringify(body, null, 2)
   const curl = [
-    `curl -X POST "${backendEndpoint}/api/stream" \\
+    `curl -X POST "${backendEndpoint}/api/chat" \\
   -H "Content-Type: application/json" \\
   -d '${jsonStr}'`
   ].join('\n')
@@ -733,7 +725,7 @@ const generateUsageCodes = (agent) => {
   const python = [
     'import requests',
     '',
-    `url = "${backendEndpoint}/api/stream"`,
+    `url = "${backendEndpoint}/api/chat"`,
     'payload = ' + jsonStr,
     'headers = {"Content-Type": "application/json"}',
     '',
@@ -751,7 +743,7 @@ const generateUsageCodes = (agent) => {
     ')',
     '',
     'func main() {',
-    `  url := "${backendEndpoint}/api/stream"`,
+    `  url := "${backendEndpoint}/api/chat"`,
     '  body := []byte(`' + jsonStr.replace(/`/g, '\\`') + '`)',
     '  req, _ := http.NewRequest("POST", url, bytes.NewBuffer(body))',
     '  req.Header.Set("Content-Type", "application/json")',
