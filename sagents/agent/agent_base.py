@@ -8,7 +8,7 @@ from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import get_session_context, SessionContext, SessionStatus
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.utils.prompt_manager import prompt_manager
-from sagents.utils.message_manager import MessageManager
+from sagents.context.messages.message_manager import MessageManager
 import traceback
 import time
 import os
