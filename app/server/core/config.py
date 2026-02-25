@@ -98,7 +98,7 @@ class ENV:
     CONTEXT_RECENT_TURNS = "SAGE_CONTEXT_RECENT_TURNS"
 
     # Trace
-    TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
+    TRACE_JAEGER_URL = "SAGE_TRACE_JAEGER_URL"
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
@@ -392,7 +392,7 @@ def create_argument_parser():
     # Trace 配置
     parser.add_argument(
         "--trace_jaeger_endpoint",
-        help=f"Jaeger OTLP Endpoint (http/grpc), e.g. http://localhost:4317 (环境变量: {ENV.TRACE_JAEGER_ENDPOINT})",
+        help=f"Jaeger OTLP Endpoint (http/grpc), e.g. http://localhost:4317 (环境变量: {ENV.TRACE_JAEGER_URL})",
     )
 
     # 数据库相关参数
@@ -554,7 +554,7 @@ def build_startup_config() -> StartupConfig:
         ),
         trace_jaeger_endpoint=pick_str(
             args.trace_jaeger_endpoint,
-            ENV.TRACE_JAEGER_ENDPOINT,
+            ENV.TRACE_JAEGER_URL,
             StartupConfig.trace_jaeger_endpoint,
         ),
     )

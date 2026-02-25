@@ -168,7 +168,6 @@ Sage Server supports configuration via **Command Line Arguments** or **Environme
 | `--workspace` | `SAGE_WORKSPACE_PATH` | `agent_workspace` | Workspace directory (storing files, temporary data, etc.) |
 | `--logs-dir` | `SAGE_LOGS_DIR_PATH` | `logs` | Log file storage directory |
 | `--force_summary` | `SAGE_FORCE_SUMMARY` | `False` | Whether to force enable summary function |
-| `--no_auth` | `SAGE_NO_AUTH` | `True` | Whether to disable authentication (disabled by default, fetch data based on user_id) |
 | `--preset_mcp_config` | `SAGE_MCP_CONFIG_PATH` | `mcp_setting.json` | MCP configuration file path |
 | `--preset_running_config` | `SAGE_PRESET_RUNNING_CONFIG_PATH` | `agent_setting.json` | Preset running configuration (system_context, workflow, etc.) |
 
