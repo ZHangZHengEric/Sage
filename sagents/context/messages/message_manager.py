@@ -86,7 +86,6 @@ class MessageManager:
             'last_updated': datetime.datetime.now().isoformat()
         }
         
-        logger.info(f"MessageManager: 初始化完成，会话ID: {self.session_id}")
     
     def update_messages(self, messages: Union[MessageChunk, List[MessageChunk]]) -> None:
         """
@@ -114,7 +113,7 @@ class MessageManager:
             index: 活跃消息的起始索引，None表示所有消息都是活跃消息
         """  
         self.active_start_index = index
-        logger.info(f"MessageManager: 设置 active_start_index = {index}，"
+        logger.debug(f"MessageManager: 设置 active_start_index = {index}，"
                    f"历史消息: {index if index else 0}条，"
                    f"活跃消息: {len(self.messages) - (index if index else 0)}条")
     
@@ -382,7 +381,6 @@ class MessageManager:
         Returns:
             提取后的消息列表
         """
-        logger.info(f"MessageManager: 提取所有上下文消息，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}")
         all_context_messages = []
         chat_list = []
 
@@ -432,7 +430,7 @@ class MessageManager:
         result_messages = all_context_messages[::-1]
         # 打印提取结果的统计信息
         total_tokens = MessageManager.calculate_messages_token_length(result_messages)
-        logger.info(f"MessageManager: 提取完成，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
+        logger.info(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
         return result_messages
     
     # def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
