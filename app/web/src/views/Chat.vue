@@ -178,14 +178,6 @@ const showWorkspace = ref(false)
 const currentTraceId = ref(null)
 const selectedToolExecution = ref(null)
 
-watch(currentSessionId, (newVal) => {
-  if (newVal) {
-    currentTraceId.value = SparkMD5.hash(newVal)
-  } else {
-    currentTraceId.value = null
-  }
-})
-
 const toolResult = ref(null)
 
 /* ---------------- jaeger jump ---------------- */
@@ -213,6 +205,15 @@ const messageChunks = ref(new Map());
 const isLoading = ref(false);
 const abortControllerRef = ref(null);
 const currentSessionId = ref(null);
+
+watch(currentSessionId, (newVal) => {
+  if (newVal) {
+    currentTraceId.value = SparkMD5.hash(newVal)
+  } else {
+    currentTraceId.value = null
+  }
+})
+
 const selectedAgent = ref(null);
 const config = ref({
     deepThinking: true,
