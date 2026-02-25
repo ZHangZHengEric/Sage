@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前版本-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_版本-0.9.8-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_版本-0.9.9-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage 多智能体框架**
 
@@ -40,7 +40,7 @@ git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 pip install -r requirements.txt
 # 如果需要 Web UI
-pip install -r app/fastapi_react_demo/requirements.txt
+pip install -r app/server/requirements.txt
 ```
 
 ### 运行 Sage
@@ -50,7 +50,7 @@ pip install -r app/fastapi_react_demo/requirements.txt
 streamlit run app/sage_demo.py -- \
   --default_llm_api_key YOUR_API_KEY \
   --default_llm_model deepseek-chat \
-  --default_llm_base_url https://api.deepseek.com
+  --default_llm_api_base_url https://api.deepseek.com
 ```
 
 **命令行工具 (CLI)**：
@@ -94,14 +94,17 @@ graph TD
     Core -.-> Obs["👁️ Observability (OpenTelemetry)"]
 ```
 
-## 📅 **v0.9.8 更新内容**
+## 📅 **v0.9.9 更新内容**
 
-- **企业级存储**：引入 Elasticsearch, RustFS, 和 SQL 实现稳健的数据持久化。
-- **Fibre Agent**：全新的并行多智能体编排架构。
-- **RAG 引擎**：完全重构的检索引擎，支持 RRF。
-- **安全性**：新增代码执行沙箱。
-- **可观测性**：全面集成 OpenTelemetry。
-- **[查看完整版本发布说明](release_notes/v0.9.8.md)**
+- **智能工具选择**：基于工具 ID 的推荐系统，提升准确性并统一 Agent 逻辑。
+- **任务调度 MCP**：内置任务调度服务，支持 SQLite 持久化和定时任务。
+- **Agent Hub MCP**：智能体间消息中心，实现多智能体协作和任务委派。
+- **Brave Search MCP**：网络搜索集成，支持实时信息获取。
+- **暗色主题**：完整的暗色模式支持，自动检测系统偏好。
+- **模型提供商管理**：动态 LLM 提供商配置，支持多模型源。
+- **子任务可视化**：实时子智能体执行追踪和消息流展示。
+- **上下文预算**：智能上下文压缩，支持长对话场景。
+- **[查看完整版本发布说明](release_notes/v0.9.9.md)**
 
 ## 📚 **文档资源**
 

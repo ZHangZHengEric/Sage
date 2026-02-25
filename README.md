@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.8-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-0.9.9-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage Multi-Agent Framework**
 
@@ -96,14 +96,17 @@ graph TD
     Core -.-> Obs["👁️ Observability (OpenTelemetry)"]
 ```
 
-## 📅 **What's New in v0.9.8**
+## 📅 **What's New in v0.9.9**
 
-- **Enterprise Storage**: Introduced Elasticsearch, RustFS, and SQL for robust data persistence.
-- **Fibre Agent**: New parallel multi-agent orchestration architecture.
-- **RAG Engine**: Completely refactored retrieval engine with RRF support.
-- **Security**: Added code execution sandbox.
-- **Observability**: Full OpenTelemetry integration.
-- **[View Full Release Notes](release_notes/v0.9.8.md)**
+- **Smart Tool Selection**: Tool ID-based recommendation system for improved accuracy and unified Agent logic.
+- **Task Scheduler MCP**: Built-in task scheduling service with SQLite persistence and cron job support.
+- **Agent Hub MCP**: Inter-agent messaging center enabling multi-agent collaboration and delegation.
+- **Brave Search MCP**: Web search integration for real-time information retrieval.
+- **Dark Theme**: Full dark mode support with system preference detection.
+- **Model Provider Management**: Dynamic LLM provider configuration with multi-source support.
+- **Sub-task Visualization**: Real-time sub-agent execution tracking and message streaming.
+- **Context Budget**: Intelligent context compression for long conversations.
+- **[View Full Release Notes](release_notes/v0.9.9.md)**
 
 ## 📚 **Documentation**
 
