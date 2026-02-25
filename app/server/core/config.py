@@ -52,9 +52,9 @@ class StartupConfig:
     context_recent_turns: int = 0
     
     # auth
-    jwt_key: str = "123"
+    jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
     jwt_expire_hours: int = 24
-    refresh_token_secret: str = "123"
+    refresh_token_secret: str = "sage_dev_refresh_secret_key_change_me_in_prod_v1"
 
     # Embedding
     embed_api_key: Optional[str] = None
@@ -324,6 +324,20 @@ def create_argument_parser():
         help=f"日志目录 (环境变量: {ENV.LOGS_DIR})",
     )
 
+    # Auth 配置
+    parser.add_argument(
+        "--jwt_key",
+        help=f"JWT Key (环境变量: {ENV.JWT_KEY})",
+    )
+    parser.add_argument(
+        "--jwt_expire_hours",
+        type=int,
+        help=f"JWT Expire Hours (环境变量: {ENV.JWT_EXPIRE_HOURS})",
+    )
+    parser.add_argument(
+        "--refresh_token_secret",
+        help=f"Refresh Token Secret (环境变量: {ENV.REFRESH_TOKEN_SECRET})",
+    )
 
     # Embedding 配置
     parser.add_argument(
@@ -507,6 +521,15 @@ def build_startup_config() -> StartupConfig:
             args.context_recent_turns,
             ENV.CONTEXT_RECENT_TURNS,
             StartupConfig.context_recent_turns,
+        ),
+        jwt_key=pick_str(args.jwt_key, ENV.JWT_KEY, StartupConfig.jwt_key),
+        jwt_expire_hours=pick_int(
+            args.jwt_expire_hours, ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
+        ),
+        refresh_token_secret=pick_str(
+            args.refresh_token_secret,
+            ENV.REFRESH_TOKEN_SECRET,
+            StartupConfig.refresh_token_secret,
         ),
         embed_api_key=pick_str(
             args.embedding_api_key, ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key

@@ -71,7 +71,6 @@ class SAgent:
         if memory_type == "user":
             self.user_memory_manager = UserMemoryManager(model=self.model, workspace=workspace)
         else:
-            logger.info(f"SAgent: 记忆类型为 {memory_type}，将禁用用户记忆功能")
             self.user_memory_manager = None
         
         # 懒加载代理缓存
@@ -86,8 +85,6 @@ class SAgent:
             # 注意：这会拦截 self.model 的调用以记录 LLM 事件
             self.model = ObservableAsyncOpenAI(self.model, self.observability_manager)
             
-        logger.info("SAgent: 智能体控制器初始化完成")
-
     def _get_agent(self, agent_cls: Type[AgentBase], name: str) -> AgentBase:
         if name not in self._agents:
             agent = agent_cls(self.model, self.model_config, system_prefix=self.system_prefix)
@@ -363,20 +360,17 @@ class SAgent:
                 skill_manager=skill_manager,
             )
             with session_manager.session_context(session_id):
-                logger.info(f"开始流式工作流，会话ID: {session_id}")
+                logger.info(f"SAgent: 会话开始")
                 
                 # 设置 custom_sub_agents
                 if custom_sub_agents:
                     session_context.custom_sub_agents = custom_sub_agents
-                    logger.info(f"SAgent: 设置了 {len(custom_sub_agents)} 个自定义 Sub Agent")
+                    logger.debug(f"SAgent: 设置了 {len(custom_sub_agents)} 个自定义 Sub Agent")
 
                 # 1. 设置传入的 system_context
                 if system_context:
-                    try:
-                        logger.info(f"SAgent: 设置了system_context参数 keys: {list(system_context.keys())}")
-                    except Exception:
-                        logger.info("SAgent: 设置了system_context参数 (content unprintable)")
                     session_context.add_and_update_system_context(system_context)
+                    logger.debug(f"SAgent: 设置了system_context参数 keys: {list(system_context.keys())}")
 
                 # 2. 尝试初始化记忆 (这将更新 session_context.system_context 中的用户偏好)
                 await session_context.init_user_memory_context()
@@ -404,7 +398,7 @@ class SAgent:
                 initial_messages = self._prepare_initial_messages(input_messages)
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
-                logger.info(f"SAgent: 合并前message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                merge_before_num = len(session_context.message_manager.messages)
                 all_message_ids = [m.message_id for m in session_context.message_manager.messages]
                 for message in initial_messages:
                     if message.message_id not in all_message_ids:
@@ -413,7 +407,7 @@ class SAgent:
                         # 如果message 存在，更新，以新的message 为准
                         session_context.message_manager.update_messages(message)
 
-                logger.info(f"SAgent: 合并后message_manager的消息数量：{len(session_context.message_manager.messages)}")
+                logger.info(f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)}")
 
                 # 加载最近一次调用的skill到context
                 await session_context.load_recent_skill_to_context()
@@ -490,7 +484,6 @@ class SAgent:
                         yield message_chunks
                 else:
                     # 直接执行模式：可选的任务分析 + 直接执行
-                    logger.info("SAgent: 开始简化工作流")
                     
                     # # 注册 ToDoTool 到工具管理器，确保 SimpleAgent 可以使用，改成按available tools 来是否使用todo工具
                     # from sagents.tool.impl.todo_tool import ToDoTool
@@ -666,7 +659,6 @@ class SAgent:
         Returns:
             List[MessageChunk]: 准备好的消息列表
         """
-        logger.debug("SAgent: 准备初始消息")
         # 检查每个消息的格式
         for msg in input_messages:
             if not isinstance(msg, (dict, MessageChunk)):
@@ -674,7 +666,6 @@ class SAgent:
         # 对dict 的消息输入，转化成MessageChunk
         input_messages = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in input_messages]
         # 清理过长的消息历史
-        logger.info(f"SAgent: 初始化消息数量: {len(input_messages)}")
         return input_messages
 
     async def _handle_workflow_error(self, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:

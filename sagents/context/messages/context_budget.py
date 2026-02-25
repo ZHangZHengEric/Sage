@@ -49,7 +49,7 @@ class ContextBudgetManager:
                 f"(history={history_ratio}, active={active_ratio}, max_new={max_new_message_ratio})"
             )
         
-        logger.info(
+        logger.debug(
             f"ContextBudgetManager初始化: max_len={max_model_len}, "
             f"ratios(h/a/n)={history_ratio}/{active_ratio}/{max_new_message_ratio}, "
             f"recent_turns={recent_turns}"
@@ -151,7 +151,7 @@ class ContextBudgetManager:
             'max_model_len': self.max_model_len
         }
         
-        logger.info(
+        logger.debug(
             f"ContextBudgetManager: 预算分配 - 可用={available_tokens}, "
             f"history={budget_info['history_budget']}, "
             f"active={budget_info['active_budget']}, "
@@ -210,7 +210,7 @@ class ContextBudgetManager:
         
         history_tokens = self._calculate_messages_tokens(history_messages)
         
-        logger.info(
+        logger.debug(
             f"ContextBudgetManager: 消息切分 - 总轮次={len(chat_list)}, "
             f"active={len(active_messages)}条/{active_tokens}tokens, "
             f"history={len(history_messages)}条/{history_tokens}tokens"
@@ -223,4 +223,3 @@ class ContextBudgetManager:
             'active_tokens': active_tokens
         }
 
-# cd /data/wangxinhao/reagent && python -m sagents.context.messages.context_budget

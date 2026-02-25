@@ -179,9 +179,8 @@ class ExecuteCommandTool:
                         # 如果没有 ensure_directory，尝试手动解析并创建
                         # 注意：如果 effective_workdir 是虚拟路径，必须先解析为 host_path 才能 os.makedirs
                         if hasattr(sandbox_fs, 'to_host_path'):
-                             host_workdir = sandbox_fs.to_host_path(effective_workdir)
-                             if not os.path.exists(host_workdir):
-                                os.makedirs(host_workdir, exist_ok=True)
+                            host_workdir = sandbox_fs.to_host_path(effective_workdir)
+                            os.makedirs(host_workdir, exist_ok=True)
 
                     logger.debug(f"通过 session_id {session_id} (Sandbox) 定位到虚拟工作目录: {effective_workdir}")
             except ImportError:

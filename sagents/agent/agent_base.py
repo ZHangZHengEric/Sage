@@ -193,7 +193,7 @@ class AgentBase(ABC):
                 if 'content' not in msg:
                     msg['content'] = ''
 
-            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
+            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成")
 
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
@@ -242,7 +242,7 @@ class AgentBase(ABC):
             raise e
         finally:
             # 将次请求记录在session context 中的llm调用记录中
-            logger.info(f"{step_name}: 调用语言模型进行流式生成，耗时: {time.time() - start_request_time},返回{len(all_chunks)}个chunk")
+            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，耗时: {time.time() - start_request_time},返回{len(all_chunks)}个chunk")
             if session_id:
                 session_context = get_session_context(session_id) if session_id else None
 
@@ -535,10 +535,7 @@ class AgentBase(ABC):
                 if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
                     # 尝试加载新技能，以确保新安装的技能能被发现
                     try:
-                        if hasattr(session_context.skill_manager, 'load_new_skills'):
-                            session_context.skill_manager.load_new_skills()
-                        elif hasattr(session_context.skill_manager, 'reload'):
-                            session_context.skill_manager.reload()
+                        session_context.skill_manager.load_new_skills()
                     except Exception as e:
                         logger.warning(f"Failed to load new skills: {e}")
 
@@ -996,7 +993,7 @@ class AgentBase(ABC):
         Returns:
             List[str]: 建议工具名称列表
         """
-        logger.info(f"AgentBase: 开始获取建议工具，会话ID: {session_id}")
+        logger.info(f"AgentBase: 开始获取建议工具")
 
         if not messages_input or not tool_manager:
             logger.warning("AgentBase: 未提供消息或工具管理器，返回空列表")
