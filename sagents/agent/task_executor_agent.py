@@ -3,14 +3,12 @@ from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator, cast, Union
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext, get_session_context
+from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
-from sagents.tool.tool_schema import convert_spec_to_openai_format
+
 from sagents.utils.content_saver import save_agent_response_content
 import uuid
-import json
-import traceback
 
 
 class TaskExecutorAgent(AgentBase):
@@ -73,103 +71,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         ):
             yield chunk
 
-    async def _get_suggested_tools(self,
-                                   messages_input: List[MessageChunk],
-                                   tool_manager: ToolManager,
-                                   session_id: str,
-                                   session_context: SessionContext) -> List[str]:
-        """
-        基于用户输入和历史对话获取建议工具
-        """
-        logger.info(f"TaskExecutorAgent: 开始获取建议工具，会话ID: {session_id}")
-
-        if not messages_input or not tool_manager:
-            logger.warning("TaskExecutorAgent: 未提供消息或工具管理器，返回空列表")
-            return []
-        try:
-            # 获取可用工具，只提取工具名称
-            available_tools = tool_manager.list_tools_simplified()
-
-            tool_names = [tool['name'] for tool in available_tools] if available_tools else []
-            if len(tool_names) <= 10:
-                logger.info(f"TaskExecutorAgent: 可用工具数量小于等于9个，直接返回所有工具: {tool_names}")
-                if 'complete_task' in tool_names:
-                    tool_names.remove('complete_task')
-                return tool_names
-            available_tools_str = ", ".join(tool_names) if tool_names else '无可用工具'
-
-            # 准备消息
-            clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
-
-            # 重新获取agent_custom_system_prefix以支持动态语言切换
-            current_system_prefix = PromptManager().get_agent_prompt_auto("task_executor_system_prefix", language=session_context.get_language())
-
-            # 生成提示
-            tool_suggestion_template = PromptManager().get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
-            prompt = tool_suggestion_template.format(
-                session_id=session_id,
-                available_tools_str=available_tools_str,
-                agent_config=self.prepare_unified_system_message(
-                    session_id,
-                    custom_prefix=current_system_prefix,
-                    language=session_context.get_language(),
-                ).content,
-                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
-            )
-
-            # 调用LLM获取建议
-            suggested_tools = await self._get_tool_suggestions(prompt, session_id)
-
-            # 如果session_context 有skills，要保证有file_read execute_python_code execute_shell_command file_write file_update 这几个工具
-            if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
-                suggested_tools.extend(['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'file_update', 'load_skill'])
-
-            if "sys_spawn_agent" in tool_names:
-                suggested_tools.extend(['sys_spawn_agent'])
-            if 'sys_delegate_task' in tool_names:
-                suggested_tools.extend(['sys_delegate_task'])
-            if 'sys_finish_task' in tool_names:
-                suggested_tools.append('sys_finish_task')
-
-            # 去重
-            suggested_tools = list(set(suggested_tools))    
-
-            logger.info(f"TaskExecutorAgent: 获取到建议工具: {suggested_tools}")
-            return suggested_tools
-
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            logger.error(f"TaskExecutorAgent: 获取建议工具时发生错误: {str(e)}")
-            return []
-
-    async def _get_tool_suggestions(self, prompt: str, session_id: str) -> List[str]:
-        """
-        调用LLM获取工具建议（流式调用）
-        """
-        logger.debug("TaskExecutorAgent: 调用LLM获取工具建议（流式）")
-
-        messages_input = [{'role': 'user', 'content': prompt}]
-        # 使用基类的流式调用方法，自动处理LLM request日志
-        response = self._call_llm_streaming(
-            messages=messages_input,
-            session_id=session_id,
-            step_name="tool_suggestion"
-        )
-        # 收集流式响应内容
-        all_content = ""
-        async for chunk in response:
-            if len(chunk.choices) == 0:
-                continue
-            if chunk.choices[0].delta.content:
-                all_content += chunk.choices[0].delta.content
-        try:
-            result_clean = MessageChunk.extract_json_from_markdown(all_content)
-            suggested_tools = json.loads(result_clean)
-            return suggested_tools
-        except json.JSONDecodeError:
-            logger.warning("TaskExecutorAgent: 解析工具建议响应时JSON解码错误")
-            return []
-
     async def _call_llm_and_process_response(self,
                                              messages_input: List[MessageChunk],
                                              tools_json: List[Dict[str, Any]],
@@ -182,10 +83,6 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
-
-        # 总是添加 load_skill 工具，如果有技能管理器
-        # 这确保了它不会被过滤掉，并且直接传递给 LLM
-        session_context = get_session_context(session_id)
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
