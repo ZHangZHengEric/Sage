@@ -62,7 +62,6 @@ graph TD
 | `SAGE_WORKSPACE_PATH` | string | "agent_workspace" | 工作空间目录 |
 | `SAGE_MEMORY_ROOT` | string | None | 记忆存储根目录（可选） |
 | `SAGE_FORCE_SUMMARY` | boolean | false | 是否强制生成总结 |
-| `SAGE_NO_AUTH` | boolean | true | 是否关闭认证（根据 user_id 获取数据） |
 | `SAGE_MCP_CONFIG_PATH` | string | "mcp_setting.json" | MCP 配置文件路径 |
 | `SAGE_PRESET_RUNNING_CONFIG_PATH` | string | "agent_setting.json" | 预设运行配置文件路径 |
 
@@ -146,7 +145,7 @@ graph TD
 
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
-| `SAGE_TRACE_JAEGER_ENDPOINT` | string | None | Jaeger OTLP Endpoint |
+| `SAGE_TRACE_JAEGER_URL` | string | None | Jaeger OTLP Endpoint |
 
 ### Knowledge Base MCP 设置
 

@@ -153,7 +153,6 @@ Sage Server 支持通过 **命令行参数** 或 **环境变量** 进行配置�
 | `--workspace` | `SAGE_WORKSPACE_PATH` | `agent_workspace` | 工作空间目录（存放文件、临时数据等） |
 | `--logs-dir` | `SAGE_LOGS_DIR_PATH` | `logs` | 日志文件存放目录 |
 | `--force_summary` | `SAGE_FORCE_SUMMARY` | `False` | 是否强制开启总结功能 |
-| `--no_auth` | `SAGE_NO_AUTH` | `True` | 是否禁用认证（默认禁用，根据 user_id 获取数据） |
 | `--preset_mcp_config` | `SAGE_MCP_CONFIG_PATH` | `mcp_setting.json` | MCP 配置文件路径 |
 | `--preset_running_config` | `SAGE_PRESET_RUNNING_CONFIG_PATH` | `agent_setting.json` | 预设运行配置（system_context, workflow 等） |
 
