@@ -231,11 +231,13 @@ async def populate_request_from_agent_config(
     request.context_budget_config = context_budget_config
 
     # 处理可用覆盖mcp配置，注册到tool_manager
-    if request.extra_mcp_config:
+    if request.extra_mcp_config or request.system_context.get("extra_mcp_config",None):
+        extra_mcp_config = request.extra_mcp_config or request.system_context.get("extra_mcp_config",None)
+        
         tm = get_tool_manager()
         if tm:
-            logger.info(f"Registering {len(request.extra_mcp_config)} extra MCP servers")
-            for key, value in request.extra_mcp_config.items():
+            logger.info(f"Registering {len(extra_mcp_config)} extra MCP servers")
+            for key, value in extra_mcp_config.items():
                 if not isinstance(value, dict):
                     logger.warning(f"Invalid MCP config for {key}: expected dict, got {type(value)}")
                     continue
@@ -261,12 +263,15 @@ async def populate_request_from_agent_config(
                         
                         if tool_name:
                             new_tool_names.append(tool_name)
-                    
                     # if new_tool_names:
                         # request.available_tools.extend(new_tool_names)
                         # logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
+                    # 移除system context 中的extra_mcp_config
+                   
                 else:
                     logger.warning(f"Failed to register MCP server {key} with tools")
+            if 'extra_mcp_config' in request.system_context:
+                del request.system_context['extra_mcp_config']
         else:
             logger.warning("ToolManager not available, cannot register MCP servers")
             
