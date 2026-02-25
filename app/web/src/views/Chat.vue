@@ -127,6 +127,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Bot, Settings, Share2, FolderOpen, Search } from 'lucide-vue-next'
+import SparkMD5 from 'spark-md5'
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
@@ -176,6 +177,15 @@ const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
 const currentTraceId = ref(null)
 const selectedToolExecution = ref(null)
+
+watch(currentSessionId, (newVal) => {
+  if (newVal) {
+    currentTraceId.value = SparkMD5.hash(newVal)
+  } else {
+    currentTraceId.value = null
+  }
+})
+
 const toolResult = ref(null)
 
 /* ---------------- jaeger jump ---------------- */
