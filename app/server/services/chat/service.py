@@ -388,10 +388,26 @@ async def prepare_session(request: StreamRequest):
 async def execute_chat_session(
     mode: str,
     stream_service: SageStreamService,
+    **kwargs,
 ):
     """
     执行聊天会话逻辑（仅生成流，不处理锁释放）
     """
+    # 注入 Trace ID
+    from opentelemetry import trace
+    from opentelemetry.trace import format_trace_id
+    
+    current_span = trace.get_current_span()
+    if current_span and current_span.get_span_context().is_valid:
+        trace_id = format_trace_id(current_span.get_span_context().trace_id)
+        trace_info = {
+            "type": "trace_info",
+            "trace_id": trace_id,
+            "session_id": stream_service.request.session_id,
+            "timestamp": time.time()
+        }
+        yield json.dumps(trace_info, ensure_ascii=False) + "\n"
+
     session_id = stream_service.request.session_id
     stream_counter = 0
     last_activity_time = time.time()
