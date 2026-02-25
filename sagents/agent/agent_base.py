@@ -209,7 +209,8 @@ class AgentBase(ABC):
                     "chat_template_kwargs": {"enable_thinking": False},
                     "enable_thinking": False,
                     "thinking": {'type': "disabled"},
-                    "top_k": 20
+                    "top_k": 20,
+                    "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
                 },
                 **final_config
             )
