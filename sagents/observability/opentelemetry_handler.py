@@ -211,7 +211,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
-    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], **kwargs: Any) -> Any:
+    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], step_name: str, **kwargs: Any) -> Any:
         span = self.tracer.start_span(
             name=f"阶段：{step_name}",
             kind=trace.SpanKind.CLIENT
