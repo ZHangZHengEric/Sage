@@ -281,3 +281,79 @@ skills_info_label = {
     "en": "\nAvailable Skills List (Skills), please use `load_skill` tool to load if needed:\n",
     "pt": "\nLista de Habilidades Disponíveis (Skills), use a ferramenta `load_skill` para carregar se necessário:\n"
 }
+
+# 工具建议模板
+tool_suggestion_template = {
+    "zh": """你是一个工具推荐专家，你的任务是根据用户的需求，为用户推荐合适的工具。
+你要根据历史的对话以及用户的请求，以及agent的配置，获取解决用户请求用到的所有可能的工具。
+
+## agent的配置要求
+{agent_config}
+
+## 可用工具
+{available_tools_str}
+
+## 用户的对话历史以及新的请求
+{messages}
+
+输出格式：
+```json
+[
+    1,
+    2,
+    ...
+]
+```
+注意：
+1. 工具ID必须是可用工具中的序号。
+2. 返回所有可能用到的工具ID，对于不可能用到的工具，不要返回。
+3. 可能的工具最多返回15个。""",
+    "en": """You are a tool recommendation expert. Your task is to recommend suitable tools for users based on their needs.
+You need to identify all possible tools that could be used to solve the user's request based on the conversation history, user's request, and agent configuration.
+
+## Agent Configuration Requirements
+{agent_config}
+
+## Available Tools
+{available_tools_str}
+
+## User's Conversation History and New Request
+{messages}
+
+Output Format:
+```json
+[
+    1,
+    2,
+    ...
+]
+```
+Notes:
+1. Tool IDs must be the numbers from the available tools list.
+2. Return all possible tool IDs that might be used. Do not return tools that are unlikely to be used.
+3. Return at most 7 possible tools.""",
+    "pt": """Você é um especialista em recomendação de ferramentas. Sua tarefa é recomendar ferramentas adequadas para os usuários com base em suas necessidades.
+Você precisa identificar todas as ferramentas possíveis que podem ser usadas para resolver a solicitação do usuário com base no histórico de conversas, solicitação do usuário e configuração do agente.
+
+## Requisitos de Configuração do Agente
+{agent_config}
+
+## Ferramentas Disponíveis
+{available_tools_str}
+
+## Histórico de Conversas do Usuário e Nova Solicitação
+{messages}
+
+Formato de Saída:
+```json
+[
+    1,
+    2,
+    ...
+]
+```
+Notas:
+1. Os IDs das ferramentas devem ser os números da lista de ferramentas disponíveis.
+2. Retorne todos os IDs de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
+3. Retorne no máximo 15 ferramentas possíveis."""
+}
