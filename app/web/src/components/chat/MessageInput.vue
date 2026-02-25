@@ -28,6 +28,30 @@
     </div>
 
     <div class="relative flex items-end gap-2 p-3 bg-muted/30 border border-input rounded-3xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm">
+      <!-- 技能列表弹窗 -->
+      <div v-if="showSkillList && (filteredSkills.length > 0 || loadingSkills)" class="absolute bottom-full left-0 w-full mb-2 bg-popover border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto z-50 bg-background">
+        <div v-if="loadingSkills" class="p-3 text-center text-sm text-muted-foreground">
+          加载中...
+        </div>
+        <div v-else-if="filteredSkills.length === 0" class="p-3 text-center text-sm text-muted-foreground">
+          未找到相关技能
+        </div>
+        <div v-else>
+          <div 
+            v-for="(skill, index) in filteredSkills" 
+            :key="skill.name"
+            class="px-4 py-2 cursor-pointer hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors text-sm"
+            :class="{'bg-accent text-accent-foreground': index === selectedSkillIndex}"
+            @click="selectSkill(skill)"
+          >
+            <div class="flex flex-col overflow-hidden">
+              <span class="font-medium truncate">{{ skill.name }}</span>
+              <span class="text-xs text-muted-foreground truncate" v-if="skill.description">{{ skill.description }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 文件上传按钮 -->
       <Button 
         type="button" 
@@ -44,6 +68,21 @@
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </Button>
+
+      <!-- 选中的技能展示 -->
+      <div v-if="currentSkill" class="flex items-center gap-1 h-9 px-3 bg-primary/10 text-primary rounded-full text-sm font-medium whitespace-nowrap border border-primary/20">
+        <span class="max-w-[120px] truncate">@{{ currentSkill }}</span>
+        <button 
+          type="button" 
+          @click="currentSkill = null"
+          class="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
 
       <Textarea 
         ref="textareaRef" 
@@ -90,9 +129,10 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { ossApi } from '../../api/oss.js'
+import { skillAPI } from '../../api/skill.js'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -111,6 +151,35 @@ const inputValue = ref('')
 const textareaRef = ref(null)
 const fileInputRef = ref(null)
 
+// 技能列表相关状态
+const showSkillList = ref(false)
+const loadingSkills = ref(false)
+const skills = ref([])
+const selectedSkillIndex = ref(0)
+const skillKeyword = ref('')
+const currentSkill = ref(null)
+
+const filteredSkills = computed(() => {
+  if (!skillKeyword.value) return skills.value
+  const lowerKeyword = skillKeyword.value.toLowerCase()
+  return skills.value.filter(skill => 
+    (skill.name || '').toLowerCase().startsWith(lowerKeyword)
+  )
+})
+
+// 选中技能
+const selectSkill = (skill) => {
+  currentSkill.value = skill.name
+  inputValue.value = ''
+  showSkillList.value = false
+  nextTick(() => {
+    // 聚焦并调整高度
+    const el = textareaRef.value?.$el || textareaRef.value
+    if (el) el.focus()
+    adjustTextareaHeight()
+  })
+}
+
 // 文件上传相关状态
 const uploadedFiles = ref([])
 
@@ -124,16 +193,57 @@ const adjustTextareaHeight = async () => {
   }
 }
 
-// 监听输入值变化，自动调整高度
-watch(inputValue, () => {
+// 监听输入值变化
+watch(inputValue, async (newVal) => {
+  // 检查是否包含技能标签（粘贴或手动输入）
+  const skillMatch = newVal.match(/^<skill>(.*?)<\/skill>\s*/)
+  if (skillMatch) {
+    currentSkill.value = skillMatch[1]
+    inputValue.value = newVal.replace(skillMatch[0], '')
+    return
+  }
+
   adjustTextareaHeight()
+  
+  if (newVal.startsWith('/')) {
+    const keyword = newVal.slice(1)
+    skillKeyword.value = keyword
+    
+    // 如果技能列表为空，则获取
+    if (skills.value.length === 0 && !loadingSkills.value) {
+      try {
+        loadingSkills.value = true
+        console.log('Fetching skills...')
+        const res = await skillAPI.getSkills()
+        if (res.skills) {
+            skills.value = res.skills
+        }
+      } catch (error) {
+        console.error('获取技能列表失败:', error)
+        skills.value = []
+      } finally {
+        loadingSkills.value = false
+      }
+    }
+    
+    showSkillList.value = true
+    selectedSkillIndex.value = 0
+  } else {
+    showSkillList.value = false
+  }
 })
 
 // 处理表单提交
 const handleSubmit = (e) => {
   e.preventDefault()
-  if ((inputValue.value.trim() || uploadedFiles.value.length > 0) && !props.isLoading) {
+  if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) && !props.isLoading) {
     let messageContent = inputValue.value.trim()
+    
+    // 如果有选中的技能，添加到消息头部
+    if (currentSkill.value) {
+      messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
+    }
+
     if (uploadedFiles.value.length > 0) {
       const fileUrls = uploadedFiles.value.filter(f => f.url).map(f => f.url)
 
@@ -148,12 +258,43 @@ const handleSubmit = (e) => {
       emit('sendMessage', messageContent)
       inputValue.value = ''
       uploadedFiles.value = []
+      currentSkill.value = null
     }
   }
 }
 
 // 处理键盘事件
 const handleKeyDown = (e) => {
+  if (showSkillList.value && filteredSkills.value.length > 0) {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      selectedSkillIndex.value = (selectedSkillIndex.value - 1 + filteredSkills.value.length) % filteredSkills.value.length
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      selectedSkillIndex.value = (selectedSkillIndex.value + 1) % filteredSkills.value.length
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      selectSkill(filteredSkills.value[selectedSkillIndex.value])
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      showSkillList.value = false
+      return
+    }
+  }
+
+  // Backspace 删除技能
+  if (e.key === 'Backspace' && inputValue.value === '' && currentSkill.value) {
+    e.preventDefault()
+    currentSkill.value = null
+    return
+  }
+
   // 检查是否在输入法组合状态中，如果是则不处理回车键
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
