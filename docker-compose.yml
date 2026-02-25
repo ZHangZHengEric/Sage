@@ -25,7 +25,7 @@ services:
       dockerfile: docker/Dockerfile.web
       args:
         VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-        VITE_SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL}
+        VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
     image: sage-web:v1.0
     container_name: sage-web
     ports:
@@ -33,7 +33,7 @@ services:
     environment:
       TZ: 'Asia/Shanghai'
       VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
-      VITE_SAGE_TRACE_JAEGER_URL: ${SAGE_TRACE_JAEGER_URL}
+      VITE_SAGE_TRACE_WEB_URL: ${SAGE_TRACE_WEB_URL}
     depends_on:
       - sage-server
     mem_limit: 512m
