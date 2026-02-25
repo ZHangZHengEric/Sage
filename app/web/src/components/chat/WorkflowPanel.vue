@@ -351,7 +351,7 @@ watch(() => props.sessionId, fetchTraces, { immediate: true })
 /* ---------------- jaeger jump ---------------- */
 
 const openTraceDetails = () => {
-  const baseUrl = import.meta.env.VITE_SAGE_TRACE_JAEGER_URL
+  const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
   if (!baseUrl || !traces.value.length) return
   const traceId = traces.value[0]?.trace_id
   if (traceId) window.open(`${baseUrl}/trace/${traceId}`, '_blank')
