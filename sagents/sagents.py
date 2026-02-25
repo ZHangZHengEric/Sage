@@ -756,10 +756,10 @@ class SAgent:
                 await lock.release()
             delete_session_run_lock(session_id)
         except Exception as e:
-            logger.bind(session_id=session_id).error(f"SAgent: 清理会话锁时出错: {e}")
+            logger.error(f"SAgent: 清理会话锁时出错: {e}", session_id=session_id)
 
         try:
             delete_session_context(session_id)
-            logger.bind(session_id=session_id).info("SAgent: 会话已清理")
+            logger.info(f"SAgent: 会话 {session_id} 已清理", session_id=session_id)
         except Exception as e:
-            logger.bind(session_id=session_id).error(f"SAgent: 清理会话时出错: {e}")
+            logger.error(f"SAgent: 清理会话 {session_id} 时出错: {e}", session_id=session_id)
