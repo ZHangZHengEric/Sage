@@ -62,7 +62,6 @@ graph TD
 | `SAGE_WORKSPACE_PATH` | string | "agent_workspace" | Workspace directory |
 | `SAGE_MEMORY_ROOT` | string | None | Memory storage root directory (optional) |
 | `SAGE_FORCE_SUMMARY` | boolean | false | Force summary generation |
-| `SAGE_NO_AUTH` | boolean | true | Disable authentication (fetch data by user_id) |
 | `SAGE_MCP_CONFIG_PATH` | string | "mcp_setting.json" | MCP config file path |
 | `SAGE_PRESET_RUNNING_CONFIG_PATH` | string | "agent_setting.json" | Preset running config path |
 
@@ -146,7 +145,7 @@ graph TD
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SAGE_TRACE_JAEGER_ENDPOINT` | string | None | Jaeger OTLP endpoint |
+| `SAGE_TRACE_JAEGER_URL` | string | None | Jaeger OTLP endpoint |
 
 ### Knowledge Base MCP Settings
 
