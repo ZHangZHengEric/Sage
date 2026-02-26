@@ -33,7 +33,6 @@ from sagents.utils.streaming_message_box import (
 )
 
 
-
 def display_tools(console, tool_manager: Union[ToolManager, ToolProxy]):
     try:
         if hasattr(tool_manager, 'list_tools_simplified'):
@@ -83,6 +82,9 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
             messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
             all_chunks = []
             current_message_box = None
+            first_args = True
+            # 为每个 tool_call 维护状态
+            tool_call_parsers: Dict[str, bool] = {}
 
             async for chunks in agent.run_stream(
                 input_messages=messages,
@@ -102,11 +104,11 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
                         try:
                             if chunk.message_id != last_message_id:
                                 # 如果有之前的消息框，先完成它
-                                if current_message_box is not None:
+                                if current_message_box is not None and (chunk.content or chunk.tool_calls):
                                     current_message_box.finish()
 
                                 # 创建新的消息框
-                                if chunk.content and chunk.type:
+                                if (chunk.content or chunk.tool_calls) and chunk.type:
                                     message_type = chunk.type or chunk.message_type or 'normal'
                                     current_message_box = StreamingMessageBox(console, message_type)
 
@@ -119,6 +121,43 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
                             content_to_print = str(chunk.content)
                             for char in content_to_print:
                                 current_message_box.add_content(char)
+                        
+                        # 处理 tool_calls（流式增量）
+                        if chunk.tool_calls and current_message_box:
+                            for tool_call in chunk.tool_calls:
+                                # 获取 tool_call_id, tool_name 和 tool_args
+                                if hasattr(tool_call, 'id'):
+                                    tc_id = tool_call.id
+                                else:
+                                    tc_id = tool_call.get('id')
+
+                                if hasattr(tool_call, 'function'):
+                                    tool_name = tool_call.function.name if hasattr(tool_call.function, 'name') else None
+                                    tool_args = tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else None
+                                else:
+                                    tool_name = tool_call.get('function', {}).get('name')
+                                    tool_args = tool_call.get('function', {}).get('arguments')
+
+                                # 新的 tool_call，显示工具名和参数
+                                if tc_id not in tool_call_parsers:
+                                    tool_call_parsers[tc_id] = True
+                                    if tool_name:
+                                        prefix = f"\nTool:  {tool_name}:\n    {tool_args}" if tool_args else f"\n🛠️  {tool_name}"
+                                        for char in prefix:
+                                            current_message_box.add_content(char)
+                                    if tool_args:
+                                        first_args = False
+                                    else:
+                                        first_args = True
+                                elif tool_args:
+                                    # 增量显示参数
+                                    if first_args:
+                                        for char in "\n    " + tool_args:
+                                            current_message_box.add_content(char)
+                                        first_args = False
+                                    else:
+                                        for char in tool_args:
+                                            current_message_box.add_content(char)
 
             # 完成最后一个消息框
             if current_message_box is not None:

@@ -1,4 +1,3 @@
-import traceback
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
@@ -7,7 +6,6 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.session_context import SessionContext, get_session_context, SessionStatus
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
-from sagents.tool.tool_schema import convert_spec_to_openai_format
 from sagents.utils.content_saver import save_agent_response_content
 import json
 import uuid
@@ -297,18 +295,6 @@ class SimpleAgent(AgentBase):
 
         # 准备模型配置覆盖，包含工具信息
         model_config_override = {}
-        
-        # 总是添加 load_skill 工具，如果有技能管理器
-        # 这确保了它不会被过滤掉，并且直接传递给 LLM
-        session_context = get_session_context(session_id)
-        # if session_context and session_context.skill_manager and tool_manager:
-        #     # 检查是否已经存在
-        #     if not any(t['function']['name'] == 'load_skill' for t in tools_json):
-        #         load_skill_tool = tool_manager.get_tool('load_skill')
-        #         if load_skill_tool:
-        #             skill_tool_schema = convert_spec_to_openai_format(load_skill_tool, lang=session_context.get_language())
-        #             tools_json.append(skill_tool_schema)
-        #             logger.debug("SimpleAgent: Added load_skill tool to tools_json via override logic")
 
         if len(tools_json) > 0:
             model_config_override['tools'] = tools_json
@@ -325,7 +311,7 @@ class SimpleAgent(AgentBase):
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id = None
         full_content_accumulator = ""
-
+        tool_calls_messages_id = str(uuid.uuid4())
         # 处理流式响应块
         async for chunk in response:
             # print(chunk)
@@ -344,20 +330,25 @@ class SimpleAgent(AgentBase):
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
 
-                # yield 一个空的消息块以避免生成器卡住
+                # 流式返回工具调用消息
                 output_messages = [MessageChunk(
                     role=MessageRole.ASSISTANT.value,
-                    content="",
-                    message_id=content_response_message_id,
-                    message_type=MessageType.EMPTY.value
+                    tool_calls=chunk.choices[0].delta.tool_calls,
+                    message_id=tool_calls_messages_id,
+                    message_type=MessageType.TOOL_CALL.value
                 )]
                 yield (output_messages, False)
 
-            elif chunk.choices[0].delta.content:
-                if len(tool_calls) > 0:
-                    logger.info(f"SimpleAgent: LLM响应包含 {len(tool_calls)} 个工具调用和内容，停止收集文本内容")
-                    break
+                # # yield 一个空的消息块以避免生成器卡住
+                # output_messages = [MessageChunk(
+                #     role=MessageRole.ASSISTANT.value,
+                #     content="",
+                #     message_id=content_response_message_id,
+                #     message_type=MessageType.EMPTY.value
+                # )]
+                # yield (output_messages, False)
 
+            elif chunk.choices[0].delta.content:
                 if len(chunk.choices[0].delta.content) > 0:
                     content_piece = chunk.choices[0].delta.content
                     full_content_accumulator += content_piece
@@ -425,44 +416,6 @@ class SimpleAgent(AgentBase):
                 agent_name=self.agent_name
             )]
             yield (output_messages, False)
-
-    async def _handle_tool_calls(self,
-                                 tool_calls: Dict[str, Any],
-                                 tool_manager: Optional[ToolManager],
-                                 messages_input: List[MessageChunk],
-                                 session_id: str) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
-        """
-        处理工具调用
-
-        Args:
-            tool_calls: 工具调用字典
-            tool_manager: 工具管理器
-            messages_input: 输入消息列表
-            session_id: 会话ID
-
-        Yields:
-            tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
-        """
-        logger.info(f"SimpleAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
-        logger.info(f"SimpleAgent: 工具调用: {tool_calls}")
-
-        for tool_call_id, tool_call in tool_calls.items():
-            tool_name = tool_call['function']['name']
-            logger.info(f"SimpleAgent: 执行工具 {tool_name}")
-            logger.info(f"SimpleAgent: 参数 {tool_call['function']['arguments']}")
-
-            # 发送工具调用消息
-            output_messages = self._create_tool_call_message(tool_call)
-            yield (output_messages, False)
-
-            # 执行工具
-            async for message_chunk_list in self._execute_tool(
-                tool_call=tool_call,
-                tool_manager=tool_manager,
-                messages_input=messages_input,
-                session_id=session_id
-            ):
-                yield (message_chunk_list, False)
 
     def _should_stop_execution(self, all_new_response_chunks: List[MessageChunk]) -> bool:
         """
