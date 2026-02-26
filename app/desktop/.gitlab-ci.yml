@@ -1,0 +1,61 @@
+stages:
+  - build
+  - release
+
+variables:
+  TAURI_VERSION: "1.5.0"
+  NODE_VERSION: "18.16.0"
+  RUST_VERSION: "1.70.0"
+
+cache:
+  paths:
+    - node_modules/
+    - target/
+    - app/web/node_modules/
+
+build-macos:
+  stage: build
+  tags:
+    - macos
+  script:
+    - echo "Building for macOS..."
+    - source $HOME/.bash_profile
+    - rustup update stable
+    - npm install -g tauri
+    - cd app/desktop/src_python
+    - pip install -r requirements.txt pyinstaller
+    - pyinstaller --clean --noconfirm --name sage-server --onefile --windowed main.py
+    - mkdir -p ../src-tauri/bin
+    - cp dist/sage-server ../src-tauri/bin/sage-server-x86_64-apple-darwin
+    - cd ../../../app/web
+    - npm install
+    - npm run build
+    - cp -r dist ../desktop/dist
+    - cd ../desktop/src-tauri
+    - cargo tauri build
+  artifacts:
+    paths:
+      - app/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+      - app/desktop/src-tauri/target/release/bundle/macos/*.app
+
+build-windows:
+  stage: build
+  tags:
+    - windows
+  script:
+    - echo "Building for Windows..."
+    - cd app/desktop/src_python
+    - pip install -r requirements.txt pyinstaller
+    - pyinstaller --clean --noconfirm --name sage-server --onefile --windowed main.py
+    - mkdir -p ../src-tauri/bin
+    - copy dist/sage-server.exe ../src-tauri/bin/sage-server-x86_64-pc-windows-msvc.exe
+    - cd ../../../app/web
+    - npm install
+    - npm run build
+    - xcopy /s /e /y dist ..\desktop\dist
+    - cd ../desktop/src-tauri
+    - cargo tauri build
+  artifacts:
+    paths:
+      - app/desktop/src-tauri/target/release/bundle/msi/*.msi
+      - app/desktop/src-tauri/target/release/bundle/nsis/*.exe
