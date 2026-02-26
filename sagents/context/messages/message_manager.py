@@ -267,7 +267,7 @@ class MessageManager:
         return int(token_length)
 
     @staticmethod
-    def merge_new_message_old_messages(new_message:MessageChunk,old_messages:List[MessageChunk])->List[MessageChunk]:
+    def merge_new_message_old_messages(new_message: MessageChunk, old_messages: List[MessageChunk]) -> List[MessageChunk]:
         """
         合并新消息和旧消息
         
@@ -285,8 +285,73 @@ class MessageManager:
         if existing_message:
             # 流式消息的特点是每次传递的都是新的增量内容
             if new_message.content is not None:
-                existing_message.content = (existing_message.content or '') + new_message.content                    
-        else:                    
+                existing_message.content = (existing_message.content or '') + new_message.content
+            
+            # 合并 tool_calls（流式 tool_calls 增量合并）
+            if new_message.tool_calls is not None:
+                if existing_message.tool_calls is None:
+                    existing_message.tool_calls = []
+                
+                # 遍历新的 tool_calls，按 id 合并
+                for new_tc in new_message.tool_calls:
+                    # 兼容字典和对象形式（如 ChoiceDeltaToolCall）
+                    if hasattr(new_tc, 'id'):
+                        # 对象形式
+                        tc_id = new_tc.id
+                        tc_function = new_tc.function if hasattr(new_tc, 'function') else None
+                        tc_name = tc_function.name if tc_function and hasattr(tc_function, 'name') else None
+                        tc_args = tc_function.arguments if tc_function and hasattr(tc_function, 'arguments') else None
+                    else:
+                        # 字典形式
+                        tc_id = new_tc.get('id')
+                        tc_function = new_tc.get('function', {})
+                        tc_name = tc_function.get('name') if isinstance(tc_function, dict) else getattr(tc_function, 'name', None)
+                        tc_args = tc_function.get('arguments') if isinstance(tc_function, dict) else getattr(tc_function, 'arguments', None)
+                    
+                    # 如果 id 为空，则尝试合并到最后一个 tool_call（流式特性）
+                    if not tc_id and existing_message.tool_calls:
+                        existing_tc = existing_message.tool_calls[-1]
+                        # 合并 function 参数
+                        if tc_name is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'name'):
+                                existing_tc.function.name = tc_name
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_tc['function']['name'] = tc_name
+                        if tc_args is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'arguments'):
+                                existing_args = existing_tc.function.arguments or ''
+                                existing_tc.function.arguments = existing_args + tc_args
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_args = existing_tc['function'].get('arguments') or ''
+                                existing_tc['function']['arguments'] = existing_args + tc_args
+                        continue
+                    
+                    # 查找是否已存在相同 id 的 tool_call
+                    existing_tc = None
+                    for etc in existing_message.tool_calls:
+                        etc_id = etc.id if hasattr(etc, 'id') else etc.get('id')
+                        if etc_id == tc_id:
+                            existing_tc = etc
+                            break
+                    
+                    if existing_tc:
+                        # 合并 function 参数
+                        if tc_name is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'name'):
+                                existing_tc.function.name = tc_name
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_tc['function']['name'] = tc_name
+                        if tc_args is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'arguments'):
+                                existing_args = existing_tc.function.arguments or ''
+                                existing_tc.function.arguments = existing_args + tc_args
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_args = existing_tc['function'].get('arguments') or ''
+                                existing_tc['function']['arguments'] = existing_args + tc_args
+                    else:
+                        # 添加新的 tool_call
+                        existing_message.tool_calls.append(new_tc)
+        else:
             old_messages.append(new_message)
             # logger.debug(f"MessageManager: 创建新消息 {new_message.message_id[:8]}... ")
         return old_messages
@@ -899,11 +964,32 @@ class MessageManager:
             if msg.type == MessageType.EMPTY.value:
                 logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
                 continue
+            
+            # 转换 tool_calls 为字典列表
+            tool_calls_dict = None
+            if msg.tool_calls is not None:
+                tool_calls_dict = []
+                for tc in msg.tool_calls:
+                    if hasattr(tc, 'id'):
+                        # ChoiceDeltaToolCall 对象形式
+                        tc_dict = {
+                            'id': tc.id,
+                            'type': tc.type if hasattr(tc, 'type') else 'function',
+                            'function': {
+                                'name': tc.function.name if hasattr(tc, 'function') and hasattr(tc.function, 'name') else None,
+                                'arguments': tc.function.arguments if hasattr(tc, 'function') and hasattr(tc.function, 'arguments') else None
+                            }
+                        }
+                        tool_calls_dict.append(tc_dict)
+                    else:
+                        # 已经是字典形式
+                        tool_calls_dict.append(tc)
+            
             clean_msg = {
                 'role': msg.role,
                 'content': msg.content,
                 'tool_call_id': msg.tool_call_id,
-                'tool_calls': msg.tool_calls
+                'tool_calls': tool_calls_dict
             }
             
             # 去掉None值的键
