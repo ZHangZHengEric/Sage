@@ -96,6 +96,13 @@
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
              <!-- Global Error Card -->
              <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
+             
+             <!-- Loading State -->
+             <div v-else-if="!isToolArgsReady(toolCall)" class="flex items-center gap-2 p-3 bg-secondary/50 rounded-lg text-sm text-muted-foreground">
+                <Loader2 class="w-4 h-4 animate-spin" />
+                <span>正在构造工具 {{ toolCall.function?.name }} 参数...</span>
+             </div>
+
              <!-- Dynamic Tool Component -->
              <component
                v-else
@@ -131,7 +138,7 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Loader2 } from 'lucide-vue-next'
 import { getMessageLabel } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -382,6 +389,16 @@ const checkIsToolError = (result) => {
     if (result.is_error || result.status === 'error') return true
     if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
     return false
+}
+
+const isToolArgsReady = (toolCall) => {
+    if (!toolCall?.function?.arguments) return false
+    try {
+        JSON.parse(toolCall.function.arguments)
+        return true
+    } catch {
+        return false
+    }
 }
 
 const isLatestMessage = computed(() => {

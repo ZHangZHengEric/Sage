@@ -10,7 +10,6 @@ import uuid
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
-    delete_session_run_lock,
     get_session_context,
     get_session_run_lock,
 )
@@ -27,7 +26,6 @@ from .utils import (
     create_model_client,
     create_skill_proxy,
     create_tool_proxy,
-    send_chunked_json,
 )
 
 _SAGENT_CACHE = {}
@@ -396,6 +394,17 @@ async def execute_chat_session(
     session_id = stream_service.request.session_id
     stream_counter = 0
     last_activity_time = time.time()
+    
+    buffer_tool_call_msg = None
+    buffer_msg_id = None
+
+    async def send_response(data):
+        yield_result = data.copy()
+        yield_result.pop("message_type", None)
+        yield_result.pop("is_final", None)
+        yield_result.pop("is_chunk", None)
+        yield json.dumps(yield_result, ensure_ascii=False) + "\n"
+
     async for result in stream_service.process_stream():
         stream_counter += 1
         current_time = time.time()
@@ -405,17 +414,84 @@ async def execute_chat_session(
             logger.bind(session_id=session_id).info(
                 f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
             )
-        if mode == "chat":
-            yield_result = result.copy()
-            yield_result.pop("message_type", None)
-            yield_result.pop("is_final", None)
-            yield_result.pop("is_chunk", None)
-            yield json.dumps(yield_result, ensure_ascii=False) + "\n"
-        elif mode == "stream":
-            async for chunk in send_chunked_json(result):
-                yield chunk
+
+        if mode == "chat" or mode == "stream":
+            # Check if it is a tool call
+            is_tool_call = result.get('role') == 'assistant' and result.get('tool_calls')
+            
+            if is_tool_call:
+                current_tool_call = result['tool_calls'][0]
+                current_id = current_tool_call.get('id')
+                if buffer_tool_call_msg:
+                    prev_tool_call = buffer_tool_call_msg['tool_calls'][0]
+                    if hasattr(prev_tool_call, 'id'):
+                        prev_id = prev_tool_call.id
+                    else:
+                        prev_id = prev_tool_call.get('id')
+                    
+                    if prev_id == current_id or (not current_id and prev_id):
+                        # Same tool call, update buffer
+                        
+                        # Merge arguments
+                        if buffer_tool_call_msg.get('tool_calls') and result.get('tool_calls'):
+                            prev_tc = buffer_tool_call_msg['tool_calls'][0]
+                            curr_tc = result['tool_calls'][0]
+                            
+                            # Merge arguments
+                            prev_args = prev_tc.get('function', {}).get('arguments') or ""
+                            curr_args = curr_tc.get('function', {}).get('arguments') or ""
+                            if 'function' not in prev_tc:
+                                prev_tc['function'] = {}
+                            prev_tc['function']['arguments'] = prev_args + curr_args
+                            
+                            # Update name if current has it (and it's not empty)
+                            if curr_tc.get('function', {}).get('name'):
+                                prev_tc['function']['name'] = curr_tc['function']['name']
+
+                        # Update top-level fields from result (except tool_calls which we merged)
+                        for k, v in result.items():
+                            if k != 'tool_calls':
+                                buffer_tool_call_msg[k] = v
+
+                        # Maintain stable message_id
+                        buffer_tool_call_msg['message_id'] = buffer_msg_id
+                        continue
+                    else:
+                        # New tool call ID, flush previous
+                        async for chunk in send_response(buffer_tool_call_msg):
+                            yield chunk
+                        
+                        # Start new buffer
+                        buffer_tool_call_msg = result
+                        buffer_msg_id = result.get('message_id') or str(uuid.uuid4())
+                        buffer_tool_call_msg['message_id'] = buffer_msg_id
+                        async for chunk in send_response(buffer_tool_call_msg):
+                            yield chunk
+                else:
+                    # Start new buffer
+                    buffer_tool_call_msg = result
+                    buffer_msg_id = result.get('message_id') or str(uuid.uuid4())
+                    buffer_tool_call_msg['message_id'] = buffer_msg_id
+                    async for chunk in send_response(buffer_tool_call_msg):
+                        yield chunk
+            else:
+                # Not a tool call, flush buffer if exists
+                if buffer_tool_call_msg:
+                    async for chunk in send_response(buffer_tool_call_msg):
+                        yield chunk
+                    buffer_tool_call_msg = None
+                    buffer_msg_id = None
+                
+                async for chunk in send_response(result):
+                    yield chunk
         else:
-            yield json.dumps(result, ensure_ascii=False) + "\n"
+            async for chunk in send_response(result):
+                yield chunk
+
+    # End of stream, flush buffer
+    if buffer_tool_call_msg:
+        async for chunk in send_response(buffer_tool_call_msg):
+            yield chunk
 
 
     end_data = {

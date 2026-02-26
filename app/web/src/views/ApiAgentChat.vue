@@ -106,31 +106,6 @@
           </Card>
         </div>
 
-        <h3 class="text-lg font-bold mb-4">分块事件说明</h3>
-        <div class="grid gap-4 mb-8">
-          <Card v-for="p in chunkParams" :key="p.name">
-            <CardHeader class="p-4 pb-2">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-bold">{{ p.name }}</span>
-                <Badge variant="secondary">{{ p.type }}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent class="p-4 pt-0">
-              <p class="text-sm text-muted-foreground">{{ p.desc }}</p>
-              
-              <div v-if="p.children && p.children.length" class="mt-4 pl-4 border-l-2 border-muted space-y-4">
-                <div v-for="c in p.children" :key="p.name + '-' + c.name">
-                  <div class="flex items-center gap-2 flex-wrap mb-1">
-                    <span class="font-semibold text-sm">{{ c.name }}</span>
-                    <Badge variant="secondary" class="text-xs">{{ c.type }}</Badge>
-                  </div>
-                  <p class="text-xs text-muted-foreground">{{ c.desc }}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
         <Card>
           <CardHeader class="flex flex-row items-center justify-between p-4">
             <CardTitle class="text-base">流式响应示例</CardTitle>
@@ -224,7 +199,6 @@ const responseParams = [
   { name: 'role', type: '"user" | "assistant" | "tool"', required: false, desc: '角色标识，流式事件如 stream_end 不携带' },
   { name: 'message_id', type: 'string', required: false, desc: '消息唯一ID' },
   { name: 'timestamp', type: 'number', required: true, desc: '时间戳（秒）' },
-  { name: 'chunk_id', type: 'string', required: false, desc: '流式分片ID' },
   { name: 'is_final', type: 'boolean', required: false, desc: '是否最终消息' },
   { name: 'session_id', type: 'string', required: false, desc: '会话ID' },
   { name: 'content', type: 'string', required: false, desc: '原始内容，可能为空' },
@@ -237,26 +211,10 @@ const responseParams = [
   { name: 'total_stream_count', type: 'number', required: false, desc: '当 type=stream_end 时返回总流事件数' }
 ]
 
-const chunkParams = [
-  { name: 'chunk_start', type: 'event', desc: '开始分块，返回本次分块的 chunk_id；后续所有 json_chunk 与 chunk_end 的 chunk_id 与之保持一致', children: [
-    { name: 'chunk_id', type: 'string', required: true, desc: '分块唯一标识' },
-    { name: 'is_chunk', type: 'boolean', required: true, desc: '为 true，表示当前为分块事件' }
-  ] },
-  { name: 'json_chunk', type: 'event', desc: '分块内容，可能为流式片段或结构化片段；在 UI 侧累积并拼接', children: [
-    { name: 'chunk_id', type: 'string', required: true, desc: '与 chunk_start 的 chunk_id 相同' },
-    { name: 'content', type: 'string | object', required: false, desc: '片段内容，可能为空字符串或结构化对象' },
-    { name: 'is_chunk', type: 'boolean', required: true, desc: '为 true' }
-  ] },
-  { name: 'chunk_end', type: 'event', desc: '结束分块，表示该 chunk 已完成；前端可关闭累积并触发最终渲染', children: [
-    { name: 'chunk_id', type: 'string', required: true, desc: '与 chunk_start 的 chunk_id 相同' },
-    { name: 'is_chunk', type: 'boolean', required: true, desc: '为 true' }
-  ] }
-]
-
 const typeList = computed(() => Array.from(messageTypeLabels.entries()).map(([key, label]) => ({ key, label })))
 
-const exampleStreamResponse = `{"role": "assistant", "content": "您好", "message_id": "8c89c757-1ce5-4860-9ad5-6d20d6defdef",  "type": "do_subtask_result", "message_type": "do_subtask_result", "timestamp": 1764040749.2765763, "chunk_id": "81d993e8-6013-4862-b083-bdaeac8b5f15", "is_final": false, "is_chunk": false, "metadata": {}, "session_id": "demo-session"}
-{"role": "assistant", "content": "", "message_id": "98516185-a102-47b8-acfa-b4320f988f54", "type": "token_usage", "message_type": "token_usage", "timestamp": 1764040752.8867667, "chunk_id": "d16899a8-e8bd-40f5-97b1-b1f1ab774806", "is_final": false, "is_chunk": false, "metadata": {"token_usage": {"total_info": {"completion_tokens": 146, "prompt_tokens": 1583, "total_tokens": 1729}, "per_step_info": [{"step_name": "direct_execution", "usage": {"completion_tokens": 123, "prompt_tokens": 1067, "total_tokens": 1190, "completion_tokens_details": null, "prompt_tokens_details": null}}, {"step_name": "task_complete_judge", "usage": {"completion_tokens": 23, "prompt_tokens": 516, "total_tokens": 539, "completion_tokens_details": null, "prompt_tokens_details": null}}]}, "session_id": "demo-session"}, "session_id": "demo-session"}
+const exampleStreamResponse = `{"role": "assistant", "content": "您好", "message_id": "8c89c757-1ce5-4860-9ad5-6d20d6defdef",  "type": "do_subtask_result", "message_type": "do_subtask_result", "timestamp": 1764040749.2765763, "is_final": false, "is_chunk": false, "metadata": {}, "session_id": "demo-session"}
+{"role": "assistant", "content": "", "message_id": "98516185-a102-47b8-acfa-b4320f988f54", "type": "token_usage", "message_type": "token_usage", "timestamp": 1764040752.8867667, "is_final": false, "is_chunk": false, "metadata": {"token_usage": {"total_info": {"completion_tokens": 146, "prompt_tokens": 1583, "total_tokens": 1729}, "per_step_info": [{"step_name": "direct_execution", "usage": {"completion_tokens": 123, "prompt_tokens": 1067, "total_tokens": 1190, "completion_tokens_details": null, "prompt_tokens_details": null}}, {"step_name": "task_complete_judge", "usage": {"completion_tokens": 23, "prompt_tokens": 516, "total_tokens": 539, "completion_tokens_details": null, "prompt_tokens_details": null}}]}, "session_id": "demo-session"}, "session_id": "demo-session"}
 {"type": "stream_end", "session_id": "demo-session", "timestamp": 1764040752.909369, "total_stream_count": 29}`
 
 const showResponseExample = ref(true)
