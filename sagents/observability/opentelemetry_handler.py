@@ -213,7 +213,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
     def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], **kwargs: Any) -> Any:
         span = self.tracer.start_span(
-            name=f"LLM调用:{model_name}",
+            name=f"阶段：{step_name}",
             kind=trace.SpanKind.CLIENT
         )
         llm_system = kwargs.get("llm_system", "openai")
