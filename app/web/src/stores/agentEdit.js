@@ -26,6 +26,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     memoryType: "session",
     maxLoopCount: 10,
     llm_provider_id: null,
+    llmConfig: {},
     systemContext: {},
     availableTools: [],
     availableSkills: [],
@@ -36,10 +37,13 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
 
   const formData = ref(JSON.parse(JSON.stringify(defaultFormData)))
 
+  // Helper to generate unique IDs for UI tracking
+  const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2)
+
   // Helper State for complex fields (Workflows, Context)
   // These are transformed to/from formData when saving/loading
   const systemContextPairs = ref([{ key: '', value: '' }])
-  const workflowPairs = ref([{ key: '', steps: [''] }])
+  const workflowPairs = ref([{ id: generateId(), key: '', steps: [''] }])
 
   // Computed
   const isStep1Valid = computed(() => {
@@ -69,7 +73,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
   }
 
   const addWorkflowPair = () => {
-    workflowPairs.value.push({ key: '', steps: [''] })
+    workflowPairs.value.push({ id: generateId(), key: '', steps: [''] })
   }
 
   const removeWorkflowPair = (index) => {
@@ -139,12 +143,12 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       systemContextPairs.value = Object.entries(formData.value.systemContext || {}).map(([k, v]) => ({ key: k, value: v }))
       if (systemContextPairs.value.length === 0) systemContextPairs.value.push({ key: '', value: '' })
 
-      workflowPairs.value = Object.entries(formData.value.availableWorkflows || {}).map(([k, v]) => ({ key: k, steps: v }))
-      if (workflowPairs.value.length === 0) workflowPairs.value.push({ key: '', steps: [''] })
+      workflowPairs.value = Object.entries(formData.value.availableWorkflows || {}).map(([k, v]) => ({ id: generateId(), key: k, steps: v }))
+      if (workflowPairs.value.length === 0) workflowPairs.value.push({ id: generateId(), key: '', steps: [''] })
     } else {
       formData.value = JSON.parse(JSON.stringify(defaultFormData))
       systemContextPairs.value = [{ key: '', value: '' }]
-      workflowPairs.value = [{ key: '', steps: [''] }]
+      workflowPairs.value = [{ id: generateId(), key: '', steps: [''] }]
     }
     
     if (!preserveStep) {
