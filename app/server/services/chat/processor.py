@@ -23,28 +23,6 @@ class ContentProcessor:
             content = result.get('content')
             if isinstance(content, str):
                 result['content'] = cls._process_tool_content(content)
-        # 3. tool_calls是对象形式转成dict
-        if result.get('tool_calls'):
-            tool_calls = result['tool_calls']
-            processed_tool_calls = []
-            for tc in tool_calls:
-                if isinstance(tc, dict):
-                    processed_tool_calls.append(tc)
-                else:
-                     # ChoiceDeltaToolCall 对象形式
-                    tc_dict = {
-                        'id': tc.id,
-                        'type': tc.type if hasattr(tc, 'type') else 'function',
-                        'function': {
-                            'name': tc.function.name if hasattr(tc, 'function') and hasattr(tc.function, 'name') else None,
-                            'arguments': tc.function.arguments if hasattr(tc, 'function') and hasattr(tc.function, 'arguments') else None
-                        },
-                        'index': getattr(tc, 'index', 0)
-                    }
-                    processed_tool_calls.append(tc_dict)
-          
-            result['tool_calls'] = processed_tool_calls
-
         return result
 
 
