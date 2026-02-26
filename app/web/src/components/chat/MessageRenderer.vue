@@ -98,7 +98,7 @@
              <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
              
              <!-- Loading State -->
-             <div v-else-if="!isToolArgsReady(toolCall)" class="flex items-center gap-2 p-3 bg-secondary/50 rounded-lg text-sm text-muted-foreground">
+             <div v-else-if="!isToolArgsReady(toolCall) && isCustomTool(toolCall.function?.name)" class="flex items-center gap-2 p-3 bg-secondary/50 rounded-lg text-sm text-muted-foreground">
                 <Loader2 class="w-4 h-4 animate-spin" />
                 <span>正在构造工具 {{ toolCall.function?.name }} 参数...</span>
              </div>
@@ -275,10 +275,10 @@ const getToolResult = (toolCall) => {
 }
 
 const getToolName = (message) => {
-    if (message.tool_calls && message.tool_calls.length > 0) {
-        return message.tool_calls[0].function?.name || ''
-    }
-    return ''
+  if (message.tool_calls && message.tool_calls.length > 0) {
+    return message.tool_calls[0].function?.name || ''
+  }
+  return ''
 }
 
 const getLabel = ({ role, type, messageType, toolName }) => {
@@ -385,43 +385,46 @@ const getParsedToolResult = (toolCall) => {
 }
 
 const checkIsToolError = (result) => {
-    if (!result) return false
-    if (result.is_error || result.status === 'error') return true
-    if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
+  if (!result) return false
+  if (result.is_error || result.status === 'error') return true
+  if (result.content && typeof result.content === 'string' && result.content.toLowerCase().startsWith('error:')) return true
     return false
 }
 
 const isToolArgsReady = (toolCall) => {
-    if (!toolCall?.function?.arguments) return false
-    try {
-        JSON.parse(toolCall.function.arguments)
-        return true
-    } catch {
-        return false
-    }
+  if (!toolCall?.function?.arguments) return false
+  try {
+    JSON.parse(toolCall.function.arguments)
+    return true
+  } catch {
+    return false
+  }
 }
 
 const isLatestMessage = computed(() => {
-    // 如果readonly，所有消息都不是最新
-    if (props.readonly) return false
-    
-    // If it's the last message, it's definitely latest
-    if (props.messageIndex === props.messages.length - 1) return true
-    
-    // Check if there are any user messages after this one
-    // If no user message follows, it is considered the latest turn
-    for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
-        if (props.messages[i].role === 'user') {
-            return false
-        }
+  // 如果readonly，所有消息都不是最新
+  if (props.readonly) return false
+
+  // If it's the last message, it's definitely latest
+  if (props.messageIndex === props.messages.length - 1) return true
+
+  // Check if there are any user messages after this one
+  // If no user message follows, it is considered the latest turn
+  for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
+    if (props.messages[i].role === 'user') {
+      return false
     }
-    return true
+  }
+  return true
 })
 
+const isCustomTool = (toolName) => {
+  return !!TOOL_COMPONENT_MAP[toolName]
+}
 
 const isCustomToolMessage = computed(() => {
-    if (!hasToolCalls.value) return false
-    return props.message.tool_calls.some(call => !!TOOL_COMPONENT_MAP[call.function?.name])
+  if (!hasToolCalls.value) return false
+  return props.message.tool_calls.some(call => !!TOOL_COMPONENT_MAP[call.function?.name])
 })
 
 const getToolComponent = (toolName) => {
