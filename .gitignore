@@ -194,3 +194,8 @@ agent_workspace
 data
 .trae
 skills/*
+
+.cargo
+.pyinstaller
+.rustup
+app/desktop/tauri/bin/*
