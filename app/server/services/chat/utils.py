@@ -15,7 +15,7 @@ def create_model_client(client_params: Dict[str, Any]) -> Any:
             api_key = random.choice(keys)
             logger.info(f"Using random key from {len(keys)} available keys")
             
-    logger.info(f"初始化自定义模型客户端: model={client_params.get('model')}, base_url={base_url}")
+    logger.info(f"初始化Chat模型客户端: model={client_params.get('model')}, base_url={base_url}")
     model_client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,

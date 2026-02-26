@@ -317,7 +317,6 @@ class SageStreamService:
                 message_dict["content"] = str(message_dict["content"])
             messages.append(message_dict)
         await _ensure_conversation(self.request)
-        logger.bind(session_id=session_id).info("🚀 SageStreamService.process_stream 开始")
         try:
             stream_result = self.sage_engine.run_stream(
                 input_messages=messages,
@@ -388,10 +387,12 @@ async def prepare_session(request: StreamRequest):
 async def execute_chat_session(
     mode: str,
     stream_service: SageStreamService,
+    **kwargs,
 ):
     """
     执行聊天会话逻辑（仅生成流，不处理锁释放）
     """
+
     session_id = stream_service.request.session_id
     stream_counter = 0
     last_activity_time = time.time()
@@ -409,8 +410,6 @@ async def execute_chat_session(
             yield_result.pop("message_type", None)
             yield_result.pop("is_final", None)
             yield_result.pop("is_chunk", None)
-            if yield_result.get("type") == "token_usage":
-                continue
             yield json.dumps(yield_result, ensure_ascii=False) + "\n"
         elif mode == "stream":
             async for chunk in send_chunked_json(result):
@@ -425,42 +424,7 @@ async def execute_chat_session(
         "timestamp": time.time(),
         "total_stream_count": stream_counter,
     }
-    total_duration = time.time() - (
-        last_activity_time - time_since_last
-        if "time_since_last" in locals()
-        else last_activity_time
-    )
-    logger.bind(session_id=session_id).info(
-        f"✅ 完成流式处理: 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s"
-    )
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
-
-
-async def run_chat_session(
-    request: StreamRequest,
-    mode: str,
-):
-    """
-    运行聊天会话，封装了准备、执行和资源清理的完整生命周期
-    """
-    # 1. 准备会话（获取锁、初始化服务）
-    session_id, stream_service, lock = await prepare_session(request)
-    
-    try:
-        async for line in execute_chat_session(
-            request=request,
-            mode=mode,
-            session_id=session_id,
-            stream_service=stream_service,
-        ):
-            yield line
-    finally:
-        # 3. 清理资源
-        logger.bind(session_id=session_id).info("流处理结束，清理会话资源")
-        if lock.locked():
-            await lock.release()
-        delete_session_run_lock(session_id)
-        logger.bind(session_id=session_id).info("资源已清理")
 
 async def _ensure_conversation(request: StreamRequest) -> None:
     conversation_dao = models.ConversationDao()

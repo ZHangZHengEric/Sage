@@ -211,14 +211,20 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
-    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], **kwargs: Any) -> Any:
+    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], step_name: str, **kwargs: Any) -> Any:
         span = self.tracer.start_span(
-            name=f"LLM调用:{model_name}",
+            name=f"阶段：{step_name}",
             kind=trace.SpanKind.CLIENT
         )
         llm_system = kwargs.get("llm_system", "openai")
         span.set_attribute("llm.system", llm_system)
         span.set_attribute("llm.model", model_name)
+        try:
+            messages_str = json.dumps(messages, ensure_ascii=False)
+            span.set_attribute("llm.messages", messages_str)
+        except Exception as e:
+            logger.error(f"Error setting llm.messages attribute: {e}")
+            pass
         span.set_attribute("session_id", session_id)
         self._push_span(span)
 
@@ -227,12 +233,12 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         if not span:
             return
 
-        # Record usage if available
-        if hasattr(response, 'usage') and response.usage:
-            span.set_attribute("llm.usage.prompt_tokens", response.usage.prompt_tokens)
-            span.set_attribute("llm.usage.completion_tokens", response.usage.completion_tokens)
-            span.set_attribute("llm.usage.total_tokens", response.usage.total_tokens)
-
+        try:
+            span.set_attribute("llm.response", json.dumps(response, ensure_ascii=False))
+        except Exception as e:
+            logger.error(f"Error setting llm.response attribute: {e}")
+            pass
+        
         span.set_status(Status(StatusCode.OK))
         self._pop_span()
 

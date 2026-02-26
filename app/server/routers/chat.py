@@ -112,7 +112,7 @@ async def stream_with_disconnect_check(
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
 
-        logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
+        logger.bind(session_id=session_id).debug("流处理结束，清理会话锁")
 
         try:
             if hasattr(lock, "locked") and lock.locked():
@@ -122,9 +122,9 @@ async def stream_with_disconnect_check(
 
             delete_session_run_lock(session_id)
 
-            logger.bind(session_id=session_id).info("资源已清理")
+            logger.bind(session_id=session_id).info("会话锁已清理")
         except Exception as e:
-            logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
+            logger.bind(session_id=session_id).error(f"清理会话锁时出错: {e}")
 
 def validate_and_prepare_request(
     request: ChatRequest | StreamRequest, http_request: Request

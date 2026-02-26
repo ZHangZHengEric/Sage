@@ -209,14 +209,8 @@ async def initialize_observability(cfg: StartupConfig):
         logger.info("观测链路上报已初始化")
     else:
         try:
-            from .services.trace import SageSpanExporter, TraceService
-
             resource = Resource(attributes={SERVICE_NAME: "sage-server"})
             provider = TracerProvider(resource=resource)
-
-            # 1. Internal Exporter (for Workflow Panel) - Optional
-            processor = BatchSpanProcessor(SageSpanExporter())
-            provider.add_span_processor(processor)
 
             # 2. OTLP Exporter (for Jaeger/external)
             if cfg and cfg.trace_jaeger_endpoint:
@@ -227,8 +221,6 @@ async def initialize_observability(cfg: StartupConfig):
             # Set global provider
             trace.set_tracer_provider(provider)
 
-            # Start TraceService worker
-            await TraceService.get_instance().start()
             logger.info("观测链路上报已初始化")
         except Exception as e:
             logger.error(f"观测链路上报初始化失败: {e}")
@@ -244,13 +236,7 @@ async def close_observability():
         except Exception as e:
             logger.error(f"观测链路上报关闭失败: {e}")
 
-    from .services.trace import TraceService
-
-    # 2. Stop Trace Service (Drain queue to DB)
-    try:
-        await TraceService.get_instance().stop()
-    finally:
-        logger.info("观测链路上报服务已关闭")
+    logger.info("观测链路上报服务已关闭")
 
 
 async def initialize_scheduler(cfg: StartupConfig):

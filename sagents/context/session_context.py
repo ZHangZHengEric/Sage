@@ -109,40 +109,17 @@ class SessionContext:
             self.message_manager.add_messages(valid_messages)
 
     def init_more(self, workspace_root: str):
-        logger.info(f"SessionContext: 后初始化会话上下文，会话ID: {self.session_id}")
-        self.session_workspace = os.path.join(workspace_root, self.session_id)
-        
-        # 定义虚拟工作空间路径 / Define virtual workspace path
+        # 1. 虚拟工作空间路径（容器内路径）
         self.virtual_workspace = "/workspace"
-        
-        # 临时变量存储宿主机路径
+
+        # 2. 会话根目录
+        self.session_workspace = os.path.join(workspace_root, self.session_id)
+        os.makedirs(self.session_workspace, exist_ok=True)
+
+        # 3. agent 工作目录（宿主机）
         _agent_workspace_host_path = os.path.join(self.session_workspace, "agent_workspace")
+        os.makedirs(_agent_workspace_host_path, exist_ok=True)
 
-        if not os.path.exists(self.session_workspace):
-            os.makedirs(self.session_workspace)
-        
-        if not os.path.exists(_agent_workspace_host_path):
-            os.makedirs(_agent_workspace_host_path)
-
-        # 加载save的session_status.json
-        session_status_path = os.path.join(self.session_workspace, "session_status.json")
-        if os.path.exists(session_status_path):
-            try:
-                with open(session_status_path, "r") as f:
-                    session_status = json.load(f)
-                    self.status = SessionStatus(session_status["status"])
-                    self.start_time = session_status["start_time"]
-                    self.end_time = session_status["end_time"]
-                    self.system_context = session_status["system_context"]
-            except Exception as e:
-                logger.error(f"SessionContext: Failed to load session status: {e}")
-        
-        # 确保 llm_request 目录存在，用于存放请求日志
-        self.llm_request_dir = os.path.join(self.session_workspace, "llm_request")
-        if not os.path.exists(self.llm_request_dir):
-            os.makedirs(self.llm_request_dir)
-
-        logger.info(f"SessionContext: system_context: {self.system_context}")
         # 初始化 external_paths
         self.external_paths = self.system_context.get('external_paths') or []
         self.system_context.pop("可以访问的其他路径文件夹",None)
@@ -178,8 +155,7 @@ class SessionContext:
         
         # Define session skill directory and update SkillManager
         self.session_skill_dir = os.path.join(self.agent_workspace.host_path, "skills")
-        if not os.path.exists(self.session_skill_dir):
-            os.makedirs(self.session_skill_dir)
+        os.makedirs(self.session_skill_dir, exist_ok=True)
 
         if self.skill_manager:
             # Create a dedicated manager for session-specific skills
@@ -195,15 +171,11 @@ class SessionContext:
             # This ensures session-specific skills override global ones if names collide,
             # and new session skills are immediately available.
             self.skill_manager = SkillProxy(skill_managers=[session_local_manager, self.skill_manager])
-
-        # Copy skills to workspace if skill manager is available
-        if self.skill_manager:
-            logger.info(f"SessionContext: 准备复制技能到工作区: {self.agent_workspace.host_path}")
+            logger.debug(f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}, 准备复制技能到工作区: {self.agent_workspace.host_path}")
             t1 = time.time()
-            logger.info(f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}")
             try:
                 self.skill_manager.prepare_skills_in_workspace(self.agent_workspace.host_path)
-                logger.info(f"SessionContext: 技能复制完成，耗时: {time.time() - t1:.3f}s")
+                logger.debug(f"SessionContext: 技能复制完成，耗时: {time.time() - t1:.3f}s")
             except Exception as e:
                 logger.error(f"SessionContext: 技能复制失败: {e}", exc_info=True)
         else:
@@ -221,7 +193,7 @@ class SessionContext:
         # external_paths 已经在上面初始化并在 system_context 中设置了
 
         permission_paths = [self.system_context['private_workspace']]
-        logger.info(f"self.external_paths: {self.external_paths}")
+        logger.debug(f"self.external_paths: {self.external_paths}")
         if self.external_paths and isinstance(self.external_paths, list):
              permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
@@ -359,18 +331,17 @@ class SessionContext:
     async def init_user_memory_context(self):
         """初始化用户记忆
         """
-        if self.user_id is None:
-            logger.info("SessionContext: 用户ID为空，无法初始化用户记忆")
-            return
-
         # 使用已注入的UserMemoryManager
         if self.user_memory_manager:
             try:
                 # 检查是否可用
                 if not self.user_memory_manager.is_enabled():
-                    logger.info(f"SessionContext: UserMemoryManager不可用，用户ID: {self.user_id}")
+                    logger.warning(f"SessionContext: UserMemoryManager不可用，用户ID: {self.user_id}")
                 else:
-                    logger.info(f"SessionContext: UserMemoryManager已启用，用户ID: {self.user_id}")
+                    if self.user_id is None:
+                        logger.warning("SessionContext: 用户ID为空，无法初始化用户记忆")
+                        return
+                    logger.debug(f"SessionContext: UserMemoryManager已启用，用户ID: {self.user_id}")
                     # user_memory_manager 初始化成功，需要在system context添加对于 记忆使用的说明和要求
                     self.system_context['长期记忆的要求'] = self.user_memory_manager.get_user_memory_usage_description()
                     # 自动查询系统级记忆并注入到system_context
@@ -455,9 +426,9 @@ class SessionContext:
 
                 if formatted_context:
                     self.system_context['用户长期记忆'] = formatted_context
-                    logger.info(f"成功注入 {len(system_memories)} 种类型的系统级记忆到system_context")
+                    logger.debug(f"成功注入 {len(system_memories)} 种类型的系统级记忆到system_context")
             else:
-                logger.info("未找到系统级记忆，跳过注入")
+                logger.debug("未找到系统级记忆，跳过注入")
 
         except Exception as e:
             logger.error(f"加载系统级记忆失败: {e}")
@@ -596,18 +567,9 @@ class SessionContext:
 
     def save(self):
         """保存会话上下文"""
-        logger.debug(f"SessionContext: Saving session context for {self.session_id}")
-        # 先判断该会话的文件夹是否存在
-        if not os.path.exists(self.session_workspace):
-            os.makedirs(self.session_workspace)
-            logger.debug(f"SessionContext: Created session workspace: {self.session_workspace}")
-
         # 保存模型请求记录
         llm_request_folder = os.path.join(self.session_workspace, "llm_request")
-        if not os.path.exists(llm_request_folder):
-            os.makedirs(llm_request_folder)
-            logger.debug(f"SessionContext: Created llm_request folder: {llm_request_folder}")
-
+        os.makedirs(llm_request_folder, exist_ok=True)
         # 说明存在，需要看看当前的序号从几开始
         existing_files = os.listdir(llm_request_folder)
         max_index = -1

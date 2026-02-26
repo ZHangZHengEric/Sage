@@ -42,12 +42,12 @@
 
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showTrace = !showTrace">
-                  <Activity class="h-4 w-4" />
+                <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="openTraceDetails">
+                  <Search class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{{ t('chat.traceWorkflow') }}</p>
+                <p>Jaeger 详情</p>
               </TooltipContent>
             </Tooltip>
 
@@ -116,8 +116,6 @@
       <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles"
         @download-file="downloadFile" @close="showWorkspace = false" />
 
-      <WorkflowPanel v-if="showTrace && currentSessionId" :session-id="currentSessionId" @close="showTrace = false" />
-
       <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
         @config-change="updateConfig" @close="showSettings = false" />
     </div>
@@ -128,14 +126,14 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Bot, Settings, Activity, Share2, FolderOpen } from 'lucide-vue-next'
+import { Bot, Settings, Share2, FolderOpen, Search } from 'lucide-vue-next'
+import SparkMD5 from 'spark-md5'
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
-import WorkflowPanel from '@/components/chat/WorkflowPanel.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 
@@ -177,9 +175,22 @@ const showSettings = ref(false)
 const showToolDetails = ref(false)
 const showTaskStatus = ref(false)
 const showWorkspace = ref(false)
-const showTrace = ref(false)
+const currentTraceId = ref(null)
 const selectedToolExecution = ref(null)
+
 const toolResult = ref(null)
+
+/* ---------------- jaeger jump ---------------- */
+
+const openTraceDetails = () => {
+  const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
+  if (!baseUrl || !currentTraceId.value) {
+    if (!baseUrl) toast.error('Jaeger URL not configured')
+    if (!currentTraceId.value) toast.error('No trace ID available')
+    return
+  }
+  window.open(`${baseUrl}/trace/${currentTraceId.value}`, '_blank')
+}
 
 // 滚动相关状态
 const isUserScrolling = ref(false)
@@ -194,6 +205,15 @@ const messageChunks = ref(new Map());
 const isLoading = ref(false);
 const abortControllerRef = ref(null);
 const currentSessionId = ref(null);
+
+watch(currentSessionId, (newVal) => {
+  if (newVal) {
+    currentTraceId.value = SparkMD5.hash(newVal)
+  } else {
+    currentTraceId.value = null
+  }
+})
+
 const selectedAgent = ref(null);
 const config = ref({
     deepThinking: true,
@@ -796,6 +816,11 @@ const handleSendMessage = async (content) => {
       config: config.value,
       abortControllerRef: abortControllerRef,
       onMessage: (data) => {
+        if (data.type === 'trace_info') {
+          console.log('🔍 收到Trace ID:', data.trace_id);
+          currentTraceId.value = data.trace_id;
+          return;
+        }
         handleMessage(data);
       },
       onChunkMessage: (data) => {

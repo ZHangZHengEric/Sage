@@ -85,6 +85,11 @@ class ObservableCompletions:
         model_name = kwargs.get('model', 'unknown')
         messages = kwargs.get('messages', [])
         
+        # Extract step_name from extra_body if present to avoid sending it to API
+        step_name = None
+        if 'extra_body' in kwargs and isinstance(kwargs['extra_body'], dict):
+            step_name = kwargs['extra_body'].pop('_step_name', None)
+
         # We try to get base_url if possible, otherwise default
         try:
             llm_system = str(self._completions._client.base_url)
@@ -92,7 +97,7 @@ class ObservableCompletions:
             llm_system = "default_endpoint"
         
         if session_id:
-            self.observability_manager.on_llm_start(session_id, model_name, messages, llm_system=llm_system)
+            self.observability_manager.on_llm_start(session_id, model_name, messages, llm_system=llm_system, step_name=step_name)
         
         try:
             response = await self._completions.create(**kwargs)
@@ -112,16 +117,22 @@ class ObservableCompletions:
             raise e
 
     async def _wrap_stream(self, stream, session_id):
+        collected_content = []
         try:
             async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        collected_content.append(delta.content)
                 yield chunk
         finally:
             # When stream ends (or error occurs during iteration which raises out)
             # If successful completion:
             # We construct a minimal response object or just log a marker
             # Since we can't easily reconstruct the full ChatCompletion object without duplicating AgentBase logic,
-            # we will log a special marker. The content is less important for trace timing/success status.
-            self.observability_manager.on_llm_end("<stream_finished>", session_id=session_id)
+            # we will log the accumulated content.
+            full_content = "".join(collected_content)
+            self.observability_manager.on_llm_end(full_content, session_id=session_id)
 
 class AgentRuntime:
     """
