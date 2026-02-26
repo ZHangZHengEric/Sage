@@ -482,41 +482,11 @@ const handleMessage = (messageData) => {
         timestamp: messageData.timestamp || Date.now()
       };
     } else {
-      // Handle tool_calls merging if present
-      let updatedToolCalls = existing.tool_calls ? [...existing.tool_calls] : [];
-      
-      if (messageData.tool_calls) {
-          if (!existing.tool_calls) {
-              updatedToolCalls = messageData.tool_calls;
-          } else {
-              messageData.tool_calls.forEach(newTc => {
-                  const existingTcIndex = updatedToolCalls.findIndex(tc => tc.index === newTc.index);
-                  if (existingTcIndex >= 0) {
-                      const existingTc = updatedToolCalls[existingTcIndex];
-                      updatedToolCalls[existingTcIndex] = {
-                          ...existingTc,
-                          ...newTc,
-                          id: newTc.id || existingTc.id,
-                          function: {
-                              ...existingTc.function,
-                              ...newTc.function,
-                              name: newTc.function?.name || existingTc.function?.name,
-                              arguments: (existingTc.function?.arguments || '') + (newTc.function?.arguments || '')
-                          }
-                      };
-                  } else {
-                      updatedToolCalls.push(newTc);
-                  }
-              });
-          }
-      }
-
       // 对于其他消息类型，合并content
       newMessages[existingIndex] = {
         ...existing,
         ...messageData,
         content: (existing.content || '') + (messageData.content || ''),
-        tool_calls: updatedToolCalls,
         timestamp: messageData.timestamp || Date.now()
       };
     }
@@ -867,9 +837,19 @@ const sendMessageApi = async ({
         try {
           const messageData = JSON.parse(line);
 
-          // 处理普通消息
-          if (onMessage) {
-            onMessage(messageData);
+          // 处理分块消息
+          if (messageData.type === 'chunk_start' ||
+            messageData.type === 'json_chunk' ||
+            messageData.type === 'chunk_end') {
+            console.log('🧩 分块消息:', messageData.type, messageData);
+         
+
+          } else {
+            // 处理普通消息
+            if (onMessage) {
+              onMessage(messageData);
+            }
+
           }
         } catch (parseError) {
           console.error('❌ JSON解析失败:', parseError);
