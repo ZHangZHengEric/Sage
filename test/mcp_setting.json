@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "mock-weather": {
-      "protocol": "sse",
-      "sse_url": "http://mock-mcp:9001/sse",
-      "disabled": false
-    }
-  }
-}

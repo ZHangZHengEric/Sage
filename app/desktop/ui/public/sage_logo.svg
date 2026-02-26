@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Monochrome Gradient: White to Mid-Gray for depth without color -->
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#A0A0A0;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Solid Black Background with Rounded Corners -->
+  <rect width="512" height="512" rx="128" fill="#000000"/>
+  
+  <!-- 
+    "Ambiguous Tech S/Z" - Final Refinement
+    - Corrected S orientation (Top-Left to Bottom-Right diagonal).
+    - Sharp, angular "Z-like" geometry (chamfered corners).
+    - Perfectly centered in 512x512 canvas.
+    - Solid and balanced.
+  -->
+   <path d="
+    M 146 85
+    H 366
+    L 416 135
+    V 195
+    L 376 195
+    L 206 195
+    L 396 365
+    V 397
+    L 366 427
+    H 146
+    L 96 377
+    V 317
+    L 136 317
+    L 306 317
+    L 116 147
+    V 115
+    L 146 85
+    Z
+   " fill="url(#grad1)" />
+
+</svg>
