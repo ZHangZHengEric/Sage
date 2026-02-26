@@ -12,6 +12,32 @@ import uuid
 from copy import deepcopy
 
 
+def _get_system_prefix(tool_manager: Optional[ToolManager], language: str) -> str:
+    """
+    根据工具管理器中是否有 todo_write 工具来选择合适的 system prefix
+    
+    Args:
+        tool_manager: 工具管理器
+        language: 语言
+        
+    Returns:
+        str: 合适的 system prefix 模板名称
+    """
+    tool_names = []
+    if tool_manager:
+        # 获取所有工具
+        tool_names = tool_manager.list_all_tools_name()
+        # tools_json = tool_manager.get_openai_tools(lang=language, fallback_chain=["en"])
+        # tool_names = [tool['function']['name'] for tool in tools_json]
+    
+    # 如果有 todo_write 工具，使用完整版本
+    if 'todo_write' in tool_names:
+        return "agent_custom_system_prefix"
+    
+    # 没有 todo_write 工具，使用无任务管理版本
+    return "agent_custom_system_prefix_no_task"
+
+
 class SimpleAgent(AgentBase):
     """
     简单智能体
@@ -37,7 +63,7 @@ class SimpleAgent(AgentBase):
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
         current_system_prefix = PromptManager().get_agent_prompt_auto(
-            "agent_custom_system_prefix", language=session_context.get_language()
+            _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
         )
 
         # 从会话管理中，获取消息管理实例
@@ -117,6 +143,7 @@ class SimpleAgent(AgentBase):
     async def _is_task_complete(self,
                                 messages_input: List[MessageChunk],
                                 session_id: str,
+                                tool_manager: Optional[ToolManager],
                                 session_context: SessionContext) -> bool:
         # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
         if messages_input[-1].role == 'tool':
@@ -139,7 +166,7 @@ class SimpleAgent(AgentBase):
             system_prompt=self.prepare_unified_system_message(
                 session_id,
                 custom_prefix=PromptManager().get_agent_prompt_auto(
-                                                "agent_custom_system_prefix", language=session_context.get_language()
+                                                _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
                                             ),
                 language=session_context.get_language(),
                 include_sections=["role_definition"]
@@ -214,7 +241,7 @@ class SimpleAgent(AgentBase):
                 cast(List[Union[MessageChunk, Dict[str, Any]]], messages_input)
             )
             all_new_response_chunks = []
-            current_system_prefix = PromptManager().get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language())
+            current_system_prefix = PromptManager().get_agent_prompt_auto(_get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language())
 
             # 更新system message，确保包含最新的子智能体列表等上下文信息
             if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
@@ -270,7 +297,7 @@ class SimpleAgent(AgentBase):
             if self._should_abort_due_to_session(session_id, session_context):
                 break
             # 检查任务是否完成
-            if await self._is_task_complete(messages_input, session_id, session_context):
+            if await self._is_task_complete(messages_input, session_id, tool_manager, session_context):
                 logger.info("SimpleAgent: 任务完成，终止执行")
                 break
 
