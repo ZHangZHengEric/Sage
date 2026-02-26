@@ -155,8 +155,37 @@ class MessageChunk:
                 elif isinstance(result[field_name], MessageType):
                     result[field_name] = result[field_name].value
         
+        # 处理 tool_calls 字段 - 转换为标准字典格式
+        if 'tool_calls' in result and result['tool_calls'] is not None:
+            result['tool_calls'] = self._serialize_tool_calls(result['tool_calls'])
+        
         # 移除None值以保持简洁
         return {k: v for k, v in result.items() if v is not None}
+    
+    def _serialize_tool_calls(self, tool_calls) -> List[Dict[str, Any]]:
+        """序列化 tool_calls 为标准字典格式"""
+        if tool_calls is None:
+            return None
+        
+        result = []
+        for tc in tool_calls:
+            if hasattr(tc, 'id') and hasattr(tc, 'function'):
+                # 对象形式 (如 ChoiceDeltaToolCall)
+                tc_dict = {'id': tc.id, 'type': getattr(tc, 'type', 'function')}
+                function = tc.function if hasattr(tc, 'function') else None
+                if function:
+                    tc_dict['function'] = {
+                        'name': getattr(function, 'name', ''),
+                        'arguments': getattr(function, 'arguments', '')
+                    }
+                result.append(tc_dict)
+            elif isinstance(tc, dict):
+                # 字典形式
+                result.append(tc)
+            else:
+                # 其他形式，转换为字符串
+                result.append(str(tc))
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'MessageChunk':
