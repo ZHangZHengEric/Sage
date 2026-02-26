@@ -354,11 +354,7 @@ const processFile = async (file) => {
     // 更新文件URL
     fileItem.url = url
     fileItem.uploading = false
-
-    console.log('文件上传成功:', url)
-
   } catch (error) {
-    console.error('文件上传失败:', error)
 
     // 移除失败的文件
     const index = uploadedFiles.value.indexOf(fileItem)
