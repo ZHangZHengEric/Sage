@@ -219,19 +219,38 @@ class SAgent:
             AsyncGenerator[List["MessageChunk"], None]: 
                 异步生成的流式消息块列表。每个块可能包含部分文本内容、工具调用信息或状态更新。
         """
+        # 统计耗时：首个非空 content 与完整执行总耗时
+        _start_time = time.time()
+        _first_show_time = None
+        # 初始化该session 的context 管理器
+        # 如果没有提供 session_id，尝试从 input_messages 中推断
+        if not session_id and input_messages:
+            first_msg = input_messages[0]
+            if isinstance(first_msg, MessageChunk) and first_msg.session_id:
+                session_id = first_msg.session_id
+            elif isinstance(first_msg, dict) and first_msg.get('session_id'):
+                session_id = first_msg.get('session_id')
 
-        # 确保 session_id 存在，用于 trace
         session_id = session_id or str(uuid.uuid4())
+        
+        # 确保 input_messages 中的所有消息都有 session_id
+        if input_messages:
+            for i, msg in enumerate(input_messages):
+                if isinstance(msg, MessageChunk):
+                    if not msg.session_id:
+                        msg.session_id = session_id
+                elif isinstance(msg, dict):
+                    if not msg.get('session_id'):
+                        msg['session_id'] = session_id
+                else:
+                    # 对于其他类型的消息，不做处理，或者可以考虑报错
+                    pass
 
         # 开启 Chain Trace
         if self.observability_manager:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
 
         try:
-            # 统计耗时：首个非空 content 与完整执行总耗时
-            _start_time = time.time()
-            _first_show_time = None
-
             # 调用内部方法执行流式处理，对结果进行过滤
             async for message_chunks in self.run_stream_internal(
                 input_messages=input_messages,
@@ -259,7 +278,7 @@ class SAgent:
                                 if sc and str(sc).strip():
                                     _first_show_time = time.time()
                                     _delta_ms = int((_first_show_time - _start_time) * 1000)
-                                    logger.info(f"SAgent: 会话 {session_id} 首个可显示内容耗时 {_delta_ms} ms")
+                                    logger.info(f"SAgent: 会话首个可显示内容耗时 {_delta_ms} ms")
                             except Exception as _e:
                                 logger.error(f"SAgent: 统计首个content耗时出错: {_e}\n{traceback.format_exc()}")
                         if message_chunk.content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
@@ -268,16 +287,46 @@ class SAgent:
             # 流结束后记录完整执行总耗时
             _end_time = time.time()
             _total_ms = int((_end_time - _start_time) * 1000)
-            logger.info(f"SAgent: 会话 {session_id} 完整执行耗时 {_total_ms} ms", session_id)
-            # 结束 Chain Trace
-            if self.observability_manager:
-                self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
-
+            logger.info(f"SAgent: 会话完整执行耗时 {_total_ms} ms", session_id)
         except Exception as e:
             # 记录 Chain Error
             if self.observability_manager:
                 self.observability_manager.on_chain_error(e, session_id=session_id)
-            raise e
+            # 标记会话错误
+            session_context = get_session_context(session_id)
+            if session_context:
+                session_context.status = SessionStatus.ERROR
+                async for message_chunks in self._handle_workflow_error(e):
+                    session_context.add_messages(message_chunks)
+                    yield message_chunks
+            else:
+                 logger.error(f"Failed to initialize session: {e}")
+                 # You might want to yield an error message here even without session context
+                 yield [MessageChunk(
+                     role="assistant", 
+                     content=f"Error initializing session: {str(e)}", 
+                     type="text"
+                 )]
+        finally:
+            # 结束 Chain Trace
+            if self.observability_manager:
+                self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
+            # 保存会话状态
+            session_context = get_session_context(session_id)
+            if session_context:
+                try:
+                    logger.info(f"SAgent: 会话状态保存")
+                    session_context.save()
+                except Exception as e:
+                    logger.error(f"SAgent: 会话状态保存时出错: {e}")
+            # 生成 token_usage（注意：yield 在 cleanup 前）
+            try:
+                chunks = await self._emit_token_usage_if_any(session_context, session_id)
+                if chunks:
+                    yield chunks
+            finally:
+                # 无论如何都清理
+                await self._cleanup_session(session_id or "")
 
     async def run_stream_internal(
         self,
@@ -295,8 +344,7 @@ class SAgent:
         system_context: Optional[Dict[str, Any]] = None,
         available_workflows: Optional[Dict[str, Any]] = {},
         context_budget_config: Optional[Dict[str, Any]] = None,
-        custom_sub_agents: Optional[List[Dict[str, Any]]] = None,
-    ) -> AsyncGenerator[List["MessageChunk"], None]:
+        custom_sub_agents: Optional[List[Dict[str, Any]]] = None) -> AsyncGenerator[List["MessageChunk"], None]:
         """
         执行智能体任务的主流程
 
@@ -322,44 +370,17 @@ class SAgent:
         Yields:
             消息块列表
         """
-        session_context = None
-        try:
-            # 初始化会话
-            # 初始化该session 的context 管理器
-            
-            # 如果没有提供 session_id，尝试从 input_messages 中推断
-            if not session_id and input_messages:
-                first_msg = input_messages[0]
-                if isinstance(first_msg, MessageChunk) and first_msg.session_id:
-                    session_id = first_msg.session_id
-                elif isinstance(first_msg, dict) and first_msg.get('session_id'):
-                    session_id = first_msg.get('session_id')
-
-            session_id = session_id or str(uuid.uuid4())
-            
-            # 确保 input_messages 中的所有消息都有 session_id
-            if input_messages:
-                for i, msg in enumerate(input_messages):
-                    if isinstance(msg, MessageChunk):
-                        if not msg.session_id:
-                            msg.session_id = session_id
-                    elif isinstance(msg, dict):
-                        if not msg.get('session_id'):
-                            msg['session_id'] = session_id
-                    else:
-                        # 对于其他类型的消息，不做处理，或者可以考虑报错
-                        pass
-
-            session_context = init_session_context(
-                session_id=session_id,
-                user_id=user_id,
-                workspace_root=self.workspace,
-                context_budget_config=context_budget_config,
-                user_memory_manager=self.user_memory_manager,
-                tool_manager=tool_manager,
-                skill_manager=skill_manager,
-            )
-            with session_manager.session_context(session_id):
+        # session_context = None
+        with session_manager.session_context(session_id):
+                session_context = init_session_context(
+                    session_id=session_id,
+                    user_id=user_id,
+                    workspace_root=self.workspace,
+                    context_budget_config=context_budget_config,
+                    user_memory_manager=self.user_memory_manager,
+                    tool_manager=tool_manager,
+                    skill_manager=skill_manager,
+                )
                 logger.info(f"SAgent: 会话开始")
                 
                 # 设置 custom_sub_agents
@@ -492,7 +513,7 @@ class SAgent:
                     #      tool_manager.register_tools_from_object(todo_tool_impl)
 
                     async for message_chunks in self._execute_agent_phase(
-                        session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="直接执行"
+                        session_context=session_context, tool_manager=tool_manager, session_id=session_id, agent=self.simple_agent, phase_name="Simple执行"
                     ):
                         session_context.add_messages(message_chunks)
                         yield message_chunks
@@ -514,7 +535,6 @@ class SAgent:
                         yield message_chunks
 
                 # 异步执行记忆提取，不阻塞主流程
-                logger.info("SAgent: 检查是否需要提取记忆")
                 if session_context.user_memory_manager and session_context.user_memory_manager.is_enabled():
                     logger.info("SAgent: 启动异步记忆提取任务")
                     extractor = MemoryExtractor(self.model)
@@ -524,41 +544,10 @@ class SAgent:
                 # 检查最终状态，如果不是中断状态则标记为完成
                 if session_context.status != SessionStatus.INTERRUPTED:
                     session_context.status = SessionStatus.COMPLETED
-                    logger.info(f"SAgent: 流式工作流完成，会话ID: {session_id}")
                 else:
-                    logger.info(f"SAgent: 流式工作流被中断，会话ID: {session_id}")
+                    logger.warning(f"SAgent: 会话被中断，会话ID: {session_id}")
 
-        except Exception as e:
-            # 标记会话错误
-            if session_context:
-                session_context.status = SessionStatus.ERROR
-                async for message_chunks in self._handle_workflow_error(e):
-                    session_context.add_messages(message_chunks)
-                    yield message_chunks
-            else:
-                 logger.error(f"Failed to initialize session: {e}")
-                 # You might want to yield an error message here even without session context
-                 yield [MessageChunk(
-                     role="assistant", 
-                     content=f"Error initializing session: {str(e)}", 
-                     type="text"
-                 )]
-        finally:
-            # 保存会话状态
-            if session_context:
-                try:
-                    logger.info(f"SAgent: 会话状态保存 {session_id}")
-                    session_context.save()
-                except Exception as e:
-                    logger.error(f"SAgent: 保存会话状态 {session_id} 时出错: {e}")
-            # 生成 token_usage（注意：yield 在 cleanup 前）
-            try:
-                chunks = await self._emit_token_usage_if_any(session_context, session_id)
-                if chunks:
-                    yield chunks
-            finally:
-                # 无论如何都清理
-                await self._cleanup_session(session_id or "")
+
 
     async def _execute_multi_agent_workflow(self, session_context: SessionContext, tool_manager: Optional[Any], session_id: str, max_loop_count: int) -> AsyncGenerator[List[MessageChunk], None]:
         """
@@ -630,7 +619,7 @@ class SAgent:
         """
         执行智能体阶段
         """
-        logger.info(f"SAgent: 使用 {agent.agent_name} 智能体")
+        logger.info(f"SAgent: {phase_name} 阶段开始")
         # 检查中断
         if session_context.status == SessionStatus.INTERRUPTED:
             logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
@@ -739,7 +728,7 @@ class SAgent:
                 logger.warning(f"SAgent: 会话 {session_id} 没有 token_usage 信息")
                 return []
 
-            logger.info(f"SAgent: 生成 token_usage MessageChunk，会话 {session_id}: {token_usage}")
+            logger.debug(f"SAgent: 生成 token_usage MessageChunk，会话 {session_id}: {token_usage}")
 
             return [
                 MessageChunk(
@@ -767,10 +756,10 @@ class SAgent:
                 await lock.release()
             delete_session_run_lock(session_id)
         except Exception as e:
-            logger.error(f"SAgent: 清理会话锁 {session_id} 时出错: {e}")
+            logger.bind(session_id=session_id).error(f"SAgent: 清理会话锁时出错: {e}")
 
         try:
             delete_session_context(session_id)
-            logger.info(f"SAgent: 已清理会话 {session_id}")
+            logger.bind(session_id=session_id).info("SAgent: 会话已清理")
         except Exception as e:
-            logger.error(f"SAgent: 清理会话 {session_id} 时出错: {e}")
+            logger.bind(session_id=session_id).error(f"SAgent: 清理会话时出错: {e}")

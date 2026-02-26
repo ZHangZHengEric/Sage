@@ -567,12 +567,6 @@ class SessionContext:
 
     def save(self):
         """保存会话上下文"""
-        logger.debug(f"SessionContext: Saving session context for {self.session_id}")
-        # 先判断该会话的文件夹是否存在
-        if not os.path.exists(self.session_workspace):
-            os.makedirs(self.session_workspace)
-            logger.debug(f"SessionContext: Created session workspace: {self.session_workspace}")
-
         # 保存模型请求记录
         llm_request_folder = os.path.join(self.session_workspace, "llm_request")
         os.makedirs(llm_request_folder, exist_ok=True)
