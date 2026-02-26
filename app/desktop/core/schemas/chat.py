@@ -1,0 +1,63 @@
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel
+
+
+class Message(BaseModel):
+    message_id: Optional[str] = None
+    role: str
+    content: str
+
+class BaseChatRequest(BaseModel):
+    """基础聊天请求，包含公共字段"""
+    messages: List[Message]
+    session_id: Optional[str] = None
+    user_id: Optional[str] = None
+    system_context: Optional[Dict[str, Any]] = None
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # 确保 messages 中的每个消息都有 role 和 content
+        if self.messages:
+            for i, msg in enumerate(self.messages):
+                if isinstance(msg, dict):
+                    # 如果是字典，转换为 Message 对象
+                    self.messages[i] = Message(**msg)
+                elif not hasattr(msg, "role") or not hasattr(msg, "content"):
+                    raise ValueError(f"消息 {i} 缺少必要的 'role' 或 'content' 字段")
+class CustomSubAgentConfig(BaseModel):
+    name: str
+    system_prompt: Optional[str] = None
+    description: Optional[str] = None
+    available_tools: Optional[List[str]] = None
+    available_skills: Optional[List[str]] = None
+    available_workflows: Optional[List[str]] = None
+    system_context: Optional[Dict[str, Any]] = None
+
+class StreamRequest(BaseChatRequest):
+    """流式请求，包含所有流式控制参数"""
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    deep_thinking: Optional[bool] = None
+    max_loop_count: Optional[int] = 50
+    multi_agent: Optional[bool] = None
+    agent_mode: Optional[str] = None
+    more_suggest: Optional[bool] = None
+    available_workflows: Optional[Dict[str, List[str]]] = None
+    llm_model_config: Optional[Dict[str, Any]] = None
+    system_prefix: Optional[str] = None
+    available_tools: Optional[List[str]] = None
+    available_skills: Optional[List[str]] = None
+    available_knowledge_bases: Optional[List[str]] = None
+    available_sub_agent_ids: Optional[List[str]] = None
+    force_summary: Optional[bool] = False
+    memory_type: Optional[str] = "session"
+    custom_sub_agents: Optional[List[CustomSubAgentConfig]] = None
+    context_budget_config: Optional[Dict[str, Any]] = None
+    # 额外的mcp配置
+    extra_mcp_config: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+class ChatRequest(BaseChatRequest):
+    """普通聊天请求，主要用于从 AgentID 初始化"""
+    agent_id: str

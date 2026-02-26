@@ -25,18 +25,18 @@ build-macos:
     - cd app/desktop/src_python
     - pip install -r requirements.txt pyinstaller
     - pyinstaller --clean --noconfirm --name sage-server --onefile --windowed main.py
-    - mkdir -p ../src-tauri/bin
-    - cp dist/sage-server ../src-tauri/bin/sage-server-x86_64-apple-darwin
+    - mkdir -p ../tauri/bin
+    - cp dist/sage-server ../tauri/bin/sage-server-x86_64-apple-darwin
     - cd ../../../app/web
     - npm install
     - npm run build
     - cp -r dist ../desktop/dist
-    - cd ../desktop/src-tauri
+    - cd ../desktop/tauri
     - cargo tauri build
   artifacts:
     paths:
-      - app/desktop/src-tauri/target/release/bundle/dmg/*.dmg
-      - app/desktop/src-tauri/target/release/bundle/macos/*.app
+      - app/desktop/tauri/target/release/bundle/dmg/*.dmg
+      - app/desktop/tauri/target/release/bundle/macos/*.app
 
 build-windows:
   stage: build
@@ -47,15 +47,15 @@ build-windows:
     - cd app/desktop/src_python
     - pip install -r requirements.txt pyinstaller
     - pyinstaller --clean --noconfirm --name sage-server --onefile --windowed main.py
-    - mkdir -p ../src-tauri/bin
-    - copy dist/sage-server.exe ../src-tauri/bin/sage-server-x86_64-pc-windows-msvc.exe
+    - mkdir -p ../tauri/bin
+    - copy dist/sage-server.exe ../tauri/bin/sage-server-x86_64-pc-windows-msvc.exe
     - cd ../../../app/web
     - npm install
     - npm run build
     - xcopy /s /e /y dist ..\desktop\dist
-    - cd ../desktop/src-tauri
+    - cd ../desktop/tauri
     - cargo tauri build
   artifacts:
     paths:
-      - app/desktop/src-tauri/target/release/bundle/msi/*.msi
-      - app/desktop/src-tauri/target/release/bundle/nsis/*.exe
+      - app/desktop/tauri/target/release/bundle/msi/*.msi
+      - app/desktop/tauri/target/release/bundle/nsis/*.exe

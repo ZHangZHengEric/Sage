@@ -1,6 +1,0 @@
-FROM docker.m.daocloud.io/python:3.11-slim
-RUN pip install fastapi uvicorn -i https://mirrors.aliyun.com/pypi/simple/
-
-COPY mock_llm.py /app/mock_llm.py
-WORKDIR /app
-CMD ["python", "mock_llm.py"]
