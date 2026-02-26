@@ -232,7 +232,7 @@ class SAgent:
                 session_id = first_msg.get('session_id')
 
         session_id = session_id or str(uuid.uuid4())
-        
+
         # 确保 input_messages 中的所有消息都有 session_id
         if input_messages:
             for i, msg in enumerate(input_messages):
@@ -249,7 +249,6 @@ class SAgent:
         # 开启 Chain Trace
         if self.observability_manager:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
-
         try:
             # 调用内部方法执行流式处理，对结果进行过滤
             async for message_chunks in self.run_stream_internal(
@@ -271,18 +270,20 @@ class SAgent:
             ):
                 # 过滤掉空消息块
                 for message_chunk in message_chunks:
+                    if not message_chunk.session_id:
+                        message_chunk.session_id = session_id
                     # 记录首个 content 不为空的耗时
-                        if _first_show_time is None:
-                            try:
-                                sc = message_chunk.content
-                                if sc and str(sc).strip():
-                                    _first_show_time = time.time()
-                                    _delta_ms = int((_first_show_time - _start_time) * 1000)
-                                    logger.info(f"SAgent: 会话首个可显示内容耗时 {_delta_ms} ms")
-                            except Exception as _e:
-                                logger.error(f"SAgent: 统计首个content耗时出错: {_e}\n{traceback.format_exc()}")
-                        if message_chunk.content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
-                            yield [message_chunk]
+                    if _first_show_time is None:
+                        try:
+                            sc = message_chunk.content
+                            if sc and str(sc).strip():
+                                _first_show_time = time.time()
+                                _delta_ms = int((_first_show_time - _start_time) * 1000)
+                                logger.info(f"SAgent: 会话首个可显示内容耗时 {_delta_ms} ms")
+                        except Exception as _e:
+                            logger.error(f"SAgent: 统计首个content耗时出错: {_e}\n{traceback.format_exc()}")
+                    if message_chunk.content or message_chunk.tool_calls or message_chunk.type == MessageType.TOKEN_USAGE.value:
+                        yield [message_chunk]
 
             # 流结束后记录完整执行总耗时
             _end_time = time.time()
