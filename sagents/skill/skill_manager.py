@@ -54,6 +54,8 @@ class SkillManager:
         """
         if path not in self.skill_dirs:
             self.skill_dirs.append(path)
+            # Invalidate cache when adding new directory (添加新目录时使缓存失效)
+            self._skills_cache_valid = False
             self.reload()
 
     def _initialize(self, skill_dirs: List[str] = None, include_global_skills: bool = True):
@@ -69,6 +71,8 @@ class SkillManager:
              dirs.append(self.skill_workspace)
              
         self.skill_dirs = list(dict.fromkeys(dirs))
+        # Flag to track if skills cache is valid (标志：跟踪技能缓存是否有效)
+        self._skills_cache_valid = False
         self._load_skills_from_workspace()
 
     @classmethod
@@ -85,6 +89,8 @@ class SkillManager:
         从磁盘重新加载所有技能。
         """
         logger.info("Reloading skills...")
+        # Invalidate cache before reloading (重新加载前使缓存失效)
+        self._skills_cache_valid = False
         self._load_skills_from_workspace()
 
     def list_skills(self) -> List[str]:
@@ -169,7 +175,13 @@ class SkillManager:
     def load_new_skills(self):
         """
         Load new skills from disk without reloading existing ones.
+        If skills cache is valid, skip scanning and return immediately.
         """
+        # Check if cache is valid, if so, skip scanning (检查缓存是否有效，如果有效则跳过扫描)
+        if getattr(self, '_skills_cache_valid', False):
+            logger.debug("Skills cache is valid, skipping load_new_skills scan")
+            return
+        
         count = 0
         
         # Build a set of existing skill paths for fast lookup
@@ -199,6 +211,9 @@ class SkillManager:
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
         logger.debug(f"Total skills loaded/checked: {count}")
+        
+        # Mark cache as valid after successful loading (加载成功后标记缓存为有效)
+        self._skills_cache_valid = True
 
 
     def _generate_file_list(self, path: str, root_path: str, skill_name: str) -> str:
@@ -302,6 +317,8 @@ class SkillManager:
 
         skill_name = self._load_skill_from_dir(skill_path)
         if skill_name:
+            # Invalidate cache when registering new skill (注册新技能时使缓存失效)
+            self._skills_cache_valid = False
             return skill_name
         else:
             # Validation failed, remove the directory
@@ -323,7 +340,8 @@ class SkillManager:
         Returns:
             bool: True if successful, False otherwise
         """
-
+        # Invalidate cache when reloading skill (重新加载技能时使缓存失效)
+        self._skills_cache_valid = False
         skill_name = self._load_skill_from_dir(skill_path)
         return skill_name is not None
 
@@ -333,6 +351,8 @@ class SkillManager:
         """
         if skill_name in self.skills:
             del self.skills[skill_name]
+            # Invalidate cache when removing skill (移除技能时使缓存失效)
+            self._skills_cache_valid = False
             logger.info(f"Removed skill from manager: {skill_name}")
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
