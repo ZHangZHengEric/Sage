@@ -177,6 +177,7 @@ class AgentBase(ABC):
             # 发起LLM请求
             # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
             start_request_time = time.time()
+            first_token_time = None
             serializable_messages = []
             for msg in messages:
                 if isinstance(msg, MessageChunk):
@@ -193,12 +194,11 @@ class AgentBase(ABC):
                 if 'content' not in msg:
                     msg['content'] = ''
 
-            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
-
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
             # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
             serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
+            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
 
             stream = await self.model.chat.completions.create(
                 model=model_name,
@@ -215,6 +215,9 @@ class AgentBase(ABC):
             )
             async for chunk in stream:
                 # print(chunk)
+                # 记录首token时间
+                if first_token_time is None:
+                    first_token_time = time.time()
                 all_chunks.append(chunk)
                 yield chunk
 
@@ -242,7 +245,10 @@ class AgentBase(ABC):
             raise e
         finally:
             # 将次请求记录在session context 中的llm调用记录中
-            logger.info(f"{step_name}: 调用语言模型进行流式生成，耗时: {time.time() - start_request_time},返回{len(all_chunks)}个chunk")
+            total_time = time.time() - start_request_time
+            first_token_latency = first_token_time - start_request_time if first_token_time else None
+            first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
+            logger.info(f"{step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
             if session_id:
                 session_context = get_session_context(session_id) if session_id else None
 
@@ -1006,7 +1012,7 @@ class AgentBase(ABC):
             available_tools = tool_manager.list_tools_simplified()
 
             if len(available_tools) <= 15:
-                logger.info(f"AgentBase: 可用工具数量小于等于15个，直接返回所有工具")
+                logger.info("AgentBase: 可用工具数量小于等于15个，直接返回所有工具")
                 # 移除complete_task工具
                 tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
                 return tool_names
