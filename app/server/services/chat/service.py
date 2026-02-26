@@ -420,60 +420,63 @@ async def execute_chat_session(
             is_tool_call = result.get('role') == 'assistant' and result.get('tool_calls')
             
             if is_tool_call:
-                current_tool_call = result['tool_calls'][0]
-                current_id = current_tool_call.get('id')
+                current_msg_id = result.get('message_id')
+                
+                # Check if we need to flush previous buffer
                 if buffer_tool_call_msg:
-                    prev_tool_call = buffer_tool_call_msg['tool_calls'][0]
-                    if hasattr(prev_tool_call, 'id'):
-                        prev_id = prev_tool_call.id
-                    else:
-                        prev_id = prev_tool_call.get('id')
-                    
-                    if prev_id == current_id or (not current_id and prev_id):
-                        # Same tool call, update buffer
-                        
-                        # Merge arguments
-                        if buffer_tool_call_msg.get('tool_calls') and result.get('tool_calls'):
-                            prev_tc = buffer_tool_call_msg['tool_calls'][0]
-                            curr_tc = result['tool_calls'][0]
-                            
-                            # Merge arguments
-                            prev_args = prev_tc.get('function', {}).get('arguments') or ""
-                            curr_args = curr_tc.get('function', {}).get('arguments') or ""
-                            if 'function' not in prev_tc:
-                                prev_tc['function'] = {}
-                            prev_tc['function']['arguments'] = prev_args + curr_args
-                            
-                            # Update name if current has it (and it's not empty)
-                            if curr_tc.get('function', {}).get('name'):
-                                prev_tc['function']['name'] = curr_tc['function']['name']
-
-                        # Update top-level fields from result (except tool_calls which we merged)
-                        for k, v in result.items():
-                            if k != 'tool_calls':
-                                buffer_tool_call_msg[k] = v
-
-                        # Maintain stable message_id
-                        buffer_tool_call_msg['message_id'] = buffer_msg_id
-                        continue
-                    else:
-                        # New tool call ID, flush previous
+                    prev_msg_id = buffer_tool_call_msg.get('message_id')
+                    # If new chunk has an explicit ID and it differs from buffer's ID, it's a new message
+                    if current_msg_id and current_msg_id != prev_msg_id:
                         async for chunk in send_response(buffer_tool_call_msg):
                             yield chunk
-                        
-                        # Start new buffer
-                        buffer_tool_call_msg = result
-                        buffer_msg_id = result.get('message_id') or str(uuid.uuid4())
-                        buffer_tool_call_msg['message_id'] = buffer_msg_id
-                        async for chunk in send_response(buffer_tool_call_msg):
-                            yield chunk
-                else:
+                        buffer_tool_call_msg = None
+
+                if not buffer_tool_call_msg:
                     # Start new buffer
                     buffer_tool_call_msg = result
-                    buffer_msg_id = result.get('message_id') or str(uuid.uuid4())
-                    buffer_tool_call_msg['message_id'] = buffer_msg_id
-                    async for chunk in send_response(buffer_tool_call_msg):
-                        yield chunk
+                    # Ensure message_id exists
+                    if not buffer_tool_call_msg.get('message_id'):
+                        buffer_tool_call_msg['message_id'] = str(uuid.uuid4())
+                    continue
+
+                # Merge into existing buffer
+                # Update top-level fields (except tool_calls)
+                for k, v in result.items():
+                    if k != 'tool_calls':
+                        buffer_tool_call_msg[k] = v
+                
+                # Merge tool calls
+                existing_map = {tc.get('index'): tc for tc in buffer_tool_call_msg.get('tool_calls', [])}
+                
+                for new_tc in result.get('tool_calls', []):
+                    idx = new_tc.get('index')
+                    if idx in existing_map:
+                        existing = existing_map[idx]
+                        # Merge function arguments
+                        if 'function' in new_tc:
+                            if 'function' not in existing:
+                                existing['function'] = {}
+                            
+                            new_args = new_tc['function'].get('arguments')
+                            if new_args:
+                                existing_args = existing['function'].get('arguments') or ""
+                                existing['function']['arguments'] = existing_args + new_args
+                            
+                            new_name = new_tc['function'].get('name')
+                            if new_name:
+                                existing['function']['name'] = new_name
+                        
+                        # Update other fields
+                        if new_tc.get('id'):
+                            existing['id'] = new_tc['id']
+                        if new_tc.get('type'):
+                            existing['type'] = new_tc['type']
+                    else:
+                        # Add new tool call
+                        buffer_tool_call_msg['tool_calls'].append(new_tc)
+                        existing_map[idx] = new_tc
+                
+                continue
             else:
                 # Not a tool call, flush buffer if exists
                 if buffer_tool_call_msg:
