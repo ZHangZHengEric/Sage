@@ -214,7 +214,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     return StreamingResponse(
         stream_with_disconnect_check(
             execute_chat_session(
-                mode="stream",
+                mode="web-stream",
                 stream_service=stream_service,
             ),
             http_request,
