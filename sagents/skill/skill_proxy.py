@@ -76,36 +76,13 @@ class SkillProxy:
         self._available_skills.update(new_skills)
         logger.info(f"SkillProxy: Added new skill manager with skills: {new_skills}")
 
-    def reload(self) -> None:
-        """
-        Reload skills from disk for all managers.
-        从磁盘重新加载所有管理器的技能。
-        """
-        for sm in self.skill_managers:
-            sm.reload()
-            
-        if self._is_all_skills_mode:
-            # Re-fetch all skills from all managers
-            self._available_skills = set()
-            for sm in self.skill_managers:
-                self._available_skills.update(sm.list_skills())
-        else:
-            # In restricted mode, we don't automatically add new skills from existing managers
-            # unless they were added via add_skill_manager which updates _available_skills explicitly.
-            # However, if a manager reloads and finds new skills, they won't be in _available_skills
-            # if we are in restricted mode. This is expected behavior for restricted mode.
-            pass
-
     def load_new_skills(self) -> None:
         """
         Load new skills from disk for all managers without reloading existing ones.
         """
         for sm in self.skill_managers:
-            if hasattr(sm, 'load_new_skills'):
-                sm.load_new_skills()
-            else:
-                sm.reload()
-            
+            sm.load_new_skills()
+
         if self._is_all_skills_mode:
             # Re-fetch all skills from all managers
             self._available_skills = set()
