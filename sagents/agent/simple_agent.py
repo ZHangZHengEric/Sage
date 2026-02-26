@@ -357,23 +357,23 @@ class SimpleAgent(AgentBase):
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
 
-                # 流式返回工具调用消息
-                output_messages = [MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    tool_calls=chunk.choices[0].delta.tool_calls,
-                    message_id=tool_calls_messages_id,
-                    message_type=MessageType.TOOL_CALL.value
-                )]
-                yield (output_messages, False)
-
-                # # yield 一个空的消息块以避免生成器卡住
+                # # 流式返回工具调用消息
                 # output_messages = [MessageChunk(
                 #     role=MessageRole.ASSISTANT.value,
-                #     content="",
-                #     message_id=content_response_message_id,
-                #     message_type=MessageType.EMPTY.value
+                #     tool_calls=chunk.choices[0].delta.tool_calls,
+                #     message_id=tool_calls_messages_id,
+                #     message_type=MessageType.TOOL_CALL.value
                 # )]
                 # yield (output_messages, False)
+
+                # yield 一个空的消息块以避免生成器卡住
+                output_messages = [MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content="",
+                    message_id=content_response_message_id,
+                    message_type=MessageType.EMPTY.value
+                )]
+                yield (output_messages, False)
 
             elif chunk.choices[0].delta.content:
                 if len(chunk.choices[0].delta.content) > 0:
