@@ -735,7 +735,8 @@ class AgentBase(ABC):
             }],
             message_type=MessageType.TOOL_CALL.value,
             message_id=str(uuid.uuid4()),
-            content=f"{tool_name}({formatted_params})",
+            # content=f"{tool_name}({formatted_params})",
+            content = None,
             agent_name=self.agent_name
         )]
 
@@ -1165,8 +1166,8 @@ class AgentBase(ABC):
                 return
 
             # 发送工具调用消息,如果流式已经返回了，则需要注释掉这个
-            # output_messages = self._create_tool_call_message(tool_call)
-            # yield output_messages
+            output_messages = self._create_tool_call_message(tool_call)
+            yield (output_messages, False)
 
             # 执行工具
             async for message_chunk_list in self._execute_tool(
