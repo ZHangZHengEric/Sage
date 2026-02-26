@@ -114,7 +114,12 @@ class AgentBase(ABC):
             if msg.get('role') == MessageRole.ASSISTANT.value and 'tool_calls' in msg:
                 tool_calls = msg['tool_calls'] or []
                 # 如果tool_calls 里面的id 没有在其他的role 为tool 的消息中出现，就移除这个消息
-                if any(tool_call['id'] not in all_tool_call_ids_from_tool for tool_call in tool_calls):
+                # 兼容 ChoiceDeltaToolCall 对象和字典形式
+                def get_tool_call_id(tool_call):
+                    if hasattr(tool_call, 'id'):
+                        return tool_call.id
+                    return tool_call.get('id')
+                if any(get_tool_call_id(tool_call) not in all_tool_call_ids_from_tool for tool_call in tool_calls):
                     continue
             new_messages.append(msg)
         return new_messages
@@ -1001,7 +1006,7 @@ class AgentBase(ABC):
         Returns:
             List[str]: 建议工具名称列表
         """
-        logger.info(f"AgentBase: 开始获取建议工具")
+        logger.info("AgentBase: 开始获取建议工具")
 
         if not messages_input or not tool_manager:
             logger.warning("AgentBase: 未提供消息或工具管理器，返回空列表")
@@ -1120,3 +1125,54 @@ class AgentBase(ABC):
         except json.JSONDecodeError:
             logger.warning("AgentBase: 解析工具建议响应时JSON解码错误")
             return []
+
+    async def _handle_tool_calls(self,
+                                 tool_calls: Dict[str, Any],
+                                 tool_manager: Optional[ToolManager],
+                                 messages_input: List[Any],
+                                 session_id: str,
+                                 handle_complete_task: bool = False) -> AsyncGenerator[tuple[List[MessageChunk], bool], None]:
+        """
+        处理工具调用
+
+        Args:
+            tool_calls: 工具调用字典
+            tool_manager: 工具管理器
+            messages_input: 输入消息列表
+            session_id: 会话ID
+            handle_complete_task: 是否处理complete_task工具（TaskExecutorAgent需要）
+
+        Yields:
+            tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
+        """
+        logger.info(f"{self.agent_name}: LLM响应包含 {len(tool_calls)} 个工具调用")
+        logger.info(f"{self.agent_name}: 工具调用: {tool_calls}")
+
+        for tool_call_id, tool_call in tool_calls.items():
+            tool_name = tool_call['function']['name']
+            logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
+            logger.info(f"{self.agent_name}: 参数 {tool_call['function']['arguments']}")
+
+            # 检查是否为complete_task（仅TaskExecutorAgent需要处理）
+            if handle_complete_task and tool_name == 'complete_task':
+                logger.info(f"{self.agent_name}: complete_task，停止执行")
+                yield ([MessageChunk(
+                    role=MessageRole.ASSISTANT.value,
+                    content='已经完成了满足用户的所有要求',
+                    message_id=str(uuid.uuid4()),
+                    message_type=MessageType.DO_SUBTASK_RESULT.value
+                )], True)
+                return
+
+            # 发送工具调用消息,如果流式已经返回了，则需要注释掉这个
+            # output_messages = self._create_tool_call_message(tool_call)
+            # yield output_messages
+
+            # 执行工具
+            async for message_chunk_list in self._execute_tool(
+                tool_call=tool_call,
+                tool_manager=tool_manager,
+                messages_input=messages_input,
+                session_id=session_id
+            ):
+                yield (message_chunk_list, False)
