@@ -317,7 +317,6 @@ class SageStreamService:
                 message_dict["content"] = str(message_dict["content"])
             messages.append(message_dict)
         await _ensure_conversation(self.request)
-        logger.bind(session_id=session_id).info("🚀 SageStreamService.process_stream 开始")
         try:
             stream_result = self.sage_engine.run_stream(
                 input_messages=messages,
@@ -393,20 +392,6 @@ async def execute_chat_session(
     """
     执行聊天会话逻辑（仅生成流，不处理锁释放）
     """
-    # 注入 Trace ID
-    from opentelemetry import trace
-    from opentelemetry.trace import format_trace_id
-    
-    current_span = trace.get_current_span()
-    if current_span and current_span.get_span_context().is_valid:
-        trace_id = format_trace_id(current_span.get_span_context().trace_id)
-        trace_info = {
-            "type": "trace_info",
-            "trace_id": trace_id,
-            "session_id": stream_service.request.session_id,
-            "timestamp": time.time()
-        }
-        yield json.dumps(trace_info, ensure_ascii=False) + "\n"
 
     session_id = stream_service.request.session_id
     stream_counter = 0
