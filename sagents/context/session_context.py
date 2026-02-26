@@ -658,10 +658,25 @@ class SessionContext:
         elif isinstance(obj, dict):
             # 处理字典，递归处理每个值
             return {key: self._make_serializable(value) for key, value in obj.items()}
+        elif hasattr(obj, 'to_dict'):
+            # 使用 to_dict 方法（适用于 MessageChunk 等 dataclass）
+            return obj.to_dict()
         elif hasattr(obj, 'model_dump'):
             # Pydantic 对象
             return obj.model_dump()
         elif hasattr(obj, '__dict__'):
+            # 检查是否是 tool_call 类型的对象
+            if hasattr(obj, 'id') and hasattr(obj, 'function'):
+                # tool_call 对象，转换为标准格式
+                result = {'id': obj.id, 'type': getattr(obj, 'type', 'function')}
+                function = obj.function if hasattr(obj, 'function') else None
+                if function:
+                    result['function'] = {
+                        'name': getattr(function, 'name', ''),
+                        'arguments': getattr(function, 'arguments', '')
+                    }
+                return result
+            
             # 普通对象，转换为字典
             result = {}
             for key, value in obj.__dict__.items():
