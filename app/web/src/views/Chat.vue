@@ -463,7 +463,7 @@ const handleChunkMessage = (messageData) => {
   console.log('🧩 收到分块消息:', messageData.type, messageData);
 
   const newChunks = new Map(messageChunks.value);
-  // 使用message_id作为分组标识符，而不是chunk_id
+  // 使用message_id作为分组标识符
   const messageId = messageData.message_id;
 
   if (messageData.type === 'chunk_start') {
