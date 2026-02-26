@@ -194,11 +194,12 @@ class AgentBase(ABC):
                 if 'content' not in msg:
                     msg['content'] = ''
 
+
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
             # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
             serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
-            logger.info(f"{self.__class__.__name__}: 调用语言模型进行流式生成")
+            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成")
 
             stream = await self.model.chat.completions.create(
                 model=model_name,
@@ -209,7 +210,8 @@ class AgentBase(ABC):
                     "chat_template_kwargs": {"enable_thinking": False},
                     "enable_thinking": False,
                     "thinking": {'type': "disabled"},
-                    "top_k": 20
+                    "top_k": 20,
+                    "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
                 },
                 **final_config
             )
@@ -248,7 +250,7 @@ class AgentBase(ABC):
             total_time = time.time() - start_request_time
             first_token_latency = first_token_time - start_request_time if first_token_time else None
             first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
-            logger.info(f"{step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
+            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
             if session_id:
                 session_context = get_session_context(session_id) if session_id else None
 
@@ -541,10 +543,7 @@ class AgentBase(ABC):
                 if hasattr(session_context, 'skill_manager') and session_context.skill_manager:
                     # 尝试加载新技能，以确保新安装的技能能被发现
                     try:
-                        if hasattr(session_context.skill_manager, 'load_new_skills'):
-                            session_context.skill_manager.load_new_skills()
-                        elif hasattr(session_context.skill_manager, 'reload'):
-                            session_context.skill_manager.reload()
+                        session_context.skill_manager.load_new_skills()
                     except Exception as e:
                         logger.warning(f"Failed to load new skills: {e}")
 
@@ -1002,7 +1001,7 @@ class AgentBase(ABC):
         Returns:
             List[str]: 建议工具名称列表
         """
-        logger.info(f"AgentBase: 开始获取建议工具，会话ID: {session_id}")
+        logger.info(f"AgentBase: 开始获取建议工具")
 
         if not messages_input or not tool_manager:
             logger.warning("AgentBase: 未提供消息或工具管理器，返回空列表")
