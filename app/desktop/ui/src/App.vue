@@ -99,7 +99,8 @@ watch(() => [route.path, route.name], () => {
       router.replace('/onboarding')
       return
     }
-    showLoginModal.value = !isLoggedIn()
+    // 移除自动弹出登录框逻辑
+    showLoginModal.value = false
   }
 }, { immediate: true })
 
@@ -130,7 +131,8 @@ const handleUserUpdated = () => {
   if (isSharedPage.value) {
     showLoginModal.value = false
   } else {
-    showLoginModal.value = !isLoggedIn()
+    // 登录状态更新不再自动弹出登录框
+    showLoginModal.value = false
   }
 }
 

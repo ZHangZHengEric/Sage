@@ -4,8 +4,16 @@ Sage Stream Service
 基于 Sage 框架的智能体流式服务
 提供简洁的 HTTP API 和 Server-Sent Events (SSE) 实时通信
 """
+import os
+import sys
+# 1. Setup paths
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
+sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.join(project_root, "app"))
 
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -18,8 +26,6 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-from .core import config
-from .core.config import get_startup_config
 from .core.exceptions import register_exception_handlers
 from .core.middleware import register_middlewares
 from .lifecycle import (
@@ -33,10 +39,9 @@ from .utils.log import init_logging
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
-    cfg = get_startup_config()
 
     # 1) 核心系统初始化（必须先完成）
-    await initialize_system(cfg)
+    await initialize_system()
 
     # 2) 异步后置初始化任务（可选）
     post_init_task = post_initialize_task()
@@ -56,8 +61,8 @@ def create_fastapi_app() -> FastAPI:
 
     # 创建 FastAPI 应用
     app = FastAPI(
-        title="Sage Platform Service",
-        description="基于 Sage 框架的智能体平台服务",
+        title="Sage Desktop",
+        description="基于 Sage 框架的智能体桌面端服务",
         version="1.0.0",
         lifespan=app_lifespan,
     )
@@ -78,17 +83,17 @@ def create_fastapi_app() -> FastAPI:
     return app
 
 
-def start_server(cfg: config.StartupConfig):
+def start_server(port: int = 8080):
     """
     启动 Uvicorn Server
 
     """
     un_cfg = uvicorn.Config(
         app=create_fastapi_app,
-        host=getattr(cfg, "host", "0.0.0.0"),
-        port=cfg.port,
+        host="127.0.0.1",
+        port=port,
         log_config=None,
-        reload=getattr(cfg, "reload", False),
+        reload=False,
         factory=True,
     )
     server = uvicorn.Server(config=un_cfg)
@@ -97,9 +102,17 @@ def start_server(cfg: config.StartupConfig):
 
 def main():
     try:
-        cfg = config.init_startup_config()
-        init_logging(log_name="sage-server", log_level=getattr(cfg, "log_level", "INFO"))
-        start_server(cfg)
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        sage_home.mkdir(parents=True, exist_ok=True)
+
+        logs_dir = sage_home / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        port = 8080
+        print(f"Starting Sage Desktop Server on port {port}...")
+        init_logging(log_name="sage-desktop", log_level="INFO", log_path=logs_dir)
+        start_server(port)  
         return 0
     except KeyboardInterrupt:
         print("服务收到中断信号，正在退出...")

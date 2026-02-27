@@ -18,7 +18,7 @@
         "sidecar": true,
         "scope": [
           {
-            "name": "bin/sage-server",
+            "name": "bin/sage-desktop-sidecar",
             "sidecar": true,
             "args": true
           }
@@ -40,7 +40,7 @@
         "depends": []
       },
       "externalBin": [
-        "bin/sage-server"
+        "bin/sage-desktop-sidecar"
       ],
       "icon": [
         "icons/32x32.png",

@@ -91,6 +91,7 @@ const clearLocalLoginState = () => {
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('token_expires_in')
+  localStorage.removeItem('isGuest')
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('user-updated'))
   }
@@ -104,11 +105,26 @@ export const logout = () => {
 // 获取当前用户信息
 export const getCurrentUser = () => {
   const userInfo = localStorage.getItem('userInfo')
-  return userInfo ? JSON.parse(userInfo) : null
+  if (userInfo) return JSON.parse(userInfo)
+  
+  if (localStorage.getItem('isGuest') === 'true') {
+     return { 
+       username: 'Not Logged In', 
+       nickname: 'Not Logged In',
+       role: 'guest', 
+       isGuest: true, 
+       avatar: '/sage_logo.svg' 
+     }
+  }
+  return null
 }
 
 // 基于API的登录状态检查 - 主要方法
 export const isLoggedInAPI = async () => {
+  if (localStorage.getItem('isGuest') === 'true') {
+    return { isLoggedIn: true, user: getCurrentUser() }
+  }
+
   const user = getCurrentUser()
   const localLoginFlag = localStorage.getItem('isLoggedIn')
   
@@ -157,6 +173,8 @@ export const isLoggedInAPI = async () => {
 
 // 同步版本的登录状态检查（用于兼容现有代码）
 export const isLoggedIn = () => {
+  if (localStorage.getItem('isGuest') === 'true') return true
+
   const user = getCurrentUser()
   const loginFlag = localStorage.getItem('isLoggedIn')
   const result = !!(user && loginFlag === 'true')

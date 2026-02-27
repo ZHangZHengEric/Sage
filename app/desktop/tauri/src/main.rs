@@ -57,8 +57,8 @@ fn main() {
             let app_handle = app.handle();
             
             tauri::async_runtime::spawn(async move {
-                let (mut rx, _child) = Command::new_sidecar("sage-server")
-                    .expect("failed to create `sage-server` binary command")
+                let (mut rx, _child) = Command::new_sidecar("sage-desktop-sidecar")
+                    .expect("failed to create `sage-desktop-sidecar` binary command")
                     .spawn()
                     .expect("Failed to spawn sidecar");
                 
@@ -76,7 +76,7 @@ fn main() {
                                     if let Ok(port) = clean_port.parse::<u16>() {
                                         println!("Detected port: {}", port);
                                         // Emit event to frontend
-                                        app_handle.emit_all("sage-server-ready", Payload { port }).unwrap();
+                                        app_handle.emit_all("sage-desktop-ready", Payload { port }).unwrap();
                                     }
                                 }
                             }

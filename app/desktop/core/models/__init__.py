@@ -2,8 +2,6 @@ from .agent import Agent, AgentConfigDao, AgentAuthorization
 from .base import Base, BaseDao
 from .conversation import Conversation, ConversationDao
 from .file import File, FileDao
-from .kdb import Kdb, KdbDao
-from .kdb_doc import KdbDoc, KdbDocDao, KdbDocStatus
 from .mcp_server import MCPServer, MCPServerDao
 from .skill import SkillOwnership, SkillOwnershipDao
 from .user import User, UserDao
@@ -18,11 +16,6 @@ __all__ = [
     "ConversationDao",
     "User",
     "UserDao",
-    "Kdb",
-    "KdbDao",
-    "KdbDoc",
-    "KdbDocDao",
-    "KdbDocStatus",
     "MCPServer",
     "MCPServerDao",
     "Base",
