@@ -1,8 +1,0 @@
-{
-    "default_agent": {
-        "name": "Sage Assistant",
-        "description": "A helpful assistant",
-        "model": "mock-model",
-        "tools": ["get_weather"]
-    }
-}

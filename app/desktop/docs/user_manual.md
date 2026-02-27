@@ -1,48 +1,48 @@
-# Sage Desktop User Manual
+# Sage 桌面端用户手册
 
-## Installation
+## 安装
 
 ### macOS
-1.  Download the `.dmg` file from the latest release.
-2.  Open the `.dmg` file.
-3.  Drag the **Sage Desktop** icon to the **Applications** folder.
-4.  Launch **Sage Desktop** from Launchpad or Applications.
-    *   *Note*: On first launch, you may see a security warning. Go to **System Settings > Privacy & Security** and click **Open Anyway**.
+1.  下载最新发布的 `.dmg` 文件。
+2.  打开 `.dmg` 文件。
+3.  将 **Sage Desktop** 图标拖入 **Applications** (应用程序) 文件夹。
+4.  从启动台或应用程序中启动 **Sage Desktop**。
+    *   *注意*: 首次启动时，可能会看到安全警告。请前往 **系统设置 > 隐私与安全性** 并点击 **仍要打开**。
 
 ### Windows
-1.  Download the `.msi` installer or `.exe` setup file.
-2.  Run the installer and follow the on-screen instructions.
-3.  Launch **Sage Desktop** from the Start Menu or Desktop shortcut.
+1.  下载 `.msi` 安装程序或 `.exe` 设置文件。
+2.  运行安装程序并按照屏幕上的说明进行操作。
+3.  从开始菜单或桌面快捷方式启动 **Sage Desktop**。
 
-## Usage Guide
+## 使用指南
 
-### Initial Setup
-Upon first launch, the application will initialize the local environment:
--   **Database**: Created at `~/Library/Application Support/Sage/data` (macOS) or `%AppData%\Sage\data` (Windows).
--   **Files**: Local storage directory initialized.
--   **Vector Store**: Local vector database initialized.
+### 初始设置
+首次启动时，应用程序将初始化本地环境：
+-   **数据库**: 创建于 `~/Library/Application Support/Sage/data` (macOS) 或 `%AppData%\Sage\data` (Windows)。
+-   **文件**: 初始化本地存储目录。
+-   **向量库**: 初始化本地向量数据库。
 
-### Main Interface
-The interface is identical to the web version but runs entirely on your machine.
--   **Chat**: Interact with intelligent agents.
--   **Knowledge Base**: Upload files (PDF, TXT, MD) for local processing.
-    *   *Note*: Processing large files may take time depending on your computer's performance.
+### 主界面
+界面与网页版相同，但完全在您的机器上运行。
+-   **对话**: 与智能代理互动。
+-   **知识库**: 上传文件（PDF, TXT, MD）进行本地处理。
+    *   *注意*: 处理大文件可能会花费一些时间，具体取决于您的计算机性能。
 
-### Data Management
-All your data is stored locally.
--   **Backup**: You can backup your data by copying the `data` directory mentioned above.
--   **Uninstall**:
-    -   macOS: Drag the app to Trash. To remove data, delete `~/Library/Application Support/Sage`.
-    -   Windows: Use "Add or Remove Programs". To remove data, delete `%AppData%\Sage`.
+### 数据管理
+您的所有数据都存储在本地。
+-   **备份**: 您可以通过复制上述 `data` 目录来备份数据。
+-   **卸载**:
+    -   macOS: 将应用程序拖入废纸篓。要删除数据，请删除 `~/Library/Application Support/Sage`。
+    -   Windows: 使用“添加或删除程序”。要删除数据，请删除 `%AppData%\Sage`。
 
-## Troubleshooting
+## 故障排除
 
-### App won't start
--   Check if another instance is running.
--   Restart your computer.
+### 应用程序无法启动
+-   检查是否已有另一个实例在运行。
+-   重启计算机。
 
-### "Backend not ready" error
--   The Python background service might have failed to start.
--   Check logs:
+### "Backend not ready" (后端未就绪) 错误
+-   Python 后台服务可能启动失败。
+-   检查日志：
     -   macOS: `~/Library/Logs/Sage Desktop/`
     -   Windows: `%AppData%\Sage\logs\`
