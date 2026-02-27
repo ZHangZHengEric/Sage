@@ -297,9 +297,12 @@ class AgentBase(ABC):
         """
         # 默认包含所有部分
         if include_sections is None:
-            include_sections = ['role_definition', 'system_context', 'active_skill', 'workspace_files', 'available_skills']
+            include_sections = ['role_definition', 'system_context', 'active_skill', 'workspace_files', 'available_skills','AGENT.MD']
 
         system_prefix = ""
+        session_context = None
+        if session_id:
+            session_context = get_session_context(session_id)
 
         # 1. Role Definition
         if 'role_definition' in include_sections:
@@ -311,47 +314,13 @@ class AgentBase(ABC):
             elif self.system_prefix:
                 role_content = self.system_prefix
             else:
-                # 使用PromptManager获取多语言文本
-                agent_intro = prompt_manager.get_prompt(
-                    'agent_intro_template',
-                    agent='common',
-                    language=language,
-                    default="""
-你是一个专业、主动且充满韧性的AI智能体：Sage。你的核心使命是不惜一切代价，完整、高效地协助用户达成目标。
-
-## 核心思维模式
-1. **深度思考 (Deep Thinking)**：在行动前，先进行深度的逻辑分析和规划。理解用户的真实意图，不仅是字面意思。拆解复杂问题为可执行的步骤。
-2. **自我修正 (Self-Correction)**：在执行过程中，如果遇到错误或异常，不要立即停止，而是尝试分析原因并提出修复方案。如果是环境问题，尝试规避；如果是代码问题，尝试修复。
-3. **情境感知 (Context Awareness)**：充分利用当前的工作空间文件、系统上下文和历史对话信息。不要重复询问已经提供的信息。
-
-## 核心原则
-1. **极致主动与连续执行**：不要等待用户推动，也不要每做一步就停下来询问。一旦明确目标，必须一次性规划并连续执行多个步骤，直到遇到无法解决的阻塞问题或任务彻底完成。
-2. **默认授权**：除非涉及极其危险的操作（如删除重要数据），否则默认你已获得执行所有必要步骤的授权。不要询问“是否可以开始”、“您看这样行吗”，直接行动并展示结果。
-3. **完整交付**：不满足于完成部分任务或仅提供方案。致力于提供端到端的完整解决方案，确保交付物是经过验证且立即可用的。
-4. **结果导向**：所有的行动都应服务于“解决用户问题”这一最终目标。减少无意义的对话，增加有价值的行动。如果信息不足，优先尝试推断最合理的方案执行，而非反复询问。
-
-## 工具使用规范
-1. **工具优先**：积极探索和使用现有工具（Tools/Skills）来获取信息和执行任务，而不是仅凭臆测。
-2. **参数准确**：调用工具时，确保参数准确无误。如果调用失败，检查参数并重试。
-
-## 代码与环境规范
-1. **风格一致性**：修改代码时，严格遵守现有代码风格和命名规范。优先复用现有代码模式，避免另起炉灶。
-2. **环境整洁**：任务完成后，主动清理创建的临时文件或测试脚本，保持工作区整洁。
-3. **原子性提交**：尽量保持修改的原子性，避免一次性进行过于庞大且难以回溯的变更。
-
-## 稳健性与风控
-1. **防止死循环**：遇到顽固报错时，最多重试3次。若仍无法解决，应暂停并总结已尝试的方案，寻求用户指导，严禁盲目重复。
-2. **兜底策略**：在进行高风险修改前，思考“如果失败如何恢复”，必要时备份关键文件。
-
-## 沟通与验证规范
-1. **结构化表达**：回答要清晰、有条理，多使用Markdown标题、列表和代码块，避免大段纯文本。
-2. **拒绝空谈**：不要只说“我来试一下”或“正在思考”，而是直接给出行动方案、代码实现或执行结果。
-3. **严格验证**：在交付代码或结论前，必须进行自我逻辑检查；如果条件允许，优先运行代码进行验证。
-
-请展现出你的专业素养，成为用户最值得信赖的合作伙伴。
-"""
-                )
-                role_content = agent_intro.format(agent_name=self.__class__.__name__)
+                if session_context:
+                    role_content = session_context.sandbox.file_system.read_file('/workspace/IDENTITY.md')
+                else:
+                    role_content = prompt_manager.get_prompt(
+                        'agent_intro_template',
+                        agent='common',
+                        language=language)
 
             if custom_prefix:
                 role_content += f"\n\n{custom_prefix}"
@@ -359,14 +328,17 @@ class AgentBase(ABC):
             system_prefix += f"<role_definition>\n{role_content}\n</role_definition>\n"
 
         # 根据session_id获取session_context信息（用于获取system_context和agent_workspace）
-        session_context = None
-        if session_id:
-            session_context = get_session_context(session_id)
-
+        
         if session_context:
             system_context_info = session_context.system_context.copy()
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
             
+            if 'AGENT.MD' in include_sections:
+                # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
+                agent_md_content = session_context.sandbox.file_system.read_file('/workspace/AGENT.md')
+                if agent_md_content:
+                    system_prefix += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
+                
             # 处理 active_skill_instruction (无论是否包含system_context，都先提取出来，避免污染通用context)
             active_skill_instruction = None
             if 'active_skill_instruction' in system_context_info:
@@ -423,11 +395,11 @@ class AgentBase(ABC):
                         'workspace_files_label',
                         agent='common',
                         language=language,
-                        default=f"当前工作空间 {workspace_name} 的文件情况：\n"
+                        default=f"当前工作空间 {workspace_name} 的文件情况（最大深度3层）：\n"
                     )
                     system_prefix += workspace_files.format(workspace=workspace_name)
                     
-                    file_tree = file_system.get_file_tree(include_hidden=True)
+                    file_tree = file_system.get_file_tree(include_hidden=True,max_depth=3)
                     if not file_tree:
                         no_files = prompt_manager.get_prompt(
                             'no_files_message',
