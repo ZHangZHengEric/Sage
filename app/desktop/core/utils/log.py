@@ -73,7 +73,7 @@ class InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(level, record.getMessage())
 
 
-def init_logging(log_name="app", log_level="DEBUG"):
+def init_logging(log_name="app", log_level="DEBUG", log_path= "./logs"):
     """
     Initializes the Loguru logger with custom settings.
 
@@ -138,13 +138,10 @@ def init_logging(log_name="app", log_level="DEBUG"):
         "encoding": "utf8",
         "format": "{message}",
     }
-    LOG_PATH = "./logs"
-    if not os.path.exists(LOG_PATH):
-        os.mkdir(LOG_PATH)
 
-    logger.add(Path(LOG_PATH) / f"{log_name}_debug.log", level="DEBUG", **params)
-    logger.add(Path(LOG_PATH) / f"{log_name}_info.log", level="INFO", **params)
-    logger.add(Path(LOG_PATH) / f"{log_name}_error.log", level="ERROR", **params)
+    logger.add(Path(log_path) / f"{log_name}_debug.log", level="DEBUG", **params)
+    logger.add(Path(log_path) / f"{log_name}_info.log", level="INFO", **params)
+    logger.add(Path(log_path) / f"{log_name}_error.log", level="ERROR", **params)
 
     # 添加专门的访问日志文件
     access_params = {
@@ -155,7 +152,7 @@ def init_logging(log_name="app", log_level="DEBUG"):
         "format": "{message}",
     }
     logger.add(
-        Path(LOG_PATH) / f"{log_name}_access.log",
+        Path(log_path) / f"{log_name}_access.log",
         level="INFO",
         filter=lambda record: "REQUEST_START" in record["message"]
         or "REQUEST_END" in record["message"]
