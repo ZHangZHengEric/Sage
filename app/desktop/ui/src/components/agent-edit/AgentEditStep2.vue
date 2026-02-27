@@ -106,39 +106,6 @@
          </ScrollArea>
       </div>
     </Card>
-
-    <!-- Knowledge Bases -->
-    <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
-      <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('knowledgeBases')">
-        <div class="flex items-center gap-2">
-          <Database class="h-5 w-5" />
-          <CardTitle class="text-base">{{ t('agent.availableKnowledgeBases') }}</CardTitle>
-          <span class="text-xs text-muted-foreground ml-2">({{ store.formData.availableKnowledgeBases ? store.formData.availableKnowledgeBases.length : 0 }})</span>
-        </div>
-        <ChevronDown v-if="sections.knowledgeBases" class="h-4 w-4" />
-        <ChevronUp v-else class="h-4 w-4" />
-      </CardHeader>
-      <div v-show="!sections.knowledgeBases" class="px-5 pb-5 pt-4 space-y-3">
-         <div class="relative">
-           <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-           <Input v-model="searchQueries.knowledgeBases" placeholder="搜索知识库..." class="pl-8" />
-         </div>
-         <ScrollArea class="h-[300px] border rounded-lg p-4 bg-muted/10">
-          <div class="space-y-3">
-            <div v-for="kb in filteredKnowledgeBases" :key="kb.id" class="flex items-center space-x-2">
-              <Checkbox :id="`kb-${kb.id}`" :checked="store.formData.availableKnowledgeBases ? store.formData.availableKnowledgeBases.includes(kb.id) : false" @update:checked="() => store.toggleKnowledgeBase(kb.id)" />
-              <label :for="`kb-${kb.id}`" class="text-sm font-medium leading-none cursor-pointer flex-1">
-                {{ kb.name }}
-                <p v-if="kb.intro" class="text-xs text-muted-foreground line-clamp-1 mt-1 font-normal">{{ kb.intro }}</p>
-              </label>
-            </div>
-            <div v-if="filteredKnowledgeBases.length === 0" class="text-sm text-muted-foreground text-center py-4">
-              {{ props.knowledgeBases.length === 0 ? (t('knowledgeBase.noKnowledgeBases') || '暂无可用知识库') : '未找到匹配的知识库' }}
-            </div>
-          </div>
-         </ScrollArea>
-      </div>
-    </Card>
   </div>
 </template>
 
@@ -146,7 +113,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useAgentEditStore } from '../../stores/agentEdit'
 import { useLanguage } from '../../utils/i18n.js'
-import { Trash2, Plus, ChevronDown, ChevronUp, Bot, Wrench, Search, Database, Server, Code } from 'lucide-vue-next'
+import { Trash2, Plus, ChevronDown, ChevronUp, Bot, Wrench, Search, Server, Code } from 'lucide-vue-next'
 
 // UI Components
 import { Button } from '@/components/ui/button'
@@ -157,8 +124,7 @@ import { Input } from '@/components/ui/input'
 
 const props = defineProps({
   tools: { type: Array, default: () => [] },
-  skills: { type: Array, default: () => [] },
-  knowledgeBases: { type: Array, default: () => [] }
+  skills: { type: Array, default: () => [] }
 })
 
 const store = useAgentEditStore()
@@ -167,14 +133,12 @@ const { t } = useLanguage()
 // Collapsed state
 const sections = reactive({
   tools: false,
-  skills: false,
-  knowledgeBases: false
+  skills: false
 })
 
 const searchQueries = reactive({
   tools: '',
-  skills: '',
-  knowledgeBases: ''
+  skills: ''
 })
 
 const selectedGroupSource = ref('')
@@ -233,15 +197,6 @@ const filteredSkills = computed(() => {
     const desc = skill.description || ''
     return name.toLowerCase().includes(query) || desc.toLowerCase().includes(query)
   })
-})
-
-const filteredKnowledgeBases = computed(() => {
-  if (!searchQueries.knowledgeBases) return props.knowledgeBases
-  const query = searchQueries.knowledgeBases.toLowerCase()
-  return props.knowledgeBases.filter(kb => 
-    kb.name.toLowerCase().includes(query) || 
-    (kb.intro && kb.intro.toLowerCase().includes(query))
-  )
 })
 
 const toggleSection = (key) => {

@@ -8,8 +8,6 @@ from loguru import logger
 
 from .render import Response
 
-# ============= 自定义异常类 =============
-
 
 class SageHTTPException(HTTPException):
     """自定义HTTP异常，支持更多错误信息"""

@@ -88,7 +88,6 @@
       :agent="editingAgent" 
       :tools="tools" 
       :skills="skills" 
-      :knowledgeBases="knowledgeBases"
       @save="handleSaveAgent"
       @update:visible="handleCloseEdit" 
     />
@@ -186,7 +185,6 @@ import AgentEdit from '../components/AgentEdit.vue'
 import AgentAuthModal from '../components/AgentAuthModal.vue'
 import { toolAPI } from '../api/tool.js'
 import { skillAPI } from '../api/skill.js'
-import { knowledgeBaseAPI } from '../api/knowledgeBase.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { dump } from 'js-yaml'
@@ -206,7 +204,6 @@ const loading = ref(false)
 const error = ref(null)
 const tools = ref([])
 const skills = ref([])
-const knowledgeBases = ref([])
 const modelProviders = ref([])
 const showCreationModal = ref(false)
 const currentView = ref('list') // 'list', 'create', 'edit', 'view'
@@ -264,7 +261,6 @@ onMounted(async () => {
   await loadModelProviders()
   await loadAvailableTools()
   await loadAvailableSkills()
-  await loadKnowledgeBases()
 })
 
 
@@ -293,19 +289,6 @@ const loadAvailableSkills = async () => {
     }
   } catch (error) {
     console.error('Failed to load available skills:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-const loadKnowledgeBases = async () => {
-  try {
-    loading.value = true
-    const response = await knowledgeBaseAPI.getKnowledgeBases({ page: 1, page_size: 1000 })
-    const { list } = response || {}
-    knowledgeBases.value = list || []
-  } catch (error) {
-    console.error('Failed to load knowledge bases:', error)
   } finally {
     loading.value = false
   }
@@ -422,7 +405,6 @@ const confirmExport = () => {
     llm_provider_id: agent.llm_provider_id,
     availableTools: agent.availableTools,
     availableSkills: agent.availableSkills,
-    availableKnowledgeBases: agent.availableKnowledgeBases,
     systemContext: agent.systemContext,
     availableWorkflows: agent.availableWorkflows,
     exportTime: new Date().toISOString(),
@@ -495,7 +477,6 @@ const handleImport = () => {
           maxLoopCount: importedConfig.maxLoopCount || 10,
           availableTools: importedConfig.availableTools || [],
           availableSkills: importedConfig.availableSkills || [],
-          availableKnowledgeBases: importedConfig.availableKnowledgeBases || [],
           systemContext: importedConfig.systemContext || {},
           availableWorkflows: importedConfig.availableWorkflows || {}
         }

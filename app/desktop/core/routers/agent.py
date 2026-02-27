@@ -38,7 +38,6 @@ class AgentConfigDTO(BaseModel):
     availableTools: Optional[List[str]] = None
     availableSubAgentIds: Optional[List[str]] = None
     availableSkills: Optional[List[str]] = None
-    availableKnowledgeBases: Optional[List[str]] = None
     memoryType: Optional[str] = None
     maxLoopCount: Optional[int] = 10
     deepThinking: Optional[bool] = False
@@ -78,8 +77,7 @@ def convert_config_to_agent(
         availableTools=config.get("availableTools") or config.get("available_tools"),
         availableSubAgentIds=config.get("availableSubAgentIds") or config.get("available_sub_agent_ids"),
         availableSkills=config.get("availableSkills") or config.get("available_skills"),
-        availableKnowledgeBases=config.get("availableKnowledgeBases")
-        or config.get("available_knowledge_bases"),
+
         memoryType=config.get("memoryType") or config.get("memory_type"),
         maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
@@ -102,7 +100,6 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "availableTools": agent.availableTools,
         "availableSubAgentIds": agent.availableSubAgentIds,
         "availableSkills": agent.availableSkills,
-        "availableKnowledgeBases": agent.availableKnowledgeBases,
         "memoryType": agent.memoryType,
         "maxLoopCount": agent.maxLoopCount,
         "deepThinking": agent.deepThinking,
