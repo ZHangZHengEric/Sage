@@ -192,7 +192,7 @@ async def brave_search(query: str, count: int = 10) -> str:
     return json.dumps(results, indent=2, ensure_ascii=False)
 
 @mcp.tool()
-@sage_mcp_tool(server_name="brave_search")
+# @sage_mcp_tool(server_name="brave_search")
 async def visit_page(url: str) -> str:
     """
     Visit a web page and extract its content as Markdown.
