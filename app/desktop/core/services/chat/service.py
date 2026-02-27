@@ -10,7 +10,6 @@ import uuid
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
-    delete_session_run_lock,
     get_session_context,
     get_session_run_lock,
 )
@@ -80,8 +79,6 @@ async def populate_request_from_agent_config(
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
             request.memory_type = agent_config.get("memoryType")
-        if agent_config.get("availableKnowledgeBases") is not None:
-            request.available_knowledge_bases = agent_config.get("availableKnowledgeBases")
         if agent_config.get("availableSubAgentIds") is not None:
             request.available_sub_agent_ids = agent_config.get("availableSubAgentIds")
 
@@ -146,39 +143,11 @@ async def populate_request_from_agent_config(
     _merge_dict("system_context", {})
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
-    _fill_if_none("available_knowledge_bases", [])
     _fill_if_none("available_sub_agent_ids", [])
     user = {"本次会话用户id": request.user_id or "default_user"}
     _merge_dict("system_context", user)
     if request.agent_id and agent:
         _merge_dict("system_context", {"当前AgentId": request.agent_id})
-
-    # 处理可用知识库
-    available_knowledge_bases = request.available_knowledge_bases
-    if available_knowledge_bases:
-        kdb_dao = models.KdbDao()
-        # 分页获取所有关联的知识库
-        kdbs, _ = await kdb_dao.get_kdbs_paginated(
-            kdb_ids=available_knowledge_bases,
-            data_type=None,
-            query_name=None,
-            page=1,
-            page_size=1000,
-        )
-
-        if kdbs:
-            # 1. 注入 system_context
-            kdb_context = {}
-            for kdb in kdbs:
-                index_name = kdb.get_index_name()
-                kdb_context[f"{kdb.name}数据库的index_name"] = index_name
-
-            _merge_dict("system_context", kdb_context)
-
-            # 2. 添加 retrieve_on_zavixai_db 工具
-            current_tools = request.available_tools
-            if "retrieve_on_zavixai_db" not in current_tools:
-                current_tools.append("retrieve_on_zavixai_db")
 
     # 处理可用技能
     available_skills = request.available_skills

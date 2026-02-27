@@ -3,9 +3,7 @@ import ChatPage from '../views/Chat.vue'
 import AgentConfigPage from '../views/AgentList.vue'
 import ToolsPage from '../views/ToolList.vue'
 import HistoryPage from '../views/ChatHistory.vue'
-import KnowledgeBasePage from '../views/KnowledgeBaseList.vue'
 import SkillLibraryPage from '../views/SkillList.vue'
-import ApiAgentChatPage from '../views/ApiAgentChat.vue'
 import UserListPage from '../views/UserList.vue'
 import SystemSettingsPage from '../views/SystemSettings.vue'
 
@@ -63,35 +61,11 @@ const routes = [
     }
   },
   {
-    path: '/agent/knowledge-base',
-    name: 'KnowledgeBase',
-    component: KnowledgeBasePage,
-    meta: {
-      title: 'knowledgeBase.title'
-    }
-  },
-  {
-    path: '/agent/knowledge-base/:kdbId',
-    name: 'KnowledgeBaseDetail',
-    component: () => import('../views/KnowledgeBaseDetail.vue'),
-    meta: {
-      title: 'knowledgeBase.title'
-    }
-  },
-  {
     path: '/agent/skills',
     name: 'Skills',
     component: SkillLibraryPage,
     meta: {
       title: 'skills.title'
-    }
-  },
-  {
-    path: '/agent/api-doc/agent-chat',
-    name: 'ApiAgentChat',
-    component: ApiAgentChatPage,
-    meta: {
-      title: 'api.agentChatTitle'
     }
   },
   {

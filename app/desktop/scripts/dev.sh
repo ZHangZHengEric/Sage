@@ -56,7 +56,7 @@ else
 fi
 
 if [ -n "$TARGET" ]; then
-    SIDECAR_NAME="sage-server-$TARGET"
+    SIDECAR_NAME="sage-desktop-sidecar-$TARGET"
     if [[ "$OS" == MINGW* ]] || [[ "$OS" == CYGWIN* ]]; then
         SIDECAR_NAME="$SIDECAR_NAME.exe"
     fi
@@ -87,8 +87,8 @@ VENV_PYTHON="\$CORE_DIR/.venv/bin/python"
 export PYTHONPATH="\$PROJECT_ROOT:\$PYTHONPATH"
 
 # Execute Python script
-echo "Wrapper starting Python sidecar from source: \$CORE_DIR/run_desktop.py"
-exec "\$VENV_PYTHON" "\$CORE_DIR/run_desktop.py"
+echo "Wrapper starting Python sidecar from source: app.desktop.core.main"
+exec "\$VENV_PYTHON" -m app.desktop.core.main
 EOF
         chmod +x "$SIDECAR_PATH"
     fi
