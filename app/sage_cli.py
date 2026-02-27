@@ -34,24 +34,124 @@ from sagents.utils.streaming_message_box import (
 
 
 def display_tools(console, tool_manager: Union[ToolManager, ToolProxy]):
-    try:
-        if hasattr(tool_manager, 'list_tools_simplified'):
-            available_tools = tool_manager.list_tools_simplified()
-        elif hasattr(tool_manager, 'tool_manager') and hasattr(tool_manager.tool_manager, 'list_tools_simplified'):
-            available_tools = tool_manager.tool_manager.list_tools_simplified()
-        else:
-            available_tools = []
+    """显示可用的工具列表（简化为一行）"""
+    tools = tool_manager.get_openai_tools()
+    tool_names = [tool['function']['name'] for tool in tools]
+    console.print(f"\n[dim]可用工具: {', '.join(tool_names)}[/dim]")
 
-        if available_tools:
-            tool_names = [tool.get('name', '未知工具') for tool in available_tools]
-            # 排序
-            tool_names.sort()
-            display_items_in_columns(tool_names, title="可用工具列表", color="cyan")
+
+def select_skill_interactive(console, skill_manager, initial_input: str = "") -> Optional[str]:
+    """
+    交互式选择 skill
+    当用户输入 / 时调用，显示 skills 列表并允许选择
+    
+    Args:
+        skill_manager: SkillManager 实例
+        initial_input: 用户已输入的内容（以 / 开头）
+        
+    Returns:
+        选中的 skill 名称，或 None（用户取消）
+    """
+    from prompt_toolkit import Application
+    from prompt_toolkit.widgets import TextArea, Label, Button
+    from prompt_toolkit.layout import Layout, HSplit, VSplit, Frame
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
+    from prompt_toolkit.filter import to_filter
+    
+    skills = skill_manager.list_skills()
+    if not skills:
+        console.print("[yellow]没有已加载的技能[/yellow]")
+        return None
+    
+    filtered_skills = skills.copy()
+    selected_index = 0
+    
+    # 创建 UI 组件
+    skill_list_label = Label("")
+    input_area = TextArea(
+        text=initial_input[1:] if initial_input.startswith('/') else initial_input,
+        multiline=False,
+        accept_handler=None
+    )
+    
+    def update_display():
+        """更新显示"""
+        nonlocal filtered_skills, selected_index
+        
+        query = input_area.text.lower().strip()
+        if query:
+            filtered_skills = [s for s in skills if query in s.lower()]
         else:
-            console.print("[yellow]未检测到可用工具。[/yellow]")
-    except Exception as e:
-        logger.error(f"获取工具列表时出错: {traceback.format_exc()}")
-        console.print(f"\n[red]获取工具列表时出错: {e}[/red]")
+            filtered_skills = skills.copy()
+        
+        selected_index = 0
+        
+        # 更新列表显示
+        lines = []
+        for i, skill in enumerate(filtered_skills):
+            prefix = "▶ " if i == selected_index else "  "
+            lines.append(f"{prefix}{skill}")
+        
+        skill_list_label.text = "\n".join(lines)
+    
+    # 创建 key bindings
+    kb = KeyBindings()
+    
+    @kb.add('c-c', filter=to_filter(True))
+    def cancel(event):
+        event.app.exit(result=None)
+    
+    @kb.add('c-q', filter=to_filter(True))
+    def cancel2(event):
+        event.app.exit(result=None)
+    
+    @kb.add('escape', filter=to_filter(True))
+    def cancel3(event):
+        event.app.exit(result=None)
+    
+    @kb.add('up', filter=to_filter(True))
+    def move_up(event):
+        nonlocal selected_index
+        if filtered_skills:
+            selected_index = (selected_index - 1) % len(filtered_skills)
+            update_display()
+    
+    @kb.add('down', filter=to_filter(True))
+    def move_down(event):
+        nonlocal selected_index
+        if filtered_skills:
+            selected_index = (selected_index + 1) % len(filtered_skills)
+            update_display()
+    
+    @kb.add('enter', filter=to_filter(True))
+    def select(event):
+        if filtered_skills and 0 <= selected_index < len(filtered_skills):
+            event.app.exit(result=filtered_skills[selected_index])
+    
+    # 布局
+    container = VSplit([
+        Label("[bold]技能列表 (↑↓ 选择, Enter 确认, Esc 取消):[/bold]\n"),
+        skill_list_label,
+        Label("\n[bold]搜索:[/bold]"),
+        input_area,
+    ])
+    
+    # 初始化显示
+    update_display()
+    
+    # 运行应用
+    app = Application(
+        layout=Layout(container),
+        key_bindings=kb,
+        mouse_support=True,
+    )
+    
+    try:
+        result = app.run()
+        return result
+    except Exception:
+        return None
 
 
 async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], skill_manager: Optional[Union[SkillManager, SkillProxy]], config: Dict[str, Any], context_budget_config: Optional[Dict[str, Any]] = None):
@@ -72,7 +172,26 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
     messages = []
     while True:
         try:
-            user_input = console.input("[bold blue]你: [/bold blue]")
+            # 使用 input() 替代 console.input()，更好地支持中文
+            user_input = input("\033[1;34m你: \033[0m")
+            
+            # 处理 / 开头的情况 - 显示技能列表
+            if user_input.startswith('/') and skill_manager:
+                console.print("\n[cyan]=== 技能选择模式 ===[/cyan]")
+                try:
+                    selected_skill = select_skill_interactive(console, skill_manager, user_input)
+                except Exception as e:
+                    console.print(f"[red]技能选择出错: {e}[/red]")
+                    console.print(f"[yellow]可用技能: {skill_manager.list_skills()}[/yellow]")
+                    continue
+                
+                if selected_skill:
+                    console.print(f"[green]已选择技能: {selected_skill}[/green]")
+                    user_input = f"/使用技能 {selected_skill}"
+                else:
+                    console.print("[yellow]取消选择[/yellow]")
+                    continue
+            
             if user_input.lower() in ['exit', 'quit']:
                 console.print("[green]再见！[/green]")
                 break
@@ -538,6 +657,29 @@ def parse_arguments() -> Dict[str, Any]:
 
 
 if __name__ == '__main__':
+    # 设置终端编码，确保中文输入正常
+    import sys
+    import os
+    
+    # 设置 Python 的标准流编码
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout.reconfigure(encoding='utf-8')
+    if sys.stdin.encoding != 'utf-8':
+        sys.stdin.reconfigure(encoding='utf-8')
+    
+    # 设置 readline 相关环境变量
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['LC_ALL'] = 'zh_CN.UTF-8'
+    
+    # 配置 readline 以正确处理 UTF-8
+    try:
+        import readline
+        # 设置破折号/引号字符不做转义
+        readline.parse_and_bind('set enable-bracketed-paste off')
+        readline.parse_and_bind('set editing-mode emacs')
+    except:
+        pass
+    
     config = parse_arguments()
 
     async def main_async():
