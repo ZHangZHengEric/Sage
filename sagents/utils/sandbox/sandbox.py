@@ -1072,6 +1072,80 @@ class Sandbox:
              venv.create(self.venv_dir, with_pip=True, clear=True)
              self._configure_pip_mirror()
 
+    def ensure_npm(self, packages: Optional[List[str]] = None) -> bool:
+        """Ensure npm is available and optionally install packages in workdir.
+        
+        Args:
+            packages: Optional list of npm package names to install in workdir
+            
+        Returns:
+            bool: True if npm is available (and packages installed if specified)
+        """
+        import shutil
+        
+        # 检查 npm 是否已安装
+        if not shutil.which("npm"):
+            logger.warning("npm not found")
+            return False
+        
+        if not packages:
+            return True
+        
+        # 在 workdir 下安装 npm 包
+        workdir = self.workdir
+        if not workdir:
+            logger.error("No workdir set, cannot install npm packages")
+            return False
+        
+        # 初始化 package.json（如果不存在）
+        pkg_path = os.path.join(workdir, "package.json")
+        if not os.path.exists(pkg_path):
+            try:
+                subprocess.run(["npm", "init", "-y"], cwd=workdir, check=True, capture_output=True)
+            except Exception as e:
+                logger.error(f"Failed to initialize package.json: {e}")
+                return False
+        
+        # 检查是否所有包都已安装
+        needs_install = True
+        try:
+            if os.path.exists(os.path.join(workdir, "node_modules")):
+                all_installed = True
+                for pkg in packages:
+                    pkg_name = pkg.split('@')[0] if '@' in pkg and not pkg.startswith('@') else pkg
+                    if pkg.startswith('@'):
+                        parts = pkg.split('@')
+                        if len(parts) > 2:
+                            pkg_name = '@' + parts[1]
+                        else:
+                            pkg_name = pkg
+
+                    if not os.path.exists(os.path.join(workdir, "node_modules", pkg_name)):
+                        all_installed = False
+                        break
+                if all_installed:
+                    needs_install = False
+        except:
+            pass
+        
+        if needs_install:
+            try:
+                # 使用国内镜像源
+                npm_registry = "https://registry.npmmirror.com/"
+                subprocess.run(
+                    ["npm", "install", f"--registry={npm_registry}", "--prefix", workdir] + packages,
+                    cwd=workdir,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                logger.info(f"npm packages installed in {workdir}: {packages}")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to install npm packages: {e.stderr}")
+                return False
+        
+        return True
+    
     def _configure_pip_mirror(self):
         """配置 venv 的 pip 镜像源，解决 SSL 和网络问题"""
         pip_conf_path = os.path.join(self.venv_dir, "pip.conf")
