@@ -31,7 +31,7 @@ class ServerBuilder:
         "mcp", "fastmcp", "docstring_parser", "chardet", "httpx",
         "pdfplumber", "html2text", "openpyxl", "pypandoc",
         "python-docx", "markdown", "python-pptx", "PyMuPDF",
-        "tqdm", "unstructured", "numpy", "pandas", "pyarrow",
+        "tqdm", "unstructured", "numpy", "pandas",
         "loguru", "asyncio_mqtt", "websockets"
        
     ]
@@ -44,7 +44,7 @@ class ServerBuilder:
         "yaml", "openai", "httpx", "loguru", "pypandoc", "pdfplumber",
         "html2text", "openpyxl", "python-docx", "markdown",
         "python-pptx", "PyMuPDF", "tqdm", "unstructured", "numpy",
-        "pandas", "pyarrow", "chardet", "asyncio", "aiofiles",
+        "pandas", "chardet", "asyncio", "aiofiles",
         "websockets", "python-multipart", "jinja2", "itsdangerous",
         "click", "h11", "anyio", "idna", "sniffio",
         "typing_extensions", "starlette", "pydantic_core",
