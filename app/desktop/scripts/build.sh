@@ -1,112 +1,180 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Add cargo to PATH
-export PATH="$HOME/.cargo/bin:$PATH"
+########################################
+# Sage Desktop Industrial Build Script
+########################################
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+VENV_DIR="$ROOT_DIR/app/desktop/core/.venv"
+DIST_DIR="$ROOT_DIR/app/desktop/dist"
+TAURI_BIN_DIR="$ROOT_DIR/app/desktop/tauri/bin"
 
-# Detect OS
+MODE="${1:-release}"  # release | debug
+
+echo "======================================"
+echo " Sage Desktop Build ($MODE)"
+echo " Root: $ROOT_DIR"
+echo "======================================"
+
+########################################
+# Detect OS & Target Triple
+########################################
+
 OS="$(uname -s)"
-case "${OS}" in
-    Linux*)     OS_TYPE=Linux;;
-    Darwin*)    OS_TYPE=Mac;;
-    CYGWIN*)    OS_TYPE=Cygwin;;
-    MINGW*)     OS_TYPE=MinGw;;
-    *)          OS_TYPE="UNKNOWN:${OS}"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  Darwin)
+    OS_TYPE="macos"
+    if [ "$ARCH" = "arm64" ]; then
+      TARGET="aarch64-apple-darwin"
+    else
+      TARGET="x86_64-apple-darwin"
+    fi
+    ;;
+  Linux)
+    OS_TYPE="linux"
+    TARGET="x86_64-unknown-linux-gnu"
+    ;;
+  MINGW*|CYGWIN*)
+    OS_TYPE="windows"
+    TARGET="x86_64-pc-windows-msvc"
+    ;;
+  *)
+    echo "Unsupported OS: $OS"
+    exit 1
+    ;;
 esac
 
-echo "Building for $OS_TYPE..."
+echo "OS: $OS_TYPE"
+echo "Target: $TARGET"
 
-# 1. Setup Python Environment
-echo "Setting up Python environment..."
-VENV_DIR="$ROOT_DIR/app/desktop/core/.venv"
+########################################
+# 1. Python Environment Setup
+########################################
 
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating Python virtual environment at $VENV_DIR..."
-    python3 -m venv "$VENV_DIR"
+  echo "Creating virtualenv..."
+  python3 -m venv "$VENV_DIR"
 fi
 
 source "$VENV_DIR/bin/activate"
 
-# Install dependencies
-pip install --upgrade setuptools
+echo "Upgrading build tools..."
+pip install --upgrade pip setuptools wheel >/dev/null
+
+echo "Installing dependencies..."
 pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt"
-pip install pyinstaller
 
+if ! command -v pyinstaller >/dev/null; then
+  pip install pyinstaller
+fi
+
+########################################
 # 2. Build Python Sidecar
-echo "Building Python Sidecar..."
+########################################
+
+echo "Building Python sidecar..."
+
+rm -rf "$DIST_DIR"
+
 export PYINSTALLER_CONFIG_DIR="$ROOT_DIR/.pyinstaller"
-cd "$ROOT_DIR/app/desktop/core"
-# Make sure we can import from app.desktop.core
-export PYTHONPATH="$ROOT_DIR:$PYTHONPATH"
-pyinstaller --clean --noconfirm --name sage-desktop --onefile --windowed main.py --paths="$ROOT_DIR"
-cd "$ROOT_DIR"
+export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
+cd "$ROOT_DIR/app/desktop"
 
-# Move binary to tauri/bin
-mkdir -p "$ROOT_DIR/app/desktop/tauri/bin"
-if [ "$OS_TYPE" == "Mac" ]; then
-    ARCH=$(uname -m)
-    if [ "$ARCH" == "arm64" ]; then
-        TARGET="aarch64-apple-darwin"
-    else
-        TARGET="$ARCH-apple-darwin"
-    fi
-    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
-    elif [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop.app/Contents/MacOS/sage-desktop" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop.app/Contents/MacOS/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
-    else
-        echo "Sidecar binary not found under app/desktop/core/dist"
-        exit 1
-    fi
-elif [ "$OS_TYPE" == "MinGw" ] || [ "$OS_TYPE" == "Cygwin" ]; then
-    TARGET="x86_64-pc-windows-msvc"
-    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop.exe" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop.exe" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET.exe"
-    else
-        echo "Sidecar binary not found under app/desktop/core/dist"
-        exit 1
-    fi
-else
-    TARGET="x86_64-unknown-linux-gnu"
-    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
-    else
-        echo "Sidecar binary not found under app/desktop/core/dist"
-        exit 1
-    fi
+PYI_FLAGS=(
+  --noconfirm
+  --clean
+  --onedir
+  --name sage-desktop
+  --hidden-import=aiosqlite
+  --hidden-import=greenlet
+  --hidden-import=sqlalchemy.dialects.sqlite.aiosqlite
+)
+
+if [ "$MODE" = "release" ]; then
+  PYI_FLAGS+=(--strip)
+  PYI_FLAGS+=(--noupx)
 fi
 
-echo "Python Sidecar built and moved to bin."
+pyinstaller "${PYI_FLAGS[@]}" entry.py
 
-# 3. Build Frontend
-echo "Building Frontend..."
+cd "$ROOT_DIR"
+
+########################################
+# 3. Move Binary to Tauri
+########################################
+
+# Define the sidecar directory in Tauri
+TAURI_SIDECAR_DIR="$ROOT_DIR/app/desktop/tauri/sidecar"
+
+# Clean up previous build
+rm -rf "$TAURI_SIDECAR_DIR"
+mkdir -p "$TAURI_SIDECAR_DIR"
+
+if [ "$OS_TYPE" = "windows" ]; then
+  SRC_DIR="$DIST_DIR/sage-desktop"
+else
+  SRC_DIR="$DIST_DIR/sage-desktop"
+fi
+
+if [ ! -d "$SRC_DIR" ]; then
+  echo "ERROR: Sidecar directory not found: $SRC_DIR"
+  exit 1
+fi
+
+# Copy the entire directory
+cp -r "$SRC_DIR/"* "$TAURI_SIDECAR_DIR/"
+
+# Ensure the executable is executable
+if [ "$OS_TYPE" = "windows" ]; then
+  chmod +x "$TAURI_SIDECAR_DIR/sage-desktop.exe"
+else
+  chmod +x "$TAURI_SIDECAR_DIR/sage-desktop"
+fi
+
+echo "Sidecar copied to:"
+echo "$TAURI_SIDECAR_DIR"
+
+########################################
+# 4. Build Frontend
+########################################
+
+echo "Building frontend..."
+
 cd "$ROOT_DIR/app/desktop/ui"
-npm install
-npm run build
-cd "$ROOT_DIR"
 
-# Move frontend build to desktop dist is handled by tauri config (distDir)
-# But if we want to manually check or use it for something else:
-# The dist will be at app/desktop/ui/dist
-
-# 4. Build Tauri
-echo "Building Tauri App..."
-cd "$ROOT_DIR/app/desktop/tauri"
-# Check if cargo is available
-if command -v cargo &> /dev/null; then
-    # Check if tauri-cli is installed
-    if ! cargo tauri --version &> /dev/null; then
-        echo "Tauri CLI not found. Installing..."
-        cargo install tauri-cli --version "^1.5"
-    elif [[ $(cargo tauri --version) == *"tauri-cli 2"* ]]; then
-        echo "Tauri CLI v2 detected but v1 is required. Installing v1..."
-        cargo install tauri-cli --version "^1.5" --force
-    fi
-    cargo tauri build
-else
-    echo "Cargo not found. Skipping Tauri build. Please install Rust and run 'cargo tauri build' manually."
+if [ ! -d node_modules ]; then
+  npm ci
 fi
 
-echo "Build complete!"
+npm run build
+
+cd "$ROOT_DIR"
+
+########################################
+# 5. Build Tauri
+########################################
+
+cd "$ROOT_DIR/app/desktop/tauri"
+
+if ! command -v cargo >/dev/null; then
+  echo "Cargo not found. Install Rust first."
+  exit 1
+fi
+
+if ! cargo tauri --version >/dev/null 2>&1; then
+  echo "Installing tauri-cli v1..."
+  cargo install tauri-cli --version "^1.5"
+fi
+
+if [ "$MODE" = "release" ]; then
+  cargo tauri build
+else
+  cargo tauri build --debug
+fi
+
+echo "======================================"
+echo " Build Completed Successfully"
+echo "======================================"
