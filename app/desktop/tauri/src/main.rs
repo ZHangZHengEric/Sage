@@ -11,6 +11,9 @@ use tauri::{
 use tokio::process::Command;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use std::process::Stdio;
+use std::sync::Mutex;
+
+struct SidecarPid(Mutex<Option<u32>>);
 
 #[derive(Clone, serde::Serialize)]
 struct Payload {
@@ -30,10 +33,28 @@ fn main() {
     */
 
     tauri::Builder::default()
+        .manage(SidecarPid(Mutex::new(None)))
         .on_window_event(|event| match event.event() {
             WindowEvent::Destroyed => {
                 // When the main window is destroyed (closed), exit the app.
                 // Use app_handle.exit(0) to ensure proper cleanup of child processes.
+                let app_handle = event.window().app_handle();
+                if let Some(state) = app_handle.try_state::<SidecarPid>() {
+                    let mut pid_guard = state.0.lock().unwrap();
+                    if let Some(pid) = *pid_guard {
+                        #[cfg(unix)]
+                        std::process::Command::new("kill")
+                            .arg(pid.to_string())
+                            .output()
+                            .ok();
+                        #[cfg(windows)]
+                        std::process::Command::new("taskkill")
+                            .args(["/F", "/PID", &pid.to_string()])
+                            .output()
+                            .ok();
+                        *pid_guard = None;
+                    }
+                }
                 event.window().app_handle().exit(0);
             }
             _ => {}
@@ -98,6 +119,11 @@ fn main() {
                     .stderr(Stdio::piped())
                     .spawn()
                     .expect("Failed to spawn sidecar");
+
+                if let Some(id) = child.id() {
+                    let state = app_handle.state::<SidecarPid>();
+                    *state.0.lock().unwrap() = Some(id);
+                }
                 
                 println!("Python sidecar spawned");
                 
