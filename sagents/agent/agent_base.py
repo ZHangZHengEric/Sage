@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
 import json
 import uuid
+from app.server.models import User
 from sagents.utils.logger import logger
 from sagents.tool.tool_schema import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
@@ -338,7 +339,20 @@ class AgentBase(ABC):
                 agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))
                 if agent_md_content:
                     system_prefix += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
+
+                soul_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'SOUL.md'))
+                if soul_content:
+                    if len(soul_content) > 300:
+                        soul_content = soul_content[:300]+"……"
+                    system_prefix += f"<soul>\n{soul_content}\n</soul>\n"
                 
+                user_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'USER.md'))
+                if user_content:
+                    if len(user_content) > 300: 
+                        user_content = user_content[:300]+"……"  
+                    system_prefix += f"<user>\n{user_content}\n</user>\n"
+
+
             # 处理 active_skill_instruction (无论是否包含system_context，都先提取出来，避免污染通用context)
             active_skill_instruction = None
             if 'active_skill_instruction' in system_context_info:
