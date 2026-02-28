@@ -1,1821 +1,298 @@
-import multiprocessing
-import resource
-import time
-import traceback
-from typing import Any, Callable, Dict, Optional, List, Union
+"""
+Sandbox - 沙箱核心类
+
+核心功能：
+1. 路径映射：虚拟路径 ↔ 宿主机路径
+2. Python 虚拟环境：隔离 Python 依赖
+3. 执行模式：subprocess（默认，无 FS 隔离）
+"""
 import sys
 import os
-import contextvars
-import subprocess
-import platform
-import pickle
-import json
-import venv
+from typing import Dict, Any, Optional, Callable, List
+
 from sagents.utils.logger import logger
 
-# Global cache for auto-detected isolation mode
-_AUTO_DETECTED_MODE = None
-
-_current_sandbox = contextvars.ContextVar('current_sandbox', default=None)
 
 class SandboxError(Exception):
+    """沙箱错误"""
     pass
 
-class ResourceLimitExceeded(SandboxError):
-    pass
-
-class SecurityViolation(SandboxError):
-    pass
-
-def _read_first_line(path: str) -> Optional[str]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.readline().strip()
-    except Exception:
-        return None
-
-def _get_cgroup_memory_limit_bytes() -> Optional[int]:
-    v2_path = "/sys/fs/cgroup/memory.max"
-    v1_paths = [
-        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-        "/sys/fs/cgroup/memory.limit_in_bytes",
-    ]
-    line = _read_first_line(v2_path)
-    if line and line != "max":
-        try:
-            value = int(line)
-            if value > 0:
-                return value
-        except Exception:
-            pass
-    for path in v1_paths:
-        line = _read_first_line(path)
-        if not line:
-            continue
-        try:
-            value = int(line)
-            if value > 0 and value < (1 << 60):
-                return value
-        except Exception:
-            continue
-    return None
-
-def _effective_memory_limit(limits: Dict[str, Any]) -> Optional[int]:
-    if 'memory' not in limits:
-        return None
-    
-    # On macOS, RLIMIT_AS (Virtual Memory Size) is strictly enforced and often causes
-    # immediate crashes for Python processes (which may reserve large address spaces).
-    # We skip strict memory limiting on macOS to prevent "Process died unexpectedly".
-    if sys.platform == 'darwin':
-        return None
-
-    try:
-        target = int(limits['memory'])
-    except Exception:
-        return None
-    
-    # Check cgroup limit only for logging or soft reference, but do NOT use it 
-    # to restrict RLIMIT_AS (Virtual Memory). Cgroups control physical memory.
-    # RLIMIT_AS controls virtual address space, which must be much larger 
-    # for V8/WebAssembly (often 10GB+ for guard regions).
-    # Using cgroup limit (e.g. 512MB) to cap RLIMIT_AS would crash V8 immediately.
-    
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    if hard != resource.RLIM_INFINITY:
-        target = min(target, hard)
-    
-    # V8/WebAssembly requires huge virtual memory (Guard Regions).
-    # Setting RLIMIT_AS can causing immediate crashes (OOM) even if physical memory is sufficient.
-    # In Docker/Kubernetes, physical memory is already constrained by cgroups.
-    # We effectively disable RLIMIT_AS by setting it to None (Unlimited) to accommodate V8 requirements.
-    # See: https://github.com/nodejs/node/issues/24649
-    return None
-
-# --- Launcher Script Content ---
-LAUNCHER_SCRIPT = """
-import sys
-import os
-import pickle
-import traceback
-import importlib
-import importlib.util
-import asyncio
-import subprocess
-import io
-import resource
-import builtins
-import time
-from contextlib import redirect_stdout, redirect_stderr
-
-# Ensure current directory is in sys.path
-sys.path.insert(0, os.getcwd())
-
-def log_timing(msg):
-    try:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        sys.stderr.write(f"[{timestamp}] [LAUNCHER] {msg}\\n")
-        sys.stderr.flush()
-    except Exception:
-        pass
-
-def _apply_limits_internal(limits, restrict_files=True):
-    log_timing("Applying limits...")
-    # Set CPU time limit (in seconds)
-    if 'cpu_time' in limits:
-        target = int(limits['cpu_time'])
-        try:
-            soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
-            if hard != resource.RLIM_INFINITY:
-                target = min(target, hard)
-            resource.setrlimit(resource.RLIMIT_CPU, (target, hard))
-        except Exception:
-            pass
-
-    # Set Memory limit (in bytes)
-    # if 'memory' in limits:
-    #     target = int(limits['memory'])
-    #     try:
-    #         soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    #         if hard != resource.RLIM_INFINITY:
-    #             target = min(target, hard)
-    #         # resource.setrlimit(resource.RLIMIT_AS, (target, hard))
-    #     except Exception:
-    #         pass
-
-    # Simple file system restriction (logical)
-    if restrict_files and 'allowed_paths' in limits:
-        allowed_paths = limits.get('allowed_paths', [])
-        if allowed_paths:
-            original_open = open
-            def restricted_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
-                # Resolve absolute path
-                if isinstance(file, int):
-                    return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
-                
-                try:
-                    abs_path = os.path.abspath(file)
-                except Exception:
-                    raise PermissionError(f"Access to file {file} is denied (Invalid Path).")
-
-                allowed = False
-                for path in allowed_paths:
-                    if abs_path.startswith(os.path.abspath(path)):
-                        allowed = True
-                        break
-                
-                if not allowed:
-                    raise PermissionError(f"Access to file {abs_path} is denied (Sandboxed).")
-                
-                return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
-            
-            # Monkey patch builtins.open
-            builtins.open = restricted_open
-
-def main():
-    try:
-        log_timing("Starting launcher main...")
-        if len(sys.argv) < 3:
-            raise ValueError("Usage: launcher.py <input_pkl> <output_pkl>")
-            
-        input_path = sys.argv[1]
-        output_path = sys.argv[2]
-        
-        log_timing(f"Loading payload from {input_path}")
-        with open(input_path, 'rb') as f:
-            payload = pickle.load(f)
-            
-        mode = payload['mode']
-        args = payload.get('args', [])
-        kwargs = payload.get('kwargs', {})
-        sys_path = payload.get('sys_path', [])
-        limits = payload.get('limits', {})
-        apply_file_restrictions = payload.get('apply_file_restrictions', False)
-
-        # Apply limits if provided
-        if limits:
-            _apply_limits_internal(limits, restrict_files=apply_file_restrictions)
-        
-        log_timing("Restoring sys.path...")
-        # Restore sys.path
-        for p in reversed(sys_path):
-            if p not in sys.path:
-                sys.path.insert(0, p)
-        
-        result = None
-        log_timing(f"Executing mode: {mode}")
-        
-        if mode == 'library':
-            module_name = payload['module_name']
-            class_name = payload.get('class_name')
-            function_name = payload['function_name']
-            
-            log_timing(f"Importing module: {module_name}")
-            module = importlib.import_module(module_name)
-            if class_name:
-                log_timing(f"Getting class: {class_name}")
-                cls = getattr(module, class_name)
-                instance = cls()
-                func = getattr(instance, function_name)
-            else:
-                func = getattr(module, function_name)
-                
-            log_timing(f"Running function: {function_name}")
-            if asyncio.iscoroutinefunction(func):
-                result = asyncio.run(func(*args, **kwargs))
-            else:
-                result = func(*args, **kwargs)
-            log_timing("Function execution completed")
-                
-        elif mode == 'module':
-            module_path = payload['module_path']
-            func_name = payload['func_name']
-            
-            spec = importlib.util.spec_from_file_location("sandboxed_module", module_path)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                func = getattr(module, func_name)
-                result = func(*args, **kwargs)
-            else:
-                raise ImportError(f"Could not load module from {module_path}")
-
-        elif mode == 'script':
-            script_path = payload['script_path']
-            
-            script_dir = os.path.dirname(os.path.abspath(script_path))
-            if script_dir not in sys.path:
-                sys.path.insert(0, script_dir)
-                
-            with open(script_path, 'r', encoding='utf-8') as f:
-                script_content = f.read()
-                
-            global_ns = {'__name__': '__main__', '__file__': script_path}
-            
-            # Capture output
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-            
-            try:
-                with redirect_stdout(stdout), redirect_stderr(stderr):
-                    exec(script_content, global_ns)
-            except Exception:
-                # Print traceback to stderr capture
-                traceback.print_exc(file=stderr)
-                raise
-                
-            result = stdout.getvalue() + stderr.getvalue()
-
-        elif mode == 'shell':
-            cmd = payload['command']
-            cwd = payload.get('cwd')
-            # For shell, we use subprocess inside the sandbox
-            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
-            if proc.returncode != 0:
-                 raise Exception(f"Command failed with code {proc.returncode}: {proc.stderr}")
-            result = proc.stdout
-
-        with open(output_path, 'wb') as f:
-            pickle.dump({'status': 'success', 'result': result}, f)
-            
-    except Exception as e:
-        try:
-            with open(output_path, 'wb') as f:
-                pickle.dump({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()}, f)
-        except Exception:
-            # Fallback if writing fails
-            traceback.print_exc()
-            sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-"""
-
-# Deleted duplicate class definition
-
-
-
-
-def _restricted_execution(func: Callable, args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, limits: Dict[str, Any]):
-    """
-    Internal function to run code in a separate process with resource limits.
-    """
-    try:
-        # Set CPU time limit (in seconds)
-        if 'cpu_time' in limits:
-            target = int(limits['cpu_time'])
-            soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
-            
-            if hard != resource.RLIM_INFINITY:
-                target = min(target, hard)
-            
-            # Set soft limit to target, keep hard limit
-            resource.setrlimit(resource.RLIMIT_CPU, (target, hard))
-        
-        # Set Memory limit (in bytes)
-        if 'memory' in limits:
-            target = _effective_memory_limit(limits)
-            if target is not None:
-                soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-                try:
-                    resource.setrlimit(resource.RLIMIT_AS, (target, hard))
-                except (ValueError, OSError):
-                    pass
-
-        # Simple file system restriction (logical)
-        # In a real rigorous sandbox, this should be done via chroot or containerization (Docker/nsjail).
-        # Here we patch open to restrict access to allowed directories if specified.
-        allowed_paths = limits.get('allowed_paths', [])
-        if allowed_paths:
-            original_open = open
-            def restricted_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
-                # Resolve absolute path
-                if isinstance(file, int):
-                    # File descriptor
-                    return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
-                
-                abs_path = os.path.abspath(file)
-                allowed = False
-                for path in allowed_paths:
-                    if abs_path.startswith(os.path.abspath(path)):
-                        allowed = True
-                        break
-                
-                if not allowed:
-                    raise SecurityViolation(f"Access to file {abs_path} is denied.")
-                
-                return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
-            
-            # Monkey patch builtins.open
-            import builtins
-            builtins.open = restricted_open
-
-        # Execute the function
-        result = func(*args, **kwargs)
-        result_queue.put({'status': 'success', 'result': result})
-
-    except Exception as e:
-        result_queue.put({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()})
-
-def _restricted_script_execution(script_path: str, args: list, requirements: Optional[list], install_cmd: Optional[str], result_queue: multiprocessing.Queue, limits: Dict[str, Any], cwd: Optional[str] = None):
-    """
-    Internal function to run a script in a separate process with resource limits.
-    """
-    import io
-    import sys
-    from contextlib import redirect_stdout, redirect_stderr
-    
-    # Capture stdout/stderr
-    stdout_capture = io.StringIO()
-    stderr_capture = io.StringIO()
-    
-    # Prepare environment variables with mirrors
-    env = os.environ.copy()
-    env['npm_config_registry'] = 'https://registry.npmmirror.com'
-    env['PLAYWRIGHT_DOWNLOAD_HOST'] = 'https://npmmirror.com/mirrors/playwright/'
-    # Ensure system path is preserved
-    
-    try:
-        # Switch to script directory or specified cwd
-        script_dir = os.path.dirname(os.path.abspath(script_path))
-        working_dir = cwd if cwd else script_dir
-
-        if os.path.exists(working_dir):
-            os.chdir(working_dir)
-
-        # Setup isolated environment
-        _setup_sandbox_env(working_dir, env)
-
-        normalized_requirements = _normalize_requirements(requirements)
-        if normalized_requirements:
-            _install_requirements(normalized_requirements, stdout_capture, stderr_capture, env=env)
-            
-        if install_cmd:
-            _run_install_cmd(install_cmd, stdout_capture, stderr_capture, env=env)
-
-        # 自动配置 NODE_PATH 以支持全局安装的 npm 包 (Retain logic but adapt to new env if needed, though _setup_sandbox_env handles PATH)
-        # Note: _setup_sandbox_env sets NPM_CONFIG_PREFIX, so `npm install -g` goes there.
-        # We still check for NODE_PATH compatibility just in case.
-        try:
-            import subprocess
-            npm_proc = subprocess.run(
-                ['npm', 'root', '-g'],
-                capture_output=True,
-                text=True,
-                env=env,
-                cwd=working_dir
-            )
-            if npm_proc.returncode == 0:
-                global_modules = npm_proc.stdout.strip()
-                if global_modules:
-                    current_path = env.get('NODE_PATH', '')
-                    env['NODE_PATH'] = f"{global_modules}{os.pathsep}{current_path}" if current_path else global_modules
-        except Exception:
-            pass
-
-        _apply_limits(limits, restrict_files=False)
-        
-        # Prepare sys.argv
-        sys.argv = [script_path] + args
-        
-        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            _, extension = os.path.splitext(script_path)
-            extension = extension.lower()
-            if extension in {'.js', '.mjs', '.cjs'}:
-                import subprocess
-                try:
-                    result = subprocess.run(
-                        ['node', script_path, *args],
-                        capture_output=True,
-                        text=True,
-                        cwd=working_dir,
-                        env=env
-                    )
-                except FileNotFoundError:
-                    raise Exception("Node.js environment not found, please install Node.js first (Node.js 环境未找到，请先安装 Node.js)")
-
-                if result.stdout:
-                    stdout_capture.write(result.stdout)
-                if result.stderr:
-                    stderr_capture.write(result.stderr)
-                if result.returncode != 0:
-                    raise Exception(f"Script exited with code {result.returncode}")
-            elif extension == '.py':
-                import subprocess
-                python_exec = sys.executable or 'python3'
-                try:
-                    result = subprocess.run(
-                        [python_exec, script_path, *args],
-                        capture_output=True,
-                        text=True,
-                        cwd=working_dir,
-                        env=env
-                    )
-                except FileNotFoundError:
-                    raise Exception("Python environment not found, please install Python first (Python 环境未找到，请先安装 Python)")
-
-                if result.stdout:
-                    stdout_capture.write(result.stdout)
-                if result.stderr:
-                    stderr_capture.write(result.stderr)
-                if result.returncode != 0:
-                    raise Exception(f"Script exited with code {result.returncode}")
-            elif extension == '.go':
-                import subprocess
-                try:
-                    result = subprocess.run(
-                        ['go', 'run', script_path, *args],
-                        capture_output=True,
-                        text=True,
-                        cwd=working_dir,
-                        env=env
-                    )
-                except FileNotFoundError:
-                    raise Exception("Go environment not found, please install Go first (Go 环境未找到，请先安装 Go)")
-
-                if result.stdout:
-                    stdout_capture.write(result.stdout)
-                if result.stderr:
-                    stderr_capture.write(result.stderr)
-                if result.returncode != 0:
-                    raise Exception(f"Script exited with code {result.returncode}")
-            elif extension in {'.sh', '.bash'}:
-                import subprocess
-                shell_cmd = '/bin/bash' if extension == '.bash' else '/bin/sh'
-                try:
-                    result = subprocess.run(
-                        [shell_cmd, script_path, *args],
-                        capture_output=True,
-                        text=True,
-                        cwd=working_dir,
-                        env=env
-                    )
-                except FileNotFoundError:
-                    raise Exception(f"Shell executable {shell_cmd} not found")
-
-                if result.stdout:
-                    stdout_capture.write(result.stdout)
-                if result.stderr:
-                    stderr_capture.write(result.stderr)
-                if result.returncode != 0:
-                    raise Exception(f"Script exited with code {result.returncode}")
-            else:
-                with open(script_path, 'r', encoding='utf-8') as f:
-                    script_content = f.read()
-
-                if script_dir not in sys.path:
-                    sys.path.insert(0, script_dir)
-
-                global_ns = {'__name__': '__main__', '__file__': script_path}
-                exec(script_content, global_ns)
-            
-        result_queue.put({
-            'status': 'success', 
-            'result': stdout_capture.getvalue() + stderr_capture.getvalue()
-        })
-            
-    except Exception as e:
-        error_msg = str(e)
-        if isinstance(e, MemoryError):
-            error_msg = "MemoryError (内存不足或超出限制)"
-        result_queue.put({
-            'status': 'error', 
-            'error': error_msg, 
-            'traceback': traceback.format_exc(),
-            'output': stdout_capture.getvalue() + stderr_capture.getvalue()
-        })
-
-def _restricted_shell_execution(command: str, result_queue: multiprocessing.Queue, limits: Dict[str, Any], cwd: Optional[str] = None):
-    """
-    Internal function to run shell command in a separate process.
-    """
-    import io
-    import subprocess
-    from contextlib import redirect_stdout, redirect_stderr
-    
-    stdout_capture = io.StringIO()
-    stderr_capture = io.StringIO()
-    
-    env = os.environ.copy()
-    env['npm_config_registry'] = 'https://registry.npmmirror.com'
-    env['PLAYWRIGHT_DOWNLOAD_HOST'] = 'https://npmmirror.com/mirrors/playwright/'
-
-    try:
-        working_dir = cwd if cwd else os.getcwd()
-        if os.path.exists(working_dir):
-            os.chdir(working_dir)
-            
-        # Setup isolated environment
-        _setup_sandbox_env(working_dir, env)
-            
-        _apply_limits(limits, restrict_files=False)
-        
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=working_dir,
-            env=env
-        )
-        
-        if result.stdout:
-            stdout_capture.write(result.stdout)
-        if result.stderr:
-            stderr_capture.write(result.stderr)
-            
-        if result.returncode != 0:
-             raise Exception(f"Command exited with code {result.returncode}")
-             
-        result_queue.put({
-            'status': 'success', 
-            'result': stdout_capture.getvalue() + stderr_capture.getvalue()
-        })
-        
-    except Exception as e:
-        result_queue.put({
-            'status': 'error', 
-            'error': str(e), 
-            'traceback': traceback.format_exc(),
-            'output': stdout_capture.getvalue() + stderr_capture.getvalue()
-        })
-
-def _restricted_module_execution(module_path: str, func_name: str, requirements: Optional[list], args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, limits: Dict[str, Any]):
-    """
-    Internal function to run code from a module in a separate process with resource limits.
-    """
-    import importlib.util
-    try:
-        # For module execution, we assume the module's directory is the working directory for env setup
-        working_dir = os.path.dirname(os.path.abspath(module_path))
-        
-        # Setup env (though we can't easily change os.environ for the current process effectively for importlib 
-        # if libraries are already loaded, but we can update sys.path)
-        env = os.environ.copy()
-        _setup_sandbox_env(working_dir, env)
-        
-        # Add isolated pylibs to sys.path
-        pylibs_dir = env.get('PIP_TARGET')
-        if pylibs_dir and pylibs_dir not in sys.path:
-            sys.path.insert(0, pylibs_dir)
-            
-        normalized_requirements = _normalize_requirements(requirements)
-        if normalized_requirements:
-            _install_requirements(normalized_requirements, None, None, env=env)
-            _apply_limits(limits, restrict_files=False)
-        else:
-            _apply_limits(limits)
-        
-        spec = importlib.util.spec_from_file_location("sandboxed_module", module_path)
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            func = getattr(module, func_name)
-            
-            # Execute
-            result = func(*args, **kwargs)
-            result_queue.put({'status': 'success', 'result': result})
-        else:
-            result_queue.put({'status': 'error', 'error': f"Could not load module from {module_path}"})
-            
-    except Exception as e:
-        result_queue.put({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()})
-
-def _restricted_library_execution(module_name: str, class_name: Optional[str], function_name: str, args: tuple, kwargs: dict, result_queue: multiprocessing.Queue, limits: Dict[str, Any], cwd: Optional[str], sys_path: List[str]):
-    """
-    Internal function to run a library function in a separate process.
-    """
-    import sys
-    import importlib
-    import asyncio
-    
-    # Restore sys.path to ensure we can find the project modules
-    if sys_path:
-        for p in reversed(sys_path):
-            if p not in sys.path:
-                sys.path.insert(0, p)
-                
-    # Setup cwd
-    if cwd and os.path.exists(cwd):
-        os.chdir(cwd)
-        
-    try:
-        # Apply limits (including monkey patching open)
-        _apply_limits(limits)
-        
-        # Import module
-        module = importlib.import_module(module_name)
-        
-        # Get function
-        if class_name:
-            cls = getattr(module, class_name)
-            # Instantiate class (assuming no-arg constructor for Tool classes)
-            instance = cls()
-            func = getattr(instance, function_name)
-        else:
-            func = getattr(module, function_name)
-            
-        # Execute
-        if asyncio.iscoroutinefunction(func):
-            result = asyncio.run(func(*args, **kwargs))
-        else:
-            result = func(*args, **kwargs)
-            
-        result_queue.put({'status': 'success', 'result': result})
-        
-    except Exception as e:
-        result_queue.put({'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()})
-
-def _apply_limits(limits: Dict[str, Any], restrict_files: bool = True):
-    # Set CPU time limit (in seconds)
-    if 'cpu_time' in limits:
-        target = int(limits['cpu_time'])
-        soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
-        
-        if hard != resource.RLIM_INFINITY:
-            target = min(target, hard)
-        
-        # Set soft limit to target, keep hard limit
-        resource.setrlimit(resource.RLIMIT_CPU, (target, hard))
-    
-    # Set Memory limit (in bytes)
-    if 'memory' in limits:
-        target = _effective_memory_limit(limits)
-        if target is not None:
-            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-            try:
-                # We calculate a large virtual memory limit in _effective_memory_limit (e.g. 32x),
-                # but we must ensure we don't exceed the system's hard limit.
-                if hard != resource.RLIM_INFINITY:
-                    target = min(target, hard)
-                resource.setrlimit(resource.RLIMIT_AS, (target, hard))
-            except (ValueError, OSError):
-                pass
-
-    # Simple file system restriction (logical)
-    if not restrict_files:
-        return
-    allowed_paths = limits.get('allowed_paths', [])
-    if allowed_paths:
-        original_open = open
-        def restricted_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
-            # Resolve absolute path
-            if isinstance(file, int):
-                # File descriptor
-                return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
-            
-            abs_path = os.path.abspath(file)
-            allowed = False
-            for path in allowed_paths:
-                if abs_path.startswith(os.path.abspath(path)):
-                    allowed = True
-                    break
-            
-            if not allowed:
-                # raise SecurityViolation(f"Access to file {abs_path} is denied.")
-                # Since SecurityViolation is not available in this scope easily without import, use Exception or ensure it is imported
-                raise Exception(f"Access to file {abs_path} is denied (Sandboxed).")
-            
-            return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
-        
-        # Monkey patch builtins.open
-        import builtins
-        builtins.open = restricted_open
-
-def _normalize_requirements(requirements: Optional[list]) -> List[str]:
-    if requirements is None:
-        return []
-    if isinstance(requirements, str):
-        requirements = [requirements]
-    if not isinstance(requirements, list):
-        raise Exception("requirements 必须是字符串列表")
-    return [r.strip() for r in requirements if isinstance(r, str) and r.strip()]
-
-def _setup_sandbox_env(working_dir: str, env: Dict[str, str]):
-    """
-    Setup isolated environment variables for the sandbox.
-    """
-    # Node.js isolation
-    npm_global_dir = os.path.join(working_dir, ".npm_global")
-    npm_bin_dir = os.path.join(npm_global_dir, "bin")
-    env['NPM_CONFIG_PREFIX'] = npm_global_dir
-    # Redirect npm cache to local directory to avoid permission issues
-    env['npm_config_cache'] = os.path.join(working_dir, ".npm_cache")
-    env['npm_config_userconfig'] = os.path.join(working_dir, ".npmrc")
-    
-    # Python isolation
-    # We use PIP_TARGET to install packages into a local directory
-    # and add it to PYTHONPATH.
-    pylibs_dir = os.path.join(working_dir, ".pylibs")
-    env['PIP_TARGET'] = pylibs_dir
-    
-    # Update PATH and PYTHONPATH
-    # Add node_modules/.bin to PATH for local execution
-    local_node_bin = os.path.join(working_dir, "node_modules", ".bin")
-    current_path = env.get('PATH', '')
-    env['PATH'] = f"{local_node_bin}{os.pathsep}{npm_bin_dir}{os.pathsep}{pylibs_dir}/bin{os.pathsep}{current_path}"
-    
-    current_pythonpath = env.get('PYTHONPATH', '')
-    env['PYTHONPATH'] = f"{pylibs_dir}{os.pathsep}{working_dir}{os.pathsep}{current_pythonpath}"
-    
-    # Set non-interactive mode for apt-get
-    env['DEBIAN_FRONTEND'] = 'noninteractive'
-
-def ensure_npm_dependencies(workdir: str, packages: List[str]) -> bool:
-    """确保指定目录下已安装npm依赖包"""
-    if not packages:
-        return True
-        
-    import shutil
-    try:
-        # 检查node环境
-        if not shutil.which("node"):
-            # 如果是找不到node，这里返回False，调用方应该处理这个错误
-            return False
-            
-        # 初始化 package.json
-        pkg_path = os.path.join(workdir, "package.json")
-        if not os.path.exists(pkg_path):
-             subprocess.run(["npm", "init", "-y"], cwd=workdir, check=True, capture_output=True)
-             
-        # 简单的优化：检查是否所有包都已安装
-        needs_install = True
-        try:
-            if os.path.exists(os.path.join(workdir, "node_modules")):
-                all_installed = True
-                for pkg in packages:
-                    # 处理包名，去掉版本号和scope
-                    pkg_name = pkg.split('@')[0] if '@' in pkg and not pkg.startswith('@') else pkg
-                    if pkg.startswith('@'): # scoped package
-                         parts = pkg.split('@')
-                         if len(parts) > 2: pkg_name = '@' + parts[1]
-                         else: pkg_name = pkg
-
-                    if not os.path.exists(os.path.join(workdir, "node_modules", pkg_name)):
-                        all_installed = False
-                        break
-                if all_installed:
-                    needs_install = False
-        except:
-            pass
-            
-        if needs_install:
-            # 安装包，使用国内镜像源
-            npm_registry = "https://registry.npmmirror.com/"
-            cmd = ["npm", "install", f"--registry={npm_registry}"] + packages
-            subprocess.run(cmd, cwd=workdir, check=True, capture_output=True)
-            
-        return True
-    except Exception as e:
-        # log error but don't crash
-        return False
-
-def _install_requirements(requirements: List[str], stdout_capture: Optional[Any], stderr_capture: Optional[Any], env: Optional[Dict[str, str]] = None):
-    if not requirements:
-        return
-    import subprocess
-    python_exec = sys.executable or "python3"
-    # Use Tsinghua mirror for better connectivity in China
-    mirror = "https://pypi.tuna.tsinghua.edu.cn/simple"
-    trusted_host = "pypi.tuna.tsinghua.edu.cn"
-    
-    install_env = env or os.environ.copy()
-    
-    for requirement in requirements:
-        # Note: If env contains PIP_TARGET, pip will automatically use it.
-        cmd = [python_exec, "-m", "pip", "install", requirement, "-i", mirror, "--trusted-host", trusted_host]
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            env=install_env
-        )
-        if stdout_capture is not None and result.stdout:
-            stdout_capture.write(result.stdout)
-        if stderr_capture is not None and result.stderr:
-            stderr_capture.write(result.stderr)
-        if result.returncode != 0:
-            raise Exception(f"依赖安装失败: {requirement}")
-
-def _run_install_cmd(install_cmd: str, stdout_capture: Optional[Any], stderr_capture: Optional[Any], env: Optional[Dict[str, str]] = None):
-    import subprocess
-    # Use shell=True to allow complex commands
-    result = subprocess.run(
-        install_cmd,
-        shell=True,
-        capture_output=True,
-        text=True,
-        env=env or os.environ.copy()
-    )
-    if stdout_capture is not None and result.stdout:
-        stdout_capture.write(result.stdout)
-    if stderr_capture is not None and result.stderr:
-        stderr_capture.write(result.stderr)
-    if result.returncode != 0:
-        raise Exception(f"Install command failed: {install_cmd}")
-
-from sagents.utils.sandbox.filesystem import SandboxFileSystem
 
 class Sandbox:
-    def __init__(self, cpu_time_limit: int = 10, memory_limit_mb: int = 1024, allowed_paths: Optional[List[str]] = None, host_workspace: Optional[str] = None, virtual_workspace: str = "/workspace", linux_isolation_mode: str = 'auto'):
-        """
-        Initialize the Sandbox.
-
-        Args:
-            cpu_time_limit: CPU time limit in seconds. Default is 60s.
-            memory_limit_mb: Memory limit in MB.
-            allowed_paths: List of allowed paths (for Seatbelt/Sandbox).
-            host_workspace: The host workspace path.
-            virtual_workspace: The virtual workspace path inside the sandbox.
-            linux_isolation_mode: Isolation mode for Linux ('auto', 'chroot', 'bwrap', 'subprocess'). Default is 'bwrap'.
-                                  - 'auto': Automatically detect available isolation method (bwrap -> subprocess).
-                                  - 'chroot': Use chroot for isolation (requires root or configured chroot env).
-                                  - 'bwrap': Use bubblewrap for isolation (unprivileged).
-                                  - 'subprocess': Direct execution in venv (no FS isolation).
-        """
-        # Default allowed system paths required for common libraries (e.g., pandas/dateutil need zoneinfo, openpyxl/mimetypes need mime.types)
-        default_allowed_paths = [
-            "/usr/share/zoneinfo",
-            "/etc/localtime",
-            "/etc/mime.types",
-            "/etc/apache2/mime.types",
-            "/etc/httpd/mime.types",
-            "/usr/local/etc/mime.types"
-        ]
+    """
+    沙箱核心类
+    """
+    
+    DEFAULT_ALLOWED_PATHS = [
+        "/usr/share/zoneinfo",
+        "/etc/localtime", 
+        "/etc/mime.types",
+        "/etc/apache2/mime.types",
+        "/usr/local/etc/mime.types",
+        "~/.npm",
+        "~/.cache", 
+        "~/.config",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/local/lib/node_modules",
+    ]
+    
+    def __init__(self, cpu_time_limit: int = 60, memory_limit_mb: int = 1024, 
+                 allowed_paths: Optional[List[str]] = None, 
+                 host_workspace: Optional[str] = None, 
+                 virtual_workspace: str = "/sage-workspace", 
+                 linux_isolation_mode: str = 'auto', 
+                 macos_isolation_mode: str = 'subprocess'):
+        logger.info(f"初始化沙箱 Sandbox")
+        logger.info(f"  平台: {sys.platform}")
+        logger.info(f"  host_workspace: {host_workspace}")
+        logger.info(f"  virtual_workspace: {virtual_workspace}")
         
-        # Merge allowed_paths with default_allowed_paths
-        final_allowed_paths = list(set((allowed_paths or []) + default_allowed_paths))
+        self.linux_isolation_mode = self._resolve_linux_mode(linux_isolation_mode)
+        self.macos_isolation_mode = macos_isolation_mode
+        
+        if sys.platform == 'darwin':
+            self.isolation_mode = self.macos_isolation_mode
+        else:
+            self.isolation_mode = self.linux_isolation_mode
+            
+        logger.info(f"  隔离模式: {self.isolation_mode}")
         
         self.limits = {
             'cpu_time': cpu_time_limit,
-            'memory': memory_limit_mb * 1024 * 1024,  # Convert to bytes
-            'allowed_paths': final_allowed_paths
+            'memory': memory_limit_mb * 1024 * 1024,
+            'allowed_paths': list(set((allowed_paths or []) + self.DEFAULT_ALLOWED_PATHS))
         }
+        
         self.host_workspace = host_workspace
-        self.linux_isolation_mode = self._resolve_linux_mode(linux_isolation_mode)
         self.virtual_workspace = virtual_workspace
         self.file_system = None
-
         self.sandbox_dir = None
         self.venv_dir = None
-
-        if host_workspace:
-            # Enable path mapping only on macOS (Darwin) or Linux (subprocess mode).
-            # On Linux (future bwrap implementation), we can use bind mounts to map paths natively,
-            # eliminating the need for text-based path replacement.
-            enable_path_mapping = (sys.platform == 'darwin') or (
-                sys.platform == 'linux' and self.linux_isolation_mode == 'subprocess'
-            )
+        self.isolation = None
+        
+        # 始终创建 SandboxFileSystem
+        # 当 host_path == virtual_workspace 时，创建"无沙箱功能的沙箱"
+        from sagents.utils.sandbox.filesystem import SandboxFileSystem
+        
+        # host_workspace 是必填参数
+        # 检查是否与 virtual_workspace 相同
+        if host_workspace == virtual_workspace:
+            # 相同时，创建"无沙箱功能的沙箱"（禁用路径映射，不创建 venv，不初始化 isolation）
             self.file_system = SandboxFileSystem(
                 host_path=host_workspace, 
                 virtual_path=virtual_workspace,
-                enable_path_mapping=enable_path_mapping
+                enable_path_mapping=False
             )
-            
-            # Ensure host workspace is in allowed paths
+            self.sandbox_dir = None
+            self.venv_dir = None
+            self.isolation = None
+        else:
+            # 不同时，创建正常沙箱（启用路径映射，创建 venv，初始化 isolation）
+            self.file_system = SandboxFileSystem(
+                host_path=host_workspace, 
+                virtual_path=virtual_workspace,
+                enable_path_mapping=True
+            )
             if host_workspace not in self.limits['allowed_paths']:
                 self.limits['allowed_paths'].append(host_workspace)
             
             self.sandbox_dir = os.path.join(host_workspace, ".sandbox")
             self.venv_dir = os.path.join(self.sandbox_dir, "venv")
-            
-            # Ensure sandbox directory exists
             os.makedirs(self.sandbox_dir, exist_ok=True)
-            
-            # Ensure venv exists
             self._ensure_venv()
-            
-            # Add sandbox dir to allowed paths
-            if self.sandbox_dir not in self.limits['allowed_paths']:
-                self.limits['allowed_paths'].append(self.sandbox_dir)
-
-        # Initialize CWD to host_workspace (or virtual_workspace if mapping enabled? No, execution happens in host path)
-        # But we want to store the "Current" directory.
-        # Since subprocess.Popen uses host paths, we store host path here.
-        self.cwd = self.host_workspace
-
-    def get_cwd(self) -> Optional[str]:
-        """Get the current working directory of the sandbox (host path)."""
-        return self.cwd
-
-    def wrap_command_with_cwd_capture(self, command: str, process_id: str = "") -> str:
-        """
-        Wraps a shell command to capture the resulting CWD.
-        Appends '; echo __SAGE_CWD_MARKER__; pwd' etc.
-        """
-        cwd_marker = f"__SAGE_CWD_{process_id}__"
-        # 使用分号追加 echo 和 pwd，并保留原始命令的返回码
-        # 注意：仅适用于 Unix-like shell，Windows 暂不支持完美保留
-        if platform.system() != "Windows":
-            return f"{command}; __SAGE_RET=$?; echo '{cwd_marker}'; pwd; exit $__SAGE_RET"
-        else:
-            return f"{command} & echo {cwd_marker} & cd"
-
-    def update_cwd_from_output(self, stdout: str, process_id: str = "") -> str:
-        """
-        Parses the stdout, extracts the new CWD, updates self.cwd, and returns cleaned stdout.
-        """
-        cwd_marker = f"__SAGE_CWD_{process_id}__"
-        if cwd_marker in stdout:
-            try:
-                parts = stdout.split(cwd_marker)
-                # The part before marker is actual stdout
-                cleaned_stdout = parts[0]
-                
-                # The part after marker should be "\n/path/to/cwd\n"
-                if len(parts) > 1:
-                    new_cwd = parts[1].strip()
-                    if new_cwd and os.path.exists(new_cwd):
-                        self.cwd = new_cwd
-                        logger.debug(f"Sandbox CWD updated to: {self.cwd}")
-                    else:
-                         logger.debug(f"Ignored invalid CWD update: {new_cwd}")
-                
-                return cleaned_stdout
-            except Exception as e:
-                logger.warning(f"Failed to parse CWD from output: {e}")
-                return stdout
-        return stdout
-
+            self._init_isolation()
+        
+        logger.info(f"沙箱初始化完成")
+        
     def _resolve_linux_mode(self, mode: str) -> str:
         if mode != 'auto':
             return mode
-            
-        global _AUTO_DETECTED_MODE
-        if _AUTO_DETECTED_MODE:
-            return _AUTO_DETECTED_MODE
-            
-        # Auto-detect logic
-        import shutil
-        import subprocess
-        
-        resolved_mode = 'subprocess'
-        if shutil.which('bwrap'):
-            # Verify if bwrap actually works (can fail in Docker containers without privileges)
-            try:
-                # Try a minimal bwrap command: bind root to / and run true
-                subprocess.run(
-                    ['bwrap', '--bind', '/', '/', 'true'], 
-                    check=True, 
-                    stdout=subprocess.DEVNULL, 
-                    stderr=subprocess.DEVNULL
-                )
-                resolved_mode = 'bwrap'
-            except (subprocess.CalledProcessError, OSError):
-                # Fallback if bwrap fails to execute
-                resolved_mode = 'subprocess'
-        
-        _AUTO_DETECTED_MODE = resolved_mode
-        return resolved_mode
-
-    def _get_effective_limits(self, cwd: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Get limits with additional allowed paths (log_dir, cwd) merged in.
-        This is crucial for Linux subprocess mode (logical isolation) to allow
-        logging and cwd access.
-        """
-        limits = self.limits.copy()
-        # Ensure allowed_paths exists and is a list copy
-        allowed_paths = list(limits.get('allowed_paths', []))
-        
-        # Add log directory
-        from sagents.utils.logger import logger
-        log_dir = getattr(logger, 'log_dir', None)
-        if log_dir:
-            # Check if already included (simple string check)
-            if log_dir not in allowed_paths:
-                allowed_paths.append(log_dir)
-            
-        # Add cwd
-        if cwd:
-            if cwd not in allowed_paths:
-                allowed_paths.append(cwd)
-            
-        limits['allowed_paths'] = allowed_paths
-        return limits
-
-    def _ensure_venv(self):
-        if not self.sandbox_dir or not self.venv_dir:
-            return
-
-        python_bin = os.path.join(self.venv_dir, "bin", "python")
-
-        # 默认不安装 pip，提升速度
-        if not os.path.exists(python_bin):
-            venv.create(self.venv_dir, with_pip=False, clear=True)
-            
-        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
-        if not os.path.exists(launcher_path) or os.path.getsize(launcher_path) != len(LAUNCHER_SCRIPT):
-             with open(launcher_path, "w", encoding="utf-8") as f:
-                 f.write(LAUNCHER_SCRIPT)
-
-    def ensure_pip(self):
-        """Ensure pip is installed in the virtual environment."""
-        if not self.venv_dir:
-            return
-
-        pip_bin = os.path.join(self.venv_dir, "bin", "pip")
-        if os.path.exists(pip_bin):
-            return
-
-        logger.info(f"Installing pip in sandbox venv at {self.venv_dir}...")
-        try:
-             # Use ensurepip to install pip
-             python_bin = os.path.join(self.venv_dir, "bin", "python")
-             subprocess.run([python_bin, "-m", "ensurepip"], check=True, capture_output=True)
-             self._configure_pip_mirror()
-        except Exception as e:
-             logger.error(f"Failed to install pip via ensurepip: {e}")
-             # Fallback to recreation if ensurepip fails
-             logger.info("Recreating venv with pip...")
-             venv.create(self.venv_dir, with_pip=True, clear=True)
-             self._configure_pip_mirror()
-
-    def ensure_npm(self, packages: Optional[List[str]] = None) -> bool:
-        """Ensure npm is available and optionally install packages in workdir.
-        
-        Args:
-            packages: Optional list of npm package names to install in workdir
-            
-        Returns:
-            bool: True if npm is available (and packages installed if specified)
-        """
-        import shutil
-        
-        # 检查 npm 是否已安装
-        if not shutil.which("npm"):
-            logger.warning("npm not found")
-            return False
-        
-        if not packages:
-            return True
-        
-        # 在 workdir 下安装 npm 包
-        workdir = self.workdir
-        if not workdir:
-            logger.error("No workdir set, cannot install npm packages")
-            return False
-        
-        # 初始化 package.json（如果不存在）
-        pkg_path = os.path.join(workdir, "package.json")
-        if not os.path.exists(pkg_path):
-            try:
-                subprocess.run(["npm", "init", "-y"], cwd=workdir, check=True, capture_output=True)
-            except Exception as e:
-                logger.error(f"Failed to initialize package.json: {e}")
-                return False
-        
-        # 检查是否所有包都已安装
-        needs_install = True
-        try:
-            if os.path.exists(os.path.join(workdir, "node_modules")):
-                all_installed = True
-                for pkg in packages:
-                    pkg_name = pkg.split('@')[0] if '@' in pkg and not pkg.startswith('@') else pkg
-                    if pkg.startswith('@'):
-                        parts = pkg.split('@')
-                        if len(parts) > 2:
-                            pkg_name = '@' + parts[1]
-                        else:
-                            pkg_name = pkg
-
-                    if not os.path.exists(os.path.join(workdir, "node_modules", pkg_name)):
-                        all_installed = False
-                        break
-                if all_installed:
-                    needs_install = False
-        except:
-            pass
-        
-        if needs_install:
-            try:
-                # 使用国内镜像源
-                npm_registry = "https://registry.npmmirror.com/"
-                subprocess.run(
-                    ["npm", "install", f"--registry={npm_registry}", "--prefix", workdir] + packages,
-                    cwd=workdir,
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                logger.info(f"npm packages installed in {workdir}: {packages}")
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to install npm packages: {e.stderr}")
-                return False
-        
-        return True
+        result = os.system('which bwrap > /dev/null 2>&1')
+        if result == 0:
+            return 'bwrap'
+        return 'subprocess'
     
-    def _configure_pip_mirror(self):
-        """配置 venv 的 pip 镜像源，解决 SSL 和网络问题"""
-        pip_conf_path = os.path.join(self.venv_dir, "pip.conf")
-        # 如果 pip.conf 不存在，则创建
-        if not os.path.exists(pip_conf_path):
-            config_content = """[global]
-index-url = https://pypi.tuna.tsinghua.edu.cn/simple
-trusted-host = pypi.tuna.tsinghua.edu.cn
-timeout = 120
-"""
-            with open(pip_conf_path, "w") as f:
-                f.write(config_content)
-
-
-    def _generate_seatbelt_profile(self, output_path: str, additional_read_paths: List[str] = [], additional_write_paths: List[str] = []) -> str:
-        profile_path = os.path.join(self.sandbox_dir, "profile.sb")
+    def _ensure_venv(self):
+        if not os.path.exists(self.venv_dir):
+            import venv
+            logger.info(f"创建虚拟环境: {self.venv_dir}")
+            os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
+            venv.create(self.venv_dir, with_pip=True)
+    
+    def _init_isolation(self):
+        from sagents.utils.sandbox.isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
         
-        sb_lines = [
-            "(version 1)",
-            "(deny default)",
-            "(allow process-exec*)",
-            "(allow process-fork)",
-            "(allow signal)",
-            "(allow sysctl*)",
-            "(allow ipc-posix*)",
-            "(allow mach-lookup)",
-            "(allow file-map-executable)",
-            "(allow network*)",
-            '(allow file-read* (subpath "/"))', 
-            f'(allow file-write* (subpath "{self.sandbox_dir}"))',
-            '(allow file-write* (subpath "/private/var/folders"))',
-            '(allow file-write* (subpath "/tmp"))',
-            '(allow file-write* (subpath "/dev/null"))',
-            '(allow file-write* (subpath "/dev/tty"))',
-            '(allow file-ioctl)',
-        ]
+        logger.info(f"初始化隔离策略: {self.isolation_mode}")
         
-        for p in self.limits.get('allowed_paths', []) + additional_write_paths:
-             if p:
-                sb_lines.append(f'(allow file-write* (subpath "{os.path.abspath(p)}"))')
-        
-        sb_content = "\n".join(sb_lines)
-        
-        with open(profile_path, "w") as f:
-            f.write(sb_content)
+        if not self.host_workspace:
+            self.isolation = None
+            return
             
-        return profile_path
-
-    def _run_with_seatbelt(self, payload: dict, cwd: Optional[str] = None) -> Any:
-        if not self.sandbox_dir:
-             raise SandboxError("Sandbox directory not initialized")
-
-        import uuid
-        run_id = str(uuid.uuid4())
-        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
-        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
-        
-        with open(input_pkl, "wb") as f:
-            pickle.dump(payload, f)
-            
-        # Determine logger directory to allow write access
-        from sagents.utils.logger import logger
-        log_dir = getattr(logger, 'log_dir', None)
-        additional_write_paths = [cwd] if cwd else []
-        if log_dir:
-            additional_write_paths.append(log_dir)
-
-        profile_path = self._generate_seatbelt_profile(
-            output_path=output_pkl,
-            additional_read_paths=[input_pkl],
-            additional_write_paths=additional_write_paths
-        )
-        
-        python_bin = os.path.join(self.venv_dir, "bin", "python")
-        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
-        
-        cmd = [
-            "sandbox-exec", "-f", profile_path,
-            python_bin, launcher_path,
-            input_pkl, output_pkl
-        ]
-        
-        try:
-            t0 = time.time()
-            logger.debug(f"Starting sandbox subprocess (mode=seatbelt, id={run_id})")
-            
-            # Prepare environment with sandbox configurations (e.g. npm cache)
-            env = os.environ.copy()
-            _setup_sandbox_env(cwd or self.sandbox_dir, env)
-            
-            # Ensure npm cache is in sandbox_dir to avoid permission issues and pollution
-            env['npm_config_cache'] = os.path.join(self.sandbox_dir, ".npm_cache")
-            env['npm_config_userconfig'] = os.path.join(self.sandbox_dir, ".npmrc")
-            
-            # Redirect HOME and XDG paths to sandbox_dir to contain application data
-            # This prevents tools from trying to write to ~/.config or ~/Library which is blocked
-            env['HOME'] = self.sandbox_dir
-            env['XDG_DATA_HOME'] = os.path.join(self.sandbox_dir, ".local", "share")
-            env['XDG_CONFIG_HOME'] = os.path.join(self.sandbox_dir, ".config")
-            env['XDG_CACHE_HOME'] = os.path.join(self.sandbox_dir, ".cache")
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd or self.sandbox_dir,
-                env=env
+        if self.isolation_mode == 'subprocess':
+            self.isolation = SubprocessIsolation(
+                venv_dir=self.venv_dir,
+                host_workspace=self.host_workspace,
+                limits=self.limits
             )
-            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
-            
-            if result.returncode != 0:
-                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
-                 
-            if not os.path.exists(output_pkl):
-                 raise SandboxError("Sandbox execution produced no output file")
-                 
-            with open(output_pkl, "rb") as f:
-                res = pickle.load(f)
-                
-            if res['status'] == 'success':
-                return res['result']
-            else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
-                
-        finally:
-            if os.path.exists(input_pkl):
-                try: os.remove(input_pkl)
-                except: pass
-            if os.path.exists(output_pkl):
-                try: os.remove(output_pkl)
-                except: pass
-            if os.path.exists(profile_path):
-                try: os.remove(profile_path)
-                except: pass
-
-    def _run_with_subprocess(self, payload: dict, cwd: Optional[str] = None) -> Any:
-        """
-        Run the payload in a subprocess using the sandbox venv (no filesystem isolation).
-        """
-        if not self.sandbox_dir:
-             raise SandboxError("Sandbox directory not initialized")
-
-        import uuid
-        run_id = str(uuid.uuid4())
-        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
-        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
-        
-        with open(input_pkl, "wb") as f:
-            pickle.dump(payload, f)
-            
-        python_bin = os.path.join(self.venv_dir, "bin", "python")
-        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
-        
-        cmd = [
-            python_bin, launcher_path,
-            input_pkl, output_pkl
-        ]
-        
-        try:
-            t0 = time.time()
-            logger.debug(f"Starting sandbox subprocess (mode=subprocess, id={run_id})")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=cwd or self.host_workspace
+        elif self.isolation_mode == 'seatbelt':
+            self.isolation = SeatbeltIsolation(
+                venv_dir=self.venv_dir,
+                host_workspace=self.host_workspace,
+                limits=self.limits,
+                allowed_paths=self.limits['allowed_paths'],
+                sandbox_dir=self.sandbox_dir
             )
-            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
-            
-            if result.returncode != 0:
-                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
-                 
-            if not os.path.exists(output_pkl):
-                 raise SandboxError("Sandbox execution produced no output file")
-                 
-            with open(output_pkl, "rb") as f:
-                res = pickle.load(f)
-                
-            if res['status'] == 'success':
-                return res['result']
-            else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
-                
-        finally:
-            if os.path.exists(input_pkl):
-                try: os.remove(input_pkl)
-                except: pass
-            if os.path.exists(output_pkl):
-                try: os.remove(output_pkl)
-                except: pass
-
-    def _run_with_chroot(self, payload: dict, cwd: Optional[str] = None) -> Any:
-        """
-        Run the payload using chroot. 
-        Note: This requires the sandbox_dir to be a valid root filesystem or at least contain 
-        necessary libraries for the venv python to run.
-        """
-        if not self.sandbox_dir:
-             raise SandboxError("Sandbox directory not initialized")
-
-        import uuid
-        run_id = str(uuid.uuid4())
-        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
-        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
-        
-        with open(input_pkl, "wb") as f:
-            pickle.dump(payload, f)
-            
-        # Paths relative to the new root (sandbox_dir)
-        inner_launcher = "/launcher.py"
-        inner_input = f"/input_{run_id}.pkl"
-        inner_output = f"/output_{run_id}.pkl"
-        inner_python = "/venv/bin/python"
-        
-        cmd = [
-            "chroot",
-            self.sandbox_dir,
-            inner_python, inner_launcher,
-            inner_input, inner_output
-        ]
-        
-        try:
-            # We cannot easily set CWD inside chroot with simple `chroot` command without using `sh -c cd ...`
-            # For now we ignore CWD for chroot mode or assume the script handles paths.
-            t0 = time.time()
-            logger.debug(f"Starting sandbox subprocess (mode=chroot, id={run_id})")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True
+        elif self.isolation_mode == 'bwrap':
+            self.isolation = BwrapIsolation(
+                venv_dir=self.venv_dir,
+                host_workspace=self.host_workspace,
+                limits=self.limits,
+                virtual_workspace=self.virtual_workspace
             )
-            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
-            
-            if result.returncode != 0:
-                 error_msg = f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}"
-                 if result.returncode == 127 or "No such file or directory" in result.stderr:
-                     error_msg += "\n\n[Hint] 'chroot' mode requires a complete RootFS (libraries, bin, etc.) in the sandbox directory.\n"
-                     error_msg += "If you only have a python venv, please use 'bwrap' mode (requires bubblewrap installed) or 'subprocess' mode."
-                 raise SandboxError(error_msg)
-                 
-            if not os.path.exists(output_pkl):
-                 raise SandboxError("Sandbox execution produced no output file")
-                 
-            with open(output_pkl, "rb") as f:
-                res = pickle.load(f)
-                
-            if res['status'] == 'success':
-                return res['result']
-            else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
-                
-        finally:
-            if os.path.exists(input_pkl):
-                try: os.remove(input_pkl)
-                except: pass
-            if os.path.exists(output_pkl):
-                try: os.remove(output_pkl)
-                except: pass
-
-    def _run_with_bwrap(self, payload: dict, cwd: Optional[str] = None) -> Any:
-        if not self.sandbox_dir:
-             raise SandboxError("Sandbox directory not initialized")
-
-        import uuid
-        run_id = str(uuid.uuid4())
-        input_pkl = os.path.join(self.sandbox_dir, f"input_{run_id}.pkl")
-        output_pkl = os.path.join(self.sandbox_dir, f"output_{run_id}.pkl")
-        
-        with open(input_pkl, "wb") as f:
-            pickle.dump(payload, f)
-            
-        python_bin = os.path.join(self.venv_dir, "bin", "python")
-        launcher_path = os.path.join(self.sandbox_dir, "launcher.py")
-        
-        # Build bwrap command
-        # We construct a new root filesystem by binding top-level directories from host,
-        # instead of binding '/' recursively. This allows us to create new mount points (like /workspace)
-        # even if they don't exist on the host, because the root is an implicit tmpfs.
-        cmd = [
-            "bwrap",
-            "--dev", "/dev",                  # Device files
-            "--proc", "/proc",                # Process info
-            "--tmpfs", "/tmp",                # Temp filesystem
-            "--unshare-all",                  # Create new namespaces
-            "--share-net",                    # Share network
-            "--die-with-parent",              # Cleanup
-        ]
-
-        # Bind top-level directories from host
-        try:
-            for name in os.listdir("/"):
-                if name in [".", "..", "dev", "proc", "tmp", "lost+found"]:
-                    continue
-                
-                path = os.path.join("/", name)
-                # Skip if path doesn't exist (symlink broken?)
-                if not os.path.exists(path) and not os.path.islink(path):
-                    continue
-
-                if os.path.islink(path):
-                    try:
-                        target = os.readlink(path)
-                        cmd.extend(["--symlink", target, f"/{name}"])
-                    except OSError:
-                        pass
-                elif os.path.isdir(path):
-                    cmd.extend(["--ro-bind", path, f"/{name}"])
-        except Exception as e:
-            logger.warning(f"Error while constructing bwrap root: {e}")
-            # Fallback to simple root bind if listdir fails (unlikely)
-            cmd.extend(["--ro-bind", "/", "/"])
-
-        # Bind workspace and sandbox dir
-        cmd.extend([
-            "--bind", self.host_workspace, self.virtual_workspace,
-            "--bind", self.sandbox_dir, self.sandbox_dir
-        ])
-
-        # Bind additional allowed paths (read-write)
-        # Note: We bind them to the same absolute path inside the sandbox
-        for path in self.limits.get('allowed_paths', []):
-             if path and os.path.exists(path):
-                 abs_path = os.path.abspath(path)
-                 # Skip if it matches host_workspace or sandbox_dir (already handled above)
-                 if abs_path == os.path.abspath(self.host_workspace):
-                     continue
-                 if abs_path == os.path.abspath(self.sandbox_dir):
-                     continue
-                     
-                 cmd.extend(["--bind", abs_path, abs_path])
-
-
-        cmd.extend(["--chdir", cwd or self.virtual_workspace])
-        
-        # Add the command to run
-        cmd.extend([
-            python_bin, launcher_path,
-            input_pkl, output_pkl
-        ])
-        
-        try:
-            t0 = time.time()
-            logger.debug(f"Starting sandbox subprocess (mode=bwrap, id={run_id})")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=self.host_workspace # Run from host workspace so relative paths in bwrap args resolve? Actually bwrap handles absolute paths.
+        else:
+            logger.warning(f"未知的隔离模式: {self.isolation_mode}，使用 subprocess")
+            self.isolation = SubprocessIsolation(
+                venv_dir=self.venv_dir,
+                host_workspace=self.host_workspace,
+                limits=self.limits
             )
-            logger.debug(f"Sandbox subprocess finished in {time.time() - t0:.4f}s")
             
-            if result.returncode != 0:
-                 raise SandboxError(f"Sandbox execution failed (code {result.returncode}):\nStdout: {result.stdout}\nStderr: {result.stderr}")
-                 
-            if not os.path.exists(output_pkl):
-                 raise SandboxError("Sandbox execution produced no output file")
-                 
-            with open(output_pkl, "rb") as f:
-                res = pickle.load(f)
-                
-            if res['status'] == 'success':
-                return res['result']
-            else:
-                raise SandboxError(f"Error in sandbox: {res.get('error')}\n{res.get('traceback')}\nSandbox Logs:\n{result.stderr}")
+        logger.info(f"隔离策略初始化完成: {type(self.isolation).__name__}")
+    
+    def get_venv_python(self) -> Optional[str]:
+        """获取沙箱 venv 的 Python 路径"""
+        import sys
+        if self.venv_dir:
+            venv_python = os.path.join(self.venv_dir, 'bin', 'python')
+            if os.path.exists(venv_python):
+                return venv_python
+        # 没有沙箱时，返回系统 Python
+        return sys.executable
+    
+    def get_cwd(self) -> str:
+        """获取当前工作目录（宿主机路径）"""
+        if self.host_workspace:
+            return self.host_workspace
+        return os.getcwd()
+    
+    def wrap_command_with_cwd_capture(self, command: str, process_id: str) -> str:
+        """包装命令以捕获 CWD"""
+        # 不需要捕获 CWD，直接返回原命令
+        return command
+    
+    def update_cwd_from_output(self, stdout: str, process_id: str) -> str:
+        """从输出中更新 CWD"""
+        return stdout
+    
+    def _map_to_host(self, obj: Any) -> Any:
+        """将虚拟路径映射到宿主机路径"""
+        if self.file_system:
+            if isinstance(obj, str):
+                return self.file_system.map_text_to_host(obj)
+            elif isinstance(obj, dict):
+                result = {}
+                for k, v in obj.items():
+                    if isinstance(v, str):
+                        result[k] = self.file_system.map_text_to_host(v)
+                    else:
+                        result[k] = v
+                return result
+            return obj
+        return obj
+    
+    def _map_to_virtual(self, obj: Any) -> Any:
+        """将宿主机路径映射到虚拟路径"""
+        if self.file_system:
+            if isinstance(obj, str):
+                return self.file_system.map_text_to_virtual(obj)
+            elif isinstance(obj, dict):
+                result = {}
+                for k, v in obj.items():
+                    if isinstance(v, str):
+                        result[k] = self.file_system.map_text_to_virtual(v)
+                    else:
+                        result[k] = v
+                return result
+            return obj
+        return obj
+    
+    async def run_tool(self, tool_func: Callable, kwargs: Dict[str, Any], tool_obj: Any = None) -> Any:
+        """
+        运行工具函数（异步版本）。
+        """
+        import asyncio
+        logger.info(f"[Sandbox.run_tool] 开始执行")
         
-        except FileNotFoundError:
-             raise SandboxError("Bubblewrap (bwrap) executable not found. Please install bubblewrap (e.g., `apt install bubblewrap` or `yum install bubblewrap`).")
-                
-        finally:
-            if os.path.exists(input_pkl):
-                try: os.remove(input_pkl)
-                except: pass
-            if os.path.exists(output_pkl):
-                try: os.remove(output_pkl)
-                except: pass
-
-    def __enter__(self):
-        self._token = _current_sandbox.set(self)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self, '_token'):
-            _current_sandbox.reset(self._token)
-            
-    @staticmethod
-    def current() -> Optional['Sandbox']:
-        return _current_sandbox.get()
-
-    def run_tool(self, tool_func: Callable, kwargs: Dict[str, Any], tool_obj: Any = None) -> Any:
-        """
-        Runs a tool function within the sandbox.
-        """
-        # 1. Map paths in kwargs
+        # 映射路径
         host_kwargs = self._map_to_host(kwargs)
         
-        # 2. Extract module/function info
-        func = tool_func
-        if hasattr(func, "__self__"):
-            # Bound method
-            instance = func.__self__
-            module_name = instance.__class__.__module__
-            class_name = instance.__class__.__name__
-            function_name = func.__name__
-        elif tool_obj:
-            # Maybe provided explicitly
-            module_name = tool_obj.__module__
-            class_name = tool_obj.__class__.__name__
-            function_name = func.__name__
-        else:
-            # Unbound function
-            module_name = func.__module__
-            # Try to guess class if it's a method
-            parts = func.__qualname__.split('.')
-            if len(parts) > 1:
-                class_name = parts[-2]
-                function_name = parts[-1]
-            else:
-                class_name = None
-                function_name = func.__name__
-
-        # 3. Run
-        result = self.run_library_task(
-            module_name=module_name,
-            class_name=class_name,
-            function_name=function_name,
-            args=(),
-            kwargs=host_kwargs,
-            cwd=self.host_workspace if self.host_workspace else None
-        )
+        # 如果没有 tool_func，返回错误
+        if tool_func is None:
+            raise SandboxError("未提供 tool_func")
         
-        # 4. Map paths in result
+        # 检查是否是 bound method
+        if hasattr(tool_func, '__self__'):
+            # bound method
+            func_to_call = tool_func
+        else:
+            # 需要获取或创建实例
+            tool_class = getattr(tool_func, '__objclass__', None)
+            if tool_class:
+                # 创建实例
+                instance = tool_class()
+                func_to_call = tool_func.__get__(instance)
+            else:
+                raise SandboxError("tool_func 无法调用，需要 bound method 或提供 tool_obj")
+        
+        # 检查是否是 coroutine function
+        is_async = asyncio.iscoroutinefunction(func_to_call)
+        
+        # 使用沙箱 venv 的 Python 环境执行
+        if self.venv_dir and os.path.exists(self.venv_dir):
+            result = await self._run_with_venv(func_to_call, host_kwargs, is_async)
+        else:
+            # 没有 venv，直接调用
+            if is_async:
+                result = await func_to_call(**host_kwargs)
+            else:
+                result = func_to_call(**host_kwargs)
+        
+        # 将返回结果中的路径映射回虚拟路径
         return self._map_to_virtual(result)
-
-    def _map_to_host(self, obj: Any) -> Any:
-        if not self.file_system:
-            return obj
-        if isinstance(obj, str):
-            # Use map_text_to_host to replace path in commands/scripts/paths
-            return self.file_system.map_text_to_host(obj)
-        elif isinstance(obj, dict):
-            return {k: self._map_to_host(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._map_to_host(item) for item in obj]
-        return obj
-
-    def _map_to_virtual(self, obj: Any) -> Any:
-        if not self.file_system:
-            return obj
-        if isinstance(obj, str):
-            # Use map_text_to_virtual to hide host paths in output
-            return self.file_system.map_text_to_virtual(obj)
-        elif isinstance(obj, dict):
-            return {k: self._map_to_virtual(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._map_to_virtual(item) for item in obj]
-        return obj
-
-    def run_module_function(self, module_path: str, func_name: str, *args, requirements: Optional[list] = None, **kwargs) -> Any:
-        """
-        Run a function loaded from a module file in the sandbox.
-        """
-        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
-            payload = {
-                'mode': 'module',
-                'module_path': module_path,
-                'func_name': func_name,
-                'args': args,
-                'kwargs': kwargs,
-                'requirements': requirements,
-                'limits': self._get_effective_limits(),
-                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
-            }
-            if sys.platform == 'linux':
-                if self.linux_isolation_mode == 'bwrap':
-                    return self._run_with_bwrap(payload)
-                elif self.linux_isolation_mode == 'chroot':
-                    return self._run_with_chroot(payload)
-                else:
-                    return self._run_with_subprocess(payload)
-            return self._run_with_seatbelt(payload)
-
-        result_queue = multiprocessing.Queue()
-        process = multiprocessing.Process(
-            target=_restricted_module_execution, 
-            args=(module_path, func_name, requirements, args, kwargs, result_queue, self.limits)
-        )
+    
+    async def _run_with_venv(self, tool_func: Callable, kwargs: Dict[str, Any], is_async: bool = False) -> Any:
+        """在沙箱 venv 环境中执行工具函数（异步版本）"""
+        import asyncio
+        import os as _os
         
-        process.start()
-        process.join()
+        # 保存原始环境变量
+        original_path = _os.environ.get('PATH', '')
+        original_virtenv = _os.environ.get('VIRTUAL_ENV', '')
         
-        if not result_queue.empty():
-            result = result_queue.get()
-            if result['status'] == 'success':
-                return result['result']
+        try:
+            # 设置环境变量使用沙箱 venv
+            venv_bin = _os.path.join(self.venv_dir, 'bin')
+            _os.environ['PATH'] = venv_bin + ':' + original_path
+            _os.environ['VIRTUAL_ENV'] = self.venv_dir
+            _os.environ['SANDBOX_PYTHON_PATH'] = _os.path.join(venv_bin, 'python')
+            
+            logger.info(f"[_run_with_venv] 使用 venv: {self.venv_dir}")
+            
+            # 执行工具函数
+            if is_async:
+                result = await tool_func(**kwargs)
             else:
-                output = result.get('output')
-                output_block = f"\n{output}" if output else ""
-                raise SandboxError(f"Error in sandboxed module: {result.get('error')}\n{result.get('traceback')}{output_block}")
-        else:
-            if process.exitcode is not None and process.exitcode != 0:
-                raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
-            raise SandboxError("Sandboxed process died unexpectedly")
-
-    def run_library_task(self, module_name: str, function_name: str, args: tuple = (), kwargs: dict = {}, class_name: Optional[str] = None, cwd: Optional[str] = None) -> Any:
-        """
-        Run a function from an installed library module in the sandbox.
-        
-        Args:
-            module_name: The dotted name of the module (e.g. 'sagents.tool.impl.file_system_tool')
-            function_name: The name of the function to call
-            args: Positional arguments for the function
-            kwargs: Keyword arguments for the function
-            class_name: Optional class name if the function is a method of a class. The class must be instantiable without arguments.
-            cwd: Optional current working directory to set in the sandbox
-        """
-        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
-            payload = {
-                'mode': 'library',
-                'module_name': module_name,
-                'class_name': class_name,
-                'function_name': function_name,
-                'args': args,
-                'kwargs': kwargs,
-                'sys_path': sys.path,
-                'limits': self._get_effective_limits(cwd),
-                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
-            }
-            if sys.platform == 'linux':
-                if self.linux_isolation_mode == 'bwrap':
-                    return self._run_with_bwrap(payload, cwd=cwd)
-                elif self.linux_isolation_mode == 'chroot':
-                    return self._run_with_chroot(payload, cwd=cwd)
-                else:
-                    return self._run_with_subprocess(payload, cwd=cwd)
-            return self._run_with_seatbelt(payload, cwd=cwd)
-
-        result_queue = multiprocessing.Queue()
-        process = multiprocessing.Process(
-            target=_restricted_library_execution, 
-            args=(module_name, class_name, function_name, args, kwargs, result_queue, self.limits, cwd, sys.path)
-        )
-        
-        process.start()
-        process.join()
-        
-        if not result_queue.empty():
-            result = result_queue.get()
-            if result['status'] == 'success':
-                return result['result']
+                result = tool_func(**kwargs)
+            return result
+            
+        finally:
+            # 恢复原始环境变量
+            _os.environ['PATH'] = original_path
+            if original_virtenv:
+                _os.environ['VIRTUAL_ENV'] = original_virtenv
             else:
-                raise SandboxError(f"Error in sandboxed task: {result.get('error')}\n{result.get('traceback')}")
-        else:
-             if process.exitcode is not None and process.exitcode != 0:
-                raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
-             raise SandboxError("Sandboxed process died unexpectedly")
-
-    def skill_run_script(self, script_path: str, args: list = None, requirements: Optional[list] = None, install_cmd: Optional[str] = None, cwd: Optional[str] = None) -> str:
-        """
-        Run a python script file in the sandbox and return stdout.
-        """
-        args = args or []
-        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
-            payload = {
-                'mode': 'script',
-                'script_path': script_path,
-                'args': args,
-                'requirements': requirements,
-                'install_cmd': install_cmd,
-                'limits': self._get_effective_limits(cwd),
-                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
-            }
-            if sys.platform == 'linux':
-                if self.linux_isolation_mode == 'bwrap':
-                    return self._run_with_bwrap(payload, cwd=cwd)
-                elif self.linux_isolation_mode == 'chroot':
-                    return self._run_with_chroot(payload, cwd=cwd)
-                else:
-                    return self._run_with_subprocess(payload, cwd=cwd)
-            return self._run_with_seatbelt(payload, cwd=cwd)
-
-        result_queue = multiprocessing.Queue()
-        process = multiprocessing.Process(
-            target=_restricted_script_execution, 
-            args=(script_path, args, requirements, install_cmd, result_queue, self.limits, cwd)
-        )
-        
-        process.start()
-        process.join()
-        
-        if not result_queue.empty():
-            result = result_queue.get()
-            if result['status'] == 'success':
-                return result['result']
-            else:
-                output = result.get('output')
-                output_block = f"\n{output}" if output else ""
-                raise SandboxError(f"Error in sandboxed script: {result.get('error')}\n{result.get('traceback')}{output_block}")
-        else:
-            if process.exitcode is not None and process.exitcode != 0:
-                raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
-            raise SandboxError("Sandboxed process died unexpectedly")
-
-    def run_shell_command(self, command: str, cwd: Optional[str] = None) -> str:
-        """
-        Run a raw shell command in the sandbox.
-        """
-        target_cwd = cwd or self.host_workspace
-        
-        if (sys.platform == 'darwin' or sys.platform == 'linux') and self.sandbox_dir:
-            payload = {
-                'mode': 'shell',
-                'command': command,
-                'cwd': target_cwd,
-                'limits': self._get_effective_limits(target_cwd),
-                'apply_file_restrictions': not (sys.platform == 'linux' and self.linux_isolation_mode in ('bwrap', 'chroot'))
-            }
-            if sys.platform == 'linux':
-                if self.linux_isolation_mode == 'bwrap':
-                    return self._run_with_bwrap(payload, cwd=target_cwd)
-                elif self.linux_isolation_mode == 'chroot':
-                    return self._run_with_chroot(payload, cwd=target_cwd)
-                else:
-                    return self._run_with_subprocess(payload, cwd=target_cwd)
-            return self._run_with_seatbelt(payload, cwd=target_cwd)
-
-        result_queue = multiprocessing.Queue()
-        process = multiprocessing.Process(
-            target=_restricted_shell_execution, 
-            args=(command, result_queue, self.limits, target_cwd)
-        )
-        
-        process.start()
-        process.join()
-        
-        if not result_queue.empty():
-            result = result_queue.get()
-            if result['status'] == 'success':
-                return result['result']
-            else:
-                output = result.get('output')
-                output_block = f"\n{output}" if output else ""
-                raise SandboxError(f"Error in sandboxed command: {result.get('error')}\n{result.get('traceback')}{output_block}")
-        else:
-            if process.exitcode is not None and process.exitcode != 0:
-                raise SandboxError(f"Sandboxed process terminated. Exit code: {process.exitcode}")
-            raise SandboxError("Sandboxed process died unexpectedly")
-
-
-    def run(self, func: Callable, *args, **kwargs) -> Any:
-        """
-        Run a function in the sandbox.
-        """
-        result_queue = multiprocessing.Queue()
-        process = multiprocessing.Process(
-            target=_restricted_execution, 
-            args=(func, args, kwargs, result_queue, self.limits)
-        )
-        
-        process.start()
-        process.join()
-        
-        if not result_queue.empty():
-            result = result_queue.get()
-            if result['status'] == 'success':
-                return result['result']
-            else:
-                output = result.get('output')
-                output_block = f"\n{output}" if output else ""
-                raise SandboxError(f"Execution failed: {result.get('error')}\n{result.get('traceback')}{output_block}")
-        else:
-            if process.exitcode != 0:
-                raise SandboxError(f"Process terminated abnormally. Exit code: {process.exitcode}")
-            return None
+                _os.environ.pop('VIRTUAL_ENV', None)
+            _os.environ.pop('SANDBOX_PYTHON_PATH', None)
