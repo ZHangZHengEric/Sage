@@ -198,10 +198,12 @@ const fetchSystemInfo = async () => {
     systemStatus.value = res
     
     if (!res.has_model_provider || !res.has_agent) {
-      step.value = 'welcome'
-      // Pre-fetch resources if we might need them
-      if (!res.has_agent) {
-         fetchResources()
+      if (res.has_model_provider && !res.has_agent) {
+          // Skip welcome if model provider is already configured
+          step.value = 'agent'
+          fetchResources()
+      } else {
+          step.value = 'welcome'
       }
     } else {
       router.replace('/')
