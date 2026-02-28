@@ -56,6 +56,15 @@ fn main() {
             let _window = app.get_window("main").unwrap();
             let app_handle = app.handle();
             
+            // Set default environment variables
+            std::env::set_var("SAGE_USE_SANDBOX", "False");
+            let home_dir = dirs::home_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let skill_workspace = format!("{}/.sage/skills", home_dir);
+            std::env::set_var("SAGE_SKILL_WORKSPACE", &skill_workspace);
+            println!("Set SAGE_SKILL_WORKSPACE: {}", skill_workspace);
+            
             tauri::async_runtime::spawn(async move {
                 let (mut rx, _child) = Command::new_sidecar("sage-desktop-sidecar")
                     .expect("failed to create `sage-desktop-sidecar` binary command")
