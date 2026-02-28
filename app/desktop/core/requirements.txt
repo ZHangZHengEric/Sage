@@ -23,7 +23,6 @@ pypandoc>=1.13
 python-docx>=1.0.0
 python-pptx>=0.6.22
 unstructured>=0.12.0
-opencc>=1.1.6
 pytest-shutil>=1.8.1
 ##############################
 # Web / API / 后端框架
@@ -64,11 +63,6 @@ argon2-cffi>=23.1.0
 chromadb>=0.4.22
 
 ##############################
-# 任务 / 调度
-##############################
-# apscheduler>=3.10.4
-
-##############################
 # 应用类工具
 ##############################
 streamlit==1.50.0
@@ -76,10 +70,3 @@ ijson
 loguru>=0.7.0
 rank-bm25
 weasyprint
-
-##############################
-# 链路追踪
-##############################
-# opentelemetry-api>=1.20.0
-# opentelemetry-sdk>=1.20.0
-# opentelemetry-exporter-otlp>=1.20.0
