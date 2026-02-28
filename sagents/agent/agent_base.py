@@ -306,6 +306,7 @@ class AgentBase(ABC):
             session_context = get_session_context(session_id)
 
         # 1. Role Definition
+        use_identity = False
         if 'role_definition' in include_sections:
             role_content = ""
             if system_prefix_override:
@@ -317,6 +318,7 @@ class AgentBase(ABC):
             else:
                 if session_context:
                     role_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
+                    use_identity = True
                 else:
                     role_content = prompt_manager.get_prompt(
                         'agent_intro_template',
@@ -334,7 +336,7 @@ class AgentBase(ABC):
             system_context_info = session_context.system_context.copy()
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
             
-            if 'AGENT.MD' in include_sections:
+            if 'AGENT.MD' in include_sections and use_identity:
                 # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
                 agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))
                 if agent_md_content:
@@ -352,6 +354,12 @@ class AgentBase(ABC):
                         user_content = user_content[:300]+"……"  
                     system_prefix += f"<user>\n{user_content}\n</user>\n"
 
+                if use_identity==False:
+                    identity_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
+                    if identity_content:
+                        if len(identity_content) > 300:
+                            identity_content = identity_content[:300]+"……"
+                        system_prefix += f"<identity>\n{identity_content}\n</identity>\n"
 
             # 处理 active_skill_instruction (无论是否包含system_context，都先提取出来，避免污染通用context)
             active_skill_instruction = None
