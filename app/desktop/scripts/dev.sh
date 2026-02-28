@@ -3,27 +3,40 @@ set -euo pipefail
 # Add cargo to PATH
 export PATH="$HOME/.cargo/bin:$PATH"
 
-########################################
-# Sage Desktop Industrial Build Script
-########################################
+# Disable sandbox for desktop app
+export SAGE_USE_SANDBOX=False
+export SAGE_SKILL_WORKSPACE="$HOME/.sage/skills"
+export SAGE_ROOT="$HOME/.sage"
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-VENV_DIR="$ROOT_DIR/app/desktop/core/.venv"
-DIST_DIR="$ROOT_DIR/app/desktop/dist"
-TAURI_BIN_DIR="$ROOT_DIR/app/desktop/tauri/bin"
-NO_PYTHON_BUILD=1
-MODE="${1:-release}"  # release | debug
+# 1. Determine paths
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+APP_ROOT="$SCRIPT_DIR/.."
+PROJECT_ROOT="$(cd "$APP_ROOT/../.." && pwd)"
+TAURI_DIR="$APP_ROOT/tauri"
+CORE_DIR="$APP_ROOT/core"
+UI_DIR="$APP_ROOT/ui"
 
-echo "======================================"
-echo " Sage Desktop Build ($MODE)"
-echo " Root: $ROOT_DIR"
-echo " Tip: Set NO_PYTHON_BUILD=1 to skip sidecar build"
-echo "======================================"
+# 1.5 Setup Python Environment
+VENV_DIR="$CORE_DIR/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating Python virtual environment at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
 
-########################################
-# Detect OS & Target Triple
-########################################
+source "$VENV_DIR/bin/activate"
 
+echo "Installing Python dependencies..."
+pip install --upgrade setuptools
+pip install -r "$CORE_DIR/requirements.txt"
+
+# 2. Check and install frontend dependencies
+if [ ! -d "$UI_DIR/node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    cd "$UI_DIR"
+    npm install
+fi
+
+# 3. Detect OS and Architecture for Sidecar
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
