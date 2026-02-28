@@ -149,7 +149,7 @@ async def populate_request_from_agent_config(
         # 4. 路径处理
         user_home = Path.home()
         sage_home = os.path.join(user_home, ".sage")
-        agent_workspace = os.path.join(sage_home, "agent")
+        agent_workspace = os.path.join(sage_home, "agents")
         _merge_dict("system_context", {"agent_host_workspace_path": os.path.join(agent_workspace, request.agent_id)})
     # 处理可用技能
     available_skills = request.available_skills
