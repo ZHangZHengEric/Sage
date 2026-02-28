@@ -257,9 +257,13 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
-        user_home = Path.home()
-        sage_home = user_home / ".sage"
-        workspace = sage_home / "workspace"
+        if os.environ.get("SAGE_WORKSPACE_PATH"):
+            workspace = Path(os.environ.get("SAGE_WORKSPACE_PATH"))
+        else:
+            user_home = Path.home()
+            sage_home = user_home / ".sage"
+            workspace = sage_home / "workspace"
+        
         workspace.mkdir(parents=True, exist_ok=True)
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
