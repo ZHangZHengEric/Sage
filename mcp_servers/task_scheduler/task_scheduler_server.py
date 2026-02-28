@@ -20,12 +20,13 @@ mcp = FastMCP("Task Scheduler Service")
 # Constants
 logger = logging.getLogger("TaskScheduler")
 
-# Base storage path - relative to execution directory
-BASE_DIR = Path("./data/mcp/task_scheduler")
-DB_PATH = BASE_DIR / "tasks.db"
+# Base storage path - use SAGE_ROOT if available, otherwise use current directory
+SAGE_ROOT = os.getenv("SAGE_ROOT", os.getcwd())
+DB_PATH = Path(SAGE_ROOT) / "tasks.db"
 
-# Ensure data directory exists
-BASE_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure directory exists
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+logger.info(f"Task scheduler database: {DB_PATH}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -38,8 +39,8 @@ def _get_api_base_url() -> str:
     Since this MCP server runs in the same container as the main server,
     we use localhost with the port from environment or default.
     """
-    # Try to get port from environment variable or use default 8001
-    port = os.getenv("SAGE_PORT", "8001")
+    # Try to get port from environment variable or use default 8080 (desktop app port)
+    port = os.getenv("SAGE_PORT", "8080")
     return f"http://localhost:{port}"
 
 
