@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from ..models.llm_provider import LLMProvider, LLMProviderDao
 from ..schemas.llm_provider import LLMProviderDTO, LLMProviderCreate, LLMProviderUpdate
 from ..core.render import Response
+from ..core.client.chat import init_chat_client
+from loguru import logger
 
 router = APIRouter(prefix="/api/llm-provider", tags=["LLM Provider"])
 
@@ -30,8 +32,19 @@ async def create_provider(data: LLMProviderCreate, request: Request):
         top_p=data.top_p,
         presence_penalty=data.presence_penalty,
         max_model_len=data.max_model_len,
-        is_default=False,
+        is_default=data.is_default,
     )
+    if data.is_default:
+        api_key = provider.api_keys[0] if provider.api_keys else None
+        base_url = provider.base_url
+        model_name = provider.model
+        chat_client = await init_chat_client(
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
+        )
+        if chat_client is not None:
+            logger.info("LLM Chat 客户端已初始化")
     await dao.save(provider)
     return await Response.succ()
 
