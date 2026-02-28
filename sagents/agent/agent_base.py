@@ -1012,7 +1012,11 @@ class AgentBase(ABC):
             available_tools_str = "\n".join([f"{i+1}. {tool['name']}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'
 
             # 准备消息
+            # messages_input = MessageManager.compress_messages(messages_input, budget_limit=10000)
+            logger.info(f"AgentBase: messages_input 的token长度为{MessageManager.calculate_messages_token_length(messages_input)}")
             clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+            
+            logger.info(f"AgentBase: clean_messages的字符长度为{len(json.dumps(clean_messages, ensure_ascii=False, indent=2))}")
 
             # 重新获取agent_custom_system_prefix以支持动态语言切换
             current_system_prefix = prompt_manager.get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language())

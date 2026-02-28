@@ -70,6 +70,7 @@ class FibreSubAgent:
             context_budget_config=context_budget_config, 
             tool_manager=self.parent_context.tool_manager,
             skill_manager=self.parent_context.skill_manager,
+            system_context=self.parent_context.system_context
         )
         
 

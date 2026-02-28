@@ -1,3 +1,4 @@
+from math import log
 from sagents.context.session_context import (
     SessionContext,
     init_session_context,
@@ -424,15 +425,20 @@ class SAgent:
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
                 merge_before_num = len(session_context.message_manager.messages)
                 all_message_ids = [m.message_id for m in session_context.message_manager.messages]
+                add_new_messages_num = 0
+                update_messages_num = 0
                 for message in initial_messages:
                     if message.message_id not in all_message_ids:
                         session_context.add_messages(message)
+                        add_new_messages_num += 1
                     else:
                         # 如果message 存在，更新，以新的message 为准
                         session_context.message_manager.update_messages(message)
+                        update_messages_num += 1
+                
 
-                logger.info(f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)}")
-
+                logger.info(f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)} 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}")
+                logger.info(f"SAgent: 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}")
                 # 加载最近一次调用的skill到context
                 await session_context.load_recent_skill_to_context()
 
