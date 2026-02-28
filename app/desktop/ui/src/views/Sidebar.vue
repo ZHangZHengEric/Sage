@@ -180,24 +180,20 @@
       </div>
     </ScrollArea>
 
-    <!-- Footer User Profile -->
-    <div class="p-4 mt-auto" v-if="currentUser">
+    <!-- Footer Settings -->
+    <div class="p-4 mt-auto">
       <DropdownMenu v-model:open="isDropdownOpen">
         <DropdownMenuTrigger as-child>
           <div 
             class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-background hover:shadow-sm transition-all duration-200 w-full group"
             :class="{'justify-center': isCollapsed}"
           >
-            <Avatar class="h-9 w-9 border-2 border-background shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
-              <AvatarImage v-if="!currentUser.isGuest" :src="currentUser.avatar" />
-              <AvatarImage v-else src="/sage_logo.svg" />
-              <AvatarFallback class="bg-primary/10 text-primary font-bold">
-                {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
-              </AvatarFallback>
-            </Avatar>
+            <div class="h-9 w-9 flex items-center justify-center rounded-lg bg-muted group-hover:bg-primary/10 transition-colors shrink-0">
+               <Settings class="h-5 w-5 text-muted-foreground group-hover:text-primary" />
+            </div>
             <div v-if="!isCollapsed" class="flex-1 min-w-0 text-left">
               <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
-                {{ currentUser.nickname || currentUser.username }}
+                {{ t('common.settings') || 'Settings' }}
               </p>
             </div>
             <ChevronDown 
@@ -208,13 +204,6 @@
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent class="w-56" :side="isCollapsed ? 'right' : 'top'" align="end" :sideOffset="isCollapsed ? 10 : 0">
-          <DropdownMenuLabel class="font-normal" v-if="isCollapsed">
-             <div class="flex flex-col space-y-1">
-                <p class="text-sm font-medium leading-none">{{ currentUser.nickname || currentUser.username }}</p>
-                <p class="text-xs leading-none text-muted-foreground">User Profile</p>
-             </div>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator v-if="isCollapsed" />
           <DropdownMenuItem @click="toggleLanguage">
              <Globe class="mr-2 h-4 w-4" />
              <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
@@ -246,15 +235,6 @@
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
-          <DropdownMenuItem v-if="!currentUser.isGuest" @select.prevent="showChangePasswordDialog = true">
-            <KeyRound class="mr-2 h-4 w-4" />
-            <span>修改密码</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem @click="handleLogout" :class="currentUser.isGuest ? 'text-primary' : 'text-red-600'">
-            <LogOut class="mr-2 h-4 w-4" />
-            <span>{{ currentUser.isGuest ? '去登录' : t('auth.logout') }}</span>
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
