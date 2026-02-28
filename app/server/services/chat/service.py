@@ -57,6 +57,20 @@ async def populate_request_from_agent_config(
 
     agent_config = agent.config if agent and agent.config else None
 
+    def _fill_if_none(field, value):
+        if getattr(request, field) is None:
+            setattr(request, field, value)
+
+    def _merge_dict(field, value):
+        current = getattr(request, field)
+        if current is None:
+            setattr(request, field, value)
+        elif isinstance(current, dict) and isinstance(value, dict):
+            # Request 优先，所以 Agent 配置作为 base
+            merged = value.copy()
+            merged.update(current)
+            setattr(request, field, merged)
+
     if agent_config:
         if agent_config.get("name") is not None:
             request.agent_name = agent_config.get("name")
@@ -74,8 +88,8 @@ async def populate_request_from_agent_config(
             request.agent_mode = agent_config.get("agentMode")
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
-        if agent_config.get("systemContext") is not None and request.system_context is None:
-            request.system_context = agent_config.get("systemContext")
+        if agent_config.get("systemContext") is not None:
+            _merge_dict("system_context", agent_config.get("systemContext"))
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
@@ -87,20 +101,6 @@ async def populate_request_from_agent_config(
 
     if request.agent_name is None:
         request.agent_name = "Sage Assistant"
-
-    def _fill_if_none(field, value):
-        if getattr(request, field) is None:
-            setattr(request, field, value)
-
-    def _merge_dict(field, value):
-        current = getattr(request, field)
-        if current is None:
-            setattr(request, field, value)
-        elif isinstance(current, dict) and isinstance(value, dict):
-            # Request 优先，所以 Agent 配置作为 base
-            merged = value.copy()
-            merged.update(current)
-            setattr(request, field, merged)
     # 注入 llm_config 配置
     if request.llm_model_config is None:
         request.llm_model_config = {}
@@ -143,7 +143,6 @@ async def populate_request_from_agent_config(
     _fill_if_none("deep_thinking", False)
     _fill_if_none("multi_agent", False)
     _fill_if_none("more_suggest", False)
-    _merge_dict("system_context", {})
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
     _fill_if_none("available_knowledge_bases", [])
