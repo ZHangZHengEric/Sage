@@ -1,4 +1,7 @@
 export default {
+  // 通用
+  'common.settings': '设置',
+  
   // 侧边栏
   'sidebar.newChat': '新对话',
   'sidebar.agentList': '我的Agent',
