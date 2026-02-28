@@ -28,6 +28,7 @@ from fastapi import FastAPI
 
 from .core.exceptions import register_exception_handlers
 from .core.middleware import register_middlewares
+from .core.config import init_startup_config
 from .lifecycle import (
     cleanup_system,
     initialize_system,
@@ -108,7 +109,8 @@ def main():
 
         logs_dir = sage_home / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        cfg = init_startup_config()
         port = 8080
         print(f"Starting Sage Desktop Server on port {port}...")
         init_logging(log_name="sage-desktop", log_level="INFO", log_path=logs_dir)

@@ -3,7 +3,7 @@ from loguru import logger
 from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
 
-from .core.client.chat import close_chat_client
+from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
 
 
@@ -17,6 +17,25 @@ async def initialize_db_connection():
                 from . import models
                 await conn.run_sync(models.Base.metadata.create_all)
             logger.debug("数据库自动建表完成")
+        try:
+            # Load default provider settings first
+            from .models.llm_provider import LLMProviderDao
+            llm_dao = LLMProviderDao()
+            default_provider = await llm_dao.get_default()
+            if default_provider: 
+                api_key = default_provider.api_keys[0] if default_provider.api_keys else None
+                base_url = default_provider.base_url 
+                model_name = default_provider.model
+                chat_client = await init_chat_client(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model_name=model_name,
+                )
+                if chat_client is not None:
+                    logger.info("LLM Chat 客户端已初始化")
+        except Exception as e:
+            logger.error(f"LLM Chat 初始化失败: {e}")
+
     except Exception as e:
         logger.error(f"数据库客户端初始化失败: {e}")
 
@@ -89,19 +108,11 @@ async def validate_and_disable_mcp_servers():
 
 async def shutdown_clients():
     """关闭所有第三方客户端"""
-    # 关闭第三方客户端
-    try:
-        await close_s3_client()
-    finally:
-        logger.info("RustFS客户端 已关闭")
+ 
     try:
         await close_chat_client()
     finally:
         logger.info("LLM Chat客户端 已关闭")
-    try:
-        await close_embed_client()
-    finally:
-        logger.info("Embedding客户端 已关闭")
     try:
         await close_db_client()
     finally:
