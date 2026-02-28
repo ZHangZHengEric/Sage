@@ -1,4 +1,7 @@
 export default {
+  // Common
+  'common.settings': 'Settings',
+
   // Sidebar
   'sidebar.newChat': 'New Chat',
   'sidebar.agentList': 'My Agents',
