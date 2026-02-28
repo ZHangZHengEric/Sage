@@ -175,18 +175,18 @@ class FileSystemTool:
             logger.error(f"💥 文件写入异常 [{operation_id}] - 错误: {str(e)}")
             return {"status": "error", "message": f"文件写入失败: {str(e)}", "operation_id": operation_id}
 
-    @tool(
-        description_i18n={
-            "zh": "按关键词检索文件并返回上下文",
-            "en": "Search file by keywords and return context",
-            "pt": "Pesquisa por palavras-chave e retorna contexto"
-        },
-        param_description_i18n={
-            "file_path": {"zh": "要搜索的文件路径", "en": "File path to search", "pt": "Caminho do arquivo para buscar"},
-            "keywords": {"zh": "关键词列表", "en": "List of keywords", "pt": "Lista de palavras-chave"},
-            "return_search_item": {"zh": "返回的匹配条目数量", "en": "Number of matched items to return", "pt": "Quantidade de resultados retornados"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "按关键词检索文件并返回上下文",
+    #         "en": "Search file by keywords and return context",
+    #         "pt": "Pesquisa por palavras-chave e retorna contexto"
+    #     },
+    #     param_description_i18n={
+    #         "file_path": {"zh": "要搜索的文件路径", "en": "File path to search", "pt": "Caminho do arquivo para buscar"},
+    #         "keywords": {"zh": "关键词列表", "en": "List of keywords", "pt": "Lista de palavras-chave"},
+    #         "return_search_item": {"zh": "返回的匹配条目数量", "en": "Number of matched items to return", "pt": "Quantidade de resultados retornados"}
+    #     }
+    # )
     def search_content_in_file(self, file_path: str, keywords:list[str],return_search_item=5) -> Dict[str, Any]:
         
         """在文件中通过关键词匹配，搜索相关的内容的上下文内容
@@ -484,17 +484,17 @@ class FileSystemTool:
         except Exception as e:
             return {"status": "error", "message": f"搜索替换失败: {str(e)}"} 
     
-    @tool(
-        description_i18n={
-            "zh": "将CSV转换为Excel",
-            "en": "Convert CSV to Excel",
-            "pt": "Converte CSV para Excel"
-        },
-        param_description_i18n={
-            "csv_file_path": {"zh": "输入CSV文件路径", "en": "Input CSV file path", "pt": "Caminho do arquivo CSV de entrada"},
-            "excel_file_path": {"zh": "输出Excel文件路径", "en": "Output Excel file path", "pt": "Caminho do arquivo Excel de saída"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "将CSV转换为Excel",
+    #         "en": "Convert CSV to Excel",
+    #         "pt": "Converte CSV para Excel"
+    #     },
+    #     param_description_i18n={
+    #         "csv_file_path": {"zh": "输入CSV文件路径", "en": "Input CSV file path", "pt": "Caminho do arquivo CSV de entrada"},
+    #         "excel_file_path": {"zh": "输出Excel文件路径", "en": "Output Excel file path", "pt": "Caminho do arquivo Excel de saída"}
+    #     }
+    # )
     def convert_csv_to_excel(self, csv_file_path: str, excel_file_path: str) -> Dict[str, Any]:
         """将CSV文件转换为Excel文件
 
