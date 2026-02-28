@@ -315,7 +315,7 @@ class AgentBase(ABC):
                 role_content = self.system_prefix
             else:
                 if session_context:
-                    role_content = session_context.sandbox.file_system.read_file('/workspace/IDENTITY.md')
+                    role_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
                 else:
                     role_content = prompt_manager.get_prompt(
                         'agent_intro_template',
@@ -335,7 +335,7 @@ class AgentBase(ABC):
             
             if 'AGENT.MD' in include_sections:
                 # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
-                agent_md_content = session_context.sandbox.file_system.read_file('/workspace/AGENT.md')
+                agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))
                 if agent_md_content:
                     system_prefix += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
                 
