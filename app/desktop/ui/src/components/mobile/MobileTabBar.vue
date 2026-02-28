@@ -56,10 +56,6 @@
             <LayoutGrid class="mr-3 h-4 w-4 text-blue-500" />
             <span class="font-medium">{{ t('sidebar.skillList') }}</span>
           </DropdownMenuItem>
-          <DropdownMenuItem @click="router.push({ name: 'KnowledgeBase' })" class="py-3 px-4 cursor-pointer">
-            <Book class="mr-3 h-4 w-4 text-emerald-500" />
-            <span class="font-medium">{{ t('sidebar.knowledgeBaseList') }}</span>
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -114,7 +110,7 @@ const handleNewChat = () => {
 }
 
 const isCapabilitiesActive = computed(() => {
-  return ['Tools', 'Skills', 'KnowledgeBase', 'KnowledgeBaseDetail', 'ToolDetailView'].includes(route.name)
+  return ['Tools', 'Skills', 'ToolDetailView'].includes(route.name)
 })
 </script>
 

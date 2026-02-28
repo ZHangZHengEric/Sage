@@ -91,6 +91,7 @@ const clearLocalLoginState = () => {
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('token_expires_in')
+  localStorage.removeItem('isGuest')
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('user-updated'))
   }
@@ -104,64 +105,29 @@ export const logout = () => {
 // 获取当前用户信息
 export const getCurrentUser = () => {
   const userInfo = localStorage.getItem('userInfo')
-  return userInfo ? JSON.parse(userInfo) : null
+  if (userInfo) return JSON.parse(userInfo)
+  
+  // 默认返回管理员用户，因为不再需要登录
+  return { 
+    username: 'Admin', 
+    nickname: 'Admin',
+    role: 'admin', 
+    isGuest: false, 
+    avatar: '/sage_logo.svg' 
+  }
 }
 
 // 基于API的登录状态检查 - 主要方法
 export const isLoggedInAPI = async () => {
-  const user = getCurrentUser()
-  const localLoginFlag = localStorage.getItem('isLoggedIn')
-  
-  // 如果本地没有登录标记或用户信息，直接返回未登录
-  if (!user || localLoginFlag !== 'true') {
-    return { isLoggedIn: false, user: null }
-  }
-  
-  try {
-    // 调用API验证服务器端登录状态
-    const result = await checkLoginAPI()
-    
-    if (result.success) {
-      return { 
-        isLoggedIn: true, 
-        user: result.data || user,
-        apiResult: result
-      }
-    } else {
-      return { 
-        isLoggedIn: false, 
-        user: null,
-        apiResult: result
-      }
-    }
-  } catch (error) {
-    console.error('API验证过程出错:', error)
-    
-    // 如果是网络错误，可以选择信任本地状态（可配置）
-    if (error.isNetworkError) {
-      return { 
-        isLoggedIn: true, 
-        user: user,
-        isNetworkError: true
-      }
-    } else {
-      // 其他错误认为未登录
-      return { 
-        isLoggedIn: false, 
-        user: null,
-        error: error
-      }
-    }
+  return { 
+    isLoggedIn: true, 
+    user: getCurrentUser()
   }
 }
 
 // 同步版本的登录状态检查（用于兼容现有代码）
 export const isLoggedIn = () => {
-  const user = getCurrentUser()
-  const loginFlag = localStorage.getItem('isLoggedIn')
-  const result = !!(user && loginFlag === 'true')
-  
-  return result
+  return true
 }
 
 

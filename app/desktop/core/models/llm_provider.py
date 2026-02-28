@@ -25,7 +25,6 @@ class LLMProvider(Base):
     presence_penalty: Mapped[float] = mapped_column(Float, nullable=True)
     max_model_len: Mapped[int] = mapped_column(Integer, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    user_id: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
@@ -42,7 +41,6 @@ class LLMProvider(Base):
         presence_penalty: Optional[float] = None,
         max_model_len: Optional[int] = None,
         is_default: bool = False,
-        user_id: str = "",
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
@@ -57,7 +55,6 @@ class LLMProvider(Base):
         self.presence_penalty = presence_penalty
         self.max_model_len = max_model_len
         self.is_default = is_default
-        self.user_id = user_id
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
 
@@ -74,7 +71,6 @@ class LLMProvider(Base):
             "presence_penalty": self.presence_penalty,
             "max_model_len": self.max_model_len,
             "is_default": self.is_default,
-            "user_id": self.user_id,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -91,12 +87,9 @@ class LLMProviderDao(BaseDao):
     async def get_by_id(self, provider_id: str) -> Optional["LLMProvider"]:
         return await BaseDao.get_by_id(self, LLMProvider, provider_id)
 
-    async def get_list(self, user_id: Optional[str] = None) -> List["LLMProvider"]:
-        where = [
-            LLMProvider.user_id == user_id,
-        ]
+    async def get_list(self) -> List["LLMProvider"]:
         limit = 100
-        return await BaseDao.get_list(self, LLMProvider, where=where, order_by=LLMProvider.created_at.desc(), limit=limit)
+        return await BaseDao.get_list(self, LLMProvider, order_by=LLMProvider.created_at.desc(), limit=limit)
 
     async def delete_by_id(self, provider_id: str) -> bool:
         return await BaseDao.delete_by_id(self, LLMProvider, provider_id)

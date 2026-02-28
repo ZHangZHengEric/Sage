@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, Request
 
 from ..core.render import Response
-from ..models import SystemInfoDao
+from ..models import SystemInfoDao, LLMProviderDao, AgentConfigDao
 from ..schemas.base import BaseResponse
 from ..schemas.system import SystemSettingsRequest
 
@@ -14,10 +14,23 @@ system_router = APIRouter(prefix="/api", tags=["System"])
 @system_router.get("/system/info")
 async def get_system_info():
     sys_dao = SystemInfoDao()
-    allow_reg = await sys_dao.get_by_key("allow_registration")
+    # allow_reg = await sys_dao.get_by_key("allow_registration")
+    
+    # Check for model providers
+    llm_dao = LLMProviderDao()
+    providers = await llm_dao.get_list()
+    has_model_provider = len(providers) > 0
+    
+    # Check for agents
+    agent_dao = AgentConfigDao()
+    agents = await agent_dao.get_list()
+    has_agent = len(agents) > 0
+
     return await Response.succ(
         data={
-            "allow_registration": allow_reg != "false"
+            "allow_registration": False, # Disabled as per requirement
+            "has_model_provider": has_model_provider,
+            "has_agent": has_agent
         },
         message="获取系统信息成功"
     )

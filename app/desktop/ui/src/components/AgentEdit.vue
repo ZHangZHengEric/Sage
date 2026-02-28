@@ -12,6 +12,7 @@
     <div class="px-5 py-5 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex justify-between items-center shrink-0 z-10">
       <!-- Left Side: Return/Cancel -->
       <Button 
+        v-if="!isSetup"
         variant="ghost" 
         @click="handleReturn" 
         class="text-muted-foreground hover:text-foreground transition-colors"
@@ -19,6 +20,7 @@
         <ChevronLeft class="mr-2 h-4 w-4" />
         {{ t('common.return') }}
       </Button>
+      <div v-else></div>
 
       <!-- Right Side: Navigation & Action -->
       <div class="flex items-center gap-3">
@@ -87,7 +89,7 @@ const props = defineProps({
   agent: { type: Object, default: null },
   tools: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] },
-  knowledgeBases: { type: Array, default: () => [] }
+  isSetup: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:visible', 'save'])
@@ -109,8 +111,7 @@ const stepProps = computed(() => {
   if (store.currentStep === 2) {
     return {
       tools: props.tools,
-      skills: props.skills,
-      knowledgeBases: props.knowledgeBases
+      skills: props.skills
     }
   }
   return {}

@@ -34,9 +34,6 @@ def _normalize_source(source: str) -> str:
 async def exec_tool(request: ExecToolRequest, http_request: Request):
     """执行工具"""
     logger.info(f"执行工具请求: {request}")
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
 
     tool_manager = get_tool_manager()
     if not tool_manager:
@@ -55,21 +52,6 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
             error_detail=f"Tool '{request.tool_name}' not found",
         )
     
-    # Permission check
-    if role != "admin":
-        tool_info = tool_manager.get_tool_info(request.tool_name)
-        tool_type = tool_info.get("type", "basic")
-        if tool_type == "mcp":
-            source = _normalize_source(tool_info.get("source", "internal"))
-            dao = MCPServerDao()
-            server = await dao.get_by_name(source)
-            if server and server.user_id and server.user_id != user_id:
-                raise SageHTTPException(
-                    status_code=403,
-                    detail="无权使用该工具",
-                    error_detail="Permission denied",
-                )
-
     tool_response = await tool_manager.run_tool_async(
         tool_name=request.tool_name,
         session_context=None,
@@ -97,39 +79,18 @@ async def get_tools(http_request: Request, type: Optional[str] = None):
         type: 工具类型过滤参数，可选值：basic, mcp, agent等
 
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    tools = []
-
     tm = get_tool_manager()
+    tools = []
     if tm:
         available_tools = tm.list_tools_with_type()
         
-        source_owner_map = {}
-        dao = MCPServerDao()
-        all_servers = await dao.get_list(user_id=None)
-
-        for s in all_servers:
-            source_owner_map[s.name] = s.user_id or ""
-
         for tool_info in available_tools:
             tool_type = tool_info.get("type", "basic")
             source = tool_info.get("source", "internal")
-            normalized_source = _normalize_source(source)
 
             # 如果指定了type参数，则进行过滤
             if type is not None and tool_type != type:
                 continue
-
-            if role != "admin" and tool_type == "mcp":
-                owner = source_owner_map.get(normalized_source)
-                if owner is None:
-                    continue
-                if owner and owner != user_id:
-                    continue
-            
-            tool_owner = source_owner_map.get(normalized_source, "") if tool_type == "mcp" else ""
 
             tools.append(
                 {
@@ -138,7 +99,6 @@ async def get_tools(http_request: Request, type: Optional[str] = None):
                     "parameters": tool_info.get("parameters", {}),
                     "type": tool_type,
                     "source": source,
-                    "user_id": tool_owner
                 }
             )
 

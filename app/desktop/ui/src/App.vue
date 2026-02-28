@@ -31,11 +31,6 @@
       @new-chat="handleNewChat" 
     />
 
-    <LoginModal
-        :visible="showLoginModal"
-        @close="showLoginModal = false"
-        @login-success="handleLoginSuccess"
-    />
     <Teleport to="body">
       <Toaster position="top-center" richColors />
     </Teleport>
@@ -48,10 +43,10 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
 import MobileTabBar from './components/mobile/MobileTabBar.vue'
-import LoginModal from './components/LoginModal.vue'
 import { Toaster } from '@/components/ui/sonner'
-import { isLoggedIn } from './utils/auth.js'
+// import { isLoggedIn } from './utils/auth.js'
 import request from './utils/request.js'
+import { systemAPI } from './api/system'
 // import { Menu } from 'lucide-vue-next'
 // import { Button } from '@/components/ui/button'
 
@@ -59,6 +54,27 @@ const router = useRouter()
 const route = useRoute()
 
 const isBackendReady = ref(false)
+
+const checkSystemInitialization = async () => {
+  try {
+    const res = await systemAPI.getSystemInfo()
+    if (!res.has_model_provider || !res.has_agent) {
+       // If system is not initialized, we MUST go to Setup
+       if (route.name !== 'Setup') {
+         router.replace('/setup')
+       }
+    } else {
+       // System IS initialized
+       // If user is currently on Setup page, redirect to home
+       if (route.name === 'Setup') {
+          router.replace('/')
+          return
+       }
+    }
+  } catch (e) {
+    console.error('Failed to check system info', e)
+  }
+}
 
 const checkBackend = async () => {
   try {
@@ -72,6 +88,7 @@ const checkBackend = async () => {
     const response = await fetch(url)
     if (response.ok) {
       isBackendReady.value = true
+      checkSystemInitialization()
       return
     }
   } catch (e) {
@@ -83,25 +100,12 @@ const checkBackend = async () => {
 }
 
 const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.startsWith('/share/'))
-const isOnboarding = computed(() => route.name === 'Onboarding')
-
-// 登录模态框显示状态
-const showLoginModal = ref(false)
+const isOnboarding = computed(() => route.name === 'Onboarding' || route.name === 'Setup')
 
 // Check login status on mount and route change
 watch(() => [route.path, route.name], () => {
-  if (isSharedPage.value || isOnboarding.value) {
-    showLoginModal.value = false
-  } else {
-    // Check if onboarding is completed
-    const hasSeenOnboarding = localStorage.getItem('hasSeenOnboarding')
-    if (!hasSeenOnboarding && route.name !== 'Onboarding') {
-      router.replace('/onboarding')
-      return
-    }
-    showLoginModal.value = !isLoggedIn()
-  }
-}, { immediate: true })
+  // Navigation guards are handled in checkSystemInitialization and router
+})
 
 // 选中的conversation数据
 const selectedConversation = ref(null)
@@ -120,32 +124,8 @@ const handleSelectConversation = (conversation) => {
   router.push({ name: 'Chat' })
 }
 
-
-// 登录成功处理（从LoginModal接收）
-const handleLoginSuccess = (userData) => {
-  showLoginModal.value = false
-}
-
-const handleUserUpdated = () => {
-  if (isSharedPage.value) {
-    showLoginModal.value = false
-  } else {
-    showLoginModal.value = !isLoggedIn()
-  }
-}
-
 onMounted(() => {
   checkBackend()
-  
-  if (typeof window !== 'undefined') {
-    window.addEventListener('user-updated', handleUserUpdated)
-  }
-})
-
-onUnmounted(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('user-updated', handleUserUpdated)
-  }
 })
 </script>
 

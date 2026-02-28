@@ -17,26 +17,6 @@
          <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
       </div>
 
-      <Button 
-        v-if="!isCollapsed"
-        variant="ghost" 
-        size="icon" 
-        @click="toggleCollapse"
-        :title="isCollapsed ? '展开' : '收起'"
-        class="text-muted-foreground hover:text-foreground shrink-0 ml-1"
-      >
-        <PanelLeftClose class="h-4 w-4" />
-      </Button>
-      <Button 
-         v-else
-         variant="ghost"
-         size="icon"
-         @click="toggleCollapse"
-         title="展开"
-         class="absolute -right-3 top-6 bg-background border shadow-sm rounded-full h-6 w-6 p-0 hover:bg-accent z-50 flex items-center justify-center"
-      >
-         <PanelLeftOpen class="h-3 w-3" />
-      </Button>
     </div>
 
     <!-- Change Password Dialog -->
@@ -200,23 +180,20 @@
       </div>
     </ScrollArea>
 
-    <!-- Footer User Profile -->
-    <div class="p-4 mt-auto" v-if="currentUser">
+    <!-- Footer Settings -->
+    <div class="p-4 mt-auto">
       <DropdownMenu v-model:open="isDropdownOpen">
         <DropdownMenuTrigger as-child>
           <div 
             class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-background hover:shadow-sm transition-all duration-200 w-full group"
             :class="{'justify-center': isCollapsed}"
           >
-            <Avatar class="h-9 w-9 border-2 border-background shadow-sm group-hover:border-primary/20 transition-colors shrink-0">
-              <AvatarImage :src="currentUser.avatar" />
-              <AvatarFallback class="bg-primary/10 text-primary font-bold">
-                {{ (currentUser.nickname?.[0] || currentUser.username?.[0] || 'U').toUpperCase() }}
-              </AvatarFallback>
-            </Avatar>
+            <div class="h-9 w-9 flex items-center justify-center rounded-lg bg-muted group-hover:bg-primary/10 transition-colors shrink-0">
+               <Settings class="h-5 w-5 text-muted-foreground group-hover:text-primary" />
+            </div>
             <div v-if="!isCollapsed" class="flex-1 min-w-0 text-left">
               <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
-                {{ currentUser.nickname || currentUser.username }}
+                {{ t('common.settings') || 'Settings' }}
               </p>
             </div>
             <ChevronDown 
@@ -227,13 +204,6 @@
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent class="w-56" :side="isCollapsed ? 'right' : 'top'" align="end" :sideOffset="isCollapsed ? 10 : 0">
-          <DropdownMenuLabel class="font-normal" v-if="isCollapsed">
-             <div class="flex flex-col space-y-1">
-                <p class="text-sm font-medium leading-none">{{ currentUser.nickname || currentUser.username }}</p>
-                <p class="text-xs leading-none text-muted-foreground">User Profile</p>
-             </div>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator v-if="isCollapsed" />
           <DropdownMenuItem @click="toggleLanguage">
              <Globe class="mr-2 h-4 w-4" />
              <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
@@ -265,32 +235,28 @@
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
-          <DropdownMenuItem @select.prevent="showChangePasswordDialog = true">
-            <KeyRound class="mr-2 h-4 w-4" />
-            <span>修改密码</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem @click="handleLogout" class="text-red-600">
-            <LogOut class="mr-2 h-4 w-4" />
-            <span>{{ t('auth.logout') }}</span>
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
   </div>
+  
+  <LoginModal 
+    :visible="showLoginModal" 
+    @close="showLoginModal = false"
+    @login-success="handleLoginSuccess"
+  />
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import LoginModal from '../components/LoginModal.vue'
 import { 
   MessageSquare, 
   Bot, 
   Wrench, 
   Zap, 
-  Book, 
   Clock, 
-  Code, 
   Globe, 
   ChevronDown,
   LogOut,
@@ -298,8 +264,6 @@ import {
   LayoutGrid,
   Users,
   KeyRound,
-  PanelLeftClose,
-  PanelLeftOpen,
   Sun,
   Moon,
   Monitor,
@@ -354,10 +318,6 @@ const isCollapsed = ref(false)
 
 const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
-}
-
-const toggleCollapse = () => {
-  isCollapsed.value = !isCollapsed.value
 }
 
 const isDropdownOpen = ref(false)
@@ -427,16 +387,7 @@ const predefinedServices = computed(() => {
       children: [
         { id: 'svc_model_provider', nameKey: 'modelProvider.menuTitle', url: 'ModelProviderList', isInternal: true },
         { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
-        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
-        { id: 'svc_kdb', nameKey: 'sidebar.knowledgeBaseList', url: 'KnowledgeBase', isInternal: true }
-      ]
-    },
-    {
-      id: 'cat5',
-      key: 'api_reference',
-      nameKey: 'sidebar.apiReference',
-      children: [
-        { id: 'svc_api_agent_chat', nameKey: 'sidebar.apiAgentChat', url: 'ApiAgentChat', isInternal: true }
+        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true }
       ]
     }
   ]
@@ -459,9 +410,7 @@ const predefinedServices = computed(() => {
 const expandedCategories = ref({
   new_chat: true,
   agent_capabilities: false,
-  knowledge_base: false,
   history: false,
-  api_reference: false,
   skills: false,
   system_management: false
 })
@@ -473,16 +422,14 @@ const getCategoryIcon = (key) => {
     personal_center: Users,
     agent_capabilities: Wrench,
     skills: Zap,
-    knowledge_base: Book,
     history: Clock,
-    api_reference: Code,
     system_management: Settings
   }
   return map[key] || LayoutGrid
 }
 
 const isCurrentService = (url, isInternal) => {
-  if (isInternal) return route.name === url || (route.name === 'KnowledgeBaseDetail' && url === 'KnowledgeBase')
+  if (isInternal) return route.name === url
   return false
 }
 
@@ -514,9 +461,24 @@ const handleMenuClick = (url, name, isInternal) => {
   }
 }
 
+const showLoginModal = ref(false)
+
 const handleLogout = () => {
+  if (currentUser.value && currentUser.value.isGuest) {
+    showLoginModal.value = true
+    return
+  }
+  
   logout()
   currentUser.value = null
+  // 登出后自动转为 Guest
+  localStorage.setItem('isGuest', 'true')
+  currentUser.value = getCurrentUser()
   router.push({ name: 'Chat' })
+}
+
+const handleLoginSuccess = () => {
+  showLoginModal.value = false
+  currentUser.value = getCurrentUser()
 }
 </script>
