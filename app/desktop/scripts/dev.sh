@@ -12,7 +12,7 @@ VENV_DIR="$ROOT_DIR/app/desktop/core/.venv"
 DIST_DIR="$ROOT_DIR/app/desktop/dist"
 TAURI_BIN_DIR="$ROOT_DIR/app/desktop/tauri/bin"
 NO_PYTHON_BUILD=1
-MODE="${1:-release}"  # release | debug
+MODE="debug"  # release | debug
 
 echo "======================================"
 echo " Sage Desktop Build ($MODE)"
@@ -54,121 +54,118 @@ echo "OS: $OS_TYPE"
 echo "Target: $TARGET"
 
 ########################################
-# 1. Python Environment Setup
+# 1. Python Environment Setup (Conda)
 ########################################
 
-# Clear Conda environment variables to prevent PyInstaller from misidentifying the environment
-unset CONDA_PREFIX
-unset CONDA_DEFAULT_ENV
-unset CONDA_PYTHON_EXE
-unset CONDA_SHLVL
-unset CONDA_EXE
-unset CONDA_PROMPT_MODIFIER
-
-if [ ! -d "$VENV_DIR" ]; then
-  echo "Creating virtualenv..."
-  python3 -m venv "$VENV_DIR"
+# Try to locate conda
+CONDA_EXE=""
+if command -v conda >/dev/null 2>&1; then
+  CONDA_EXE=$(command -v conda)
+elif [ -f "$HOME/miniconda3/bin/conda" ]; then
+  CONDA_EXE="$HOME/miniconda3/bin/conda"
+elif [ -f "$HOME/anaconda3/bin/conda" ]; then
+  CONDA_EXE="$HOME/anaconda3/bin/conda"
+elif [ -f "/opt/miniconda3/bin/conda" ]; then
+  CONDA_EXE="/opt/miniconda3/bin/conda"
+elif [ -f "/opt/anaconda3/bin/conda" ]; then
+  CONDA_EXE="/opt/anaconda3/bin/conda"
 fi
 
-# Create a fake conda-meta directory to suppress PyInstaller warnings
-# when using a venv created by Conda Python
-mkdir -p "$VENV_DIR/conda-meta"
-
-source "$VENV_DIR/bin/activate"
-
-echo "Upgrading build tools..."
-pip install --upgrade pip setuptools wheel >/dev/null
-
-echo "Installing dependencies..."
-pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt"
-
-if ! command -v pyinstaller >/dev/null; then
-  pip install pyinstaller
-fi
-
-########################################
-# 2. Build Python Sidecar
-########################################
-
-if [ "${NO_PYTHON_BUILD:-0}" = "1" ]; then
-  echo "Skipping Python sidecar build (NO_PYTHON_BUILD=1)..."
-  # Ensure sidecar directory exists to prevent Tauri error
-  TAURI_SIDECAR_DIR="$ROOT_DIR/app/desktop/tauri/sidecar"
-  mkdir -p "$TAURI_SIDECAR_DIR"
-else
-  echo "Building Python sidecar..."
-
-  rm -rf "$DIST_DIR"
-
-export PYINSTALLER_CONFIG_DIR="$ROOT_DIR/.pyinstaller"
-export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
-cd "$ROOT_DIR/app/desktop"
-
-PYI_FLAGS=(
-  --noconfirm
-  --clean
-  --onedir
-  --log-level=WARN
-  --name sage-desktop
-  --hidden-import=aiosqlite
-  --hidden-import=greenlet
-  --hidden-import=sqlalchemy.dialects.sqlite.aiosqlite
-  --debug=all
-)
-
-# Force debug mode
-PYI_FLAGS+=(--debug=all)
-
-# if [ "$MODE" = "release" ]; then
-#   PYI_FLAGS+=(--strip)
-#   PYI_FLAGS+=(--noupx)
-# fi
-
-pyinstaller "${PYI_FLAGS[@]}" entry.py
-
-cd "$ROOT_DIR"
-
-########################################
-# 3. Move Binary to Tauri
-########################################
-
-# Define the sidecar directory in Tauri
-TAURI_SIDECAR_DIR="$ROOT_DIR/app/desktop/tauri/sidecar"
-
-# Clean up previous build
-rm -rf "$TAURI_SIDECAR_DIR"
-mkdir -p "$TAURI_SIDECAR_DIR"
-
-if [ "$OS_TYPE" = "windows" ]; then
-  SRC_DIR="$DIST_DIR/sage-desktop"
-else
-  SRC_DIR="$DIST_DIR/sage-desktop"
-fi
-
-if [ ! -d "$SRC_DIR" ]; then
-  echo "ERROR: Sidecar directory not found: $SRC_DIR"
+if [ -z "$CONDA_EXE" ]; then
+  echo "ERROR: Conda not found. Please install Miniconda or Anaconda."
   exit 1
 fi
 
-# Copy the entire directory
-cp -r "$SRC_DIR/"* "$TAURI_SIDECAR_DIR/"
+echo "Using Conda: $CONDA_EXE"
 
-# Ensure the executable is executable
-if [ "$OS_TYPE" = "windows" ]; then
-  chmod +x "$TAURI_SIDECAR_DIR/sage-desktop.exe"
+# Initialize conda for shell interaction
+CONDA_BASE=$($CONDA_EXE info --base)
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+ENV_NAME="sage-desktop-env"
+
+# Check if environment exists
+if conda info --envs | grep -q "$ENV_NAME"; then
+  echo "Conda environment '$ENV_NAME' exists."
 else
-  chmod +x "$TAURI_SIDECAR_DIR/sage-desktop"
+  echo "Creating Conda environment '$ENV_NAME' with Python 3.11..."
+  conda create -n "$ENV_NAME" python=3.11 -y
 fi
 
-  echo "Sidecar copied to:"
-  echo "$TAURI_SIDECAR_DIR"
+echo "Activating Conda environment '$ENV_NAME'..."
+conda activate "$ENV_NAME"
+
+echo "Python version: $(python --version)"
+echo "Pip version: $(pip --version)"
+
+echo "Upgrading build tools..."
+pip install --upgrade pip setuptools wheel
+
+echo "Installing dependencies..."
+pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+if ! command -v pyinstaller >/dev/null; then
+  pip install pyinstaller --index-url https://pypi.org/simple
 fi
 
 ########################################
-# 4. Build Frontend (Skipped in Dev)
+# 2. Build Python Sidecar (Wrapper Script)
 ########################################
 
-echo "Skipping frontend build in dev mode..."
+echo "Setting up Python sidecar wrapper..."
+
+TAURI_BIN_DIR="$ROOT_DIR/app/desktop/tauri/bin"
+mkdir -p "$TAURI_BIN_DIR"
+
+# Get current python executable path
+PYTHON_EXEC=$(python -c "import sys; print(sys.executable)")
+
+# Determine target triple name
+SIDECAR_NAME="sage-desktop-sidecar-$TARGET"
+SIDECAR_PATH="$TAURI_BIN_DIR/$SIDECAR_NAME"
+
+echo "Generating sidecar script at: $SIDECAR_PATH"
+
+# Create wrapper script
+cat > "$SIDECAR_PATH" <<EOF
+#!/bin/bash
+export PYTHONPATH="$ROOT_DIR:\$PYTHONPATH"
+exec "$PYTHON_EXEC" "$ROOT_DIR/app/desktop/entry.py" "\$@"
+EOF
+
+chmod +x "$SIDECAR_PATH"
+
+echo "Sidecar wrapper created."
+
+# Ensure sidecar directory exists and is not empty to satisfy tauri.conf.json resources
+TAURI_SIDECAR_DIR="$ROOT_DIR/app/desktop/tauri/sidecar"
+mkdir -p "$TAURI_SIDECAR_DIR"
+touch "$TAURI_SIDECAR_DIR/.keep"
+
+########################################
+# 3. Move Binary to Tauri (Skipped)
+########################################
+# Since we are using a wrapper script in place, we don't need to copy binaries.
+# The wrapper script IS the sidecar.
+
+########################################
+# 4. Frontend Setup
+########################################
+
+echo "Setting up frontend dependencies..."
+cd "$ROOT_DIR/app/desktop/ui"
+
+if ! command -v npm >/dev/null; then
+  echo "ERROR: npm not found. Please install Node.js."
+  exit 1
+fi
+
+if [ ! -d "node_modules" ]; then
+  echo "Installing frontend dependencies..."
+  npm install
+fi
+
+cd "$ROOT_DIR"
 
 ########################################
 # 5. Setup Code Signing (Self-Signed)
@@ -208,11 +205,7 @@ if ! cargo tauri --version >/dev/null 2>&1; then
   cargo install tauri-cli --version "^1.5"
 fi
 
-if [ "$MODE" = "release" ]; then
-  cargo tauri dev
-else
-  cargo tauri dev
-fi
+cargo tauri dev
 
 echo "======================================"
 echo " Build Completed Successfully"
