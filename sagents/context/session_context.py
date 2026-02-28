@@ -324,8 +324,11 @@ class SessionContext:
             t2 = time.time()
             with open(messages_path, "r") as f:
                 messages = json.load(f)
-                for message_item in messages:
-                    self.message_manager.add_messages(MessageChunk(**message_item))
+                # 批量添加消息，避免重复调用 merge 操作
+                message_chunks = [MessageChunk(**message_item) for message_item in messages]
+                logger.info(f"SessionContext: 从messages.json加载{len(message_chunks)}条消息")
+                self.message_manager.messages = message_chunks
+                self.message_manager.stats['total_messages'] = len(message_chunks)
                 logger.info(f"已经成功加载{len(messages)}条历史消息，耗时: {time.time() - t2:.3f}s")
 
         # 尝试清理过期的 todo 任务
@@ -718,7 +721,6 @@ class SessionContext:
                     json.dump(serializable_request, f, ensure_ascii=False, indent=4)
             except Exception as e:
                 logger.error(f"SessionContext: Failed to write log file {file_path}: {e}")
-        # 根据
 
         # 保存messages 到messages.json
         with open(os.path.join(self.session_workspace, "messages.json"), "w") as f:
