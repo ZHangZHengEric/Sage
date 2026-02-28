@@ -62,8 +62,7 @@ class SkillManager:
         logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.skill_workspace = os.path.join(base_dir, "skills")
+        self.skill_workspace = os.environ.get("SAGE_SKILL_WORKSPACE", "skills")
         
         # Combine custom directories with the default workspace (合并自定义目录和默认工作区)
         dirs = skill_dirs or []

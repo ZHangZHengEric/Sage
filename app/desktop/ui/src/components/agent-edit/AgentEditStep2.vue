@@ -106,6 +106,39 @@
          </ScrollArea>
       </div>
     </Card>
+
+    <!-- External Paths -->
+    <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+      <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('externalPaths')">
+        <div class="flex items-center gap-2">
+          <FolderOpen class="h-5 w-5" />
+          <CardTitle class="text-base">可访问文件夹</CardTitle>
+          <span class="text-xs text-muted-foreground ml-2">({{ store.formData.externalPaths ? store.formData.externalPaths.length : 0 }})</span>
+        </div>
+        <ChevronDown v-if="sections.externalPaths" class="h-4 w-4" />
+        <ChevronUp v-else class="h-4 w-4" />
+      </CardHeader>
+      <div v-show="!sections.externalPaths" class="px-5 pb-5 pt-4 space-y-3">
+        <div class="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" @click="selectExternalPath">
+            <Plus class="h-4 w-4 mr-1" />
+            添加文件夹
+          </Button>
+          <span class="text-xs text-muted-foreground">允许 Agent 访问这些文件夹中的文件</span>
+        </div>
+        <div v-if="store.formData.externalPaths && store.formData.externalPaths.length > 0" class="space-y-2">
+          <div v-for="(path, index) in store.formData.externalPaths" :key="index" class="flex items-center justify-between p-2 rounded-lg border bg-muted/30">
+            <span class="text-sm truncate flex-1" :title="path">{{ path }}</span>
+            <Button type="button" variant="ghost" size="sm" @click="store.removeExternalPath(index)">
+              <Trash2 class="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        </div>
+        <div v-else class="text-sm text-muted-foreground text-center py-4">
+          未添加可访问文件夹
+        </div>
+      </div>
+    </Card>
   </div>
 </template>
 
@@ -113,7 +146,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useAgentEditStore } from '../../stores/agentEdit'
 import { useLanguage } from '../../utils/i18n.js'
-import { Trash2, Plus, ChevronDown, ChevronUp, Bot, Wrench, Search, Server, Code } from 'lucide-vue-next'
+import { Trash2, Plus, ChevronDown, ChevronUp, Bot, Wrench, Search, Server, Code, FolderOpen } from 'lucide-vue-next'
 
 // UI Components
 import { Button } from '@/components/ui/button'
@@ -133,7 +166,8 @@ const { t } = useLanguage()
 // Collapsed state
 const sections = reactive({
   tools: false,
-  skills: false
+  skills: false,
+  externalPaths: false
 })
 
 const searchQueries = reactive({
@@ -201,6 +235,28 @@ const filteredSkills = computed(() => {
 
 const toggleSection = (key) => {
   sections[key] = !sections[key]
+}
+
+// Select external path using Tauri dialog
+const selectExternalPath = async () => {
+  try {
+    const { open } = await import('@tauri-apps/api/dialog')
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择可访问文件夹'
+    })
+    if (selected) {
+      store.addExternalPath(selected)
+    }
+  } catch (error) {
+    console.error('选择文件夹失败:', error)
+    // Fallback: prompt user to enter path manually
+    const path = prompt('请输入文件夹路径:')
+    if (path) {
+      store.addExternalPath(path)
+    }
+  }
 }
 
 // Helpers
