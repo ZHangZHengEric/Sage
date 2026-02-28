@@ -178,9 +178,27 @@ class SkillManager:
         If skills cache is valid, skip scanning and return immediately.
         """
         # Check if cache is valid, if so, skip scanning (检查缓存是否有效，如果有效则跳过扫描)
+        # 除了要判断 _skills_cache_valid 是否有效，还得看一下目录中的文件夹数量与已加载 skill 数量是否一致
         if getattr(self, '_skills_cache_valid', False):
-            logger.debug("Skills cache is valid, skipping load_new_skills scan")
-            return
+            # 快速统计所有 skill_dirs 下的文件夹总数
+            total_dirs = 0
+            for workspace in self.skill_dirs:
+                if not os.path.exists(workspace):
+                    continue
+                try:
+                    total_dirs += sum(
+                        1 for item in os.listdir(workspace)
+                        if os.path.isdir(os.path.join(workspace, item))
+                    )
+                except Exception:
+                    pass
+            # 如果文件夹总数与已加载技能数量不一致，则视为缓存失效
+            if total_dirs != len(self.skills):
+                logger.debug("Skills cache invalid: folder count != loaded skill count")
+                self._skills_cache_valid = False
+            else:
+                logger.debug("Skills cache is valid, skipping load_new_skills scan")
+                return
         
         count = 0
         
@@ -395,6 +413,25 @@ class SkillManager:
                 logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
             else:
                 pass
+        except shutil.Error as e:
+            # 处理部分复制成功但部分文件失败的情况
+            errors = e.args[0] if e.args else []
+            copied_files = []
+            failed_files = []
+            
+            for src, dst, err in errors:
+                if 'socket' in str(err).lower() or 'lock' in str(err).lower():
+                    # 忽略 socket 和 lock 文件错误
+                    logger.debug(f"Skipped socket/lock file: {src}")
+                    continue
+                failed_files.append((src, dst, err))
+            
+            # 如果有非 socket/lock 错误，重新抛出
+            if failed_files:
+                logger.warning(f"部分文件复制失败: {failed_files}")
+                # 继续返回目标目录，部分文件应该已经复制成功
+                
+            logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
         except Exception as e:
             logger.error(f"Failed to copy skill {skill_name} to workspace: {e}")
             return None

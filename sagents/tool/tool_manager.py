@@ -665,6 +665,18 @@ class ToolManager:
                 kwargs.pop("session_id", None)
                 final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, ToolSpec):
+                # 检查必填参数
+                required_params = getattr(tool, 'required', []) or []
+                missing_params = [p for p in required_params if p not in kwargs or kwargs.get(p) is None]
+                if missing_params:
+                    # 返回错误信息而不是 raise
+                    return json.dumps({
+                        "success": False,
+                        "error": f"缺少必填参数: {', '.join(missing_params)}",
+                        "required_params": required_params,
+                        "provided_params": list(kwargs.keys())
+                    }, ensure_ascii=False, indent=2)
+                
                 # Check for sandbox execution
                 # Define sandbox tools (can be moved to config later)
                 SANDBOX_TOOLS = [
@@ -719,7 +731,7 @@ class ToolManager:
                             # We pass the function object from the tool spec
                             # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
                             # usually it's bound method if created from class)
-                            result = session_context.sandbox.run_tool(tool.func, kwargs)
+                            result = await session_context.sandbox.run_tool(tool.func, kwargs)
                             final_result = json.dumps({"content": result}, ensure_ascii=False, indent=2)
 
                             # Sync context for ToDo tools after successful sandbox execution

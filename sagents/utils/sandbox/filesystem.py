@@ -2,7 +2,7 @@ import os
 import re
 from typing import List, Optional
 
-SANDBOX_WORKSPACE_ROOT = "/workspace"
+SANDBOX_WORKSPACE_ROOT = "/sage-workspace"
 
 class SandboxFileSystem:
     """
@@ -13,7 +13,11 @@ class SandboxFileSystem:
     def __init__(self, host_path: str, virtual_path: str = SANDBOX_WORKSPACE_ROOT, enable_path_mapping: bool = True):
         self.host_path = host_path
         self.virtual_path = virtual_path
-        self.enable_path_mapping = enable_path_mapping
+        # 如果 host_path == virtual_path，自动禁用路径映射
+        if host_path == virtual_path:
+            self.enable_path_mapping = False
+        else:
+            self.enable_path_mapping = enable_path_mapping
 
     def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None) -> str:
         """
