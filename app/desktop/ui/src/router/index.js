@@ -7,18 +7,8 @@ import SkillLibraryPage from '../views/SkillList.vue'
 import UserListPage from '../views/UserList.vue'
 import SystemSettingsPage from '../views/SystemSettings.vue'
 
-import OnboardingPage from '../views/Onboarding.vue'
 
 const routes = [
-  {
-    path: '/onboarding',
-    name: 'Onboarding',
-    component: OnboardingPage,
-    meta: {
-      title: 'onboarding.title',
-      public: true
-    }
-  },
   {
     path: '/agent/chat',
     name: 'Chat',
