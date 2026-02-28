@@ -30,6 +30,10 @@
       },
       "window": {
         "all": true
+      },
+      "dialog": {
+        "all": false,
+        "open": true
       }
     },
     "bundle": {
@@ -58,7 +62,9 @@
         "providerShortName": null,
         "signingIdentity": null
       },
-      "resources": [],
+      "resources": [
+        "../../skills"
+      ],
       "shortDescription": "",
       "targets": ["app"],
       "windows": {

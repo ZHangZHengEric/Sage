@@ -54,6 +54,9 @@ async def list_skills() -> List[Dict[str, Any]]:
     if not tm:
         return []
 
+    # 重新加载技能目录
+    tm.reload()
+    
     all_skills = list(tm.list_skill_info())
 
     skills = []
@@ -293,8 +296,13 @@ async def _process_zip_and_register(tm, zip_path: str, original_filename: str):
         if not skill_dir_name or not source_dir:
             return False, "未找到有效的技能结构 (缺少 SKILL.md)"
 
-        # 目标路径
-        target_path = os.path.join(tm.skill_workspace, skill_dir_name)
+        # 目标路径：保存到 ~/.sage/skills/
+        
+        from pathlib import Path
+        user_home = Path.home()
+        sage_skills_dir = user_home / ".sage" / "skills"
+        sage_skills_dir.mkdir(parents=True, exist_ok=True)
+        target_path = os.path.join(str(sage_skills_dir), skill_dir_name)
 
         # 如果目标已存在，先删除 (或者报错? 这里选择覆盖)
         if os.path.exists(target_path):
