@@ -53,6 +53,7 @@ class FibreOrchestrator:
             session_context = init_session_context(
                 session_id=session_id,
                 user_id=user_id,
+                system_context=system_context,
                 workspace_root=self.agent.workspace,
                 context_budget_config=context_budget_config,
                 user_memory_manager=self.agent.user_memory_manager,
@@ -143,10 +144,10 @@ class FibreOrchestrator:
 
                 # 5. Process Initial Messages
                 # Ensure messages are in message_manager
-                initial_msgs = self._prepare_initial_messages(input_messages)
-                for msg in initial_msgs:
-                    if msg.role != MessageRole.SYSTEM.value: # System prompt handled by context
-                        session_context.add_messages(msg)
+                # initial_msgs = self._prepare_initial_messages(input_messages)
+                # for msg in initial_msgs:
+                #     if msg.role != MessageRole.SYSTEM.value: # System prompt handled by context
+                #         session_context.add_messages(msg)
 
                 # 6. Main Execution Loop
                 # The Container runs as the primary agent.

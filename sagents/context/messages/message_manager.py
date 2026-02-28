@@ -759,8 +759,10 @@ class MessageManager:
         # 辅助函数：计算当前 Token
         def current_usage():
             return MessageManager.calculate_messages_token_length(working_messages)
-            
-        if current_usage() <= budget_limit:
+
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 初始token长度为{current_tokens}")
+        if current_tokens <= budget_limit:
             return working_messages
             
         # --- 1. 分组与保护区识别 ---
@@ -842,15 +844,21 @@ class MessageManager:
         
         # 应用 Level 0.5 (老化)
         apply_levels(0.5)
-        if current_usage() <= budget_limit: return working_messages
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
+        if current_tokens <= budget_limit: return working_messages
         
         # 应用 Level 1 (轻度)
         apply_levels(1)
-        if current_usage() <= budget_limit: return working_messages
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
+        if current_tokens <= budget_limit: return working_messages
         
         # 应用 Level 2 (强力)
         apply_levels(2)
-        if current_usage() <= budget_limit: return working_messages
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
+        if current_tokens <= budget_limit: return working_messages
 
         # --- Level 3: 历史丢弃 (基于组) ---
         # 目标: 未在 protected_group_indices 中的组
@@ -888,7 +896,10 @@ class MessageManager:
                 working_messages[followers[0]].content = None
                 working_messages[followers[0]].tool_calls = None
                 
-            if current_usage() <= budget_limit: break
+            current_tokens = current_usage() 
+            if current_tokens <= budget_limit:
+                logger.info(f"MessageManager: compress_messages 应用Level 3后的token长度为{current_tokens}")
+                break
 
         # 清理已标记为删除的消息 (Content 为 None 的)
         final_messages = [
