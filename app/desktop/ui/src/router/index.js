@@ -109,6 +109,15 @@ const routes = [
       title: 'sidebar.userProfile'
     }
   },
+  {
+    path: '/setup',
+    name: 'Setup',
+    component: () => import('../views/Setup.vue'),
+    meta: {
+      title: 'common.setup',
+      public: true
+    }
+  },
   // 重定向根路径到聊天页面
   {
     path: '/:pathMatch(.*)*',

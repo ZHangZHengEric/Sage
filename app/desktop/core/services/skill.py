@@ -48,7 +48,7 @@ def _set_permissions_recursive(path, dir_mode=0o755, file_mode=0o644):
         logger.warning(f"Failed to set permissions for {path}: {e}")
 
 
-async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
+async def list_skills() -> List[Dict[str, Any]]:
     """获取可用技能列表"""
     tm = get_skill_manager()
     if not tm:
@@ -56,28 +56,13 @@ async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
 
     all_skills = list(tm.list_skill_info())
 
-    # Get all ownerships to avoid N+1 queries
-    dao = models.SkillOwnershipDao()
-    all_ownerships = await dao.get_all_ownerships()
-    ownership_map = {obj.skill_name: obj.user_id for obj in all_ownerships}
-
     skills = []
-    if role == "admin":
-        for skill in all_skills:
-            name = skill.name
-            skills.append({"name": skill.name, "description": skill.description, "user_id": ownership_map.get(name, "")})
-    else:
-        # Filter for user: System skills (no owner) + Own skills
-        for skill in all_skills:
-            name = skill.name
-
-            owner = ownership_map.get(name, "")
-            if not owner or owner == user_id:
-                skills.append({"name": skill.name, "description": skill.description, "user_id": ownership_map.get(name, "")})
+    for skill in all_skills:
+        skills.append({"name": skill.name, "description": skill.description})
     return skills
 
 
-async def import_skill_by_file(file: UploadFile, user_id: str) -> str:
+async def import_skill_by_file(file: UploadFile) -> str:
     """通过上传 ZIP 文件导入技能"""
     if not file.filename.endswith('.zip'):
         raise SageHTTPException(status_code=500, detail="仅支持 ZIP 文件")
@@ -93,7 +78,7 @@ async def import_skill_by_file(file: UploadFile, user_id: str) -> str:
             tmp_file_path = tmp_file.name
 
         success, message = await _process_zip_and_register(
-            tm, tmp_file_path, file.filename, user_id
+            tm, tmp_file_path, file.filename
         )
 
         if not success:
@@ -111,7 +96,7 @@ async def import_skill_by_file(file: UploadFile, user_id: str) -> str:
             os.unlink(tmp_file_path)
 
 
-async def import_skill_by_url(url: str, user_id: str) -> str:
+async def import_skill_by_url(url: str) -> str:
     """通过 URL 导入技能"""
     tm = get_skill_manager()
     if not tm:
@@ -132,7 +117,7 @@ async def import_skill_by_url(url: str, user_id: str) -> str:
             tmp_file_path = tmp_file.name
 
         success, message = await _process_zip_and_register(
-            tm, tmp_file_path, filename, user_id
+            tm, tmp_file_path, filename
         )
 
         if not success:
@@ -150,7 +135,7 @@ async def import_skill_by_url(url: str, user_id: str) -> str:
             os.unlink(tmp_file_path)
 
 
-async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> None:
+async def delete_skill(skill_name: str) -> None:
     """删除技能"""
     tm = get_skill_manager()
     if not tm:
@@ -159,17 +144,6 @@ async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> Non
     skill_info = _get_skill_info_safe(tm, skill_name)
     if not skill_info:
         raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
-
-    dao = models.SkillOwnershipDao()
-    owner = await dao.get_owner(skill_name)
-
-    if role != "admin":
-        if not owner:
-            raise SageHTTPException(
-                status_code=500, detail="Permission denied: Cannot delete system skill"
-            )
-        if owner != user_id:
-            raise SageHTTPException(status_code=500, detail="Permission denied")
 
     try:
         # 1. Remove from SkillManager (Cache)
@@ -182,39 +156,23 @@ async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> Non
                 shutil.rmtree(skill_path)
             except (PermissionError, OSError) as e:
                 logger.warning(f"Could not delete skill files for '{skill_name}' (possibly mounted): {e}")
-                # Continue to delete ownership so it's removed from the app view
-
-        # 3. Delete ownership (DB)
-        await dao.delete_ownership(skill_name)
 
     except Exception as e:
         logger.error(f"Delete skill failed: {e}")
         raise SageHTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
-async def get_skill_content(skill_name: str, user_id: str, role: str = "user") -> str:
+async def get_skill_content(skill_name: str) -> str:
     """获取技能内容 (SKILL.md)"""
     tm = get_skill_manager()
     if not tm:
         raise SageHTTPException(status_code=500, detail="技能管理器未初始化")
 
-    # Check existence
     skill_info = _get_skill_info_safe(tm, skill_name)
     if not skill_info:
         raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
 
-    # Check permission
-    dao = models.SkillOwnershipDao()
-    owner = await dao.get_owner(skill_name)
-
-    if role != "admin":
-        # User can read system skills (owner=None) and own skills
-        if owner and owner != user_id:
-            raise SageHTTPException(status_code=500, detail="Permission denied")
-
     skill_path = os.path.join(skill_info.path, "SKILL.md")
-    if not os.path.exists(skill_path):
-        raise SageHTTPException(status_code=500, detail="SKILL.md not found")
 
     try:
         with open(skill_path, "r", encoding="utf-8") as f:
@@ -224,7 +182,7 @@ async def get_skill_content(skill_name: str, user_id: str, role: str = "user") -
         raise SageHTTPException(status_code=500, detail=f"Failed to read skill content: {e}")
 
 
-async def update_skill_content(skill_name: str, content: str, user_id: str, role: str = "user") -> str:
+async def update_skill_content(skill_name: str, content: str) -> str:
     """更新技能内容 (SKILL.md)"""
     tm = get_skill_manager()
     if not tm:
@@ -233,15 +191,6 @@ async def update_skill_content(skill_name: str, content: str, user_id: str, role
     skill_info = _get_skill_info_safe(tm, skill_name)
     if not skill_info:
         raise SageHTTPException(status_code=500, detail=f"Skill '{skill_name}' not found")
-
-    dao = models.SkillOwnershipDao()
-    owner = await dao.get_owner(skill_name)
-
-    if role != "admin":
-        if not owner: # System skill
-            raise SageHTTPException(status_code=500, detail="Cannot modify system skill")
-        if owner != user_id:
-            raise SageHTTPException(status_code=500, detail="Permission denied")
 
     skill_path = os.path.join(skill_info.path, "SKILL.md")
     
@@ -311,11 +260,10 @@ async def update_skill_content(skill_name: str, content: str, user_id: str, role
         raise SageHTTPException(status_code=500, detail=f"Failed to update skill content: {e}")
 
 
-async def _process_zip_and_register(
-    tm, zip_path: str, original_filename: str, user_id: str
-) -> Tuple[bool, str]:
+async def _process_zip_and_register(tm, zip_path: str, original_filename: str):
     """
-    解压 ZIP 并注册技能
+    Process the ZIP file, register the skill, and set ownership.
+    Returns (success, message)
     """
     temp_extract_dir = tempfile.mkdtemp()
     try:
@@ -364,9 +312,6 @@ async def _process_zip_and_register(
         # 验证并注册
         registered_name = tm.register_new_skill(skill_dir_name)
         if registered_name:
-            # Save ownership
-            dao = models.SkillOwnershipDao()
-            await dao.set_owner(registered_name, user_id)
             return True, f"技能 '{registered_name}' 导入成功"
         else:
             return False, "技能验证失败，请检查 SKILL.md 格式"
