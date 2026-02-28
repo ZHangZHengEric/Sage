@@ -53,36 +53,58 @@ echo "OS: $OS_TYPE"
 echo "Target: $TARGET"
 
 ########################################
-# 1. Python Environment Setup
+# 1. Python Environment Setup (Conda)
 ########################################
 
-# Clear Conda environment variables to prevent PyInstaller from misidentifying the environment
-unset CONDA_PREFIX
-unset CONDA_DEFAULT_ENV
-unset CONDA_PYTHON_EXE
-unset CONDA_SHLVL
-unset CONDA_EXE
-unset CONDA_PROMPT_MODIFIER
-
-if [ ! -d "$VENV_DIR" ]; then
-  echo "Creating virtualenv..."
-  python3 -m venv "$VENV_DIR"
+# Try to locate conda
+CONDA_EXE=""
+if command -v conda >/dev/null 2>&1; then
+  CONDA_EXE=$(command -v conda)
+elif [ -f "$HOME/miniconda3/bin/conda" ]; then
+  CONDA_EXE="$HOME/miniconda3/bin/conda"
+elif [ -f "$HOME/anaconda3/bin/conda" ]; then
+  CONDA_EXE="$HOME/anaconda3/bin/conda"
+elif [ -f "/opt/miniconda3/bin/conda" ]; then
+  CONDA_EXE="/opt/miniconda3/bin/conda"
+elif [ -f "/opt/anaconda3/bin/conda" ]; then
+  CONDA_EXE="/opt/anaconda3/bin/conda"
 fi
 
-# Create a fake conda-meta directory to suppress PyInstaller warnings
-# when using a venv created by Conda Python
-mkdir -p "$VENV_DIR/conda-meta"
+if [ -z "$CONDA_EXE" ]; then
+  echo "ERROR: Conda not found. Please install Miniconda or Anaconda."
+  exit 1
+fi
 
-source "$VENV_DIR/bin/activate"
+echo "Using Conda: $CONDA_EXE"
+
+# Initialize conda for shell interaction
+CONDA_BASE=$($CONDA_EXE info --base)
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+ENV_NAME="sage-desktop-env"
+
+# Check if environment exists
+if conda info --envs | grep -q "$ENV_NAME"; then
+  echo "Conda environment '$ENV_NAME' exists."
+else
+  echo "Creating Conda environment '$ENV_NAME' with Python 3.11..."
+  conda create -n "$ENV_NAME" python=3.11 -y
+fi
+
+echo "Activating Conda environment '$ENV_NAME'..."
+conda activate "$ENV_NAME"
+
+echo "Python version: $(python --version)"
+echo "Pip version: $(pip --version)"
 
 echo "Upgrading build tools..."
-pip install --upgrade pip setuptools wheel >/dev/null
+pip install --upgrade pip setuptools wheel
 
 echo "Installing dependencies..."
-pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt"
+pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 if ! command -v pyinstaller >/dev/null; then
-  pip install pyinstaller
+  pip install pyinstaller --index-url https://pypi.org/simple
 fi
 
 ########################################

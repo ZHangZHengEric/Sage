@@ -73,6 +73,31 @@ class InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).bind(**payload).log(level, record.getMessage())
 
 
+class SafeStdout:
+    """
+    Wrapper for stdout that suppresses BrokenPipeError.
+    This prevents "BrokenPipeError: [Errno 32] Broken pipe" when the parent process
+    closes the pipe before the python script finishes writing logs during shutdown.
+    """
+    def write(self, message):
+        try:
+            sys.stdout.write(message)
+            sys.stdout.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            # Pipe is broken or file closed, stop writing to prevent error spam
+            pass
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            sys.stdout.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+        except Exception:
+            pass
+
+
 def init_logging(log_name="app", log_level="DEBUG", log_path= "./logs"):
     """
     Initializes the Loguru logger with custom settings.
@@ -129,7 +154,7 @@ def init_logging(log_name="app", log_level="DEBUG", log_path= "./logs"):
 
     logger.configure(patcher=patcher)
 
-    logger.add(sys.stdout, level=log_level, format="{message}")
+    logger.add(SafeStdout(), level=log_level, format="{message}")
 
     params = {
         "rotation": "100MB",
