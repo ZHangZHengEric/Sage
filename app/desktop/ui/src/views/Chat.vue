@@ -151,7 +151,7 @@ import { useLanguage } from '@/utils/i18n.js'
 import { agentAPI} from '../api/agent.js'
 import { chatAPI } from '../api/chat.js'
 import { taskAPI } from '../api/task.js'
-import { isLoggedIn } from '@/utils/auth.js'
+// import { isLoggedIn } from '@/utils/auth.js'
 
 // Props
 const props = defineProps({
@@ -625,20 +625,12 @@ const handleScroll = () => {
 }
 
 const loadAgents = async () => {
-  // 如果未登录，不加载Agent列表，避免401导致无限循环
-  if (!isLoggedIn()) {
-    agents.value = []
-    return
-  }
   try {
     const response = await agentAPI.getAgents()
     agents.value = response || []
   } catch (error) {
     console.error('Failed to load agents:', error)
-    // 只有在登录状态下才提示错误，避免未登录时的干扰
-    if (isLoggedIn()) {
-      toast.error(t('chat.loadAgentsError'))
-    }
+    toast.error(t('chat.loadAgentsError'))
   }
 }
 
