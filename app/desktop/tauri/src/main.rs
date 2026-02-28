@@ -100,6 +100,7 @@ fn main() {
             
             // Set default environment variables
             std::env::set_var("SAGE_USE_SANDBOX", "False");
+
             // Get home directory from environment variable
             let home_dir = std::env::var("HOME")
                 .or_else(|_| std::env::var("USERPROFILE"))
@@ -108,6 +109,7 @@ fn main() {
             let session_workspace = format!("{}/.sage/workspace", home_dir);
             std::env::set_var("SAGE_SKILL_WORKSPACE", &skill_workspace);
             std::env::set_var("SAGE_WORKSPACE_PATH", &session_workspace);
+            std::env::set_var("SAGE_ROOT", format!("{}/.sage", home_dir));
             println!("Set SAGE_SKILL_WORKSPACE: {}", skill_workspace);
 
             // Find a free port
@@ -116,6 +118,7 @@ fn main() {
                 .expect("failed to find free port");
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
+            
             
             tauri::async_runtime::spawn(async move {
                 // Determine how to run the backend
