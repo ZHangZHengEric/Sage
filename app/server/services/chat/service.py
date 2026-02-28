@@ -74,7 +74,7 @@ async def populate_request_from_agent_config(
             request.agent_mode = agent_config.get("agentMode")
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
-        if agent_config.get("systemContext") is not None:
+        if agent_config.get("systemContext") is not None and request.system_context is None:
             request.system_context = agent_config.get("systemContext")
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
