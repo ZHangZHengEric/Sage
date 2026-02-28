@@ -18,11 +18,25 @@ Tauri 依赖 Rust 语言环境。
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+或者brew安装：
+
+```bash
+brew install rustup-init
+```
+
 安装完成后，重启终端或运行 `source $HOME/.cargo/env` 以生效。验证安装：
 
 ```bash
 cargo --version
 # 输出示例: cargo 1.70.0 (ec8a8a0ca 2023-04-25)
+```
+
+**安装 Tauri CLI:**
+
+为了更方便地使用 Tauri，请安装 Tauri CLI 工具 (需要 v1 版本)：
+
+```bash
+cargo install tauri-cli --version "^1.5"
 ```
 
 **Windows:**

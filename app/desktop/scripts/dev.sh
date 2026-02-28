@@ -22,6 +22,7 @@ fi
 source "$VENV_DIR/bin/activate"
 
 echo "Installing Python dependencies..."
+pip install --upgrade setuptools
 pip install -r "$CORE_DIR/requirements.txt"
 
 # 2. Check and install frontend dependencies
@@ -105,6 +106,15 @@ export RUST_LOG=info
 if ! command -v cargo &> /dev/null; then
     echo "Error: cargo not found. Please install Rust."
     exit 1
+fi
+
+# Check if tauri-cli is installed
+if ! cargo tauri --version &> /dev/null; then
+    echo "Tauri CLI not found. Installing..."
+    cargo install tauri-cli --version "^1.5"
+elif [[ $(cargo tauri --version) == *"tauri-cli 2"* ]]; then
+     echo "Tauri CLI v2 detected but v1 is required. Installing v1..."
+     cargo install tauri-cli --version "^1.5" --force
 fi
 
 # Run Tauri Dev

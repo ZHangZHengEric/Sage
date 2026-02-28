@@ -30,6 +30,7 @@ fi
 source "$VENV_DIR/bin/activate"
 
 # Install dependencies
+pip install --upgrade setuptools
 pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt"
 pip install pyinstaller
 
@@ -95,6 +96,14 @@ echo "Building Tauri App..."
 cd "$ROOT_DIR/app/desktop/tauri"
 # Check if cargo is available
 if command -v cargo &> /dev/null; then
+    # Check if tauri-cli is installed
+    if ! cargo tauri --version &> /dev/null; then
+        echo "Tauri CLI not found. Installing..."
+        cargo install tauri-cli --version "^1.5"
+    elif [[ $(cargo tauri --version) == *"tauri-cli 2"* ]]; then
+        echo "Tauri CLI v2 detected but v1 is required. Installing v1..."
+        cargo install tauri-cli --version "^1.5" --force
+    fi
     cargo tauri build
 else
     echo "Cargo not found. Skipping Tauri build. Please install Rust and run 'cargo tauri build' manually."
