@@ -19,7 +19,7 @@ class SandboxFileSystem:
         else:
             self.enable_path_mapping = enable_path_mapping
 
-    def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None) -> str:
+    def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 10) -> str:
         """
         Returns a formatted string of the file tree relative to the virtual root.
         This safely exposes the structure of the sandbox file system to the agent.
@@ -29,11 +29,14 @@ class SandboxFileSystem:
                             Note: Sensitive directories like .sandbox, .git are always excluded.
             root_path: The root path to start the traversal from. If None, uses self.host_path.
             max_depth: The maximum depth to traverse. None means no limit.
+            max_items_per_dir: Maximum number of items (files + dirs) to show per directory. 
+                              If exceeded, shows ellipsis. Default is 10.
         
         Example output:
         file1.txt
         dir1/
         dir1/file2.txt
+        ... (and 15 more items)
         """
         system_prefix = ""
         target_root = root_path if root_path else self.host_path
@@ -54,52 +57,53 @@ class SandboxFileSystem:
             # Check depth limit
             if max_depth is not None and current_depth >= max_depth:
                 dirs[:] = []  # Don't recurse further
-                # But we still want to list files in the current directory if we are exactly at max_depth?
-                # Usually max_depth=1 means list root's children (depth 0's children).
-                # If current_depth == max_depth, we are at the limit. We process files but clear dirs.
-                # If current_depth > max_depth, we should not be here if we cleared dirs at max_depth.
             
             # Filter directories
-            # 1. Always exclude ALWAYS_HIDDEN_DIRS
-            # 2. If include_hidden is False, also exclude directories starting with .
             dirs[:] = [d for d in dirs if d not in ALWAYS_HIDDEN_DIRS and (include_hidden or not d.startswith('.'))]
             
-            # Files
-            for file_item in files:
-                if file_item in ALWAYS_HIDDEN_DIRS:
-                    continue
-                if not include_hidden and file_item.startswith('.'):
-                    continue
-                try:
-                    abs_path = os.path.join(root, file_item)
-                    # Use relpath relative to the target_root, or self.host_path?
-                    # If we are listing external paths, we probably want relpath to target_root,
-                    # but maybe the agent expects absolute paths for external dirs?
-                    # Let's use relpath to target_root for tree structure clarity.
-                    rel_path = os.path.relpath(abs_path, target_root)
-                    
-                    # If target_root is different from self.host_path, maybe we should prefix with the root name?
-                    # Or just list the relative structure.
-                    system_prefix += f"{rel_path}\n"
-                except ValueError:
-                    continue
-
-            # Directories
+            # Filter files
+            filtered_files = [f for f in files if f not in ALWAYS_HIDDEN_DIRS and (include_hidden or not f.startswith('.'))]
+            
+            # Collect all items (files and dirs) with their types
+            all_items = []
+            
+            # Add directories
             for dir_item in dirs:
                 try:
                     abs_path = os.path.join(root, dir_item)
                     rel_path = os.path.relpath(abs_path, target_root)
-                    system_prefix += f"{rel_path}/\n"
+                    all_items.append(('dir', f"{rel_path}/"))
                 except ValueError:
                     continue
             
+            # Add files
+            for file_item in filtered_files:
+                try:
+                    abs_path = os.path.join(root, file_item)
+                    rel_path = os.path.relpath(abs_path, target_root)
+                    all_items.append(('file', rel_path))
+                except ValueError:
+                    continue
+            
+            # Check if we need to truncate
+            total_items = len(all_items)
+            if total_items > max_items_per_dir:
+                # Show first max_items_per_dir items
+                shown_items = all_items[:max_items_per_dir]
+                hidden_count = total_items - max_items_per_dir
+            else:
+                shown_items = all_items
+                hidden_count = 0
+            
+            # Add shown items to output
+            for item_type, item_path in shown_items:
+                system_prefix += f"{item_path}\n"
+            
+            # Add ellipsis if truncated
+            if hidden_count > 0:
+                system_prefix += f"... (and {hidden_count} more items)\n"
+            
             # Special handling for 'skills' directory to limit depth.
-            # We want to list 'skills/' and its immediate children (e.g. 'skills/weather/'),
-            # but we do NOT want to recurse deeper into those children.
-            # So if we are currently visiting the 'skills' directory, we clear 'dirs'
-            # to prevent os.walk from descending into the subdirectories we just listed.
-            # Note: This logic assumes we are walking self.host_path. 
-            # If traversing external path, 'skills' might not be relevant or relative path might be different.
             rel_root = os.path.relpath(root, self.host_path)
             if rel_root == 'skills':
                 dirs[:] = []

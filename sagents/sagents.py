@@ -220,6 +220,7 @@ class SAgent:
                 异步生成的流式消息块列表。每个块可能包含部分文本内容、工具调用信息或状态更新。
         """
         # 统计耗时：首个非空 content 与完整执行总耗时
+        logger.info(f"run_stream: system_context: {system_context}")
         _start_time = time.time()
         _first_show_time = None
         # 初始化该session 的context 管理器
@@ -376,6 +377,7 @@ class SAgent:
                 session_context = init_session_context(
                     session_id=session_id,
                     user_id=user_id,
+                    system_context=system_context,
                     workspace_root=self.workspace,
                     context_budget_config=context_budget_config,
                     user_memory_manager=self.user_memory_manager,
