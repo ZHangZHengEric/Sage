@@ -20,6 +20,11 @@ struct Payload {
     port: u16,
 }
 
+#[tauri::command]
+fn get_server_port() -> Option<u16> {
+    std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
+}
+
 fn main() {
     /*
     // Tray setup
@@ -34,6 +39,11 @@ fn main() {
 
     tauri::Builder::default()
         .manage(SidecarPid(Mutex::new(None)))
+        // .plugin(tauri_plugin_log::Builder::default().targets([
+        //     LogTarget::LogDir,
+        //     LogTarget::Stdout,
+        //     LogTarget::Webview,
+        // ]).build())
         .on_window_event(|event| match event.event() {
             WindowEvent::Destroyed => {
                 // When the main window is destroyed (closed), exit the app.
@@ -99,26 +109,73 @@ fn main() {
             std::env::set_var("SAGE_SKILL_WORKSPACE", &skill_workspace);
             std::env::set_var("SAGE_WORKSPACE_PATH", &session_workspace);
             println!("Set SAGE_SKILL_WORKSPACE: {}", skill_workspace);
+
+            // Find a free port
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .map(|l| l.local_addr().unwrap().port())
+                .expect("failed to find free port");
+            std::env::set_var("SAGE_PORT", port.to_string());
+            println!("Set SAGE_PORT: {}", port);
             
             tauri::async_runtime::spawn(async move {
-                // Resolve the sidecar path from resources
-                let sidecar_dir = app_handle.path_resolver()
-                    .resolve_resource("sidecar")
-                    .expect("failed to resolve sidecar resource");
-                
-                let sidecar_executable = if cfg!(target_os = "windows") {
-                    sidecar_dir.join("sage-desktop.exe")
+                // Determine how to run the backend
+                let (command, args) = if cfg!(debug_assertions) {
+                    // In debug mode, try to run python directly
+                    // We need to find the python script path relative to the project root
+                    // The current working directory when running `cargo tauri dev` is typically app/desktop/tauri
+                    // So we need to go up to app/desktop/core/main.py or entry.py
+                    // Let's assume we are in app/desktop/tauri
+                    let mut script_path = std::env::current_dir().unwrap();
+                    // If we are in tauri directory, we go up to find entry.py
+                    if script_path.ends_with("tauri") {
+                        script_path.pop(); // app/desktop
+                    } else if script_path.ends_with("src-tauri") {
+                        script_path.pop(); // app/desktop (if named src-tauri)
+                    }
+                    
+                    let entry_py = script_path.join("entry.py");
+                    
+                    if entry_py.exists() {
+                        println!("Running python script directly: {:?}", entry_py);
+                        ("python3".to_string(), vec![entry_py.to_string_lossy().to_string()])
+                    } else {
+                        // Fallback to sidecar if script not found
+                         println!("Python script not found at {:?}, falling back to sidecar", script_path);
+                         // Resolve the sidecar path from resources
+                        let sidecar_dir = app_handle.path_resolver()
+                            .resolve_resource("sidecar")
+                            .expect("failed to resolve sidecar resource");
+                        
+                        let sidecar_executable = if cfg!(target_os = "windows") {
+                            sidecar_dir.join("sage-desktop.exe")
+                        } else {
+                            sidecar_dir.join("sage-desktop")
+                        };
+                        (sidecar_executable.to_string_lossy().to_string(), vec![])
+                    }
                 } else {
-                    sidecar_dir.join("sage-desktop")
+                     // In release mode, always use sidecar
+                    let sidecar_dir = app_handle.path_resolver()
+                        .resolve_resource("sidecar")
+                        .expect("failed to resolve sidecar resource");
+                    
+                    let sidecar_executable = if cfg!(target_os = "windows") {
+                        sidecar_dir.join("sage-desktop.exe")
+                    } else {
+                        sidecar_dir.join("sage-desktop")
+                    };
+                    (sidecar_executable.to_string_lossy().to_string(), vec![])
                 };
-                
-                println!("Spawning sidecar from: {:?}", sidecar_executable);
 
-                let mut child = Command::new(sidecar_executable)
+                println!("Spawning backend: {} {:?}", command, args);
+
+                let mut child = Command::new(command)
+                    .args(args)
+                    .env("SAGE_PORT", port.to_string())
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
+                    .stderr(Stdio::inherit())
                     .spawn()
-                    .expect("Failed to spawn sidecar");
+                    .expect("Failed to spawn backend");
 
                 if let Some(id) = child.id() {
                     let state = app_handle.state::<SidecarPid>();
@@ -140,6 +197,7 @@ fn main() {
                             let clean_port: &str = last_word.trim_matches('.');
                             if let Ok(port) = clean_port.parse::<u16>() {
                                 println!("Detected port: {}", port);
+                                println!("Emitting sage-desktop-ready event...");
                                 // Emit event to frontend
                                 app_handle.emit_all("sage-desktop-ready", Payload { port }).unwrap();
                             }
@@ -154,6 +212,7 @@ fn main() {
 
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![get_server_port])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
