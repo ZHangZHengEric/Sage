@@ -58,8 +58,9 @@ fn main() {
             
             // Set default environment variables
             std::env::set_var("SAGE_USE_SANDBOX", "False");
-            let home_dir = dirs::home_dir()
-                .map(|p| p.to_string_lossy().to_string())
+            // Get home directory from environment variable
+            let home_dir = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
                 .unwrap_or_default();
             let skill_workspace = format!("{}/.sage/skills", home_dir);
             std::env::set_var("SAGE_SKILL_WORKSPACE", &skill_workspace);
