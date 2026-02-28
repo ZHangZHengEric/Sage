@@ -39,7 +39,7 @@ export PYINSTALLER_CONFIG_DIR="$ROOT_DIR/.pyinstaller"
 cd "$ROOT_DIR/app/desktop/core"
 # Make sure we can import from app.desktop.core
 export PYTHONPATH="$ROOT_DIR:$PYTHONPATH"
-pyinstaller --clean --noconfirm --name sage-server --onefile --windowed run_desktop.py --paths="$ROOT_DIR"
+pyinstaller --clean --noconfirm --name sage-desktop --onefile --windowed main.py --paths="$ROOT_DIR"
 cd "$ROOT_DIR"
 
 # Move binary to tauri/bin
@@ -51,26 +51,26 @@ if [ "$OS_TYPE" == "Mac" ]; then
     else
         TARGET="$ARCH-apple-darwin"
     fi
-    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-server" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-server" "$ROOT_DIR/app/desktop/tauri/bin/sage-server-$TARGET"
-    elif [ -f "$ROOT_DIR/app/desktop/core/dist/sage-server.app/Contents/MacOS/sage-server" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-server.app/Contents/MacOS/sage-server" "$ROOT_DIR/app/desktop/tauri/bin/sage-server-$TARGET"
+    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop" ]; then
+        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
+    elif [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop.app/Contents/MacOS/sage-desktop" ]; then
+        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop.app/Contents/MacOS/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
     else
         echo "Sidecar binary not found under app/desktop/core/dist"
         exit 1
     fi
 elif [ "$OS_TYPE" == "MinGw" ] || [ "$OS_TYPE" == "Cygwin" ]; then
     TARGET="x86_64-pc-windows-msvc"
-    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-server.exe" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-server.exe" "$ROOT_DIR/app/desktop/tauri/bin/sage-server-$TARGET.exe"
+    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop.exe" ]; then
+        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop.exe" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET.exe"
     else
         echo "Sidecar binary not found under app/desktop/core/dist"
         exit 1
     fi
 else
     TARGET="x86_64-unknown-linux-gnu"
-    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-server" ]; then
-        cp "$ROOT_DIR/app/desktop/core/dist/sage-server" "$ROOT_DIR/app/desktop/tauri/bin/sage-server-$TARGET"
+    if [ -f "$ROOT_DIR/app/desktop/core/dist/sage-desktop" ]; then
+        cp "$ROOT_DIR/app/desktop/core/dist/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
     else
         echo "Sidecar binary not found under app/desktop/core/dist"
         exit 1

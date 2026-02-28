@@ -9,8 +9,8 @@
       </div>
 
       <div class="grid gap-4 mt-8">
-        <Button size="lg" class="w-full" @click="handleLogin">
-          Sign In
+        <Button variant="outline" size="lg" class="w-full" @click="handleDefaultLogin">
+          Quick Start (Default)
         </Button>
         <div class="relative">
           <div class="absolute inset-0 flex items-center">
@@ -22,8 +22,8 @@
             </span>
           </div>
         </div>
-        <Button variant="outline" size="lg" class="w-full" @click="handleDefaultLogin">
-          Quick Start (Default)
+        <Button variant="ghost" size="lg" class="w-full" @click="handleSkipLogin">
+          Skip Login
         </Button>
       </div>
       
@@ -46,12 +46,6 @@ const markOnboardingComplete = () => {
   localStorage.setItem('hasSeenOnboarding', 'true')
 }
 
-const handleLogin = () => {
-  markOnboardingComplete()
-  // Redirect to home, App.vue will detect not logged in and show LoginModal
-  router.push('/')
-}
-
 const handleDefaultLogin = async () => {
   try {
     const res = await loginAPI('admin', 'admin')
@@ -65,5 +59,11 @@ const handleDefaultLogin = async () => {
   } catch (e) {
     toast.error('Login failed')
   }
+}
+
+const handleSkipLogin = () => {
+  markOnboardingComplete()
+  localStorage.setItem('isGuest', 'true')
+  router.push('/')
 }
 </script>
