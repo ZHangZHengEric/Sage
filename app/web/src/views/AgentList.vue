@@ -712,6 +712,7 @@ const generateUsageCodes = (agent) => {
     ],
     session_id: 'demo-session',
     agent_id: agent.id,
+    user_id: "demo-user",
     system_context: agent.systemContext || {}
   }
 
