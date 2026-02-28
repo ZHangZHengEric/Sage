@@ -61,6 +61,20 @@ async def initialize_skill_manager():
     """初始化技能管理器"""
     try:
         skill_manager_instance = SkillManager.get_instance()
+        
+        # 检查并添加 sage_home/skills 目录
+        from pathlib import Path
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        sage_skills_dir = sage_home / "skills"
+        
+        # 创建目录（如果不存在）
+        sage_skills_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 添加到 skill manager
+        skill_manager_instance.add_skill_dir(str(sage_skills_dir))
+        logger.info(f"已添加技能目录: {sage_skills_dir}")
+        
         return skill_manager_instance
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")
