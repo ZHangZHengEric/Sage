@@ -1,8 +1,7 @@
 import asyncio
 import hashlib
 import json
-import os
-from re import S
+from pathlib import Path
 import time
 import traceback
 import uuid
@@ -240,7 +239,7 @@ async def populate_request_from_agent_config(
                 del request.system_context['extra_mcp_config']
         else:
             logger.warning("ToolManager not available, cannot register MCP servers")
-            
+
 class SageStreamService:
     """Sage 流式服务类"""
 
@@ -253,13 +252,10 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
-        config = get_startup_config()
-        workspace = config.workspace
-        if workspace:
-            workspace = os.path.abspath(workspace)
-            if not workspace.endswith('/'):
-                workspace += '/'
-
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        workspace = sage_home / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
@@ -311,7 +307,7 @@ class SageStreamService:
                     result = ContentProcessor.clean_content(result)
 
                     yield result
-                    
+
         except Exception as e:
             logger.bind(session_id=session_id).error(f"❌ 流式处理异常: {traceback.format_exc()}")
             error_result = {
