@@ -28,7 +28,7 @@ description: 深度研究技能，用于系统性调研与分析。适用于研�
 运行初始化脚本，使用绝对路径创建工作目录：
 
 ```bash
-python /workspace/skills/deep-research-agent/scripts/init_research.py <absolute_template_path> <absolute_project_path>
+python skills/deep-research-agent/scripts/init_research.py <absolute_template_path> <absolute_project_path>
 ```
 
 **用法：** `python init_research.py <absolute_template_path> <absolute_project_path>`
@@ -147,7 +147,7 @@ file_update(
 4. **引用来源**：报告内引用 materials/ 文件
 5. **结构一致**：`research_data.json` 与报告保持一致
 6. **HTML 输出**：最终必须将 report.md 转为 HTML，使用 `scripts/md_to_html.py` 生成。
-   - 命令：`python /workspace/skills/deep-research-agent/scripts/md_to_html.py /absolute/path/report.md`
+   - 命令：`python skills/deep-research-agent/scripts/md_to_html.py /absolute/path/report.md`
    - 默认输出为 report.html，可用 `--out` 指定输出路径。
 
 ## 模板选择指南
