@@ -12,7 +12,6 @@ class BaseChatRequest(BaseModel):
     """基础聊天请求，包含公共字段"""
     messages: List[Message]
     session_id: Optional[str] = None
-    user_id: Optional[str] = None
     system_context: Optional[Dict[str, Any]] = None
     
     def __init__(self, **data):

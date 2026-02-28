@@ -16,7 +16,6 @@ class MCPServer(Base):
 
     name: Mapped[str] = mapped_column(String(255), primary_key=True)
     config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
-    user_id: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
@@ -41,15 +40,14 @@ class MCPServerDao(BaseDao):
     async def get_by_name(self, name: str) -> Optional["MCPServer"]:
         return await BaseDao.get_by_id(self, MCPServer, name)
 
-    async def get_list(self, user_id: Optional[str] = None) -> List["MCPServer"]:
-        where = [MCPServer.user_id == user_id] if user_id else None
-        return await BaseDao.get_list(self, MCPServer, where=where, order_by=MCPServer.created_at)
+    async def get_list(self) -> List["MCPServer"]:
+        return await BaseDao.get_list(self, MCPServer, order_by=MCPServer.created_at)
 
     async def delete_by_name(self, name: str) -> bool:
         return await BaseDao.delete_by_id(self, MCPServer, name)
 
     async def save_mcp_server(
-        self, name: str, config: Dict[str, Any], user_id: Optional[str] = None
+        self, name: str, config: Dict[str, Any]
     ) -> MCPServer:
         db = await self._get_db()
         async with db.get_session() as session:
@@ -58,13 +56,9 @@ class MCPServerDao(BaseDao):
             if existing:
                 existing.config = config
                 existing.updated_at = now
-                if user_id:
-                    existing.user_id = user_id
                 await session.merge(existing)
                 return existing
             else:
                 obj = MCPServer(name=name, config=config, created_at=now, updated_at=now)
-                if user_id:
-                    obj.user_id = user_id
                 session.add(obj)
                 return obj

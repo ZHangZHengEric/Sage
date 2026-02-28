@@ -16,7 +16,6 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     session_id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_name: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -26,7 +25,6 @@ class Conversation(Base):
 
     def __init__(
         self,
-        user_id: str,
         session_id: str,
         agent_id: str,
         agent_name: str,
@@ -35,7 +33,6 @@ class Conversation(Base):
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
-        self.user_id = user_id
         self.session_id = session_id
         self.agent_id = agent_id
         self.agent_name = agent_name
@@ -71,7 +68,6 @@ class Conversation(Base):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Conversation":
         return cls(
-            user_id=data["user_id"],
             session_id=data["session_id"],
             agent_id=data["agent_id"],
             agent_name=data["agent_name"],
@@ -89,7 +85,6 @@ class ConversationDao(BaseDao):
 
     async def save_conversation(
         self,
-        user_id: str,
         session_id: str,
         agent_id: str,
         agent_name: str,
@@ -97,7 +92,6 @@ class ConversationDao(BaseDao):
         messages: List[Dict[str, Any]],
     ) -> bool:
         conversation = Conversation(
-            user_id=user_id,
             session_id=session_id,
             agent_id=agent_id,
             agent_name=agent_name,
@@ -114,14 +108,11 @@ class ConversationDao(BaseDao):
         self,
         page: int = 1,
         page_size: int = 10,
-        user_id: Optional[str] = None,
         search: Optional[str] = None,
         agent_id: Optional[str] = None,
         sort_by: str = "date",
     ) -> tuple[List[Conversation], int]:
         where = []
-        if user_id:
-            where.append(Conversation.user_id == user_id)
         if agent_id:
             where.append(Conversation.agent_id == agent_id)
         if search:
