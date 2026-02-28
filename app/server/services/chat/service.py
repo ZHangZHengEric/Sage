@@ -74,8 +74,13 @@ async def populate_request_from_agent_config(
             request.agent_mode = agent_config.get("agentMode")
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
-        if agent_config.get("systemContext") is not None and request.system_context is None:
-            request.system_context = agent_config.get("systemContext")
+        if agent_config.get("systemContext") is not None:
+            if request.system_context is None:
+                request.system_context = agent_config.get("systemContext")
+            elif isinstance(request.system_context, dict) and isinstance(agent_config.get("systemContext"), dict):
+                merged = agent_config.get("systemContext").copy()
+                merged.update(request.system_context)
+                request.system_context = merged
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
@@ -143,7 +148,6 @@ async def populate_request_from_agent_config(
     _fill_if_none("deep_thinking", False)
     _fill_if_none("multi_agent", False)
     _fill_if_none("more_suggest", False)
-    _merge_dict("system_context", {})
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
     _fill_if_none("available_knowledge_bases", [])
