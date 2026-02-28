@@ -31,7 +31,8 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     availableTools: [],
     availableSkills: [],
     availableWorkflows: {},
-    availableSubAgentIds: []
+    availableSubAgentIds: [],
+    externalPaths: []
   }
 
   const formData = ref(JSON.parse(JSON.stringify(defaultFormData)))
@@ -116,6 +117,20 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     else list.splice(index, 1)
   }
 
+  // External Paths Management
+  const addExternalPath = (path) => {
+    if (!Array.isArray(formData.value.externalPaths)) formData.value.externalPaths = []
+    if (path && !formData.value.externalPaths.includes(path)) {
+      formData.value.externalPaths.push(path)
+    }
+  }
+
+  const removeExternalPath = (index) => {
+    if (Array.isArray(formData.value.externalPaths)) {
+      formData.value.externalPaths.splice(index, 1)
+    }
+  }
+
   const initForm = (agentData = null, options = {}) => {
     const { preserveStep = false } = options
 
@@ -128,6 +143,11 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
       if (!formData.value.availableWorkflows || typeof formData.value.availableWorkflows !== 'object') formData.value.availableWorkflows = {}
       if (!formData.value.llmConfig || typeof formData.value.llmConfig !== 'object') {
         formData.value.llmConfig = JSON.parse(JSON.stringify(defaultFormData.llmConfig))
+      }
+      // Load externalPaths from systemContext
+      if (formData.value.systemContext.external_paths) {
+        formData.value.externalPaths = formData.value.systemContext.external_paths
+        delete formData.value.systemContext.external_paths
       }
       // Parse context and workflows back to pairs
       systemContextPairs.value = Object.entries(formData.value.systemContext || {}).map(([k, v]) => ({ key: k, value: v }))
@@ -201,6 +221,12 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     systemContextPairs.value.forEach(p => {
       if (p.key) context[p.key] = p.value
     })
+    
+    // Add external_paths to systemContext
+    if (Array.isArray(formData.value.externalPaths) && formData.value.externalPaths.length > 0) {
+      context.external_paths = formData.value.externalPaths
+    }
+    
     formData.value.systemContext = context
 
     // Workflows
@@ -243,6 +269,8 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     removeWorkflowStep,
     updateWorkflowStep,
     toggleTool,
-    toggleSkill
+    toggleSkill,
+    addExternalPath,
+    removeExternalPath
   }
 })

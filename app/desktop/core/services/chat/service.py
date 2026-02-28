@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import traceback
 import uuid
-
+import os
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
@@ -148,9 +148,9 @@ async def populate_request_from_agent_config(
         # agent_host_workspace_path 这个文件夹路径，根据agent_id 来确定
         # 4. 路径处理
         user_home = Path.home()
-        sage_home = user_home / ".sage"
-        workspace = sage_home / "workspace"
-        _merge_dict("system_context", {"agent_host_workspace_path": os.path.join(workspace, request.agent_id)})
+        sage_home = os.path.join(user_home, ".sage")
+        agent_workspace = os.path.join(sage_home, "agent")
+        _merge_dict("system_context", {"agent_host_workspace_path": os.path.join(agent_workspace, request.agent_id)})
     # 处理可用技能
     available_skills = request.available_skills
     if available_skills:

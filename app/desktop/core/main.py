@@ -110,6 +110,12 @@ def main():
         logs_dir = sage_home / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
+        skills_dir = sage_home / "skills"
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
+        agents_workspace_dir = sage_home / "agents"
+        agents_workspace_dir.mkdir(parents=True, exist_ok=True)
+
         cfg = init_startup_config()
         port = 8080
         print(f"Starting Sage Desktop Server on port {port}...")
