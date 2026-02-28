@@ -107,79 +107,27 @@ export const getCurrentUser = () => {
   const userInfo = localStorage.getItem('userInfo')
   if (userInfo) return JSON.parse(userInfo)
   
-  if (localStorage.getItem('isGuest') === 'true') {
-     return { 
-       username: 'Not Logged In', 
-       nickname: 'Not Logged In',
-       role: 'guest', 
-       isGuest: true, 
-       avatar: '/sage_logo.svg' 
-     }
+  // 默认返回管理员用户，因为不再需要登录
+  return { 
+    username: 'Admin', 
+    nickname: 'Admin',
+    role: 'admin', 
+    isGuest: false, 
+    avatar: '/sage_logo.svg' 
   }
-  return null
 }
 
 // 基于API的登录状态检查 - 主要方法
 export const isLoggedInAPI = async () => {
-  if (localStorage.getItem('isGuest') === 'true') {
-    return { isLoggedIn: true, user: getCurrentUser() }
-  }
-
-  const user = getCurrentUser()
-  const localLoginFlag = localStorage.getItem('isLoggedIn')
-  
-  // 如果本地没有登录标记或用户信息，直接返回未登录
-  if (!user || localLoginFlag !== 'true') {
-    return { isLoggedIn: false, user: null }
-  }
-  
-  try {
-    // 调用API验证服务器端登录状态
-    const result = await checkLoginAPI()
-    
-    if (result.success) {
-      return { 
-        isLoggedIn: true, 
-        user: result.data || user,
-        apiResult: result
-      }
-    } else {
-      return { 
-        isLoggedIn: false, 
-        user: null,
-        apiResult: result
-      }
-    }
-  } catch (error) {
-    console.error('API验证过程出错:', error)
-    
-    // 如果是网络错误，可以选择信任本地状态（可配置）
-    if (error.isNetworkError) {
-      return { 
-        isLoggedIn: true, 
-        user: user,
-        isNetworkError: true
-      }
-    } else {
-      // 其他错误认为未登录
-      return { 
-        isLoggedIn: false, 
-        user: null,
-        error: error
-      }
-    }
+  return { 
+    isLoggedIn: true, 
+    user: getCurrentUser()
   }
 }
 
 // 同步版本的登录状态检查（用于兼容现有代码）
 export const isLoggedIn = () => {
-  if (localStorage.getItem('isGuest') === 'true') return true
-
-  const user = getCurrentUser()
-  const loginFlag = localStorage.getItem('isLoggedIn')
-  const result = !!(user && loginFlag === 'true')
-  
-  return result
+  return true
 }
 
 
