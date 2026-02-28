@@ -109,8 +109,7 @@ class SessionContext:
             self.message_manager.add_messages(valid_messages)
 
     def init_more(self, workspace_root: str):
-        # 1. 虚拟工作空间路径（容器内路径）
-        self.virtual_workspace = "/workspace"
+        use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
 
         # 2. 会话根目录
         self.session_workspace = os.path.join(workspace_root, self.session_id)
@@ -133,6 +132,14 @@ class SessionContext:
             # 3. agent 工作目录（宿主机）
             _agent_workspace_host_path = os.path.join(self.session_workspace, "agent_workspace")
             os.makedirs(_agent_workspace_host_path, exist_ok=True)
+        
+        # 1. 虚拟工作空间路径（容器内路径）
+        # 使用 /sage-workspace 避免与宿主机可能存在的 /workspace 冲突
+        # 如果不使用沙箱，则 virtual_workspace 与 host_workspace 一致
+        if use_sandbox:
+            self.virtual_workspace = "/sage-workspace"
+        else:
+            self.virtual_workspace = _agent_workspace_host_path
         
         # 如果在_agent_workspace_host_path 下存在AGENT.md,不存在则创建
         agent_md_path = os.path.join(_agent_workspace_host_path, "AGENT.md")
@@ -241,12 +248,14 @@ class SessionContext:
         # 初始化沙箱环境 / Initialize sandbox environment
         # 沙箱内部会自动管理 SandboxFileSystem
         # 增加资源限制以支持 heavy 任务 (如 bun install, build)
+        # macOS 使用 subprocess 模式，避免 sandbox-exec 的限制问题
         self.sandbox = Sandbox(
             host_workspace=_agent_workspace_host_path,
             virtual_workspace=self.virtual_workspace,
             cpu_time_limit=300,    # 5分钟，支持长时间安装
             memory_limit_mb=4096,  # 4GB，防止 OOM
-            allowed_paths=self.external_paths
+            allowed_paths=self.external_paths,
+            macos_isolation_mode='subprocess'
         )
         logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         

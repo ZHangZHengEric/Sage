@@ -135,110 +135,30 @@ class ExecuteCommandTool:
     def _prepare_script_environment(self, workdir: Optional[str], process_id: str, extension: str, session_id: Optional[str] = None) -> Tuple[str, str]:
         """准备脚本执行环境：确定工作目录和脚本路径
         
-        Args:
-            workdir: 用户指定的工作目录。强烈建议由 Agent 传入 Session 相关的 workspace 路径。
-            process_id: 进程ID，用于生成文件名
-            extension: 脚本扩展名 (如 .py, .js)
-            session_id: 会话ID，用于查找默认的 Session Workspace
-            
-        Returns:
-            Tuple[str, str]: (脚本绝对路径, 有效工作目录)
+        使用 sandbox_utils 统一处理沙箱和非沙箱环境。
         """
-        effective_workdir = None
-
-        if workdir:
-            # 用户指定了目录，使用该目录
-            effective_workdir = os.path.abspath(workdir)
-        elif session_id:
-            # 尝试通过 session_id 获取 Session Workspace
-            try:
-                # 避免循环导入
-                from sagents.context.session_context import get_session_context
-                session_context = get_session_context(session_id)
-                
-                sandbox_fs = None
-                if session_context:
-                    # 优先使用 session_context.sandbox
-                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                        sandbox_fs = session_context.sandbox.file_system
-                    # 回退到 agent_workspace (通常也是 SandboxFileSystem)
-                    elif hasattr(session_context, 'agent_workspace'):
-                        sandbox_fs = session_context.agent_workspace
-                
-                if sandbox_fs:
-                    # 获取沙箱的虚拟路径，默认为 /workspace
-                    virtual_path = getattr(sandbox_fs, 'virtual_path', '/workspace')
-                    
-                    # 使用虚拟路径构建 effective_workdir
-                    effective_workdir = os.path.join(virtual_path, "scripts")
-                    
-                    # 确保 scripts 目录存在 (使用 ensure_directory，它会处理虚拟路径到宿主路径的转换)
-                    if hasattr(sandbox_fs, 'ensure_directory'):
-                        sandbox_fs.ensure_directory(effective_workdir)
-                    else:
-                        # 如果没有 ensure_directory，尝试手动解析并创建
-                        # 注意：如果 effective_workdir 是虚拟路径，必须先解析为 host_path 才能 os.makedirs
-                        if hasattr(sandbox_fs, 'to_host_path'):
-                            host_workdir = sandbox_fs.to_host_path(effective_workdir)
-                            os.makedirs(host_workdir, exist_ok=True)
-
-                    logger.debug(f"通过 session_id {session_id} (Sandbox) 定位到虚拟工作目录: {effective_workdir}")
-            except ImportError:
-                logger.warning("无法导入 get_session_context，跳过 Session 路径解析")
-            except Exception as e:
-                logger.warning(f"解析 Session Workspace 失败: {e}")
-
+        from sagents.utils.sandbox import get_sandbox_workdir
+        
+        # 获取工作目录
+        effective_workdir = get_sandbox_workdir(workdir, session_id)
+        
         if not effective_workdir:
-            # 未指定目录且无法解析 Session 路径，为了避免污染项目根目录，回退到系统临时目录
-            # 注意：这意味着脚本文件可能不会持久化保留在 Session 目录下
-            if session_id:
-                logger.warning(f"尽管提供了 session_id {session_id}，但未能解析到有效的 host_path，回退到临时目录")
-            effective_workdir = tempfile.mkdtemp(prefix=f"sage_agent_scripts_{process_id}_")
-            
-        # 确保目录存在 (非沙箱环境，或再次确认)
-        # 如果是沙箱环境，前面已经调用了 ensure_directory，这里 os.path.exists 可能会因为是虚拟路径而失败
-        # 所以我们需要判断是否是虚拟路径
-        is_virtual_path = False
-        if session_id:
-             try:
-                # 简单判断：如果 effective_workdir 以 /workspace 开头 (假设虚拟路径前缀)，或者是绝对路径但在当前系统不存在
-                # 更严谨的是复用前面的 sandbox_fs
-                from sagents.context.session_context import get_session_context
-                ctx = get_session_context(session_id)
-                if ctx and hasattr(ctx, 'sandbox') and ctx.sandbox:
-                    is_virtual_path = True
-             except:
-                pass
-
-        if not is_virtual_path:
-            if not os.path.exists(effective_workdir):
-                try:
-                    os.makedirs(effective_workdir, exist_ok=True)
-                except Exception as e:
-                    logger.warning(f"创建目录失败 {effective_workdir}: {e}")
-                    # 如果创建失败（可能是权限问题），回退到临时目录
-                    effective_workdir = tempfile.mkdtemp(prefix="agent_scripts_")
-                
+            effective_workdir = tempfile.mkdtemp(prefix=f"sage_scripts_{process_id}_")
+        
+        # 确保目录存在
+        os.makedirs(effective_workdir, exist_ok=True)
+        
         # 生成脚本路径
         script_name = f"script_{process_id}.{extension}"
         script_path = os.path.join(effective_workdir, script_name)
         
         return script_path, effective_workdir
-
+    
     def _write_script_file(self, file_path: str, content: str, workdir: str = None, session_id: Optional[str] = None):
-        """写入脚本文件，包含沙箱权限处理"""
-        # 尝试使用沙箱写入
-        if session_id:
-            try:
-                from sagents.context.session_context import get_session_context
-                session_context = get_session_context(session_id)
-                if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-                    # 使用 SandboxFileSystem 的 write_file
-                    session_context.sandbox.file_system.write_file(file_path, content)
-                    return
-            except Exception as e:
-                logger.debug(f"沙箱写入失败，回退到普通写入: {e}")
-
+        """写入脚本文件"""
+        from sagents.utils.sandbox import get_sandbox_workdir
+        
+        # 写入文件
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -247,54 +167,38 @@ class ExecuteCommandTool:
             logger.warning(f"直接写入文件被拦截，尝试使用命令行写入: {file_path}")
             import shlex
             escaped_content = shlex.quote(content)
-            # 使用 printf 写入
             write_cmd = f"printf '%s' {escaped_content} > {file_path}"
-            self.execute_shell_command(write_cmd, workdir=workdir, timeout=10)
-
+            self.execute_shell_command(write_cmd, workdir=workdir, timeout=10, background=False)
+    
     def _log_shell_history(self, command: str, workdir: Optional[str], success: bool, return_code: Optional[int], session_id: Optional[str]):
         """记录 Shell 命令历史"""
         if not session_id:
             return
-
+        
+        from sagents.utils.sandbox import get_sandbox_workdir
+        
         try:
-            # 避免循环导入
             from sagents.context.session_context import get_session_context
             session_context = get_session_context(session_id)
             if not session_context:
                 return
-
-            # 优先使用 sandbox 写入
-            if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-                status = "SUCCESS" if success else "FAILED"
-                rc_str = str(return_code) if return_code is not None else "N/A"
-                log_entry = f"[{timestamp}] [{status}] [RC:{rc_str}] [WD:{workdir or 'CWD'}] {command}\n"
-                
-                try:
-                    # 使用 SandboxFileSystem 的 write_file (append=True)
-                    # 历史记录文件通常在 workspace 根目录下
-                    history_file_path = os.path.join(session_context.agent_workspace.host_path, ".shell_history")
-                    session_context.sandbox.file_system.write_file(history_file_path, log_entry, append=True)
-                    return
-                except Exception as e:
-                    logger.debug(f"沙箱写入历史失败，回退到普通写入: {e}")
-
-            if not hasattr(session_context, 'agent_workspace'):
-                return
-
-            host_path = getattr(session_context.agent_workspace, 'host_path', None)
+            
+            # 获取 host_path
+            host_path = None
+            if hasattr(session_context, 'agent_workspace'):
+                host_path = getattr(session_context.agent_workspace, 'host_path', None)
+            
             if not host_path:
                 return
-
-            history_file = os.path.join(host_path, ".shell_history")
             
+            # 写入历史
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             status = "SUCCESS" if success else "FAILED"
             rc_str = str(return_code) if return_code is not None else "N/A"
-            
             log_entry = f"[{timestamp}] [{status}] [RC:{rc_str}] [WD:{workdir or 'CWD'}] {command}\n"
             
-            # 使用 append 模式写入，简单文件锁机制在单 Agent 场景下通常不需要，多线程可能需要注意但此处为 Tool 调用
+            history_file = os.path.join(host_path, ".shell_history")
+            
             with open(history_file, "a", encoding="utf-8") as f:
                 f.write(log_entry)
                 
@@ -309,10 +213,11 @@ class ExecuteCommandTool:
         },
         param_description_i18n={
             "command": {"zh": "待执行的Shell命令字符串", "en": "Shell command to execute", "pt": "Comando shell a executar"},
+            "background": {"zh": "是否后台执行。为True时命令在后台运行并立即返回", "en": "Run in background. When True, command runs in background and returns immediately", "pt": "Executar em segundo plano"},
             "workdir": {"zh": "执行目录，默认当前目录", "en": "Working directory, defaults to current", "pt": "Diretório de trabalho, padrão atual"},
             "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
             "env_vars": {"zh": "附加环境变量字典", "en": "Additional environment variables dict", "pt": "Dicionário de variáveis de ambiente adicionais"},
-            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
+            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"},
         },
         return_data={
             "type": "object",
@@ -321,320 +226,205 @@ class ExecuteCommandTool:
                 "stdout": {"type": "string"},
                 "stderr": {"type": "string"},
                 "return_code": {"type": "integer"},
-                "execution_time": {"type": "number"}
+                "execution_time": {"type": "number"},
+                "is_background": {"type": "boolean", "description": "Whether the command was run in background"}
             },
             "required": ["success"]
         }
     )
-    def execute_shell_command(self, command: str, workdir: Optional[str] = None, 
-                             timeout: int = 30, env_vars: Optional[Dict[str, str]] = None,
-                             session_id: Optional[str] = None) -> Dict[str, Any]:
-        """在指定目录执行Shell命令，后台执行请通过command 进行设置
+    def execute_shell_command(self, command: str, background: bool,
+                             workdir: Optional[str] = None, 
+                             timeout: int = 30,
+                             env_vars: Optional[Dict[str, str]] = None,
+                             session_id: Optional[str] = None,
+                             ) -> Dict[str, Any]:
+        """在指定目录执行Shell命令
         
-        Args:
-            command (str): 要执行的Shell命令
-            workdir (str): 命令执行的工作目录（可选）
-            timeout (int): 超时时间，默认30秒
-            env_vars (dict): 自定义环境变量（可选）
-            session_id (str): 会话ID（可选，由ToolManager注入）
-
-        Returns:
-            Dict[str, Any]: 包含执行结果的字典
+        使用 sandbox_utils 统一处理沙箱路径映射，兼容有沙箱和没有沙箱的环境。
         """
+        from sagents.utils.sandbox import get_sandbox_workdir
+        
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
         logger.info(f"🖥️ execute_shell_command开始执行 [{process_id}] - command: {command[:100]}{'...' if len(command) > 100 else ''}")
-        logger.info(f"📁 工作目录: {workdir or '当前目录'}, 超时: {timeout}秒")
         
-        # 路径与命令解析（处理沙箱虚拟路径）
-        actual_command = command
+        # 获取实际工作目录
+        # 优先使用用户传入的 workdir，否则使用沙箱的 host_workspace
         actual_workdir = workdir
+        logger.info(f"[execute_shell_command] 原始 workdir: {workdir}, session_id: {session_id}")
+        if actual_workdir is None and session_id:
+            from sagents.context.session_context import get_session_context
+            session_context = get_session_context(session_id)
+            logger.info(f"[execute_shell_command] session_context: {session_context}")
+            if session_context:
+                logger.info(f"[execute_shell_command] has sandbox: {hasattr(session_context, 'sandbox')}")
+                if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                    actual_workdir = session_context.sandbox.host_workspace
+                    logger.info(f"[execute_shell_command] 使用沙箱 host_workspace: {actual_workdir}")
+        logger.info(f"[execute_shell_command] 最终 actual_workdir: {actual_workdir}")
         
-        # CWD 保持逻辑
-        target_workdir = workdir
-        should_update_cwd = False
-        cwd_marker = f"__SAGE_CWD_{process_id}__"
-
-        # 检查是否禁用 CWD 更新 (内部调用标记)
-        no_update_cwd = False
-        if env_vars and env_vars.get('_SAGE_NO_UPDATE_CWD'):
-            no_update_cwd = True
-
-        if session_id:
-            try:
-                from sagents.context.session_context import get_session_context
-                session_context = get_session_context(session_id)
-                
-                # 尝试应用 Session CWD (from Sandbox)
-                if not target_workdir and not no_update_cwd and session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-                     # sandbox.cwd is a host path. execute_shell_command expects a path that might be virtual.
-                     # But here we are setting actual_workdir (host path) directly?
-                     # Wait, execute_shell_command takes 'workdir' argument.
-                     # If we use sandbox.cwd (host path), we should set actual_workdir directly?
-                     # Or should we convert it back to virtual?
-                     # Let's set actual_workdir directly since we are bypassing the virtual-to-host mapping for this case.
-                     target_workdir = session_context.sandbox.get_cwd()
-                     actual_workdir = target_workdir 
-                
-                sandbox_fs = None
-                if session_context:
-                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                        sandbox_fs = session_context.sandbox.file_system
-                    elif hasattr(session_context, 'agent_workspace'):
-                        sandbox_fs = session_context.agent_workspace
-                
-                if sandbox_fs:
-                    # 1. 转换 command 中的虚拟路径
-                    if hasattr(sandbox_fs, 'map_text_to_host'):
-                        actual_command = sandbox_fs.map_text_to_host(command)
-                        if actual_command != command:
-                             logger.debug(f"Command 路径映射: {command} -> {actual_command}")
-                    
-                    # 2. 转换 workdir 中的虚拟路径
-                    # Only map if target_workdir was NOT set from sandbox.cwd (which is already host path)
-                    # How to distinguish? logic above sets actual_workdir.
-                    # If workdir argument was provided, we need to map it.
-                    if workdir and target_workdir == workdir and hasattr(sandbox_fs, 'to_host_path'):
-                        # 检查是否看起来像虚拟路径 (不是绝对路径，或者是 /workspace 开头)
-                        # 这里简单处理：直接调用 to_host_path，它内部有判断逻辑
-                        actual_workdir = sandbox_fs.to_host_path(target_workdir)
-                        if actual_workdir != target_workdir:
-                            logger.debug(f"Workdir 路径映射: {target_workdir} -> {actual_workdir}")
-                    
-                    # 3. 注入 CWD 捕获逻辑 (Delegate to Sandbox)
-                    if not no_update_cwd and session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-                        should_update_cwd = True
-                        actual_command = session_context.sandbox.wrap_command_with_cwd_capture(actual_command, process_id)
-
-
-            except Exception as e:
-                logger.warning(f"沙箱路径解析失败 (session_id={session_id}): {e}")
-
         try:
-            # 安全检查 (使用原始命令，因为黑名单可能针对特定关键词，但也需要注意混淆)
-            # 最好检查 actual_command 吗？或者两者都检查？
-            # 这里的 SecurityManager 主要检查关键字，所以检查 actual_command 更安全
-            is_safe, reason = self.security_manager.is_command_safe(actual_command)
+            logger.info(f"[execute_shell_command] 开始安全检查")
+            # 安全检查
+            is_safe, reason = self.security_manager.is_command_safe(command)
             if not is_safe:
-                error_time = time.time() - start_time
-                logger.error(f"❌ 安全检查失败 [{process_id}] - 原因: {reason}, 耗时: {error_time:.2f}秒")
+                logger.warning(f"[execute_shell_command] 安全检查失败: {reason}")
                 return {
                     "success": False,
                     "error": f"安全检查失败: {reason}",
                     "command": command,
                     "process_id": process_id,
-                    "execution_time": error_time
+                    "execution_time": time.time() - start_time
                 }
+            logger.info(f"[execute_shell_command] 安全检查通过")
             
             # 验证工作目录
-            if actual_workdir:
-                if not os.path.exists(actual_workdir):
-                    error_time = time.time() - start_time
-                    logger.error(f"❌ 工作目录不存在 [{process_id}] - 目录: {actual_workdir}, 耗时: {error_time:.2f}秒")
-                    return {
-                        "success": False,
-                        "error": f"工作目录不存在: {workdir}", # 报错给用户时用原始路径
-                        # "command": command,
-                        "process_id": process_id,
-                        "execution_time": error_time
-                    }
+            logger.info(f"[execute_shell_command] 验证工作目录: {actual_workdir}")
+            if actual_workdir and not os.path.exists(actual_workdir):
+                logger.error(f"[execute_shell_command] 工作目录不存在: {actual_workdir}")
+                return {
+                    "success": False,
+                    "error": f"工作目录不存在: {workdir}",
+                    "process_id": process_id,
+                    "execution_time": time.time() - start_time
+                }
+            logger.info(f"[execute_shell_command] 工作目录验证通过")
             
             # 准备环境变量
+            logger.info(f"[execute_shell_command] 准备环境变量")
             env = os.environ.copy()
             if env_vars:
                 env.update(env_vars)
+                logger.info(f"[execute_shell_command] 更新环境变量: {env_vars.keys()}")
             
-            # 自动修复 PATH：将常见用户二进制目录添加到 PATH 中
-            # 解决如 "env: 'bun': No such file or directory" 等因 PATH 缺失导致的问题
-            common_bin_paths = [
-                os.path.expanduser("~/.bun/bin"),
-                os.path.expanduser("~/.local/bin"),
-                os.path.expanduser("~/.cargo/bin"),
-                os.path.expanduser("~/.deno/bin"),
-                "/opt/homebrew/bin",
-                "/usr/local/bin"
-            ]
+            # 自动修复权限
+            logger.info(f"[execute_shell_command] 检查执行权限")
+            self._fix_execute_permission(command, actual_workdir)
             
-            current_path = env.get("PATH", "")
-            for p in common_bin_paths:
-                if os.path.exists(p) and p not in current_path:
-                    # 将其添加到 PATH 的开头，以确保优先使用
-                    current_path = f"{p}:{current_path}"
-            
-            env["PATH"] = current_path
-
-            # 自动修复权限：如果命令指向本地文件且没有执行权限，自动添加 +x
-            try:
-                # 简单解析第一个命令段
-                cmd_parts = actual_command.strip().split()
-                if cmd_parts:
-                    exe_cmd = cmd_parts[0]
-                    # 确定当前工作目录
-                    current_cwd = actual_workdir if actual_workdir else os.getcwd()
-                    
-                    # 尝试解析文件路径
-                    target_file = None
-                    if os.path.isabs(exe_cmd):
-                        target_file = exe_cmd
-                    else:
-                        target_file = os.path.join(current_cwd, exe_cmd)
-                    
-                    # 检查文件是否存在且是文件
-                    if target_file and os.path.exists(target_file) and os.path.isfile(target_file):
-                        # 检查是否有执行权限
-                        if not os.access(target_file, os.X_OK):
-                            logger.info(f"🔧 [AutoFix] 检测到文件缺少执行权限，正在修复: {target_file}")
-                            st = os.stat(target_file)
-                            os.chmod(target_file, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-            except Exception as e:
-                logger.warning(f"⚠️ 自动修复权限时发生错误 (非致命): {e}")
-
-            # 自动依赖安装检测 (针对 Node.js/Bun 项目)
-            # 如果目录中有 package.json 且 node_modules 不存在，自动执行 bun install
-            if actual_workdir:
-                pkg_json = os.path.join(actual_workdir, "package.json")
-                node_modules = os.path.join(actual_workdir, "node_modules")
-                if os.path.exists(pkg_json) and not os.path.exists(node_modules):
-                    logger.info(f"检测到 package.json 但缺失 node_modules，尝试自动安装依赖... [{actual_workdir}]")
-                    try:
-                        # 优先使用 bun install (速度快)，如果失败可以回退到 npm (这里暂只用 bun)
-                        # 使用 npmmirror 确保国内速度
-                        install_cmd = "bun install --registry=https://registry.npmmirror.com/"
-                        
-                        # 确保 bun 在 PATH 中 (虽然上面已经加了，但为了保险)
-                        install_env = env.copy()
-                        
-                        subprocess.run(
-                            install_cmd, 
-                            cwd=actual_workdir, 
-                            shell=True, 
-                            env=install_env, 
-                            check=True, 
-                            stdout=subprocess.PIPE, 
-                            stderr=subprocess.PIPE,
-                            timeout=120 # 安装依赖可能耗时
-                        )
-                        logger.info("自动依赖安装成功")
-                    except Exception as e:
-                        logger.warning(f"自动依赖安装失败: {e}")
-                        # 即使失败也继续执行原命令，也许用户有全局依赖或者是其他情况
-
             # 执行命令
             exec_start_time = time.time()
-            logger.info(f"🚀 开始执行命令 [{process_id}]: {command}")
+            logger.info(f"[execute_shell_command] 准备执行命令, background={background}")
             
-            # 使用 shell=True 允许复杂的命令 (如 pipes, redirects)
-            # 注意：这在 windows 上和 unix 上行为不同
-            process = subprocess.Popen(
-                actual_command,
-                cwd=actual_workdir,
-                shell=True,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True, # 自动解码
-                preexec_fn=os.setsid if platform.system() != "Windows" else None
-            )
+            if background:
+                logger.info(f"[execute_shell_command] 调用 _execute_background")
+                result = self._execute_background(command, actual_workdir, env, process_id)
+            else:
+                logger.info(f"[execute_shell_command] 调用 _execute_normal")
+                result = self._execute_normal(command, actual_workdir, env, timeout, process_id)
             
-            # 添加到进程管理器
-            self.process_manager.add_process(process_id, process)
+            result["execution_time"] = time.time() - exec_start_time
+            logger.info(f"[execute_shell_command] 执行完成, result: {result.get('success')}")
+            return result
             
-            try:
-                # 等待命令完成
-                stdout, stderr = process.communicate(timeout=timeout)
-                
-                # CWD 捕获与清理 (Delegate to Sandbox)
-                if should_update_cwd and session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-                    stdout = session_context.sandbox.update_cwd_from_output(stdout, process_id)
-
-                execution_time = time.time() - exec_start_time
-                total_time = time.time() - start_time
-                return_code = process.returncode
-                
-                # 移除进程
-                self.process_manager.remove_process(process_id)
-                
-                # 记录历史
-                self._log_shell_history(command, workdir, return_code == 0, return_code, session_id)
-
-                if return_code == 0:
-                    logger.info(f"✅ 命令执行成功 [{process_id}] - 返回码: {return_code}, 执行耗时: {execution_time:.2f}秒, 总耗时: {total_time:.2f}秒")
-                    
-                    return {
-                        "success": True,
-                        "stdout": stdout,
-                        "stderr": stderr,
-                        "return_code": return_code,
-                        # "command": command,
-                        # "workdir": workdir,
-                        "execution_time": execution_time,
-                        # "total_time": total_time,
-                        # "process_id": process_id,
-                        # "pid": process.pid
-                    }
-                else:
-                    logger.warning(f"⚠️ 命令执行失败 [{process_id}] - 返回码: {return_code}, 执行耗时: {execution_time:.2f}秒")
-                    
-                    return {
-                        "success": False,
-                        "stdout": stdout,
-                        "stderr": stderr,
-                        "return_code": return_code,
-                        "command": command,
-                        "workdir": workdir,
-                        "execution_time": execution_time,
-                        "total_time": total_time,
-                        "process_id": process_id,
-                        "pid": process.pid
-                    }
-                    
-            except subprocess.TimeoutExpired:
-                # 超时处理
-                process.kill()
-                self.process_manager.remove_process(process_id)
-                execution_time = time.time() - exec_start_time
-                total_time = time.time() - start_time
-                
-                # 记录超时历史
-                self._log_shell_history(command, workdir, False, -1, session_id)
-
-                logger.error(f"⏰ 命令执行超时 [{process_id}] - 超时时间: {timeout}秒")
-                
-                return {
-                    "success": False,
-                    "error": f"命令执行超时 (>{timeout}秒)",
-                    "command": command,
-                    "timeout": timeout,
-                    "execution_time": execution_time,
-                    "total_time": total_time,
-                    "process_id": process_id,
-                    "pid": process.pid
-                }
-                
         except Exception as e:
-            # 清理进程
-            if process_id in self.process_manager.running_processes:
-                self.process_manager.terminate_process(process_id)
-                self.process_manager.remove_process(process_id)
-            
-            error_time = time.time() - start_time
-            # 记录异常历史
-            self._log_shell_history(command, workdir, False, -2, session_id)
-
-            logger.error(f"💥 命令执行异常 [{process_id}] - 错误: {str(e)}, 耗时: {error_time:.2f}秒")
-            logger.error(traceback.format_exc())
-            
             return {
                 "success": False,
                 "error": str(e),
-                "error_traceback": traceback.format_exc(),
                 "command": command,
-                "execution_time": error_time,
+                "execution_time": time.time() - start_time,
                 "process_id": process_id
             }
+    
+    def _fix_execute_permission(self, command: str, workdir: Optional[str]):
+        """自动修复执行权限"""
+        try:
+            cmd_parts = command.strip().split()
+            if not cmd_parts:
+                return
+            
+            exe_cmd = cmd_parts[0]
+            current_cwd = workdir or os.getcwd()
+            
+            if os.path.isabs(exe_cmd):
+                target_file = exe_cmd
+            else:
+                target_file = os.path.join(current_cwd, exe_cmd)
+            
+            if target_file and os.path.exists(target_file) and os.path.isfile(target_file):
+                if not os.access(target_file, os.X_OK):
+                    logger.info(f"🔧 [AutoFix] 修复执行权限: {target_file}")
+                    st = os.stat(target_file)
+                    os.chmod(target_file, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        except Exception:
+            pass
+    
+    def _execute_background(self, command: str, workdir: Optional[str], env: Dict, process_id: str) -> Dict[str, Any]:
+        """后台执行"""
+        logger.info(f"[_execute_background] 开始, workdir={workdir}")
+        log_dir = os.path.join(workdir or os.getcwd(), ".sandbox_logs")
+        logger.info(f"[_execute_background] log_dir={log_dir}")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"bg_{process_id}.log")
+        logger.info(f"[_execute_background] log_file={log_file}")
+        
+        # 使用括号包裹，确保 cd 在子 shell 中执行
+        nohup_cmd = f"nohup sh -c '{command}' > {log_file} 2>&1 &"
+        logger.info(f"[_execute_background] nohup_cmd={nohup_cmd}")
+        
+        logger.info(f"[_execute_background] 启动 subprocess, cwd={workdir}")
+        process = subprocess.Popen(
+            nohup_cmd,
+            cwd=workdir,
+            shell=True,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        logger.info(f"[_execute_background] subprocess 启动完成, pid={process.pid}")
+        
+        return {
+            "success": True,
+            "output": f"[后台任务已启动]\n命令: {command}\n进程ID: {process.pid}\n日志文件: {log_file}",
+            "process_id": process_id,
+            "is_background": True,
+            "log_file": log_file,
+        }
+    
+    def _execute_normal(self, command: str, workdir: Optional[str], env: Dict, timeout: int, process_id: str) -> Dict[str, Any]:
+        """普通执行"""
+        process = subprocess.Popen(
+            command,
+            cwd=workdir,
+            shell=True,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            preexec_fn=os.setsid if platform.system() != "Windows" else None
+        )
+        
+        self.process_manager.add_process(process_id, process)
+        
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            return_code = process.returncode
+            
+            if return_code == 0:
+                return {
+                    "success": True,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "return_code": return_code,
+                }
+            else:
+                return {
+                    "success": False,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "return_code": return_code,
+                    "command": command,
+                }
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return {
+                "success": False,
+                "error": f"命令执行超时 (>{timeout}秒)",
+                "command": command,
+                "timeout": timeout,
+            }
         finally:
-            # 清理已完成的进程
-            self.process_manager.cleanup_finished_processes()
+            self.process_manager.remove_process(process_id)
 
     @tool(
         description_i18n={
@@ -680,9 +470,14 @@ class ExecuteCommandTool:
             self._write_script_file(temp_file, code, workdir, session_id)
             
             # 参数类型校验与依赖处理
-            python_path = sys.executable
+            # 优先使用沙箱的 Python
+            from sagents.utils.sandbox import get_sandbox_python_path
+            python_path = get_sandbox_python_path(session_id)
+            
             if not python_path:
-                python_path = shutil.which("python") or shutil.which("python3")
+                python_path = sys.executable
+                if not python_path:
+                    python_path = shutil.which("python") or shutil.which("python3")
             
             if not python_path:
                 raise RuntimeError("未找到Python解释器，请确保Python已正确安装")
@@ -715,7 +510,8 @@ class ExecuteCommandTool:
                         install_result = self.execute_shell_command(
                             install_cmd,
                             workdir=workdir,
-                            timeout=120
+                            timeout=120,
+                            background=False
                         )
                         if install_result.get("success"):
                             newly_installed.append(package)
@@ -735,7 +531,8 @@ class ExecuteCommandTool:
             result = self.execute_shell_command(
                 python_cmd,
                 workdir=workdir,
-                timeout=timeout
+                timeout=timeout,
+                background=False
             )
             
             execution_time = time.time() - exec_start_time
@@ -810,194 +607,94 @@ class ExecuteCommandTool:
                               session_id: Optional[str] = None) -> Dict[str, Any]:
         """在临时文件中运行JavaScript代码，可选依赖安装
         
-        Args:
-            code (str): JavaScript代码文本
-            npm_packages (List[str] | str): 需要安装的npm包列表
-            workdir (str): 工作目录（可选）
-            timeout (int): 超时时间（秒）
-            session_id (str): 会话ID（可选，由ToolManager注入）
-
-        Returns:
-            Dict[str, Any]: 执行结果
+        使用 sandbox_utils 统一处理沙箱和非沙箱环境。
         """
+        from sagents.utils.sandbox import get_sandbox_host_path
+        
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
-        logger.info(f"📜 execute_javascript_code开始执行 [{process_id}] - 代码长度: {len(code)} 字符")
-        logger.info(f"📁 工作目录: {workdir or '临时目录'}, 超时: {timeout}秒")
-        
-        temp_file = None
-        # temp_dir = None
+        logger.info(f"📜 execute_javascript_code开始执行 [{process_id}]")
         
         try:
             # 检查node环境
             node_path = shutil.which("node")
             if not node_path:
-                raise RuntimeError("未找到Node.js环境，请确保Node.js已正确安装")
+                raise RuntimeError("未找到Node.js环境")
             
-            # 准备脚本环境：确定路径并确保目录存在
-            # 如果未指定workdir，将使用默认脚本目录进行备份和执行
+            # 准备脚本环境
             temp_file, workdir = self._prepare_script_environment(workdir, process_id, "js", session_id)
             
             # 写入代码文件
             self._write_script_file(temp_file, code, workdir, session_id)
             
-            newly_installed: List[str] = []
-            install_failed: List[Dict[str, Any]] = []
-
+            newly_installed = []
+            
             # 处理npm包依赖
             if npm_packages:
                 npm_packages = ensure_list(npm_packages)
-                
                 parsed_packages = [str(p).strip() for p in npm_packages if p]
+                
                 if parsed_packages:
-                    logger.info(f"📦 npm依赖包处理: {parsed_packages}")
-                    
-                    # 检查是否需要初始化package.json (如果不存在)
-                    # 注意：workdir 可能是虚拟路径，需要先解析为 host_path 才能检查文件是否存在
-                    host_workdir = workdir
-                    if session_id:
-                        try:
-                            from sagents.context.session_context import get_session_context
-                            session_context = get_session_context(session_id)
-                            if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-                                sandbox_fs = session_context.sandbox.file_system
-                                if hasattr(sandbox_fs, 'to_host_path'):
-                                    host_workdir = sandbox_fs.to_host_path(workdir)
-                        except Exception as e:
-                            logger.warning(f"解析 Host Path 失败: {e}")
-
+                    # 获取 host_path 检查 package.json
+                    host_workdir = get_sandbox_host_path(session_id) or workdir
                     pkg_json_path = os.path.join(host_workdir, "package.json")
-                    if not os.path.exists(pkg_json_path):
-                         self.execute_shell_command("npm init -y", workdir=workdir, timeout=10)
                     
-                    # 优化：检查是否所有包都已安装，避免重复运行 npm install
-                    packages_to_install = []
-                    try:
-                        # 简单的检查方式：查看 package.json 中的 dependencies
-                        # 更严谨的方式是 check node_modules，但这里先用 package.json 做快速筛选
-                        import json
-                        with open(pkg_json_path, 'r', encoding='utf-8') as f:
-                            pkg_data = json.load(f)
-                            dependencies = pkg_data.get('dependencies', {})
-                            
-                        for pkg in parsed_packages:
-                            # 处理带版本的包名 (e.g., "axios@1.0.0")
-                            pkg_name = pkg.split('@')[0] if '@' in pkg and not pkg.startswith('@') else pkg
-                            if pkg.startswith('@'): # scoped package @scope/pkg@ver
-                                parts = pkg.split('@')
-                                if len(parts) > 2: # has version
-                                    pkg_name = '@' + parts[1]
-                                else:
-                                    pkg_name = pkg
-                            
-                            if pkg_name not in dependencies:
-                                packages_to_install.append(pkg)
-                            elif not os.path.exists(os.path.join(host_workdir, "node_modules", pkg_name)):
-                                # 即使在 package.json 中，如果 node_modules 里没有，也需要安装
-                                packages_to_install.append(pkg)
-                    except Exception as e:
-                        # 如果解析出错，为了安全起见，全部尝试安装
-                        logger.warning(f"无法解析 package.json，将尝试安装所有包: {e}")
-                        packages_to_install = parsed_packages
-
-                    if packages_to_install:
-                        logger.info(f"需要安装的包: {packages_to_install}")
-                        # 批量安装，使用国内镜像源加速
-                        npm_registry = "https://registry.npmmirror.com/"
-                        npm_cmd = f"npm install --registry={npm_registry} {' '.join(packages_to_install)}"
-                        install_result = self.execute_shell_command(
-                            npm_cmd,
-                            workdir=workdir,
-                            timeout=120 # 安装依赖给更多时间
-                        )
-                        
-                        if install_result.get("success"):
-                            newly_installed.extend(packages_to_install)
-                        else:
-                            install_failed.append({
-                                "packages": packages_to_install,
-                                "return_code": install_result.get("return_code"),
-                                "stderr": install_result.get("stderr", ""),
-                                "stdout": install_result.get("stdout", "")
-                            })
-                    else:
-                        logger.info("所有依赖包已存在，跳过安装")
-
+                    if not os.path.exists(pkg_json_path):
+                        self.execute_shell_command("npm init -y", workdir=workdir, timeout=10, background=False)
+                    
+                    # 安装依赖
+                    npm_registry = "https://registry.npmmirror.com/"
+                    npm_cmd = f"npm install --registry={npm_registry} {' '.join(parsed_packages)}"
+                    install_result = self.execute_shell_command(npm_cmd, workdir=workdir, timeout=120, background=False)
+                    
+                    if install_result.get("success"):
+                        newly_installed = parsed_packages
+            
             # 执行JS代码
             exec_start_time = time.time()
-            logger.info(f"🚀 开始执行JavaScript代码 [{process_id}]")
-            
             node_cmd = f"{node_path} {temp_file}"
-            result = self.execute_shell_command(
-                node_cmd,
-                workdir=workdir,
-                timeout=timeout
-            )
-            
-            execution_time = time.time() - exec_start_time
-            total_time = time.time() - start_time
-            
-            if result["success"]:
-                logger.info(f"✅ JavaScript代码执行成功 [{process_id}] - 执行耗时: {execution_time:.2f}秒")
-            else:
-                logger.error(f"❌ JavaScript代码执行失败 [{process_id}] - 返回码: {result.get('return_code', 'unknown')}")
+            result = self.execute_shell_command(node_cmd, workdir=workdir, timeout=timeout, background=False)
             
             result.update({
                 "npm_packages": npm_packages,
                 "installed": newly_installed if npm_packages else None,
-                "total_execution_time": total_time
+                "execution_time": time.time() - exec_start_time,
+                "total_execution_time": time.time() - start_time
             })
             
-             # 如果执行失败，尽可能提供详细的错误trace
-            if not result.get("success"):
-                stderr_text = result.get("stderr") or ""
-                if stderr_text:
-                    result["error_traceback"] = stderr_text
-                if npm_packages:
-                    result["install_failed"] = install_failed or None
-            
-            if not result.get("success") and install_failed:
-                 result["error_hint"] = "检测到依赖安装失败，可能导致运行错误"
-
             return result
 
         except Exception as e:
-            error_time = time.time() - start_time
-            logger.error(f"💥 JavaScript代码执行异常 [{process_id}] - 错误: {str(e)}")
-            logger.error(traceback.format_exc())
-            
+            logger.error(f"💥 JavaScript代码执行异常: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
                 "error_traceback": traceback.format_exc(),
                 "code": code,
-                "execution_time": error_time,
+                "execution_time": time.time() - start_time,
                 "process_id": process_id
             }
-        finally:
-            # 脚本文件保留用于备份，不自动删除
-            pass
 
-    @tool(
-        description_i18n={
-            "zh": "检查系统命令是否可用及其路径",
-            "en": "Check whether system commands are available and their paths",
-            "pt": "Verificar se comandos do sistema estão disponíveis e seus caminhos"
-        },
-        param_description_i18n={
-            "commands": {"zh": "待检查的命令名列表", "en": "List of command names to check", "pt": "Lista de nomes de comando para verificar"}
-        },
-        return_data={
-            "type": "object",
-            "properties": {
-                "available": {"type": "boolean"},
-                "path": {"type": "string"},
-                "version": {"type": "string"},
-                "error": {"type": "string"}
-            },
-            "required": ["available"]
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "检查系统命令是否可用及其路径",
+    #         "en": "Check whether system commands are available and their paths",
+    #         "pt": "Verificar se comandos do sistema estão disponíveis e seus caminhos"
+    #     },
+    #     param_description_i18n={
+    #         "commands": {"zh": "待检查的命令名列表", "en": "List of command names to check", "pt": "Lista de nomes de comando para verificar"}
+    #     },
+    #     return_data={
+    #         "type": "object",
+    #         "properties": {
+    #             "available": {"type": "boolean"},
+    #             "path": {"type": "string"},
+    #             "version": {"type": "string"},
+    #             "error": {"type": "string"}
+    #         },
+    #         "required": ["available"]
+    #     }
+    # )
     def check_command_availability(self, commands: List[str]) -> Dict[str, Any]:
         """检查系统中命令的可用性
 

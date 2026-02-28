@@ -153,7 +153,7 @@ async def _api_brave_search(query: str, api_key: str, count: int = 10) -> List[D
     return results
 
 @mcp.tool()
-@sage_mcp_tool(server_name="brave_search")
+# @sage_mcp_tool(server_name="brave_search")
 async def brave_search(query: str, count: int = 10) -> str:
     """
     Search the web using Brave Search.
