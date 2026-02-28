@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Add cargo to PATH
+export PATH="$HOME/.cargo/bin:$PATH"
 
 ########################################
 # Sage Desktop Industrial Build Script
@@ -158,9 +160,8 @@ echo "Building frontend..."
 
 cd "$ROOT_DIR/app/desktop/ui"
 
-if [ ! -d node_modules ]; then
-  npm ci
-fi
+# Always install/update dependencies to ensure everything in package.json is installed
+npm install
 
 npm run build
 
@@ -173,11 +174,10 @@ cd "$ROOT_DIR"
 CERT_DIR="$ROOT_DIR/app/desktop/scripts/certs"
 CERT_B64_FILE="$CERT_DIR/cert.p12.base64"
 
-# Generate certificate if it doesn't exist
-if [ ! -f "$CERT_B64_FILE" ]; then
-  echo "Generating self-signed certificate..."
-  "$ROOT_DIR/app/desktop/scripts/generate_cert.sh"
-fi
+# Generate certificate (script checks if regeneration is needed)
+echo "Checking self-signed certificate..."
+chmod +x "$ROOT_DIR/app/desktop/scripts/generate_cert.sh"
+"$ROOT_DIR/app/desktop/scripts/generate_cert.sh"
 
 if [ -f "$CERT_B64_FILE" ]; then
   echo "Setting up self-signed certificate..."
