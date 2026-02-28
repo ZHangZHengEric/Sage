@@ -19,7 +19,7 @@ app/
 ├── desktop/                # 桌面客户端根目录
 │   ├── ui/                 # Vue 前端代码 (原 app/desktop/web)
 │   ├── core/               # Python 核心逻辑与 Sidecar (原 app/desktop/server + src_python)
-│   │   ├── run_desktop.py  # Sidecar 入口点
+│   │   ├── .py  # Sidecar 入口点
 │   │   ├── adapters/       # 本地适配器 (FileStorage, VectorStore)
 │   │   ├── requirements.txt# 依赖列表
 │   │   └── ...             # 核心业务逻辑
@@ -90,7 +90,7 @@ app/
 
 ### 5.1. Python 构建
 1.  安装依赖（包括 `pyinstaller`）。
-2.  对 `app/desktop/core/run_desktop.py` 运行 `pyinstaller`。
+2.  对 `app/desktop/core/main.py` 运行 `pyinstaller`。
 3.  将可执行文件输出到 `app/desktop/tauri/bin/`。
 
 ### 5.2. 前端构建

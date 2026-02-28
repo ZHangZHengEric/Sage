@@ -12,7 +12,6 @@ class BaseChatRequest(BaseModel):
     """基础聊天请求，包含公共字段"""
     messages: List[Message]
     session_id: Optional[str] = None
-    user_id: Optional[str] = None
     system_context: Optional[Dict[str, Any]] = None
     
     def __init__(self, **data):
@@ -48,7 +47,6 @@ class StreamRequest(BaseChatRequest):
     system_prefix: Optional[str] = None
     available_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
-    available_knowledge_bases: Optional[List[str]] = None
     available_sub_agent_ids: Optional[List[str]] = None
     force_summary: Optional[bool] = False
     memory_type: Optional[str] = "session"

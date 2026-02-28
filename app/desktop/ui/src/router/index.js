@@ -3,24 +3,12 @@ import ChatPage from '../views/Chat.vue'
 import AgentConfigPage from '../views/AgentList.vue'
 import ToolsPage from '../views/ToolList.vue'
 import HistoryPage from '../views/ChatHistory.vue'
-import KnowledgeBasePage from '../views/KnowledgeBaseList.vue'
 import SkillLibraryPage from '../views/SkillList.vue'
-import ApiAgentChatPage from '../views/ApiAgentChat.vue'
 import UserListPage from '../views/UserList.vue'
 import SystemSettingsPage from '../views/SystemSettings.vue'
 
-import OnboardingPage from '../views/Onboarding.vue'
 
 const routes = [
-  {
-    path: '/onboarding',
-    name: 'Onboarding',
-    component: OnboardingPage,
-    meta: {
-      title: 'onboarding.title',
-      public: true
-    }
-  },
   {
     path: '/agent/chat',
     name: 'Chat',
@@ -63,35 +51,11 @@ const routes = [
     }
   },
   {
-    path: '/agent/knowledge-base',
-    name: 'KnowledgeBase',
-    component: KnowledgeBasePage,
-    meta: {
-      title: 'knowledgeBase.title'
-    }
-  },
-  {
-    path: '/agent/knowledge-base/:kdbId',
-    name: 'KnowledgeBaseDetail',
-    component: () => import('../views/KnowledgeBaseDetail.vue'),
-    meta: {
-      title: 'knowledgeBase.title'
-    }
-  },
-  {
     path: '/agent/skills',
     name: 'Skills',
     component: SkillLibraryPage,
     meta: {
       title: 'skills.title'
-    }
-  },
-  {
-    path: '/agent/api-doc/agent-chat',
-    name: 'ApiAgentChat',
-    component: ApiAgentChatPage,
-    meta: {
-      title: 'api.agentChatTitle'
     }
   },
   {
@@ -133,6 +97,15 @@ const routes = [
     component: () => import('../views/MobileMe.vue'),
     meta: {
       title: 'sidebar.userProfile'
+    }
+  },
+  {
+    path: '/setup',
+    name: 'Setup',
+    component: () => import('../views/Setup.vue'),
+    meta: {
+      title: 'common.setup',
+      public: true
     }
   },
   // 重定向根路径到聊天页面

@@ -22,6 +22,7 @@ fi
 source "$VENV_DIR/bin/activate"
 
 echo "Installing Python dependencies..."
+pip install --upgrade setuptools
 pip install -r "$CORE_DIR/requirements.txt"
 
 # 2. Check and install frontend dependencies
@@ -56,7 +57,7 @@ else
 fi
 
 if [ -n "$TARGET" ]; then
-    SIDECAR_NAME="sage-server-$TARGET"
+    SIDECAR_NAME="sage-desktop-sidecar-$TARGET"
     if [[ "$OS" == MINGW* ]] || [[ "$OS" == CYGWIN* ]]; then
         SIDECAR_NAME="$SIDECAR_NAME.exe"
     fi
@@ -87,8 +88,8 @@ VENV_PYTHON="\$CORE_DIR/.venv/bin/python"
 export PYTHONPATH="\$PROJECT_ROOT:\$PYTHONPATH"
 
 # Execute Python script
-echo "Wrapper starting Python sidecar from source: \$CORE_DIR/run_desktop.py"
-exec "\$VENV_PYTHON" "\$CORE_DIR/run_desktop.py"
+echo "Wrapper starting Python sidecar from source: app.desktop.core.main"
+exec "\$VENV_PYTHON" -m app.desktop.core.main
 EOF
         chmod +x "$SIDECAR_PATH"
     fi
@@ -105,6 +106,15 @@ export RUST_LOG=info
 if ! command -v cargo &> /dev/null; then
     echo "Error: cargo not found. Please install Rust."
     exit 1
+fi
+
+# Check if tauri-cli is installed
+if ! cargo tauri --version &> /dev/null; then
+    echo "Tauri CLI not found. Installing..."
+    cargo install tauri-cli --version "^1.5"
+elif [[ $(cargo tauri --version) == *"tauri-cli 2"* ]]; then
+     echo "Tauri CLI v2 detected but v1 is required. Installing v1..."
+     cargo install tauri-cli --version "^1.5" --force
 fi
 
 # Run Tauri Dev

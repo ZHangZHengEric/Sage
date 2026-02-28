@@ -1,8 +1,7 @@
 import asyncio
 import hashlib
 import json
-import os
-from re import S
+from pathlib import Path
 import time
 import traceback
 import uuid
@@ -10,7 +9,6 @@ import uuid
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
-    delete_session_run_lock,
     get_session_context,
     get_session_run_lock,
 )
@@ -80,8 +78,6 @@ async def populate_request_from_agent_config(
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
             request.memory_type = agent_config.get("memoryType")
-        if agent_config.get("availableKnowledgeBases") is not None:
-            request.available_knowledge_bases = agent_config.get("availableKnowledgeBases")
         if agent_config.get("availableSubAgentIds") is not None:
             request.available_sub_agent_ids = agent_config.get("availableSubAgentIds")
 
@@ -146,39 +142,9 @@ async def populate_request_from_agent_config(
     _merge_dict("system_context", {})
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
-    _fill_if_none("available_knowledge_bases", [])
     _fill_if_none("available_sub_agent_ids", [])
-    user = {"本次会话用户id": request.user_id or "default_user"}
-    _merge_dict("system_context", user)
     if request.agent_id and agent:
         _merge_dict("system_context", {"当前AgentId": request.agent_id})
-
-    # 处理可用知识库
-    available_knowledge_bases = request.available_knowledge_bases
-    if available_knowledge_bases:
-        kdb_dao = models.KdbDao()
-        # 分页获取所有关联的知识库
-        kdbs, _ = await kdb_dao.get_kdbs_paginated(
-            kdb_ids=available_knowledge_bases,
-            data_type=None,
-            query_name=None,
-            page=1,
-            page_size=1000,
-        )
-
-        if kdbs:
-            # 1. 注入 system_context
-            kdb_context = {}
-            for kdb in kdbs:
-                index_name = kdb.get_index_name()
-                kdb_context[f"{kdb.name}数据库的index_name"] = index_name
-
-            _merge_dict("system_context", kdb_context)
-
-            # 2. 添加 retrieve_on_zavixai_db 工具
-            current_tools = request.available_tools
-            if "retrieve_on_zavixai_db" not in current_tools:
-                current_tools.append("retrieve_on_zavixai_db")
 
     # 处理可用技能
     available_skills = request.available_skills
@@ -273,7 +239,7 @@ async def populate_request_from_agent_config(
                 del request.system_context['extra_mcp_config']
         else:
             logger.warning("ToolManager not available, cannot register MCP servers")
-            
+
 class SageStreamService:
     """Sage 流式服务类"""
 
@@ -286,13 +252,10 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
-        config = get_startup_config()
-        workspace = config.workspace
-        if workspace:
-            workspace = os.path.abspath(workspace)
-            if not workspace.endswith('/'):
-                workspace += '/'
-
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        workspace = sage_home / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
@@ -322,7 +285,7 @@ class SageStreamService:
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
                 session_id=session_id,
-                user_id=self.request.user_id,
+                user_id="default_user",
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
                 multi_agent=self.request.multi_agent,
@@ -344,7 +307,7 @@ class SageStreamService:
                     result = ContentProcessor.clean_content(result)
 
                     yield result
-                    
+
         except Exception as e:
             logger.bind(session_id=session_id).error(f"❌ 流式处理异常: {traceback.format_exc()}")
             error_result = {
@@ -425,12 +388,11 @@ async def _ensure_conversation(request: StreamRequest) -> None:
     if not existing_conversation:
         conversation_title = await create_conversation_title(request)
         await conversation_dao.save_conversation(
-            user_id=request.user_id or "default_user",
+            session_id=request.session_id,
             agent_id=request.agent_id or "default_agent",
             agent_name=request.agent_name or "Sage Assistant",
-            messages=[],
-            session_id=request.session_id,
             title=conversation_title,
+            messages=[],
         )
 
 async def create_conversation_title(request: StreamRequest):
