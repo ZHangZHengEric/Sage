@@ -153,7 +153,7 @@ async def get_default_system_prompt(language: str = "zh"):
         # 这里为了作为草稿，我们预填 Sage
         if "{agent_name}" in content:
             content = content.format(agent_name="Sage")
-            
+        content = ""
         return await Response.succ(
             data={"content": content},
             message="成功获取默认System Prompt模板"
