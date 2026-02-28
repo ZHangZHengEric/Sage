@@ -24,9 +24,9 @@ build-macos:
     - npm install -g tauri
     - cd app/desktop/src_python
     - pip install -r requirements.txt pyinstaller
-    - pyinstaller --clean --noconfirm --name sage-server --onefile --windowed main.py
+    - pyinstaller --clean --noconfirm --name sage-desktop --onefile --windowed main.py
     - mkdir -p ../tauri/bin
-    - cp dist/sage-server ../tauri/bin/sage-server-x86_64-apple-darwin
+    - cp dist/sage-desktop ../tauri/bin/sage-desktop-x86_64-apple-darwin
     - cd ../../../app/web
     - npm install
     - npm run build
@@ -46,9 +46,9 @@ build-windows:
     - echo "Building for Windows..."
     - cd app/desktop/src_python
     - pip install -r requirements.txt pyinstaller
-    - pyinstaller --clean --noconfirm --name sage-server --onefile --windowed main.py
+    - pyinstaller --clean --noconfirm --name sage-desktop --onefile --windowed main.py
     - mkdir -p ../tauri/bin
-    - copy dist/sage-server.exe ../tauri/bin/sage-server-x86_64-pc-windows-msvc.exe
+    - copy dist/sage-desktop.exe ../tauri/bin/sage-desktop-x86_64-pc-windows-msvc.exe
     - cd ../../../app/web
     - npm install
     - npm run build

@@ -87,7 +87,6 @@ const props = defineProps({
   agent: { type: Object, default: null },
   tools: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] },
-  knowledgeBases: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['update:visible', 'save'])
@@ -109,8 +108,7 @@ const stepProps = computed(() => {
   if (store.currentStep === 2) {
     return {
       tools: props.tools,
-      skills: props.skills,
-      knowledgeBases: props.knowledgeBases
+      skills: props.skills
     }
   }
   return {}
