@@ -319,6 +319,13 @@ const request = new Request()
 export default request
 export {Request}
 
+// 动态设置 Base URL
+export const setBaseURL = (url) => {
+    console.log('[Request] Updating Base URL to:', url)
+    request.baseURL = url
+    // Update axios instance defaults if needed (but Request class uses this.baseURL in request method)
+}
+
 // 便捷方法
 export const get = (url, params, config) => request.get(url, params, config)
 export const post = (url, data, config) => request.post(url, data, config)

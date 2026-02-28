@@ -62,6 +62,7 @@
       },
       "resources": [
         "../../skills",
+        "../../../mcp_servers",
         "sidecar"
       ],
       "shortDescription": "",
