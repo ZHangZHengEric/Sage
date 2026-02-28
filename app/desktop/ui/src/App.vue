@@ -59,14 +59,16 @@ const checkSystemInitialization = async () => {
   try {
     const res = await systemAPI.getSystemInfo()
     if (!res.has_model_provider || !res.has_agent) {
+       // If system is not initialized, we MUST go to Setup
        if (route.name !== 'Setup') {
          router.replace('/setup')
        }
     } else {
-       // Check onboarding
-       const hasSeenOnboarding = localStorage.getItem('hasSeenOnboarding')
-       if (!hasSeenOnboarding && route.name !== 'Onboarding') {
-         router.replace('/onboarding')
+       // System IS initialized
+       // If user is currently on Setup page, redirect to home
+       if (route.name === 'Setup') {
+          router.replace('/')
+          return
        }
     }
   } catch (e) {
