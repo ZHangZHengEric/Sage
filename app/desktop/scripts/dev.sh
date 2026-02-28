@@ -4,6 +4,9 @@ set -e
 # Add cargo to PATH
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Disable sandbox for desktop app
+export SAGE_USE_SANDBOX=False
+
 # 1. Determine paths
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 APP_ROOT="$SCRIPT_DIR/.."
