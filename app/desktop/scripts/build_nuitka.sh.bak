@@ -1,0 +1,128 @@
+#!/bin/bash
+set -e
+
+# Add cargo to PATH
+export PATH="$HOME/.cargo/bin:$PATH"
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+# Detect OS
+OS="$(uname -s)"
+case "${OS}" in
+    Linux*)     OS_TYPE=Linux;;
+    Darwin*)    OS_TYPE=Mac;;
+    CYGWIN*)    OS_TYPE=Cygwin;;
+    MINGW*)     OS_TYPE=MinGw;;
+    *)          OS_TYPE="UNKNOWN:${OS}"
+esac
+
+echo "Building with Nuitka for $OS_TYPE..."
+
+# 1. Setup Python Environment
+echo "Setting up Python environment..."
+VENV_DIR="$ROOT_DIR/app/desktop/core/.venv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating Python virtual environment at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+source "$VENV_DIR/bin/activate"
+
+# Install dependencies
+echo "Installing dependencies..."
+pip install --upgrade pip
+pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt"
+# Install Nuitka and optimization dependencies
+pip install nuitka zstandard ordered-set
+
+# 2. Build Python Sidecar with Nuitka
+echo "Compiling Python Sidecar with Nuitka..."
+cd "$ROOT_DIR/app/desktop"
+export PYTHONPATH="$ROOT_DIR:$PYTHONPATH"
+
+# Clean previous build (ONLY dist, keep build cache)
+rm -rf "$ROOT_DIR/app/desktop/dist_nuitka"
+# DO NOT remove build_nuitka to enable incremental compilation
+# rm -rf "$ROOT_DIR/app/desktop/build_nuitka"
+
+# Enable Nuitka Caching
+export NUITKA_CACHE_DIR="$ROOT_DIR/.nuitka_cache"
+echo "Nuitka cache directory: $NUITKA_CACHE_DIR"
+
+# Determine number of cores for parallel compilation
+if [[ "$OS_TYPE" == "Mac" ]]; then
+    CPU_CORES=$(sysctl -n hw.ncpu)
+else
+    CPU_CORES=$(nproc)
+fi
+JOBS=${CPU_CORES:-4}
+
+echo "Using $JOBS jobs for compilation."
+
+# Nuitka compilation
+# --standalone: REQUIRED for cross-system portability (bundles Python + libs)
+# --onefile: Pack into a single binary
+# --jobs: Parallel compilation
+# --lto=no: Disable Link Time Optimization for faster build
+python -m nuitka --standalone --onefile \
+    --jobs="$JOBS" \
+    --lto=no \
+    --output-dir="$ROOT_DIR/app/desktop/dist_nuitka" \
+    --include-package=app.desktop.core \
+    --include-package=uvicorn \
+    --include-package=fastapi \
+    --include-package=sqlalchemy \
+    --include-package=aiosqlite \
+    --include-module=sqlalchemy.dialects.sqlite.aiosqlite \
+    --include-module=greenlet \
+    --output-dir="$ROOT_DIR/app/desktop/dist_nuitka" \
+    --output-filename=sage-desktop \
+    --assume-yes-for-downloads \
+    entry.py
+
+echo "Nuitka build finished."
+
+# 3. Move binary to tauri/bin
+mkdir -p "$ROOT_DIR/app/desktop/tauri/bin"
+DIST_DIR="$ROOT_DIR/app/desktop/dist_nuitka"
+
+if [ "$OS_TYPE" == "Mac" ]; then
+    ARCH=$(uname -m)
+    if [ "$ARCH" == "arm64" ]; then
+        TARGET="aarch64-apple-darwin"
+    else
+        TARGET="$ARCH-apple-darwin"
+    fi
+    # Nuitka on Mac might output sage-desktop.bin or just sage-desktop
+    if [ -f "$DIST_DIR/sage-desktop.bin" ]; then
+        cp "$DIST_DIR/sage-desktop.bin" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
+    elif [ -f "$DIST_DIR/sage-desktop" ]; then
+        cp "$DIST_DIR/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
+    else
+        echo "Sidecar binary not found under $DIST_DIR"
+        ls -R "$DIST_DIR"
+        exit 1
+    fi
+elif [ "$OS_TYPE" == "MinGw" ] || [ "$OS_TYPE" == "Cygwin" ]; then
+    TARGET="x86_64-pc-windows-msvc"
+    if [ -f "$DIST_DIR/sage-desktop.exe" ]; then
+        cp "$DIST_DIR/sage-desktop.exe" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET.exe"
+    else
+        echo "Sidecar binary not found under $DIST_DIR"
+        exit 1
+    fi
+else
+    TARGET="x86_64-unknown-linux-gnu"
+    if [ -f "$DIST_DIR/sage-desktop.bin" ]; then
+        cp "$DIST_DIR/sage-desktop.bin" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
+    elif [ -f "$DIST_DIR/sage-desktop" ]; then
+        cp "$DIST_DIR/sage-desktop" "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
+    else
+        echo "Sidecar binary not found under $DIST_DIR"
+        exit 1
+    fi
+fi
+
+chmod +x "$ROOT_DIR/app/desktop/tauri/bin/sage-desktop-sidecar-$TARGET"
+echo "Binary moved to tauri/bin/sage-desktop-sidecar-$TARGET"

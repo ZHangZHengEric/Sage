@@ -103,6 +103,9 @@ def start_server(port: int = 8080):
 
 def main():
     try:
+        # Force stdout to be unbuffered
+        sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+        
         user_home = Path.home()
         sage_home = user_home / ".sage"
         sage_home.mkdir(parents=True, exist_ok=True)
@@ -118,12 +121,12 @@ def main():
 
         cfg = init_startup_config()
         port = 8080
-        print(f"Starting Sage Desktop Server on port {port}...")
+        print(f"Starting Sage Desktop Server on port {port}...", flush=True)
         init_logging(log_name="sage-desktop", log_level="INFO", log_path=logs_dir)
         start_server(port)  
         return 0
     except KeyboardInterrupt:
-        print("服务收到中断信号，正在退出...")
+        print("服务收到中断信号，正在退出...", flush=True)
         return 0
     except SystemExit:
         return 0

@@ -199,3 +199,13 @@ skills/*
 .pyinstaller
 .rustup
 app/desktop/tauri/bin/*
+
+# Nuitka build artifacts
+app/desktop/build_nuitka/
+app/desktop/dist_nuitka/
+.nuitka_cache/
+*.build/
+*.dist/
+*.onefile-build/
+sidecar
+
