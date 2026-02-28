@@ -52,7 +52,7 @@
       "identifier": "com.sage.desktop",
       "longDescription": "",
       "macOS": {
-        "entitlements": null,
+        "entitlements": "Entitlements.plist",
         "exceptionDomain": "",
         "frameworks": [],
         "providerShortName": null,
@@ -60,7 +60,7 @@
       },
       "resources": [],
       "shortDescription": "",
-      "targets": "all",
+      "targets": ["app"],
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
