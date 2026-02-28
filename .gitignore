@@ -209,3 +209,6 @@ app/desktop/dist_nuitka/
 *.onefile-build/
 sidecar
 
+
+# Certificates
+app/desktop/scripts/certs
