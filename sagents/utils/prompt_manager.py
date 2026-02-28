@@ -13,28 +13,25 @@ from sagents.utils.logger import logger
 def _auto_import_prompt_modules():
     """自动导入prompts文件夹下的所有prompt模块"""
     import importlib
-    import glob
-    
+    import pkgutil
+    import sagents.prompts
+
     prompt_modules = {}
-    prompts_dir = Path(__file__).parent.parent / "prompts"
     
     try:
-        # 获取所有.py文件（排除__init__.py）
-        pattern = str(prompts_dir / "*.py")
-        for file_path in glob.glob(pattern):
-            file_name = Path(file_path).stem
-            if file_name == "__init__":
-                continue
-                
+        # 使用 pkgutil 遍历 sagents.prompts 包下的模块
+        # 这比 glob 更可靠，尤其是在打包后的环境中
+        prefix = sagents.prompts.__name__ + "."
+        
+        for _, name, _ in pkgutil.iter_modules(sagents.prompts.__path__, prefix):
             try:
                 # 动态导入模块
-                module_name = f"sagents.prompts.{file_name}"
-                module = importlib.import_module(module_name)
+                module = importlib.import_module(name)
                 
                 # 获取模块的AGENT_IDENTIFIER
                 agent_identifier = getattr(module, 'AGENT_IDENTIFIER', None)
                 if agent_identifier is None:
-                    logger.warning(f"模块 {module_name} 缺少AGENT_IDENTIFIER变量，跳过")
+                    logger.warning(f"模块 {name} 缺少AGENT_IDENTIFIER变量，跳过")
                     continue
                 
                 # 新结构：查找模块中的prompt变量（不以_开头，不是AGENT_IDENTIFIER，且是字典类型）
@@ -67,7 +64,7 @@ def _auto_import_prompt_modules():
                         prompt_modules[f"{agent_identifier}_PROMPTS_EN"] = en_prompts
                     if pt_prompts:
                         prompt_modules[f"{agent_identifier}_PROMPTS_PT"] = pt_prompts
-                    logger.debug(f"成功导入prompt模块: {module_name} (agent: {agent_identifier}, zh: {len(zh_prompts)}, en: {len(en_prompts)}, pt: {len(pt_prompts)})")
+                    logger.debug(f"成功导入prompt模块: {name} (agent: {agent_identifier}, zh: {len(zh_prompts)}, en: {len(en_prompts)}, pt: {len(pt_prompts)})")
                 else:
                     # 兼容旧格式：查找模块中的PROMPTS变量
                     for attr_name in dir(module):
@@ -80,10 +77,10 @@ def _auto_import_prompt_modules():
                             else:
                                 key = f"{agent_identifier}_PROMPTS_PT"
                             prompt_modules[key] = getattr(module, attr_name)
-                    logger.debug(f"成功导入prompt模块(旧格式): {module_name} (agent: {agent_identifier})")
+                    logger.debug(f"成功导入prompt模块(旧格式): {name} (agent: {agent_identifier})")
                         
             except ImportError as e:
-                logger.warning(f"无法导入prompt模块 {module_name}: {e}")
+                logger.warning(f"无法导入prompt模块 {name}: {e}")
                 
         return prompt_modules, True
     except Exception as e:

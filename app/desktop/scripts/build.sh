@@ -54,10 +54,22 @@ echo "Target: $TARGET"
 # 1. Python Environment Setup
 ########################################
 
+# Clear Conda environment variables to prevent PyInstaller from misidentifying the environment
+unset CONDA_PREFIX
+unset CONDA_DEFAULT_ENV
+unset CONDA_PYTHON_EXE
+unset CONDA_SHLVL
+unset CONDA_EXE
+unset CONDA_PROMPT_MODIFIER
+
 if [ ! -d "$VENV_DIR" ]; then
   echo "Creating virtualenv..."
   python3 -m venv "$VENV_DIR"
 fi
+
+# Create a fake conda-meta directory to suppress PyInstaller warnings
+# when using a venv created by Conda Python
+mkdir -p "$VENV_DIR/conda-meta"
 
 source "$VENV_DIR/bin/activate"
 
