@@ -87,6 +87,7 @@ PYI_FLAGS=(
   --noconfirm
   --clean
   --onedir
+  --log-level=WARN
   --name sage-desktop
   --hidden-import=aiosqlite
   --hidden-import=greenlet
