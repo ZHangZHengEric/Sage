@@ -62,13 +62,13 @@ async def initialize_skill_manager():
     try:
         skill_manager_instance = SkillManager.get_instance()
         
+        # 复制默认 skills 到用户目录
+        await copy_default_skills()
+        
         # 检查并添加 sage_home/skills 目录
         from pathlib import Path
         user_home = Path.home()
-        sage_home = user_home / ".sage"
-        sage_skills_dir = sage_home / "skills"
-        
-        # 创建目录（如果不存在）
+        sage_skills_dir = user_home / ".sage" / "skills"
         sage_skills_dir.mkdir(parents=True, exist_ok=True)
         
         # 添加到 skill manager
@@ -79,6 +79,71 @@ async def initialize_skill_manager():
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")
         return None
+
+
+async def copy_default_skills():
+    """复制默认 skills 到用户目录（如果是首次运行）"""
+    try:
+        import shutil
+        from pathlib import Path
+        
+        # 用户 skills 目录
+        user_home = Path.home()
+        user_skills_dir = user_home / ".sage" / "skills"
+        user_skills_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 检查是否已初始化（通过检查标记文件）
+        init_marker = user_skills_dir / ".defaults_copied"
+        if init_marker.exists():
+            logger.debug("默认 skills 已复制，跳过")
+            return
+        
+        # 获取打包的默认 skills 目录
+        # 在开发环境中使用相对路径，在生产环境中使用 tauri 资源路径
+        default_skills_dir = None
+        
+        # 尝试从 tauri 资源目录获取
+        try:
+            import os
+            # 检查是否在 tauri 环境中
+            if 'TAURI_RESOURCES_DIR' in os.environ:
+                default_skills_dir = Path(os.environ['TAURI_RESOURCES_DIR']) / "skills"
+            else:
+                # 开发环境：使用相对路径
+                current_file = Path(__file__).resolve()
+                default_skills_dir = current_file.parent.parent.parent / "skills"
+        except Exception as e:
+            logger.warning(f"无法确定默认 skills 目录: {e}")
+            return
+        
+        if not default_skills_dir or not default_skills_dir.exists():
+            logger.warning(f"默认 skills 目录不存在: {default_skills_dir}")
+            return
+        
+        logger.info(f"复制默认 skills 从 {default_skills_dir} 到 {user_skills_dir}")
+        
+        # 复制每个 skill
+        copied_count = 0
+        for skill_path in default_skills_dir.iterdir():
+            if skill_path.is_dir():
+                target_path = user_skills_dir / skill_path.name
+                if target_path.exists():
+                    logger.debug(f"Skill {skill_path.name} 已存在，跳过")
+                    continue
+                
+                try:
+                    shutil.copytree(skill_path, target_path)
+                    logger.info(f"已复制 skill: {skill_path.name}")
+                    copied_count += 1
+                except Exception as e:
+                    logger.error(f"复制 skill {skill_path.name} 失败: {e}")
+        
+        # 创建标记文件
+        init_marker.touch()
+        logger.info(f"默认 skills 复制完成，共复制 {copied_count} 个")
+        
+    except Exception as e:
+        logger.error(f"复制默认 skills 失败: {e}")
 
 
 async def close_skill_manager():

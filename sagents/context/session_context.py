@@ -38,6 +38,7 @@ class SessionContext:
         self,
         session_id: str,
         user_id: Optional[str] = None,
+        system_context: Optional[Dict[str, Any]] = None,
         workspace_root: str = "",
         context_budget_config: Optional[Dict[str, Any]] = None,
         user_memory_manager: Optional[UserMemoryManager] = None,
@@ -51,7 +52,7 @@ class SessionContext:
         self.start_time = time.time()
         self.end_time = None
         self.status = SessionStatus.IDLE
-        self.system_context: Dict[str, Any] = {}       # 当前系统的环境变量
+        self.system_context: Dict[str, Any] = system_context or {}       # 当前系统的环境变量
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
         from sagents.context.tasks.task_manager import TaskManager
         self.task_manager = TaskManager(session_id=self.session_id)
@@ -110,17 +111,18 @@ class SessionContext:
 
     def init_more(self, workspace_root: str):
         use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
-
+        logger.info(f"SessionContext: use_sandbox: {use_sandbox}")
         # 2. 会话根目录
         self.session_workspace = os.path.join(workspace_root, self.session_id)
         os.makedirs(self.session_workspace, exist_ok=True)
 
         _agent_workspace_host_path = self.system_context.get("agent_host_workspace_path", None)
-        
+        logger.info(f"SessionContext: agent_host_workspace_path: {_agent_workspace_host_path}")
         if _agent_workspace_host_path is not None:
             if os.path.exists(_agent_workspace_host_path)==False:
                 try:
                     os.makedirs(_agent_workspace_host_path, exist_ok=True)
+                    logger.info(f"SessionContext: Created agent_host_workspace_path: {_agent_workspace_host_path}")
                 except Exception as e:
                     logger.error(f"SessionContext: Failed to create agent_host_workspace_path: {e}")
                     _agent_workspace_host_path = None
@@ -133,6 +135,7 @@ class SessionContext:
             _agent_workspace_host_path = os.path.join(self.session_workspace, "agent_workspace")
             os.makedirs(_agent_workspace_host_path, exist_ok=True)
         
+        logger.info(f"SessionContext: agent_workspace_host_path: {_agent_workspace_host_path}")
         # 1. 虚拟工作空间路径（容器内路径）
         # 使用 /sage-workspace 避免与宿主机可能存在的 /workspace 冲突
         # 如果不使用沙箱，则 virtual_workspace 与 host_workspace 一致
@@ -963,6 +966,7 @@ def init_session_context(
     user_memory_manager: Optional[Any] = None,
     tool_manager: Optional[Any] = None,
     skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
+    system_context: Optional[Dict[str, Any]] = None,
 ) -> SessionContext:
     """初始化会话上下文"""
     if session_id in _active_sessions:
@@ -976,7 +980,8 @@ def init_session_context(
     _active_sessions[session_id] = SessionContext(
         session_id,
         user_id,
-        workspace_root,
+        system_context=system_context,
+        workspace_root=workspace_root,
         context_budget_config=context_budget_config,
         user_memory_manager=user_memory_manager,
         tool_manager=tool_manager,
