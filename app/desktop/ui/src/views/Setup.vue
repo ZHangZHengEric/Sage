@@ -252,38 +252,43 @@ const handleModelSubmit = async () => {
     return
   }
   
-  // Just validate and move to next step, don't save yet
-  step.value = 'agent'
-  // Fetch resources now so they are available for Agent step
-  await fetchResources()
+  loading.value = true
+  try {
+    const data = {
+      name: modelForm.name,
+      base_url: modelForm.base_url,
+      api_keys: modelForm.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+      model: modelForm.model,
+      max_tokens: modelForm.maxTokens,
+      temperature: modelForm.temperature,
+      top_p: modelForm.topP,
+      presence_penalty: modelForm.presencePenalty,
+      max_model_len: modelForm.maxModelLen,
+      is_default: true
+    }
+
+    await modelProviderAPI.createModelProvider(data)
+    
+    step.value = 'agent'
+    // Fetch resources now so they are available for Agent step
+    await fetchResources()
+  } catch (error) {
+    console.error('Failed to save model provider:', error)
+    toast.error(error.message || 'Failed to save model provider')
+  } finally {
+    loading.value = false
+  }
 }
 
 const handleAgentSaved = async (agentData, shouldExit = true, doneCallback = null) => {
+  // Only save to backend if it is the final step
+  if (!shouldExit) {
+     if (doneCallback) doneCallback()
+     return
+  }
+
   loading.value = true
   try {
-    // 1. First save the Model Provider
-    const keys = modelForm.api_keys_str
-      .split(/[\n,]/)
-      .map(k => k.trim())
-      .filter(k => k)
-
-    // Check if we need to create model provider (only if not already exists)
-    if (!systemStatus.value.has_model_provider) {
-        try {
-            await modelProviderAPI.createModelProvider({
-              ...modelForm,
-              api_keys: keys,
-              is_default: true 
-            })
-            // Mark as done so we don't try again if agent save fails and user retries
-            systemStatus.value.has_model_provider = true
-        } catch (e) {
-            console.error('Failed to create model provider', e)
-            toast.error('Failed to save Model Provider configuration')
-            throw e 
-        }
-    }
-
     // 2. Then save the Agent
     let result
     if (agentData.id) {
@@ -295,18 +300,11 @@ const handleAgentSaved = async (agentData, shouldExit = true, doneCallback = nul
        result = await agentAPI.createAgent(agentData)
     }
 
-    if (shouldExit) {
-       toast.success('Setup completed successfully!')
-       router.replace('/')
-    } else {
-       if (!agentData.id && result && result.data && result.data.agent_id) {
-          agentData.id = result.data.agent_id
-       }
-    }
+    toast.success('Setup completed successfully!')
+    router.replace('/')
   } catch (error) {
     console.error('Failed to save setup:', error)
-    // toast.error('Failed to complete setup') 
-    // Individual toasts are handled above or let the user retry
+    toast.error('Failed to complete setup') 
   } finally {
     loading.value = false
     if (doneCallback) doneCallback()

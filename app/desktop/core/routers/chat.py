@@ -197,8 +197,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
 
 @chat_router.post("/api/web-stream")
 async def stream_chat_web(request: StreamRequest, http_request: Request):
-    """这个接口有用户鉴权"""
-    validate_and_prepare_request(request, http_request)
+    validate_and_prepare_request(request)
 
     await populate_request_from_agent_config(request, require_agent_id=False)
     stream_service, lock = await prepare_session(request)
