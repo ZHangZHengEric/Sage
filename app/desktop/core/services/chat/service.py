@@ -144,8 +144,6 @@ async def populate_request_from_agent_config(
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
     _fill_if_none("available_sub_agent_ids", [])
-    user = {"本次会话用户id": request.user_id or "default_user"}
-    _merge_dict("system_context", user)
     if request.agent_id and agent:
         _merge_dict("system_context", {"当前AgentId": request.agent_id})
 
@@ -291,7 +289,7 @@ class SageStreamService:
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
                 session_id=session_id,
-                user_id=self.request.user_id,
+                user_id="default_user",
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
                 multi_agent=self.request.multi_agent,
@@ -394,12 +392,11 @@ async def _ensure_conversation(request: StreamRequest) -> None:
     if not existing_conversation:
         conversation_title = await create_conversation_title(request)
         await conversation_dao.save_conversation(
-            user_id=request.user_id or "default_user",
+            session_id=request.session_id,
             agent_id=request.agent_id or "default_agent",
             agent_name=request.agent_name or "Sage Assistant",
-            messages=[],
-            session_id=request.session_id,
             title=conversation_title,
+            messages=[],
         )
 
 async def create_conversation_title(request: StreamRequest):

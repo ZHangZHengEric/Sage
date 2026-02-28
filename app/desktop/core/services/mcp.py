@@ -42,7 +42,6 @@ async def add_mcp_server(
     sse_url: str,
     api_key: str,
     disabled: bool = False,
-    user_id: Optional[str] = None,
 ) -> str:
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
 
@@ -68,18 +67,18 @@ async def add_mcp_server(
             error_detail="Tool manager registration failed",
         )
     # 保存到数据库
-    await dao.save_mcp_server(name=name, config=server_config, user_id=user_id)
+    await dao.save_mcp_server(name=name, config=server_config)
     return name
 
 
-async def list_mcp_servers(user_id: Optional[str] = None) -> List[models.MCPServer]:
+async def list_mcp_servers() -> List[models.MCPServer]:
     """获取所有 MCP 服务器并转换为简化响应结构"""
     dao = models.MCPServerDao()
-    mcp_servers = await dao.get_list(user_id)
+    mcp_servers = await dao.get_list()
     return mcp_servers
 
 
-async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
+async def remove_mcp_server(server_name: str) -> str:
     """删除 MCP 服务器，返回 server_name"""
     tm = get_tool_manager()
 
@@ -90,14 +89,6 @@ async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
             status_code=404,
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
-        )
-
-    # Permission check
-    if role != "admin" and existing_server.user_id != user_id:
-        raise SageHTTPException(
-            status_code=403,
-            detail="无权删除该MCP服务器",
-            error_detail="Permission denied",
         )
 
     success = await tm.remove_tool_by_mcp(server_name)
@@ -147,7 +138,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
     return new_disabled, status_text
 
 
-async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
+async def refresh_mcp_server(server_name: str) -> str:
     """刷新 MCP 服务器连接，返回是否成功"""
     tm = get_tool_manager()
     dao = models.MCPServerDao()
@@ -159,14 +150,6 @@ async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
     
-    # Permission check
-    if role != "admin" and existing_server.user_id != user_id:
-        raise SageHTTPException(
-            status_code=403,
-            detail="无权操作该MCP服务器",
-            error_detail="Permission denied",
-        )
-
     await tm.remove_tool_by_mcp(server_name)
     server_config = existing_server.config
     server_config["disabled"] = False

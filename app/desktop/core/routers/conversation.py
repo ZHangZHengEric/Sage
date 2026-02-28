@@ -29,7 +29,6 @@ class ConversationInfo(BaseModel):
     """会话信息模型"""
 
     session_id: str
-    user_id: str
     agent_id: str
     agent_name: str
     title: str
@@ -51,36 +50,27 @@ class InterruptRequest(BaseModel):
 @conversation_router.post("/api/sessions/{session_id}/interrupt")
 async def interrupt(session_id: str, request: Request, body: InterruptRequest = None):
     """中断指定会话"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-
     message = body.message if body else "用户请求中断"
     data = await interrupt_session(session_id, message)
-    return await Response.succ(message=f"会话 {session_id} 已中断", data={**data, "user_id": user_id})
+    return await Response.succ(message=f"会话 {session_id} 已中断", data={**data})
 
 
 @conversation_router.post("/api/sessions/{session_id}/tasks_status")
 async def get_status(session_id: str, request: Request):
     """获取指定会话的状态"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-
     result = await get_session_status(session_id)
     tasks = result.get("tasks_status", {}).get("tasks", [])
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks)}")
-    return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result, "user_id": user_id})
+    return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result})
 
 
 @conversation_router.post("/api/sessions/{session_id}/file_workspace")
 async def get_workspace(session_id: str, request: Request):
     """获取指定会话的文件工作空间"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-
     result = await get_file_workspace(session_id)
     files = result.get("files", [])
     logger.bind(session_id=session_id).info(f"获取工作空间文件数量：{len(files)}")
-    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
+    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result})
 
 
 @conversation_router.get("/api/sessions/{session_id}/file_workspace/download")
@@ -103,23 +93,13 @@ async def list_conversations(
     request: Request,
     page: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量，最大100"),
-    user_id: Optional[str] = Query(None, description="用户ID过滤"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     agent_id: Optional[str] = Query(None, description="Agent ID过滤"),
     sort_by: Optional[str] = Query("date", description="排序方式: date, title, messages"),
 ):
-    claims = getattr(request.state, "user_claims", {}) or {}
-    current_user_id = claims.get("userid") or user_id or ""
-    role = claims.get("role") or "user"
-
-    if role == "admin":
-        current_user_id = None
-    elif role == "user" and not current_user_id:
-        return await Response.succ(data={"list": [], "total": 0}, message="获取会话列表成功")
     conversations, total_count = await get_conversations_paginated(
         page=page,
         page_size=page_size,
-        user_id=current_user_id,
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
@@ -131,7 +111,6 @@ async def list_conversations(
         conversation_items.append(
             ConversationInfo(
                 session_id=conv.session_id,
-                user_id=conv.user_id,
                 agent_id=conv.agent_id,
                 agent_name=conv.agent_name,
                 title=conv.title,
@@ -155,7 +134,6 @@ async def list_conversations(
         "total_pages": total_pages,
         "has_next": has_next,
         "has_prev": has_prev,
-        "user_id": current_user_id,  # Keeping this as caller context
     }
     return await Response.succ(data=result, message="获取会话列表成功")
 
@@ -182,5 +160,5 @@ async def delete(conversation_id: str, request: Request):
     logger.bind(session_id=conversation_id).info("会话删除成功")
     return await Response.succ(
         message=f"会话 {conversation_id} 已删除",
-        data={"conversation_id": conversation_id_res, "user_id": target_user_id},
+        data={"conversation_id": conversation_id_res},
     )

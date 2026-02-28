@@ -42,8 +42,6 @@ async def add(req: MCPServerRequest, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
     server_name = await add_mcp_server(
         name=req.name,
         protocol=req.protocol,
@@ -51,7 +49,6 @@ async def add(req: MCPServerRequest, http_request: Request):
         sse_url=req.sse_url,
         api_key=req.api_key,
         disabled=False,
-        user_id=user_id,
     )
     return await Response.succ(
         data={"server_name": server_name, "status": "success"},
@@ -67,14 +64,7 @@ async def list(http_request: Request):
     Returns:
         StandardResponse: 包含MCP服务器列表的标准响应
     """
-
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    
-    # Admin sees all (user_id=None), User sees own (user_id=user_id)
-    target_user_id = None if role == "admin" else user_id
-    mcp_servers = await list_mcp_servers(user_id=target_user_id)
+    mcp_servers = await list_mcp_servers()
     
     servers: List[Dict[str, Any]] = []
     for server in mcp_servers:
@@ -87,7 +77,6 @@ async def list(http_request: Request):
                 "streamable_http_url": config.get("streamable_http_url"),
                 "sse_url": config.get("sse_url"),
                 "api_key": config.get("api_key"),
-                "user_id": server.user_id,
             }
         )
     return await Response.succ(
@@ -106,12 +95,8 @@ async def remove(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-    
     logger.info(f"开始删除MCP server: {server_name}")
-    await remove_mcp_server(server_name, user_id, role)
+    await remove_mcp_server(server_name)
     return await Response.succ(
         data={"server_name": server_name}, message=f"MCP服务器 '{server_name}' 删除成功"
     )
@@ -128,10 +113,5 @@ async def refresh(server_name: str, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-
-    status = await refresh_mcp_server(server_name, user_id, role)
+    status = await refresh_mcp_server(server_name)
     return await Response.succ(data={"server_name": server_name, "status": status})

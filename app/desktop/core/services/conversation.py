@@ -127,7 +127,6 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
 async def get_conversations_paginated(
     page: int = 1,
     page_size: int = 10,
-    user_id: Optional[str] = None,
     search: Optional[str] = None,
     agent_id: Optional[str] = None,
     sort_by: str = "date",
@@ -137,7 +136,6 @@ async def get_conversations_paginated(
     conversations, total_count = await dao.get_conversations_paginated(
         page=page,
         page_size=page_size,
-        user_id=user_id,
         search=search,
         agent_id=agent_id,
         sort_by=sort_by or "date",
@@ -192,7 +190,6 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
         "message_count": len(messages),
         "conversation_info": {
             "session_id": conversation.session_id,
-            "user_id": conversation.user_id,
             "agent_id": conversation.agent_id,
             "agent_name": conversation.agent_name,
             "title": conversation.title,
