@@ -56,7 +56,7 @@ fi
 
 # Export to P12
 if [ ! -f "$CERT_DIR/cert.p12" ]; then
-    openssl pkcs12 -export -out "$CERT_DIR/cert.p12" \
+    openssl pkcs12 -export -legacy -out "$CERT_DIR/cert.p12" \
         -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" \
         -passout pass:"$CERT_PASS" \
         -name "$CERT_NAME"

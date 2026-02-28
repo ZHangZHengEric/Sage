@@ -167,27 +167,6 @@ fi
 
 cd "$ROOT_DIR"
 
-########################################
-# 5. Setup Code Signing (Self-Signed)
-########################################
-
-CERT_DIR="$ROOT_DIR/app/desktop/scripts/certs"
-CERT_B64_FILE="$CERT_DIR/cert.p12.base64"
-
-# Generate certificate (script checks if regeneration is needed)
-echo "Checking self-signed certificate..."
-chmod +x "$ROOT_DIR/app/desktop/scripts/generate_cert.sh"
-"$ROOT_DIR/app/desktop/scripts/generate_cert.sh"
-
-if [ -f "$CERT_B64_FILE" ]; then
-  echo "Setting up self-signed certificate..."
-  export APPLE_CERTIFICATE="$(cat "$CERT_B64_FILE")"
-  export APPLE_CERTIFICATE_PASSWORD="sage-password"
-  export APPLE_SIGNING_IDENTITY="SageAI Self Signed"
-  echo "Code signing enabled with self-signed certificate."
-else
-  echo "WARNING: Failed to generate certificate. Build will be unsigned."
-fi
 
 ########################################
 # 6. Build Tauri
