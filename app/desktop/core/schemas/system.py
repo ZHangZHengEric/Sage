@@ -4,5 +4,7 @@ from pydantic import BaseModel
 class SystemSettingsRequest(BaseModel):
     allow_registration: bool
 
-class SystemSettingsResponse(BaseModel):
+class SystemInfoResponse(BaseModel):
     allow_registration: bool
+    has_model_provider: bool
+    has_agent: bool
