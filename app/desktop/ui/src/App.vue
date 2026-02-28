@@ -1,7 +1,7 @@
 <template>
   <div v-if="!isBackendReady" class="flex h-screen w-full items-center justify-center bg-background text-foreground flex-col gap-4">
     <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-    <div class="text-sm text-muted-foreground animate-pulse">正在连接服务...</div>
+    <div class="text-sm text-muted-foreground animate-pulse">正在启动Sage...</div>
   </div>
   <div v-else class="app flex h-screen overflow-hidden bg-background text-foreground">
     <!-- Desktop Sidebar -->
@@ -45,15 +45,16 @@ import Sidebar from './views/Sidebar.vue'
 import MobileTabBar from './components/mobile/MobileTabBar.vue'
 import { Toaster } from '@/components/ui/sonner'
 // import { isLoggedIn } from './utils/auth.js'
-import request from './utils/request.js'
+import request, { setBaseURL } from './utils/request.js'
 import { systemAPI } from './api/system'
-// import { Menu } from 'lucide-vue-next'
-// import { Button } from '@/components/ui/button'
+import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/tauri'
 
 const router = useRouter()
 const route = useRoute()
 
 const isBackendReady = ref(false)
+const currentApiPrefix = ref(import.meta.env.VITE_BACKEND_API_PREFIX || '')
 
 const checkSystemInitialization = async () => {
   try {
@@ -77,10 +78,11 @@ const checkSystemInitialization = async () => {
 }
 
 const checkBackend = async () => {
+  if (isBackendReady.value) return
+
   try {
     // 尝试直接使用 fetch 调用，绕过拦截器，避免控制台报错
-    const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || ''
-    const url = `${apiPrefix}/active`
+    const url = `${currentApiPrefix.value}/active`
     
     // 如果是开发环境且有前缀，Vite代理会处理
     // 生产环境可能需要完整URL，但在Tauri中通常是localhost
@@ -124,9 +126,45 @@ const handleSelectConversation = (conversation) => {
   router.push({ name: 'Chat' })
 }
 
-onMounted(() => {
-  checkBackend()
-})
+  let unlisten = null
+
+  onMounted(async () => {
+    // Listen for Tauri backend ready event
+    try {
+      const updatePort = (port) => {
+          console.log('Backend ready on port', port)
+          const newUrl = `http://127.0.0.1:${port}`
+          currentApiPrefix.value = newUrl
+          setBaseURL(newUrl)
+          // Check backend immediately
+          checkBackend()
+      }
+
+      // Wait for the backend port event
+      unlisten = await listen('sage-desktop-ready', (event) => {
+         updatePort(event.payload.port)
+      })
+
+      // Also try to get port actively, in case we missed the event
+      try {
+          const port = await invoke('get_server_port')
+          if (port) {
+              console.log('Got port from command:', port)
+              updatePort(port)
+          }
+      } catch (err) {
+          console.log('Failed to get port from command (maybe sidecar not ready yet):', err)
+      }
+    } catch (e) {
+      console.warn('Tauri event listener failed (likely running in browser)', e)
+    }
+  
+    checkBackend()
+  })
+
+  onUnmounted(() => {
+    if (unlisten) unlisten()
+  })
 </script>
 
 

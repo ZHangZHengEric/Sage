@@ -130,7 +130,28 @@ def main():
         os.environ["SAGE_WORKSPACE_PATH"] = str(workspace)
 
         cfg = init_startup_config()
-        port = 8080
+        
+        # Get port from environment variable SAGE_PORT, or find a free one if not set
+        port_env = os.environ.get("SAGE_PORT")
+        if port_env:
+            try:
+                port = int(port_env)
+                print(f"Using port from environment SAGE_PORT: {port}", flush=True)
+            except ValueError:
+                print(f"Invalid SAGE_PORT environment variable: {port_env}, finding free port...", flush=True)
+                port = None
+        else:
+            port = None
+
+        if port is None:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', 0))
+                s.listen(1)
+                port = s.getsockname()[1]
+            os.environ["SAGE_PORT"] = str(port)
+            print(f"Set SAGE_PORT environment variable to {port}", flush=True)
+            
         print(f"Starting Sage Desktop Server on port {port}...", flush=True)
         init_logging(log_name="sage-desktop", log_level="INFO", log_path=logs_dir)
         start_server(port)  
