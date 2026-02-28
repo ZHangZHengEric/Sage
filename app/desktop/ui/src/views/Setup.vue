@@ -143,6 +143,7 @@ import { useRouter } from 'vue-router'
 import { useLanguage } from '@/utils/i18n'
 import { systemAPI } from '@/api/system'
 import { modelProviderAPI } from '@/api/modelProvider'
+import { agentAPI } from '@/api/agent'
 import { toolAPI } from '@/api/tool'
 import { skillAPI } from '@/api/skill'
 import { toast } from 'vue-sonner'
@@ -227,8 +228,17 @@ const fetchResources = async () => {
       toolAPI.getTools(),
       skillAPI.getSkills()
     ])
-    tools.value = toolsRes || []
-    skills.value = skillsRes || []
+    if (toolsRes && toolsRes.tools) {
+        tools.value = toolsRes.tools
+    } else {
+        tools.value = []
+    }
+    
+    if (skillsRes && skillsRes.skills) {
+        skills.value = skillsRes.skills
+    } else {
+        skills.value = []
+    }
   } catch (error) {
     console.error('Failed to fetch resources:', error)
   }
@@ -240,40 +250,65 @@ const handleModelSubmit = async () => {
     return
   }
   
+  // Just validate and move to next step, don't save yet
+  step.value = 'agent'
+  // Fetch resources now so they are available for Agent step
+  await fetchResources()
+}
+
+const handleAgentSaved = async (agentData, shouldExit = true, doneCallback = null) => {
   loading.value = true
   try {
-    // Convert comma/newline separated keys to array
+    // 1. First save the Model Provider
     const keys = modelForm.api_keys_str
       .split(/[\n,]/)
       .map(k => k.trim())
       .filter(k => k)
 
-    await modelProviderAPI.createModelProvider({
-      ...modelForm,
-      api_keys: keys,
-      is_default: true // First one is default
-    })
-    
-    toast.success('Model Provider created successfully')
-    
-    // Update status
-    systemStatus.value.has_model_provider = true
-    
-    // Proceed to next step
-    step.value = 'agent'
-    await fetchResources()
-    
+    // Check if we need to create model provider (only if not already exists)
+    if (!systemStatus.value.has_model_provider) {
+        try {
+            await modelProviderAPI.createModelProvider({
+              ...modelForm,
+              api_keys: keys,
+              is_default: true 
+            })
+            // Mark as done so we don't try again if agent save fails and user retries
+            systemStatus.value.has_model_provider = true
+        } catch (e) {
+            console.error('Failed to create model provider', e)
+            toast.error('Failed to save Model Provider configuration')
+            throw e 
+        }
+    }
+
+    // 2. Then save the Agent
+    let result
+    if (agentData.id) {
+       result = await agentAPI.updateAgent(agentData.id, agentData)
+    } else {
+       // Ensure llm_provider_id is not set (will use default) or set it if we have it
+       // Since we just created the default provider, the backend will pick it up automatically if not provided.
+       // Or we can query it back. For now, let's rely on backend default logic.
+       result = await agentAPI.createAgent(agentData)
+    }
+
+    if (shouldExit) {
+       toast.success('Setup completed successfully!')
+       router.replace('/')
+    } else {
+       if (!agentData.id && result && result.data && result.data.agent_id) {
+          agentData.id = result.data.agent_id
+       }
+    }
   } catch (error) {
-    console.error('Failed to create provider:', error)
-    toast.error('Failed to create Model Provider')
+    console.error('Failed to save setup:', error)
+    // toast.error('Failed to complete setup') 
+    // Individual toasts are handled above or let the user retry
   } finally {
     loading.value = false
+    if (doneCallback) doneCallback()
   }
-}
-
-const handleAgentSaved = () => {
-  toast.success('Agent created successfully')
-  router.replace('/')
 }
 
 onMounted(() => {
