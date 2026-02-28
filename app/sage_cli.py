@@ -166,7 +166,11 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
 
     console.print(f"[green]欢迎使用 SAgent CLI ({config.get('agent_mode', 'simple')} 模式)。输入 'exit' 或 'quit' 退出。[/green]")
     
-    session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_'+str(uuid.uuid4())[:4]
+    # 使用配置的 session_id 或生成新的
+    if config.get('session_id'):
+        session_id = config['session_id']
+    else:
+        session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_'+str(uuid.uuid4())[:4]
     console.print(f"[dim]当前session id: {session_id}[/dim]")
 
     messages = []
@@ -300,7 +304,11 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
     """
     原 fibre_cli.py 的对话逻辑，适用于 fibre 模式，支持多 Agent 面板显示和键盘中断
     """
-    session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_' + str(uuid.uuid4())[:4]
+    # 使用配置的 session_id 或生成新的
+    if config.get('session_id'):
+        session_id = config['session_id']
+    else:
+        session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_' + str(uuid.uuid4())[:4]
     messages = []
     agent_task = None
     active_states: Dict[str, Dict[str, Any]] = {session_id: {"order": [], "messages": {}}}
@@ -589,6 +597,7 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
     parser.add_argument('--show_terminal_log', action='store_false', dest='no_terminal_log', help='开启终端打印log')
     parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录')
+    parser.add_argument('--session_id', type=str, default=None, help='指定会话 ID（可选）')
     parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'),
                         help="""MCP 设置文件路径，文件内容为json格式""")
     parser.add_argument('--preset_running_agent_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_agent_config.json'),
@@ -637,6 +646,7 @@ def parse_arguments() -> Dict[str, Any]:
         'use_deepthink': use_deepthink,
         'agent_mode': agent_mode,
         'workspace': args.workspace,
+        'session_id': args.session_id,
         'mcp_setting_path': args.mcp_setting_path,
         'available_workflows': preset_running_agent_config.get('availableWorkflows', {}),
         'system_context': preset_running_agent_config.get('systemContext', {}),
