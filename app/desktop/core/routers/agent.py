@@ -7,6 +7,7 @@ import mimetypes
 import tempfile
 import zipfile
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
@@ -276,7 +277,9 @@ async def optimize(request: SystemPromptOptimizeRequest):
 @agent_router.post("/{agent_id}/file_workspace")
 async def get_workspace(agent_id: str, request: Request):
     """获取指定Agent的文件工作空间"""
-    workspace_path = os.path.expanduser(f"~/.sage/{agent_id}/")
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+    workspace_path = sage_home / "agents" / agent_id
 
     if not workspace_path or not os.path.exists(workspace_path):
         return await Response.succ(
@@ -333,8 +336,9 @@ async def get_workspace(agent_id: str, request: Request):
 async def download_file(agent_id: str, request: Request):
     file_path = request.query_params.get("file_path")
     logger.bind(agent_id=agent_id).info(f"Download request: file_path={file_path}")
-    
-    workspace_path = os.path.expanduser(f"~/.sage/{agent_id}/")
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+    workspace_path = sage_home / "agents" / agent_id
 
     try:
         # Resolve path logic
