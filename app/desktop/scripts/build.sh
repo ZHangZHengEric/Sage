@@ -137,6 +137,14 @@ fi
 
 pyinstaller "${PYI_FLAGS[@]}" entry.py
 
+# Copy mcp_servers to distribution directory
+echo "Copying mcp_servers to distribution..."
+if [ -d "$DIST_DIR/sage-desktop/_internal" ]; then
+  cp -r "$ROOT_DIR/mcp_servers" "$DIST_DIR/sage-desktop/_internal/"
+else
+  cp -r "$ROOT_DIR/mcp_servers" "$DIST_DIR/sage-desktop/"
+fi
+
 cd "$ROOT_DIR"
 
 ########################################
