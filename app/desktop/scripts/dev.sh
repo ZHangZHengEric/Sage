@@ -184,8 +184,8 @@ if ! cargo tauri --version >/dev/null 2>&1; then
   cargo install tauri-cli --version "^1.5"
 fi
 
-cargo tauri dev
-
 echo "======================================"
 echo " Dev Server Running"
 echo "======================================"
+
+cargo tauri dev

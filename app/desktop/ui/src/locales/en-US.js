@@ -88,6 +88,7 @@ export default {
   'chat.share': 'Share Session',
   'chat.shareFailed': 'Failed to share',
   'chat.downloadFailed': 'Download failed',
+  'chat.downloadSuccess': 'Download successful',
   'chat.traceWorkflow': 'Trace Workflow',
   'chat.agentSpawned': 'Agent Spawned',
   'chat.agentName': 'Agent Name',

@@ -31,28 +31,6 @@
 
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleShare">
-                  <Share2 class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t('chat.share') }}</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="openTraceDetails">
-                  <Search class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Jaeger 详情</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger as-child>
                 <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showSettings = !showSettings">
                   <Settings class="h-4 w-4" />
                 </Button>
@@ -278,15 +256,49 @@ const handleCloseSubSession = () => {
 
     try {
       const blob = await taskAPI.downloadFile(agentId, filePath);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
       
       let filename = filePath.split('/').pop();
       if (isDirectory && !filename.endsWith('.zip')) {
         filename += '.zip';
       }
+
+      // 尝试使用 Tauri API
+      if (window.__TAURI__) {
+        try {
+          const { save } = await import('@tauri-apps/api/dialog');
+          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
+          const { documentDir, join } = await import('@tauri-apps/api/path');
+          
+          const defaultDir = await documentDir();
+          const defaultPath = await join(defaultDir, filename);
+
+          // Extract extension for filter
+          const ext = filename.split('.').pop();
+          const filters = ext && ext !== filename ? [{
+            name: ext.toUpperCase() + ' File',
+            extensions: [ext]
+          }] : [];
+
+          const savePath = await save({
+            defaultPath: defaultPath,
+            filters: filters
+          });
+
+          if (savePath) {
+            const arrayBuffer = await blob.arrayBuffer();
+            await writeBinaryFile(savePath, new Uint8Array(arrayBuffer));
+            toast.success(t('chat.downloadSuccess') || 'Download successful');
+          }
+          return;
+        } catch (tauriError) {
+          console.warn('Tauri download failed, falling back to web download:', tauriError);
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
       
       a.download = filename;
       document.body.appendChild(a);
