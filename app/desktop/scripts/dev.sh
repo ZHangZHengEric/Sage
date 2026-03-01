@@ -98,7 +98,8 @@ echo "Activating Conda environment '$ENV_NAME'..."
 conda activate "$ENV_NAME"
 
 # Export Python path for Tauri
-export SAGE_PYTHON="$CONDA_BASE/envs/$ENV_NAME/bin/python"
+# Use 'which python' to get the path from the active environment
+export SAGE_PYTHON="$(which python)"
 echo "Set SAGE_PYTHON: $SAGE_PYTHON"
 
 if [[ "$CONDA_EXE" == *"anaconda3"* ]]; then
