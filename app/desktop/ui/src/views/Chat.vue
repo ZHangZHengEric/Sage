@@ -248,10 +248,10 @@ const handleCloseSubSession = () => {
 
 
   // 获取工作空间文件
-  const fetchWorkspaceFiles = async (sessionId) => {
-    if (!sessionId) return;
+  const fetchWorkspaceFiles = async (agentId) => {
+    if (!agentId) return;
     try {
-      const data = await taskAPI.getWorkspaceFiles(sessionId);
+      const data = await taskAPI.getWorkspaceFiles(agentId);
       workspaceFiles.value = data.files || [];
     } catch (error) {
       console.error('获取工作空间文件出错:', error);
@@ -266,8 +266,9 @@ const handleCloseSubSession = () => {
   }
 
   // 下载文件
-  const downloadWorkspaceFile = async (sessionId, itemOrPath) => {
-    if (!sessionId || !itemOrPath) return;
+  const downloadWorkspaceFile = async (sid, itemOrPath) => {
+    const agentId = selectedAgentId.value;
+    if (!agentId || !itemOrPath) return;
     
     // 兼容处理：itemOrPath可能是字符串路径，也可能是文件对象
     const filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path;
@@ -276,7 +277,7 @@ const handleCloseSubSession = () => {
     if (!filePath) return;
 
     try {
-      const blob = await taskAPI.downloadFile(sessionId, filePath);
+      const blob = await taskAPI.downloadFile(agentId, filePath);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
@@ -311,8 +312,8 @@ const toggleTaskExpanded = (taskId) => {
 
   // 更新任务和工作空间数据
   const updateTaskAndWorkspace = (sessionId, reason = 'unknown') => {
-    if (sessionId) {
-      fetchWorkspaceFiles(sessionId);
+    if (selectedAgentId.value) {
+      fetchWorkspaceFiles(selectedAgentId.value);
     }
   };
 
@@ -758,8 +759,8 @@ const handleToolClick = (toolExecution, result) => {
 
 const downloadFile = async (item) => {
   try {
-    if (currentSessionId.value) {
-      await downloadWorkspaceFile(currentSessionId.value, item)
+    if (selectedAgentId.value) {
+      await downloadWorkspaceFile(selectedAgentId.value, item)
     }
   } catch (error) {
     console.error('Failed to download file:', error)
