@@ -32,6 +32,7 @@ default_agent_md = {
 - 你也可以随时使用工具读取或修改这些文件
 - 修改后文件会持久化保存，影响后续会话
 - 当用户提供了一些信息与IDENTITY.md/USER.md/SOUL.md相关时，需要及时更新该文件
+- 过程中创建的文件不要放在工作空间的根目录下，而是放在一些子目录下，例如`memory/`,`projects/`目录下
 
 ## 记忆管理
 
@@ -94,6 +95,8 @@ Your behavior is defined by the following files, which can be dynamically modifi
 - Platform will automatically read AGENT.md when session starts
 - You can also read or modify these files anytime using tools
 - Modified files will persist and affect future sessions
+- When user provides information related to IDENTITY.md/USER.md/SOUL.md, update files promptly
+- Do not put created files in the root directory of the workspace, but in some subdirectories, such as `memory/`,`projects/` directories
 
 ## Memory Management
 
@@ -156,6 +159,8 @@ Este é o seu espaço de trabalho. Por favor, trabalhe de acordo com as seguinte
 - A plataforma lerá automaticamente o AGENT.md quando a sessão começar
 - Você também pode ler ou modificar esses arquivos a qualquer momento usando ferramentas
 - Arquivos modificados persistirão e afetarão sessões futuras
+- Quando o usuário fornecer informações relacionadas a IDENTITY.md/USER.md/SOUL.md, atualize os arquivos imediatamente
+- Não coloque arquivos criados na raiz do diretório de trabalho, mas em alguns subdiretórios, como `memory/`,`projects/` diretórios
 
 ## Gerenciamento de Memória
 
