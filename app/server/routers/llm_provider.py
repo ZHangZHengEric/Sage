@@ -5,8 +5,38 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from ..models.llm_provider import LLMProvider, LLMProviderDao
 from ..schemas.llm_provider import LLMProviderDTO, LLMProviderCreate, LLMProviderUpdate
 from ..core.render import Response
+from openai import AsyncOpenAI
+from loguru import logger
 
 router = APIRouter(prefix="/api/llm-provider", tags=["LLM Provider"])
+
+@router.post("/verify")
+async def verify_provider(data: LLMProviderCreate):
+    """
+    验证模型提供商配置是否有效
+    """
+    try:
+        api_key = data.api_keys[0] if data.api_keys else None
+        if not api_key:
+             return await Response.error(message="API Key is required")
+
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=data.base_url,
+            timeout=10.0
+        )
+        
+        # 尝试发送一个简单的消息
+        await client.chat.completions.create(
+            model=data.model,
+            messages=[{"role": "user", "content": "Hi"}],
+            max_tokens=5
+        )
+        
+        return await Response.succ(message="验证成功")
+    except Exception as e:
+        logger.error(f"Provider verification failed: {e}")
+        return await Response.error(message=f"验证失败: {str(e)}")
 
 async def get_current_user_id(request: Request) -> str:
     claims = getattr(request.state, "user_claims", None)
