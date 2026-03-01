@@ -87,7 +87,7 @@ async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
@@ -95,7 +95,7 @@ async def remove_mcp_server(server_name: str, user_id: str, role: str) -> str:
     # Permission check
     if role != "admin" and existing_server.user_id != user_id:
         raise SageHTTPException(
-            status_code=403,
+            status_code=500,
             detail="无权删除该MCP服务器",
             error_detail="Permission denied",
         )
@@ -121,7 +121,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
@@ -139,7 +139,7 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
         success = await tm.register_mcp_server(server_name, server_config)
         if not success:
             raise SageHTTPException(
-                status_code=400,
+                status_code=500,
                 detail=f"MCP服务器 '{server_name}' 启用失败",
                 error_detail="工具管理器注册失败",
             )
@@ -154,7 +154,7 @@ async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"MCP服务器 '{server_name}' 不存在",
             error_detail=f"MCP服务器 '{server_name}' 不存在",
         )
@@ -162,7 +162,7 @@ async def refresh_mcp_server(server_name: str, user_id: str, role: str) -> str:
     # Permission check
     if role != "admin" and existing_server.user_id != user_id:
         raise SageHTTPException(
-            status_code=403,
+            status_code=500,
             detail="无权操作该MCP服务器",
             error_detail="Permission denied",
         )

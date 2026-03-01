@@ -4,20 +4,24 @@ set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 
 ########################################
-# Sage Desktop Industrial Build Script
+# Sage Desktop Dev Script
 ########################################
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-VENV_DIR="$ROOT_DIR/app/desktop/core/.venv"
-DIST_DIR="$ROOT_DIR/app/desktop/dist"
-TAURI_BIN_DIR="$ROOT_DIR/app/desktop/tauri/bin"
+APP_DIR="$ROOT_DIR/app/desktop"
+UI_DIR="$APP_DIR/ui"
+TAURI_DIR="$APP_DIR/tauri"
+DIST_DIR="$APP_DIR/dist"
+TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
+TAURI_BIN_DIR="$TAURI_DIR/bin"
+
 NO_PYTHON_BUILD=1
-MODE="debug"  # release | debug
+MODE="debug"
 
 echo "======================================"
-echo " Sage Desktop Build ($MODE)"
+echo " Sage Desktop Dev ($MODE)"
 echo " Root: $ROOT_DIR"
-echo " Tip: Set NO_PYTHON_BUILD=1 to skip sidecar build"
+echo " Tip: Set NO_PYTHON_BUILD=1 to skip sidecar build (Default: 1)"
 echo "======================================"
 
 ########################################
@@ -76,8 +80,6 @@ if [ -z "$CONDA_EXE" ]; then
   exit 1
 fi
 
-echo "Using Conda: $CONDA_EXE"
-
 # Initialize conda for shell interaction
 CONDA_BASE=$($CONDA_EXE info --base)
 source "$CONDA_BASE/etc/profile.d/conda.sh"
@@ -95,14 +97,8 @@ fi
 echo "Activating Conda environment '$ENV_NAME'..."
 conda activate "$ENV_NAME"
 
-echo "Python version: $(python --version)"
-echo "Pip version: $(pip --version)"
-
-echo "Upgrading build tools..."
-pip install --upgrade pip setuptools wheel
-
 echo "Installing dependencies..."
-pip install -r "$ROOT_DIR/app/desktop/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r "$APP_DIR/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 if ! command -v pyinstaller >/dev/null; then
   pip install pyinstaller --index-url https://pypi.org/simple
@@ -114,46 +110,43 @@ fi
 
 echo "Setting up Python sidecar wrapper..."
 
-TAURI_BIN_DIR="$ROOT_DIR/app/desktop/tauri/bin"
 mkdir -p "$TAURI_BIN_DIR"
+mkdir -p "$TAURI_SIDECAR_DIR"
 
 # Get current python executable path
 PYTHON_EXEC=$(python -c "import sys; print(sys.executable)")
 
-# Determine target triple name
-SIDECAR_NAME="sage-desktop-sidecar-$TARGET"
-SIDECAR_PATH="$TAURI_BIN_DIR/$SIDECAR_NAME"
+# Create wrapper script that acts as the sidecar executable
+# This is used for dev mode to avoid rebuilding the binary
+SIDECAR_WRAPPER="$TAURI_SIDECAR_DIR/sage-desktop"
+if [ "$OS_TYPE" = "windows" ]; then
+  SIDECAR_WRAPPER="$TAURI_SIDECAR_DIR/sage-desktop.exe"
+fi
 
-echo "Generating sidecar script at: $SIDECAR_PATH"
+echo "Generating sidecar wrapper at: $SIDECAR_WRAPPER"
 
-# Create wrapper script
-cat > "$SIDECAR_PATH" <<EOF
+cat > "$SIDECAR_WRAPPER" <<EOF
 #!/bin/bash
 export PYTHONPATH="$ROOT_DIR:\$PYTHONPATH"
-exec "$PYTHON_EXEC" "$ROOT_DIR/app/desktop/entry.py" "\$@"
+# Ensure mcp_servers are accessible (dev mode relies on source path)
+# The app expects mcp_servers relative to executable or in a known location
+# In dev, we can just point to source
+exec "$PYTHON_EXEC" "$APP_DIR/entry.py" "\$@"
 EOF
 
-chmod +x "$SIDECAR_PATH"
+chmod +x "$SIDECAR_WRAPPER"
 
-echo "Sidecar wrapper created."
-
-# Ensure sidecar directory exists and is not empty to satisfy tauri.conf.json resources
-TAURI_SIDECAR_DIR="$ROOT_DIR/app/desktop/tauri/sidecar"
-mkdir -p "$TAURI_SIDECAR_DIR"
+# Also create a .keep file
 touch "$TAURI_SIDECAR_DIR/.keep"
 
-########################################
-# 3. Move Binary to Tauri (Skipped)
-########################################
-# Since we are using a wrapper script in place, we don't need to copy binaries.
-# The wrapper script IS the sidecar.
+echo "Sidecar wrapper created."
 
 ########################################
 # 4. Frontend Setup
 ########################################
 
 echo "Setting up frontend dependencies..."
-cd "$ROOT_DIR/app/desktop/ui"
+cd "$UI_DIR"
 
 if ! command -v npm >/dev/null; then
   echo "ERROR: npm not found. Please install Node.js."
@@ -167,12 +160,11 @@ fi
 
 cd "$ROOT_DIR"
 
-
 ########################################
 # 6. Build Tauri
 ########################################
 
-cd "$ROOT_DIR/app/desktop/tauri"
+cd "$TAURI_DIR"
 
 if ! command -v cargo >/dev/null; then
   echo "Cargo not found. Install Rust first."
@@ -187,5 +179,5 @@ fi
 cargo tauri dev
 
 echo "======================================"
-echo " Build Completed Successfully"
+echo " Dev Server Running"
 echo "======================================"

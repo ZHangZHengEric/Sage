@@ -44,7 +44,7 @@
          >
             <Loader v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
             <template v-else>
-              {{ t('common.saveAndNextStep') }}
+              {{ isEditMode ? t('common.saveAndNextStep') : t('common.nextStep') }}
               <ChevronRight class="ml-2 h-4 w-4" />
             </template>
          </Button>
@@ -98,6 +98,8 @@ const { t } = useLanguage()
 const saving = ref(false)
 const showRightPanel = ref(true)
 
+const isEditMode = computed(() => !!store.formData.id)
+
 // Computed for dynamic component rendering
 const currentStepComponent = computed(() => {
   switch(store.currentStep) {
@@ -145,7 +147,9 @@ const handleSave = async (shouldExit = true) => {
   try {
     store.prepareForSave()
     await new Promise((resolve) => {
-      emit('save', store.formData, shouldExit, () => {
+      // 使用深拷贝传递纯数据，避免 Proxy 问题
+      const plainData = JSON.parse(JSON.stringify(store.formData))
+      emit('save', plainData, shouldExit, () => {
         resolve()
       })
       // 如果parent没有调用callback (比如旧代码), 这里的promise会一直pending
@@ -163,7 +167,10 @@ const handleNextStep = async () => {
   const currentStep = store.currentStep
   store.nextStep()
   if (store.currentStep !== currentStep) {
-    await handleSave(false)
+    // 只有在编辑模式下，切换步骤时才自动保存
+    if (isEditMode.value) {
+      await handleSave(false)
+    }
   }
 }
 
@@ -171,7 +178,10 @@ const handlePrevStep = async () => {
   const currentStep = store.currentStep
   store.prevStep()
   if (store.currentStep !== currentStep) {
-    await handleSave(false)
+    // 只有在编辑模式下，切换步骤时才自动保存
+    if (isEditMode.value) {
+      await handleSave(false)
+    }
   }
 }
 

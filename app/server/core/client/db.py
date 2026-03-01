@@ -84,7 +84,7 @@ class SessionManager:
             logger.debug(f"使用MySQL数据库: {self.mysql_config.get('host')}:{self.mysql_config.get('port')} / {self.mysql_config.get('database')}")
         else:
             raise SageHTTPException(
-                status_code=400,
+                status_code=500,
                 detail="不支持的数据库类型",
                 error_detail=f"db_type={self.db_type}",
             )

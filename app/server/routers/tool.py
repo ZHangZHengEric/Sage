@@ -50,7 +50,7 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
     if request.tool_name not in tool_manager.tools.keys():
         logger.error(f"执行工具失败: {request.tool_name}")
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail="工具不存在",
             error_detail=f"Tool '{request.tool_name}' not found",
         )
@@ -65,7 +65,7 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
             server = await dao.get_by_name(source)
             if server and server.user_id and server.user_id != user_id:
                 raise SageHTTPException(
-                    status_code=403,
+                    status_code=500,
                     detail="无权使用该工具",
                     error_detail="Permission denied",
                 )
