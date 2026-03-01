@@ -19,7 +19,7 @@ class SandboxFileSystem:
         else:
             self.enable_path_mapping = enable_path_mapping
 
-    def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 10) -> str:
+    def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 5) -> str:
         """
         Returns a formatted string of the file tree relative to the virtual root.
         This safely exposes the structure of the sandbox file system to the agent.
@@ -29,8 +29,8 @@ class SandboxFileSystem:
                             Note: Sensitive directories like .sandbox, .git are always excluded.
             root_path: The root path to start the traversal from. If None, uses self.host_path.
             max_depth: The maximum depth to traverse. None means no limit.
-            max_items_per_dir: Maximum number of items (files + dirs) to show per directory. 
-                              If exceeded, shows ellipsis. Default is 10.
+            max_items_per_dir: Maximum number of items (files + dirs) to show per directory 
+                              for subdirectories. Root directory is not limited. Default is 5.
         
         Example output:
         file1.txt
@@ -86,12 +86,14 @@ class SandboxFileSystem:
                     continue
             
             # Check if we need to truncate
+            # Root directory (current_depth == 0) shows all items, subdirectories apply max_items_per_dir
             total_items = len(all_items)
-            if total_items > max_items_per_dir:
-                # Show first max_items_per_dir items
+            if current_depth > 0 and total_items > max_items_per_dir:
+                # Show first max_items_per_dir items for subdirectories
                 shown_items = all_items[:max_items_per_dir]
                 hidden_count = total_items - max_items_per_dir
             else:
+                # Show all items for root directory
                 shown_items = all_items
                 hidden_count = 0
             
