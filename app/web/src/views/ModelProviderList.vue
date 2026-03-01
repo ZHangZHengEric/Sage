@@ -68,7 +68,8 @@
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
             <Label>{{ t('modelProvider.name') }}</Label>
-            <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
+            <div class="space-y-3">
+              <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
                 <SelectTrigger>
                   <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
                 </SelectTrigger>
@@ -77,10 +78,14 @@
                     <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
                       {{ provider.name }}
                     </SelectItem>
+                    <SelectItem value="Custom">{{ t('modelProvider.custom') }}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
+              
+              <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
             </div>
+          </div>
             <div class="grid gap-2">
             <Label>{{ t('modelProvider.baseUrl') }}</Label>
             <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" />
@@ -244,11 +249,17 @@ const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === sele
 
 const handleProviderChange = (val) => {
   selectedProvider.value = val
+  if (val === 'Custom') {
+    form.name = ''
+    form.base_url = ''
+    form.model = ''
+    return
+  }
   const provider = MODEL_PROVIDERS.find(p => p.name === val)
   if (provider) {
     form.name = provider.name
     form.base_url = provider.base_url
-    form.model = provider.models[0] || ''
+    // form.model = provider.models[0] || ''
   }
 }
 
@@ -302,11 +313,7 @@ const handleEdit = (provider) => {
   
   // Try to match provider
   const known = MODEL_PROVIDERS.find(p => p.base_url === provider.base_url)
-  if (known) {
-    selectedProvider.value = known.name
-  } else {
-    selectedProvider.value = 'Custom' 
-  }
+  selectedProvider.value = known ? known.name : 'Custom'
 
   form.base_url = provider.base_url
   // api_keys are not returned in list usually for security?
