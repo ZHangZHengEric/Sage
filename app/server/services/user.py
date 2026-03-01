@@ -63,20 +63,20 @@ async def register_user(
     allow_reg = await sys_dao.get_by_key("allow_registration")
     if allow_reg == "false":
         raise SageHTTPException(
-            status_code=403, detail="系统不允许自注册", error_detail="registration disabled"
+            status_code=500, detail="系统不允许自注册", error_detail="registration disabled"
         )
 
     dao = models.UserDao()
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
-            status_code=400, detail="用户名已存在", error_detail=username
+            status_code=500, detail="用户名已存在", error_detail=username
         )
     if email:
         existing_email = await dao.get_by_email(email)
         if existing_email:
             raise SageHTTPException(
-                status_code=400, detail="邮箱已存在", error_detail=email
+                status_code=500, detail="邮箱已存在", error_detail=email
             )
     user_id = gen_id()
     password_hash = _hash_password(password)
@@ -147,13 +147,13 @@ async def add_user(
     existing = await dao.get_by_username(username)
     if existing:
         raise SageHTTPException(
-            status_code=400, detail="用户名已存在", error_detail=username
+            status_code=500, detail="用户名已存在", error_detail=username
         )
     if email:
         existing_email = await dao.get_by_email(email)
         if existing_email:
             raise SageHTTPException(
-                status_code=400, detail="邮箱已存在", error_detail=email
+                status_code=500, detail="邮箱已存在", error_detail=email
             )
     
     user_id = gen_id()

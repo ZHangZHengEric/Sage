@@ -42,12 +42,11 @@ async def create_agent(
     """创建新的 Agent，返回创建的 Agent 对象"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
-
     dao = models.AgentConfigDao()
     existing_config = await dao.get_by_name(agent_name)
     if existing_config:
         raise SageHTTPException(
-            status_code=400,
+            status_code=500,
             detail=f"Agent '{agent_name}' 已存在",
             error_detail=f"Agent '{agent_name}' 已存在",
         )
@@ -64,7 +63,7 @@ async def get_agent(agent_id: str) -> models.Agent:
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
@@ -80,7 +79,7 @@ async def update_agent(
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
@@ -99,7 +98,7 @@ async def delete_agent(agent_id: str) -> models.Agent:
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
@@ -136,7 +135,7 @@ async def auto_generate_agent(
 
     if not agent_config:
         raise SageHTTPException(
-            status_code=400,
+            status_code=500,
             detail="自动生成Agent失败",
             error_detail="生成的Agent配置为空",
         )
@@ -162,7 +161,7 @@ async def optimize_system_prompt(
 
     if not optimized_prompt:
         raise SageHTTPException(
-            status_code=400,
+            status_code=500,
             detail="系统提示词优化失败",
             error_detail="优化后的提示词为空",
         )
