@@ -190,7 +190,7 @@ class KdbService:
                 filename = uf.filename.lower()
                 if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xls")):
                     raise SageHTTPException(
-                        status_code=400,
+                        status_code=500,
                         detail=f"QA知识库仅支持CSV或Excel文件: {uf.filename}",
                     )
                 
@@ -231,7 +231,7 @@ class KdbService:
                             
                 except Exception as e:
                     raise SageHTTPException(
-                        status_code=400,
+                        status_code=500,
                         detail=f"文件格式错误 {uf.filename}: {e} (QA库要求两列数据: Question, Answer)",
                     )
                 finally:
