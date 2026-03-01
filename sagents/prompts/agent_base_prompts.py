@@ -290,11 +290,11 @@ tool_suggestion_template = {
 ## agent的配置要求
 {agent_config}
 
-## 可用工具
-{available_tools_str}
-
 ## 用户的对话历史以及新的请求
 {messages}
+
+## 可用工具
+{available_tools_str}
 
 输出格式：
 ```json
@@ -307,7 +307,7 @@ tool_suggestion_template = {
 注意：
 1. 工具ID必须是可用工具中的序号。
 2. 返回所有可能用到的工具ID，对于不可能用到的工具，不要返回。
-3. 可能的工具最多返回15个。""",
+3. 尽可能多的返回相关的工具ID，但是不要超过15个。""",
     "en": """You are a tool recommendation expert. Your task is to recommend suitable tools for users based on their needs.
 You need to identify all possible tools that could be used to solve the user's request based on the conversation history, user's request, and agent configuration.
 
@@ -331,7 +331,7 @@ Output Format:
 Notes:
 1. Tool IDs must be the numbers from the available tools list.
 2. Return all possible tool IDs that might be used. Do not return tools that are unlikely to be used.
-3. Return at most 7 possible tools.""",
+3. Return as many relevant tool IDs as possible, but do not exceed 15.""",
     "pt": """Você é um especialista em recomendação de ferramentas. Sua tarefa é recomendar ferramentas adequadas para os usuários com base em suas necessidades.
 Você precisa identificar todas as ferramentas possíveis que podem ser usadas para resolver a solicitação do usuário com base no histórico de conversas, solicitação do usuário e configuração do agente.
 
@@ -355,5 +355,5 @@ Formato de Saída:
 Notas:
 1. Os IDs das ferramentas devem ser os números da lista de ferramentas disponíveis.
 2. Retorne todos os IDs de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
-3. Retorne no máximo 15 ferramentas possíveis."""
+3. Retorne o máximo possível de IDs de ferramentas relevantes, mas não exceda 15."""
 }
