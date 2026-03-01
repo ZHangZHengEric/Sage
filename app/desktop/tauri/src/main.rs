@@ -149,6 +149,7 @@ fn main() {
                             // Try common conda paths for sage-desktop-env
                             let home_dir = std::env::var("HOME").unwrap_or_default();
                             let possible_paths = [
+                                format!("{}/.conda/envs/sage-desktop-env/bin/python", home_dir),
                                 format!("{}/opt/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
                                 format!("{}/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
                                 format!("{}/miniconda3/envs/sage-desktop-env/bin/python", home_dir),
