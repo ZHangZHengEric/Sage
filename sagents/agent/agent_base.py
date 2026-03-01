@@ -1016,8 +1016,8 @@ class AgentBase(ABC):
                 tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
                 return tool_names
             
-            # 准备工具列表字符串，包含ID和名称
-            available_tools_str = "\n".join([f"{i+1}. {tool['name']}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'
+            # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
+            available_tools_str = "\n".join([f"{i+1}. {tool['name']} - {tool['description'][:100]}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'    
 
             # 准备消息
             # messages_input = MessageManager.compress_messages(messages_input, budget_limit=10000)
