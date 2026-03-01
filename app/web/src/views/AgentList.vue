@@ -38,19 +38,23 @@
              <div class="space-y-3 text-sm">
                 <div class="flex justify-between">
                    <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
-                   <span class="font-medium truncate max-w-[120px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
+                   <span class="font-medium truncate max-w-[200px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
                 </div>
                 <div class="flex justify-between items-center">
                    <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
                    <Badge :variant="getConfigBadgeVariant(agent.deepThinking)">{{ getConfigBadgeText(agent.deepThinking) }}</Badge>
                 </div>
                 <div class="flex justify-between items-center">
-                   <span class="text-muted-foreground">{{ t('agent.multiAgent') }}:</span>
-                   <Badge :variant="getConfigBadgeVariant(agent.multiAgent)">{{ getConfigBadgeText(agent.multiAgent) }}</Badge>
+                   <span class="text-muted-foreground">{{ t('agent.agentMode') }}:</span>
+                   <Badge variant="outline">{{ getAgentModeText(agent.agentMode) }}</Badge>
                 </div>
                 <div class="flex justify-between">
                    <span class="text-muted-foreground">{{ t('agent.availableTools') }}:</span>
                    <span>{{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}</span>
+                </div>
+                <div class="flex justify-between">
+                   <span class="text-muted-foreground">{{ t('agent.availableSkills') }}:</span>
+                   <span>{{ agent.availableSkills?.length || 0 }} {{ t('agent.toolsCount') }}</span>
                 </div>
              </div>
           </CardContent>
@@ -633,6 +637,14 @@ const getModelLabel = (providerId) => {
   const provider = modelProviderMap.value[providerId]
   if (!provider) return providerId
   return provider.name 
+}
+
+const getAgentModeText = (mode) => {
+  if (!mode || mode === 'auto') return t('agent.modeAuto')
+  if (mode === 'fibre') return t('agent.modeFibre')
+  if (mode === 'simple') return t('agent.modeSimple')
+  if (mode === 'multi') return t('agent.modeMulti')
+  return mode
 }
 
 const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {
