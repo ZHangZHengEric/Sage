@@ -127,9 +127,12 @@ watch(() => props.agent, (newAgent) => {
   } else {
     store.initForm(newAgent)
   }
-}, { immediate: true })
+})
 
 onMounted(() => {
+  // Initialize form on mount (always reset to step 1)
+  store.initForm(props.agent)
+
   // Auto-hide right panel on small screens
   if (window.innerWidth < 1024) {
     showRightPanel.value = false
