@@ -50,7 +50,7 @@ export default {
   'modelProvider.apiKeyHint': '支持多个Key，用于轮询负载均衡',
   'modelProvider.model': '模型名称',
   'modelProvider.modelPlaceholder': '输入模型名称',
-  'modelProvider.modelHint': '例如: gpt-4o',
+  'modelProvider.modelHint': '填写model名称',
   'modelProvider.noProviders': '暂无模型源',
   'modelProvider.noProvidersDesc': '请先创建一个模型源以开始使用',
 

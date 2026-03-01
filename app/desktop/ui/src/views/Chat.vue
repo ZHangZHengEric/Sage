@@ -852,7 +852,7 @@ const sendMessageApi = async ({
 
     onComplete();
   } catch (error) {
-    if (error.name === 'AbortError') {
+    if (error.name === 'AbortError' || error.originalError?.name === 'AbortError' || error.message?.includes('aborted')) {
       console.log('Request was aborted');
     } else {
       console.error('Error sending message:', error);
