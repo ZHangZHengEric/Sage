@@ -55,6 +55,8 @@ const route = useRoute()
 
 const isBackendReady = ref(false)
 const currentApiPrefix = ref(import.meta.env.VITE_BACKEND_API_PREFIX || '')
+const retryCount = ref(0)
+const MAX_RETRIES = 30 // 1 minute timeout (2s * 30)
 
 const checkSystemInitialization = async () => {
   try {
@@ -80,6 +82,19 @@ const checkSystemInitialization = async () => {
 const checkBackend = async () => {
   if (isBackendReady.value) return
 
+  // If in Tauri environment but API prefix is still default (relative path starting with /), 
+  // do NOT poll the default backend port. Wait for port update event instead.
+  if (window.__TAURI__ && currentApiPrefix.value.startsWith('/')) {
+    console.log('In Tauri environment, waiting for backend port update...')
+    return
+  }
+
+  // If failed too many times, stop checking
+  if (retryCount.value > MAX_RETRIES) {
+    console.warn('Backend check failed too many times, please restart app or check backend status.')
+    return
+  }
+
   try {
     // 尝试直接使用 fetch 调用，绕过拦截器，避免控制台报错
     const url = `${currentApiPrefix.value}/active`
@@ -90,6 +105,7 @@ const checkBackend = async () => {
     const response = await fetch(url)
     if (response.ok) {
       isBackendReady.value = true
+      retryCount.value = 0 // Reset retry count
       checkSystemInitialization()
       return
     }
@@ -97,8 +113,9 @@ const checkBackend = async () => {
     // 忽略错误
   }
   
+  retryCount.value++
   // 失败重试
-  setTimeout(checkBackend, 1000)
+  setTimeout(checkBackend, 2000)
 }
 
 const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.startsWith('/share/'))
@@ -137,6 +154,7 @@ const handleSelectConversation = (conversation) => {
           currentApiPrefix.value = newUrl
           setBaseURL(newUrl)
           // Check backend immediately
+          retryCount.value = 0
           checkBackend()
       }
 
@@ -156,10 +174,12 @@ const handleSelectConversation = (conversation) => {
           console.log('Failed to get port from command (maybe sidecar not ready yet):', err)
       }
     } catch (e) {
-      console.warn('Tauri event listener failed (likely running in browser)', e)
-    }
-  
-    checkBackend()
+    console.warn('Tauri event listener failed (likely running in browser)', e)
+    // Only check backend if we are NOT in Tauri environment (browser mode)
+    // if (!window.__TAURI__) {
+    //     checkBackend()
+    // }
+  }
   })
 
   onUnmounted(() => {
