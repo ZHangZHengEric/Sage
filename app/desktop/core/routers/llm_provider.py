@@ -7,8 +7,37 @@ from ..schemas.llm_provider import LLMProviderDTO, LLMProviderCreate, LLMProvide
 from ..core.render import Response
 from ..core.client.chat import init_chat_client
 from loguru import logger
+from openai import AsyncOpenAI
 
 router = APIRouter(prefix="/api/llm-provider", tags=["LLM Provider"])
+
+@router.post("/verify")
+async def verify_provider(data: LLMProviderCreate):
+    """
+    验证模型提供商配置是否有效
+    """
+    try:
+        api_key = data.api_keys[0] if data.api_keys else None
+        if not api_key:
+             return await Response.error(message="API Key is required")
+
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=data.base_url,
+            timeout=10.0
+        )
+        
+        # 尝试发送一个简单的消息
+        await client.chat.completions.create(
+            model=data.model,
+            messages=[{"role": "user", "content": "Hi"}],
+            max_tokens=5
+        )
+        
+        return await Response.succ(message="验证成功")
+    except Exception as e:
+        logger.error(f"Provider verification failed: {e}")
+        return await Response.error(message=f"验证失败: {str(e)}")
 
 @router.get("/list")
 async def list_providers(request: Request):

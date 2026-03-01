@@ -147,7 +147,6 @@
                 <SelectValue :placeholder="t('agent.selectModelProvider')" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem :value="defaultProviderOption">{{ t('agent.useSystemDefault') }}</SelectItem>
                 <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
                   {{ provider.name }} ({{ provider.model }})
                 </SelectItem>

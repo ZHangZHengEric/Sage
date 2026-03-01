@@ -23,9 +23,6 @@
             <TableCell class="font-medium">
                <div class="flex items-center gap-2">
                  {{ provider.name }}
-                 <Badge variant="outline" class="text-xs font-normal text-muted-foreground">
-                    {{ getProviderName(provider) }}
-                 </Badge>
                  <Badge v-if="provider.is_default" variant="secondary">{{ t('common.default') }}</Badge>
                </div>
             </TableCell>
@@ -74,20 +71,19 @@
             <div class="space-y-3">
               <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a provider" />
+                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectLabel>Providers</SelectLabel>
                     <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
                       {{ provider.name }}
                     </SelectItem>
-                    <SelectItem value="Custom">Custom Provider</SelectItem>
+                    <SelectItem value="Custom">{{ t('modelProvider.custom') }}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
               
-              <Input v-if="selectedProvider === 'Custom'" v-model="form.name" placeholder="Custom Provider Name" />
+              <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
             </div>
           </div>
           <div class="grid gap-2">
@@ -174,9 +170,15 @@
               <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
-          <Button @click="submitForm">{{ t('common.save') }}</Button>
+        <DialogFooter class="flex sm:justify-between items-center w-full">
+          <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
+            <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
+            {{ t('common.verify') || '验证' }}
+          </Button>
+          <div class="flex gap-2">
+            <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
+            <Button @click="submitForm">{{ t('common.save') }}</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -185,7 +187,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { Plus, Edit, Trash2, Bot, ArrowRight } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, ArrowRight, Loader } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -228,6 +230,7 @@ const providers = ref([])
 const dialogOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
+const verifying = ref(false)
 
 // Basic form state
 const form = reactive({
@@ -303,7 +306,6 @@ const handleCreate = () => {
   currentId.value = null
   form.name = ''
   selectedProvider.value = ''
-  isCustomModel.value = false
   form.base_url = ''
   form.api_keys_str = ''
   form.model = ''
@@ -357,6 +359,35 @@ const handleDelete = async (provider) => {
      } catch (error) {
        toast.error(error.message)
      }
+  }
+}
+
+const handleVerify = async () => {
+  const data = {
+    name: form.name,
+    base_url: form.base_url,
+    api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+    model: form.model,
+    max_tokens: form.maxTokens,
+    temperature: form.temperature,
+    top_p: form.topP,
+    presence_penalty: form.presencePenalty,
+    max_model_len: form.maxModelLen
+  }
+  
+  if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
+     toast.error(t('common.fillRequired') || '请填写必填项')
+     return
+  }
+  
+  verifying.value = true
+  try {
+    await modelProviderAPI.verifyModelProvider(data)
+    toast.success(t('common.verifySuccess') || '验证成功')
+  } catch (error) {
+    toast.error(error.message || '验证失败')
+  } finally {
+    verifying.value = false
   }
 }
 
