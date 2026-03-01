@@ -59,14 +59,14 @@
 
           <div class="space-y-6 bg-card/50 p-8 rounded-xl border shadow-sm backdrop-blur-sm">
             <div class="grid gap-2">
-              <Label class="text-base">提供商 <span class="text-destructive">*</span></Label>
+              <Label class="text-base">{{ t('modelProvider.providerLabel') }} <span class="text-destructive">*</span></Label>
               <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
                 <SelectTrigger class="h-11">
-                  <SelectValue placeholder="选择提供商" />
+                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectLabel>提供商</SelectLabel>
+                    <SelectLabel>{{ t('modelProvider.providerLabel') }}</SelectLabel>
                     <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
                       {{ provider.name }}
                     </SelectItem>
@@ -148,7 +148,11 @@
             </div>
           </div>
 
-          <div class="flex justify-end pt-4">
+          <div class="flex justify-between pt-4">
+            <Button variant="outline" size="lg" @click="handleVerify" :disabled="verifying || loading" class="h-12 px-6">
+               <Loader v-if="verifying" class="mr-2 h-5 w-5 animate-spin" />
+               验证连接
+            </Button>
             <Button size="lg" @click="handleModelSubmit" :disabled="loading" class="px-8 h-12 text-base">
               <Loader v-if="loading" class="mr-2 h-5 w-5 animate-spin" />
               {{ t('common.nextStep') }}
@@ -222,6 +226,7 @@ const { t } = useLanguage()
 
 const step = ref('loading') // loading, welcome, model, agent
 const loading = ref(false)
+const verifying = ref(false)
 const tools = ref([])
 const skills = ref([])
 const systemStatus = ref({
@@ -344,6 +349,36 @@ const fetchResources = async () => {
     }
   } catch (error) {
     console.error('Failed to fetch resources:', error)
+  }
+}
+
+const handleVerify = async () => {
+  if (!modelForm.name || !modelForm.base_url || !modelForm.api_keys_str || !modelForm.model) {
+    toast.error('请填写所有必填字段')
+    return
+  }
+
+  verifying.value = true
+  try {
+    const data = {
+      name: modelForm.name,
+      base_url: modelForm.base_url,
+      api_keys: modelForm.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+      model: modelForm.model,
+      max_tokens: modelForm.maxTokens,
+      temperature: modelForm.temperature,
+      top_p: modelForm.topP,
+      presence_penalty: modelForm.presencePenalty,
+      max_model_len: modelForm.maxModelLen,
+      is_default: true
+    }
+    await modelProviderAPI.verifyModelProvider(data)
+    toast.success('连接验证成功')
+  } catch (error) {
+    console.error('Failed to verify model provider:', error)
+    toast.error(error.message || '连接验证失败')
+  } finally {
+    verifying.value = false
   }
 }
 

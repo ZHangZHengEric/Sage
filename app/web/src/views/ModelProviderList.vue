@@ -69,20 +69,19 @@
           <div class="grid gap-2">
             <Label>{{ t('modelProvider.name') }}</Label>
             <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a provider" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectLabel>Providers</SelectLabel>
-                  <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
-                    {{ provider.name }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="grid gap-2">
+                <SelectTrigger>
+                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
+                      {{ provider.name }}
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-2">
             <Label>{{ t('modelProvider.baseUrl') }}</Label>
             <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" />
           </div>
@@ -166,9 +165,15 @@
               <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
-          <Button @click="submitForm">{{ t('common.save') }}</Button>
+        <DialogFooter class="flex sm:justify-between items-center w-full">
+          <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
+            <Loader v-if="verifying" class="mr-2 h-4 w-4 animate-spin" />
+            {{ t('common.verify') || '验证' }}
+          </Button>
+          <div class="flex gap-2">
+            <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
+            <Button @click="submitForm">{{ t('common.save') }}</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -177,7 +182,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { Plus, Edit, Trash2, Bot, ArrowRight } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, Bot, ArrowRight, Loader } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -219,6 +224,7 @@ const providers = ref([])
 const dialogOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
+const verifying = ref(false)
 
 // Basic form state
 const form = reactive({
@@ -327,6 +333,35 @@ const handleDelete = async (provider) => {
      } catch (error) {
        toast.error(error.message)
      }
+  }
+}
+
+const handleVerify = async () => {
+  const data = {
+    name: form.name,
+    base_url: form.base_url,
+    api_keys: form.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+    model: form.model,
+    max_tokens: form.maxTokens,
+    temperature: form.temperature,
+    top_p: form.topP,
+    presence_penalty: form.presencePenalty,
+    max_model_len: form.maxModelLen
+  }
+  
+  if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
+     toast.error(t('common.fillRequired') || '请填写必填项')
+     return
+  }
+  
+  verifying.value = true
+  try {
+    await modelProviderAPI.verifyModelProvider(data)
+    toast.success(t('common.verifySuccess') || '验证成功')
+  } catch (error) {
+    toast.error(error.message || '验证失败')
+  } finally {
+    verifying.value = false
   }
 }
 
