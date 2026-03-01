@@ -1,7 +1,7 @@
 <template>
   <div class="h-full w-full overflow-hidden flex flex-col">
     <!-- List View -->
-    <div v-if="currentView === 'list'" class="flex-1 overflow-y-auto p-6 space-y-6 animate-in fade-in duration-500">
+    <div v-if="currentView === 'list'" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 animate-in fade-in duration-500">
       <div class="flex justify-end gap-3">
         <Button variant="outline" @click="handleImport">
           <Download class="mr-2 h-4 w-4" />
@@ -16,15 +16,15 @@
       <div v-if="loading" class="flex flex-col items-center justify-center py-20">
         <Loader class="h-8 w-8 animate-spin text-primary" />
       </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 md:gap-6">
         <Card v-for="agent in agents" :key="agent.id" class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-          <CardHeader class="pb-4">
-            <div class="flex items-start gap-4">
-              <div class="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
-                <Bot class="h-6 w-6" />
+          <CardHeader class="pb-3 md:pb-4">
+            <div class="flex items-start gap-3 md:gap-4">
+              <div class="h-10 w-10 md:h-12 md:w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
+                <Bot class="h-5 w-5 md:h-6 md:w-6" />
               </div>
               <div class="space-y-1 overflow-hidden flex-1">
-                <CardTitle class="text-lg leading-tight truncate" :title="agent.name">
+                <CardTitle class="text-base md:text-lg leading-tight truncate" :title="agent.name">
                   {{ agent.name }}
                 </CardTitle>
                 <CardDescription class="line-clamp-2 min-h-[2.5rem]">
@@ -35,10 +35,10 @@
           </CardHeader>
           
           <CardContent class="flex-1 pb-4">
-             <div class="space-y-3 text-sm">
+             <div class="space-y-2 md:space-y-3 text-sm">
                 <div class="flex justify-between">
                    <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
-                   <span class="font-medium truncate max-w-[200px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
+                   <span class="font-medium truncate max-w-[120px] md:max-w-[200px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
                 </div>
                 <div class="flex justify-between items-center">
                    <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
@@ -66,9 +66,7 @@
             <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
               <Edit class="h-4 w-4" />
             </Button>
-            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleAuthorize(agent)" :title="t('agent.authorize')">
-              <UserPlus class="h-4 w-4" />
-            </Button>
+       
             <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
               <Upload class="h-4 w-4" />
             </Button>
@@ -392,7 +390,7 @@ const handleExport = (agent) => {
   showExportDialog.value = true
 }
 
-const confirmExport = () => {
+const confirmExport = async () => {
   if (!agentToExport.value) return
   const agent = agentToExport.value
   
@@ -429,6 +427,37 @@ const confirmExport = () => {
      extension = 'yaml'
    }
 
+  // 尝试使用 Tauri API
+  if (window.__TAURI__) {
+    try {
+      const { save } = await import('@tauri-apps/api/dialog')
+      const { writeTextFile } = await import('@tauri-apps/api/fs')
+      const { documentDir, join } = await import('@tauri-apps/api/path')
+      
+      const defaultDir = await documentDir()
+      const fileName = `agent_${agent.name}_${new Date().toISOString().split('T')[0]}.${extension}`
+      const defaultPath = await join(defaultDir, fileName)
+
+      const filePath = await save({
+        defaultPath: defaultPath,
+        filters: [{
+          name: extension.toUpperCase() + ' Config',
+          extensions: [extension]
+        }]
+      })
+
+      if (filePath) {
+        await writeTextFile(filePath, dataStr)
+        toast.success(t('agent.exportSuccess') || '导出成功')
+        showExportDialog.value = false
+        agentToExport.value = null
+      }
+      return
+    } catch (e) {
+      console.warn('Tauri export failed, falling back to web download', e)
+    }
+  }
+
   // 创建下载链接
   const dataBlob = new Blob([dataStr], { type: mimeType })
   const url = URL.createObjectURL(dataBlob)
@@ -448,8 +477,79 @@ const confirmExport = () => {
   agentToExport.value = null
 }
 
-const handleImport = () => {
-  // 创建文件输入元素
+const processImportContent = (content) => {
+  try {
+    const importedConfig = JSON.parse(content)
+
+    // 验证必要字段
+    if (!importedConfig.name) {
+      alert(t('agent.importMissingName'))
+      return
+    }
+
+    // 创建新的Agent配置
+    const newAgent = {
+      name: importedConfig.name + t('agent.importSuffix'),
+      llm_provider_id: importedConfig.llm_provider_id || null,
+      description: importedConfig.description || '',
+      systemPrefix: importedConfig.systemPrefix || '',
+      deepThinking: importedConfig.deepThinking || false,
+      multiAgent: importedConfig.multiAgent || false,
+      maxLoopCount: importedConfig.maxLoopCount || 10,
+      availableTools: importedConfig.availableTools || [],
+      availableSkills: importedConfig.availableSkills || [],
+      systemContext: importedConfig.systemContext || {},
+      availableWorkflows: importedConfig.availableWorkflows || {},
+      llmConfig: importedConfig.llmConfig || {}
+    }
+    
+    // 移除可能存在的id，确保是创建新Agent
+    if (newAgent.id) {
+        delete newAgent.id
+    }
+
+    // 切换到编辑视图并预填数据
+    editingAgent.value = newAgent
+    currentView.value = 'edit'
+
+  } catch (error) {
+    alert(t('agent.importError'))
+    console.error('Import error:', error)
+  }
+}
+
+const handleImport = async () => {
+  // 尝试使用 Tauri API
+  if (window.__TAURI__) {
+    try {
+      const { open } = await import('@tauri-apps/api/dialog')
+      const { readTextFile } = await import('@tauri-apps/api/fs')
+      const { documentDir } = await import('@tauri-apps/api/path')
+      
+      const defaultDir = await documentDir()
+
+      const selected = await open({
+        defaultPath: defaultDir,
+        multiple: false,
+        filters: [{
+          name: 'JSON Config',
+          extensions: ['json']
+        }]
+      })
+
+      if (selected) {
+        // selected is path string or array of strings
+        const path = Array.isArray(selected) ? selected[0] : selected
+        const contents = await readTextFile(path)
+        processImportContent(contents)
+      }
+      return
+    } catch (e) {
+      console.warn('Tauri import failed, falling back to web input', e)
+    }
+  }
+
+  // Web fallback
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.json'
@@ -460,39 +560,8 @@ const handleImport = () => {
     if (!file) return
 
     const reader = new FileReader()
-    reader.onload = async (e) => {
-      try {
-        const importedConfig = JSON.parse(e.target.result)
-
-        // 验证必要字段
-        if (!importedConfig.name) {
-          alert(t('agent.importMissingName'))
-          return
-        }
-
-        // 创建新的Agent配置
-        const newAgent = {
-          name: importedConfig.name + t('agent.importSuffix'),
-          llm_provider_id: importedConfig.llm_provider_id || null,
-          description: importedConfig.description || '',
-          systemPrefix: importedConfig.systemPrefix || '',
-          deepThinking: importedConfig.deepThinking || false,
-          multiAgent: importedConfig.multiAgent || false,
-          maxLoopCount: importedConfig.maxLoopCount || 10,
-          availableTools: importedConfig.availableTools || [],
-          availableSkills: importedConfig.availableSkills || [],
-          systemContext: importedConfig.systemContext || {},
-          availableWorkflows: importedConfig.availableWorkflows || {}
-        }
-
-        // 切换到编辑视图并预填数据
-        editingAgent.value = newAgent
-        currentView.value = 'edit'
-
-      } catch (error) {
-        alert(t('agent.importError'))
-        console.error('Import error:', error)
-      }
+    reader.onload = (e) => {
+      processImportContent(e.target.result)
     }
 
     reader.readAsText(file)
@@ -596,8 +665,7 @@ const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null
       toast.success(t('agent.createSuccess').replace('{name}', agentData.name))
     }
   } catch (error) {
-    console.error('保存agent失败:', error)
-    toast.error(t('agent.saveError'))
+    toast.error(t('agent.saveError') + ' ' + error.message)
   } finally {
     if (doneCallback) doneCallback()
   }
