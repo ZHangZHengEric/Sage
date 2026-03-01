@@ -6,7 +6,6 @@ import math
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -16,10 +15,8 @@ from ..services.conversation import (
     delete_conversation,
     get_conversation_messages,
     get_conversations_paginated,
-    get_file_workspace,
     get_session_status,
     interrupt_session,
-    download_session_file,
 )
 
 # ============= 会话相关模型 =============
@@ -62,30 +59,6 @@ async def get_status(session_id: str, request: Request):
     tasks = result.get("tasks_status", {}).get("tasks", [])
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks)}")
     return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result})
-
-
-@conversation_router.post("/api/sessions/{session_id}/file_workspace")
-async def get_workspace(session_id: str, request: Request):
-    """获取指定会话的文件工作空间"""
-    result = await get_file_workspace(session_id)
-    files = result.get("files", [])
-    logger.bind(session_id=session_id).info(f"获取工作空间文件数量：{len(files)}")
-    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result})
-
-
-@conversation_router.get("/api/sessions/{session_id}/file_workspace/download")
-async def download_file(session_id: str, request: Request):
-    file_path = request.query_params.get("file_path")
-    logger.bind(session_id=session_id).info(f"Download request: file_path={file_path}")
-    try:
-        path, filename, media_type = await download_session_file(session_id, file_path)
-        logger.bind(session_id=session_id).info(f"Download resolved: path={path}")
-        return FileResponse(
-            path=path, filename=filename, media_type=media_type
-        )
-    except Exception as e:
-        logger.bind(session_id=session_id).error(f"Download failed: {e}")
-        raise
 
 
 @conversation_router.get("/api/conversations")
