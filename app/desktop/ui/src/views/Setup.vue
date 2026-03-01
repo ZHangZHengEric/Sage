@@ -9,9 +9,9 @@
           <div class="p-8 bg-primary/5 rounded-full inline-block mb-4">
             <Bot class="w-24 h-24 text-primary" />
           </div>
-          <h1 class="text-4xl md:text-5xl font-bold tracking-tight">Welcome to Sage</h1>
+          <h1 class="text-4xl md:text-5xl font-bold tracking-tight">欢迎使用 Sage</h1>
           <p class="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            Your intelligent AI workspace is almost ready. Let's set up your environment to get started.
+            您的智能 AI 工作空间已准备就绪。让我们设置您的环境以开始使用。
           </p>
         </div>
         
@@ -21,10 +21,10 @@
               <div class="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
                 <Brain class="w-6 h-6 text-blue-600 dark:text-blue-400" />
               </div>
-              <h3 class="text-xl font-semibold">Model Provider</h3>
+              <h3 class="text-xl font-semibold">模型提供商</h3>
             </div>
             <p class="text-muted-foreground leading-relaxed">
-              The "Brain" of the AI. Connect to services like OpenAI, DeepSeek, or others to power your agents.
+              AI 的“大脑”。连接到 OpenAI、DeepSeek 或其他服务以为您的代理提供动力。
             </p>
           </div>
           
@@ -33,16 +33,16 @@
               <div class="p-3 bg-green-100 dark:bg-green-900/30 rounded-xl">
                 <MessageSquare class="w-6 h-6 text-green-600 dark:text-green-400" />
               </div>
-              <h3 class="text-xl font-semibold">Agent</h3>
+              <h3 class="text-xl font-semibold">智能体</h3>
             </div>
             <p class="text-muted-foreground leading-relaxed">
-              The "Persona" you interact with. Define how it behaves, what tools it uses, and its personality.
+              您与之交互的“角色”。定义它的行为方式、使用的工具及其个性。
             </p>
           </div>
         </div>
 
         <Button size="lg" @click="handleWelcomeNext" class="px-12 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
-          Get Started
+          开始使用
           <ArrowRight class="ml-2 w-6 h-6" />
         </Button>
       </div>
@@ -59,29 +59,80 @@
 
           <div class="space-y-6 bg-card/50 p-8 rounded-xl border shadow-sm backdrop-blur-sm">
             <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.name') }}</Label>
-              <Input v-model="modelForm.name" placeholder="My LLM Provider" class="h-11" />
+              <Label class="text-base">提供商 <span class="text-destructive">*</span></Label>
+              <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
+                <SelectTrigger class="h-11">
+                  <SelectValue placeholder="选择提供商" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>提供商</SelectLabel>
+                    <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
+                      {{ provider.name }}
+                    </SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
             
             <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.baseUrl') }}</Label>
+              <Label class="text-base">{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
               <Input v-model="modelForm.base_url" placeholder="https://api.openai.com/v1" class="h-11" />
-              <div class="flex gap-3 text-sm flex-wrap pt-1">
-                  <span class="cursor-pointer text-primary hover:underline" @click="modelForm.base_url='https://api.openai.com/v1'">OpenAI</span>
-                  <span class="cursor-pointer text-primary hover:underline" @click="modelForm.base_url='https://api.deepseek.com'">DeepSeek</span>
-                  <span class="cursor-pointer text-primary hover:underline" @click="modelForm.base_url='https://dashscope.aliyuncs.com/compatible-mode/v1'">Aliyun</span>
-                  <span class="cursor-pointer text-primary hover:underline" @click="modelForm.base_url='https://ark.cn-beijing.volces.com/api/v3'">ByteDance</span>
+            </div>
+            
+            <div class="grid gap-2">
+              <div class="flex items-center justify-between">
+                <Label class="text-base">{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
+                <Button 
+                  v-if="currentProvider?.website" 
+                  variant="link" 
+                  size="sm" 
+                  class="h-auto p-0 text-primary" 
+                  @click="openProviderWebsite"
+                >
+                  获取 API Key
+                  <ArrowRight class="ml-1 w-3 h-3" />
+                </Button>
               </div>
+              <Input v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="h-11" />
             </div>
             
             <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.apiKey') }}</Label>
-              <Textarea v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="min-h-[100px] resize-none" />
-            </div>
-            
-            <div class="grid gap-2">
-               <Label class="text-base">{{ t('modelProvider.model') }}</Label>
-               <Input v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" />
+               <div class="flex items-center justify-between">
+                 <Label class="text-base">{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
+                 <Button 
+                   v-if="currentProvider?.model_list_url" 
+                   variant="link" 
+                   size="sm" 
+                   class="h-auto p-0 text-primary" 
+                   @click="openProviderModelList"
+                 >
+                   查看模型列表
+                   <ArrowRight class="ml-1 w-3 h-3" />
+                 </Button>
+               </div>
+               <div v-if="currentProvider?.models?.length" class="flex gap-2">
+                 <div class="flex-1 relative">
+                   <Input 
+                     v-model="modelForm.model" 
+                     :placeholder="t('modelProvider.modelPlaceholder')" 
+                     class="h-11 pr-10" 
+                   />
+                   <div v-if="currentProvider?.models?.length" class="absolute right-0 top-0 h-full">
+                     <Select :model-value="''" @update:model-value="(val) => modelForm.model = val">
+                        <SelectTrigger class="h-full w-8 px-0 border-l-0 rounded-l-none focus:ring-0">
+                          <span class="sr-only">Select model</span>
+                        </SelectTrigger>
+                        <SelectContent align="end" class="min-w-[200px]">
+                          <SelectItem v-for="m in currentProvider.models" :key="m" :value="m">
+                            {{ m }}
+                          </SelectItem>
+                        </SelectContent>
+                     </Select>
+                   </div>
+                 </div>
+               </div>
+               <Input v-else v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" />
                <p class="text-sm text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
             </div>
             
@@ -148,11 +199,22 @@ import { toolAPI } from '@/api/tool'
 import { skillAPI } from '@/api/skill'
 import { toast } from 'vue-sonner'
 import { Loader, Bot, Brain, MessageSquare, ArrowRight } from 'lucide-vue-next'
+import { open } from '@tauri-apps/api/shell'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { MODEL_PROVIDERS } from '@/utils/modelProviders'
 import AgentEdit from '@/components/AgentEdit.vue'
 
 const router = useRouter()
@@ -171,7 +233,7 @@ const systemStatus = ref({
 const modelForm = reactive({
   name: 'Default Provider',
   base_url: '',
-  api_keys_str: '',
+  api_keys_str: 'sk-xxxxxxxx',
   model: '',
   maxTokens: 4096,
   temperature: 0.7,
@@ -180,16 +242,55 @@ const modelForm = reactive({
   maxModelLen: 32000
 })
 
+const selectedProvider = ref('')
+const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+
+const isCustomModel = ref(false)
+
+const handleProviderChange = (val) => {
+  selectedProvider.value = val
+  const provider = MODEL_PROVIDERS.find(p => p.name === val)
+  if (provider) {
+    // modelForm.name = provider.name // Don't override name for setup
+    modelForm.base_url = provider.base_url
+    // modelForm.model = provider.models[0] || '' // Don't auto-select first model
+    isCustomModel.value = false
+  }
+}
+
+const openProviderWebsite = async () => {
+  if (currentProvider.value?.website) {
+    try {
+      await open(currentProvider.value.website)
+    } catch (error) {
+      console.error('Failed to open external link:', error)
+      // Fallback to window.open if Tauri open fails (e.g. in browser mode)
+      window.open(currentProvider.value.website, '_blank')
+    }
+  }
+}
+
+const openProviderModelList = async () => {
+  if (currentProvider.value?.model_list_url) {
+    try {
+      await open(currentProvider.value.model_list_url)
+    } catch (error) {
+      console.error('Failed to open external link:', error)
+      window.open(currentProvider.value.model_list_url, '_blank')
+    }
+  }
+}
+
 const currentStepTitle = computed(() => {
-  if (step.value === 'model') return 'Connect Model Provider'
-  if (step.value === 'agent') return 'Create First Agent'
-  return 'Loading...'
+  if (step.value === 'model') return '连接模型提供商'
+  if (step.value === 'agent') return '创建第一个智能体'
+  return '加载中...'
 })
 
 const currentStepDescription = computed(() => {
-  if (step.value === 'model') return 'First, we need to connect to an LLM provider (the "Brain") to power your agents.'
-  if (step.value === 'agent') return 'Now, create your first Agent (the "Persona") to start chatting.'
-  return 'Checking system status...'
+  if (step.value === 'model') return '首先，我们需要连接到一个 LLM 提供商（“大脑”）来为您的智能体提供动力。'
+  if (step.value === 'agent') return '现在，创建您的第一个智能体（“角色”）以开始聊天。'
+  return '正在检查系统状态...'
 })
 
 const fetchSystemInfo = async () => {
@@ -248,7 +349,7 @@ const fetchResources = async () => {
 
 const handleModelSubmit = async () => {
   if (!modelForm.name || !modelForm.base_url || !modelForm.api_keys_str || !modelForm.model) {
-    toast.error('Please fill in all required fields')
+    toast.error('请填写所有必填字段')
     return
   }
   
@@ -274,7 +375,7 @@ const handleModelSubmit = async () => {
     await fetchResources()
   } catch (error) {
     console.error('Failed to save model provider:', error)
-    toast.error(error.message || 'Failed to save model provider')
+    toast.error(error.message || '保存模型提供商失败')
   } finally {
     loading.value = false
   }
@@ -300,11 +401,11 @@ const handleAgentSaved = async (agentData, shouldExit = true, doneCallback = nul
        result = await agentAPI.createAgent(agentData)
     }
 
-    toast.success('Setup completed successfully!')
+    toast.success('设置完成！')
     router.replace('/')
   } catch (error) {
     console.error('Failed to save setup:', error)
-    toast.error('Failed to complete setup') 
+    toast.error('设置失败') 
   } finally {
     loading.value = false
     if (doneCallback) doneCallback()

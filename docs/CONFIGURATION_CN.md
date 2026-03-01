@@ -310,7 +310,7 @@ providers:
     
   deepseek:
     base_url: "https://api.deepseek.com/v1"
-    models: ["deepseek-chat", "deepseek-coder"]
+    models: ["deepseek-chat", "deepseek-reasoner"]
     rate_limit: 100
 
   # 多模型代理池配置
@@ -479,7 +479,7 @@ watch_config_file("./config/settings.yaml", auto_reload=True)
 
 # DeepSeek 模型
 "deepseek-chat"
-"deepseek-coder"
+"deepseek-reasoner"
 
 # 本地模型（通过 Ollama）
 "llama2:7b"
