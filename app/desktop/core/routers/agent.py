@@ -2,12 +2,19 @@
 Agent 相关路由
 """
 
+import os
+import mimetypes
+import tempfile
+import zipfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
+from loguru import logger
 from pydantic import BaseModel
 
 from ..core.render import Response
+from ..core.exceptions import SageHTTPException
 from ..services.agent import (
     auto_generate_agent,
     create_agent,
@@ -265,5 +272,112 @@ async def optimize(request: SystemPromptOptimizeRequest):
     )
     return await Response.succ(data=res, message="系统提示词优化成功")
 
+
+@agent_router.post("/{agent_id}/file_workspace")
+async def get_workspace(agent_id: str, request: Request):
+    """获取指定Agent的文件工作空间"""
+    workspace_path = os.path.expanduser(f"~/.sage/{agent_id}/")
+
+    if not workspace_path or not os.path.exists(workspace_path):
+        return await Response.succ(
+             message="工作空间为空",
+             data={
+                "agent_id": agent_id,
+                "files": [],
+                "message": "工作空间为空",
+            }
+        )
+
+    files: List[Dict[str, Any]] = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        # 过滤掉隐藏文件和文件夹
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        filenames = [f for f in filenames if not f.startswith(".")]
+        for filename in filenames:
+            file_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(file_path, workspace_path)
+            file_stat = os.stat(file_path)
+            files.append(
+                {
+                    "name": filename,
+                    "path": relative_path,
+                    "size": file_stat.st_size,
+                    "modified_time": file_stat.st_mtime,
+                    "is_directory": False,
+                }
+            )
+
+        for dirname in dirs:
+            dir_path = os.path.join(root, dirname)
+            relative_path = os.path.relpath(dir_path, workspace_path)
+            files.append(
+                {
+                    "name": dirname,
+                    "path": relative_path,
+                    "size": 0,
+                    "modified_time": os.stat(dir_path).st_mtime,
+                    "is_directory": True,
+                }
+            )
+
+    logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
+    result = {
+        "agent_id": agent_id,
+        "files": files,
+        "message": "获取文件列表成功",
+    }
+    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result})
+
+
+@agent_router.get("/{agent_id}/file_workspace/download")
+async def download_file(agent_id: str, request: Request):
+    file_path = request.query_params.get("file_path")
+    logger.bind(agent_id=agent_id).info(f"Download request: file_path={file_path}")
+    
+    workspace_path = os.path.expanduser(f"~/.sage/{agent_id}/")
+
+    try:
+        # Resolve path logic
+        if not workspace_path or not file_path:
+             raise SageHTTPException(status_code=500, detail="缺少必要的路径参数")
+        
+        full_file_path = os.path.join(workspace_path, file_path)
+        if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
+             raise SageHTTPException(status_code=500, detail="访问被拒绝：文件路径超出工作空间范围")
+        
+        if not os.path.exists(full_file_path):
+             raise SageHTTPException(status_code=500, detail=f"文件不存在: {file_path}")
+             
+        path = full_file_path
+        
+        # Directory zip logic
+        if os.path.isdir(path):
+            temp_dir = tempfile.gettempdir()
+            zip_filename = f"{os.path.basename(path)}.zip"
+            zip_path = os.path.join(temp_dir, zip_filename)
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        file_abs_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_abs_path, path)
+                        zipf.write(file_abs_path, rel_path)
+            
+            path = zip_path
+            filename = zip_filename
+            media_type = "application/zip"
+        else:
+            filename = os.path.basename(path)
+            media_type, _ = mimetypes.guess_type(path)
+            if media_type is None:
+                media_type = "application/octet-stream"
+
+        logger.bind(agent_id=agent_id).info(f"Download resolved: path={path}")
+        return FileResponse(
+            path=path, filename=filename, media_type=media_type
+        )
+    except Exception as e:
+        logger.bind(agent_id=agent_id).error(f"Download failed: {e}")
+        raise
 
 
