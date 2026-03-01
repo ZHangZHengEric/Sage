@@ -35,5 +35,14 @@ export const modelProviderAPI = {
    */
   deleteModelProvider: async (id) => {
     return await baseAPI.delete(`/api/llm-provider/delete/${id}`)
+  },
+
+  /**
+   * 验证模型提供商
+   * @param {Object} data
+   * @returns {Promise<Object>}
+   */
+  verifyModelProvider: async (data) => {
+    return await baseAPI.post('/api/llm-provider/verify', data)
   }
 }
