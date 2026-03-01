@@ -12,21 +12,22 @@ export const taskAPI = {
 
   /**
    * 获取工作空间文件
-   * @param {string} sessionId - 会话ID
+   * @param {string} agentId - Agent ID
    * @returns {Promise<Object>}
    */
-  getWorkspaceFiles: (sessionId) => {
-    return baseAPI.post(`/api/sessions/${sessionId}/file_workspace`, {})
+  getWorkspaceFiles: (agentId) => {
+    return baseAPI.post(`/api/agent/${agentId}/file_workspace`, {})
   },
 
   /**
    * 下载文件
+   * @param {string} agentId - Agent ID
    * @param {string} filePath - 文件路径
    * @returns {Promise<Blob>}
    */
-  downloadFile: async (sessionId, filePath) => {
+  downloadFile: async (agentId, filePath) => {
     const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';
-    const url = `${apiPrefix}/api/sessions/${sessionId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
+    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
     
     // 准备请求头
     const headers = {
