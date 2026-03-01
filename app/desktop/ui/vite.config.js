@@ -24,5 +24,17 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom'
+  },
+  build: {
+    minify: 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor': ['vue', 'vue-router', 'pinia'],
+          'ui-libs': ['lucide-vue-next', 'clsx', 'tailwind-merge']
+        }
+      }
+    },
+    sourcemap: false
   }
 })

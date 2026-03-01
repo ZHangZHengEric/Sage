@@ -38,7 +38,7 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
     session_context = get_session_context(session_id)
     if not session_context:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"会话 {session_id} 已完成或者不存在",
             error_detail=f"Session '{session_id}' completed or not found",
         )
@@ -104,20 +104,20 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
     """校验并返回可下载的文件绝对路径"""
     if not workspace_path or not file_path:
         raise SageHTTPException(
-            status_code=400,
+            status_code=500,
             detail="缺少必要的路径参数",
             error_detail="workspace_path or file_path missing",
         )
     full_file_path = os.path.join(workspace_path, file_path)
     if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
         raise SageHTTPException(
-            status_code=403,
+            status_code=500,
             detail="访问被拒绝：文件路径超出工作空间范围",
             error_detail="Access denied: file path outside workspace",
         )
     if not os.path.exists(full_file_path):
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"文件不存在: {file_path}",
             error_detail=f"File not found: {file_path}",
         )
@@ -151,7 +151,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"会话 {conversation_id} 不存在",
             error_detail=f"Conversation '{conversation_id}' not found",
         )
@@ -208,7 +208,7 @@ async def delete_conversation(conversation_id: str) -> str:
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
-            status_code=404,
+            status_code=500,
             detail=f"会话 {conversation_id} 不存在",
             error_detail=f"Conversation '{conversation_id}' not found",
         )
@@ -265,7 +265,7 @@ async def download_session_file(session_id: str, file_path: str) -> Tuple[str, s
 
     if not os.path.isfile(full_path):
         raise SageHTTPException(
-            status_code=400,
+            status_code=500,
             detail=f"路径不是文件: {file_path}",
             error_detail=f"Path is not a file: {file_path}",
         )
