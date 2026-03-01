@@ -134,7 +134,7 @@ export default {
   'agent.sessionMemory': '会话记忆 (短期)',
   'agent.userMemory': '用户记忆 (长期)',
   'agent.deepThinking': '深度思考',
-  'agent.multiAgent': '多智能体',
+  'agent.multiAgent': 'Agent模式',
   'agent.enabled': '启用',
   'agent.selectTools': '选择可用工具',
   'agent.selectOption': '请选择',
