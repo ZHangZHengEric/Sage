@@ -97,6 +97,13 @@ fi
 echo "Activating Conda environment '$ENV_NAME'..."
 conda activate "$ENV_NAME"
 
+# Export Python path for Tauri
+export SAGE_PYTHON="$CONDA_BASE/envs/$ENV_NAME/bin/python"
+echo "Set SAGE_PYTHON: $SAGE_PYTHON"
+
+if [[ "$CONDA_EXE" == *"anaconda3"* ]]; then
+    conda install -n "$ENV_NAME" numba -y
+fi
 echo "Installing dependencies..."
 pip install -r "$APP_DIR/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
