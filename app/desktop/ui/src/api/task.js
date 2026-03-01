@@ -26,7 +26,11 @@ export const taskAPI = {
    * @returns {Promise<Blob>}
    */
   downloadFile: async (agentId, filePath) => {
-    const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';
+    let apiPrefix = baseAPI.request.baseURL;
+    // remove trailing slash
+    if (apiPrefix.endsWith('/')) {
+      apiPrefix = apiPrefix.slice(0, -1);
+    }
     const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
     
     // 准备请求头

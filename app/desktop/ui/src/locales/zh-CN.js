@@ -88,6 +88,7 @@ export default {
   'chat.share': '分享当前会话',
   'chat.shareFailed': '分享失败',
   'chat.downloadFailed': '下载失败',
+  'chat.downloadSuccess': '文件下载成功',
   'chat.traceWorkflow': '跟踪工作流',
   'chat.agentSpawned': '子智能体',
   'chat.agentName': '智能体名称',
