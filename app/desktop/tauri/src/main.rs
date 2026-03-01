@@ -12,6 +12,7 @@ use tokio::process::Command;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use std::process::Stdio;
 use std::sync::Mutex;
+use std::path::PathBuf;
 
 struct SidecarPid(Mutex<Option<u32>>);
 
@@ -140,7 +141,39 @@ fn main() {
                     
                     if entry_py.exists() {
                         println!("Running python script directly: {:?}", entry_py);
-                        ("python3".to_string(), vec![entry_py.to_string_lossy().to_string()])
+                        // Use environment variable SAGE_PYTHON if set, otherwise try common conda paths
+                        let python_cmd = if let Ok(sage_python) = std::env::var("SAGE_PYTHON") {
+                            println!("Using SAGE_PYTHON: {}", sage_python);
+                            sage_python
+                        } else {
+                            // Try common conda paths for sage-desktop-env
+                            let home_dir = std::env::var("HOME").unwrap_or_default();
+                            let possible_paths = [
+                                format!("{}/opt/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
+                                format!("{}/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
+                                format!("{}/miniconda3/envs/sage-desktop-env/bin/python", home_dir),
+                                format!("/opt/anaconda3/envs/sage-desktop-env/bin/python"),
+                                format!("/opt/miniconda3/envs/sage-desktop-env/bin/python"),
+                            ];
+                            let mut found = None;
+                            for path in &possible_paths {
+                                if PathBuf::from(path).exists() {
+                                    found = Some(path.clone());
+                                    break;
+                                }
+                            }
+                            match found {
+                                Some(path) => {
+                                    println!("Using conda python: {}", path);
+                                    path
+                                }
+                                None => {
+                                    println!("Conda python not found, falling back to python3");
+                                    "python3".to_string()
+                                }
+                            }
+                        };
+                        (python_cmd, vec![entry_py.to_string_lossy().to_string()])
                     } else {
                         // Fallback to sidecar if script not found
                          println!("Python script not found at {:?}, falling back to sidecar", script_path);
