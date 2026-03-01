@@ -18,7 +18,7 @@ export default {
   'sidebar.langToggleZh': '中 / En',
   'sidebar.langToggleEn': 'En / 中',
   'sidebar.apiReference': 'API Reference',
-  'sidebar.apiAgentChat': 'Agent Chat - api/stream',
+  'sidebar.apiAgentChat': 'Agent Chat - api/chat',
   'sidebar.systemManagement': 'System',
   'sidebar.userList': 'Users',
   'sidebar.systemSettings': 'Settings',

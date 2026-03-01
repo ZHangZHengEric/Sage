@@ -84,8 +84,10 @@
         "fullscreen": false,
         "resizable": true,
         "title": "SageAI",
-        "width": 1280,
-        "height": 800
+        "width": 1024,
+        "height": 768,
+        "minWidth": 1024,
+        "minHeight": 768
       }
     ]
   }
