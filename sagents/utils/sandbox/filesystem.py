@@ -180,6 +180,24 @@ class SandboxFileSystem:
         with open(host_file_path, 'r', encoding=encoding) as f:
             return f.read()
 
+    def exists(self, path: str) -> bool:
+        """
+        Check if a path exists in the sandbox.
+        
+        Args:
+            path: Virtual path or host path.
+            
+        Returns:
+            True if the path exists, False otherwise.
+        """
+        # Resolve to host path
+        if os.path.isabs(path) and path.startswith(self.host_path):
+            host_path = path
+        else:
+            host_path = self.to_host_path(path)
+        
+        return os.path.exists(host_path)
+
     def ensure_directory(self, path: str) -> str:
         """
         Ensures that a directory exists in the sandbox.
