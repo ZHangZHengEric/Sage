@@ -180,6 +180,15 @@ find "$TARGET_MCP_DIR/mcp_servers" -name "__pycache__" -type d -exec rm -rf {} +
 find "$TARGET_MCP_DIR/mcp_servers" -name ".git" -type d -exec rm -rf {} +
 find "$TARGET_MCP_DIR/mcp_servers" -name ".DS_Store" -delete
 
+# Copy skills to distribution directory
+echo "Copying skills to distribution..."
+cp -r "$ROOT_DIR/app/skills" "$TARGET_MCP_DIR/"
+
+# Clean up skills in dist
+find "$TARGET_MCP_DIR/skills" -name "__pycache__" -type d -exec rm -rf {} +
+find "$TARGET_MCP_DIR/skills" -name ".git" -type d -exec rm -rf {} +
+find "$TARGET_MCP_DIR/skills" -name ".DS_Store" -delete
+
 cd "$ROOT_DIR"
 
 ########################################
