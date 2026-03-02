@@ -14,9 +14,7 @@ class TaskStatus(str, Enum):
 
 class TaskType(str, Enum):
     ONCE = "once"
-    DAILY = "daily"
-    WEEKLY = "weekly"
-    MONTHLY = "monthly"
+    RECURRING = "recurring"
 
 
 class TaskSchedulerDB:
@@ -28,9 +26,27 @@ class TaskSchedulerDB:
         return sqlite3.connect(self.db_path, check_same_thread=False)
 
     def _init_db(self):
+        """Initialize database with new schema: separate tables for one-time and recurring tasks"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            # Tasks table
+            
+            # Recurring tasks table (templates for scheduled tasks)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS recurring_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    agent_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    cron_expression TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_executed_at DATETIME
+                )
+            """)
+            
+            # One-time tasks table (actual executable tasks)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,15 +55,17 @@ class TaskSchedulerDB:
                     agent_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     execute_at DATETIME NOT NULL,
-                    task_type TEXT DEFAULT 'once',
                     status TEXT DEFAULT 'pending',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     completed_at DATETIME,
                     retry_count INTEGER DEFAULT 0,
-                    max_retries INTEGER DEFAULT 3
+                    max_retries INTEGER DEFAULT 3,
+                    recurring_task_id INTEGER,
+                    FOREIGN KEY (recurring_task_id) REFERENCES recurring_tasks (id)
                 )
             """)
+            
             # Task execution history table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS task_history (
@@ -60,7 +78,114 @@ class TaskSchedulerDB:
                     FOREIGN KEY (task_id) REFERENCES tasks (id)
                 )
             """)
+            
+            # Create indexes for performance
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tasks_session_status 
+                ON tasks (session_id, status)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tasks_execute_at 
+                ON tasks (execute_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_recurring_tasks_enabled 
+                ON recurring_tasks (enabled)
+            """)
+            
             conn.commit()
+
+    # === Recurring Tasks Management ===
+    
+    def add_recurring_task(
+        self,
+        name: str,
+        description: str,
+        agent_id: str,
+        session_id: str,
+        cron_expression: str
+    ) -> int:
+        """Add a recurring task template"""
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO recurring_tasks (name, description, agent_id, session_id, cron_expression)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, description, agent_id, session_id, cron_expression))
+            conn.commit()
+            return cursor.lastrowid
+
+    def list_recurring_tasks(
+        self,
+        agent_id: Optional[str] = None,
+        enabled_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """List recurring task templates"""
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            query = "SELECT * FROM recurring_tasks WHERE 1=1"
+            params = []
+            
+            if agent_id:
+                query += " AND agent_id = ?"
+                params.append(agent_id)
+            if enabled_only:
+                query += " AND enabled = 1"
+            
+            query += " ORDER BY created_at DESC"
+            
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_recurring_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        """Get a recurring task template by ID"""
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM recurring_tasks WHERE id = ?", (task_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_recurring_task_last_executed(self, task_id: int):
+        """Update the last_executed_at timestamp for a recurring task"""
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE recurring_tasks 
+                SET last_executed_at = ?, updated_at = ?
+                WHERE id = ?
+            """, (datetime.now().isoformat(), datetime.now().isoformat(), task_id))
+            conn.commit()
+
+    def delete_recurring_task(self, task_id: int) -> bool:
+        """Delete a recurring task template and all its pending instances"""
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            # Delete pending tasks associated with this recurring task
+            cursor.execute("""
+                DELETE FROM tasks 
+                WHERE recurring_task_id = ? AND status = 'pending'
+            """, (task_id,))
+            # Delete the recurring task
+            cursor.execute("DELETE FROM recurring_tasks WHERE id = ?", (task_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def enable_recurring_task(self, task_id: int, enabled: bool) -> bool:
+        """Enable or disable a recurring task"""
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE recurring_tasks 
+                SET enabled = ?, updated_at = ?
+                WHERE id = ?
+            """, (1 if enabled else 0, datetime.now().isoformat(), task_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # === One-time Tasks Management ===
 
     def add_task(
         self,
@@ -69,14 +194,15 @@ class TaskSchedulerDB:
         agent_id: str,
         session_id: str,
         execute_at: str,
-        task_type: str = "once"
+        recurring_task_id: Optional[int] = None
     ) -> int:
+        """Add a one-time task (can be linked to a recurring task template)"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO tasks (name, description, agent_id, session_id, execute_at, task_type, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending')
-            """, (name, description, agent_id, session_id, execute_at, task_type))
+                INSERT INTO tasks (name, description, agent_id, session_id, execute_at, status, recurring_task_id)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+            """, (name, description, agent_id, session_id, execute_at, recurring_task_id))
             conn.commit()
             return cursor.lastrowid
 
@@ -84,9 +210,11 @@ class TaskSchedulerDB:
         self,
         agent_id: Optional[str] = None,
         status: Optional[str] = None,
+        session_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
+        """List one-time tasks"""
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -100,6 +228,9 @@ class TaskSchedulerDB:
             if status:
                 query += " AND status = ?"
                 params.append(status)
+            if session_id:
+                query += " AND session_id = ?"
+                params.append(session_id)
 
             query += " ORDER BY execute_at ASC LIMIT ? OFFSET ?"
             params.append(limit)
@@ -109,6 +240,7 @@ class TaskSchedulerDB:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        """Get a one-time task by ID"""
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -117,6 +249,7 @@ class TaskSchedulerDB:
             return dict(row) if row else None
 
     def delete_task(self, task_id: int) -> bool:
+        """Delete a one-time task and its history"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             # First delete related history
@@ -127,6 +260,7 @@ class TaskSchedulerDB:
             return cursor.rowcount > 0
 
     def complete_task(self, task_id: int) -> bool:
+        """Mark a task as completed"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             completed_at = datetime.now().isoformat()
@@ -139,6 +273,7 @@ class TaskSchedulerDB:
             return cursor.rowcount > 0
 
     def get_pending_tasks(self) -> List[Dict[str, Any]]:
+        """Get all pending tasks that are due for execution"""
         now = datetime.now().isoformat()
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
@@ -151,7 +286,21 @@ class TaskSchedulerDB:
             """, (now,))
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_pending_tasks_by_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get pending tasks for a specific session, ordered by creation time"""
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM tasks
+                WHERE status = 'pending'
+                  AND session_id = ?
+                ORDER BY created_at ASC
+            """, (session_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
     def claim_task(self, task_id: int) -> bool:
+        """Claim a task for processing (atomic operation)"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -162,6 +311,7 @@ class TaskSchedulerDB:
             return cursor.rowcount > 0
 
     def update_task_status(self, task_id: int, status: str, error_message: Optional[str] = None):
+        """Update task status"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             updated_at = datetime.now().isoformat()
@@ -179,39 +329,8 @@ class TaskSchedulerDB:
                 """, (status, updated_at, task_id))
             conn.commit()
 
-    def reschedule_recurring_task(self, task_id: int, task_type: str) -> bool:
-        task = self.get_task(task_id)
-        if not task or task_type == TaskType.ONCE:
-            return False
-
-        current_execute_at = datetime.fromisoformat(task['execute_at'])
-
-        if task_type == TaskType.DAILY:
-            next_execute_at = current_execute_at + timedelta(days=1)
-        elif task_type == TaskType.WEEKLY:
-            next_execute_at = current_execute_at + timedelta(weeks=1)
-        elif task_type == TaskType.MONTHLY:
-            # Add one month (approximate)
-            next_month = current_execute_at.month + 1
-            next_year = current_execute_at.year
-            if next_month > 12:
-                next_month = 1
-                next_year += 1
-            next_execute_at = current_execute_at.replace(year=next_year, month=next_month)
-        else:
-            return False
-
-        with self._get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE tasks
-                SET execute_at = ?, status = 'pending', updated_at = ?
-                WHERE id = ?
-            """, (next_execute_at.isoformat(), datetime.now().isoformat(), task_id))
-            conn.commit()
-            return cursor.rowcount > 0
-
     def add_task_history(self, task_id: int, status: str, response: Optional[str] = None, error_message: Optional[str] = None):
+        """Add task execution history record"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -219,3 +338,16 @@ class TaskSchedulerDB:
                 VALUES (?, ?, ?, ?)
             """, (task_id, status, response, error_message))
             conn.commit()
+
+    def get_task_history(self, task_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get execution history for a task"""
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM task_history
+                WHERE task_id = ?
+                ORDER BY executed_at DESC
+                LIMIT ?
+            """, (task_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
