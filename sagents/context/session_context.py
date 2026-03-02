@@ -161,7 +161,7 @@ class SessionContext:
                 logger.warning(f"SessionContext: Failed to create agent.md: {e}")
                 agent_md_path = None
         
-        use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "false").lower() == "true"
+        use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
         logger.info(f"SessionContext: use_claw_mode: {use_claw_mode}")
         if use_claw_mode:
             # 如果在_agent_workspace_host_path 下存在USER.md,不存在则创建
