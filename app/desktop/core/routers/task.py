@@ -7,10 +7,25 @@ from ..schemas.task import (
     RecurringTaskResponse, 
     TaskListResponse,
     TaskResponse,
-    TaskHistoryListResponse
+    TaskHistoryListResponse,
+    OneTimeTaskListResponse,
+    OneTimeTaskCreate
 )
 
 task_router = APIRouter(prefix="/tasks", tags=["Tasks"])
+
+@task_router.get("/one-time", response_model=OneTimeTaskListResponse)
+async def list_one_time_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    agent_id: Optional[str] = None
+):
+    items, total = await task_service.get_one_time_tasks(page, page_size, agent_id)
+    return OneTimeTaskListResponse(items=items, total=total, page=page, page_size=page_size)
+
+@task_router.post("/one-time", response_model=TaskResponse)
+async def create_one_time_task(data: OneTimeTaskCreate):
+    return await task_service.create_one_time_task(data)
 
 @task_router.get("/recurring", response_model=TaskListResponse)
 async def list_recurring_tasks(
