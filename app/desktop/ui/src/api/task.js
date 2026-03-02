@@ -1,23 +1,54 @@
-import { baseAPI } from './base.js'
+import { BaseAPI } from './base.js'
 
-export const taskAPI = {
+class TaskAPI extends BaseAPI {
+  getRecurringTasks(params) {
+    return this.get('/tasks/recurring', params)
+  }
+
+  getOneTimeTasks(params) {
+    return this.get('/tasks/one-time', params)
+  }
+
+  createRecurringTask(data) {
+    return this.post('/tasks/recurring', data)
+  }
+
+  createOneTimeTask(data) {
+    return this.post('/tasks/one-time', data)
+  }
+
+  updateRecurringTask(id, data) {
+    return this.put(`/tasks/recurring/${id}`, data)
+  }
+
+  deleteRecurringTask(id) {
+    return this.delete(`/tasks/recurring/${id}`)
+  }
+
+  toggleTaskStatus(id, enabled) {
+    return this.post(`/tasks/recurring/${id}/toggle`, { enabled })
+  }
+
+  getTaskHistory(id, params) {
+    return this.get(`/tasks/recurring/${id}/history`, params)
+  }
   /**
    * 获取任务状态
    * @param {string} sessionId - 会话ID
    * @returns {Promise<Object>}
    */
-  getTaskStatus: (sessionId) => {
-    return baseAPI.post(`/api/sessions/${sessionId}/tasks_status`, {})
-  },
+  getTaskStatus(sessionId) {
+    return this.post(`/api/sessions/${sessionId}/tasks_status`, {})
+  }
 
   /**
    * 获取工作空间文件
    * @param {string} agentId - Agent ID
    * @returns {Promise<Object>}
    */
-  getWorkspaceFiles: (agentId) => {
-    return baseAPI.post(`/api/agent/${agentId}/file_workspace`, {})
-  },
+  getWorkspaceFiles(agentId) {
+    return this.post(`/api/agent/${agentId}/file_workspace`, {})
+  }
 
   /**
    * 下载文件
@@ -25,8 +56,8 @@ export const taskAPI = {
    * @param {string} filePath - 文件路径
    * @returns {Promise<Blob>}
    */
-  downloadFile: async (agentId, filePath) => {
-    let apiPrefix = baseAPI.request.baseURL;
+  async downloadFile(agentId, filePath) {
+    let apiPrefix = this.request.baseURL;
     // remove trailing slash
     if (apiPrefix.endsWith('/')) {
       apiPrefix = apiPrefix.slice(0, -1);
@@ -67,3 +98,5 @@ export const taskAPI = {
     return response.blob()
   }
 }
+
+export const taskAPI = new TaskAPI()
