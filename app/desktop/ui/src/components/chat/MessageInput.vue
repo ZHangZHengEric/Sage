@@ -307,10 +307,70 @@ const handleStop = () => {
   emit('stopGeneration')
 }
 
+// 获取文件MIME类型
+const getMimeType = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase()
+  const mimeMap = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'svg': 'image/svg+xml',
+    'mp4': 'video/mp4',
+    'webm': 'video/webm',
+    'pdf': 'application/pdf',
+    'txt': 'text/plain',
+    'json': 'application/json',
+    'zip': 'application/zip',
+    'md': 'text/markdown',
+    'csv': 'text/csv',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  }
+  return mimeMap[ext] || 'application/octet-stream'
+}
+
 // 触发文件选择
-const triggerFileInput = () => {
-  if (fileInputRef.value) {
-    fileInputRef.value.click()
+const triggerFileInput = async () => {
+  if (window.__TAURI__) {
+    try {
+      const { open } = await import('@tauri-apps/api/dialog')
+      const { readBinaryFile } = await import('@tauri-apps/api/fs')
+      
+      const selected = await open({
+        multiple: true
+      })
+
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected]
+        for (const path of paths) {
+          try {
+            const contents = await readBinaryFile(path)
+            // Extract filename from path (handles both Windows and Unix separators)
+            const filename = path.split(/[\\/]/).pop()
+            const mimeType = getMimeType(filename)
+            const file = new File([contents], filename, { type: mimeType })
+            await processFile(file)
+          } catch (err) {
+            console.error('Failed to read file:', path, err)
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Tauri file selection failed, falling back to web input', e)
+      if (fileInputRef.value) {
+        fileInputRef.value.click()
+      }
+    }
+  } else {
+    if (fileInputRef.value) {
+      fileInputRef.value.click()
+    }
   }
 }
 
