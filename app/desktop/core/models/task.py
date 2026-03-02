@@ -120,3 +120,28 @@ class TaskDao(BaseDao):
             page=page,
             page_size=page_size
         )
+
+    async def get_one_time_tasks(
+        self, 
+        page: int = 1, 
+        page_size: int = 20, 
+        agent_id: Optional[str] = None
+    ) -> tuple[List[Task], int]:
+        """获取一次性任务列表（recurring_task_id=0）"""
+        # TODO: 暂时使用 recurring_task_id=0 来标识一次性任务，后续可能需要更严谨的判断
+        where = [Task.recurring_task_id == 0]
+        if agent_id:
+            where.append(Task.agent_id == agent_id)
+        
+        return await self.paginate_list(
+            Task,
+            where=where,
+            order_by=desc(Task.created_at),
+            page=page,
+            page_size=page_size
+        )
+
+    async def create_one_time_task(self, task: Task) -> Task:
+        """创建一次性任务"""
+        await self.save(task)
+        return task

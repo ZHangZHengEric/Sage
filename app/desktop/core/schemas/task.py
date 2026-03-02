@@ -12,6 +12,12 @@ class RecurringTaskBase(BaseModel):
 class RecurringTaskCreate(RecurringTaskBase):
     pass
 
+class OneTimeTaskCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    agent_id: str
+    execute_at: datetime
+
 class RecurringTaskUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -48,6 +54,12 @@ class TaskResponse(BaseModel):
 
 class TaskListResponse(BaseModel):
     items: List[RecurringTaskResponse]
+    total: int
+    page: int
+    page_size: int
+
+class OneTimeTaskListResponse(BaseModel):
+    items: List[TaskResponse]
     total: int
     page: int
     page_size: int

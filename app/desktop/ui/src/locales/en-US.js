@@ -580,8 +580,11 @@ export default {
   'task.subtasks': 'Subtasks:',
 
   // Scheduled Tasks
-  'scheduledTask.menuTitle': 'Scheduled Tasks',
-  'scheduledTask.title': 'Task Management',
+  'scheduledTask.menuTitle': 'Tasks',
+  'scheduledTask.title': 'Recurring Tasks',
+  'scheduledTask.oneTimeTitle': 'One-time Tasks',
+  'scheduledTask.createOneTime': 'Create One-Time Task',
+  'scheduledTask.futureTimeRequired': 'Execution time must be in the future',
   'scheduledTask.createTitle': 'Create Task',
   'scheduledTask.editTitle': 'Edit Task',
   'scheduledTask.name': 'Task Name',
