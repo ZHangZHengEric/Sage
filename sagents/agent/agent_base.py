@@ -317,8 +317,9 @@ class AgentBase(ABC):
                 role_content = self.system_prefix
             else:
                 if session_context:
-                    role_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
-                    use_identity = True
+                    if session_context.sandbox.file_system.exists(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md')):
+                        role_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
+                        use_identity = True
                 else:
                     role_content = prompt_manager.get_prompt(
                         'agent_intro_template',
