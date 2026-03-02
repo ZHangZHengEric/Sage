@@ -14,14 +14,14 @@ export const MODEL_PROVIDERS = [
     model_list_url: 'https://platform.deepseek.com/api_keys'
   },
   {
-    name: 'Aliyun (Qwen)',
+    name: 'Aliyun',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: ['qwen-plus', 'qwen-turbo', 'qwen-max', 'qwen-max-latest'],
     website: 'https://bailian.console.aliyun.com/',
     model_list_url: 'https://help.aliyun.com/zh/model-studio/getting-started/models'
   },
   {
-    name: 'ByteDance (Doubao)',
+    name: 'ByteDance',
     base_url: 'https://ark.cn-beijing.volces.com/api/v3',
     models: ['doubao-pro-32k', 'doubao-lite-32k', 'doubao-pro-128k', 'deepseek-r1-250120', 'deepseek-v3-241226'],
     website: 'https://console.volcengine.com/ark/region:ark+cn-beijing/endpoint',
