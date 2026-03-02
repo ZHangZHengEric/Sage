@@ -20,6 +20,8 @@ class TaskType(str, Enum):
 class TaskSchedulerDB:
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        if not self.db_path.parent.exists():
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _get_conn(self):
