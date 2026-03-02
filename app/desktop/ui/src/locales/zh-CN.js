@@ -582,8 +582,11 @@ export default {
   'task.subtasks': '子任务:',
 
   // 定时任务
-  'scheduledTask.menuTitle': '定时任务',
-  'scheduledTask.title': '定时任务管理',
+  'scheduledTask.menuTitle': '任务',
+  'scheduledTask.title': '循环任务',
+  'scheduledTask.oneTimeTitle': '一次性任务',
+  'scheduledTask.createOneTime': '创建一次性任务',
+  'scheduledTask.futureTimeRequired': '执行时间必须在当前时间之后',
   'scheduledTask.createTitle': '创建定时任务',
   'scheduledTask.editTitle': '编辑定时任务',
   'scheduledTask.name': '任务名称',

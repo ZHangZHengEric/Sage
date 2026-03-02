@@ -161,10 +161,8 @@ if ! command -v npm >/dev/null; then
   exit 1
 fi
 
-if [ ! -d "node_modules" ]; then
-  echo "Installing frontend dependencies..."
-  npm install
-fi
+echo "Installing frontend dependencies..."
+npm install
 
 cd "$ROOT_DIR"
 
