@@ -92,6 +92,14 @@ const routes = [
     }
   },
   {
+    path: '/personal/im-channels',
+    name: 'IMChannelConfig',
+    component: () => import('../views/IMChannelConfig.vue'),
+    meta: {
+      title: 'im.title'
+    }
+  },
+  {
     path: '/me',
     name: 'MobileMe',
     component: () => import('../views/MobileMe.vue'),
