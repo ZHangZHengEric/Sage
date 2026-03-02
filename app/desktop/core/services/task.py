@@ -2,7 +2,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime
 from loguru import logger
 from ..models.task import TaskDao, RecurringTask, Task
-from ..schemas.task import RecurringTaskCreate, RecurringTaskUpdate
+from ..schemas.task import RecurringTaskCreate, RecurringTaskUpdate, OneTimeTaskCreate
 from ..core.exceptions import SageHTTPException
 
 class TaskService:
@@ -24,6 +24,19 @@ class TaskService:
             enabled=data.enabled
         )
         return await self.dao.create_recurring_task(task)
+
+    async def create_one_time_task(self, data: OneTimeTaskCreate) -> Task:
+        session_id = "one-time-" + datetime.now().strftime("%Y%m%d%H%M%S")
+        task = Task(
+            name=data.name,
+            session_id=session_id,
+            description=data.description,
+            agent_id=data.agent_id,
+            execute_at=data.execute_at,
+            recurring_task_id=0,
+            status="pending"
+        )
+        return await self.dao.create_one_time_task(task)
 
     async def update_recurring_task(
         self, task_id: int, data: RecurringTaskUpdate
@@ -62,5 +75,10 @@ class TaskService:
         self, recurring_task_id: int, page: int = 1, page_size: int = 20
     ) -> Tuple[List[Task], int]:
         return await self.dao.get_task_history(recurring_task_id, page, page_size)
+
+    async def get_one_time_tasks(
+        self, page: int = 1, page_size: int = 20, agent_id: Optional[str] = None
+    ) -> Tuple[List[Task], int]:
+        return await self.dao.get_one_time_tasks(page, page_size, agent_id)
 
 task_service = TaskService()
