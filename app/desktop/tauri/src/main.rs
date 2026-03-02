@@ -4,15 +4,14 @@
 )]
 
 use tauri::{
-    // api::process::{Command, CommandEvent},
-    // CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem,
-    Manager, WindowEvent,
+    CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem,
+    WindowEvent,
 };
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::io::{BufReader, AsyncBufReadExt};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
-use std::path::PathBuf;
 
 struct SidecarPid(Mutex<Option<u32>>);
 
@@ -26,51 +25,104 @@ fn get_server_port() -> Option<u16> {
     std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
 }
 
+/// Show and focus the main window (cross-platform)
+fn show_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        // For macOS: ensure app is shown and window is visible
+        #[cfg(target_os = "macos")]
+        {
+            // Show the application (brings it to front on macOS)
+            let _ = app.show();
+        }
+
+        // Check if window is visible, if not show it
+        match window.is_visible() {
+            Ok(false) | Err(_) => {
+                if let Err(e) = window.show() {
+                    eprintln!("Failed to show window: {}", e);
+                }
+            }
+            _ => {}
+        }
+
+        // Unminimize if minimized
+        match window.is_minimized() {
+            Ok(true) => {
+                if let Err(e) = window.unminimize() {
+                    eprintln!("Failed to unminimize window: {}", e);
+                }
+            }
+            _ => {}
+        }
+
+        // Set focus
+        if let Err(e) = window.set_focus() {
+            eprintln!("Failed to set focus: {}", e);
+        }
+    }
+}
+
 fn main() {
-    /*
     // Tray setup
-    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
-    let hide = CustomMenuItem::new("hide".to_string(), "Hide");
+    let show = CustomMenuItem::new("show".to_string(), "显示");
+    let quit = CustomMenuItem::new("quit".to_string(), "退出");
     let tray_menu = SystemTrayMenu::new()
-        .add_item(hide)
+        .add_item(show)
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(quit);
-    let system_tray = SystemTray::new().with_menu(tray_menu);
-    */
+    
+    let system_tray = SystemTray::new()
+        .with_menu(tray_menu);
 
     tauri::Builder::default()
         .manage(SidecarPid(Mutex::new(None)))
-        // .plugin(tauri_plugin_log::Builder::default().targets([
-        //     LogTarget::LogDir,
-        //     LogTarget::Stdout,
-        //     LogTarget::Webview,
-        // ]).build())
-        .on_window_event(|event| match event.event() {
-            WindowEvent::Destroyed => {
-                // When the main window is destroyed (closed), exit the app.
-                // Use app_handle.exit(0) to ensure proper cleanup of child processes.
-                let app_handle = event.window().app_handle();
-                if let Some(state) = app_handle.try_state::<SidecarPid>() {
-                    let mut pid_guard = state.0.lock().unwrap();
-                    if let Some(pid) = *pid_guard {
-                        #[cfg(unix)]
-                        std::process::Command::new("kill")
-                            .arg(pid.to_string())
-                            .output()
-                            .ok();
-                        #[cfg(windows)]
-                        std::process::Command::new("taskkill")
-                            .args(["/F", "/PID", &pid.to_string()])
-                            .output()
-                            .ok();
-                        *pid_guard = None;
+        .on_window_event(|event| {
+            match event.event() {
+                WindowEvent::CloseRequested { api, .. } => {
+                    // Prevent the window from actually closing, just hide it
+                    event.window().hide().unwrap();
+                    api.prevent_close();
+                }
+                WindowEvent::Destroyed => {
+                    // When the main window is destroyed (closed), exit the app.
+                    // Use app_handle.exit(0) to ensure proper cleanup of child processes.
+                    let app_handle = event.window().app_handle();
+                    if let Some(state) = app_handle.try_state::<SidecarPid>() {
+                        let mut pid_guard = state.0.lock().unwrap();
+                        if let Some(pid) = *pid_guard {
+                            #[cfg(unix)]
+                            std::process::Command::new("kill")
+                                .arg(pid.to_string())
+                                .output()
+                                .ok();
+                            #[cfg(windows)]
+                            std::process::Command::new("taskkill")
+                                .args(["/F", "/PID", &pid.to_string()])
+                                .output()
+                                .ok();
+                            *pid_guard = None;
+                        }
+                    }
+                    event.window().app_handle().exit(0);
+                }
+                WindowEvent::Focused(focused) => {
+                    // When window is focused (e.g., user clicks on Dock icon on macOS)
+                    // Only handle if window is currently hidden and being brought to front
+                    if *focused {
+                        let window = event.window();
+                        match window.is_visible() {
+                            Ok(false) => {
+                                // Window was hidden, now being shown via Dock click
+                                let app_handle = window.app_handle();
+                                show_window(&app_handle);
+                            }
+                            _ => {}
+                        }
                     }
                 }
-                event.window().app_handle().exit(0);
+                _ => {}
             }
-            _ => {}
         })
-        /*
         .system_tray(system_tray)
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::LeftClick {
@@ -78,23 +130,36 @@ fn main() {
                 size: _,
                 ..
             } => {
-                let _window = app.get_window("main").unwrap();
-                window.show().unwrap();
-                window.set_focus().unwrap();
+                show_window(app);
             }
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                 "quit" => {
+                    // Kill the sidecar process before exiting
+                    if let Some(state) = app.try_state::<SidecarPid>() {
+                        let mut pid_guard = state.0.lock().unwrap();
+                        if let Some(pid) = *pid_guard {
+                            #[cfg(unix)]
+                            std::process::Command::new("kill")
+                                .arg(pid.to_string())
+                                .output()
+                                .ok();
+                            #[cfg(windows)]
+                            std::process::Command::new("taskkill")
+                                .args(["/F", "/PID", &pid.to_string()])
+                                .output()
+                                .ok();
+                            *pid_guard = None;
+                        }
+                    }
                     std::process::exit(0);
                 }
-                "hide" => {
-                    let window = app.get_window("main").unwrap();
-                    window.hide().unwrap();
+                "show" => {
+                    show_window(app);
                 }
                 _ => {}
             },
             _ => {}
         })
-        */
         .setup(|app| {
             let _window = app.get_window("main").unwrap();
             let app_handle = app.handle();
