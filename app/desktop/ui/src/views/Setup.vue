@@ -420,7 +420,6 @@ const createDefaultAgent = async (providerId = null) => {
     }
     
     await agentAPI.createAgent(agentData)
-    toast.success('Agent 初始化成功')
     router.replace('/')
     
   } catch (error) {
