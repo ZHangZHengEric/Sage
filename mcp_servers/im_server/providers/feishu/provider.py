@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 
 import httpx
 
-from .base import IMProviderBase
+from ..base import IMProviderBase
 
 
 class FeishuProvider(IMProviderBase):
@@ -78,13 +78,9 @@ class FeishuProvider(IMProviderBase):
             message["user_id"] = user_id
             url = f"{self.BASE_URL}/im/v1/messages?receive_id_type=user_id"
         else:
-            # Send to default chat using webhook
-            webhook_url = self.config.get("webhook_url")
-            if webhook_url:
-                return await self._send_webhook(webhook_url, content)
             return {
                 "success": False,
-                "error": "No chat_id, user_id, or webhook_url provided",
+                "error": "No chat_id or user_id provided",
             }
 
         async with httpx.AsyncClient() as client:
@@ -99,27 +95,6 @@ class FeishuProvider(IMProviderBase):
                     "success": True,
                     "message_id": data.get("data", {}).get("message_id"),
                 }
-            return {"success": False, "error": data.get("msg", "Unknown error")}
-
-    async def _send_webhook(self, webhook_url: str, content: str) -> Dict[str, Any]:
-        """Send message via webhook."""
-        timestamp = str(int(time.time()))
-        secret = self.config.get("app_secret", "")
-
-        payload = {
-            "timestamp": timestamp,
-            "msg_type": "text",
-            "content": {"text": content},
-        }
-
-        if secret:
-            payload["sign"] = self._generate_sign(timestamp, secret)
-
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(webhook_url, json=payload)
-            data = resp.json()
-            if data.get("code") == 0:
-                return {"success": True}
             return {"success": False, "error": data.get("msg", "Unknown error")}
 
     async def verify_webhook(self, request_body: bytes, signature: str) -> bool:

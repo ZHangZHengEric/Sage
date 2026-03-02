@@ -151,6 +151,50 @@ async def close_skill_manager():
     set_skill_manager(None)
 
 
+async def initialize_im_service():
+    """初始化 IM 服务 - 从数据库加载配置并启动"""
+    try:
+        from .models import IMChannelConfigDao
+        import asyncio
+        
+        # Desktop app uses fixed user_id
+        DESKTOP_USER_ID = "desktop_user"
+        
+        dao = IMChannelConfigDao()
+        config_record = await dao.get_by_user_id(DESKTOP_USER_ID)
+        
+        if not config_record:
+            logger.info("未找到 IM 配置，跳过 IM 服务启动")
+            return
+        
+        config_data = config_record.config
+        service_config = config_data.get("service", {})
+        
+        # 检查是否启用服务
+        if not service_config.get("running", False):
+            logger.info("IM 服务未启用，跳过启动")
+            return
+        
+        # 检查是否有启用的 provider
+        providers = config_data.get("im_providers", {})
+        enabled_providers = [k for k, v in providers.items() if v.get("enabled", False)]
+        
+        if not enabled_providers:
+            logger.info("没有启用的 IM provider，跳过服务启动")
+            return
+        
+        logger.info(f"正在启动 IM 服务，启用的 provider: {enabled_providers}")
+        
+        # 启动 IM 服务
+        from mcp_servers.im_server.im_server import initialize_im_server
+        asyncio.create_task(initialize_im_server())
+        
+        logger.info("IM 服务启动任务已创建")
+        
+    except Exception as e:
+        logger.error(f"IM 服务初始化失败: {e}")
+
+
 async def validate_and_disable_mcp_servers():
     """验证数据库中的 MCP 服务器配置并注册到 ToolManager；清理不可用项。
 

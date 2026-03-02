@@ -4,6 +4,7 @@ from .bootstrap import (
     close_skill_manager,
     close_tool_manager,
     initialize_db_connection,
+    initialize_im_service,
     initialize_skill_manager,
     initialize_tool_manager,
     shutdown_clients,
@@ -16,6 +17,7 @@ async def initialize_system():
     await initialize_db_connection()
     await initialize_tool_manager()
     await initialize_skill_manager()
+    await initialize_im_service()
     logger.info("sage-desktop：初始化完成")
 
 
