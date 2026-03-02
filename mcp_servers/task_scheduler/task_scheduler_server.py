@@ -278,8 +278,9 @@ def _check_and_spawn_recurring_tasks():
                 )
                 
                 # Check if there's already a pending instance of this recurring task
+                # Note: recurring_task_id from DB might be int or str, so convert both to str for comparison
                 has_pending_instance = any(
-                    t.get('recurring_task_id') == task_id for t in existing_tasks
+                    str(t.get('recurring_task_id')) == str(task_id) for t in existing_tasks
                 )
                 
                 if not has_pending_instance:
