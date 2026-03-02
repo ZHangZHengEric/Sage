@@ -653,6 +653,70 @@ class AgentBase(ABC):
                 if tool_call.function.arguments:
                     tool_calls[last_tool_call_id]['function']['arguments'] += tool_call.function.arguments
 
+    def _create_tool_call_error_message(self,
+                                        tool_name: str,
+                                        raw_arguments: str,
+                                        error_reason: str) -> MessageChunk:
+        """
+        创建工具调用错误消息，当JSON解析失败时返回给用户
+
+        Args:
+            tool_name: 工具名称
+            raw_arguments: 原始参数字符串
+            error_reason: 错误原因
+
+        Returns:
+            MessageChunk: 错误消息块
+        """
+        # 分析参数长度，给出优化建议
+        param_length = len(raw_arguments)
+        suggestions = []
+
+        if param_length > 2000:
+            suggestions.append("• 参数内容过长（超过2000字符），建议将任务拆分为多次工具调用")
+            suggestions.append("• 或者将大段内容保存到文件，然后传递文件路径")
+
+        if '{' in raw_arguments and raw_arguments.count('{') != raw_arguments.count('}'):
+            suggestions.append("• JSON括号不匹配，请检查花括号是否成对闭合")
+
+        if '"' in raw_arguments:
+            quote_count = raw_arguments.count('"')
+            if quote_count % 2 != 0:
+                suggestions.append("• 引号未正确闭合，请检查字符串引号是否成对")
+
+        if '\\' in raw_arguments:
+            suggestions.append("• 包含反斜杠字符，请确保特殊字符已正确转义")
+
+        if not suggestions:
+            suggestions.append("• 请检查JSON格式是否正确")
+            suggestions.append("• 确保所有字符串使用双引号包裹")
+            suggestions.append("• 确保没有多余的逗号或缺少逗号")
+
+        # 截断过长的参数显示
+        display_args = raw_arguments[:500] + "..." if len(raw_arguments) > 500 else raw_arguments
+
+        content = f"""我尝试调用工具 `{tool_name}`，但参数解析失败。
+
+**错误原因**: {error_reason}
+
+**原始参数**:
+```
+{display_args}
+```
+
+**优化建议**:
+{chr(10).join(suggestions)}
+
+请重新组织您的请求，确保工具参数格式正确。"""
+
+        return MessageChunk(
+            role=MessageRole.ASSISTANT.value,
+            content=content,
+            message_id=str(uuid.uuid4()),
+            message_type=MessageType.DO_SUBTASK_RESULT.value,
+            agent_name=self.agent_name
+        )
+
     def _create_tool_call_message(self, tool_call: Dict[str, Any]) -> List[MessageChunk]:
         """
         创建工具调用消息
@@ -1147,8 +1211,39 @@ class AgentBase(ABC):
 
         for tool_call_id, tool_call in tool_calls.items():
             tool_name = tool_call['function']['name']
+            raw_arguments = tool_call['function']['arguments']
             logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
-            logger.info(f"{self.agent_name}: 参数 {tool_call['function']['arguments']}")
+            logger.info(f"{self.agent_name}: 参数 {raw_arguments}")
+
+            # 验证工具参数是否为有效的JSON
+            is_valid_json = False
+            parsed_arguments = None
+            try:
+                parsed_arguments = json.loads(raw_arguments)
+                is_valid_json = True
+            except json.JSONDecodeError:
+                # 尝试使用 eval 解析
+                try:
+                    parsed_arguments = eval(raw_arguments, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
+                    # 验证解析结果是否可以序列化为JSON
+                    json.dumps(parsed_arguments)
+                    is_valid_json = True
+                except Exception:
+                    is_valid_json = False
+
+            # 如果JSON解析失败，将工具调用转换为普通消息返回
+            if not is_valid_json:
+                logger.warning(f"{self.agent_name}: 工具参数JSON解析失败，转换为普通消息")
+                error_message = self._create_tool_call_error_message(
+                    tool_name=tool_name,
+                    raw_arguments=raw_arguments,
+                    error_reason="JSON格式无效或结构不完整"
+                )
+                yield ([error_message], False)
+                continue
+
+            # 更新解析后的参数
+            tool_call['function']['arguments'] = json.dumps(parsed_arguments, ensure_ascii=False)
 
             # 检查是否为complete_task（仅TaskExecutorAgent需要处理）
             if handle_complete_task and tool_name == 'complete_task':

@@ -36,6 +36,7 @@ class Sandbox:
         "/usr/local/bin",
         "/usr/bin",
         "/bin",
+        "~/.sage",
         "/usr/local/lib/node_modules",
     ]
     
