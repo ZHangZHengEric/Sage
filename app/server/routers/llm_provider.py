@@ -74,7 +74,7 @@ async def create_provider(data: LLMProviderCreate, request: Request):
         user_id=user_id
     )
     await dao.save(provider)
-    return await Response.succ()
+    return await Response.succ(data=provider.to_dict())
 
 @router.put("/update/{provider_id}")
 async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Request):
