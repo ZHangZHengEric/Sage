@@ -334,7 +334,7 @@ class AgentBase(ABC):
             system_context_info = session_context.system_context.copy()
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
             
-            if 'AGENT.MD' in include_sections and use_identity:
+            if 'AGENT.MD' in include_sections:
                 # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
                 agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))
                 if agent_md_content:
