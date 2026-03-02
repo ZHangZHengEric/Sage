@@ -280,7 +280,7 @@ async def get_workspace(agent_id: str, request: Request):
     user_home = Path.home()
     sage_home = user_home / ".sage"
     workspace_path = sage_home / "agents" / agent_id
-
+    logger.info(f"获取Agent {agent_id} 的工作空间路径：{workspace_path}")
     if not workspace_path or not os.path.exists(workspace_path):
         return await Response.succ(
              message="工作空间为空",

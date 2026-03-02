@@ -137,8 +137,6 @@ PYI_FLAGS=(
   # Exclusions
   --exclude-module=tkinter
   --exclude-module=unittest
-  --exclude-module=pydoc
-  --exclude-module=doctest
   --exclude-module=email.test
   --exclude-module=test
   --exclude-module=tests
