@@ -55,7 +55,7 @@ class ToDoTool:
         lines = content.splitlines()
         
         # Regex for "- [ ] content (ID: id) (Updated: timestamp)"
-        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Updated: (.*?)\))?$')
+        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Updated: (.*?)\))?(?: \(Conclusion: (.*?)\))?$')
 
         for line in lines:
             line = line.strip()
@@ -65,12 +65,14 @@ class ToDoTool:
                 content_text = match.group(2).strip()
                 task_id = match.group(3).strip()
                 updated_at = match.group(4)
-                
+                conclusion = match.group(5)
+
                 tasks.append({
                     'id': task_id,
                     'content': content_text,
                     'completed': is_completed,
-                    'updated_at': updated_at if updated_at else None
+                    'updated_at': updated_at if updated_at else None,
+                    'conclusion': conclusion if conclusion else None
                 })
         return tasks
 
@@ -105,12 +107,14 @@ class ToDoTool:
                     if t.get('updated_at'):
                         line += f" (Updated: {t.get('updated_at')})"
                     md_content += line + "\n"
-                
+
                 md_content += "\n## Completed\n"
                 for t in completed_tasks:
                     line = f"- [x] {t.get('content', '')} (ID: {t.get('id')})"
                     if t.get('updated_at'):
                         line += f" (Updated: {t.get('updated_at')})"
+                    if t.get('conclusion'):
+                        line += f" (Conclusion: {t.get('conclusion')})"
                     md_content += line + "\n"
             
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -155,6 +159,10 @@ class ToDoTool:
                         "completed": {
                             "type": "boolean",
                             "description": "Whether the task is completed. Default is false (pending)."
+                        },
+                        "conclusion": {
+                            "type": "string",
+                            "description": "Execution conclusion or comment about the task. Added when task is completed, used for summary and guidance."
                         }
                     },
                     "required": ["id"]
@@ -294,6 +302,9 @@ class ToDoTool:
             
         result = "当前未完成任务清单:\n"
         for t in pending:
-            result += f"- {t.get('content')} (ID: {t.get('id')})\n"
-            
+            result += f"- {t.get('content')} (ID: {t.get('id')})"
+            if t.get('conclusion'):
+                result += f" [结论: {t.get('conclusion')}]"
+            result += "\n"
+
         return result
