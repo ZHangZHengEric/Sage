@@ -121,6 +121,12 @@ echo "Setting up Python sidecar wrapper..."
 mkdir -p "$TAURI_BIN_DIR"
 mkdir -p "$TAURI_SIDECAR_DIR"
 
+# Link resources for dev mode
+echo "Linking resources for dev mode..."
+rm -rf "$TAURI_SIDECAR_DIR/skills" "$TAURI_SIDECAR_DIR/mcp_servers"
+ln -sf "$ROOT_DIR/app/skills" "$TAURI_SIDECAR_DIR/skills"
+ln -sf "$ROOT_DIR/mcp_servers" "$TAURI_SIDECAR_DIR/mcp_servers"
+
 # Get current python executable path
 PYTHON_EXEC=$(python -c "import sys; print(sys.executable)")
 

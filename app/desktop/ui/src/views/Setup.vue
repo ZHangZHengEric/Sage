@@ -162,31 +162,12 @@
       </div>
     </div>
     
-    <!-- Agent Step: Full Screen Editor -->
-    <div v-else-if="step === 'agent'" class="flex-1 flex flex-col overflow-hidden">
-      <div class="border-b px-8 py-4 flex items-center justify-between bg-background/80 backdrop-blur-sm z-10">
-        <div>
-          <h2 class="text-2xl font-bold">{{ currentStepTitle }}</h2>
-          <p class="text-muted-foreground">{{ currentStepDescription }}</p>
-        </div>
-        <!-- Optional: Add a skip or help button here if needed -->
-      </div>
-      
-      <div class="flex-1 overflow-hidden relative">
-        <AgentEdit 
-          :visible="true" 
-          :is-setup="true" 
-          :tools="tools"
-          :skills="skills"
-          @save="handleAgentSaved" 
-          class="h-full w-full"
-        />
-      </div>
-    </div>
-
     <!-- Loading State -->
     <div v-else class="flex-1 flex items-center justify-center">
-      <Loader class="w-12 h-12 animate-spin text-primary" />
+      <div class="flex flex-col items-center gap-4">
+        <Loader class="w-12 h-12 animate-spin text-primary" />
+        <p v-if="step === 'creating_agent'" class="text-muted-foreground">正在初始化 Agent...</p>
+      </div>
     </div>
 
   </div>
@@ -219,12 +200,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MODEL_PROVIDERS } from '@/utils/modelProviders'
-import AgentEdit from '@/components/AgentEdit.vue'
 
 const router = useRouter()
 const { t } = useLanguage()
 
-const step = ref('loading') // loading, welcome, model, agent
+const step = ref('loading') // loading, welcome, model, creating_agent
 const loading = ref(false)
 const verifying = ref(false)
 const tools = ref([])
@@ -288,13 +268,11 @@ const openProviderModelList = async () => {
 
 const currentStepTitle = computed(() => {
   if (step.value === 'model') return '连接模型提供商'
-  if (step.value === 'agent') return '创建第一个智能体'
   return '加载中...'
 })
 
 const currentStepDescription = computed(() => {
   if (step.value === 'model') return '首先，我们需要连接到一个 LLM 提供商（“大脑”）来为您的智能体提供动力。'
-  if (step.value === 'agent') return '现在，创建您的第一个智能体（“角色”）以开始聊天。'
   return '正在检查系统状态...'
 })
 
@@ -306,8 +284,7 @@ const fetchSystemInfo = async () => {
     if (!res.has_model_provider || !res.has_agent) {
       if (res.has_model_provider && !res.has_agent) {
           // Skip welcome if model provider is already configured
-          step.value = 'agent'
-          fetchResources()
+          createDefaultAgent()
       } else {
           step.value = 'welcome'
       }
@@ -324,7 +301,7 @@ const handleWelcomeNext = () => {
   if (!systemStatus.value.has_model_provider) {
     step.value = 'model'
   } else if (!systemStatus.value.has_agent) {
-    step.value = 'agent'
+    createDefaultAgent()
   } else {
     router.replace('/')
   }
@@ -382,6 +359,78 @@ const handleVerify = async () => {
   }
 }
 
+const createDefaultAgent = async (providerId = null) => {
+  step.value = 'creating_agent'
+  loading.value = true
+  
+  try {
+    // Ensure resources are fetched
+    await fetchResources()
+    
+    // Get default system prompt
+    let systemPrompt = ''
+    try {
+        const promptRes = await agentAPI.getDefaultSystemPrompt()
+        if (promptRes && promptRes.system_prompt) {
+            systemPrompt = promptRes.system_prompt
+        }
+    } catch (e) {
+        console.error('Failed to get default system prompt', e)
+    }
+
+    let currentProviderId = providerId
+    if (!currentProviderId) {
+        try {
+            const providers = await modelProviderAPI.listModelProviders()
+            if (providers && providers.length > 0) {
+                // Prefer one that is default if available, or just the first one
+                const defaultProvider = providers.find(p => p.is_default)
+                currentProviderId = defaultProvider ? defaultProvider.id : providers[0].id
+            }
+        } catch (e) {
+            console.error('Failed to fetch providers for default agent', e)
+        }
+    }
+
+    if (!currentProviderId) {
+        toast.error('未找到模型提供商，请先配置。')
+        step.value = 'model'
+        loading.value = false
+        return
+    }
+
+    const agentData = {
+      name: 'zavix',
+      description: 'Desktop Default Agent',
+      maxLoopCount: 100,
+      availableTools: [
+        'todo_write', 
+        'todo_read', 
+        'execute_shell_command', 
+        'execute_python_code', 
+        'execute_javascript_code', 
+        'file_read', 
+        'file_write', 
+        'download_file_from_url', 
+        'file_update'
+      ],
+      availableSkills: skills.value.map(s => s.name),
+      systemPrefix: systemPrompt,
+      llm_provider_id: currentProviderId
+    }
+    
+    await agentAPI.createAgent(agentData)
+    router.replace('/')
+    
+  } catch (error) {
+    console.error('Failed to create agent:', error)
+    toast.error('创建默认 Agent 失败: ' + error.message)
+    step.value = 'welcome' 
+  } finally {
+    loading.value = false
+  }
+}
+
 const handleModelSubmit = async () => {
   if (!modelForm.name || !modelForm.base_url || !modelForm.api_keys_str || !modelForm.model) {
     toast.error('请填写所有必填字段')
@@ -403,47 +452,13 @@ const handleModelSubmit = async () => {
       is_default: true
     }
 
-    await modelProviderAPI.createModelProvider(data)
+    const res = await modelProviderAPI.createModelProvider(data)
     
-    step.value = 'agent'
-    // Fetch resources now so they are available for Agent step
-    await fetchResources()
+    await createDefaultAgent(res?.id)
   } catch (error) {
     console.error('Failed to save model provider:', error)
     toast.error(error.message || '保存模型提供商失败')
-  } finally {
     loading.value = false
-  }
-}
-
-const handleAgentSaved = async (agentData, shouldExit = true, doneCallback = null) => {
-  // Only save to backend if it is the final step
-  if (!shouldExit) {
-     if (doneCallback) doneCallback()
-     return
-  }
-
-  loading.value = true
-  try {
-    // 2. Then save the Agent
-    let result
-    if (agentData.id) {
-       result = await agentAPI.updateAgent(agentData.id, agentData)
-    } else {
-       // Ensure llm_provider_id is not set (will use default) or set it if we have it
-       // Since we just created the default provider, the backend will pick it up automatically if not provided.
-       // Or we can query it back. For now, let's rely on backend default logic.
-       result = await agentAPI.createAgent(agentData)
-    }
-
-    toast.success('设置完成！')
-    router.replace('/')
-  } catch (error) {
-    console.error('Failed to save setup:', error)
-    toast.error('设置失败') 
-  } finally {
-    loading.value = false
-    if (doneCallback) doneCallback()
   }
 }
 
