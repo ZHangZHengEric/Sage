@@ -324,7 +324,8 @@ const predefinedServices = computed(() => {
         { id: 'svc_model_provider', nameKey: 'modelProvider.menuTitle', url: 'ModelProviderList', isInternal: true },
         { id: 'svc_scheduled_task', nameKey: 'scheduledTask.menuTitle', url: 'TaskList', isInternal: true },
         { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
-        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true }
+        { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true },
+        { id: 'svc_im_channels', nameKey: 'sidebar.channels', url: 'IMChannelConfig', isInternal: true }
       ]
     },
     {
