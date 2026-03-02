@@ -69,7 +69,7 @@ class FibreAgent(AgentBase):
         system_context = getattr(session_context, "system_context", None) if session_context else None
         max_loop_count = 50
         if session_context and isinstance(getattr(session_context, "agent_config", None), dict):
-            max_loop_count = session_context.agent_config.get("max_loop_count", 50)
+            max_loop_count = session_context.agent_config.get("maxLoopCount", 100)
         
         if self.observability_manager:
             self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
