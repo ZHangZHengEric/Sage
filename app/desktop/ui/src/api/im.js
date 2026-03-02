@@ -1,29 +1,21 @@
-import request from '@/utils/request'
+import { baseAPI } from './base.js'
 
 export const imAPI = {
   /**
    * Get IM configuration
-   * @returns {Promise<Object>} IM configuration including service status
+   * @returns {Promise<Object>} IM configuration
    */
   getConfig() {
-    return request({
-      url: '/api/im/config',
-      method: 'get',
-    })
+    return baseAPI.get('/api/im/config')
   },
 
   /**
    * Save IM configuration
-   * Config includes provider settings and service.running flag
    * @param {Object} config - IM configuration
    * @returns {Promise<Object>}
    */
   saveConfig(config) {
-    return request({
-      url: '/api/im/config',
-      method: 'post',
-      data: config,
-    })
+    return baseAPI.post('/api/im/config', config)
   },
 
   /**
@@ -31,9 +23,6 @@ export const imAPI = {
    * @returns {Promise<Object>}
    */
   getServiceStatus() {
-    return request({
-      url: '/api/im/service/status',
-      method: 'get',
-    })
+    return baseAPI.get('/api/im/service/status')
   },
 }
