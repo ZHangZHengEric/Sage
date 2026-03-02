@@ -4,7 +4,6 @@ import AgentConfigPage from '../views/AgentList.vue'
 import ToolsPage from '../views/ToolList.vue'
 import HistoryPage from '../views/ChatHistory.vue'
 import SkillLibraryPage from '../views/SkillList.vue'
-import UserListPage from '../views/UserList.vue'
 import SystemSettingsPage from '../views/SystemSettings.vue'
 
 
@@ -67,20 +66,21 @@ const routes = [
       public: true
     }
   },
-  {
-    path: '/system/users',
-    name: 'UserList',
-    component: UserListPage,
-    meta: {
-      title: 'sidebar.userList'
-    }
-  },
+
   {
     path: '/system/settings',
     name: 'SystemSettings',
     component: SystemSettingsPage,
     meta: {
       title: 'sidebar.systemSettings'
+    }
+  },
+  {
+    path: '/personal/tasks',
+    name: 'TaskList',
+    component: () => import('../views/TaskList.vue'),
+    meta: {
+      title: 'scheduledTask.title'
     }
   },
   {
