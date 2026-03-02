@@ -39,7 +39,7 @@ class TaskSchedulerDB:
                     name TEXT NOT NULL,
                     description TEXT,
                     agent_id TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
+                    session_id TEXT,
                     cron_expression TEXT NOT NULL,
                     enabled BOOLEAN DEFAULT 1,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -55,7 +55,7 @@ class TaskSchedulerDB:
                     name TEXT NOT NULL,
                     description TEXT,
                     agent_id TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
+                    session_id TEXT,
                     execute_at DATETIME NOT NULL,
                     status TEXT DEFAULT 'pending',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -95,7 +95,80 @@ class TaskSchedulerDB:
                 ON recurring_tasks (enabled)
             """)
             
+            # Migration: Allow NULL session_id in existing tables
+            self._migrate_allow_null_session_id(cursor)
+            
             conn.commit()
+    
+    def _migrate_allow_null_session_id(self, cursor):
+        """Migrate existing tables to allow NULL session_id"""
+        try:
+            # Check and alter recurring_tasks table
+            cursor.execute("PRAGMA table_info(recurring_tasks)")
+            columns = cursor.fetchall()
+            session_id_col = next((col for col in columns if col[1] == 'session_id'), None)
+            
+            if session_id_col and session_id_col[3] == 1:  # notnull = 1
+                # Need to recreate table to remove NOT NULL constraint
+                cursor.execute("""
+                    CREATE TABLE recurring_tasks_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        description TEXT,
+                        agent_id TEXT NOT NULL,
+                        session_id TEXT,
+                        cron_expression TEXT NOT NULL,
+                        enabled BOOLEAN DEFAULT 1,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        last_executed_at DATETIME
+                    )
+                """)
+                cursor.execute("""
+                    INSERT INTO recurring_tasks_new 
+                    SELECT * FROM recurring_tasks
+                """)
+                cursor.execute("DROP TABLE recurring_tasks")
+                cursor.execute("ALTER TABLE recurring_tasks_new RENAME TO recurring_tasks")
+                print("Migrated recurring_tasks: session_id can now be NULL")
+        except Exception as e:
+            print(f"Migration warning for recurring_tasks: {e}")
+        
+        try:
+            # Check and alter tasks table
+            cursor.execute("PRAGMA table_info(tasks)")
+            columns = cursor.fetchall()
+            session_id_col = next((col for col in columns if col[1] == 'session_id'), None)
+            
+            if session_id_col and session_id_col[3] == 1:  # notnull = 1
+                # Need to recreate table to remove NOT NULL constraint
+                cursor.execute("""
+                    CREATE TABLE tasks_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        description TEXT,
+                        agent_id TEXT NOT NULL,
+                        session_id TEXT,
+                        execute_at DATETIME NOT NULL,
+                        status TEXT DEFAULT 'pending',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        completed_at DATETIME,
+                        retry_count INTEGER DEFAULT 0,
+                        max_retries INTEGER DEFAULT 3,
+                        recurring_task_id INTEGER,
+                        FOREIGN KEY (recurring_task_id) REFERENCES recurring_tasks (id)
+                    )
+                """)
+                cursor.execute("""
+                    INSERT INTO tasks_new 
+                    SELECT * FROM tasks
+                """)
+                cursor.execute("DROP TABLE tasks")
+                cursor.execute("ALTER TABLE tasks_new RENAME TO tasks")
+                print("Migrated tasks: session_id can now be NULL")
+        except Exception as e:
+            print(f"Migration warning for tasks: {e}")
 
     # === Recurring Tasks Management ===
     
