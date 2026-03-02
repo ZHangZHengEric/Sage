@@ -140,11 +140,14 @@ async def copy_default_skills():
         for skill_path in default_skills_dir.iterdir():
             if skill_path.is_dir():
                 target_path = user_skills_dir / skill_path.name
-                if target_path.exists():
-                    logger.debug(f"Skill {skill_path.name} 已存在，跳过")
-                    continue
-                
                 try:
+                    if target_path.exists():
+                        logger.debug(f"Skill {skill_path.name} 已存在，准备覆盖")
+                        if target_path.is_dir():
+                            shutil.rmtree(target_path)
+                        else:
+                            target_path.unlink()
+
                     shutil.copytree(skill_path, target_path)
                     logger.info(f"已复制 skill: {skill_path.name}")
                     copied_count += 1
