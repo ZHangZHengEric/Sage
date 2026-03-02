@@ -122,6 +122,13 @@ def main():
         skills_dir = sage_home / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
         
+        # Sync IDE skills to Sage skills folder
+        try:
+            from .skill_sync import sync_skills_with_logging
+            sync_skills_with_logging()
+        except Exception as e:
+            print(f"Warning: Failed to sync IDE skills: {e}", flush=True)
+        
         agents_workspace_dir = sage_home / "agents"
         agents_workspace_dir.mkdir(parents=True, exist_ok=True)
 
