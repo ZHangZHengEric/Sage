@@ -9,7 +9,23 @@ from pathlib import Path
 
 import httpx
 from bs4 import BeautifulSoup
-from markdownify import markdownify as md
+
+# Try to import markdownify, fallback to simple implementation if not available
+try:
+    from markdownify import markdownify as md
+    MARKDOWNIFY_AVAILABLE = True
+except ImportError:
+    MARKDOWNIFY_AVAILABLE = False
+    logging.getLogger("BraveSearch").warning("markdownify not available, using simple HTML to text conversion")
+    
+    def md(html_content: str) -> str:
+        """Simple HTML to text conversion fallback"""
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            return soup.get_text(separator='\n', strip=True)
+        except Exception:
+            return html_content
+
 from mcp.server.fastmcp import FastMCP
 from sagents.tool.mcp_tool_base import sage_mcp_tool
 

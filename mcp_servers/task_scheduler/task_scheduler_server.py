@@ -9,6 +9,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
+# Initialize logger first (before any imports that might use it)
+logger = logging.getLogger("TaskScheduler")
+
 # Try to import croniter, fallback to simple implementation if not available
 try:
     from croniter import croniter
@@ -44,9 +47,6 @@ from .db import TaskSchedulerDB
 
 # Initialize FastMCP server
 mcp = FastMCP("Task Scheduler Service")
-
-# Constants
-logger = logging.getLogger("TaskScheduler")
 
 # Base storage path - use SAGE_ROOT if available, otherwise use current directory
 SAGE_ROOT = os.getenv("SAGE_ROOT", os.getcwd())
