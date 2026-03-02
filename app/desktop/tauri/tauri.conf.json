@@ -42,6 +42,10 @@
         "all": true
       }
     },
+    "systemTray": {
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false
+    },
     "bundle": {
       "active": true,
       "category": "Productivity",
