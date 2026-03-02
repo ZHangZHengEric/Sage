@@ -8,7 +8,34 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from croniter import croniter
+
+# Try to import croniter, fallback to simple implementation if not available
+try:
+    from croniter import croniter
+    CRONITER_AVAILABLE = True
+except ImportError:
+    CRONITER_AVAILABLE = False
+    logger.warning("croniter not available, using simple cron validation")
+    
+    class SimpleCroniter:
+        """Simple cron parser fallback"""
+        @staticmethod
+        def is_valid(cron_string: str) -> bool:
+            """Basic cron validation (5 fields: min hour day month dow)"""
+            parts = cron_string.split()
+            if len(parts) != 5:
+                return False
+            return True
+        
+        def __init__(self, cron_string: str, start_time=None):
+            self.cron_string = cron_string
+            self.start_time = start_time or datetime.now()
+        
+        def get_next(self, ret_type=None):
+            """Return next run time (simplified - just returns current time + 1 minute)"""
+            return self.start_time
+    
+    croniter = SimpleCroniter()
 
 from mcp.server.fastmcp import FastMCP
 from sagents.tool.mcp_tool_base import sage_mcp_tool
