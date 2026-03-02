@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import List, Tuple
+from loguru import logger
 
 
 # IDE skill folder paths (relative to home directory)
@@ -119,10 +120,16 @@ def sync_skills() -> dict:
     
     for ide_skill_path, ide_name in ide_skills:
         try:
-            # Iterate through skills in the IDE folder
-            for skill_item in ide_skill_path.iterdir():
-                if skill_item.is_dir():
-                    skill_name = skill_item.name
+            # Iterate through skills in the IDE folder using os.walk to find SKILL.md
+            for root, dirs, files in os.walk(ide_skill_path):
+                # Check if SKILL.md exists in current directory (case-insensitive)
+                if any(f.lower() == 'skill.md' for f in files):
+                    skill_path = Path(root)
+                    skill_name = skill_path.name
+                    
+                    # Stop traversing deeper into this directory
+                    dirs[:] = []
+                    
                     target_path = sage_skills_dir / skill_name
                     
                     # Check if skill already exists in Sage
@@ -136,7 +143,7 @@ def sync_skills() -> dict:
                         })
                     else:
                         # Copy the skill folder
-                        shutil.copytree(skill_item, target_path)
+                        shutil.copytree(skill_path, target_path)
                         results["copied"] += 1
                         results["details"].append({
                             "skill": skill_name,
@@ -148,39 +155,40 @@ def sync_skills() -> dict:
         except Exception as e:
             error_msg = f"Error processing {ide_name} ({ide_skill_path}): {e}"
             results["errors"].append(error_msg)
+            logger.error(error_msg)
     
     return results
 
 
 def sync_skills_with_logging():
     """Sync skills and print results."""
-    print("=" * 60)
-    print("Sage Skill Synchronization")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Sage Skill Synchronization")
+    logger.info("=" * 60)
     
     results = sync_skills()
     
-    print(f"\nFound {results['total_ide_folders']} IDE skill folders")
-    print(f"Skills copied: {results['copied']}")
-    print(f"Skills skipped (already exist): {results['skipped']}")
+    logger.info(f"\nFound {results['total_ide_folders']} IDE skill folders")
+    logger.info(f"Skills copied: {results['copied']}")
+    logger.info(f"Skills skipped (already exist): {results['skipped']}")
     
     if results['details']:
-        print("\nDetails:")
+        logger.info("\nDetails:")
         for detail in results['details']:
             action = detail['action']
             skill = detail['skill']
             source = detail['source']
             if action == 'copied':
-                print(f"  ✓ [{source}] {skill} -> copied")
+                logger.info(f"  ✓ [{source}] {skill} -> copied")
             else:
-                print(f"  ⊘ [{source}] {skill} -> skipped ({detail.get('reason', '')})")
+                logger.info(f"  ⊘ [{source}] {skill} -> skipped ({detail.get('reason', '')})")
     
     if results['errors']:
-        print("\nErrors:")
+        logger.info("\nErrors:")
         for error in results['errors']:
-            print(f"  ✗ {error}")
+            logger.info(f"  ✗ {error}")
     
-    print("=" * 60)
+    logger.info("=" * 60)
     
     return results
 
