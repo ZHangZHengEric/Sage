@@ -5,8 +5,16 @@ class TaskAPI extends BaseAPI {
     return this.get('/tasks/recurring', params)
   }
 
+  getOneTimeTasks(params) {
+    return this.get('/tasks/one-time', params)
+  }
+
   createRecurringTask(data) {
     return this.post('/tasks/recurring', data)
+  }
+
+  createOneTimeTask(data) {
+    return this.post('/tasks/one-time', data)
   }
 
   updateRecurringTask(id, data) {
