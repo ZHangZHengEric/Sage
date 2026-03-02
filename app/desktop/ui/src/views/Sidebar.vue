@@ -1,7 +1,7 @@
 <template>
   <div 
     class="group relative flex flex-col h-full bg-muted/40 border-r transition-all duration-300 ease-in-out"
-    :class="[isCollapsed ? 'w-[70px]' : 'w-[240px]']"
+    :class="[isCollapsed ? 'w-[70px]' : 'w-[170px]']"
   >
     <!-- Header -->
     <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
@@ -180,64 +180,7 @@
       </div>
     </ScrollArea>
 
-    <!-- Footer Settings -->
-    <div class="p-4 mt-auto">
-      <DropdownMenu v-model:open="isDropdownOpen">
-        <DropdownMenuTrigger as-child>
-          <div 
-            class="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-background hover:shadow-sm transition-all duration-200 w-full group"
-            :class="{'justify-center': isCollapsed}"
-          >
-            <div class="h-9 w-9 flex items-center justify-center rounded-lg bg-muted group-hover:bg-primary/10 transition-colors shrink-0">
-               <Settings class="h-5 w-5 text-muted-foreground group-hover:text-primary" />
-            </div>
-            <div v-if="!isCollapsed" class="flex-1 min-w-0 text-left">
-              <p class="text-sm font-medium truncate text-foreground/80 group-hover:text-foreground">
-                {{ t('common.settings') || 'Settings' }}
-              </p>
-            </div>
-            <ChevronDown 
-              v-if="!isCollapsed"
-              class="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-transform duration-200" 
-              :class="{ '-rotate-90': !isDropdownOpen, 'rotate-180': isDropdownOpen }"
-            />
-          </div>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent class="w-56" :side="isCollapsed ? 'right' : 'top'" align="end" :sideOffset="isCollapsed ? 10 : 0">
-          <DropdownMenuItem @click="toggleLanguage">
-             <Globe class="mr-2 h-4 w-4" />
-             <span>{{ isZhCN ? t('sidebar.langToggleZh') : t('sidebar.langToggleEn') }}</span>
-          </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <Sun v-if="themeStore.theme === 'light'" class="mr-2 h-4 w-4" />
-              <Moon v-else-if="themeStore.theme === 'dark'" class="mr-2 h-4 w-4" />
-              <Monitor v-else class="mr-2 h-4 w-4" />
-              <span>{{ t('sidebar.theme') }}</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem @click="themeStore.setTheme('light')">
-                  <Sun class="mr-2 h-4 w-4" />
-                  <span>{{ t('sidebar.themeLight') }}</span>
-                  <Check v-if="themeStore.theme === 'light'" class="ml-auto h-4 w-4" />
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="themeStore.setTheme('dark')">
-                  <Moon class="mr-2 h-4 w-4" />
-                  <span>{{ t('sidebar.themeDark') }}</span>
-                  <Check v-if="themeStore.theme === 'dark'" class="ml-auto h-4 w-4" />
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="themeStore.setTheme('system')">
-                  <Monitor class="mr-2 h-4 w-4" />
-                  <span>{{ t('sidebar.themeSystem') }}</span>
-                  <Check v-if="themeStore.theme === 'system'" class="ml-auto h-4 w-4" />
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+
   </div>
   
   <LoginModal 
@@ -257,26 +200,20 @@ import {
   Wrench, 
   Zap, 
   Clock, 
-  Globe, 
   ChevronDown,
   LogOut,
   Settings,
   LayoutGrid,
   Users,
-  KeyRound,
-  Sun,
-  Moon,
-  Monitor,
-  Check
+  KeyRound
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
-import { useThemeStore } from '../stores/theme.js'
+
 import { getCurrentUser, logout } from '../utils/auth.js'
 import { userAPI } from '@/api/user'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -309,8 +246,7 @@ import { cn } from '@/utils/cn'
 
 const router = useRouter()
 const route = useRoute()
-const { toggleLanguage, t, isZhCN } = useLanguage()
-const themeStore = useThemeStore()
+const { t } = useLanguage()
 const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
@@ -320,7 +256,7 @@ const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
 }
 
-const isDropdownOpen = ref(false)
+
 const showChangePasswordDialog = ref(false)
 const changePasswordForm = ref({
   oldPassword: '',
@@ -386,23 +322,21 @@ const predefinedServices = computed(() => {
       nameKey: 'sidebar.personalCenter',
       children: [
         { id: 'svc_model_provider', nameKey: 'modelProvider.menuTitle', url: 'ModelProviderList', isInternal: true },
+        { id: 'svc_scheduled_task', nameKey: 'scheduledTask.menuTitle', url: 'TaskList', isInternal: true },
         { id: 'svc_tools', nameKey: 'sidebar.toolsList', url: 'Tools', isInternal: true },
         { id: 'svc_skills', nameKey: 'sidebar.skillList', url: 'Skills', isInternal: true }
       ]
+    },
+    {
+      id: 'svc_sys_settings',
+      key: 'system_management',
+      nameKey: 'sidebar.systemSettings',
+      url: 'SystemSettings',
+      isInternal: true
+  
     }
   ]
 
-  if (currentUser.value?.role === 'admin') {
-    services.push({
-      id: 'cat_sys',
-      key: 'system_management',
-      nameKey: 'sidebar.systemManagement',
-      children: [
-        { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
-        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
-      ]
-    })
-  }
 
   return services
 })

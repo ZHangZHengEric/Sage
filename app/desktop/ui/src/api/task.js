@@ -1,69 +1,29 @@
-import { baseAPI } from './base.js'
+import { BaseAPI } from "./base"
 
-export const taskAPI = {
-  /**
-   * 获取任务状态
-   * @param {string} sessionId - 会话ID
-   * @returns {Promise<Object>}
-   */
-  getTaskStatus: (sessionId) => {
-    return baseAPI.post(`/api/sessions/${sessionId}/tasks_status`, {})
-  },
+class TaskAPI extends BaseAPI {
+  getRecurringTasks(params) {
+    return this.get('/tasks/recurring', params)
+  }
 
-  /**
-   * 获取工作空间文件
-   * @param {string} agentId - Agent ID
-   * @returns {Promise<Object>}
-   */
-  getWorkspaceFiles: (agentId) => {
-    return baseAPI.post(`/api/agent/${agentId}/file_workspace`, {})
-  },
+  createRecurringTask(data) {
+    return this.post('/tasks/recurring', data)
+  }
 
-  /**
-   * 下载文件
-   * @param {string} agentId - Agent ID
-   * @param {string} filePath - 文件路径
-   * @returns {Promise<Blob>}
-   */
-  downloadFile: async (agentId, filePath) => {
-    let apiPrefix = baseAPI.request.baseURL;
-    // remove trailing slash
-    if (apiPrefix.endsWith('/')) {
-      apiPrefix = apiPrefix.slice(0, -1);
-    }
-    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
-    
-    // 准备请求头
-    const headers = {
-      'Accept': 'application/json',
-    }
-    
-    // 添加认证Token
-    if (typeof localStorage !== 'undefined') {
-        const token = localStorage.getItem('access_token');
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-    }
-    
-    // 使用原生fetch处理blob响应
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      headers: headers
-    })
-    
-    if (!response.ok) {
-      // 尝试解析错误信息
-      try {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || errorData.message || `下载文件失败: ${response.status}`)
-      } catch (e) {
-        throw new Error(`下载文件失败: ${response.status}`)
-      }
-    }
-    
+  updateRecurringTask(id, data) {
+    return this.put(`/tasks/recurring/${id}`, data)
+  }
 
-    return response.blob()
+  deleteRecurringTask(id) {
+    return this.delete(`/tasks/recurring/${id}`)
+  }
+
+  toggleTaskStatus(id, enabled) {
+    return this.post(`/tasks/recurring/${id}/toggle`, { enabled })
+  }
+
+  getTaskHistory(id, params) {
+    return this.get(`/tasks/recurring/${id}/history`, params)
   }
 }
+
+export const taskAPI = new TaskAPI()

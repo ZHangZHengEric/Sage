@@ -258,7 +258,14 @@ def _check_and_spawn_recurring_tasks():
                 continue
             
             # Check if task should run now
-            itr = croniter(cron_expr, last_executed or datetime.min)
+            last_executed_dt = last_executed
+            if isinstance(last_executed_dt, str):
+                try:
+                    last_executed_dt = datetime.fromisoformat(last_executed_dt)
+                except ValueError:
+                    last_executed_dt = datetime.min
+            
+            itr = croniter(cron_expr, last_executed_dt or datetime.min)
             next_run = itr.get_next(datetime)
             
             # If next run time is in the past or very close (within last minute), spawn a task
