@@ -15,6 +15,12 @@ async def initialize_db_connection():
             from . import models
             async with db_client._engine.begin() as conn:
                 from . import models
+                
+                # Check and drop outdated tables before creating new ones
+                from .db_schema import check_and_drop_outdated_tables
+                await conn.run_sync(check_and_drop_outdated_tables)
+                
+                # Create all tables
                 await conn.run_sync(models.Base.metadata.create_all)
             logger.debug("数据库自动建表完成")
         try:
@@ -173,42 +179,33 @@ async def initialize_im_service():
         from .models import IMChannelConfigDao
         import asyncio
         
-        # Desktop app uses fixed user_id
-        DESKTOP_USER_ID = "desktop_user"
-        
         dao = IMChannelConfigDao()
-        config_record = await dao.get_by_user_id(DESKTOP_USER_ID)
+        all_configs = await dao.get_all_configs()
         
-        if not config_record:
-            logger.info("未找到 IM 配置，跳过 IM 服务启动")
-            return
-        
-        config_data = config_record.config
-        service_config = config_data.get("service", {})
-        
-        # 检查是否启用服务
-        if not service_config.get("running", False):
-            logger.info("IM 服务未启用，跳过启动")
+        if not all_configs:
+            logger.info("[IM] 未找到 IM 配置，跳过 IM 服务启动")
             return
         
         # 检查是否有启用的 provider
-        providers = config_data.get("im_providers", {})
-        enabled_providers = [k for k, v in providers.items() if v.get("enabled", False)]
+        enabled_providers = [
+            provider_type for provider_type, config in all_configs.items()
+            if config.get("enabled", False)
+        ]
         
         if not enabled_providers:
-            logger.info("没有启用的 IM provider，跳过服务启动")
+            logger.info("[IM] 没有启用的 IM provider，跳过服务启动")
             return
         
-        logger.info(f"正在启动 IM 服务，启用的 provider: {enabled_providers}")
+        logger.info(f"[IM] 正在启动 IM 服务，启用的 provider: {enabled_providers}")
         
         # 启动 IM 服务
         from mcp_servers.im_server.im_server import initialize_im_server
         asyncio.create_task(initialize_im_server())
         
-        logger.info("IM 服务启动任务已创建")
+        logger.info("[IM] IM 服务启动任务已创建")
         
     except Exception as e:
-        logger.error(f"IM 服务初始化失败: {e}")
+        logger.error(f"[IM] IM 服务初始化失败: {e}")
 
 
 async def validate_and_disable_mcp_servers():
