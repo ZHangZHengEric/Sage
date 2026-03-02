@@ -1,10 +1,10 @@
 import os
 import json
-import sqlite3
 import time
 import threading
 import logging
 import httpx
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -13,7 +13,7 @@ from croniter import croniter
 from mcp.server.fastmcp import FastMCP
 from sagents.tool.mcp_tool_base import sage_mcp_tool
 
-from .db import TaskSchedulerDB, TaskStatus
+from .db import TaskSchedulerDB
 
 # Initialize FastMCP server
 mcp = FastMCP("Task Scheduler Service")
@@ -145,9 +145,14 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
     """
     task_id = task['id']
     agent_id = task['agent_id']
-    session_id = task['session_id']
+    session_id = task.get('session_id')
     name = task['name']
     description = task['description']
+
+    # Generate a random session_id if not provided (for tasks from other channels)
+    if not session_id:
+        session_id = f"task_{uuid.uuid4().hex[:12]}"
+        logger.info(f"Task {task_id} has no session_id, generated random one: {session_id}")
 
     logger.info(f"Executing task {task_id} for agent {agent_id} (Session: {session_id})")
 
@@ -206,9 +211,14 @@ def _execute_task_with_session_lock(task: Dict[str, Any]) -> None:
     Execute a task with session-level locking to ensure sequential execution
     for tasks in the same session.
     """
-    session_id = task['session_id']
+    session_id = task.get('session_id')
     task_id = task['id']
-    
+
+    # Generate a random session_id if not provided (for tasks from other channels)
+    if not session_id:
+        session_id = f"task_{uuid.uuid4().hex[:12]}"
+        logger.info(f"Task {task_id} has no session_id for locking, generated random one: {session_id}")
+
     # Get the lock for this session
     lock = _get_session_lock(session_id)
     
@@ -440,6 +450,7 @@ async def add_task(
         Confirmation message with Task ID (prefixed with 'once_' or 'rec_').
     """
     try:
+
         if is_recurring:
             # Validate cron expression
             if not croniter.is_valid(schedule):
