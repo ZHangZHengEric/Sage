@@ -711,8 +711,8 @@ class ToolManager:
                                 if "npm " in cmd or "node " in cmd:
                                     needs_npm = True
                             
-                            if needs_pip:
-                                session_context.sandbox.ensure_pip()
+                            # Note: pip is automatically available in the sandbox venv
+                            # No need to explicitly call ensure_pip()
                             # We might want to ensure npm here too in future if sandbox environment management supports it
                             # session_context.sandbox.ensure_npm() 
 
