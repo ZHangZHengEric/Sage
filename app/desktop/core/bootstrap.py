@@ -105,9 +105,22 @@ async def copy_default_skills():
         # 尝试从 tauri 资源目录获取
         try:
             import os
+            import sys
+            
             # 检查是否在 tauri 环境中
             if 'TAURI_RESOURCES_DIR' in os.environ:
                 default_skills_dir = Path(os.environ['TAURI_RESOURCES_DIR']) / "skills"
+            elif getattr(sys, 'frozen', False):
+                # 打包环境：
+                # build.sh 将 skills 复制到了 TARGET_MCP_DIR (通常是 _internal)
+                # 而代码通常位于 _internal/app/desktop/core/bootstrap.py
+                # 因此需要向上 4 级才能找到 _internal 根目录
+                current_file = Path(__file__).resolve()
+                default_skills_dir = current_file.parent.parent.parent.parent / "skills"
+                
+                # 如果找不到，尝试相对于可执行文件的位置
+                if not default_skills_dir.exists():
+                     default_skills_dir = Path(sys.executable).parent / "_internal" / "skills"
             else:
                 # 开发环境：使用相对路径
                 current_file = Path(__file__).resolve()
