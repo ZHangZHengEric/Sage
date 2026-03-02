@@ -213,19 +213,11 @@ class ToolManager:
         if path:
             self._discover_import_path(path=path, root_package="sagents")
         else:
-            # 默认情况：扫描 sagents.tool.impl 包下的所有模块
-            # impl/__init__.py 已清空以避免全量导入，此处使用 pkgutil 显式导入所有子模块
+            # 默认情况：直接导入 sagents.tool.impl，由其 __init__.py 控制导出哪些工具
             try:
                 import sagents.tool.impl
-                import pkgutil
-                import importlib
-                for module_info in pkgutil.walk_packages(sagents.tool.impl.__path__, sagents.tool.impl.__name__ + "."):
-                    try:
-                        importlib.import_module(module_info.name)
-                    except Exception as e:
-                        logger.warning(f"Failed to import {module_info.name}: {e}")
             except Exception as e:
-                logger.warning(f"Failed to discover tools in impl package: {e}")
+                logger.warning(f"Failed to import tools in impl package: {e}")
 
         count = 0
         for funcs in _DISCOVERED_TOOLS.values():
