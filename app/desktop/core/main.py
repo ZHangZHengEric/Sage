@@ -161,7 +161,7 @@ def main():
             
         print(f"Starting Sage Desktop Server on port {port}...", flush=True)
         init_logging(log_name="sage-desktop", log_level="INFO", log_path=logs_dir)
-        start_server(port)  
+        start_server(port)
         return 0
     except KeyboardInterrupt:
         print("服务收到中断信号，正在退出...", flush=True)

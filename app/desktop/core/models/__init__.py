@@ -5,6 +5,7 @@ from .mcp_server import MCPServer, MCPServerDao
 from .system import SystemInfo, SystemInfoDao
 from .llm_provider import LLMProvider, LLMProviderDao
 from .task import RecurringTask, Task, TaskHistory, TaskDao
+from .im_channel import IMChannelConfig, IMChannelConfigDao
 
 __all__ = [
     "Agent",
@@ -23,4 +24,6 @@ __all__ = [
     "Task",
     "TaskHistory",
     "TaskDao",
+    "IMChannelConfig",
+    "IMChannelConfigDao",
 ]
