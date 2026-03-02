@@ -4,6 +4,7 @@ from .conversation import Conversation, ConversationDao
 from .mcp_server import MCPServer, MCPServerDao
 from .system import SystemInfo, SystemInfoDao
 from .llm_provider import LLMProvider, LLMProviderDao
+from .task import RecurringTask, Task, TaskHistory, TaskDao
 
 __all__ = [
     "Agent",
@@ -18,4 +19,8 @@ __all__ = [
     "SystemInfoDao",
     "LLMProvider",
     "LLMProviderDao",
+    "RecurringTask",
+    "Task",
+    "TaskHistory",
+    "TaskDao",
 ]

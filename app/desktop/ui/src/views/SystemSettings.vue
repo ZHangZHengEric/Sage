@@ -6,6 +6,25 @@
         <Card class="p-6 max-w-2xl">
             <h3 class="text-lg font-medium mb-4">{{ t('system.generalSettings') }}</h3>
             
+            <!-- Language Setting -->
+            <div class="flex items-center justify-between py-4 border-b">
+                <div class="space-y-0.5">
+                    <Label class="text-base">{{ t('sidebar.language') }}</Label>
+                    <p class="text-sm text-muted-foreground">
+                        {{ t('system.languageDesc') }}
+                    </p>
+                </div>
+                <Select :model-value="language" @update:model-value="setLanguage">
+                  <SelectTrigger class="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="zhCN">简体中文</SelectItem>
+                    <SelectItem value="enUS">English</SelectItem>
+                  </SelectContent>
+                </Select>
+            </div>
+
             <!-- Theme Setting -->
             <div class="flex items-center justify-between py-4 border-b">
                 <div class="space-y-0.5">
@@ -44,6 +63,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const { t } = useLanguage()
+const { t, language, setLanguage } = useLanguage()
 const themeStore = useThemeStore()
 </script>
