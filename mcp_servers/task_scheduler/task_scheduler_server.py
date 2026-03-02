@@ -6,7 +6,7 @@ import logging
 import httpx
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 # Initialize logger first (before any imports that might use it)
@@ -36,9 +36,9 @@ except ImportError:
         
         def get_next(self, ret_type=None):
             """Return next run time (simplified - just returns current time + 1 minute)"""
-            return self.start_time
+            return self.start_time + timedelta(minutes=1)
     
-    croniter = SimpleCroniter()
+    croniter = SimpleCroniter
 
 from mcp.server.fastmcp import FastMCP
 from sagents.tool.mcp_tool_base import sage_mcp_tool
