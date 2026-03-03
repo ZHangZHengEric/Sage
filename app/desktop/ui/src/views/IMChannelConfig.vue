@@ -50,12 +50,15 @@
             <Label class="text-base">{{ t('im.enable') }}</Label>
             <p class="text-sm text-muted-foreground">{{ t('im.feishu.enableDesc') }}</p>
           </div>
-          <Switch v-model="config.feishu.enabled" />
+          <Switch 
+            :checked="config.feishu.enabled"
+            @update:checked="(val) => onEnableChange('feishu', val)"
+          />
         </div>
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <Label for="feishu-app-id">{{ t('im.feishu.appId') }}</Label>
+            <Label for="feishu-app-id">{{ t('im.feishu.appId') }} <span class="text-red-500">*</span></Label>
             <Input
               id="feishu-app-id"
               v-model="config.feishu.app_id"
@@ -64,7 +67,7 @@
           </div>
 
           <div class="space-y-2">
-            <Label for="feishu-app-secret">{{ t('im.feishu.appSecret') }}</Label>
+            <Label for="feishu-app-secret">{{ t('im.feishu.appSecret') }} <span class="text-red-500">*</span></Label>
             <Input
               id="feishu-app-secret"
               v-model="config.feishu.app_secret"
@@ -98,12 +101,15 @@
             <Label class="text-base">{{ t('im.enable') }}</Label>
             <p class="text-sm text-muted-foreground">{{ t('im.dingtalk.enableDesc') }}</p>
           </div>
-          <Switch v-model="config.dingtalk.enabled" />
+          <Switch 
+            :checked="config.dingtalk.enabled"
+            @update:checked="(val) => onEnableChange('dingtalk', val)"
+          />
         </div>
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <Label for="dingtalk-client-id">{{ t('im.dingtalk.clientId') }}</Label>
+            <Label for="dingtalk-client-id">{{ t('im.dingtalk.clientId') }} <span class="text-red-500">*</span></Label>
             <Input
               id="dingtalk-client-id"
               v-model="config.dingtalk.client_id"
@@ -112,7 +118,7 @@
           </div>
 
           <div class="space-y-2">
-            <Label for="dingtalk-client-secret">{{ t('im.dingtalk.clientSecret') }}</Label>
+            <Label for="dingtalk-client-secret">{{ t('im.dingtalk.clientSecret') }} <span class="text-red-500">*</span></Label>
             <Input
               id="dingtalk-client-secret"
               v-model="config.dingtalk.client_secret"
@@ -146,7 +152,10 @@
             <Label class="text-base">{{ t('im.enable') }}</Label>
             <p class="text-sm text-muted-foreground">{{ t('im.imessage.enableDesc') }}</p>
           </div>
-          <Switch v-model="config.imessage.enabled" />
+          <Switch 
+            :checked="config.imessage.enabled"
+            @update:checked="(val) => onEnableChange('imessage', val)"
+          />
         </div>
 
         <div class="space-y-4">
@@ -159,14 +168,14 @@
           </div>
 
           <div class="space-y-2">
-            <Label for="imessage-allowed-senders">{{ t('im.imessage.allowedSenders') }}</Label>
+            <Label for="imessage-allowed-senders">{{ t('im.imessage.monitoredSenders') }} <span class="text-red-500">*</span></Label>
             <Textarea
               id="imessage-allowed-senders"
               v-model="allowedSendersText"
-              :placeholder="t('im.imessage.allowedSendersPlaceholder')"
+              :placeholder="t('im.imessage.monitoredSendersPlaceholder')"
               rows="4"
             />
-            <p class="text-xs text-muted-foreground">{{ t('im.imessage.allowedSendersHelp') }}</p>
+            <p class="text-xs text-muted-foreground">{{ t('im.imessage.monitoredSendersHelp') }}</p>
           </div>
 
           <div class="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
@@ -270,34 +279,100 @@ const allowedSendersText = computed({
 const loadConfig = async () => {
   loading.value = true
   try {
+    console.log('[IM] Loading config...')
     const data = await imAPI.getConfig()
-    if (data) {
-      config.value = {
-        feishu: {
-          enabled: false,
-          app_id: '',
-          app_secret: '',
-          ...data.feishu,
-        },
-        dingtalk: {
-          enabled: false,
-          client_id: '',
-          client_secret: '',
-          ...data.dingtalk,
-        },
-        imessage: {
-          enabled: false,
-          mode: 'database_poll',
-          allowed_senders: [],
-          ...data.imessage,
-        },
-      }
+    console.log('[IM] Config loaded:', data)
+    
+    config.value = {
+      feishu: {
+        enabled: false,
+        app_id: '',
+        app_secret: '',
+        ...data?.feishu,
+      },
+      dingtalk: {
+        enabled: false,
+        client_id: '',
+        client_secret: '',
+        ...data?.dingtalk,
+      },
+      imessage: {
+        enabled: false,
+        mode: 'database_poll',
+        allowed_senders: [],
+        ...data?.imessage,
+      },
     }
   } catch (error) {
-    console.error('Failed to load IM config:', error)
+    console.error('[IM] Failed to load IM config:', error)
     toast.error(t('im.loadError'))
   } finally {
     loading.value = false
+  }
+}
+
+const onEnableChange = (provider, value) => {
+  console.log(`[IM] onEnableChange called: provider=${provider}, value=${value}`)
+  
+  if (!value) {
+    // Disabling - just update the value
+    config.value[provider].enabled = false
+    console.log(`[IM] Disabling ${provider}`)
+    return
+  }
+  
+  // Enabling - validate required fields first
+  let isValid = true
+  let missingFields = []
+  
+  console.log(`[IM] Validating ${provider} config:`, config.value[provider])
+  
+  if (provider === 'feishu') {
+    const appId = config.value.feishu.app_id
+    const appSecret = config.value.feishu.app_secret
+    console.log(`[IM] Feishu - app_id: "${appId}", app_secret: "${appSecret}"`)
+    
+    if (!appId || !appId.trim()) {
+      isValid = false
+      missingFields.push(t('im.feishu.appId'))
+    }
+    if (!appSecret || !appSecret.trim()) {
+      isValid = false
+      missingFields.push(t('im.feishu.appSecret'))
+    }
+  } else if (provider === 'dingtalk') {
+    const clientId = config.value.dingtalk.client_id
+    const clientSecret = config.value.dingtalk.client_secret
+    console.log(`[IM] DingTalk - client_id: "${clientId}", client_secret: "${clientSecret}"`)
+    
+    if (!clientId || !clientId.trim()) {
+      isValid = false
+      missingFields.push(t('im.dingtalk.clientId'))
+    }
+    if (!clientSecret || !clientSecret.trim()) {
+      isValid = false
+      missingFields.push(t('im.dingtalk.clientSecret'))
+    }
+  } else if (provider === 'imessage') {
+    const monitoredSenders = config.value.imessage.allowed_senders
+    console.log(`[IM] iMessage - monitoredSenders:`, monitoredSenders)
+    
+    if (!monitoredSenders || monitoredSenders.length === 0) {
+      isValid = false
+      missingFields.push(t('im.imessage.monitoredSenders'))
+    }
+  }
+  
+  console.log(`[IM] Validation result: isValid=${isValid}, missingFields=${missingFields}`)
+  
+  if (isValid) {
+    // Enable the provider
+    config.value[provider].enabled = true
+    console.log(`[IM] Enabling ${provider}`)
+  } else {
+    // Don't enable - show error
+    console.log(`[IM] Not enabling ${provider} due to missing fields`)
+    toast.error(`${t('im.validation.required')}: ${missingFields.join(', ')}`)
   }
 }
 
@@ -307,8 +382,8 @@ const saveConfig = async () => {
     await imAPI.saveConfig(config.value)
     toast.success(t('im.saveSuccess'))
   } catch (error) {
-    console.error('Failed to save IM config:', error)
-    toast.error(t('im.saveError'))
+    console.error('[IM] Failed to save IM config:', error)
+    toast.error(error.message || t('im.saveError'))
   } finally {
     saving.value = false
   }
