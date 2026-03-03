@@ -107,7 +107,7 @@
               variant="ghost"
               class="w-full justify-start h-9 px-2 text-sm font-normal text-muted-foreground border border-transparent hover:border-border hover:bg-background hover:text-foreground"
               :class="cn(
-                isCurrentService(session.url, session.isInternal, session.query) && 'bg-background text-primary border-border shadow-sm font-medium'
+                isActiveSessionCurrent(session) && 'bg-background text-primary border-border shadow-sm font-medium'
               )"
               @click="handleActiveSessionClick(session)"
             >
@@ -127,7 +127,7 @@
               size="icon"
               :title="session.rawName"
               class="transition-all duration-200 text-muted-foreground hover:text-foreground"
-              :class="isCurrentService(session.url, session.isInternal, session.query) ? 'bg-background shadow text-primary' : ''"
+              :class="isActiveSessionCurrent(session) ? 'bg-background shadow text-primary' : ''"
               @click="handleActiveSessionClick(session)"
             >
               <component
@@ -355,6 +355,7 @@ import { getCurrentUser, logout } from '../utils/auth.js'
 import { userAPI } from '@/api/user'
 import { chatAPI } from '@/api/chat'
 import { toast } from 'vue-sonner'
+import { useSidebarActiveSessions } from '@/composables/sidebar/useSidebarActiveSessions'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -396,86 +397,20 @@ const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
-const statusPollTimer = ref(null)
-const statusPollInFlight = ref(false)
-
-const activeSessions = ref({});
-
-const loadActiveSessions = () => {
-  try {
-    activeSessions.value = JSON.parse(localStorage.getItem('activeSessions') || '{}');
-  } catch (e) {
-    activeSessions.value = {};
-  }
-};
-
-const activeSessionItems = computed(() =>
-  Object.entries(activeSessions.value || {})
-    .filter(([, meta]) => !!meta)
-    .sort(([, a], [, b]) => (b?.lastUpdate || 0) - (a?.lastUpdate || 0))
-    .map(([sessionId, meta]) => ({
-      id: sessionId,
-      sessionId,
-      sessionStatus: meta?.status === 'completed' ? 'completed' : 'running',
-      rawName: meta?.title || `会话 ${sessionId.slice(-8)}`,
-      url: 'Chat',
-      isInternal: true,
-      query: { session_id: sessionId }
-    }))
-)
-
-const persistActiveSessions = () => {
-  localStorage.setItem('activeSessions', JSON.stringify(activeSessions.value))
-}
-
-const removeActiveSession = (sessionId) => {
-  if (!sessionId || !activeSessions.value[sessionId]) return
-  delete activeSessions.value[sessionId]
-  persistActiveSessions()
-}
-
-const handleActiveSessionClick = (session) => {
+const handleActiveSessionNavigate = (session) => {
   handleMenuClick(session.url, session.rawName, session.isInternal, session.query)
-  if (session.sessionStatus === 'completed') {
-    removeActiveSession(session.sessionId)
-  }
 }
 
-const syncActiveSessionStatuses = async () => {
-  if (activeSessionItems.value.length === 0) return
-  if (statusPollInFlight.value) return
-  statusPollInFlight.value = true
-  try {
-    const serverSessions = await chatAPI.getActiveSessions(1200)
-    const runningIds = new Set(
-      (serverSessions || [])
-        .filter(item => item && !item.is_completed)
-        .map(item => item.session_id)
-    )
-    let changed = false
-    const next = { ...activeSessions.value }
-    Object.entries(next).forEach(([sessionId, meta]) => {
-      if (!meta) return
-      const nextStatus = runningIds.has(sessionId) ? 'running' : 'completed'
-      if (meta.status !== nextStatus) {
-        next[sessionId] = {
-          ...meta,
-          status: nextStatus,
-          lastUpdate: Date.now()
-        }
-        changed = true
-      }
-    })
-    if (changed) {
-      activeSessions.value = next
-      persistActiveSessions()
-    }
-  } catch (error) {
-    console.error('同步会话状态失败:', error)
-  } finally {
-    statusPollInFlight.value = false
-  }
-}
+const {
+  activeSessionItems,
+  handleActiveSessionClick,
+  isActiveSessionCurrent,
+  disableActiveSessionSelection
+} = useSidebarActiveSessions({
+  route,
+  chatAPI,
+  onSessionClick: handleActiveSessionNavigate
+})
 
 const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
@@ -525,21 +460,12 @@ const handleChangePassword = async () => {
 onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('user-updated', handleUserUpdated)
-    window.addEventListener('active-sessions-updated', loadActiveSessions)
-    loadActiveSessions()
-    syncActiveSessionStatuses()
-    statusPollTimer.value = setInterval(syncActiveSessionStatuses, 3000)
   }
 })
 
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('user-updated', handleUserUpdated)
-    window.removeEventListener('active-sessions-updated', loadActiveSessions)
-  }
-  if (statusPollTimer.value) {
-    clearInterval(statusPollTimer.value)
-    statusPollTimer.value = null
   }
 })
 
@@ -637,6 +563,9 @@ const isCategoryActive = (item) => {
 
 const handleMenuClick = (url, name, isInternal, query = {}) => {
   query = query || {}
+  if (!(url === 'Chat' && query.session_id)) {
+    disableActiveSessionSelection()
+  }
   if (isInternal) {
     if (url === 'Chat' && !query.session_id) {
       emit('new-chat')

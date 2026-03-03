@@ -9,6 +9,7 @@ Execute Command Tool
 import os
 import sys
 import stat
+import asyncio
 import subprocess
 import tempfile
 import time
@@ -168,7 +169,7 @@ class ExecuteCommandTool:
             import shlex
             escaped_content = shlex.quote(content)
             write_cmd = f"printf '%s' {escaped_content} > {file_path}"
-            self.execute_shell_command(write_cmd, workdir=workdir, timeout=10, background=False)
+            self._execute_shell_command_sync(write_cmd, workdir=workdir, timeout=10, background=False)
     
     def _log_shell_history(self, command: str, workdir: Optional[str], success: bool, return_code: Optional[int], session_id: Optional[str]):
         """记录 Shell 命令历史"""
@@ -232,12 +233,28 @@ class ExecuteCommandTool:
             "required": ["success"]
         }
     )
-    def execute_shell_command(self, command: str, background: bool,
-                             workdir: Optional[str] = None, 
-                             timeout: int = 30,
-                             env_vars: Optional[Dict[str, str]] = None,
-                             session_id: Optional[str] = None,
-                             ) -> Dict[str, Any]:
+    async def execute_shell_command(self, command: str, background: bool,
+                                    workdir: Optional[str] = None,
+                                    timeout: int = 30,
+                                    env_vars: Optional[Dict[str, str]] = None,
+                                    session_id: Optional[str] = None,
+                                    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self._execute_shell_command_sync,
+            command,
+            background,
+            workdir,
+            timeout,
+            env_vars,
+            session_id
+        )
+
+    def _execute_shell_command_sync(self, command: str, background: bool,
+                                    workdir: Optional[str] = None,
+                                    timeout: int = 30,
+                                    env_vars: Optional[Dict[str, str]] = None,
+                                    session_id: Optional[str] = None,
+                                    ) -> Dict[str, Any]:
         """在指定目录执行Shell命令
         
         使用 sandbox_utils 统一处理沙箱路径映射，兼容有沙箱和没有沙箱的环境。
@@ -440,9 +457,21 @@ class ExecuteCommandTool:
             "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
         }
     )
-    def execute_python_code(self, code: str, requirement_list: Optional[Union[List[str], str]] = None, 
-                           workdir: Optional[str] = None, timeout: int = 60,
-                           session_id: Optional[str] = None) -> Dict[str, Any]:
+    async def execute_python_code(self, code: str, requirement_list: Optional[Union[List[str], str]] = None,
+                                  workdir: Optional[str] = None, timeout: int = 60,
+                                  session_id: Optional[str] = None) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self._execute_python_code_sync,
+            code,
+            requirement_list,
+            workdir,
+            timeout,
+            session_id
+        )
+
+    def _execute_python_code_sync(self, code: str, requirement_list: Optional[Union[List[str], str]] = None,
+                                  workdir: Optional[str] = None, timeout: int = 60,
+                                  session_id: Optional[str] = None) -> Dict[str, Any]:
         """在临时文件中运行Python代码，可选依赖安装
 
         Args:
@@ -507,7 +536,7 @@ class ExecuteCommandTool:
                         # 移除本地 importlib 检查，因为这检查的是宿主环境而非沙箱环境
                         # 且 pip install 本身是幂等的，如果已安装会跳过
                         install_cmd = f"{python_path} -m pip install {package} -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
-                        install_result = self.execute_shell_command(
+                        install_result = self._execute_shell_command_sync(
                             install_cmd,
                             workdir=workdir,
                             timeout=120,
@@ -528,7 +557,7 @@ class ExecuteCommandTool:
             logger.info(f"🚀 开始执行Python代码 [{process_id}]")
             
             python_cmd = f"{python_path} {temp_file}"
-            result = self.execute_shell_command(
+            result = self._execute_shell_command_sync(
                 python_cmd,
                 workdir=workdir,
                 timeout=timeout,
@@ -640,12 +669,12 @@ class ExecuteCommandTool:
                     pkg_json_path = os.path.join(host_workdir, "package.json")
                     
                     if not os.path.exists(pkg_json_path):
-                        self.execute_shell_command("npm init -y", workdir=workdir, timeout=10, background=False)
+                        self._execute_shell_command_sync("npm init -y", workdir=workdir, timeout=10, background=False)
                     
                     # 安装依赖
                     npm_registry = "https://registry.npmmirror.com/"
                     npm_cmd = f"npm install --registry={npm_registry} {' '.join(parsed_packages)}"
-                    install_result = self.execute_shell_command(npm_cmd, workdir=workdir, timeout=120, background=False)
+                    install_result = self._execute_shell_command_sync(npm_cmd, workdir=workdir, timeout=120, background=False)
                     
                     if install_result.get("success"):
                         newly_installed = parsed_packages
@@ -653,7 +682,7 @@ class ExecuteCommandTool:
             # 执行JS代码
             exec_start_time = time.time()
             node_cmd = f"{node_path} {temp_file}"
-            result = self.execute_shell_command(node_cmd, workdir=workdir, timeout=timeout, background=False)
+            result = self._execute_shell_command_sync(node_cmd, workdir=workdir, timeout=timeout, background=False)
             
             result.update({
                 "npm_packages": npm_packages,
