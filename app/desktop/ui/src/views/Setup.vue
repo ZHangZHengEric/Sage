@@ -184,7 +184,7 @@ import { toolAPI } from '@/api/tool'
 import { skillAPI } from '@/api/skill'
 import { toast } from 'vue-sonner'
 import { Loader, Bot, Brain, MessageSquare, ArrowRight } from 'lucide-vue-next'
-import { open } from '@tauri-apps/api/shell'
+import { open } from '@tauri-apps/plugin-shell'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

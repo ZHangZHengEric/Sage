@@ -3,7 +3,7 @@ stages:
   - release
 
 variables:
-  TAURI_VERSION: "1.5.0"
+  TAURI_VERSION: "2.0.0"
   NODE_VERSION: "18.16.0"
   RUST_VERSION: "1.70.0"
 
@@ -21,7 +21,7 @@ build-macos:
     - echo "Building for macOS..."
     - source $HOME/.bash_profile
     - rustup update stable
-    - npm install -g tauri
+    - npm install -g @tauri-apps/cli@^2
     - cd app/desktop/src_python
     - pip install -r requirements.txt pyinstaller
     - pyinstaller --clean --noconfirm --name sage-desktop --onefile --windowed main.py

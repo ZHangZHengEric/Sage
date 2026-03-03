@@ -268,9 +268,10 @@ if ! command -v cargo >/dev/null; then
   exit 1
 fi
 
-if ! cargo tauri --version >/dev/null 2>&1; then
-  echo "Installing tauri-cli v1..."
-  cargo install tauri-cli --version "^1.5"
+TAURI_CLI_VERSION="$(cargo tauri --version 2>/dev/null | awk '{print $2}' || true)"
+if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
+  echo "Installing tauri-cli v2..."
+  cargo install tauri-cli --version "^2"
 fi
 
 if [ "$MODE" = "release" ]; then

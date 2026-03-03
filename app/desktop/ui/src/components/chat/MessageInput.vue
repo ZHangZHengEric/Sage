@@ -355,8 +355,8 @@ const getMimeType = (filename) => {
 const triggerFileInput = async () => {
   if (window.__TAURI__) {
     try {
-      const { open } = await import('@tauri-apps/api/dialog')
-      const { readBinaryFile } = await import('@tauri-apps/api/fs')
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const { readFile } = await import('@tauri-apps/plugin-fs')
       
       const selected = await open({
         multiple: true
@@ -366,7 +366,7 @@ const triggerFileInput = async () => {
         const paths = Array.isArray(selected) ? selected : [selected]
         for (const path of paths) {
           try {
-            const contents = await readBinaryFile(path)
+            const contents = await readFile(path)
             // Extract filename from path (handles both Windows and Unix separators)
             const filename = path.split(/[\\/]/).pop()
             const mimeType = getMimeType(filename)
@@ -453,4 +453,3 @@ const removeFile = (index) => {
   uploadedFiles.value.splice(index, 1)
 }
 </script>
-
