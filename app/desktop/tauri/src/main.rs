@@ -4,8 +4,11 @@
 )]
 
 use tauri::{
-    CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem,
-    WindowEvent,
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
+    path::BaseDirectory,
+    tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
+    image::Image,
+    Emitter, Manager, WindowEvent,
 };
 #[cfg(target_os = "macos")]
 use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
@@ -16,6 +19,7 @@ use std::process::Stdio;
 use std::sync::Mutex;
 
 struct SidecarPid(Mutex<Option<u32>>);
+struct Tray(Mutex<Option<TrayIcon>>);
 
 #[derive(Clone, serde::Serialize)]
 struct Payload {
@@ -49,7 +53,7 @@ fn set_activation_policy_regular() {
 
 /// Show and focus the main window (cross-platform)
 fn show_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_window("main") {
+    if let Some(window) = app.get_webview_window("main") {
         // For macOS: ensure app is shown and window is visible
         #[cfg(target_os = "macos")]
         {
@@ -85,34 +89,25 @@ fn show_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
-    // Tray setup
-    let show = CustomMenuItem::new("show".to_string(), "显示");
-    let quit = CustomMenuItem::new("quit".to_string(), "退出");
-    let tray_menu = SystemTrayMenu::new()
-        .add_item(show)
-        .add_native_item(SystemTrayMenuItem::Separator)
-        .add_item(quit);
-    
-    let system_tray = SystemTray::new()
-        .with_menu(tray_menu);
-
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(SidecarPid(Mutex::new(None)))
-        .on_window_event(|event| {
-            match event.event() {
+        .manage(Tray(Mutex::new(None)))
+        .on_window_event(|window, event| {
+            match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     #[cfg(target_os = "macos")]
                     {
                         set_activation_policy_accessory();
-                        let _ = event.window().app_handle().hide();
+                        let _ = window.app_handle().hide();
                     }
-                    event.window().hide().unwrap();
+                    window.hide().unwrap();
                     api.prevent_close();
                 }
                 WindowEvent::Destroyed => {
-                    // When the main window is destroyed (closed), exit the app.
-                    // Use app_handle.exit(0) to ensure proper cleanup of child processes.
-                    let app_handle = event.window().app_handle();
+                    let app_handle = window.app_handle();
                     if let Some(state) = app_handle.try_state::<SidecarPid>() {
                         let mut pid_guard = state.0.lock().unwrap();
                         if let Some(pid) = *pid_guard {
@@ -129,16 +124,12 @@ fn main() {
                             *pid_guard = None;
                         }
                     }
-                    event.window().app_handle().exit(0);
+                    window.app_handle().exit(0);
                 }
                 WindowEvent::Focused(focused) => {
-                    // When window is focused (e.g., user clicks on Dock icon on macOS)
-                    // Only handle if window is currently hidden and being brought to front
                     if *focused {
-                        let window = event.window();
                         match window.is_visible() {
                             Ok(false) => {
-                                // Window was hidden, now being shown via Dock click
                                 let app_handle = window.app_handle();
                                 show_window(&app_handle);
                             }
@@ -149,46 +140,69 @@ fn main() {
                 _ => {}
             }
         })
-        .system_tray(system_tray)
-        .on_system_tray_event(|app, event| match event {
-            SystemTrayEvent::LeftClick {
-                position: _,
-                size: _,
-                ..
-            } => {
-                show_window(app);
-            }
-            SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
-                "quit" => {
-                    // Kill the sidecar process before exiting
-                    if let Some(state) = app.try_state::<SidecarPid>() {
-                        let mut pid_guard = state.0.lock().unwrap();
-                        if let Some(pid) = *pid_guard {
-                            #[cfg(unix)]
-                            std::process::Command::new("kill")
-                                .arg(pid.to_string())
-                                .output()
-                                .ok();
-                            #[cfg(windows)]
-                            std::process::Command::new("taskkill")
-                                .args(["/F", "/PID", &pid.to_string()])
-                                .output()
-                                .ok();
-                            *pid_guard = None;
-                        }
-                    }
-                    std::process::exit(0);
-                }
-                "show" => {
-                    show_window(app);
-                }
-                _ => {}
-            },
-            _ => {}
-        })
         .setup(|app| {
-            let _window = app.get_window("main").unwrap();
-            let app_handle = app.handle();
+            let show = MenuItemBuilder::with_id("show", "显示").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .items(&[&show, &separator, &quit])
+                .build()?;
+
+            let icon = Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("Failed to load icon");
+
+            let tray = TrayIconBuilder::with_id("main-tray")
+                .menu(&tray_menu)
+                .icon(icon)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "quit" => {
+                        if let Some(state) = app.try_state::<SidecarPid>() {
+                            let mut pid_guard = state.0.lock().unwrap();
+                            if let Some(pid) = *pid_guard {
+                                #[cfg(unix)]
+                                std::process::Command::new("kill")
+                                    .arg(pid.to_string())
+                                    .output()
+                                    .ok();
+                                #[cfg(windows)]
+                                std::process::Command::new("taskkill")
+                                    .args(["/F", "/PID", &pid.to_string()])
+                                    .output()
+                                    .ok();
+                                *pid_guard = None;
+                            }
+                        }
+                        app.exit(0);
+                    }
+                    "show" => {
+                        show_window(app);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            ..
+                        } => {
+                            show_window(&tray.app_handle());
+                        }
+                        TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        } => {
+                            show_window(&tray.app_handle());
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+
+            if let Some(tray_state) = app.try_state::<Tray>() {
+                *tray_state.0.lock().unwrap() = Some(tray);
+            }
+
+            let app_handle = app.handle().clone();
             
             // Set default environment variables
             std::env::set_var("SAGE_USE_SANDBOX", "False");
@@ -270,8 +284,9 @@ fn main() {
                         // Fallback to sidecar if script not found
                          println!("Python script not found at {:?}, falling back to sidecar", script_path);
                          // Resolve the sidecar path from resources
-                        let sidecar_dir = app_handle.path_resolver()
-                            .resolve_resource("sidecar")
+                        let sidecar_dir = app_handle
+                            .path()
+                            .resolve("sidecar", BaseDirectory::Resource)
                             .expect("failed to resolve sidecar resource");
                         
                         let sidecar_executable = if cfg!(target_os = "windows") {
@@ -283,8 +298,9 @@ fn main() {
                     }
                 } else {
                      // In release mode, always use sidecar
-                    let sidecar_dir = app_handle.path_resolver()
-                        .resolve_resource("sidecar")
+                    let sidecar_dir = app_handle
+                        .path()
+                        .resolve("sidecar", BaseDirectory::Resource)
                         .expect("failed to resolve sidecar resource");
                     
                     let sidecar_executable = if cfg!(target_os = "windows") {
@@ -327,7 +343,7 @@ fn main() {
                                 println!("Detected port: {}", port);
                                 println!("Emitting sage-desktop-ready event...");
                                 // Emit event to frontend
-                                app_handle.emit_all("sage-desktop-ready", Payload { port }).unwrap();
+                                app_handle.emit("sage-desktop-ready", Payload { port }).unwrap();
                             }
                         }
                     }
