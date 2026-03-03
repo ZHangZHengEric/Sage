@@ -13,6 +13,7 @@ class RecurringTask(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     cron_expression: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -37,8 +38,8 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    retry_count: Mapped[int] = mapped_column(Integer, default=0)
-    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    max_retries: Mapped[Optional[int]] = mapped_column(Integer, default=3)
     recurring_task_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("recurring_tasks.id"), nullable=True)
     
     # Relationship to recurring task
@@ -91,7 +92,7 @@ class TaskDao(BaseDao):
 
     async def create_recurring_task(self, task: RecurringTask) -> RecurringTask:
         """创建循环任务"""
-        await self.save(task)
+        await self.insert(task)
         return task
 
     async def update_recurring_task(self, task: RecurringTask) -> RecurringTask:
@@ -143,5 +144,5 @@ class TaskDao(BaseDao):
 
     async def create_one_time_task(self, task: Task) -> Task:
         """创建一次性任务"""
-        await self.save(task)
+        await self.insert(task)
         return task
