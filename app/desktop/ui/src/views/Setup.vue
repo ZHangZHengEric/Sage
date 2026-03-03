@@ -414,7 +414,13 @@ const createDefaultAgent = async (providerId = null) => {
         'file_read', 
         'file_write', 
         'download_file_from_url', 
-        'file_update'
+        'file_update',
+        'load_skill',
+        'add_task',
+        'delete_task',
+        'complete_task',
+        'enable_task',
+        'get_task_details'
       ],
       availableSkills: skills.value.map(s => s.name),
       systemPrefix: systemPrompt,
