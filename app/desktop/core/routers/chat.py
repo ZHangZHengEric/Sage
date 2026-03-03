@@ -68,12 +68,6 @@ def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_requ
     if not request.messages or len(request.messages) == 0:
         raise SageHTTPException(status_code=500, detail="消息列表不能为空")
 
-    # 注入当前用户ID（如果未指定）
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    req_user_id = claims.get("userid")
-    if not request.user_id:
-        request.user_id = req_user_id
-
 
 
 @chat_router.post("/api/web-stream")
