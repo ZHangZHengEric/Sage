@@ -400,7 +400,7 @@ const createDefaultAgent = async (providerId = null) => {
     }
 
     const agentData = {
-      name: 'zavix',
+      name: 'Zavix',
       description: '默认智能体',
       maxLoopCount: 100,
       memoryType: "session",
