@@ -5,11 +5,14 @@ import hashlib
 import base64
 import json
 import time
+import logging
 from typing import Optional, Dict, Any
 
 import httpx
 
 from ..base import IMProviderBase
+
+logger = logging.getLogger("DingTalkProvider")
 
 
 class DingTalkProvider(IMProviderBase):
@@ -34,17 +37,26 @@ class DingTalkProvider(IMProviderBase):
         app_key = self.config.get("app_key") or self.config.get("client_id")
         app_secret = self.config.get("app_secret") or self.config.get("client_secret")
 
+        logger.info(f"[DingTalk] Getting access token: app_key={app_key}, has_secret={bool(app_secret)}")
+
         if not app_key or not app_secret:
+            logger.error("[DingTalk] Missing app_key or app_secret in config")
             return None
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.BASE_URL}/gettoken",
-                params={"appkey": app_key, "appsecret": app_secret},
-            )
-            data = resp.json()
-            if data.get("errcode") == 0:
-                return data.get("access_token")
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{self.BASE_URL}/gettoken",
+                    params={"appkey": app_key, "appsecret": app_secret},
+                )
+                data = resp.json()
+                logger.info(f"[DingTalk] gettoken response: {data}")
+                if data.get("errcode") == 0:
+                    return data.get("access_token")
+                else:
+                    logger.error(f"[DingTalk] gettoken failed: errcode={data.get('errcode')}, errmsg={data.get('errmsg')}")
+        except Exception as e:
+            logger.error(f"[DingTalk] gettoken exception: {e}", exc_info=True)
         return None
 
     async def send_message(
@@ -52,18 +64,47 @@ class DingTalkProvider(IMProviderBase):
         content: str,
         chat_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        msg_type: str = "text",
+        msg_type: str = "markdown",
+        session_webhook: Optional[str] = None,
+        sender_staff_id: Optional[str] = None,
+        session_webhook_expired_time: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Send message via DingTalk."""
-        # Try webhook first (if configured)
+        """Send message via DingTalk.
+        
+        Args:
+            content: Message content
+            chat_id: Chat/Group ID (optional)
+            user_id: User ID (optional)
+            msg_type: Message type (text or markdown)
+            session_webhook: Webhook URL from incoming message (preferred method)
+            sender_staff_id: Sender's staff ID for @ mention
+        """
+        logger.info(f"[DingTalk] send_message called: chat_id={chat_id}, user_id={user_id}, content_length={len(content)}")
+        
+        # Use session_webhook if available (simplest method, no access token needed)
+        if session_webhook:
+            logger.info(f"[DingTalk] Using session_webhook: {session_webhook[:50]}...")
+            # Default to markdown for better formatting
+            actual_msg_type = msg_type or "markdown"
+            return await self._send_via_session_webhook(
+                session_webhook, content, actual_msg_type, sender_staff_id,
+                session_webhook_expired_time=session_webhook_expired_time
+            )
+        
+        # Try configured webhook (legacy mode)
         webhook_url = self.config.get("webhook_url")
         if webhook_url:
+            logger.info(f"[DingTalk] Using configured webhook: {webhook_url}")
             return await self._send_webhook(webhook_url, content, msg_type)
 
-        # Otherwise use API
+        # Otherwise use API (requires access token)
+        logger.info("[DingTalk] Using API to send message")
         access_token = await self._get_access_token()
         if not access_token:
+            logger.error("[DingTalk] Failed to get access token")
             return {"success": False, "error": "Failed to get access token. Check app_key and app_secret."}
+        
+        logger.info(f"[DingTalk] Got access token: {access_token[:10]}...")
 
         # Build message payload
         if msg_type == "text":
@@ -108,6 +149,70 @@ class DingTalkProvider(IMProviderBase):
             if data.get("code") == "0" or data.get("success"):
                 return {"success": True, "message_id": data.get("data", {}).get("processQueryKey")}
             return {"success": False, "error": data.get("message", "Unknown error")}
+
+    async def _send_via_session_webhook(
+        self, 
+        session_webhook: str, 
+        content: str, 
+        msg_type: str,
+        sender_staff_id: Optional[str] = None,
+        session_webhook_expired_time: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Send message via session webhook (from incoming message).
+        
+        This is the simplest method - no access token needed.
+        Note: session_webhook can be used multiple times until expired.
+        """
+        import time
+        
+        # Check if webhook is expired
+        if session_webhook_expired_time:
+            now_ms = int(time.time() * 1000)
+            if now_ms >= session_webhook_expired_time:
+                logger.warning(f"[DingTalk] session_webhook expired at {session_webhook_expired_time}, now={now_ms}")
+                return {"success": False, "error": "Session webhook expired"}
+            else:
+                remaining_ms = session_webhook_expired_time - now_ms
+                logger.info(f"[DingTalk] session_webhook valid, remaining={remaining_ms/1000:.0f}s")
+        
+        logger.info(f"[DingTalk] Sending via session_webhook, msg_type={msg_type}")
+        
+        if msg_type == "text":
+            payload = {
+                "msgtype": "text", 
+                "text": {"content": content},
+            }
+        elif msg_type == "markdown":
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {"title": "Message", "text": content},
+            }
+        else:
+            payload = {
+                "msgtype": "text", 
+                "text": {"content": content},
+            }
+        
+        # @ the sender if staff_id is available
+        if sender_staff_id:
+            payload["at"] = {"atUserIds": [sender_staff_id]}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    session_webhook, 
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                data = resp.json()
+                logger.info(f"[DingTalk] session_webhook response: {data}")
+                
+                if data.get("errcode") == 0:
+                    return {"success": True}
+                return {"success": False, "error": data.get("errmsg", "Unknown error")}
+        except Exception as e:
+            logger.error(f"[DingTalk] session_webhook failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
     async def _send_webhook(self, webhook_url: str, content: str, msg_type: str) -> Dict[str, Any]:
         """Send message via webhook (legacy mode)."""

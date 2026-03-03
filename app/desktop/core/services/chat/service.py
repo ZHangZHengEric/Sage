@@ -16,6 +16,7 @@ from sagents.sagents import SAgent
 from sagents.tool import ToolManager, get_tool_manager
 from ... import models
 from ...core.exceptions import SageHTTPException
+from ...models import IMChannelConfigDao
 from ...schemas.chat import StreamRequest, CustomSubAgentConfig
 from ...core.config import get_startup_config
 from .processor import (
@@ -60,6 +61,8 @@ async def populate_request_from_agent_config(
             request.agent_name = agent_config.get("name")
         if agent_config.get("availableTools") is not None:
             request.available_tools = agent_config.get("availableTools")
+        
+        
         if agent_config.get("availableSkills") is not None:
             request.available_skills = agent_config.get("availableSkills")
         if agent_config.get("availableWorkflows") is not None:
@@ -143,6 +146,27 @@ async def populate_request_from_agent_config(
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
     _fill_if_none("available_sub_agent_ids", [])
+
+    # Check if any IM provider is enabled and add send_message_through_im tool
+    try:
+        im_dao = IMChannelConfigDao()
+        all_im_configs = await im_dao.get_all_configs()
+        im_enabled = any(
+            config.get("enabled", False) 
+            for config in all_im_configs.values()
+        )
+        if im_enabled:
+            # Add IM tool to available tools
+            if request.available_tools is None:
+                request.available_tools = []
+            if "send_message_through_im" not in request.available_tools:
+                request.available_tools = list(request.available_tools) + ["send_message_through_im"]
+                logger.info("[Chat] Added send_message_through_im tool (IM provider enabled)")
+    except Exception as e:
+        logger.warning(f"[Chat] Failed to check IM config: {e}")
+
+
+
     if request.agent_id and agent:
         _merge_dict("system_context", {"当前AgentId": request.agent_id})
         # agent_host_workspace_path 这个文件夹路径，根据agent_id 来确定
