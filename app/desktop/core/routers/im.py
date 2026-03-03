@@ -3,37 +3,33 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
+from ..core.render import Response
 from ..models import IMChannelConfigDao
 
 logger = logging.getLogger(__name__)
 
-# Use a fixed user_id for desktop app (single user)
-DESKTOP_USER_ID = "desktop_user"
-
 
 # Pydantic Models
-class IMProviderConfig(BaseModel):
-    """Base IM provider configuration."""
-    enabled: bool = False
-
-
-class FeishuConfig(IMProviderConfig):
+class FeishuConfig(BaseModel):
     """Feishu configuration."""
+    enabled: bool = False
     app_id: Optional[str] = None
     app_secret: Optional[str] = None
 
 
-class DingTalkConfig(IMProviderConfig):
+class DingTalkConfig(BaseModel):
     """DingTalk configuration."""
+    enabled: bool = False
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
 
 
-class IMessageConfig(IMProviderConfig):
+class IMessageConfig(BaseModel):
     """iMessage configuration."""
+    enabled: bool = False
     mode: str = "database_poll"
     allowed_senders: list = []
 
@@ -55,114 +51,84 @@ class IMConfig(BaseModel):
 im_router = APIRouter(prefix="/api/im", tags=["im"])
 
 
-@im_router.get("/config", response_model=IMConfig)
+@im_router.get("/config")
 async def get_im_config():
-    """Get IM channel configuration for desktop user."""
-    logger.info(f"[IM] Getting config for user: {DESKTOP_USER_ID}")
+    """Get IM channel configuration for desktop app."""
+    logger.info("[IM] ========== GET /api/im/config ==========")
     try:
         dao = IMChannelConfigDao()
-        logger.debug(f"[IM] DAO created, querying database...")
+        logger.info("[IM] DAO created")
         
-        config_record = await dao.get_by_user_id(DESKTOP_USER_ID)
+        # Get all configs
+        all_configs = await dao.get_all_configs()
+        logger.info(f"[IM] Retrieved {len(all_configs)} provider configs")
         
-        if config_record:
-            logger.info(f"[IM] Config found for user: {DESKTOP_USER_ID}")
-            logger.debug(f"[IM] Config data: {config_record.config}")
-            
-            # Log provider status
-            config_data = config_record.config
-            for provider in ['feishu', 'dingtalk', 'imessage']:
-                provider_config = config_data.get(provider, {})
-                enabled = provider_config.get('enabled', False)
-                logger.info(f"[IM] Provider '{provider}' enabled: {enabled}")
-            
-            return IMConfig(**config_data)
+        # Build response
+        result = {
+            "feishu": all_configs.get("feishu", {}),
+            "dingtalk": all_configs.get("dingtalk", {}),
+            "imessage": all_configs.get("imessage", {}),
+            "service": {"running": False}  # TODO: get actual service status
+        }
         
-        logger.info(f"[IM] No config found for user: {DESKTOP_USER_ID}, returning default")
-        return IMConfig()
+        logger.info(f"[IM] Returning config: feishu={result['feishu'].get('enabled', False)}, dingtalk={result['dingtalk'].get('enabled', False)}, imessage={result['imessage'].get('enabled', False)}")
+        logger.info("[IM] ========== END GET /api/im/config ==========")
+        
+        return await Response.succ(data=result, message="获取配置成功")
         
     except Exception as e:
+        logger.error(f"[IM] ========== ERROR GET /api/im/config ==========")
         logger.error(f"[IM] Failed to get config: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("[IM] ========== END ERROR ==========")
+        return await Response.error(code=500, message=f"获取配置失败: {str(e)}")
 
 
-@im_router.post("/config", response_model=IMConfig)
+@im_router.post("/config")
 async def save_im_config(config: IMConfig):
-    """Save IM channel configuration for desktop user."""
-    logger.info(f"[IM] Saving config for user: {DESKTOP_USER_ID}")
-    logger.debug(f"[IM] Config data: {config.dict()}")
+    """Save IM channel configuration for desktop app."""
+    logger.info("[IM] ========== POST /api/im/config ==========")
+    logger.info(f"[IM] Request data: {config.dict()}")
     
     try:
         dao = IMChannelConfigDao()
-        logger.debug(f"[IM] DAO created, saving to database...")
+        logger.info("[IM] DAO created")
         
-        await dao.save_config(DESKTOP_USER_ID, config.dict())
-        logger.info(f"[IM] Config saved successfully for user: {DESKTOP_USER_ID}")
+        # Save each provider config
+        providers = [
+            ("feishu", config.feishu.dict()),
+            ("dingtalk", config.dingtalk.dict()),
+            ("imessage", config.imessage.dict()),
+        ]
         
-        # Log which providers are enabled
-        for provider in ['feishu', 'dingtalk', 'imessage']:
-            provider_config = getattr(config, provider)
-            enabled = provider_config.enabled if provider_config else False
-            logger.info(f"[IM] Provider '{provider}' saved with enabled: {enabled}")
+        for provider_type, provider_config in providers:
+            logger.info(f"[IM] Saving {provider_type} config: enabled={provider_config.get('enabled', False)}")
+            await dao.save_config(provider_type, provider_config)
+            logger.info(f"[IM] {provider_type} config saved")
         
-        # Handle service start/stop based on config
-        if config.service.running:
-            logger.info("[IM] Service is set to running, starting IM service...")
-            await _start_im_service(config)
-        else:
-            logger.info("[IM] Service is set to stopped, stopping IM service...")
-            await _stop_im_service()
+        logger.info("[IM] All configs saved successfully")
+        logger.info("[IM] ========== END POST /api/im/config ==========")
         
-        return config
+        return await Response.succ(data=config.dict(), message="保存配置成功")
         
     except Exception as e:
+        logger.error(f"[IM] ========== ERROR POST /api/im/config ==========")
         logger.error(f"[IM] Failed to save config: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-async def _start_im_service(config: IMConfig):
-    """Start IM service with current configuration."""
-    logger.info("[IM] Starting IM service...")
-    try:
-        from mcp_servers.im_server.im_server import initialize_im_server
-        import asyncio
-        
-        # Log which providers will be started
-        enabled_providers = []
-        if config.feishu.enabled:
-            enabled_providers.append('feishu')
-        if config.dingtalk.enabled:
-            enabled_providers.append('dingtalk')
-        if config.imessage.enabled:
-            enabled_providers.append('imessage')
-        
-        logger.info(f"[IM] Starting IM service with providers: {enabled_providers}")
-        
-        asyncio.create_task(initialize_im_server())
-        logger.info("[IM] IM service start task created")
-        
-    except Exception as e:
-        logger.error(f"[IM] Failed to start IM service: {e}", exc_info=True)
-        raise
-
-
-async def _stop_im_service():
-    """Stop IM service."""
-    logger.info("[IM] Stopping IM service...")
-    # TODO: Implement stop logic
-    logger.info("[IM] IM service stopped")
-    pass
+        logger.error("[IM] ========== END ERROR ==========")
+        return await Response.error(code=500, message=f"保存配置失败: {str(e)}")
 
 
 @im_router.get("/service/status")
 async def get_im_service_status():
     """Get IM service status."""
-    logger.debug("[IM] Getting service status")
-    return {
-        "running": False,
-        "providers": {
-            "feishu": {"enabled": False, "connected": False},
-            "dingtalk": {"enabled": False, "connected": False},
-            "imessage": {"enabled": False, "connected": False},
-        }
-    }
+    logger.info("[IM] GET /api/im/service/status")
+    return await Response.succ(
+        data={
+            "running": False,
+            "providers": {
+                "feishu": {"enabled": False, "connected": False},
+                "dingtalk": {"enabled": False, "connected": False},
+                "imessage": {"enabled": False, "connected": False},
+            }
+        },
+        message="获取服务状态成功"
+    )
