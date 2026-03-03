@@ -16,8 +16,10 @@ class TaskService:
 
     async def create_recurring_task(self, data: RecurringTaskCreate) -> RecurringTask:
         # TODO: Validate cron expression
+        session_id = "recurring-" + datetime.now().strftime("%Y%m%d%H%M%S")
         task = RecurringTask(
             name=data.name,
+            session_id=session_id,
             description=data.description,
             agent_id=data.agent_id,
             cron_expression=data.cron_expression,

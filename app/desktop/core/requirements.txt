@@ -75,7 +75,7 @@ weasyprint
 ##############################
 # IM 平台 SDK
 ##############################
-dingtalk-stream>=0.21.0
-lark-oapi>=1.5.0
-nest-asyncio>=1.5.0
-websockets>=12.0
+dingtalk-stream
+lark-oapi
+nest-asyncio
+websockets
