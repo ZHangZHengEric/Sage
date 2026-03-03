@@ -88,28 +88,44 @@ async def save_im_config(config: IMConfig):
     """Save IM channel configuration for desktop app."""
     logger.info("[IM] ========== POST /api/im/config ==========")
     logger.info(f"[IM] Request data: {config.dict()}")
-    
+
     try:
         dao = IMChannelConfigDao()
         logger.info("[IM] DAO created")
-        
+
         # Save each provider config
         providers = [
             ("feishu", config.feishu.dict()),
             ("dingtalk", config.dingtalk.dict()),
             ("imessage", config.imessage.dict()),
         ]
-        
+
+        enabled_providers = []
         for provider_type, provider_config in providers:
             logger.info(f"[IM] Saving {provider_type} config: enabled={provider_config.get('enabled', False)}")
             await dao.save_config(provider_type, provider_config)
             logger.info(f"[IM] {provider_type} config saved")
-        
+            if provider_config.get('enabled', False):
+                enabled_providers.append(provider_type)
+
         logger.info("[IM] All configs saved successfully")
+
+        # Start IM service if any provider is enabled
+        if enabled_providers:
+            logger.info(f"[IM] Providers enabled: {enabled_providers}, starting IM service...")
+            try:
+                import asyncio
+                from mcp_servers.im_server.im_server import initialize_im_server
+                asyncio.create_task(initialize_im_server())
+                logger.info("[IM] IM service start task created")
+            except Exception as e:
+                logger.error(f"[IM] Failed to start IM service: {e}")
+                # Don't fail the save if service start fails
+
         logger.info("[IM] ========== END POST /api/im/config ==========")
-        
+
         return await Response.succ(data=config.dict(), message="保存配置成功")
-        
+
     except Exception as e:
         logger.error(f"[IM] ========== ERROR POST /api/im/config ==========")
         logger.error(f"[IM] Failed to save config: {e}", exc_info=True)

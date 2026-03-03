@@ -10,13 +10,33 @@ import asyncio
 import threading
 from typing import Callable, Optional, Dict, Any
 
+logger = logging.getLogger("DingTalkStream")
+
+# Runtime imports with fallback
 try:
     import dingtalk_stream
+    from dingtalk_stream import Credential, DingTalkStreamClient as _DingTalkStreamClient
+    from dingtalk_stream import ChatbotHandler, CallbackMessage, ChatbotMessage, AckMessage
     DINGTALK_SDK_AVAILABLE = True
 except ImportError:
     DINGTALK_SDK_AVAILABLE = False
-
-logger = logging.getLogger("DingTalkStream")
+    dingtalk_stream = None
+    # Define dummy classes for type hints
+    class Credential:
+        pass
+    class _DingTalkStreamClient:
+        pass
+    class ChatbotHandler:
+        pass
+    class CallbackMessage:
+        pass
+    class ChatbotMessage:
+        TOPIC = ""
+        @classmethod
+        def from_dict(cls, data):
+            return None
+    class AckMessage:
+        STATUS_OK = "OK"
 
 
 class DingTalkStreamClient:
@@ -28,13 +48,12 @@ class DingTalkStreamClient:
         client_secret: str,
         message_handler: Callable[[Dict[str, Any]], None]
     ):
-        """
-        Initialize DingTalk Stream client.
+        """Initialize DingTalk Stream client.
         
         Args:
-            client_id: DingTalk app client_id (app_key)
-            client_secret: DingTalk app client_secret (app_secret)
-            message_handler: Callback for received messages
+            client_id: Client ID (App Key)
+            client_secret: Client Secret (App Secret)
+            message_handler: Callback function for received messages
         """
         if not DINGTALK_SDK_AVAILABLE:
             raise ImportError("dingtalk-stream SDK not installed. Run: pip install dingtalk-stream")
@@ -43,7 +62,7 @@ class DingTalkStreamClient:
         self.client_secret = client_secret
         self.message_handler = message_handler
         self.running = False
-        self.client: Optional[dingtalk_stream.DingTalkStreamClient] = None
+        self.client: Optional[Any] = None
         self.ws_thread: Optional[threading.Thread] = None
         
     def start(self):
@@ -71,63 +90,110 @@ class DingTalkStreamClient:
         logger.info("DingTalk Stream client stopped")
     
     def _run_client(self):
-        """Run DingTalk Stream client in separate thread."""
-        try:
-            # Create credential
-            credential = dingtalk_stream.Credential(
-                self.client_id,
-                self.client_secret
-            )
-            
-            # Create client
-            self.client = dingtalk_stream.DingTalkStreamClient(credential)
-            
-            # Register message handler
-            handler = _DingTalkMessageHandler(self.message_handler)
-            self.client.register_callback_handler(
-                dingtalk_stream.ChatbotMessage.TOPIC,
-                handler
-            )
-            
-            # Start client (blocking)
-            self.client.start_forever()
-            
-        except Exception as e:
-            logger.error(f"DingTalk Stream error: {e}")
-            self.running = False
+        """Run DingTalk Stream client in separate thread with reconnection."""
+        retry_count = 0
+        max_retries = 10
+        base_delay = 5  # seconds
+        
+        while self.running and retry_count < max_retries:
+            loop = None
+            try:
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Run the async client setup
+                loop.run_until_complete(self._run_client_async())
+                
+                # If we get here, the client stopped normally
+                logger.info("DingTalk Stream client stopped normally")
+                break
+                
+            except Exception as e:
+                retry_count += 1
+                error_msg = str(e)
+                
+                # Check if it's a network error
+                if "no close frame received or sent" in error_msg or "network" in error_msg.lower():
+                    logger.warning(f"[DingTalk Stream] Network error (attempt {retry_count}/{max_retries}): {e}")
+                else:
+                    logger.error(f"[DingTalk Stream] Error (attempt {retry_count}/{max_retries}): {e}")
+                
+                if retry_count < max_retries and self.running:
+                    # Exponential backoff with max 60 seconds
+                    delay = min(base_delay * (2 ** (retry_count - 1)), 60)
+                    logger.info(f"[DingTalk Stream] Reconnecting in {delay} seconds...")
+                    
+                    # Sleep without blocking the loop
+                    import time
+                    time.sleep(delay)
+                else:
+                    logger.error("[DingTalk Stream] Max retries reached, giving up")
+                    self.running = False
+                    
+            finally:
+                if loop:
+                    try:
+                        loop.close()
+                    except:
+                        pass
+        
+        if not self.running:
+            logger.info("[DingTalk Stream] Client stopped")
+    
+    async def _run_client_async(self):
+        """Async method to run DingTalk Stream client."""
+        # Create credential
+        credential = Credential(
+            self.client_id,
+            self.client_secret
+        )
+        
+        # Create client
+        self.client = _DingTalkStreamClient(credential)
+        
+        # Register message handler
+        handler = _DingTalkMessageHandler(self.message_handler)
+        self.client.register_callback_handler(
+            ChatbotMessage.TOPIC,
+            handler
+        )
+        
+        # Start client (blocks until stopped)
+        logger.info("Connecting to DingTalk Stream...")
+        await self.client.start()
 
 
-class _DingTalkMessageHandler(dingtalk_stream.ChatbotHandler):
+class _DingTalkMessageHandler(ChatbotHandler):
     """Internal handler for DingTalk messages."""
     
     def __init__(self, message_handler: Callable[[Dict[str, Any]], None]):
-        super().__init__()
         self.message_handler = message_handler
     
-    async def process(self, callback: dingtalk_stream.CallbackMessage):
+    async def process(self, callback: CallbackMessage):
         """Process incoming message."""
         try:
             # Parse message
-            message = dingtalk_stream.ChatbotMessage.from_dict(callback.data)
+            message = ChatbotMessage.from_dict(callback.data)
             
-            # Extract info
-            parsed_message = {
-                "type": "message",
-                "message_id": message.message_id,
-                "content": {"text": message.text.content if message.text else ""},
-                "chat_id": message.conversation_id,
+            # Extract relevant info including session_webhook for reply
+            msg_data = {
                 "user_id": message.sender_staff_id,
                 "user_name": message.sender_nick,
+                "content": {"text": message.text.content},
+                "chat_id": message.conversation_id,
                 "msg_type": "text",
-                "provider": "dingtalk"
+                "session_webhook": message.session_webhook,  # Save for reply
+                "session_webhook_expired_time": message.session_webhook_expired_time,
+                "sender_staff_id": message.sender_staff_id,
+                "conversation_type": message.conversation_type,
             }
             
             # Call handler
-            self.message_handler(parsed_message)
+            self.message_handler(msg_data)
             
-            # Acknowledge message
-            return dingtalk_stream.AckMessage.STATUS_OK, 'OK'
+            return AckMessage.STATUS_OK, 'OK'
             
         except Exception as e:
             logger.error(f"Error processing DingTalk message: {e}")
-            return dingtalk_stream.AckMessage.STATUS_OK, 'OK'
+            return AckMessage.STATUS_OK, 'OK'

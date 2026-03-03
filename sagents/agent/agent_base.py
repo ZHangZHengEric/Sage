@@ -1129,7 +1129,7 @@ class AgentBase(ABC):
                         suggested_tool_names.append(tool_name)
 
             # 添加系统工具
-            system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task']
+            system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task','send_message_through_im']
             for tool_name in system_tools:
                 if tool_name not in suggested_tool_names:
                     # 检查工具是否存在

@@ -32,66 +32,49 @@ async def fetch_im_config_from_backend() -> Optional[Dict[str, Any]]:
     """
     Fetch complete IM configuration from backend API.
 
-    Expected API response format:
-
-        {
-            "im_providers": {
-                "feishu": {
-                    "enabled": true,
-                    "app_id": "cli_xxx",
-                    "app_secret": "xxx"
-                },
-                "dingtalk": {
-                    "enabled": true,
-                    "client_id": "dingxxx",
-                    "client_secret": "xxx"
-                },
-                "imessage": {
-                    "enabled": true,
-                    "mode": "database_poll",
-                    "allowed_senders": ["+86138xxxxxxxx", "18910982928"]
-                }
-            },
-            "settings": {
-                "default_timeout": 300,
-                "max_message_length": 4096
-            }
-        }
-
-    Field descriptions:
-
-    - enabled: Whether this provider is active
-    - app_id: (Feishu) Application identifier
-    - app_secret: (Feishu) Application secret
-    - client_id: (DingTalk) Application identifier (same as app_key)
-    - client_secret: (DingTalk) Application secret (same as app_secret)
-    - mode: (iMessage only) "database_poll" or "notification"
-    - allowed_senders: (iMessage only) Whitelist of phone numbers/emails
-
-    Notes:
-        - Feishu uses WebSocket mode (no webhook_url needed)
-        - DingTalk uses Stream mode (no webhook_url needed)
-        - iMessage works locally without any external URL
-
     Returns:
         Complete IM configuration dict or None if not found
     """
-    # TODO: Implement when backend API is ready
-    # api_base_url = _get_api_base_url()
-    # try:
-    #     async with httpx.AsyncClient(timeout=10.0) as client:
-    #         resp = await client.get(
-    #             f"{api_base_url}/api/v1/im/config",
-    #             headers={"Authorization": f"Bearer {get_auth_token()}"}
-    #         )
-    #         if resp.status_code == 200:
-    #             config = resp.json()
-    #             _save_local_config(config)  # Cache locally
-    #             return config
-    # except Exception as e:
-    #     logger.error(f"Failed to fetch IM config from backend: {e}")
+    import httpx
+    
+    api_base_url = _get_api_base_url()
+    logger.info(f"[IM Config] Fetching config from backend: {api_base_url}/api/im/config")
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{api_base_url}/api/im/config")
+            logger.info(f"[IM Config] Backend response status: {resp.status_code}")
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(f"[IM Config] Backend response: {data}")
+                
+                if data.get("code") == 200 and data.get("data"):
+                    # Transform response format
+                    # Backend returns: {feishu: {...}, dingtalk: {...}, imessage: {...}, service: {...}}
+                    # We need: {im_providers: {feishu: {...}, ...}}
+                    response_data = data["data"]
+                    config = {
+                        "im_providers": {
+                            "feishu": response_data.get("feishu", {"enabled": False}),
+                            "dingtalk": response_data.get("dingtalk", {"enabled": False}),
+                            "imessage": response_data.get("imessage", {"enabled": False}),
+                        },
+                        "settings": {
+                            "default_timeout": 300,
+                            "max_message_length": 4096
+                        }
+                    }
+                    _save_local_config(config)  # Cache locally
+                    logger.info("[IM Config] Config fetched and cached successfully")
+                    return config
+                else:
+                    logger.warning(f"[IM Config] Backend returned unsuccessful response: {data}")
+    except Exception as e:
+        logger.error(f"[IM Config] Failed to fetch IM config from backend: {e}", exc_info=True)
 
     # Fallback: Try local config file
+    logger.info("[IM Config] Falling back to local config file")
     return _load_local_config()
 
 
@@ -202,19 +185,29 @@ async def load_im_config() -> Optional[Dict[str, Any]]:
     """
     global _im_config
 
+    logger.info("[IM Config] Loading IM configuration...")
+
     # Try backend API first
+    logger.info("[IM Config] Trying backend API...")
     config = await fetch_im_config_from_backend()
     if config:
+        logger.info(f"[IM Config] Backend config loaded: {config}")
         _im_config = config
         return config
+    else:
+        logger.warning("[IM Config] Backend API returned no config")
 
     # Try environment variables
+    logger.info("[IM Config] Trying environment variables...")
     config = _load_from_env()
+    logger.info(f"[IM Config] Environment config: {config}")
     if config.get("im_providers"):
+        logger.info("[IM Config] Using environment config")
         _im_config = config
         _save_local_config(config)  # Cache for next time
         return config
 
+    logger.error("[IM Config] No configuration found from any source")
     return None
 
 
