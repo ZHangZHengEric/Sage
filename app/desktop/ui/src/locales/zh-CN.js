@@ -733,4 +733,40 @@ export default {
   'im.imessage.monitoredSendersHelp': '必须配置至少一个发送者，只有这些发送者的消息会被处理',
   'im.imessage.macosOnly': 'macOS 专属',
   'im.imessage.macosOnlyDesc': 'iMessage 功能仅在 macOS 系统上可用。需要授予终端访问 Messages 数据库的权限。',
+
+  // 引导
+  'tour.skip': '跳过',
+  'tour.next': '下一步',
+  'tour.prev': '上一步',
+  'tour.done': '完成',
+  
+  // 侧边栏引导
+  'tour.sidebar.newChat.title': '新对话',
+  'tour.sidebar.newChat.desc': '点击这里开始一个新的对话。',
+  'tour.sidebar.history.title': '对话记录',
+  'tour.sidebar.history.desc': '查看和管理您的历史对话记录。',
+  'tour.sidebar.agentList.title': '智能体列表',
+  'tour.sidebar.agentList.desc': '创建和管理您的 AI 智能体。',
+  'tour.sidebar.personalCenter.title': '个人中心',
+  'tour.sidebar.personalCenter.desc': '访问工具、技能、模型源和定时任务等设置。',
+  'tour.sidebar.systemSettings.title': '系统设置',
+  'tour.sidebar.systemSettings.desc': '配置系统全局选项。',
+  
+  // Agent 编辑引导 Step 1
+  'tour.agent.step1.basic.title': '基本信息',
+  'tour.agent.step1.basic.desc': '设置智能体的名称、描述和角色设定（系统提示词）。',
+  'tour.agent.step1.strategy.title': '策略设置',
+  'tour.agent.step1.strategy.desc': '配置智能体的思考模式、记忆类型和多智能体协作方式。',
+  'tour.agent.step1.context.title': '系统上下文',
+  'tour.agent.step1.context.desc': '为智能体提供预设的静态知识或上下文信息。',
+  'tour.agent.step1.workflows.title': '工作流',
+  'tour.agent.step1.workflows.desc': '定义结构化的任务流程，让智能体按步骤执行复杂任务。',
+  
+  // Agent 编辑引导 Step 2
+  'tour.agent.step2.tools.title': '工具集',
+  'tour.agent.step2.tools.desc': '为智能体配备各种能力工具，如搜索、计算等。',
+  'tour.agent.step2.skills.title': '技能库',
+  'tour.agent.step2.skills.desc': '添加专门的技能模块来增强智能体的能力。',
+  'tour.agent.step2.paths.title': '文件访问',
+  'tour.agent.step2.paths.desc': '授权智能体访问特定的本地文件夹。',
 }

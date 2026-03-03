@@ -84,6 +84,7 @@
             <DropdownMenu v-if="item.children">
                <DropdownMenuTrigger as-child>
                   <Button 
+                    :id="item.tourId"
                     variant="ghost" 
                     size="icon" 
                     :class="[
@@ -111,6 +112,7 @@
             <!-- Item without children (Direct Link) -->
             <Button
                v-else
+               :id="item.tourId"
                variant="ghost"
                size="icon"
                :title="t(item.nameKey)"
@@ -129,6 +131,7 @@
             <!-- Item with children (Category) -->
             <Collapsible
               v-if="item.children"
+              :id="item.tourId"
               v-model:open="expandedCategories[item.key]"
               class="space-y-1"
             >
@@ -164,6 +167,7 @@
             <!-- Item without children (Direct Link) -->
             <Button
               v-else
+              :id="item.tourId"
               variant="ghost"
             class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-background hover:shadow-sm transition-all duration-200 mb-1"
             :class="cn(
@@ -244,9 +248,12 @@ import {
 } from '@/components/ui/collapsible'
 import { cn } from '@/utils/cn'
 
+import { useTour } from '../utils/tour'
+
 const router = useRouter()
 const route = useRoute()
 const { t } = useLanguage()
+const { startSidebarTour } = useTour()
 const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
@@ -297,6 +304,11 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('user-updated', handleUserUpdated)
   }
+  
+  // Start tour after a short delay to ensure DOM is ready
+  setTimeout(() => {
+    startSidebarTour()
+  }, 1000)
 })
 
 onUnmounted(() => {
@@ -312,14 +324,16 @@ const predefinedServices = computed(() => {
       key: 'new_chat',
       nameKey: 'sidebar.newChat',
       url: 'Chat',
-      isInternal: true
+      isInternal: true,
+      tourId: 'tour-sidebar-new-chat'
     },
-    { id: 'svc_history', nameKey: 'sidebar.sessions', url: 'History', isInternal: true },
-    { id: 'svc_agent', key: 'agent_list', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true },
+    { id: 'svc_history', nameKey: 'sidebar.sessions', url: 'History', isInternal: true, tourId: 'tour-sidebar-history' },
+    { id: 'svc_agent', key: 'agent_list', nameKey: 'sidebar.agentList', url: 'AgentConfig', isInternal: true, tourId: 'tour-sidebar-agent-list' },
     {
       id: 'cat_personal',
       key: 'personal_center',
       nameKey: 'sidebar.personalCenter',
+      tourId: 'tour-sidebar-personal-center',
       children: [
         { id: 'svc_model_provider', nameKey: 'modelProvider.menuTitle', url: 'ModelProviderList', isInternal: true },
         { id: 'svc_scheduled_task', nameKey: 'scheduledTask.menuTitle', url: 'TaskList', isInternal: true },
@@ -333,7 +347,8 @@ const predefinedServices = computed(() => {
       key: 'system_management',
       nameKey: 'sidebar.systemSettings',
       url: 'SystemSettings',
-      isInternal: true
+      isInternal: true,
+      tourId: 'tour-sidebar-system-settings'
   
     }
   ]

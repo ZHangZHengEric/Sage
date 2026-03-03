@@ -67,6 +67,7 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { useLanguage } from '../utils/i18n.js'
+import { useTour } from '../utils/tour.js'
 import { 
   Loader, 
   PanelRightClose, 
@@ -95,6 +96,7 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'save'])
 const store = useAgentEditStore()
 const { t } = useLanguage()
+const { startAgentEditStep1Tour, startAgentEditStep2Tour } = useTour()
 const saving = ref(false)
 const showRightPanel = ref(true)
 
@@ -138,6 +140,43 @@ onMounted(() => {
   // Auto-hide right panel on small screens
   if (window.innerWidth < 1024) {
     showRightPanel.value = false
+  }
+
+  // Check and start tour if visible on mount
+  if (props.visible) {
+    setTimeout(() => {
+      if (store.currentStep === 1) {
+        startAgentEditStep1Tour()
+      } else if (store.currentStep === 2) {
+        startAgentEditStep2Tour()
+      }
+    }, 1000)
+  }
+})
+
+// Watch visible prop to start tour
+watch(() => props.visible, (visible) => {
+  if (visible) {
+    setTimeout(() => {
+      if (store.currentStep === 1) {
+        startAgentEditStep1Tour()
+      } else if (store.currentStep === 2) {
+        startAgentEditStep2Tour()
+      }
+    }, 1000)
+  }
+})
+
+// Watch step change to start tour
+watch(() => store.currentStep, (step) => {
+  if (props.visible) {
+    setTimeout(() => {
+      if (step === 1) {
+        startAgentEditStep1Tour()
+      } else if (step === 2) {
+        startAgentEditStep2Tour()
+      }
+    }, 500)
   }
 })
 
