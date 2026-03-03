@@ -429,7 +429,7 @@ const convertLocalPathLinksToSystemOpen = (html) => {
           ${post}
           data-local-path="${escapeHtml(localPath)}"
           onclick="window.openMarkdownLocalPath(this); return false;"
-          class="text-primary underline underline-offset-4 hover:opacity-80 break-all"
+          class="text-primary underline underline-offset-4 hover:opacity-80 break-all cursor-pointer select-none"
         >
           ${text || localPath}
         </a>
@@ -527,6 +527,19 @@ const resolveAnchorFromEvent = (event) => {
   return null
 }
 
+const getErrorDetail = (error) => {
+  if (!error) return 'unknown'
+  if (typeof error === 'string') return error
+  if (error.message) return error.message
+  if (error.reason) return String(error.reason)
+  try {
+    const serialized = JSON.stringify(error)
+    if (serialized && serialized !== '{}') return serialized
+  } catch (e) {
+  }
+  return String(error)
+}
+
 const handleMarkdownClick = async (event) => {
   const target = resolveAnchorFromEvent(event)
   if (!target) return
@@ -551,8 +564,15 @@ onMounted(() => {
       }
       try {
         await open(localPath)
-      } catch (error) {
-        window.open(toFileUrl(localPath), '_blank')
+      } catch (error1) {
+        const fallbackUrl = toFileUrl(localPath)
+        try {
+          await open(fallbackUrl)
+        } catch (error2) {
+          const detail1 = getErrorDetail(error1)
+          const detail2 = getErrorDetail(error2)
+          console.error('打开本地文件失败:', localPath, detail1, detail2)
+        }
       }
     }
     
