@@ -141,11 +141,18 @@ class iMessageDatabasePoller:
         
     def _poll_loop(self):
         """Poll chat.db for new messages."""
+        import logging
+        logger = logging.getLogger("iMessagePoller")
+        
         db_path = Path.home() / "Library" / "Messages" / "chat.db"
         
+        logger.info(f"[iMessage] Starting database poller, checking path: {db_path}")
+        
         if not db_path.exists():
-            print(f"iMessage database not found at {db_path}")
+            logger.error(f"[iMessage] Database not found at {db_path}")
             return
+        
+        logger.info(f"[iMessage] Database found, starting poll loop")
             
         while self.running:
             try:
@@ -169,27 +176,38 @@ class iMessageDatabasePoller:
                     timeout=10
                 )
                 
-                if result.returncode == 0 and result.stdout.strip():
-                    lines = result.stdout.strip().split("\n")
-                    for line in lines:
-                        parts = line.split("|")
-                        if len(parts) >= 3:
-                            row_id = int(parts[0])
-                            sender = parts[1]
-                            content = parts[2]
-                            
-                            if row_id > self._last_row_id:
-                                self._last_row_id = row_id
+                if result.returncode == 0:
+                    if result.stdout.strip():
+                        lines = result.stdout.strip().split("\n")
+                        logger.info(f"[iMessage] Found {len(lines)} new messages")
+                        for line in lines:
+                            parts = line.split("|")
+                            if len(parts) >= 3:
+                                row_id = int(parts[0])
+                                sender_id = parts[1]  # Phone number or email
+                                content = parts[2]
                                 
-                            self.message_handler({
-                                "sender": sender,
-                                "content": content,
-                                "timestamp": datetime.now().isoformat(),
-                                "provider": "imessage",
-                                "row_id": row_id
-                            })
+                                if row_id > self._last_row_id:
+                                    self._last_row_id = row_id
+                                
+                                # Note: iMessage database only stores phone/email, not contact names
+                                # Contact names are stored in macOS Contacts app, which requires separate access
+                                logger.info(f"[iMessage] New message from {sender_id}: {content[:50]}...")
+                                self.message_handler({
+                                    "sender": sender_id,  # Phone number or email
+                                    "sender_name": None,  # Not available in iMessage database
+                                    "content": content,
+                                    "timestamp": datetime.now().isoformat(),
+                                    "provider": "imessage",
+                                    "row_id": row_id
+                                })
+                else:
+                    if "authorization" in result.stderr.lower() or "permission" in result.stderr.lower():
+                        logger.error(f"[iMessage] Permission denied. Please grant Full Disk Access permission to Terminal/IDE")
+                    else:
+                        logger.debug(f"[iMessage] Query returned no results or error: {result.stderr}")
                             
             except Exception as e:
-                print(f"Error polling iMessage database: {e}")
+                logger.error(f"[iMessage] Error polling database: {e}")
                 
             time.sleep(3)  # Poll every 3 seconds

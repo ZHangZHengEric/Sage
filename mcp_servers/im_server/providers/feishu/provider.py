@@ -4,11 +4,14 @@ import hmac
 import hashlib
 import base64
 import time
+import logging
 from typing import Optional, Dict, Any
 
 import httpx
 
 from ..base import IMProviderBase
+
+logger = logging.getLogger("FeishuProvider")
 
 
 class FeishuProvider(IMProviderBase):
@@ -51,32 +54,43 @@ class FeishuProvider(IMProviderBase):
         msg_type: str = "text",
     ) -> Dict[str, Any]:
         """Send message via Feishu."""
+        logger.info(f"[Feishu] send_message called: chat_id={chat_id}, user_id={user_id}, content_length={len(content)}, msg_type={msg_type}")
+        
         access_token = await self._get_access_token()
         if not access_token:
+            logger.error("[Feishu] Failed to get access token")
             return {"success": False, "error": "Failed to get access token"}
+        
+        logger.info(f"[Feishu] Got access token: {access_token[:10]}...")
 
+        import json
+        
         # Build message payload
+        # Note: Feishu API requires content to be a JSON string, not an object
         if msg_type == "text":
-            message = {"msg_type": "text", "content": {"text": content}}
+            content_json = json.dumps({"text": content}, ensure_ascii=False)
+            message = {"msg_type": "text", "content": content_json}
         elif msg_type == "markdown":
-            message = {
-                "msg_type": "interactive",
-                "card": {
-                    "elements": [
-                        {"tag": "div", "text": {"tag": "lark_md", "content": content}}
-                    ]
-                },
-            }
+            # For markdown, use post message type or interactive card
+            content_json = json.dumps({
+                "zh_cn": {
+                    "title": "",
+                    "content": [[{"tag": "text", "text": content}]]
+                }
+            }, ensure_ascii=False)
+            message = {"msg_type": "post", "content": content_json}
         else:
-            message = {"msg_type": "text", "content": {"text": content}}
+            content_json = json.dumps({"text": content}, ensure_ascii=False)
+            message = {"msg_type": "text", "content": content_json}
 
         # Determine receiver
+        # Feishu API uses receive_id parameter with receive_id_type
         if chat_id:
-            message["chat_id"] = chat_id
+            message["receive_id"] = chat_id
             url = f"{self.BASE_URL}/im/v1/messages?receive_id_type=chat_id"
         elif user_id:
-            message["user_id"] = user_id
-            url = f"{self.BASE_URL}/im/v1/messages?receive_id_type=user_id"
+            message["receive_id"] = user_id
+            url = f"{self.BASE_URL}/im/v1/messages?receive_id_type=open_id"
         else:
             return {
                 "success": False,

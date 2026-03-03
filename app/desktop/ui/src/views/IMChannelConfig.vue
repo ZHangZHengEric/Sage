@@ -311,27 +311,28 @@ const loadConfig = async () => {
   }
 }
 
-const onEnableChange = (provider, value) => {
+const onEnableChange = async (provider, value) => {
   console.log(`[IM] onEnableChange called: provider=${provider}, value=${value}`)
-  
+
   if (!value) {
-    // Disabling - just update the value
+    // Disabling - update and auto-save
     config.value[provider].enabled = false
-    console.log(`[IM] Disabling ${provider}`)
+    console.log(`[IM] Disabling ${provider}, auto-saving...`)
+    await autoSaveConfig()
     return
   }
-  
+
   // Enabling - validate required fields first
   let isValid = true
   let missingFields = []
-  
+
   console.log(`[IM] Validating ${provider} config:`, config.value[provider])
-  
+
   if (provider === 'feishu') {
     const appId = config.value.feishu.app_id
     const appSecret = config.value.feishu.app_secret
     console.log(`[IM] Feishu - app_id: "${appId}", app_secret: "${appSecret}"`)
-    
+
     if (!appId || !appId.trim()) {
       isValid = false
       missingFields.push(t('im.feishu.appId'))
@@ -344,7 +345,7 @@ const onEnableChange = (provider, value) => {
     const clientId = config.value.dingtalk.client_id
     const clientSecret = config.value.dingtalk.client_secret
     console.log(`[IM] DingTalk - client_id: "${clientId}", client_secret: "${clientSecret}"`)
-    
+
     if (!clientId || !clientId.trim()) {
       isValid = false
       missingFields.push(t('im.dingtalk.clientId'))
@@ -356,23 +357,36 @@ const onEnableChange = (provider, value) => {
   } else if (provider === 'imessage') {
     const monitoredSenders = config.value.imessage.allowed_senders
     console.log(`[IM] iMessage - monitoredSenders:`, monitoredSenders)
-    
+
     if (!monitoredSenders || monitoredSenders.length === 0) {
       isValid = false
       missingFields.push(t('im.imessage.monitoredSenders'))
     }
   }
-  
+
   console.log(`[IM] Validation result: isValid=${isValid}, missingFields=${missingFields}`)
-  
+
   if (isValid) {
-    // Enable the provider
+    // Enable the provider and auto-save
     config.value[provider].enabled = true
-    console.log(`[IM] Enabling ${provider}`)
+    console.log(`[IM] Enabling ${provider}, auto-saving...`)
+    await autoSaveConfig()
   } else {
     // Don't enable - show error
     console.log(`[IM] Not enabling ${provider} due to missing fields`)
     toast.error(`${t('im.validation.required')}: ${missingFields.join(', ')}`)
+  }
+}
+
+const autoSaveConfig = async () => {
+  try {
+    console.log('[IM] Auto-saving config...')
+    await imAPI.saveConfig(config.value)
+    toast.success(t('im.saveSuccess'))
+    console.log('[IM] Auto-save successful')
+  } catch (error) {
+    console.error('[IM] Auto-save failed:', error)
+    toast.error(error.message || t('im.saveError'))
   }
 }
 
