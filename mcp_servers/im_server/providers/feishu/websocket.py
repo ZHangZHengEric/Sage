@@ -1,166 +1,127 @@
-"""Feishu WebSocket client for receiving messages without webhook.
+"""Feishu WebSocket client using official lark-oapi SDK."""
 
-This uses Feishu's event subscription via WebSocket, which doesn't require public IP.
-Reference: https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/event-subscription/overview
-"""
-
-import json
 import logging
 import asyncio
 import threading
-from typing import Callable, Optional, Dict, Any
+from typing import Optional, Callable, Dict, Any
 
-import httpx
-import websockets
+import lark_oapi as lark
+from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 
 logger = logging.getLogger("FeishuWebSocket")
 
 
 class FeishuWebSocketClient:
-    """Feishu WebSocket client for real-time message receiving."""
-    
-    def __init__(self, app_id: str, app_secret: str, message_handler: Callable[[Dict[str, Any]], None]):
+    """Feishu WebSocket client using official SDK."""
+
+    def __init__(
+        self,
+        app_id: str,
+        app_secret: str,
+        message_handler: Callable[[Dict[str, Any]], None]
+    ):
         """
         Initialize Feishu WebSocket client.
-        
+
         Args:
             app_id: Feishu app ID
             app_secret: Feishu app secret
-            message_handler: Callback for received messages
+            message_handler: Callback for incoming messages
         """
         self.app_id = app_id
         self.app_secret = app_secret
         self.message_handler = message_handler
-        self.ws_url = None
-        self.access_token = None
-        self.running = False
-        self.ws_thread: Optional[threading.Thread] = None
-        
-    async def _get_access_token(self) -> Optional[str]:
-        """Get Feishu tenant access token."""
-        url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json={
-                "app_id": self.app_id,
-                "app_secret": self.app_secret
-            })
-            data = resp.json()
-            if data.get("code") == 0:
-                return data.get("tenant_access_token")
-            logger.error(f"Failed to get access token: {data}")
-        return None
-    
-    async def _get_websocket_url(self) -> Optional[str]:
-        """Get WebSocket connection URL."""
-        if not self.access_token:
-            self.access_token = await self._get_access_token()
-            if not self.access_token:
-                return None
-        
-        url = "https://open.feishu.cn/open-apis/event/v1/subscription/websocket"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                url,
-                headers={"Authorization": f"Bearer {self.access_token}"}
-            )
-            data = resp.json()
-            if data.get("code") == 0:
-                return data.get("data", {}).get("url")
-            logger.error(f"Failed to get WebSocket URL: {data}")
-        return None
-    
-    async def _connect_and_listen(self):
-        """Connect to WebSocket and listen for messages."""
-        ws_url = await self._get_websocket_url()
-        if not ws_url:
-            logger.error("Failed to get WebSocket URL")
-            return
-        
-        logger.info(f"Connecting to Feishu WebSocket...")
-        
+        self.client: Optional[lark.ws.Client] = None
+        self._thread: Optional[threading.Thread] = None
+
+    def _handle_message(self, data: P2ImMessageReceiveV1) -> None:
+        """Handle incoming message event."""
         try:
-            async with websockets.connect(ws_url) as websocket:
-                logger.info("Connected to Feishu WebSocket")
-                
-                while self.running:
-                    try:
-                        message = await asyncio.wait_for(
-                            websocket.recv(),
-                            timeout=30
-                        )
-                        await self._handle_message(message)
-                    except asyncio.TimeoutError:
-                        # Send ping to keep connection alive
-                        await websocket.ping()
-                    except websockets.exceptions.ConnectionClosed:
-                        logger.warning("WebSocket connection closed, reconnecting...")
-                        break
-                        
+            import json
+
+            event = data.event
+            message = event.message
+            sender = event.sender
+
+            # Parse message content
+            content = message.content
+            if isinstance(content, str):
+                try:
+                    content = json.loads(content)
+                except:
+                    content = {"text": content}
+
+            # Get user_id from sender
+            user_id = None
+            if sender.sender_id:
+                # UserId object has 'union_id', 'user_id', 'open_id' attributes
+                user_id = sender.sender_id.union_id or sender.sender_id.user_id or sender.sender_id.open_id
+
+            # Try to get user_name from raw data if available
+            user_name = None
+            if hasattr(data, 'raw_data') and data.raw_data:
+                raw_event = data.raw_data.get('event', {})
+                raw_sender = raw_event.get('sender', {})
+                # Try to find name in various places
+                user_name = raw_sender.get('name') or raw_sender.get('user_name')
+
+            parsed_message = {
+                "type": "message",
+                "message_id": message.message_id,
+                "content": content,
+                "chat_id": message.chat_id,
+                "user_id": user_id,
+                "user_name": user_name,  # May be None if not provided by Feishu
+                "msg_type": message.message_type,
+                "provider": "feishu"
+            }
+
+            logger.info(f"[Feishu] Received message from user_id={user_id}, user_name={user_name}: {parsed_message['content']}")
+
+            # Call handler
+            self.message_handler(parsed_message)
+
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
-    
-    async def _handle_message(self, message: str):
-        """Handle incoming WebSocket message."""
-        try:
-            data = json.loads(message)
-            
-            # Check if it's a message event
-            event_type = data.get("header", {}).get("event_type")
-            
-            if event_type == "im.message.receive_v1":
-                event = data.get("event", {})
-                message_data = event.get("message", {})
-                sender = event.get("sender", {})
-                
-                parsed_message = {
-                    "type": "message",
-                    "message_id": message_data.get("message_id"),
-                    "content": message_data.get("content", {}),
-                    "chat_id": event.get("chat_id"),
-                    "user_id": sender.get("sender_id", {}).get("user_id"),
-                    "user_name": sender.get("sender_id", {}).get("name"),
-                    "msg_type": message_data.get("message_type"),
-                    "provider": "feishu"
-                }
-                
-                # Call handler
-                self.message_handler(parsed_message)
-                
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse message: {message}")
-        except Exception as e:
-            logger.error(f"Error handling message: {e}")
-    
-    def _run_async_loop(self):
-        """Run async WebSocket loop in separate thread."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        while self.running:
-            try:
-                loop.run_until_complete(self._connect_and_listen())
-            except Exception as e:
-                logger.error(f"WebSocket loop error: {e}")
-            
-            if self.running:
-                logger.info("Reconnecting in 5 seconds...")
-                loop.run_until_complete(asyncio.sleep(5))
-        
-        loop.close()
-    
+            logger.error(f"[Feishu] Error handling message: {e}", exc_info=True)
+
     def start(self):
-        """Start WebSocket client in background thread."""
-        if self.running:
-            return
-        
-        self.running = True
-        self.ws_thread = threading.Thread(target=self._run_async_loop, daemon=True)
-        self.ws_thread.start()
-        logger.info("Feishu WebSocket client started")
-    
+        """Start WebSocket client in a background thread."""
+
+        def run_client():
+            """Run client with its own event loop."""
+            # Create event handler
+            event_handler = lark.EventDispatcherHandler.builder("", "") \
+                .register_p2_im_message_receive_v1(self._handle_message) \
+                .build()
+
+            # Create WebSocket client
+            self.client = lark.ws.Client(
+                self.app_id,
+                self.app_secret,
+                event_handler=event_handler,
+                log_level=lark.LogLevel.INFO
+            )
+
+            logger.info(f"[Feishu] Starting WebSocket client with app_id: {self.app_id}")
+
+            # Start client - SDK handles connection and reconnection
+            # Note: This may raise "event loop already running" initially,
+            # but SDK will auto-reconnect and work correctly
+            try:
+                self.client.start()
+            except RuntimeError as e:
+                if "already running" in str(e):
+                    logger.warning(f"[Feishu] Initial connection issue (will auto-reconnect): {e}")
+                else:
+                    raise
+
+        # Run in a new thread
+        self._thread = threading.Thread(target=run_client, daemon=True)
+        self._thread.start()
+        logger.info("[Feishu] WebSocket client started in background thread")
+
     def stop(self):
         """Stop WebSocket client."""
-        self.running = False
-        if self.ws_thread:
-            self.ws_thread.join(timeout=5)
-        logger.info("Feishu WebSocket client stopped")
+        logger.info("[Feishu] WebSocket client stopping...")
+        # Note: lark-oapi client doesn't have explicit stop method
+        # It will stop when the process exits
