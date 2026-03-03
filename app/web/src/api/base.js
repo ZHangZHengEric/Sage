@@ -226,6 +226,71 @@ export class BaseAPI {
   }
 
   /**
+   * 流式GET请求
+   * @param {string} url - 请求URL
+   * @param {Object} config - 请求配置
+   * @returns {Promise<Response>}
+   */
+  async getStream(url, config = {}) {
+    try {
+      const finalConfig = await this.request.executeRequestInterceptors({
+        baseURL: this.request.baseURL,
+        timeout: this.request.timeout,
+        credentials: this.request.withCredentials ? 'include' : 'omit',
+        method: 'GET',
+        url,
+        ...config
+      })
+
+      const fullUrl = finalConfig.url.startsWith('http')
+        ? finalConfig.url
+        : `${finalConfig.baseURL}${finalConfig.url}`
+
+      const controller = config.signal || new AbortController()
+      const timeoutId = !config.signal ? setTimeout(() => controller.abort(), finalConfig.timeout) : null
+
+      const fetchOptions = {
+        method: 'GET',
+        headers: finalConfig.headers,
+        credentials: finalConfig.credentials,
+        signal: controller.signal
+      }
+
+      const response = await fetch(fullUrl, fetchOptions)
+      if (timeoutId) clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        let errorData = null
+        try {
+          const contentType = response.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            errorData = await response.json()
+          } else {
+            const text = await response.text()
+            errorData = {detail: text}
+          }
+        } catch (e) {
+          errorData = null
+        }
+
+        const detailMessage = errorData && (errorData.detail || errorData.message)
+          ? (errorData.detail || errorData.message)
+          : `HTTP ${response.status}`
+
+        throw Object.assign(new Error(detailMessage), {
+          status: response.status,
+          statusText: response.statusText,
+          response: errorData
+        })
+      }
+
+      return response
+    } catch (error) {
+      return this.handleError(error, 'GET_STREAM', url)
+    }
+  }
+
+  /**
    * 处理错误
    * @param {Error} error - 错误对象
    * @param {string} method - 请求方法

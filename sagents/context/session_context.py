@@ -4,6 +4,7 @@ import time
 import threading
 from typing import Dict, Any, Optional, List, Union
 from enum import Enum
+from concurrent.futures import ThreadPoolExecutor
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.messages.message_manager import MessageManager
@@ -22,6 +23,7 @@ import datetime
 import pytz
 from sagents.utils.sandbox.sandbox import Sandbox
 
+_session_context_file_io_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-context-io")
 
 class SessionStatus(Enum):
     """会话状态枚举"""
@@ -109,6 +111,30 @@ class SessionContext:
         if valid_messages:
             self.message_manager.add_messages(valid_messages)
 
+    def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
+        try:
+            language = self.get_language()
+            default_content = prompt_manager.get_prompt(
+                prompt_key,
+                agent="SessionContext",
+                language=language,
+            )
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(default_content)
+        except Exception as e:
+            logger.warning(f"SessionContext: Failed to create {file_label}: {e}")
+
+    def _submit_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
+        try:
+            _session_context_file_io_pool.submit(
+                self._write_default_md_file,
+                file_path,
+                prompt_key,
+                file_label,
+            )
+        except Exception as e:
+            logger.warning(f"SessionContext: Failed to submit {file_label} creation: {e}")
+
     def init_more(self, workspace_root: str):
         use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
         logger.info(f"SessionContext: use_sandbox: {use_sandbox}")
@@ -167,69 +193,21 @@ class SessionContext:
             # 如果在_agent_workspace_host_path 下存在USER.md,不存在则创建
             user_md_path = os.path.join(_agent_workspace_host_path, "USER.md")
             if os.path.exists(user_md_path)==False:
-                try:
-                    with open(user_md_path, "w") as f:
-                        # 通过 prompt_manager 获取默认的 USER.md 内容
-                        language = self.get_language()
-                    default_content = prompt_manager.get_prompt(
-                        "default_user_md",
-                        agent="SessionContext",
-                        language=language,
-                    )
-                    f.write(default_content)
-                except Exception as e:
-                    logger.warning(f"SessionContext: Failed to create USER.md: {e}")
-                    user_md_path = None
+                self._submit_default_md_file(user_md_path, "default_user_md", "USER.md")
 
             # 判断是否存在SOUL.md,不存在则创建
             soul_md_path = os.path.join(_agent_workspace_host_path, "SOUL.md")
             if os.path.exists(soul_md_path)==False:
-                try:
-                    with open(soul_md_path, "w") as f:
-                        # 通过 prompt_manager 获取默认的 SOUL.md 内容
-                        language = self.get_language()
-                        default_content = prompt_manager.get_prompt(
-                            "default_soul_md",
-                            agent="SessionContext",
-                            language=language,
-                        )
-                        f.write(default_content)
-                except Exception as e:
-                    logger.warning(f"SessionContext: Failed to create SOUL.md: {e}")
-                    soul_md_path = None
+                self._submit_default_md_file(soul_md_path, "default_soul_md", "SOUL.md")
             
             # 判断是否存在IDENTITY.md,不存在则创建
             identity_md_path = os.path.join(_agent_workspace_host_path, "IDENTITY.md")
             if os.path.exists(identity_md_path)==False:
-                try:
-                    with open(identity_md_path, "w") as f:
-                        # 通过 prompt_manager 获取默认的 IDENTITY.md 内容
-                        language = self.get_language()
-                        default_content = prompt_manager.get_prompt(
-                            "default_identity_md",
-                            agent="SessionContext",
-                            language=language,
-                        )
-                        f.write(default_content)
-                except Exception as e:
-                    logger.warning(f"SessionContext: Failed to create IDENTITY.md: {e}")
-                    identity_md_path = None
+                self._submit_default_md_file(identity_md_path, "default_identity_md", "IDENTITY.md")
             # 判断是否存在MEMORY.md,不存在则创建
             memory_md_path = os.path.join(_agent_workspace_host_path, "MEMORY.md")
             if os.path.exists(memory_md_path)==False:
-                try:
-                    with open(memory_md_path, "w") as f:
-                        # 通过 prompt_manager 获取默认的 MEMORY.md 内容
-                        language = self.get_language()
-                        default_content = prompt_manager.get_prompt(
-                            "default_memory_md",
-                            agent="SessionContext",
-                            language=language,
-                        )
-                        f.write(default_content)
-                except Exception as e:
-                    logger.warning(f"SessionContext: Failed to create MEMORY.md: {e}")
-                    memory_md_path = None
+                self._submit_default_md_file(memory_md_path, "default_memory_md", "MEMORY.md")
             
             # 创建 memory 文件夹
             memory_folder_path = os.path.join(_agent_workspace_host_path, "memory")

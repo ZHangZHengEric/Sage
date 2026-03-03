@@ -881,6 +881,7 @@ class ToolManager:
     async def _execute_standard_tool_async(self, tool: ToolSpec, session_id: str = "", **kwargs) -> str:
         """Execute standard tool and format result (async version)"""
         logger.debug(f"Executing standard tool: {tool.name}")
+        execute_start = time.perf_counter()
 
         try:
             # Inject session_id if the tool function expects it
@@ -925,6 +926,9 @@ class ToolManager:
                         result = tool.func(**kwargs)
 
             # Format result - 避免双重JSON序列化
+            execute_cost = time.perf_counter() - execute_start
+            if execute_cost > 0.2:
+                logger.warning(f"Standard tool slow: {tool.name}, cost={execute_cost:.3f}s")
             return json.dumps({"content": result}, ensure_ascii=False, indent=2)
 
         except Exception as e:
