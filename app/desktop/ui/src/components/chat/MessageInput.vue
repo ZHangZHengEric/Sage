@@ -88,6 +88,8 @@
         ref="textareaRef" 
         v-model="inputValue" 
         @keydown="handleKeyDown"
+        @compositionstart="handleCompositionStart"
+        @compositionend="handleCompositionEnd"
         :placeholder="t('messageInput.placeholder')" 
         class="flex-1 min-h-[24px] max-h-[200px] py-2 px-0 bg-transparent border-0 focus-visible:ring-0 resize-none shadow-none text-base"
         :disabled="isLoading" 
@@ -182,6 +184,7 @@ const selectSkill = (skill) => {
 
 // 文件上传相关状态
 const uploadedFiles = ref([])
+const isComposing = ref(false)
 
 // 自动调整文本区域高度
 const adjustTextareaHeight = async () => {
@@ -265,6 +268,11 @@ const handleSubmit = (e) => {
 
 // 处理键盘事件
 const handleKeyDown = (e) => {
+  const composing = isComposing.value || e.isComposing || e.keyCode === 229 || e.key === 'Process'
+  if (composing) {
+    return
+  }
+
   if (showSkillList.value && filteredSkills.value.length > 0) {
     if (e.key === 'ArrowUp') {
       e.preventDefault()
@@ -296,10 +304,18 @@ const handleKeyDown = (e) => {
   }
 
   // 检查是否在输入法组合状态中，如果是则不处理回车键
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSubmit(e)
   }
+}
+
+const handleCompositionStart = () => {
+  isComposing.value = true
+}
+
+const handleCompositionEnd = () => {
+  isComposing.value = false
 }
 
 // 处理停止生成
@@ -437,5 +453,4 @@ const removeFile = (index) => {
   uploadedFiles.value.splice(index, 1)
 }
 </script>
-
 

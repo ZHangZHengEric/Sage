@@ -129,15 +129,10 @@ export const useChatStream = ({
     currentSessionId.value = sessionId
     isHistoryLoading.value = true
     try {
-      const isRunningSession = activeSessions.value[sessionId]?.status === 'running'
-      if (isRunningSession) {
-        await loadConversationMessages(sessionId)
-        ensureFirstUserMessageForRunningSession(sessionId)
-        const resumedAndCompleted = await checkAndResumeStream(sessionId)
-        if (resumedAndCompleted) {
-          await loadConversationMessages(sessionId)
-        }
-      } else {
+      await loadConversationMessages(sessionId)
+      ensureFirstUserMessageForRunningSession(sessionId)
+      const resumedAndCompleted = await checkAndResumeStream(sessionId)
+      if (resumedAndCompleted) {
         await loadConversationMessages(sessionId)
       }
     } catch (e) {
