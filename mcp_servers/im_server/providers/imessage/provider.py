@@ -6,9 +6,12 @@ Note: iMessage doesn't support webhooks for incoming messages, so this is send-o
 
 import subprocess
 import platform
+import logging
 from typing import Optional, Dict, Any
 
 from ..base import IMProviderBase
+
+logger = logging.getLogger("iMessageProvider")
 
 
 class iMessageProvider(IMProviderBase):
@@ -36,18 +39,47 @@ class iMessageProvider(IMProviderBase):
         Returns:
             True if allowed, False otherwise
         """
+        logger.info(f"[iMessage] Checking if sender '{sender}' is allowed. Whitelist: {self.allowed_senders}")
+        
         # If no whitelist configured, allow all
         if not self.allowed_senders:
+            logger.info("[iMessage] No whitelist configured, allowing all senders")
             return True
-            
-        # Normalize sender (remove spaces, dashes, etc.)
-        normalized_sender = sender.replace(" ", "").replace("-", "").replace("+", "")
+        
+        # Normalize sender: remove all non-digit characters for phone numbers
+        # Keep email as-is (case-insensitive)
+        def normalize(value: str) -> str:
+            value = value.strip().lower()
+            # If it's an email, return as-is
+            if '@' in value:
+                return value
+            # For phone numbers: remove all non-digit characters
+            digits = ''.join(c for c in value if c.isdigit())
+            # Remove leading country code (86, +86, etc.) for comparison
+            if digits.startswith('86') and len(digits) > 10:
+                digits = digits[2:]
+            return digits
+        
+        normalized_sender = normalize(sender)
+        logger.info(f"[iMessage] Normalized sender '{sender}' -> '{normalized_sender}'")
         
         for allowed in self.allowed_senders:
-            normalized_allowed = allowed.replace(" ", "").replace("-", "").replace("+", "")
+            normalized_allowed = normalize(allowed)
+            logger.debug(f"[iMessage] Comparing '{normalized_sender}' with '{normalized_allowed}'")
+            
+            # Exact match
             if normalized_sender == normalized_allowed:
+                logger.info(f"[iMessage] Sender '{sender}' is in whitelist (exact match)")
                 return True
+            
+            # For phone numbers: also check if one contains the other
+            # This handles cases like: 13800138000 vs 8613800138000
+            if '@' not in normalized_sender and '@' not in normalized_allowed:
+                if normalized_sender in normalized_allowed or normalized_allowed in normalized_sender:
+                    logger.info(f"[iMessage] Sender '{sender}' is in whitelist (partial match)")
+                    return True
                 
+        logger.info(f"[iMessage] Sender '{sender}' is NOT in whitelist, ignoring message")
         return False
 
     def _run_applescript(self, script: str) -> tuple[bool, str]:
