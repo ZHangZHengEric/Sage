@@ -36,6 +36,7 @@ export const useChatPage = (props) => {
     handleScroll,
     clearScrollTimer
   } = useChatScroll()
+
   const showSettings = ref(false)
   const showToolDetails = ref(false)
   const currentTraceId = ref(null)
@@ -154,7 +155,14 @@ export const useChatPage = (props) => {
       }
     }
     if (res.conversation_info && activeSessions.value[sessionId]?.status === 'running') {
-      updateActiveSession(sessionId, true, res.conversation_info.title)
+      const firstUserMessage = normalizedMessages.find(item =>
+        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
+      )
+      const firstUserInput = firstUserMessage
+        ? String(firstUserMessage.content || '').replace(/^<skill>.*?<\/skill>\s*/, '').trim()
+        : ''
+      const title = firstUserInput || res.conversation_info.title || null
+      updateActiveSession(sessionId, true, title, firstUserInput || null)
     }
   }
 
@@ -264,7 +272,8 @@ export const useChatPage = (props) => {
   } = useChatWorkspace({
     t,
     toast,
-    currentSessionId
+    currentSessionId,
+    selectedAgentId
   })
 
   const {
@@ -298,7 +307,8 @@ export const useChatPage = (props) => {
     loadConversationMessages,
     ensureFirstUserMessageForRunningSession,
     isHistoryLoading,
-    removeSessionFromCache
+    removeSessionFromCache,
+    shouldRemoveCompletedSession: (sessionId) => route.name === 'Chat' && currentSessionId.value === sessionId
   })
 
   const showLoadingBubble = computed(() => !!isLoading.value)
@@ -383,6 +393,17 @@ export const useChatPage = (props) => {
     if (!sessionId) return
     const meta = activeSessions.value?.[sessionId]
     if (meta?.status === 'running') {
+      const firstUserMessage = (messages.value || []).find(item =>
+        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
+      )
+      if (firstUserMessage) {
+        const firstUserInput = String(firstUserMessage.content || '')
+          .replace(/^<skill>.*?<\/skill>\s*/, '')
+          .trim()
+        if (firstUserInput) {
+          updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
+        }
+      }
       persistRunningSessionToCache(sessionId, true)
       return
     }

@@ -25,11 +25,12 @@ export const useChatStream = ({
   loadConversationMessages,
   ensureFirstUserMessageForRunningSession,
   isHistoryLoading,
-  removeSessionFromCache
+  removeSessionFromCache,
+  shouldRemoveCompletedSession
 }) => {
   const markCompletedAndCleanupCurrentSession = (sessionId) => {
-    updateActiveSession(sessionId, false, null, null, false)
-    if (currentSessionId.value === sessionId) {
+    updateActiveSession(sessionId, false, null, null, true)
+    if (typeof shouldRemoveCompletedSession === 'function' && shouldRemoveCompletedSession(sessionId)) {
       removeSessionFromCache(sessionId)
     }
   }
@@ -84,9 +85,7 @@ export const useChatStream = ({
             resumedAndCompleted = true
             markCompletedAndCleanupCurrentSession(sessionId)
           }
-          if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') {
-            return
-          }
+          if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') return
           handleMessage(data)
         },
         () => {
@@ -178,9 +177,7 @@ export const useChatStream = ({
             updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
             markCompletedAndCleanupCurrentSession(sessionId)
           }
-          if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') {
-            return
-          }
+          if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') return
           if (onMessage) onMessage(data)
         },
         () => {
