@@ -15,6 +15,7 @@
     "axios": "^1.12.2",
     "cronstrue": "^3.13.0",
     "dompurify": "^3.3.0",
+    "driver.js": "^1.4.0",
     "echarts": "^5.6.0",
     "highlight.js": "^11.11.1",
     "js-cookie": "^3.0.5",
