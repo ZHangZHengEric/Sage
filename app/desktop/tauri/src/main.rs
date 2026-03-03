@@ -7,6 +7,8 @@ use tauri::{
     CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem,
     WindowEvent,
 };
+#[cfg(target_os = "macos")]
+use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use std::path::PathBuf;
@@ -25,13 +27,33 @@ fn get_server_port() -> Option<u16> {
     std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
 }
 
+#[cfg(target_os = "macos")]
+fn set_activation_policy_accessory() {
+    unsafe {
+        let app = NSApp();
+        app.setActivationPolicy_(
+            NSApplicationActivationPolicy::NSApplicationActivationPolicyAccessory,
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_activation_policy_regular() {
+    unsafe {
+        let app = NSApp();
+        app.setActivationPolicy_(
+            NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular,
+        );
+    }
+}
+
 /// Show and focus the main window (cross-platform)
 fn show_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_window("main") {
         // For macOS: ensure app is shown and window is visible
         #[cfg(target_os = "macos")]
         {
-            // Show the application (brings it to front on macOS)
+            set_activation_policy_regular();
             let _ = app.show();
         }
 
@@ -79,7 +101,11 @@ fn main() {
         .on_window_event(|event| {
             match event.event() {
                 WindowEvent::CloseRequested { api, .. } => {
-                    // Prevent the window from actually closing, just hide it
+                    #[cfg(target_os = "macos")]
+                    {
+                        set_activation_policy_accessory();
+                        let _ = event.window().app_handle().hide();
+                    }
                     event.window().hide().unwrap();
                     api.prevent_close();
                 }

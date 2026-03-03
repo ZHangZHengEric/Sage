@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
 
+
 @dataclass
 class SessionState:
     session_id: str
@@ -15,6 +16,7 @@ class SessionState:
     last_activity: float = field(default_factory=time.time)
     is_completed: bool = False
     lock: Optional[asyncio.Lock] = None  # 持有 session lock
+
 
 class StreamManager:
     _instance = None
@@ -46,13 +48,13 @@ class StreamManager:
                     if lock.locked():
                         lock.release()
                 return
-            
+
             # 如果已完成，或是旧的残留，清理掉旧的
             await self.cleanup_session(session_id)
 
         session = SessionState(session_id=session_id, lock=lock)
         self._sessions[session_id] = session
-        
+
         # 启动后台任务
         session.task = asyncio.create_task(self._background_worker(session, generator))
         logger.info(f"Started background task for session {session_id}")
@@ -79,15 +81,15 @@ class StreamManager:
             # 发送结束信号给订阅者 (None)
             for q in list(session.subscribers):
                 await q.put(None)
-            
+
             # 任务结束，释放业务锁
             if session.lock:
                 try:
                     if hasattr(session.lock, "locked") and session.lock.locked():
                         session.lock.release()
                     elif isinstance(session.lock, dict):
-                         pass
-                    
+                        pass
+
                     delete_session_run_lock(session.session_id)
                     logger.info(f"Released lock for session {session.session_id}")
                 except Exception as e:
@@ -95,7 +97,7 @@ class StreamManager:
 
             if self._sessions.get(session.session_id) is session:
                 del self._sessions[session.session_id]
-            
+
     async def cleanup_session(self, session_id: str):
         if session_id in self._sessions:
             del self._sessions[session_id]
@@ -131,20 +133,20 @@ class StreamManager:
         """
         session = self._sessions.get(session_id)
         if not session:
-
+            # Session 不存在
             return
 
         queue = asyncio.Queue()
         session.subscribers.add(queue)
         logger.info(f"Client subscribed to session {session_id}, offset={last_index}")
-        
+
         try:
             # 1. 先发送历史消息 (Catch up)
             history_len = len(session.history)
             if last_index < history_len:
                 for i in range(last_index, history_len):
                     yield session.history[i]
-            
+
             # 2. 如果任务已完成，直接结束
             if session.is_completed:
                 return
@@ -152,7 +154,7 @@ class StreamManager:
             # 3. 监听实时消息
             while True:
                 chunk = await queue.get()
-                if chunk is None: # 结束信号
+                if chunk is None:  # 结束信号
                     break
                 yield chunk
         except asyncio.CancelledError:
@@ -165,13 +167,4 @@ class StreamManager:
         if not self._sessions:
             return []
         """获取所有活跃会话列表（可选，用于侧边栏展示）"""
-        return [
-            {
-                "session_id": s.session_id,
-                "created_at": s.created_at,
-                "is_completed": s.is_completed,
-                "last_activity": s.last_activity
-            }
-            for s in self._sessions.values()
-            if not s.is_completed
-        ]
+        return [{"session_id": s.session_id, "created_at": s.created_at, "is_completed": s.is_completed, "last_activity": s.last_activity} for s in self._sessions.values() if not s.is_completed]

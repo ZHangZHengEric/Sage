@@ -10,6 +10,7 @@ from .bootstrap import (
     shutdown_clients,
     validate_and_disable_mcp_servers,
 )
+from .services.chat.stream_manager import StreamManager
 from .utils.async_utils import create_safe_task
 
 async def initialize_system():
@@ -18,6 +19,8 @@ async def initialize_system():
     await initialize_tool_manager()
     await initialize_skill_manager()
     await initialize_im_service()
+    StreamManager.get_instance()
+    logger.info("sage-desktop：StreamManager 已预初始化")
     logger.info("sage-desktop：初始化完成")
 
 

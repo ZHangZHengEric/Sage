@@ -76,6 +76,48 @@
     <!-- Navigation -->
     <ScrollArea class="flex-1 px-3">
       <div class="space-y-4">
+        <div v-if="activeSessionItems.length > 0" class="space-y-2">
+          <div v-if="!isCollapsed" class="px-2 text-[11px] font-medium tracking-wide text-muted-foreground/80">
+            进行中的会话
+          </div>
+          <div v-if="!isCollapsed" class="space-y-1">
+            <Button
+              v-for="session in activeSessionItems"
+              :key="session.id"
+              variant="ghost"
+              class="w-full justify-start h-9 px-2 text-sm font-normal text-muted-foreground border border-transparent hover:border-border hover:bg-background hover:text-foreground"
+              :class="cn(
+                isActiveSessionCurrent(session) && 'bg-background text-primary border-border shadow-sm font-medium'
+              )"
+              @click="handleActiveSessionClick(session)"
+            >
+              <component
+                :is="getSessionStatusIcon(session.sessionStatus)"
+                class="mr-2 h-4 w-4 shrink-0"
+                :class="getSessionStatusClass(session.sessionStatus)"
+              />
+              <span class="truncate">{{ session.rawName }}</span>
+            </Button>
+          </div>
+          <div v-else class="space-y-1 flex flex-col items-center">
+            <Button
+              v-for="session in activeSessionItems"
+              :key="session.id"
+              variant="ghost"
+              size="icon"
+              :title="session.rawName"
+              class="transition-all duration-200 text-muted-foreground hover:text-foreground"
+              :class="isActiveSessionCurrent(session) ? 'bg-background shadow text-primary' : ''"
+              @click="handleActiveSessionClick(session)"
+            >
+              <component
+                :is="getSessionStatusIcon(session.sessionStatus)"
+                class="h-4 w-4"
+                :class="getSessionStatusClass(session.sessionStatus)"
+              />
+            </Button>
+          </div>
+        </div>
         <template v-for="item in predefinedServices" :key="item.id">
           
           <!-- Collapsed Mode -->
@@ -101,7 +143,7 @@
                   <DropdownMenuItem 
                     v-for="service in item.children" 
                     :key="service.id"
-                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal, service.query)"
                     :class="{'bg-muted font-medium text-primary': isCurrentService(service.url, service.isInternal)}"
                   >
                      {{ t(service.nameKey) }}
@@ -120,7 +162,7 @@
                  'transition-all duration-200',
                  isCurrentService(item.url, item.isInternal) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
                ]"
-               @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+               @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal, item.query)"
             >
                <component :is="getCategoryIcon(item.key)" class="h-4 w-4" />
             </Button>
@@ -156,7 +198,7 @@
                       'hover:bg-background hover:shadow-sm hover:text-primary transition-all duration-200',
                       isCurrentService(service.url, service.isInternal) && 'bg-background shadow text-primary font-semibold'
                     )"
-                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal)"
+                    @click="handleMenuClick(service.url, t(service.nameKey), service.isInternal, service.query)"
                   >
                     <span class="truncate">{{ t(service.nameKey) }}</span>
                   </Button>
@@ -173,7 +215,7 @@
             :class="cn(
               isCurrentService(item.url, item.isInternal) && 'bg-background shadow text-primary font-bold'
             )"
-              @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal)"
+              @click="handleMenuClick(item.url, t(item.nameKey), item.isInternal, item.query)"
             >
               <component :is="getCategoryIcon(item.key)" class="mr-2 h-4 w-4" />
               <span class="flex-1 text-left truncate">{{ t(item.nameKey) }}</span>
@@ -209,13 +251,17 @@ import {
   Settings,
   LayoutGrid,
   Users,
-  KeyRound
+  KeyRound,
+  LoaderCircle,
+  CircleCheckBig
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 
 import { getCurrentUser, logout } from '../utils/auth.js'
 import { userAPI } from '@/api/user'
+import { chatAPI } from '@/api/chat'
 import { toast } from 'vue-sonner'
+import { useSidebarActiveSessions } from '@/composables/sidebar/useSidebarActiveSessions'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
@@ -258,6 +304,20 @@ const emit = defineEmits(['new-chat'])
 
 const currentUser = ref(getCurrentUser())
 const isCollapsed = ref(false)
+const handleActiveSessionNavigate = (session) => {
+  handleMenuClick(session.url, session.rawName, session.isInternal, session.query)
+}
+
+const {
+  activeSessionItems,
+  handleActiveSessionClick,
+  isActiveSessionCurrent,
+  disableActiveSessionSelection
+} = useSidebarActiveSessions({
+  route,
+  chatAPI,
+  onSessionClick: handleActiveSessionNavigate
+})
 
 const handleUserUpdated = () => {
   currentUser.value = getCurrentUser()
@@ -378,8 +438,18 @@ const getCategoryIcon = (key) => {
   return map[key] || LayoutGrid
 }
 
-const isCurrentService = (url, isInternal) => {
-  if (isInternal) return route.name === url
+const getSessionStatusIcon = (status) => status === 'completed' ? CircleCheckBig : LoaderCircle
+
+const getSessionStatusClass = (status) =>
+  status === 'completed' ? 'text-emerald-500' : 'text-blue-500 animate-spin'
+
+const isCurrentService = (url, isInternal, query = {}) => {
+  if (isInternal) {
+    if (url === 'Chat' && query?.session_id) {
+      return route.name === 'Chat' && route.query.session_id === query.session_id
+    }
+    return route.name === url
+  }
   return false
 }
 
@@ -388,12 +458,15 @@ const isCategoryActive = (item) => {
   return item.children.some(child => isCurrentService(child.url, child.isInternal))
 }
 
-const handleMenuClick = (url, name, isInternal) => {
+const handleMenuClick = (url, name, isInternal, query = {}) => {
+  query = query || {}
+  if (!(url === 'Chat' && query.session_id)) {
+    disableActiveSessionSelection()
+  }
   if (isInternal) {
-    if (url === 'Chat') {
+    if (url === 'Chat' && !query.session_id) {
       emit('new-chat')
-      // 如果已经在 Chat 页面，触发重置后直接返回，避免重复 push
-      if (route.name === 'Chat') return
+      if (route.name === 'Chat' && !route.query.session_id) return
     }
     
     // 如果已经在当前页面，且是AgentConfig，添加刷新参数触发重置
@@ -405,7 +478,7 @@ const handleMenuClick = (url, name, isInternal) => {
       return
     }
     
-    router.push({ name: url })
+    router.push({ name: url, query })
   } else {
     window.open(url, '_blank')
   }
