@@ -71,7 +71,10 @@ async def get_im_config():
             "service": {"running": False}  # TODO: get actual service status
         }
         
-        logger.info(f"[IM] Returning config: feishu={result['feishu'].get('enabled', False)}, dingtalk={result['dingtalk'].get('enabled', False)}, imessage={result['imessage'].get('enabled', False)}")
+        logger.info(f"[IM] Returning config from database:")
+        logger.info(f"[IM]   feishu: {result['feishu']}")
+        logger.info(f"[IM]   dingtalk: {result['dingtalk']}")
+        logger.info(f"[IM]   imessage: {result['imessage']}")
         logger.info("[IM] ========== END GET /api/im/config ==========")
         
         return await Response.succ(data=result, message="获取配置成功")
@@ -102,9 +105,9 @@ async def save_im_config(config: IMConfig):
 
         enabled_providers = []
         for provider_type, provider_config in providers:
-            logger.info(f"[IM] Saving {provider_type} config: enabled={provider_config.get('enabled', False)}")
+            logger.info(f"[IM] Saving {provider_type} config: {provider_config}")
             await dao.save_config(provider_type, provider_config)
-            logger.info(f"[IM] {provider_type} config saved")
+            logger.info(f"[IM] {provider_type} config saved to database")
             if provider_config.get('enabled', False):
                 enabled_providers.append(provider_type)
 

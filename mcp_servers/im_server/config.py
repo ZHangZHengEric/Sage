@@ -54,11 +54,13 @@ async def fetch_im_config_from_backend() -> Optional[Dict[str, Any]]:
                     # Backend returns: {feishu: {...}, dingtalk: {...}, imessage: {...}, service: {...}}
                     # We need: {im_providers: {feishu: {...}, ...}}
                     response_data = data["data"]
+                    imessage_config = response_data.get("imessage", {"enabled": False})
+                    logger.info(f"[IM Config] iMessage config from backend: {imessage_config}")
                     config = {
                         "im_providers": {
                             "feishu": response_data.get("feishu", {"enabled": False}),
                             "dingtalk": response_data.get("dingtalk", {"enabled": False}),
-                            "imessage": response_data.get("imessage", {"enabled": False}),
+                            "imessage": imessage_config,
                         },
                         "settings": {
                             "default_timeout": 300,
@@ -66,7 +68,7 @@ async def fetch_im_config_from_backend() -> Optional[Dict[str, Any]]:
                         }
                     }
                     _save_local_config(config)  # Cache locally
-                    logger.info("[IM Config] Config fetched and cached successfully")
+                    logger.info(f"[IM Config] Config fetched and cached: {config}")
                     return config
                 else:
                     logger.warning(f"[IM Config] Backend returned unsuccessful response: {data}")
