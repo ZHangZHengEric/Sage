@@ -1,5 +1,5 @@
 # Python
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
@@ -9,9 +9,9 @@ __pycache__/
 .nox/
 .pytest_cache/
 .mypy_cache/
-.venv/
-venv/
-.conda/
+**/.venv/
+**/venv/
+**/.conda/
 coverage/
 *.log
 .ruff_cache
@@ -28,23 +28,23 @@ pnpm-debug.log
 .pnpm-store
 
 # OS
-.DS_Store
+**/.DS_Store
 
 # Data & Assets
 data/
-test/
+tests/
 assets/
 docs/
 
 # IDEs
-.vscode/
-.idea/
-.trae/
+**/.vscode/
+**/.idea/
+**/.trae/
 
 # Environment Variables (Secrets)
-.env
-.env.local
-.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
 # Keep example files
 !.env.example
 !.env.sample
@@ -54,9 +54,9 @@ Dockerfile
 docker-compose*.yml
 
 # Git
-.git/
-.github/
-.gitignore
+**/.git/
+**/.github/
+**/.gitignore
 
 
 # Temporary
@@ -66,3 +66,25 @@ skills/*
 assets/
 docs/
 release_notes/
+
+# Nuitka build artifacts
+app/desktop/build/
+app/desktop/dist/
+.nuitka_cache/
+*.build/
+*.dist/
+*.onefile-build/
+sidecar
+app/desktop/tauri/sidecar/
+
+# Rust build artifacts
+**/target/
+
+# Workspaces
+sage_demo_workspace/
+agent_workspace/
+
+# Certificates
+app/desktop/scripts/certs
+
+.pyinstaller

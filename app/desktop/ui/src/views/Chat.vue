@@ -46,7 +46,7 @@
     <div class="flex-1 overflow-hidden relative flex flex-row">
       <div class="flex-1 flex flex-col min-w-0 bg-muted/5 relative">
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
-          <div v-if="!messages || messages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
+          <div v-if="!filteredMessages || filteredMessages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
             <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm">
                <Bot :size="32" class="opacity-80 text-primary" />
             </div>
@@ -102,7 +102,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Bot, Settings, Share2, FolderOpen, Search } from 'lucide-vue-next'
 import SparkMD5 from 'spark-md5'
@@ -145,6 +145,7 @@ const props = defineProps({
 
 const { t } = useLanguage()
 const route = useRoute()
+const router = useRouter()
 
 // 状态管理
 const messagesEndRef = ref(null)
@@ -208,7 +209,8 @@ const isHistoryLoading = ref(false);
 
 const filteredMessages = computed(() => {
   if (!messages.value) return [];
-  return messages.value.filter(m => !m.session_id || m.session_id === currentSessionId.value);
+  if (!currentSessionId.value) return [];
+  return messages.value.filter(m => m.session_id === currentSessionId.value);
 });
 
 const subSessionMessages = computed(() => {
@@ -345,6 +347,17 @@ const createSession = () => {
     return sessionId;
   };
 
+const syncSessionIdToRoute = async (sessionId) => {
+  if (!sessionId) return
+  if (route.query.session_id === sessionId) return
+  await router.replace({
+    query: {
+      ...route.query,
+      session_id: sessionId
+    }
+  })
+}
+
   // 处理会话加载
   const handleSessionLoad = async (sessionId) => {
     if (!sessionId) return;
@@ -357,8 +370,10 @@ const createSession = () => {
       // 获取会话消息
       const res = await chatAPI.getConversationMessages(sessionId);
       if (res && res.messages) {
-        // 加载消息
-        messages.value = res.messages;
+        messages.value = (res.messages || []).map(msg => ({
+          ...msg,
+          session_id: msg.session_id || sessionId
+        }));
         if (res.conversation_info) {
           // 如果有 conversation_info，可以在这里恢复其他状态
           // 比如选中的 agent
@@ -518,12 +533,13 @@ const handleMessage = (messageData) => {
 };
 
 // 添加用户消息
-const addUserMessage = (content) => {
+const addUserMessage = (content, sessionId) => {
   const userMessage = {
     role: 'user',
     content: content.trim(),
     message_id: Date.now().toString(),
-    type: 'USER'
+    type: 'USER',
+    session_id: sessionId
   };
 
   messages.value = [...messages.value, userMessage];
@@ -537,6 +553,7 @@ const addErrorMessage = (error) => {
     content: `错误: ${error.message}`,
     message_id: Date.now().toString(),
     type: 'error',
+    session_id: currentSessionId.value,
     timestamp: Date.now()
   };
 
@@ -684,7 +701,10 @@ const loadConversationData = async (conversation) => {
 
     // 加载消息
     if (conversation.messages && conversation.messages.length > 0) {
-      messages.value = conversation.messages
+      messages.value = conversation.messages.map(msg => ({
+        ...msg,
+        session_id: msg.session_id || conversation.session_id
+      }))
     }
     currentSessionId.value = conversation.session_id || null
     // 滚动到底部（强制滚动）
@@ -712,9 +732,10 @@ const handleSendMessage = async (content) => {
     sessionId = await createSession(selectedAgent.value.id);
     console.log('🆕 创建新会话ID:', sessionId);
   }
+  await syncSessionIdToRoute(sessionId)
 
   // 添加用户消息
-  addUserMessage(content);
+  addUserMessage(content, sessionId);
 
   try {
 
@@ -1051,4 +1072,3 @@ watch(messages, () => {
     
   }, { deep: true });
 </script>
-
