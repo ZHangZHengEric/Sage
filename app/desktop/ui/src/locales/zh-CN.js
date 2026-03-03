@@ -4,7 +4,7 @@ export default {
   
   // 侧边栏
   'sidebar.newChat': '新对话',
-  'sidebar.agentList': '我的Agent',
+  'sidebar.agentList': '我的智能体',
   'sidebar.skillList': '技能',
   'sidebar.toolsList': '工具',
   'sidebar.channels': '频道',
