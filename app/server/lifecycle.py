@@ -16,6 +16,7 @@ from .bootstrap import (
     validate_and_disable_mcp_servers,
     ensure_system_init,
 )
+from .services.chat.stream_manager import StreamManager
 from .core.config import StartupConfig
 from .utils.async_utils import create_safe_task
 
@@ -45,6 +46,9 @@ async def initialize_system(cfg: StartupConfig):
 
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)
+
+    StreamManager.get_instance()
+    logger.info("sage-server：StreamManager 已预初始化")
 
     logger.info("sage-server：初始化完成")
 
