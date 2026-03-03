@@ -304,6 +304,7 @@ export const useChatPage = (props) => {
   const showLoadingBubble = computed(() => !!isLoading.value)
 
   const resetChat = () => {
+    persistRunningSessionOnLeaveChat()
     clearCurrentStreamViewState()
     clearMessages()
     clearTaskAndWorkspace()
