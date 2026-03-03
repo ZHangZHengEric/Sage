@@ -17,6 +17,14 @@ class TaskAPI extends BaseAPI {
     return this.post('/tasks/one-time', data)
   }
 
+  updateOneTimeTask(id, data) {
+    return this.put(`/tasks/one-time/${id}`, data)
+  }
+
+  deleteOneTimeTask(id) {
+    return this.delete(`/tasks/one-time/${id}`)
+  }
+
   updateRecurringTask(id, data) {
     return this.put(`/tasks/recurring/${id}`, data)
   }
