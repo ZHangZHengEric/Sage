@@ -368,8 +368,12 @@ async def prepare_session(request: StreamRequest):
              raise SageHTTPException(status_code=500, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
+        lock_wait_start = time.perf_counter()
         await asyncio.wait_for(lock.acquire(), timeout=10)
         acquired = True
+        lock_wait_cost = time.perf_counter() - lock_wait_start
+        if lock_wait_cost > 0.2:
+            logger.bind(session_id=session_id).warning(f"Session lock wait slow: {lock_wait_cost:.3f}s")
     except asyncio.TimeoutError:
          raise SageHTTPException(status_code=500, detail="会话正在清理中，请稍后重试")
 
@@ -409,6 +413,7 @@ async def execute_chat_session(
         yield_result.pop("is_chunk", None)
         yield_result.pop("chunk_id", None)
         yield json.dumps(yield_result, ensure_ascii=False) + "\n"
+        await asyncio.sleep(0)
 
     end_data = {
         "type": "stream_end",

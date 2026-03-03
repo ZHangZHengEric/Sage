@@ -398,7 +398,11 @@ class SAgent:
                     logger.debug(f"SAgent: 设置了system_context参数 keys: {list(system_context.keys())}")
 
                 # 2. 尝试初始化记忆 (这将更新 session_context.system_context 中的用户偏好)
+                init_memory_start = time.perf_counter()
                 await session_context.init_user_memory_context()
+                init_memory_cost = time.perf_counter() - init_memory_start
+                if init_memory_cost > 0.2:
+                    logger.warning(f"SAgent: init_user_memory_context slow, cost={init_memory_cost:.3f}s")
 
                 # 3.1 加载工作流
                 if available_workflows:
@@ -440,10 +444,18 @@ class SAgent:
                 logger.info(f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)} 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}")
                 logger.info(f"SAgent: 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}")
                 # 加载最近一次调用的skill到context
+                load_recent_skill_start = time.perf_counter()
                 await session_context.load_recent_skill_to_context()
+                load_recent_skill_cost = time.perf_counter() - load_recent_skill_start
+                if load_recent_skill_cost > 0.2:
+                    logger.warning(f"SAgent: load_recent_skill_to_context slow, cost={load_recent_skill_cost:.3f}s")
 
                 # 准备历史上下文：分割、BM25重排序、预算限制并保存到system_context
+                history_context_start = time.perf_counter()
                 session_context.set_history_context()
+                history_context_cost = time.perf_counter() - history_context_start
+                if history_context_cost > 0.2:
+                    logger.warning(f"SAgent: set_history_context slow, cost={history_context_cost:.3f}s")
 
                 # 检查WorkflowManager中是否有工作流
                 if session_context.workflow_manager.list_workflows():

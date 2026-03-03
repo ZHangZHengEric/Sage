@@ -68,7 +68,7 @@
     <div class="flex-1 overflow-hidden relative flex flex-row">
       <div class="flex-1 flex flex-col min-w-0 bg-muted/5 relative">
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
-          <div v-if="!messages || messages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
+          <div v-if="!filteredMessages || filteredMessages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
             <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm">
                <Bot :size="32" class="opacity-80 text-primary" />
             </div>
@@ -98,7 +98,7 @@
         </div>
         
         <div class="flex-none p-4  bg-background" v-if="selectedAgent">
-            <MessageInput :is-loading="isLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+            <MessageInput :is-loading="isCurrentSessionLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
 
@@ -124,7 +124,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Bot, Settings, Share2, FolderOpen, Search } from 'lucide-vue-next'
 import SparkMD5 from 'spark-md5'
@@ -167,6 +167,124 @@ const props = defineProps({
 
 const { t } = useLanguage()
 const route = useRoute()
+const router = useRouter()
+
+// 活跃会话管理
+const readActiveSessionsCache = () => {
+  try {
+    return JSON.parse(localStorage.getItem('activeSessions') || '{}')
+  } catch (e) {
+    return {}
+  }
+}
+const activeSessions = ref(readActiveSessionsCache());
+const sessionStreamOffsets = ref({})
+const syncSessionOffsetsFromActiveSessions = () => {
+  const nextOffsets = {}
+  Object.entries(activeSessions.value || {}).forEach(([sid, meta]) => {
+    const parsed = Number(meta?.last_index || 0)
+    nextOffsets[sid] = Number.isFinite(parsed) ? parsed : 0
+  })
+  sessionStreamOffsets.value = nextOffsets
+}
+const handleActiveSessionsUpdated = () => {
+  activeSessions.value = readActiveSessionsCache()
+  syncSessionOffsetsFromActiveSessions()
+}
+syncSessionOffsetsFromActiveSessions()
+const getSessionLastIndex = (sessionId) => {
+  const inMemory = Number(sessionStreamOffsets.value?.[sessionId] ?? 0)
+  if (Number.isFinite(inMemory) && inMemory > 0) return inMemory
+  const fromCache = Number(activeSessions.value?.[sessionId]?.last_index || 0)
+  return Number.isFinite(fromCache) ? fromCache : 0
+}
+const updateActiveSessionLastIndex = (sessionId, lastIndex, persist = false) => {
+  if (!sessionId || typeof lastIndex !== 'number') return
+  const safeIndex = Number.isFinite(lastIndex) ? Math.max(0, Math.floor(lastIndex)) : 0
+  sessionStreamOffsets.value = {
+    ...sessionStreamOffsets.value,
+    [sessionId]: safeIndex
+  }
+  if (!persist) return
+  activeSessions.value = readActiveSessionsCache()
+  const existing = activeSessions.value[sessionId]
+  if (!existing) return
+  activeSessions.value[sessionId] = {
+    ...existing,
+    last_index: safeIndex,
+    lastUpdate: Date.now()
+  }
+  localStorage.setItem('activeSessions', JSON.stringify(activeSessions.value))
+}
+const updateActiveSession = (sessionId, isActive, title = null, userInput = null) => {
+  activeSessions.value = readActiveSessionsCache()
+  if (isActive) {
+    const existing = activeSessions.value[sessionId] || {};
+    const preservedTitle = existing.title && existing.title !== '进行中的会话' ? existing.title : null
+    const preservedUserInput = existing.user_input || null
+    activeSessions.value[sessionId] = { 
+        lastUpdate: Date.now(),
+        title: preservedTitle || title || '进行中的会话',
+        user_input: preservedUserInput || userInput || '',
+        status: 'running',
+        last_index: Math.max(getSessionLastIndex(sessionId), Number(existing.last_index || 0))
+    };
+  } else {
+    const existing = activeSessions.value[sessionId];
+    if (existing) {
+      activeSessions.value[sessionId] = {
+        ...existing,
+        status: 'completed',
+        completedAt: Date.now(),
+        lastUpdate: Date.now()
+      }
+    }
+  }
+  localStorage.setItem('activeSessions', JSON.stringify(activeSessions.value));
+  syncSessionOffsetsFromActiveSessions()
+  window.dispatchEvent(new Event('active-sessions-updated'));
+};
+
+const deriveSessionTitle = (content = '') => {
+  const normalized = String(content || '').trim()
+  if (!normalized) return '进行中的会话'
+  return normalized.length > 50 ? `${normalized.slice(0, 50)}...` : normalized
+}
+
+// 通用流读取函数
+const readStreamResponse = async (response, onMessage, onComplete, onError) => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    
+    try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.trim() === '') continue;
+            try {
+              const messageData = JSON.parse(line);
+              if (onMessage) onMessage(messageData);
+            } catch (e) {
+              console.error('JSON Parse Error', e);
+            }
+          }
+        }
+        if (onComplete) onComplete();
+    } catch (e) {
+        if (onError) onError(e);
+    }
+};
 
 // 状态管理
 const messagesEndRef = ref(null)
@@ -203,6 +321,7 @@ const expandedTasks = ref(new Set())
 const messages = ref([]);
 const messageChunks = ref(new Map());
 const isLoading = ref(false);
+const loadingSessionId = ref(null);
 const abortControllerRef = ref(null);
 const currentSessionId = ref(null);
 
@@ -230,8 +349,15 @@ const isHistoryLoading = ref(false);
 
 const filteredMessages = computed(() => {
   if (!messages.value) return [];
-  return messages.value.filter(m => !m.session_id || m.session_id === currentSessionId.value);
+  if (!currentSessionId.value) return [];
+  return messages.value.filter(m => m.session_id === currentSessionId.value);
 });
+
+const isCurrentSessionLoading = computed(() =>
+  !!isLoading.value &&
+  !!currentSessionId.value &&
+  loadingSessionId.value === currentSessionId.value
+)
 
 const subSessionMessages = computed(() => {
   if (!activeSubSessionId.value) return [];
@@ -332,33 +458,108 @@ const createSession = () => {
     return sessionId;
   };
 
+const syncSessionIdToRoute = async (sessionId) => {
+  if (!sessionId) return
+  if (route.query.session_id === sessionId) return
+  await router.replace({
+    query: {
+      ...route.query,
+      session_id: sessionId
+    }
+  })
+}
+
+const clearCurrentStreamViewState = () => {
+  if (abortControllerRef.value) {
+    abortControllerRef.value.abort()
+    abortControllerRef.value = null
+  }
+  isLoading.value = false
+  loadingSessionId.value = null
+}
+
+const loadConversationMessages = async (sessionId) => {
+  const res = await chatAPI.getConversationMessages(sessionId)
+  if (!res || !res.messages) return
+  const normalizedMessages = (res.messages || []).map(msg => ({
+    ...msg,
+    session_id: msg.session_id || sessionId
+  }))
+  const activeMeta = activeSessions.value[sessionId]
+  const shouldInjectFirstUserMessage =
+    activeMeta?.status === 'running' &&
+    !!activeMeta?.user_input &&
+    (normalizedMessages.length === 0 || normalizedMessages[0]?.role !== 'user')
+  if (shouldInjectFirstUserMessage) {
+    normalizedMessages.unshift({
+      role: 'user',
+      content: activeMeta.user_input,
+      message_id: `pending_user_${sessionId}`,
+      type: 'USER',
+      session_id: sessionId,
+      timestamp: Date.now()
+    })
+  }
+  messages.value = normalizedMessages
+  if (res.conversation_info?.agent_id) {
+    const agent = agents.value.find(a => a.id === res.conversation_info.agent_id)
+    if (agent) {
+      selectAgent(agent)
+    }
+  }
+  if (res.conversation_info && activeSessions.value[sessionId]?.status === 'running') {
+    updateActiveSession(sessionId, true, res.conversation_info.title)
+  }
+}
+
+const ensureFirstUserMessageForRunningSession = (sessionId) => {
+  const activeMeta = activeSessions.value[sessionId]
+  if (activeMeta?.status !== 'running' || !activeMeta?.user_input) return
+  const pendingMessageId = `pending_user_${sessionId}`
+  const baseMessages = messages.value.filter(msg => msg.message_id !== pendingMessageId)
+  const firstSessionMessageIndex = baseMessages.findIndex(msg => msg.session_id === sessionId)
+  if (firstSessionMessageIndex >= 0 && baseMessages[firstSessionMessageIndex]?.role === 'user') {
+    messages.value = baseMessages
+    return
+  }
+  const pendingUserMessage = {
+    role: 'user',
+    content: activeMeta.user_input,
+    message_id: pendingMessageId,
+    type: 'USER',
+    session_id: sessionId,
+    timestamp: Date.now()
+  }
+  if (firstSessionMessageIndex === -1) {
+    messages.value = [pendingUserMessage, ...baseMessages]
+    return
+  }
+  messages.value = [
+    ...baseMessages.slice(0, firstSessionMessageIndex),
+    pendingUserMessage,
+    ...baseMessages.slice(firstSessionMessageIndex)
+  ]
+}
+
   // 处理会话加载
   const handleSessionLoad = async (sessionId) => {
     if (!sessionId) return;
     
+    clearCurrentStreamViewState()
     currentSessionId.value = sessionId;
-    isLoading.value = true;
     isHistoryLoading.value = true;
     
     try {
-      // 获取会话消息
-      const res = await chatAPI.getConversationMessages(sessionId);
-      if (res && res.messages) {
-        // 加载消息
-        messages.value = res.messages;
-        if (res.conversation_info) {
-          // 如果有 conversation_info，可以在这里恢复其他状态
-          // 比如选中的 agent
-          if (res.conversation_info.agent_id) {
-            const agent = agents.value.find(a => a.id === res.conversation_info.agent_id);
-            if (agent) {
-              selectAgent(agent);
-            }
-          }
+      const isRunningSession = activeSessions.value[sessionId]?.status === 'running'
+      if (isRunningSession) {
+        ensureFirstUserMessageForRunningSession(sessionId)
+        const resumedAndCompleted = await checkAndResumeStream(sessionId)
+        if (resumedAndCompleted) {
+          await loadConversationMessages(sessionId)
         }
+      } else {
+        await loadConversationMessages(sessionId)
       }
-      
-    
     } catch (e) {
       console.error('加载会话失败:', e);
       toast.error(t('chat.loadConversationError') || 'Failed to load conversation');
@@ -369,6 +570,90 @@ const createSession = () => {
         isHistoryLoading.value = false;
       });
     }
+  };
+  
+  // 检查并恢复流
+  const checkAndResumeStream = async (sessionId) => {
+    let resumedAndCompleted = false
+    // 检查是否有活跃标记
+    if (activeSessions.value[sessionId]?.status === 'running') {
+      // 简单的超时判断（例如超过 1 小时就不恢复了）
+      const lastUpdate = activeSessions.value[sessionId].lastUpdate;
+      if (Date.now() - lastUpdate > 3600000) {
+        updateActiveSession(sessionId, false);
+        return;
+      }
+
+      console.log('🔄 检测到活跃会话，尝试恢复流:', sessionId);
+      isLoading.value = true;
+      loadingSessionId.value = sessionId
+      shouldAutoScroll.value = true;
+      let resumeLastIndex = getSessionLastIndex(sessionId)
+      
+      abortControllerRef.value = new AbortController();
+      
+      try {
+        // 使用 resumeStream API，lastIndex 设为 0，让后端决定发送多少
+        // 实际上后端会发送 buffer 中的所有数据，前端 handleMessage 会去重
+        const response = await chatAPI.resumeStream(sessionId, resumeLastIndex, abortControllerRef.value);
+        
+        // 使用 readStreamResponse 处理流
+        await readStreamResponse(
+          response,
+          (data) => {
+            resumeLastIndex += 1
+            updateActiveSessionLastIndex(sessionId, resumeLastIndex)
+            if (resumeLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+            if (data.type === 'stream_end') {
+              updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+              resumedAndCompleted = true
+              updateActiveSession(sessionId, false);
+            }
+
+            if (data.type === 'chunk_start' ||
+                data.type === 'json_chunk' ||
+                data.type === 'chunk_end') {
+                return;
+            }
+
+            handleMessage(data);
+          },
+          () => { // onComplete
+            isLoading.value = false;
+            loadingSessionId.value = null
+            updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+            scrollToBottom();
+          },
+          (err) => { // onError
+            if (err?.name === 'AbortError' || err?.originalError?.name === 'AbortError') {
+              isLoading.value = false;
+              loadingSessionId.value = null
+              updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+              return;
+            }
+            console.error('Resume Stream Error', err);
+            isLoading.value = false;
+            loadingSessionId.value = null
+            updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+            // 如果出错（例如后端重启了，session 不存在了），移除 activeSessions
+            updateActiveSession(sessionId, false);
+          }
+        );
+      } catch (e) {
+        if (e?.name === 'AbortError' || e?.originalError?.name === 'AbortError') {
+          isLoading.value = false;
+          loadingSessionId.value = null
+          updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+          return;
+        }
+        console.error('Resume Stream Failed', e);
+        isLoading.value = false;
+        loadingSessionId.value = null
+        updateActiveSessionLastIndex(sessionId, resumeLastIndex, true)
+        updateActiveSession(sessionId, false);
+      }
+    }
+    return resumedAndCompleted
   };
 
   // 更新配置
@@ -407,9 +692,6 @@ const updateConfig = (newConfig) => {
     if (newVal) {
       console.log('🔄 检测到重置信号，重置聊天状态');
       resetChat();
-      if (isLoading.value) {
-        stopGeneration();
-      }
     }
   });
 
@@ -505,12 +787,13 @@ const handleMessage = (messageData) => {
 };
 
 // 添加用户消息
-const addUserMessage = (content) => {
+const addUserMessage = (content, sessionId) => {
   const userMessage = {
     role: 'user',
     content: content.trim(),
     message_id: Date.now().toString(),
-    type: 'USER'
+    type: 'USER',
+    session_id: sessionId
   };
 
   messages.value = [...messages.value, userMessage];
@@ -541,10 +824,11 @@ const stopGeneration = async () => {
   if (abortControllerRef.value) {
     console.log('Aborting request in stopGeneration');
     abortControllerRef.value.abort();
+    abortControllerRef.value = null;
     isLoading.value = false;
+    loadingSessionId.value = null;
   }
 
-  // 调用后端interrupt接口
   if (currentSessionId.value) {
     try {
       await chatAPI.interruptSession(currentSessionId.value, '用户请求中断');
@@ -656,6 +940,7 @@ const handleAgentChange = async (agentId) => {
 
 // 加载conversation数据
 const resetChat = () => {
+  clearCurrentStreamViewState()
   clearMessages()
   clearTaskAndWorkspace()
   createSession()
@@ -707,9 +992,10 @@ const handleSendMessage = async (content) => {
     sessionId = await createSession(selectedAgent.value.id);
     console.log('🆕 创建新会话ID:', sessionId);
   }
+  await syncSessionIdToRoute(sessionId)
 
   // 添加用户消息
-  addUserMessage(content);
+  addUserMessage(content, sessionId);
 
   try {
 
@@ -720,6 +1006,7 @@ const handleSendMessage = async (content) => {
       configKeys: Object.keys(config.value || {})
     });
     isLoading.value = true
+    loadingSessionId.value = sessionId
     shouldAutoScroll.value = true
     scrollToBottom()
     // 使用新的发送消息API
@@ -741,17 +1028,20 @@ const handleSendMessage = async (content) => {
       onComplete: async () => {
         scrollToBottom()
         isLoading.value = false
+        loadingSessionId.value = null
       },
       onError: (error) => {
         console.error('❌ Chat.vue消息发送错误:', error);
         addErrorMessage(error)
         isLoading.value = false
+        loadingSessionId.value = null
       }
     })
   } catch (error) {
     console.error('❌ Chat.vue发送消息异常:', error);
     toast.error(t('chat.sendError'))
     isLoading.value = false
+    loadingSessionId.value = null
   }
 }
 
@@ -791,6 +1081,9 @@ const sendMessageApi = async ({
     if (abortControllerRef) {
       abortControllerRef.value = new AbortController();
     }
+    
+    // 标记为活跃会话
+    updateActiveSession(sessionId, true, deriveSessionTitle(message), message.trim());
 
     const requestBody = {
       messages: [{
@@ -806,59 +1099,43 @@ const sendMessageApi = async ({
     };
     const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    // 使用 readStreamResponse
+    let streamLastIndex = getSessionLastIndex(sessionId)
+    await readStreamResponse(
+      response,
+      (data) => {
+        streamLastIndex += 1
+        updateActiveSessionLastIndex(sessionId, streamLastIndex)
+        if (streamLastIndex % 20 === 0) updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+        if (data.type === 'stream_end') {
+           updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+           updateActiveSession(sessionId, false);
+        }
+        
+        if (data.type === 'chunk_start' ||
+            data.type === 'json_chunk' ||
+            data.type === 'chunk_end') {
+            console.log('🧩 分块消息:', data.type, data);
+            return;
+        }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let messageCount = 0;
-
-    console.log('🌊 开始读取WebSocket流数据');
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        console.log('📡 WebSocket流读取完成，总共处理', messageCount, '条消息');
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // 保留不完整的行
-
-      for (const line of lines) {
-        if (line.trim() === '') continue;
-
-        messageCount++;
-
-        try {
-          const messageData = JSON.parse(line);
-
-          // 处理分块消息
-          if (messageData.type === 'chunk_start' ||
-            messageData.type === 'json_chunk' ||
-            messageData.type === 'chunk_end') {
-            console.log('🧩 分块消息:', messageData.type, messageData);
-         
-
-          } else {
-            // 处理普通消息
-            if (onMessage) {
-              onMessage(messageData);
-            }
-
-          }
-        } catch (parseError) {
-          console.error('❌ JSON解析失败:', parseError);
-          console.error('📄 原始行内容:', line);
+        if (onMessage) onMessage(data);
+      },
+      () => {
+        updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+        if (onComplete) onComplete();
+      },
+      (err) => {
+        if (err.name === 'AbortError') {
+          console.log('Request was aborted');
+          updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+        } else {
+          console.error('Error sending message:', err);
+          updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
+          if (onError) onError(err);
         }
       }
-    }
-
-    onComplete();
+    );
   } catch (error) {
     if (error.name === 'AbortError') {
       console.log('Request was aborted');
@@ -915,6 +1192,7 @@ const handleShare = () => {
 onMounted(async () => {
   if (typeof window !== 'undefined') {
     window.addEventListener('user-updated', loadAgents)
+    window.addEventListener('active-sessions-updated', handleActiveSessionsUpdated)
   }
 
   // 1. 获取Agent列表
@@ -935,6 +1213,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('user-updated', loadAgents)
+    window.removeEventListener('active-sessions-updated', handleActiveSessionsUpdated)
   }
   
   if (scrollTimeout.value) {
@@ -1046,4 +1325,3 @@ watch(messages, () => {
     
   }, { deep: true });
 </script>
-
