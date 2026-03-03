@@ -248,11 +248,11 @@ chmod +x "$APP_DIR/scripts/generate_cert.sh"
 "$APP_DIR/scripts/generate_cert.sh"
 
 if [ -f "$CERT_B64_FILE" ]; then
-  echo "Setting up self-signed certificate..."
-  export APPLE_CERTIFICATE="$(cat "$CERT_B64_FILE")"
-  export APPLE_CERTIFICATE_PASSWORD="sage-password"
-  export APPLE_SIGNING_IDENTITY="SageAI Self Signed"
-  echo "Code signing enabled with self-signed certificate."
+  echo "Setting up ad-hoc signing (bypass certificate requirement)..."
+  # export APPLE_CERTIFICATE="$(cat "$CERT_B64_FILE")"
+  # export APPLE_CERTIFICATE_PASSWORD="sage-password"
+  export APPLE_SIGNING_IDENTITY="-"
+  echo "Code signing enabled with ad-hoc signature."
 else
   echo "WARNING: Failed to generate certificate. Build will be unsigned."
 fi
