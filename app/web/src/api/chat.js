@@ -78,5 +78,22 @@ export const chatAPI = {
     return await baseAPI.post(`/api/sessions/${sessionId}/interrupt`, {
       message
     })
+  },
+
+  /**
+   * 恢复流式聊天
+   * @param {string} sessionId - 会话ID
+   * @param {number} lastIndex - 已收到的消息索引
+   * @param {AbortController} abortController - 中断控制器
+   * @returns {Promise<Response>} 流式响应
+   */
+  resumeStream: async (sessionId, lastIndex = 0, abortController = null) => {
+    return await baseAPI.getStream(`/api/stream/resume/${sessionId}?last_index=${lastIndex}`, {
+      signal: abortController
+    })
+  },
+
+  getActiveSessions: async (timeout = 800) => {
+    return await baseAPI.get('/api/stream/active_sessions', {}, { timeout })
   }
 }
