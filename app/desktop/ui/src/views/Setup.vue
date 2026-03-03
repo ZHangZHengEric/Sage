@@ -401,8 +401,10 @@ const createDefaultAgent = async (providerId = null) => {
 
     const agentData = {
       name: 'zavix',
-      description: 'Desktop Default Agent',
+      description: '默认智能体',
       maxLoopCount: 100,
+      memoryType: "session",
+      agentMode: "simple",
       availableTools: [
         'todo_write', 
         'todo_read', 
