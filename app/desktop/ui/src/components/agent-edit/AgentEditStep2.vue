@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-5">
     <!-- Tools -->
-    <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+    <Card id="tour-agent-step2-tools" class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
       <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('tools')">
         <div class="flex items-center gap-2">
           <Wrench class="h-5 w-5" />
@@ -73,7 +73,7 @@
     </Card>
 
     <!-- Skills -->
-    <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+    <Card id="tour-agent-step2-skills" class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
       <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('skills')">
         <div class="flex items-center gap-2">
           <Bot class="h-5 w-5" />
@@ -108,7 +108,7 @@
     </Card>
 
     <!-- External Paths -->
-    <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+    <Card id="tour-agent-step2-paths" class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
       <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('externalPaths')">
         <div class="flex items-center gap-2">
           <FolderOpen class="h-5 w-5" />
