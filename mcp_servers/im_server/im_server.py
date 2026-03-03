@@ -68,7 +68,7 @@ logging.basicConfig(
 )
 
 
-def _send_message_to_agent_sync(
+async def _send_message_to_agent(
     session_id: str,
     agent_id: str,
     content: str,
@@ -76,9 +76,9 @@ def _send_message_to_agent_sync(
     provider: str = "unknown",
     user_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Synchronously send a message to agent and get response."""
+    """Send a message to agent and get response."""
     client = get_agent_client()
-    return client.send_message(
+    return await client.send_message(
         session_id=session_id,
         agent_id=agent_id,
         content=content,
@@ -89,7 +89,7 @@ def _send_message_to_agent_sync(
 
 
 @mcp.tool()
-@sage_mcp_tool(service_name="IM Service")
+@sage_mcp_tool(server_name="IM Service")
 async def send_message_through_im(
     session_id: str,
     content: str,
@@ -162,6 +162,69 @@ async def send_message_through_im(
         return f"Error sending message: {str(e)}"
 
 
+# --- Default Agent Resolution ---
+
+# Cache for default agent ID
+_default_agent_id: Optional[str] = None
+
+
+async def get_default_agent_id() -> str:
+    """
+    Get the default agent ID from API.
+    Gets first available agent from /api/agent/list.
+    Falls back to 'default' if no agent found.
+    """
+    global _default_agent_id
+    
+    if _default_agent_id is not None:
+        return _default_agent_id
+    
+    # Try to get first available agent from API
+    try:
+        import httpx
+        port = os.getenv("SAGE_PORT", "8080")
+        base_url = f"http://localhost:{port}"
+        
+        logger.info(f"[IM] Fetching agent list from {base_url}/api/agent/list")
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{base_url}/api/agent/list")
+            logger.info(f"[IM] Agent list response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"[IM] Agent list response: {data}")
+                
+                if (data.get("success") or data.get("code") == 200) and data.get("data"):
+                    agents = data["data"]
+                    if len(agents) > 0:
+                        # Use first agent as default
+                        first_agent = agents[0]
+                        _default_agent_id = first_agent.get("id") or first_agent.get("agent_id", "default")
+                        logger.info(f"[IM] Using first available agent as default: {_default_agent_id}")
+                        return _default_agent_id
+                    else:
+                        logger.warning("[IM] Agent list is empty")
+                else:
+                    logger.warning(f"[IM] Agent list response invalid: success={data.get('success')}, has_data={data.get('data') is not None}")
+            else:
+                logger.warning(f"[IM] Agent list request failed: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"[IM] Failed to get agent list: {e}", exc_info=True)
+    
+    # Fallback to default
+    logger.info("[IM] No agent found, using 'default' as fallback")
+    _default_agent_id = "default"
+    return _default_agent_id
+
+
+def reset_default_agent_cache():
+    """Reset the default agent cache. Call this when agents are modified."""
+    global _default_agent_id
+    _default_agent_id = None
+    logger.info("[IM] Default agent cache reset")
+
+
 # --- Incoming Message Handlers ---
 
 
@@ -171,7 +234,10 @@ async def handle_incoming_message(
     content: str,
     chat_id: Optional[str] = None,
     user_name: Optional[str] = None,
-    default_agent_id: str = "default"
+    default_agent_id: Optional[str] = None,
+    session_webhook: Optional[str] = None,
+    sender_staff_id: Optional[str] = None,
+    session_webhook_expired_time: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Handle incoming message from any IM provider.
@@ -187,11 +253,15 @@ async def handle_incoming_message(
         content: Message content
         chat_id: Chat/Group ID (optional)
         user_name: Display name (optional)
-        default_agent_id: Default agent to route to
+        default_agent_id: Default agent to route to (optional, auto-detected if not provided)
 
     Returns:
         Dict with success status and session_id
     """
+    # Get default agent ID if not provided
+    if default_agent_id is None:
+        default_agent_id = await get_default_agent_id()
+    
     session_mgr = get_session_manager()
 
     # Find or create session
@@ -204,7 +274,7 @@ async def handle_incoming_message(
     )
 
     # Send to agent
-    result = _send_message_to_agent_sync(
+    result = await _send_message_to_agent(
         session_id=session_id,
         agent_id=default_agent_id,
         content=content,
@@ -216,21 +286,55 @@ async def handle_incoming_message(
     if result.get("success"):
         # Send response back via IM
         response = result.get("response", "")
-        if response:
+        has_im_tool = result.get("has_im_tool", False)
+        
+        logger.info(f"[IM] Agent response: success=True, has_im_tool={has_im_tool}, response_length={len(response) if response else 0}")
+        
+        if has_im_tool:
+            logger.info("[IM] Agent used send_message_through_im tool, skipping automatic response")
+        elif response:
             try:
                 binding = session_mgr.get_binding(session_id)
+                logger.info(f"[IM] Sending response back to {provider}: chat_id={chat_id}, user_id={user_id}")
+                
                 if binding:
                     config = get_im_config(provider)
                     if config:
                         provider_instance = get_im_provider(provider, config)
-                        await provider_instance.send_message(
-                            content=response,
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            msg_type="text"
-                        )
+                        logger.info(f"[IM] Calling {provider}.send_message with content length: {len(response)}")
+                        
+                        # Prepare send parameters
+                        # Note: For DingTalk, msg_type defaults to markdown for better formatting
+                        send_params = {
+                            "content": response,
+                            "chat_id": chat_id,
+                            "user_id": user_id,
+                        }
+                        
+                        # Add session_webhook for DingTalk (if available)
+                        if provider == "dingtalk":
+                            # Default to markdown for DingTalk
+                            send_params["msg_type"] = "markdown"
+                            if session_webhook:
+                                send_params["session_webhook"] = session_webhook
+                            if sender_staff_id:
+                                send_params["sender_staff_id"] = sender_staff_id
+                            if session_webhook_expired_time:
+                                send_params["session_webhook_expired_time"] = session_webhook_expired_time
+                        else:
+                            # Other providers use text by default
+                            send_params["msg_type"] = "text"
+                        
+                        send_result = await provider_instance.send_message(**send_params)
+                        logger.info(f"[IM] send_message result: {send_result}")
+                    else:
+                        logger.error(f"[IM] No config found for provider: {provider}")
+                else:
+                    logger.error(f"[IM] No binding found for session: {session_id}")
             except Exception as e:
-                logger.error(f"Failed to send response back: {e}")
+                logger.error(f"[IM] Failed to send response back: {e}", exc_info=True)
+        else:
+            logger.warning("[IM] Agent returned empty response")
 
         return {"success": True, "session_id": session_id}
     else:
@@ -245,7 +349,9 @@ async def _imessage_background_task():
     if not IMESSAGE_AVAILABLE:
         return
 
-    im_mgr = get_imessage_manager()
+    # Get iMessage config with allowed_senders whitelist
+    im_config = get_im_config("imessage") or {}
+    im_mgr = get_imessage_manager(config=im_config)
     im_mgr.start()
 
     while True:
@@ -270,18 +376,25 @@ def _handle_feishu_message(message: Dict[str, Any]):
     import asyncio
     
     # Run async handler in sync context
+    # Note: Feishu SDK runs in its own thread, so we need to use the main event loop
     try:
+        # Get the main event loop (from the main thread)
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(handle_incoming_message(
-                provider="feishu",
-                user_id=message.get("user_id"),
-                content=message.get("content", {}).get("text", ""),
-                chat_id=message.get("chat_id"),
-                user_name=message.get("user_name")
-            ))
+            # Use run_coroutine_threadsafe to safely schedule from another thread
+            asyncio.run_coroutine_threadsafe(
+                handle_incoming_message(
+                    provider="feishu",
+                    user_id=message.get("user_id"),
+                    content=message.get("content", {}).get("text", ""),
+                    chat_id=message.get("chat_id"),
+                    user_name=message.get("user_name")
+                ),
+                loop
+            )
+            logger.info(f"[Feishu] Scheduled message handling in main loop: {message.get('content', {}).get('text', '')[:50]}...")
     except Exception as e:
-        logger.error(f"Error handling Feishu message: {e}")
+        logger.error(f"[Feishu] Error handling message: {e}", exc_info=True)
 
 
 async def _start_feishu_websocket():
@@ -308,7 +421,8 @@ async def _start_feishu_websocket():
     
     try:
         client = FeishuWebSocketClient(app_id, app_secret, _handle_feishu_message)
-        client.start()
+        client.start()  # This now starts its own thread internally
+        
         logger.info("Feishu WebSocket listener started")
         
         # Keep the task alive
@@ -322,6 +436,16 @@ async def _start_feishu_websocket():
 async def initialize_im_server():
     """Initialize IM server and start background tasks."""
     logger.info("Initializing IM server...")
+
+    # Load configuration first
+    logger.info("[IM Server] Loading IM configuration...")
+    from .config import load_im_config
+    config = await load_im_config()
+    if not config:
+        logger.error("[IM Server] Failed to load IM configuration")
+        return
+
+    logger.info(f"[IM Server] IM configuration loaded: {config}")
 
     # Start iMessage background task (if configured)
     if IMESSAGE_AVAILABLE:
@@ -382,18 +506,28 @@ def _handle_dingtalk_message(message: Dict[str, Any]):
     import asyncio
 
     # Run async handler in sync context
+    # Note: DingTalk SDK runs in its own thread, so we need to use the main event loop
     try:
+        # Get the main event loop (from the main thread)
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(handle_incoming_message(
-                provider="dingtalk",
-                user_id=message.get("user_id"),
-                content=message.get("content", {}).get("text", ""),
-                chat_id=message.get("chat_id"),
-                user_name=message.get("user_name")
-            ))
+            # Use run_coroutine_threadsafe to safely schedule from another thread
+            asyncio.run_coroutine_threadsafe(
+                handle_incoming_message(
+                    provider="dingtalk",
+                    user_id=message.get("user_id"),
+                    content=message.get("content", {}).get("text", ""),
+                    chat_id=message.get("chat_id"),
+                    user_name=message.get("user_name"),
+                    session_webhook=message.get("session_webhook"),
+                    sender_staff_id=message.get("sender_staff_id"),
+                    session_webhook_expired_time=message.get("session_webhook_expired_time")
+                ),
+                loop
+            )
+            logger.info(f"[DingTalk] Scheduled message handling in main loop: {message.get('content', {}).get('text', '')[:50]}...")
     except Exception as e:
-        logger.error(f"Error handling DingTalk message: {e}")
+        logger.error(f"[DingTalk] Error handling message: {e}", exc_info=True)
 
 
 # Note: This module is imported by ToolManager, not run directly
