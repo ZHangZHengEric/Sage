@@ -731,4 +731,40 @@ export default {
   'im.imessage.monitoredSendersHelp': 'At least one sender must be configured. Only messages from these senders will be processed',
   'im.imessage.macosOnly': 'macOS Only',
   'im.imessage.macosOnlyDesc': 'iMessage is only available on macOS. Requires granting Terminal access to Messages database.',
+
+  // Tour
+  'tour.skip': 'Skip',
+  'tour.next': 'Next',
+  'tour.prev': 'Prev',
+  'tour.done': 'Done',
+  
+  // Sidebar Tour
+  'tour.sidebar.newChat.title': 'New Chat',
+  'tour.sidebar.newChat.desc': 'Start a new conversation here.',
+  'tour.sidebar.history.title': 'History',
+  'tour.sidebar.history.desc': 'View and manage your chat history.',
+  'tour.sidebar.agentList.title': 'Agent List',
+  'tour.sidebar.agentList.desc': 'Create and manage your AI agents.',
+  'tour.sidebar.personalCenter.title': 'Personal Center',
+  'tour.sidebar.personalCenter.desc': 'Access tools, skills, model providers, and scheduled tasks.',
+  'tour.sidebar.systemSettings.title': 'System Settings',
+  'tour.sidebar.systemSettings.desc': 'Configure system-wide settings.',
+  
+  // Agent Edit Tour Step 1
+  'tour.agent.step1.basic.title': 'Basic Info',
+  'tour.agent.step1.basic.desc': 'Set the agent\'s name, description, and system prompt.',
+  'tour.agent.step1.strategy.title': 'Strategy Settings',
+  'tour.agent.step1.strategy.desc': 'Configure agent\'s thinking mode, memory type, and multi-agent collaboration.',
+  'tour.agent.step1.context.title': 'System Context',
+  'tour.agent.step1.context.desc': 'Provide static knowledge or context for the agent.',
+  'tour.agent.step1.workflows.title': 'Workflows',
+  'tour.agent.step1.workflows.desc': 'Define structured task flows for complex operations.',
+  
+  // Agent Edit Tour Step 2
+  'tour.agent.step2.tools.title': 'Tools',
+  'tour.agent.step2.tools.desc': 'Equip the agent with various tools like search, calculation, etc.',
+  'tour.agent.step2.skills.title': 'Skills',
+  'tour.agent.step2.skills.desc': 'Add specialized skill modules to enhance agent capabilities.',
+  'tour.agent.step2.paths.title': 'File Access',
+  'tour.agent.step2.paths.desc': 'Authorize the agent to access specific local folders.',
 }
