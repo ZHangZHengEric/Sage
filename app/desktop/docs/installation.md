@@ -33,10 +33,10 @@ cargo --version
 
 **安装 Tauri CLI:**
 
-为了更方便地使用 Tauri，请安装 Tauri CLI 工具 (需要 v1 版本)：
+为了更方便地使用 Tauri，请安装 Tauri CLI 工具 (需要 v2 版本)：
 
 ```bash
-cargo install tauri-cli --version "^1.5"
+cargo install tauri-cli --version "^2"
 ```
 
 **Windows:**

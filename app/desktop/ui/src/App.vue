@@ -48,7 +48,7 @@ import { Toaster } from '@/components/ui/sonner'
 import request, { setBaseURL } from './utils/request.js'
 import { systemAPI } from './api/system'
 import { listen } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/tauri'
+import { invoke } from '@tauri-apps/api/core'
 
 const router = useRouter()
 const route = useRoute()
@@ -186,5 +186,4 @@ const handleSelectConversation = (conversation) => {
     if (unlisten) unlisten()
   })
 </script>
-
 
