@@ -79,3 +79,53 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Driver.js Custom Styles */
+.driver-popover.driver-popover-theme {
+  @apply bg-popover text-popover-foreground rounded-lg shadow-lg border border-border;
+  padding: 20px !important;
+  max-width: 350px !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-title {
+  @apply text-lg font-semibold mb-2 text-foreground !important;
+  font-family: inherit !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-description {
+  @apply text-sm text-muted-foreground leading-relaxed mb-4 !important;
+  font-family: inherit !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-footer {
+  @apply mt-4 flex justify-end gap-2 !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-btn {
+  @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 !important;
+  text-shadow: none !important;
+  border: none !important;
+  color: inherit !important; /* Reset color to be controlled by classes */
+}
+
+.driver-popover.driver-popover-theme .driver-popover-next-btn,
+.driver-popover.driver-popover-theme .driver-popover-done-btn {
+  @apply bg-primary text-primary-foreground shadow hover:bg-primary/90 !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-prev-btn {
+  @apply bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 border border-input !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-close-btn {
+  @apply text-muted-foreground hover:bg-secondary hover:text-foreground rounded-full p-1 top-2 right-2 !important;
+}
+
+/* Hide default progress text if needed, or style it */
+.driver-popover.driver-popover-theme .driver-popover-progress-text {
+  @apply text-xs text-muted-foreground font-medium !important;
+}
+
+.driver-popover.driver-popover-theme .driver-popover-navigation-btns {
+  @apply flex items-center gap-2 !important;
+}

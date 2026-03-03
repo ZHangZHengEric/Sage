@@ -1,6 +1,6 @@
 <template>
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="space-y-6">
+    <div class="space-y-6" id="tour-agent-step1-basic">
       <FormItem :label="t('agent.name')" :error="store.errors.name" required>
         <Input v-model="store.formData.name" :placeholder="t('agent.namePlaceholder')"
           :disabled="store.formData.id === 'default'" />
@@ -34,7 +34,7 @@
     <div class="space-y-6">
 
       <!-- Strategy Settings (Moved from Step 3) -->
-      <Card class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
+      <Card id="tour-agent-step1-strategy" class="transition-all hover:shadow-md rounded-xl border bg-background/80 backdrop-blur-sm">
         <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl" @click="toggleSection('strategy')">
           <div class="flex items-center gap-2">
             <Cpu class="h-5 w-5" />
@@ -159,7 +159,7 @@
       </Card>
  
       <!-- System Context -->
-      <Card class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
+      <Card id="tour-agent-step1-context" class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
         <CardHeader
           class="pb-3 pt-4 px-5 bg-muted/30 cursor-pointer flex flex-row items-center justify-between rounded-t-xl"
           @click="toggleSection('context')">
@@ -190,7 +190,7 @@
         </div>
       </Card>
       <!-- Workflows -->
-      <Card class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
+      <Card id="tour-agent-step1-workflows" class="transition-all hover:shadow-md rounded-xl bg-background/80 backdrop-blur-sm">
         <CardHeader class="pb-3 pt-4 px-5 bg-muted/30 flex flex-row items-center justify-between rounded-t-xl">
           <div class="flex items-center gap-2">
             <Workflow class="h-5 w-5" />
