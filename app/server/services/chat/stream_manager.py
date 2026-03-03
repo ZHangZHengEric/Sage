@@ -131,8 +131,7 @@ class StreamManager:
         """
         session = self._sessions.get(session_id)
         if not session:
-            # Session 不存在
-            logger.warning(f"Subscribe failed: Session {session_id} not found")
+
             return
 
         queue = asyncio.Queue()
