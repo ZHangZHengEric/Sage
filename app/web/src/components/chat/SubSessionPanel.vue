@@ -25,7 +25,7 @@
           <div class="space-y-6">
             <MessageRenderer 
               v-for="(message, index) in messages" 
-              :key="message.id || index" 
+              :key="message.message_id" 
               :message="message"
               :messages="messages" 
               :message-index="index"
