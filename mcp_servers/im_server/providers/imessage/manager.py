@@ -204,4 +204,10 @@ def get_imessage_manager(agent_id: str = "default", config: Optional[Dict[str, A
     global _imessage_manager
     if _imessage_manager is None:
         _imessage_manager = iMessageManager(agent_id, config=config)
+    elif config is not None:
+        # Update config if provided and different
+        if _imessage_manager.config != config:
+            logger.info(f"[iMessageManager] Updating config with new allowed_senders: {config.get('allowed_senders', [])}")
+            _imessage_manager.config = config
+            _imessage_manager.provider.allowed_senders = config.get("allowed_senders", [])
     return _imessage_manager
