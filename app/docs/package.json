@@ -1,0 +1,13 @@
+{
+  "name": "sage-wiki",
+  "version": "1.0.0",
+  "description": "Sage Desktop Wiki 文档",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0"
+  }
+}
