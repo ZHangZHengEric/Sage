@@ -276,3 +276,15 @@ async def download_session_file(session_id: str, file_path: str) -> Tuple[str, s
         mime_type = "application/octet-stream"
 
     return full_path, os.path.basename(full_path), mime_type
+
+async def update_conversation_title(session_id: str, title: str) -> Dict[str, Any]:
+    """更新会话标题"""
+    dao = models.ConversationDao()
+    success = await dao.update_title(session_id, title)
+    if not success:
+        raise SageHTTPException(
+            status_code=500,
+            detail=f"会话 {session_id} 不存在",
+            error_detail=f"Conversation '{session_id}' not found",
+        )
+    return {"session_id": session_id, "title": title}
