@@ -1,5 +1,5 @@
 <template>
-  <div class="prose prose-sm dark:prose-invert max-w-none break-words" v-html="renderedContent"></div>
+  <div class="prose prose-sm dark:prose-invert max-w-none break-words" v-html="renderedContent" @click="handleMarkdownClick"></div>
 </template>
 
 <script setup>
@@ -7,6 +7,7 @@ import {computed, nextTick, onMounted, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
+import { open } from '@tauri-apps/api/shell'
 import { unified } from 'unified'
 import rehypeParse from 'rehype-parse'
 import rehypePrism from 'rehype-prism-plus'
@@ -375,6 +376,68 @@ const convertVideoLinks = (html) => {
   return html
 }
 
+const unixAbsolutePathPattern = /^\/(Users|home|Volumes|private|tmp|var|opt|Applications|System|Library)\//
+const windowsAbsolutePathPattern = /^[a-zA-Z]:[\\/]/
+const fileProtocolPattern = /^file:\/\//i
+
+const normalizeLocalPath = (path) => {
+  if (!path) return ''
+  let normalized = String(path).trim()
+  if (fileProtocolPattern.test(normalized)) {
+    normalized = normalized.replace(/^file:\/\/\/?/i, '')
+  }
+  try {
+    normalized = decodeURIComponent(normalized)
+  } catch (error) {
+    normalized = normalized.replace(/%20/g, ' ')
+  }
+  if (/^[a-zA-Z]:\//.test(normalized)) {
+    return normalized
+  }
+  if (/^\/[a-zA-Z]:\//.test(normalized)) {
+    return normalized.slice(1)
+  }
+  if (!normalized.startsWith('/') && unixAbsolutePathPattern.test(`/${normalized}`)) {
+    return `/${normalized}`
+  }
+  return normalized
+}
+
+const isLocalAbsolutePath = (path) => {
+  if (!path) return false
+  const normalized = normalizeLocalPath(path)
+  return unixAbsolutePathPattern.test(normalized) || windowsAbsolutePathPattern.test(normalized)
+}
+
+const toFileUrl = (localPath) => {
+  if (windowsAbsolutePathPattern.test(localPath)) {
+    return `file:///${encodeURI(localPath.replace(/\\/g, '/'))}`
+  }
+  return `file://${encodeURI(localPath)}`
+}
+
+const convertLocalPathLinksToSystemOpen = (html) => {
+  return html.replace(
+    /<a([^>]*?)href="([^"]+)"([^>]*)>(.*?)<\/a>/gi,
+    (match, pre, href, post, text) => {
+      if (!isLocalAbsolutePath(href)) return match
+      const localPath = normalizeLocalPath(href)
+      return `
+        <a
+          ${pre}
+          href="${escapeHtml(href)}"
+          ${post}
+          data-local-path="${escapeHtml(localPath)}"
+          onclick="window.openMarkdownLocalPath(this); return false;"
+          class="text-primary underline underline-offset-4 hover:opacity-80 break-all"
+        >
+          ${text || localPath}
+        </a>
+      `
+    }
+  )
+}
+
 const preprocessContent = (content) => {
   if (!content) return ''
   return content.replace(
@@ -404,6 +467,7 @@ const renderedContent = computed(() => {
     // Post-processing
     html = convertVideoLinks(html)
     html = convertHttpLinksToDownload(html)
+    html = convertLocalPathLinksToSystemOpen(html)
     html = addImageDownloadButton(html)
 
     return DOMPurify.sanitize(html, {
@@ -420,6 +484,7 @@ const renderedContent = computed(() => {
       ALLOWED_ATTR: [
         'href', 'src', 'alt', 'title', 'class', 'id',
         'target', 'rel', 'controls', 'type', 'onclick',
+        'data-local-path',
         'width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width',
         'stroke-linecap', 'stroke-linejoin',
         'points', 'x1', 'y1', 'x2', 'y2', 'd', 'x', 'y', 'rx', 'ry',
@@ -450,10 +515,46 @@ const renderCharts = async () => {
   })
 }
 
+const resolveAnchorFromEvent = (event) => {
+  const rawTarget = event?.target
+  if (!rawTarget) return null
+  if (typeof rawTarget.closest === 'function') {
+    return rawTarget.closest('a')
+  }
+  if (rawTarget.parentElement && typeof rawTarget.parentElement.closest === 'function') {
+    return rawTarget.parentElement.closest('a')
+  }
+  return null
+}
+
+const handleMarkdownClick = async (event) => {
+  const target = resolveAnchorFromEvent(event)
+  if (!target) return
+  const localPath = target.getAttribute('data-local-path') || target.getAttribute('href') || ''
+  if (!isLocalAbsolutePath(localPath)) return
+  event.preventDefault()
+  if (typeof window !== 'undefined' && typeof window.openMarkdownLocalPath === 'function') {
+    await window.openMarkdownLocalPath(target)
+  }
+}
+
 // Global functions setup
 onMounted(() => {
   if (typeof window !== 'undefined') {
     window.downloadMarkdownImage = downloadImage
+    window.openMarkdownLocalPath = async (element) => {
+      const raw = element?.getAttribute('data-local-path') || element?.getAttribute('href') || ''
+      const localPath = normalizeLocalPath(raw)
+      if (!isLocalAbsolutePath(localPath)) {
+        if (raw) window.open(raw, '_blank')
+        return
+      }
+      try {
+        await open(localPath)
+      } catch (error) {
+        window.open(toFileUrl(localPath), '_blank')
+      }
+    }
     
     window.copyToClipboard = async (btn) => {
       const wrapper = btn.closest('.group')

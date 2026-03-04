@@ -18,6 +18,12 @@ class OneTimeTaskCreate(BaseModel):
     agent_id: str
     execute_at: datetime
 
+class OneTimeTaskUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    agent_id: Optional[str] = None
+    execute_at: Optional[datetime] = None
+
 class RecurringTaskUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
