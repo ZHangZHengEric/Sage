@@ -57,22 +57,29 @@ class FibreSubAgent:
             'recent_turns': budget_manager.recent_turns
         }
 
-        # Calculate workspace root for sub-session to ensure physical nesting
-        # The structure will be: parent_workspace/sub_sessions/{sub_session_id}
+        # Sub-agent has its own session_workspace for logs/state, but shares the same agent_workspace with parent
+        # Use sub_sessions subdirectory for session isolation, but share agent_workspace via system_context
         import os
         workspace_root = os.path.join(self.parent_context.session_workspace, "sub_sessions")
+        
+        # Prepare system_context with shared agent_workspace
+        # Use parent's virtual_workspace (host path) as the shared agent_host_workspace_path
+        sub_agent_system_context = self.parent_context.system_context.copy()
+        sub_agent_system_context["agent_host_workspace_path"] = self.parent_context.virtual_workspace
+        
+        logger.info(f"FibreSubAgent: Using workspace_root: {workspace_root}, shared agent_workspace: {self.parent_context.virtual_workspace}")
 
         self.sub_session_context = init_session_context(
             session_id=self.session_id,
             user_id=self.parent_context.user_id,
             workspace_root=workspace_root,
             # Inherit configuration from parent
-            context_budget_config=context_budget_config, 
+            context_budget_config=context_budget_config,
             tool_manager=self.parent_context.tool_manager,
             skill_manager=self.parent_context.skill_manager,
-            system_context=self.parent_context.system_context
+            system_context=sub_agent_system_context
         )
-        
+
         # 建立父子会话关系（用于级联状态传播）
         self.sub_session_context.set_parent_session(self.parent_context.session_id)
         self.parent_context.add_child_session(self.session_id)

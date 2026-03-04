@@ -314,25 +314,70 @@ class FibreOrchestrator:
             tasks: List of dicts with 'agent_id' and 'content'
         """
         import asyncio
-        
+
+        # Pre-validation: Check all session_ids before executing any task
+        validation_errors = []
+        for i, task in enumerate(tasks):
+            agent_id = task.get('agent_id')
+            session_id = task.get('session_id')
+
+            if not agent_id or not task.get('content'):
+                validation_errors.append(f"Task {i}: Invalid task format - missing agent_id or content")
+                continue
+
+            if agent_id not in self.sub_agents:
+                validation_errors.append(f"Task {i}: Agent '{agent_id}' not found")
+                continue
+
+            agent_def = self.sub_agents[agent_id]
+            parent_context = agent_def['parent_context']
+
+            # Check session validation
+            if 'sub_sessions' in parent_context.system_context:
+                existing_session_map = {s.get("id"): s for s in parent_context.system_context['sub_sessions']}
+
+                if session_id in existing_session_map:
+                    session_info = existing_session_map[session_id]
+                    registered_agent_id = session_info.get("agent_id")
+
+                    # Check if agent_id matches
+                    if registered_agent_id != agent_id:
+                        validation_errors.append(
+                            f"Task {i}: Session ID '{session_id}' is already bound to agent '{registered_agent_id}', "
+                            f"cannot be reused for agent '{agent_id}'"
+                        )
+                        continue
+
+                    # Check if this session is currently running
+                    session_status = session_info.get("status")
+                    if session_status == "running":
+                        validation_errors.append(
+                            f"Task {i}: Session ID '{session_id}' is currently running a task. "
+                            f"Please wait for it to complete or use a different session ID"
+                        )
+                        continue
+
+        # If any validation failed, return all errors immediately
+        if validation_errors:
+            error_msg = "Task validation failed:\n" + "\n".join(f"  - {err}" for err in validation_errors)
+            logger.warning(f"FibreOrchestrator: {error_msg}")
+            return error_msg
+
+        # All validations passed, execute tasks concurrently
         async def _run_single_task(task):
             agent_id = task.get('agent_id')
             content = task.get('content')
             session_id = task.get('session_id')
-            if not agent_id or not content:
-                return f"Invalid task format: {task}"
-            
             return await self.delegate_task(agent_id, content, session_id=session_id)
 
-        # Run all tasks concurrently
         results = await asyncio.gather(*[_run_single_task(t) for t in tasks])
-        
+
         # Format results
         final_output = []
         for i, result in enumerate(results):
             agent_id = tasks[i].get('agent_id')
             final_output.append(f"=== Result from {agent_id} ===\n{result}")
-            
+
         return "\n\n".join(final_output)
 
     async def delegate_task(self, agent_id, content, session_id):
@@ -353,13 +398,24 @@ class FibreOrchestrator:
             # 1. Strict Validation for Session Reuse
             if 'sub_sessions' in parent_context.system_context:
                 # Create a lookup map for existing sessions
-                existing_session_map = {s.get("id"): s.get("agent_id") for s in parent_context.system_context['sub_sessions']}
-                
+                existing_session_map = {s.get("id"): s for s in parent_context.system_context['sub_sessions']}
+
                 if sub_session_id in existing_session_map:
-                    registered_agent_id = existing_session_map[sub_session_id]
+                    session_info = existing_session_map[sub_session_id]
+                    registered_agent_id = session_info.get("agent_id")
+
+                    # Check if agent_id matches
                     if registered_agent_id != agent_id:
                         error_msg = (f"Error: Session ID '{sub_session_id}' is already bound to agent '{registered_agent_id}', "
                                      f"cannot be reused for agent '{agent_id}'. One session ID can only correspond to one agent ID.")
+                        logger.warning(f"FibreOrchestrator: {error_msg}")
+                        return error_msg
+
+                    # Check if this session is currently running
+                    session_status = session_info.get("status")
+                    if session_status == "running":
+                        error_msg = (f"Error: Session ID '{sub_session_id}' is currently running a task. "
+                                     f"Please wait for it to complete or use a different session ID.")
                         logger.warning(f"FibreOrchestrator: {error_msg}")
                         return error_msg
 
@@ -368,17 +424,24 @@ class FibreOrchestrator:
                  logger.warning(f"FibreOrchestrator: Provided session_id '{sub_session_id}' does not contain agent_id '{agent_id}'. This is discouraged.")
 
             logger.info(f"FibreOrchestrator: Using sub-session {sub_session_id} for agent {agent_id}")
-            
+
             # Record sub-session in parent's system context
             if 'sub_sessions' not in parent_context.system_context:
                 parent_context.system_context['sub_sessions'] = []
-            
-            existing_sessions = [s.get("id") for s in parent_context.system_context['sub_sessions']]
-            if sub_session_id not in existing_sessions:
+
+            # Update or add session info with running status
+            session_found = False
+            for s in parent_context.system_context['sub_sessions']:
+                if s.get("id") == sub_session_id:
+                    s["status"] = "running"
+                    session_found = True
+                    break
+
+            if not session_found:
                 parent_context.system_context['sub_sessions'].append({
                     "id": sub_session_id,
                     "agent_id": agent_id,
-                    "status": "active"
+                    "status": "running"
                 })
 
             sub_agent = FibreSubAgent(
@@ -476,8 +539,18 @@ class FibreOrchestrator:
                     return f"SubSessionID: {sub_session_id}\nSub-agent finished without calling 'sys_finish_task'. Aggregated response:\n{history_str}"
             except Exception as e:
                 logger.error(f"Error executing sub-agent task: {e}", exc_info=True)
+                # Update session status to error
+                for s in parent_context.system_context.get('sub_sessions', []):
+                    if s.get("id") == sub_session_id:
+                        s["status"] = "error"
+                        break
                 return f"Error executing sub-agent task: {e}"
             finally:
+                # Update session status to completed if still running
+                for s in parent_context.system_context.get('sub_sessions', []):
+                    if s.get("id") == sub_session_id and s.get("status") == "running":
+                        s["status"] = "completed"
+                        break
                 # Ensure sub-session state is saved
                 if sub_agent.sub_session_context:
                     try:
