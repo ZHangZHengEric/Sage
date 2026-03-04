@@ -16,12 +16,13 @@ async def initialize_db_connection():
             async with db_client._engine.begin() as conn:
                 from . import models
                 
-                # Check and drop outdated tables before creating new ones
-                from .db_schema import check_and_drop_outdated_tables
-                await conn.run_sync(check_and_drop_outdated_tables)
-                
+
                 # Create all tables
                 await conn.run_sync(models.Base.metadata.create_all)
+                # Check and update schema for existing tables
+                from .db_schema import sync_database_schema
+                await conn.run_sync(sync_database_schema)
+                
             logger.debug("数据库自动建表完成")
         try:
             # Load default provider settings first
