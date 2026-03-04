@@ -4,6 +4,7 @@ from typing import Dict, List, Set, Optional
 from dataclasses import dataclass, field
 from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
+from sagents.utils.lock_manager import safe_release
 
 @dataclass
 class SessionState:
@@ -43,8 +44,7 @@ class StreamManager:
                 # 即使复用，我们也不需要释放传入的新锁，因为调用方应该在发现 session 存在时处理
                 # 但这里简单起见，如果复用，我们需要释放传入的 lock，因为我们使用旧的 lock
                 if lock and lock != session.lock:
-                    if lock.locked():
-                        lock.release()
+                    await safe_release(lock, session_id, "复用会话释放新锁")
                 return
             
             # 如果已完成，或是旧的残留，清理掉旧的
@@ -83,11 +83,7 @@ class StreamManager:
             # 任务结束，释放业务锁
             if session.lock:
                 try:
-                    if hasattr(session.lock, "locked") and session.lock.locked():
-                        session.lock.release()
-                    elif isinstance(session.lock, dict):
-                         pass
-                    
+                    await safe_release(session.lock, session.session_id, "后台流结束清理")
                     delete_session_run_lock(session.session_id)
                     logger.info(f"Released lock for session {session.session_id}")
                 except Exception as e:
