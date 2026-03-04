@@ -119,12 +119,45 @@ class iMessageNotificationListener:
 
 class iMessageDatabasePoller:
     """Poll iMessage database for new messages (alternative method)."""
-    
+
     def __init__(self, message_handler: Callable[[Dict[str, Any]], None]):
         self.message_handler = message_handler
         self.running = False
         self.poller_thread: Optional[threading.Thread] = None
-        self._last_row_id = 0
+        # 初始化为当前最大 ROWID，避免获取历史消息
+        self._last_row_id = self._get_current_max_row_id()
+
+    def _get_current_max_row_id(self) -> int:
+        """获取当前数据库中的最大 ROWID，用于避免获取历史消息"""
+        try:
+            db_path = Path.home() / "Library" / "Messages" / "chat.db"
+            if not db_path.exists():
+                return 0
+
+            script = f'''
+                do shell script "sqlite3 {db_path} \\"
+                    SELECT MAX(ROWID) FROM message;\\""
+            '''
+
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                max_row_id = int(result.stdout.strip())
+                import logging
+                logger = logging.getLogger("iMessagePoller")
+                logger.info(f"[iMessage] Initialized with max ROWID: {max_row_id}")
+                return max_row_id
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("iMessagePoller")
+            logger.warning(f"[iMessage] Failed to get max ROWID: {e}")
+
+        return 0
         
     def start(self):
         """Start polling database."""
