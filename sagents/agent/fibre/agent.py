@@ -3,6 +3,7 @@ import uuid
 import time
 import traceback
 import logging
+import json
 
 from sagents.context.messages.message import MessageChunk
 from sagents.context.session_context import SessionContext
