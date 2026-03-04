@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sagents.context.session_context import delete_session_run_lock
+from sagents.utils.lock_manager import safe_release
 
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
@@ -97,10 +98,7 @@ async def stream_api_with_disconnect_check(
         # 清理资源
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
         try:
-            if hasattr(lock, "locked") and lock.locked():
-                await lock.release()
-            elif isinstance(lock, dict):
-                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
+            await safe_release(lock, session_id, "流结束清理")
 
             delete_session_run_lock(session_id)
             logger.bind(session_id=session_id).info("资源已清理")

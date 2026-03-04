@@ -14,6 +14,7 @@ from sagents.context.session_context import (
     get_session_context,
     get_session_run_lock,
 )
+from sagents.utils.lock_manager import safe_release
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, get_tool_manager
 from ... import models
@@ -380,9 +381,9 @@ async def prepare_session(request: StreamRequest):
     try:
         stream_service = SageStreamService(request)
         return  stream_service, lock
-    except Exception:
-        if acquired and lock.locked():
-            await lock.release()
+    except Exception as e:
+        if acquired:
+            await safe_release(lock, session_id, f"prepare_session 构造失败，保留原始异常: {type(e).__name__}")
         raise
 
 
