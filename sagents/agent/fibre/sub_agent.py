@@ -2,7 +2,7 @@ import logging
 import uuid
 import traceback
 from typing import Optional, AsyncGenerator, List
-from sagents.context.session_context import SessionContext, init_session_context
+from sagents.context.session_context import SessionContext, init_session_context, SessionStatus
 from sagents.context.session_context_manager import session_manager
 from sagents.agent.simple_agent import SimpleAgent
 from sagents.context.messages.message import MessageChunk, MessageRole
