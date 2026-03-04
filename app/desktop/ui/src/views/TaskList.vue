@@ -420,10 +420,9 @@ const handleEdit = (task) => {
 }
 
 const handleDelete = async (task) => {
-  if (confirm(t('common.confirmDelete'))) {
+  if (window.confirm(t('common.confirmDelete'))) {
     try {
       await taskAPI.deleteRecurringTask(task.id)
-      toast.success(t('common.deleteSuccess'))
       fetchTasks()
     } catch (error) {
       toast.error(error.message)
