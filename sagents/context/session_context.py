@@ -241,7 +241,8 @@ class SessionContext:
             cpu_time_limit=300,    # 5分钟，支持长时间安装
             memory_limit_mb=4096,  # 4GB，防止 OOM
             allowed_paths=self.external_paths,
-            macos_isolation_mode='subprocess'
+            macos_isolation_mode='subprocess',
+            linux_isolation_mode='subprocess'
         )
         logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         
@@ -999,6 +1000,53 @@ def get_sub_session_messages(session_id: str, sub_session_id: str) -> List[Messa
                 continue
     return messages
 
+def _load_saved_system_context(session_id: str, workspace_root: str) -> Optional[Dict[str, Any]]:
+    """从持久化文件加载保存的 system_context
+    
+    Args:
+        session_id: 会话ID
+        workspace_root: 工作空间根目录
+        
+    Returns:
+        保存的 system_context，如果没有找到则返回 None
+    """
+    try:
+        # 构建会话工作空间路径
+        session_workspace = os.path.join(workspace_root, session_id)
+        if not os.path.exists(session_workspace):
+            return None
+        
+        # 查找最新的 session_status_*.json 文件
+        existing_files = os.listdir(session_workspace)
+        status_files = [f for f in existing_files if f.startswith("session_status_") and f.endswith(".json")]
+        
+        if not status_files:
+            return None
+        
+        # 按序号排序，获取最新的文件
+        def get_file_index(filename):
+            try:
+                return int(filename.split("_")[2].split(".")[0])
+            except (ValueError, IndexError):
+                return -1
+        
+        latest_file = max(status_files, key=get_file_index)
+        file_path = os.path.join(session_workspace, latest_file)
+        
+        with open(file_path, "r") as f:
+            saved_data = json.load(f)
+        
+        saved_system_context = saved_data.get("system_context")
+        if saved_system_context:
+            logger.info(f"SessionContext: Loaded saved system_context from {latest_file} for session {session_id}")
+            return saved_system_context
+        
+        return None
+    except Exception as e:
+        logger.warning(f"SessionContext: Failed to load saved system_context for session {session_id}: {e}")
+        return None
+
+
 def init_session_context(
     session_id: str,
     workspace_root: str,
@@ -1018,6 +1066,21 @@ def init_session_context(
         if skill_manager:
             _active_sessions[session_id].skill_manager = skill_manager
         return _active_sessions[session_id]
+    
+    # 加载保存的 system_context（如果有），然后与新传入的合并
+    # 新传入的 system_context 优先级更高
+    saved_system_context = _load_saved_system_context(session_id, workspace_root)
+    if saved_system_context:
+        if system_context:
+            # 合并：保存的为基础，新传入的覆盖
+            merged_context = saved_system_context.copy()
+            merged_context.update(system_context)
+            system_context = merged_context
+            logger.info(f"SessionContext: Merged saved system_context with provided for session {session_id}")
+        else:
+            system_context = saved_system_context
+            logger.info(f"SessionContext: Using saved system_context for session {session_id}")
+    
     _active_sessions[session_id] = SessionContext(
         session_id,
         user_id,

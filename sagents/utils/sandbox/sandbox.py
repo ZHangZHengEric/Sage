@@ -8,6 +8,8 @@ Sandbox - 沙箱核心类
 """
 import sys
 import os
+import asyncio
+import threading
 from typing import Dict, Any, Optional, Callable, List
 
 from sagents.utils.logger import logger
@@ -103,11 +105,12 @@ class Sandbox:
             self.sandbox_dir = os.path.join(host_workspace, ".sandbox")
             self.venv_dir = os.path.join(self.sandbox_dir, "venv")
             os.makedirs(self.sandbox_dir, exist_ok=True)
-            self._ensure_venv()
+            # 在后台异步创建 venv，不阻塞初始化
+            self._ensure_venv_async()
             self._init_isolation()
-        
+
         logger.info(f"沙箱初始化完成")
-        
+
     def _resolve_linux_mode(self, mode: str) -> str:
         if mode != 'auto':
             return mode
@@ -115,13 +118,26 @@ class Sandbox:
         if result == 0:
             return 'bwrap'
         return 'subprocess'
-    
-    def _ensure_venv(self):
-        if not os.path.exists(self.venv_dir):
-            import venv
-            logger.info(f"创建虚拟环境: {self.venv_dir}")
-            os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
-            venv.create(self.venv_dir, with_pip=True)
+
+    def _ensure_venv_async(self):
+        """在后台异步创建虚拟环境，不阻塞初始化"""
+        if os.path.exists(self.venv_dir):
+            return  # 已存在，无需创建
+
+        def create_venv_in_background():
+            try:
+                import venv
+                logger.info(f"后台创建虚拟环境: {self.venv_dir}")
+                os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
+                venv.create(self.venv_dir, with_pip=True)
+                logger.info(f"虚拟环境创建完成: {self.venv_dir}")
+            except Exception as e:
+                logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
+
+        # 在后台线程中创建 venv
+        thread = threading.Thread(target=create_venv_in_background, daemon=True)
+        thread.start()
+        logger.info(f"虚拟环境创建任务已启动（后台）: {self.venv_dir}")
     
     def _init_isolation(self):
         from sagents.utils.sandbox.isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
