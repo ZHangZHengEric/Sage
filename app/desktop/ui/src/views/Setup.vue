@@ -404,7 +404,7 @@ const createDefaultAgent = async (providerId = null) => {
       description: '默认智能体',
       maxLoopCount: 100,
       memoryType: "session",
-      agentMode: "simple",
+      agentMode: "fibre",
       availableTools: [
         'todo_write', 
         'todo_read', 
