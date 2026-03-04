@@ -73,6 +73,10 @@ class FibreSubAgent:
             system_context=self.parent_context.system_context
         )
         
+        # 建立父子会话关系（用于级联状态传播）
+        self.sub_session_context.set_parent_session(self.parent_context.session_id)
+        self.parent_context.add_child_session(self.session_id)
+        logger.info(f"FibreSubAgent: Established parent-child relationship: {self.parent_context.session_id} -> {self.session_id}")
 
         # 1.0 Apply Tool Restrictions and Register FibreTools
         # We use ToolProxy to manage multiple ToolManagers (Isolated + Global/Parent) with priority.
@@ -226,6 +230,17 @@ You are a Sub-Agent named '{self.agent_name}', working as part of the Fibre Agen
         Yields chunks as they are generated.
         """
         await self._initialize_if_needed()
+        
+        # 检查父会话状态，如果父会话已中断，子会话也应该停止
+        if self.parent_context.status == SessionStatus.INTERRUPTED:
+            logger.warning(f"SubAgent {self.agent_name}: Parent session {self.parent_context.session_id} is interrupted, stopping execution")
+            yield [MessageChunk(
+                role=MessageRole.ASSISTANT.value,
+                content="任务已中断：父会话已被用户中断",
+                message_type="text",
+                session_id=self.session_id
+            )]
+            return
         
         # 1. Add User Message to Sub-Session
         msg = MessageChunk(
