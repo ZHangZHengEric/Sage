@@ -309,7 +309,7 @@ class SessionContext:
             with open(messages_path, "r") as f:
                 messages = json.load(f)
                 # 批量添加消息，避免重复调用 merge 操作
-                message_chunks = [MessageChunk(**message_item) for message_item in messages]
+                message_chunks = [MessageChunk.from_dict(message_item) for message_item in messages]
                 logger.info(f"SessionContext: 从messages.json加载{len(message_chunks)}条消息")
                 self.message_manager.messages = message_chunks
                 self.message_manager.stats['total_messages'] = len(message_chunks)

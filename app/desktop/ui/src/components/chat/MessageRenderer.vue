@@ -60,7 +60,7 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" />
       </div>
@@ -70,6 +70,14 @@
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
+          <button 
+            @click="handleCopy" 
+            class="opacity-0 group-hover:opacity-100 transition-opacity ml-2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+            :title="copied ? '已复制' : '复制内容'"
+          >
+            <Check v-if="copied" class="w-3 h-3 text-green-500" />
+            <Copy v-else class="w-3 h-3" />
+          </button>
         </div>
         <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
           <MarkdownRenderer
@@ -131,7 +139,7 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Copy, Check } from 'lucide-vue-next'
 import { getMessageLabel } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -407,10 +415,26 @@ const isCustomToolMessage = computed(() => {
     return props.message.tool_calls.some(call => !!TOOL_COMPONENT_MAP[call.function?.name])
 })
 
+const copied = ref(false)
+
+const handleCopy = async () => {
+  if (!props.message.content) return
+  try {
+    await navigator.clipboard.writeText(props.message.content)
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy text: ', err)
+  }
+}
+
 const getToolComponent = (toolName) => {
   if (!toolName) return ToolDefaultCard
   return TOOL_COMPONENT_MAP[toolName] || ToolDefaultCard
 }
+
 
 </script>
 

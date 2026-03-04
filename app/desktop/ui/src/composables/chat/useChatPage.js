@@ -210,8 +210,9 @@ export const useChatPage = (props) => {
     if (appended.message_id) {
       messageIdIndexMap.value.set(appended.message_id, messages.value.length - 1)
     }
-    shouldAutoScroll.value = true
-    nextTick(() => scrollToBottom(true))
+    // 不要强制重置 shouldAutoScroll，也不要强制滚动
+    // 只有当 shouldAutoScroll 为 true 时（即用户在底部），scrollToBottom 才会执行滚动
+    nextTick(() => scrollToBottom())
   }
 
   const addUserMessage = (content, sessionId) => {
@@ -268,6 +269,7 @@ export const useChatPage = (props) => {
     handleWorkspacePanel,
     downloadWorkspaceFile,
     downloadFile,
+    deleteFile,
     clearTaskAndWorkspace
   } = useChatWorkspace({
     t,
@@ -465,6 +467,7 @@ export const useChatPage = (props) => {
     handleToolClick,
     workspaceFiles,
     downloadFile,
+    deleteFile,
     updateConfig
   }
 }
