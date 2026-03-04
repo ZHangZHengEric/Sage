@@ -266,7 +266,7 @@ class ExecuteCommandTool:
         logger.info(f"🖥️ execute_shell_command开始执行 [{process_id}] - command: {command[:100]}{'...' if len(command) > 100 else ''}")
         
         # 获取实际工作目录
-        # 优先使用用户传入的 workdir，否则使用沙箱的 host_workspace
+        # 优先使用用户传入的 workdir，否则使用 sandbox.file_system.host_path（主机路径）
         actual_workdir = workdir
         logger.info(f"[execute_shell_command] 原始 workdir: {workdir}, session_id: {session_id}")
         if actual_workdir is None and session_id:
@@ -274,10 +274,23 @@ class ExecuteCommandTool:
             session_context = get_session_context(session_id)
             logger.info(f"[execute_shell_command] session_context: {session_context}")
             if session_context:
-                logger.info(f"[execute_shell_command] has sandbox: {hasattr(session_context, 'sandbox')}")
+                # 优先使用 sandbox.file_system.host_path（这是实际的主机路径）
                 if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                    actual_workdir = session_context.sandbox.host_workspace
-                    logger.info(f"[execute_shell_command] 使用沙箱 host_workspace: {actual_workdir}")
+                    if hasattr(session_context.sandbox, 'file_system') and session_context.sandbox.file_system:
+                        actual_workdir = session_context.sandbox.file_system.host_path
+                        logger.info(f"[execute_shell_command] 使用 sandbox.file_system.host_path: {actual_workdir}")
+                    else:
+                        # 如果没有 file_system，使用 host_workspace
+                        actual_workdir = session_context.sandbox.host_workspace
+                        logger.info(f"[execute_shell_command] 使用 sandbox.host_workspace: {actual_workdir}")
+                # 如果没有 sandbox，再尝试 agent_workspace
+                elif hasattr(session_context, 'agent_workspace'):
+                    agent_ws = session_context.agent_workspace
+                    if isinstance(agent_ws, str):
+                        actual_workdir = agent_ws
+                    elif hasattr(agent_ws, 'host_path'):
+                        actual_workdir = agent_ws.host_path
+                    logger.info(f"[execute_shell_command] 使用 agent_workspace: {actual_workdir}")
         logger.info(f"[execute_shell_command] 最终 actual_workdir: {actual_workdir}")
         
         try:
