@@ -62,13 +62,14 @@ export default defineConfig({
       text: '在 GitHub 上编辑此页'
     },
 
-    lastUpdated: {
-      text: '最后更新于',
-      formatOptions: {
-        dateStyle: 'short',
-        timeStyle: 'short'
-      }
-    },
+    // Disabled to avoid "spawn git ENOENT" error in Docker build where .git is missing
+    // lastUpdated: {
+    //   text: '最后更新于',
+    //   formatOptions: {
+    //     dateStyle: 'short',
+    //     timeStyle: 'short'
+    //   }
+    // },
 
     footer: {
       message: '基于 MIT 许可发布',
