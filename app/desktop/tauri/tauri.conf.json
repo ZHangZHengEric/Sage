@@ -14,7 +14,7 @@
       "all": false,
       "shell": {
         "all": false,
-        "open": true,
+        "open": "^((mailto:\\w+)|(tel:\\w+)|(https?://\\S+)|(file://\\S+)|(/[^\\s]+)|([a-zA-Z]:[\\\\/][^\\s]+)).*$",
         "sidecar": true,
         "scope": [
           {
