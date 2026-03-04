@@ -200,8 +200,6 @@ class AgentBase(ABC):
                 if 'content' not in msg:
                     msg['content'] = ''
 
-            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成")
-
             # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
             serializable_messages = self._remove_tool_call_without_id(serializable_messages)
             # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
@@ -330,12 +328,12 @@ class AgentBase(ABC):
             system_prefix += f"<role_definition>\n{role_content}\n</role_definition>\n"
 
         # 根据session_id获取session_context信息（用于获取system_context和agent_workspace）
-        
+
         if session_context:
             system_context_info = session_context.system_context.copy()
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
-            
-            if 'AGENT.MD' in include_sections:
+            use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
+            if "AGENT.MD" in include_sections and use_claw_mode:
                 # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
                 agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))
                 if agent_md_content:
@@ -346,7 +344,7 @@ class AgentBase(ABC):
                     if len(soul_content) > 300:
                         soul_content = soul_content[:300]+"……"
                     system_prefix += f"<soul>\n{soul_content}\n</soul>\n"
-                
+
                 user_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'USER.md'))
                 if user_content:
                     if len(user_content) > 300: 
@@ -368,20 +366,20 @@ class AgentBase(ABC):
             # 2. System Context
             if 'system_context' in include_sections:
                 system_prefix += "<system_context>\n"
-                
+
                 # Exclude external_paths from generic system_context display as they are handled separately
                 excluded_keys = {'active_skill_instruction', '可以访问的其他路径文件夹', 'external_paths'}
-                
+
                 for key, value in system_context_info.items():
                     if key in excluded_keys:
                         continue
-                        
+
                     if isinstance(value, (dict, list, tuple)):
                         # 如果值是字典、列表或元组，格式化显示
                         # 如果是元组，先转换为列表，确保序列化行为明确
                         if isinstance(value, tuple):
                             value = list(value)
-                        
+
                         # 将value转换为JSON字符串
                         formatted_val = json.dumps(value, ensure_ascii=False, indent=2)
                         system_prefix += f"  <{key}>\n{formatted_val}\n  </{key}>\n"
@@ -389,7 +387,7 @@ class AgentBase(ABC):
                         # 其他类型直接转换为字符串
                         system_prefix += f"  <{key}>{str(value)}</{key}>\n"
                 system_prefix += "</system_context>\n"
-            
+
             # 3. Active Skill
             if 'active_skill' in include_sections and active_skill_instruction:
                 system_prefix += f"<active_skill>\n{str(active_skill_instruction)}\n</active_skill>\n"
@@ -409,7 +407,7 @@ class AgentBase(ABC):
 
                 if file_system:
                     workspace_name = session_context.system_context.get('private_workspace', '')
-                    
+
                     system_prefix += "<workspace_files>\n"
                     # 使用PromptManager获取多语言文本
                     workspace_files = prompt_manager.get_prompt(
@@ -419,7 +417,7 @@ class AgentBase(ABC):
                         default=f"当前工作空间 {workspace_name} 的文件情况（最大深度3层）：\n"
                     )
                     system_prefix += workspace_files.format(workspace=workspace_name)
-                    
+
                     file_tree = file_system.get_file_tree(include_hidden=True,max_depth=3)
                     if not file_tree:
                         no_files = prompt_manager.get_prompt(
@@ -432,7 +430,7 @@ class AgentBase(ABC):
                     else:
                         system_prefix += file_tree
                     system_prefix += "</workspace_files>\n"
-                
+
                 # Fallback: 如果没有 file_system 对象但有 agent_workspace 路径 (兼容旧代码)
                 elif session_context.agent_workspace:
                     current_agent_workspace = session_context.agent_workspace
@@ -452,17 +450,17 @@ class AgentBase(ABC):
                     # 即使没有全局 Sandbox，我们也使用 SandboxFileSystem 的安全逻辑来展示文件
                     try:
                         from sagents.utils.sandbox.filesystem import SandboxFileSystem
-                        
+
                         fs_obj = None
                         if isinstance(current_agent_workspace, SandboxFileSystem):
-                                fs_obj = current_agent_workspace
+                            fs_obj = current_agent_workspace
                         elif isinstance(current_agent_workspace, str):
                             # 假设虚拟路径就是 /workspace
                             fs_obj = SandboxFileSystem(host_path=current_agent_workspace, virtual_path="/workspace")
-                        
+
                         if fs_obj:
                             file_tree = fs_obj.get_file_tree(include_hidden=True,max_depth=2)
-                            
+
                             if not file_tree:
                                 no_files = prompt_manager.get_prompt(
                                     'no_files_message',
@@ -483,14 +481,14 @@ class AgentBase(ABC):
                             default="当前工作空间下没有文件。\n"
                         )
                         system_prefix += no_files
-                    
+
                     system_prefix += "</workspace_files>\n"
 
                 # 4.1 External/Additional Paths
                 # Support accessing other directories on the host machine if specified in system_context
                 # Key: 'external_paths'
                 external_paths = session_context.system_context.get('external_paths')
-                
+
                 if external_paths and isinstance(external_paths, list):
                     system_prefix += "<external_paths>\n"
                     ext_paths_intro = prompt_manager.get_prompt(
@@ -504,16 +502,16 @@ class AgentBase(ABC):
                     # Ensure we have a file system object
                     fs_for_external = file_system
                     if not fs_for_external:
-                         # Try to create a temporary one
-                         try:
+                        # Try to create a temporary one
+                        try:
                             from sagents.utils.sandbox.filesystem import SandboxFileSystem
                             # We just need it for reading, host_path doesn't matter much if we provide root_path
                             # Use current working directory as a safe default if available, else /
                             fs_for_external = SandboxFileSystem(host_path=os.getcwd(), virtual_path="/workspace") 
-                         except Exception as e:
+                        except Exception as e:
                             logger.error(f"AgentBase: 创建外部路径文件系统时出错: {e}")
                             pass
-                    
+
                     if fs_for_external:
                         for ext_path in external_paths:
                             if isinstance(ext_path, str):
@@ -529,9 +527,9 @@ class AgentBase(ABC):
                                     except Exception as e:
                                         system_prefix += f"(Error listing files: {e})\n"
                                 else:
-                                     system_prefix += f"Path: {ext_path} (Not found)\n"
+                                    system_prefix += f"Path: {ext_path} (Not found)\n"
                                 system_prefix += "\n"
-                    
+
                     system_prefix += "</external_paths>\n"
 
             # 5. Available Skills
@@ -551,7 +549,7 @@ class AgentBase(ABC):
                         for skill in skill_infos:
                             system_prefix += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description}</skill_description>\n</skill>\n"
                         system_prefix += "</available_skills>\n"
-                        
+
                         # 获取技能使用说明
                         skills_hint = prompt_manager.get_prompt(
                             'skills_usage_hint',
@@ -560,7 +558,7 @@ class AgentBase(ABC):
                             default=""
                         )
                         if skills_hint:
-                             system_prefix += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
+                            system_prefix += f"<skill_usage>\n{skills_hint}\n</skill_usage>\n"
 
         return MessageChunk(
             role=MessageRole.SYSTEM.value,
@@ -835,7 +833,7 @@ class AgentBase(ABC):
             # 构造调用参数，确保 session_id 正确传递且不重复
             call_kwargs = arguments.copy()
             call_kwargs['session_id'] = session_id
-            
+
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=get_session_context(session_id),
@@ -1078,7 +1076,7 @@ class AgentBase(ABC):
                 # 移除complete_task工具
                 tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
                 return tool_names
-            
+
             # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
             available_tools_str = "\n".join([f"{i+1}. {tool['name']} - {tool['description'][:100]}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'    
 
@@ -1086,7 +1084,7 @@ class AgentBase(ABC):
             # messages_input = MessageManager.compress_messages(messages_input, budget_limit=10000)
             logger.info(f"AgentBase: messages_input 的token长度为{MessageManager.calculate_messages_token_length(messages_input)}")
             clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
-            
+
             logger.info(f"AgentBase: clean_messages的字符长度为{len(json.dumps(clean_messages, ensure_ascii=False, indent=2))}")
 
             # 重新获取agent_custom_system_prefix以支持动态语言切换
