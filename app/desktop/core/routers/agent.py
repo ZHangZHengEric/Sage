@@ -385,3 +385,32 @@ async def download_file(agent_id: str, request: Request):
         raise
 
 
+@agent_router.delete("/{agent_id}/file_workspace/delete")
+async def delete_file(agent_id: str, request: Request):
+    file_path = request.query_params.get("file_path")
+    logger.bind(agent_id=agent_id).info(f"Delete request: file_path={file_path}")
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+    workspace_path = sage_home / "agents" / agent_id
+
+    try:
+        if not workspace_path or not file_path:
+             raise SageHTTPException(status_code=500, detail="缺少必要的路径参数")
+        
+        full_file_path = os.path.join(workspace_path, file_path)
+        if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
+             raise SageHTTPException(status_code=500, detail="访问被拒绝：文件路径超出工作空间范围")
+        
+        if not os.path.exists(full_file_path):
+             raise SageHTTPException(status_code=500, detail=f"文件不存在: {file_path}")
+
+        if os.path.isfile(full_file_path):
+            os.remove(full_file_path)
+        elif os.path.isdir(full_file_path):
+            import shutil
+            shutil.rmtree(full_file_path)
+        
+        return await Response.succ(message=f"文件 {file_path} 已删除")
+    except Exception as e:
+        logger.bind(agent_id=agent_id).error(f"Delete failed: {e}")
+        raise

@@ -20,15 +20,27 @@
         </span>
       </div>
 
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-        @click.stop="$emit('download', item)"
-        :title="item.is_directory ? 'Download Folder' : 'Download File'"
-      >
-        <Download class="w-3.5 h-3.5" />
-      </Button>
+      <div class="flex items-center gap-1 ml-auto">
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+          @click.stop="$emit('download', item)"
+          :title="item.is_directory ? 'Download Folder' : 'Download File'"
+        >
+          <Download class="w-3.5 h-3.5" />
+        </Button>
+
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+          @click.stop="$emit('delete', item)"
+          :title="item.is_directory ? 'Delete Folder' : 'Delete File'"
+        >
+          <Trash2 class="w-3.5 h-3.5" />
+        </Button>
+      </div>
     </div>
 
     <div v-if="item.is_directory && isExpanded">
@@ -38,6 +50,7 @@
         :item="child" 
         :level="level + 1"
         @download="$emit('download', $event)"
+        @delete="$emit('delete', $event)"
       />
     </div>
   </div>
@@ -45,7 +58,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { File, Folder, ChevronRight, ChevronDown, Download, FileJson, FileCode, FileText, Image } from 'lucide-vue-next'
+import { File, Folder, ChevronRight, ChevronDown, Download, FileJson, FileCode, FileText, Image, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
 defineOptions({
@@ -63,7 +76,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['download'])
+defineEmits(['download', 'delete'])
 
 const isExpanded = ref(false)
 
