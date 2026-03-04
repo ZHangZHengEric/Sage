@@ -1,94 +1,16 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SageAI",
+  "version": "0.1.0",
+  "identifier": "com.sage.desktop",
   "build": {
     "beforeDevCommand": "cd ui && npm run dev",
     "beforeBuildCommand": "cd ui && npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../ui/dist"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/dist"
   },
-  "package": {
-    "productName": "SageAI",
-    "version": "0.1.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "all": false,
-        "open": "^((mailto:\\w+)|(tel:\\w+)|(https?://\\S+)|(file://\\S+)|(/[^\\s]+)|([a-zA-Z]:[\\\\/][^\\s]+)).*$",
-        "sidecar": true,
-        "scope": [
-          {
-            "name": "bin/sage-desktop-sidecar",
-            "sidecar": true,
-            "args": true
-          }
-        ]
-      },
-      "http": {
-        "all": true,
-        "request": true
-      },
-      "window": {
-        "all": true
-      },
-      "dialog": {
-        "all": true
-      },
-      "fs": {
-        "all": true,
-        "scope": ["$HOME/**", "$DOWNLOAD/**", "$DOCUMENT/**", "$DESKTOP/**"]
-      },
-      "path": {
-        "all": true
-      }
-    },
-    "systemTray": {
-      "iconPath": "icons/32x32.png",
-      "iconAsTemplate": false
-    },
-    "bundle": {
-      "active": true,
-      "category": "Productivity",
-      "copyright": "",
-      "deb": {
-        "depends": []
-      },
-      "externalBin": [],
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "identifier": "com.sage.desktop",
-      "longDescription": "",
-      "macOS": {
-        "entitlements": "Entitlements.plist",
-        "exceptionDomain": "",
-        "frameworks": [],
-        "providerShortName": null,
-        "signingIdentity": "SageAI Self Signed"
-      },
-      "resources": [
-        "../../skills",
-        "../../../mcp_servers",
-        "sidecar"
-      ],
-      "shortDescription": "",
-      "targets": ["app", "dmg", "updater"],
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
-      }
-    },
-    "security": {
-      "csp": null
-    },
-    "updater": {
-      "active": false
-    },
+  "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "fullscreen": false,
@@ -99,6 +21,55 @@
         "minWidth": 1024,
         "minHeight": 768
       }
-    ]
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "Productivity",
+    "copyright": "",
+    "externalBin": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "longDescription": "",
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
+    },
+    "resources": [
+      "../../skills",
+      "../../../mcp_servers",
+      "sidecar"
+    ],
+    "shortDescription": "",
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": "^((mailto:\\w+)|(tel:\\w+)|(https?://\\S+)|(file://\\S+)|(/[^\\s]+)|([a-zA-Z]:[\\\\/][^\\s]+)).*$"
+    }
   }
 }

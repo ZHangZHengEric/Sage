@@ -50,8 +50,8 @@ export const useChatWorkspace = ({
       }
       if (window.__TAURI__) {
         try {
-          const { save } = await import('@tauri-apps/api/dialog')
-          const { writeBinaryFile } = await import('@tauri-apps/api/fs')
+          const { save } = await import('@tauri-apps/plugin-dialog')
+          const { writeFile } = await import('@tauri-apps/plugin-fs')
           const { documentDir, join } = await import('@tauri-apps/api/path')
           const defaultDir = await documentDir()
           const defaultPath = await join(defaultDir, filename)
@@ -66,7 +66,7 @@ export const useChatWorkspace = ({
           })
           if (savePath) {
             const arrayBuffer = await blob.arrayBuffer()
-            await writeBinaryFile(savePath, new Uint8Array(arrayBuffer))
+            await writeFile(savePath, new Uint8Array(arrayBuffer))
             toast.success(t('chat.downloadSuccess') || 'Download successful')
           }
           return
