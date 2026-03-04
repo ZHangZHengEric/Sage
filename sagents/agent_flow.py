@@ -79,7 +79,7 @@ class AgentFlow:
                         logger.info(f"SAgent: 提供了 {len(available_workflows)} 个工作流模板: {list(available_workflows.keys())}")
                         session_context.workflow_manager.load_workflows_from_dict(available_workflows)
 
-                session_context.status = SessionStatus.RUNNING
+                session_context.set_status(SessionStatus.RUNNING)
                 initial_messages = self._prepare_initial_messages(input_messages)
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断

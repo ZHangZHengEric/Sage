@@ -69,6 +69,10 @@ class SessionContext:
         self.skill_manager = skill_manager
         self.custom_sub_agents: List[Dict[str, Any]] = []
         self.orchestrator: Optional[Any] = None  # Reference to the orchestrator (FibreOrchestrator)
+        
+        # 子会话管理（用于级联状态传播）
+        self.child_session_ids: List[str] = []  # 存储子会话ID列表
+        self.parent_session_id: Optional[str] = None  # 父会话ID（如果是子会话）
 
         # Ensure load_skill tool is registered if skills are available
         if self.skill_manager and self.skill_manager.list_skills() and self.tool_manager:
@@ -501,6 +505,62 @@ class SessionContext:
             "version": "1.0"
         }
         logger.debug("SessionContext: 设置agent配置信息完成")
+
+    def set_status(self, status: SessionStatus, cascade: bool = True) -> None:
+        """设置会话状态，支持级联传播到子会话
+
+        Args:
+            status: 新的会话状态
+            cascade: 是否级联传播到子会话，默认为 True
+        """
+        old_status = self.status
+        self.status = status
+        logger.info(f"SessionContext: Session {self.session_id} status changed from {old_status.value} to {status.value}")
+
+        # 级联传播到子会话（当状态为 INTERRUPTED 或 ERROR 时）
+        if cascade and status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR]:
+            if self.child_session_ids:
+                logger.info(f"SessionContext: Cascading status {status.value} to {len(self.child_session_ids)} child sessions")
+                for child_session_id in self.child_session_ids:
+                    try:
+                        # 从 _active_sessions 获取子会话上下文
+                        child_context = get_session_context(child_session_id)
+                        if child_context:
+                            child_context.set_status(status, cascade=False)  # 子会话不再级联，避免循环
+                            logger.info(f"SessionContext: Set child session {child_session_id} status to {status.value}")
+                        else:
+                            logger.warning(f"SessionContext: Child session {child_session_id} not found")
+                    except Exception as e:
+                        logger.error(f"SessionContext: Failed to cascade status to child session {child_session_id}: {e}")
+
+    def add_child_session(self, child_session_id: str) -> None:
+        """添加子会话ID
+
+        Args:
+            child_session_id: 子会话ID
+        """
+        if child_session_id not in self.child_session_ids:
+            self.child_session_ids.append(child_session_id)
+            logger.debug(f"SessionContext: Added child session {child_session_id} to session {self.session_id}")
+
+    def remove_child_session(self, child_session_id: str) -> None:
+        """移除子会话ID
+
+        Args:
+            child_session_id: 子会话ID
+        """
+        if child_session_id in self.child_session_ids:
+            self.child_session_ids.remove(child_session_id)
+            logger.debug(f"SessionContext: Removed child session {child_session_id} from session {self.session_id}")
+
+    def set_parent_session(self, parent_session_id: str) -> None:
+        """设置父会话ID
+
+        Args:
+            parent_session_id: 父会话ID
+        """
+        self.parent_session_id = parent_session_id
+        logger.debug(f"SessionContext: Set parent session {parent_session_id} for session {self.session_id}")
 
     async def _load_system_memories(self):
         """加载系统级记忆并注入到system_context

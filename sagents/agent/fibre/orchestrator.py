@@ -65,7 +65,7 @@ class FibreOrchestrator:
             logger.info(f"FibreOrchestrator: Starting session {session_id}")
             
             try:
-                session_context.status = SessionStatus.RUNNING
+                session_context.set_status(SessionStatus.RUNNING)
 
                 # 1. Setup Context
                 if system_context:
@@ -204,15 +204,15 @@ class FibreOrchestrator:
                 
                 # Check if interrupted or completed
                 if session_context.status != SessionStatus.INTERRUPTED:
-                    session_context.status = SessionStatus.COMPLETED
+                    session_context.set_status(SessionStatus.COMPLETED)
 
             except asyncio.CancelledError:
                 logger.warning(f"FibreOrchestrator: Session {session_id} interrupted (CancelledError)")
-                session_context.status = SessionStatus.INTERRUPTED
+                session_context.set_status(SessionStatus.INTERRUPTED)
                 raise
             except Exception as e:
                 logger.error(f"FibreOrchestrator: Session {session_id} failed: {e}", exc_info=True)
-                session_context.status = SessionStatus.ERROR
+                session_context.set_status(SessionStatus.ERROR)
                 raise
             finally:
                 pass
