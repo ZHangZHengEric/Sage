@@ -38,6 +38,26 @@ services:
       - sage-server
     mem_limit: 512m
     cpus: 0.5
+
+  sage-wiki:
+    restart: always
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.wiki
+      args:
+        VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
+    image: sage-wiki:v1.0
+    container_name: sage-wiki
+    ports:
+      - 30057:80
+    environment:
+      TZ: 'Asia/Shanghai'
+      VITE_SAGE_API_BASE_URL: ${SAGE_API_BASE_URL}
+    depends_on:
+      - sage-server
+    mem_limit: 512m
+    cpus: 0.5
+
   sage-mysql:
     restart: always
     image: docker.m.daocloud.io/mysql:8.4
