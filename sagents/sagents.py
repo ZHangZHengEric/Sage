@@ -13,6 +13,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.tasks.task_base import TaskStatus
 from sagents.context.session_context_manager import session_manager
 from sagents.utils.logger import logger
+from sagents.utils.lock_manager import safe_release
 from sagents.agent import (
     TaskRouterAgent,
     QuerySuggestAgent,
@@ -774,7 +775,7 @@ class SAgent:
         try:
             lock = get_session_run_lock(session_id)
             if lock and lock.locked():
-                await lock.release()
+                await safe_release(lock, session_id, "SAgent 会话清理")
             delete_session_run_lock(session_id)
         except Exception as e:
             logger.error(f"SAgent: 清理会话锁时出错: {e}", session_id=session_id)
