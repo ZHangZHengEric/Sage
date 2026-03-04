@@ -50,6 +50,7 @@ export const toolAPI = {
    * @param {string} mcpServerData.description - 描述
    * @param {string} [mcpServerData.command] - stdio 协议的命令
    * @param {Array<string>} [mcpServerData.args] - stdio 协议的参数
+   * @param {Object<string, string>} [mcpServerData.env] - stdio 协议的环境变量
    * @param {string} [mcpServerData.sse_url] - SSE 协议的 URL
    * @param {string} [mcpServerData.streamable_http_url] - Streamable HTTP 协议的 URL
    * @returns {Promise<Object>}
