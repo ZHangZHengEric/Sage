@@ -20,6 +20,7 @@ from ..services.conversation import (
     get_session_status,
     interrupt_session,
     download_session_file,
+    update_conversation_title,
 )
 
 # ============= 会话相关模型 =============
@@ -57,6 +58,17 @@ async def interrupt(session_id: str, request: Request, body: InterruptRequest = 
     message = body.message if body else "用户请求中断"
     data = await interrupt_session(session_id, message)
     return await Response.succ(message=f"会话 {session_id} 已中断", data={**data, "user_id": user_id})
+
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+
+@conversation_router.post("/api/conversations/{session_id}/title")
+async def update_title(session_id: str, request: Request, body: UpdateTitleRequest):
+    """更新会话标题"""
+    data = await update_conversation_title(session_id, body.title)
+    return await Response.succ(message=f"会话 {session_id} 标题已更新", data=data)
 
 
 @conversation_router.post("/api/sessions/{session_id}/tasks_status")
