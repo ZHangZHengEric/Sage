@@ -21,6 +21,110 @@ import traceback
 import time
 import os
 import sys
+import shutil
+import subprocess
+
+
+def _check_command_exists(command: str) -> bool:
+    """检查命令是否存在"""
+    return shutil.which(command) is not None
+
+
+async def _install_uvx() -> bool:
+    """自动安装 uvx (uv package manager)
+    
+    Returns:
+        bool: 安装是否成功
+    """
+    try:
+        logger.info("[Auto Install] uvx not found, attempting to install uv...")
+        
+        # 检查是否已经安装了 uv
+        if _check_command_exists("uv"):
+            logger.info("[Auto Install] uv is already installed")
+            return True
+        
+        # 尝试使用 pip 安装 uv
+        logger.info("[Auto Install] Installing uv via pip...")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", "uv",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode == 0:
+            logger.info("[Auto Install] Successfully installed uv via pip")
+            # 刷新 PATH
+            os.environ["PATH"] = os.environ.get("PATH", "")
+            return True
+        else:
+            logger.error(f"[Auto Install] Failed to install uv via pip: {stderr.decode()}")
+            
+            # 尝试使用官方安装脚本
+            logger.info("[Auto Install] Trying to install uv via official installer...")
+            import platform
+            system = platform.system().lower()
+            
+            if system == "darwin" or system == "linux":
+                # macOS 或 Linux
+                install_cmd = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+                process = await asyncio.create_subprocess_shell(
+                    install_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0:
+                    logger.info("[Auto Install] Successfully installed uv via official installer")
+                    # 添加 uv 到 PATH (通常安装在 ~/.local/bin)
+                    home = os.path.expanduser("~")
+                    uv_bin_path = os.path.join(home, ".local", "bin")
+                    if uv_bin_path not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = f"{uv_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+                    return True
+                else:
+                    logger.error(f"[Auto Install] Failed to install uv via official installer: {stderr.decode()}")
+            
+            return False
+            
+    except Exception as e:
+        logger.error(f"[Auto Install] Error during uvx installation: {e}")
+        return False
+
+
+def _ensure_command_available(command: str) -> bool:
+    """确保命令可用，如果不存在则尝试安装
+    
+    Args:
+        command: 命令名称 (如 'uvx', 'npx' 等)
+        
+    Returns:
+        bool: 命令是否可用
+    """
+    if _check_command_exists(command):
+        return True
+    
+    # 特殊处理 uvx/uv
+    if command in ["uvx", "uv"]:
+        # 异步安装 uv
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果事件循环正在运行，创建新任务
+                future = asyncio.ensure_future(_install_uvx())
+                # 这里不能直接等待，需要返回 False 让调用者重试
+                logger.info(f"[Auto Install] Installation of {command} started in background")
+                return False
+            else:
+                # 如果事件循环未运行，可以直接运行
+                return loop.run_until_complete(_install_uvx())
+        except Exception as e:
+            logger.error(f"[Auto Install] Error ensuring {command} available: {e}")
+            return False
+    
+    return False
 try:
     BaseExceptionGroup
 except NameError:
@@ -441,12 +545,20 @@ class ToolManager:
         bool_registered = False
         registered_tools = RegisteredToolList()
         logger.info(f"Registering MCP server: {server_name}")
+        logger.debug(f"MCP server config: {config}")
         if config.get("disabled", True):
             logger.debug(f"Server {server_name} is disabled, skipping")
             return bool_registered
         server_name = server_name.strip()
         server_params: Optional[Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]] = None
         try:
+            protocol_type = "stdio"
+            if "sse_url" in config:
+                protocol_type = "sse"
+            elif "url" in config or "streamable_http_url" in config:
+                protocol_type = "streamable_http"
+            logger.info(f"Detected protocol type for {server_name}: {protocol_type}")
+            
             if "sse_url" in config:
                 server_params = SseServerParameters(
                     url=config["sse_url"], api_key=config.get("api_key", None)
@@ -460,19 +572,63 @@ class ToolManager:
                     url=url_val
                 )
             else:
+                # stdio protocol
+                command = config.get("command")
+                args = config.get("args", [])
+                env = config.get("env", None)
+                logger.info(f"Creating StdioServerParameters for {server_name}")
+                logger.debug(f"  command: {command}")
+                logger.debug(f"  args: {args}")
+                logger.debug(f"  env: {env}")
+                
+                if not command:
+                    logger.error(f"Missing 'command' field in config for {server_name}")
+                    logger.error(f"Available config keys: {list(config.keys())}")
+                    return False
+                
+                # 检查命令是否存在，如果不存在尝试自动安装
+                if not _check_command_exists(command):
+                    logger.warning(f"Command '{command}' not found, attempting to install...")
+                    if command in ["uvx", "uv"]:
+                        # 对于 uvx/uv，尝试异步安装
+                        install_success = await _install_uvx()
+                        if not install_success:
+                            logger.error(f"Failed to install {command}. Please install it manually:")
+                            logger.error(f"  curl -LsSf https://astral.sh/uv/install.sh | sh")
+                            logger.error(f"  or: pip install uv")
+                            return False
+                        # 安装成功后，再次检查命令是否存在
+                        if not _check_command_exists(command):
+                            logger.error(f"Installation completed but '{command}' still not found in PATH")
+                            logger.error(f"Please restart the application or check your PATH configuration")
+                            return False
+                    else:
+                        logger.error(f"Command '{command}' not found and auto-installation is not supported")
+                        logger.error(f"Please install it manually")
+                        return False
+                
                 server_params = StdioServerParameters(
-                    command=config["command"],
-                    args=config.get("args", []),
-                    env=config.get("env", None),
+                    command=command,
+                    args=args,
+                    env=env,
                 )
             mcp_proxy = McpProxy()
             mcp_tools = await mcp_proxy.get_mcp_tools(server_name, server_params)
             for mcp_tool in mcp_tools:
                 await self._register_mcp_tool(server_name, mcp_tool, server_params)
                 registered_tools.append(mcp_tool)
+        except KeyError as e:
+            missing_key = str(e).strip("'")
+            logger.error(f"Missing required key '{missing_key}' in config for MCP server {server_name}")
+            logger.error(f"Full config: {config}")
+            return bool_registered
         except Exception as e:
             error_detail = _innermost_exception_message(e)
-            logger.warning(f"Error registering MCP server {server_name}: {error_detail}")
+            logger.error(f"Error registering MCP server {server_name}: {error_detail}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Full config: {config}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return bool_registered
         bool_registered = True
         logger.info(f"Successfully registered MCP server: {server_name}")
