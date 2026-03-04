@@ -68,8 +68,12 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
 
         # Only end/detach if token exists (not already handled by error handler)
         if token is not None:
-            span.end()
-            context.detach(token)
+            try:
+                span.end()
+                context.detach(token)
+            except RuntimeError as e:
+                # Token may have already been used/detached in a different context
+                logger.warning(f"OpenTelemetry: Failed to detach context (may be already detached): {e}")
 
         # Always remove from stack
         _span_token_stack.set(current_stack[:-1])
