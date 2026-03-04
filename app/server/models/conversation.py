@@ -180,3 +180,14 @@ class ConversationDao(BaseDao):
             conversation.updated_at = datetime.now()
             await session.merge(conversation)
             return True
+
+    async def update_title(self, session_id: str, title: str) -> bool:
+        db = await self._get_db()
+        async with db.get_session() as session:
+            conversation = await session.get(Conversation, session_id)
+            if not conversation:
+                return False
+            conversation.title = title
+            conversation.updated_at = datetime.now()
+            await session.merge(conversation)
+            return True

@@ -35,6 +35,7 @@ WHITELIST_API_PATHS = frozenset(
         "/api/files/logs/preview",
         "/api/conversations",
         "/api/conversations/{conversation_id}",
+        "/api/conversations/{conversation_id}/title",
         "/api/conversations/{conversation_id}/messages",
         "/api/share/conversations/{conversation_id}/messages",
         "/api/sessions/{session_id}/interrupt",
