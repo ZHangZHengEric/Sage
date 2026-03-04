@@ -298,7 +298,7 @@ class SAgent:
             # 标记会话错误
             session_context = get_session_context(session_id)
             if session_context:
-                session_context.status = SessionStatus.ERROR
+                session_context.set_status(SessionStatus.ERROR)
                 async for message_chunks in self._handle_workflow_error(e):
                     session_context.add_messages(message_chunks)
                     yield message_chunks
@@ -423,7 +423,7 @@ class SAgent:
                     max_loop_count=max_loop_count,
                 )
 
-                session_context.status = SessionStatus.RUNNING
+                session_context.set_status(SessionStatus.RUNNING)
                 initial_messages = self._prepare_initial_messages(input_messages)
 
                 # 判断initial_messages 的message 是否已经存在，没有的话添加，通过message_id 来进行判断
@@ -564,7 +564,7 @@ class SAgent:
 
                 # 检查最终状态，如果不是中断状态则标记为完成
                 if session_context.status != SessionStatus.INTERRUPTED:
-                    session_context.status = SessionStatus.COMPLETED
+                    session_context.set_status(SessionStatus.COMPLETED)
                 else:
                     logger.warning(f"SAgent: 会话被中断，会话ID: {session_id}")
 
@@ -726,7 +726,7 @@ class SAgent:
     def interrupt_session(self, session_id: str, message: str = "用户请求中断") -> bool:
         session_context_ = get_session_context(session_id=session_id)
         if session_context_:
-            session_context_.status = SessionStatus.INTERRUPTED
+            session_context_.set_status(SessionStatus.INTERRUPTED)
             return True
         return False
 

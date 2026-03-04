@@ -3,6 +3,7 @@ from .file_parser_tool import FileParserTool
 from .file_system_tool import FileSystemTool
 from .memory_tool import MemoryTool
 from .task_interruption_tool import TaskInterruptionTool
+from .web_fetcher_tool import WebFetcherTool
 
 __all__ = [
     'ExecuteCommandTool',
@@ -10,4 +11,5 @@ __all__ = [
     'FileSystemTool',
     'MemoryTool',
     'TaskInterruptionTool',
+    'WebFetcherTool',
 ]
