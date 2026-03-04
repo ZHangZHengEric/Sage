@@ -146,3 +146,17 @@ class TaskDao(BaseDao):
         """创建一次性任务"""
         await self.insert(task)
         return task
+
+    async def get_one_time_task(self, task_id: int) -> Optional[Task]:
+        """获取单个一次性任务"""
+        return await self.get_by_id(Task, task_id)
+
+    async def update_one_time_task(self, task: Task) -> Task:
+        """更新一次性任务"""
+        task.updated_at = datetime.now()
+        await self.save(task)
+        return task
+
+    async def delete_one_time_task(self, task_id: int) -> bool:
+        """删除一次性任务"""
+        return await self.delete_by_id(Task, task_id)

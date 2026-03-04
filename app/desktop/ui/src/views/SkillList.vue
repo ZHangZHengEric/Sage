@@ -214,6 +214,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -232,6 +233,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'vue-sonner'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 // Composables
 const { t } = useLanguage()
@@ -249,6 +251,7 @@ const importing = ref(false)
 const importError = ref('')
 const fileInput = ref(null)
 const currentUser = ref({ userid: '', role: 'user' })
+const confirmDialogRef = ref(null)
 
 const showEditModal = ref(false)
 const editingSkill = ref(null)
@@ -336,7 +339,8 @@ const loadSkills = async () => {
 
 const deleteSkill = async (skill) => {
   if (!canDelete(skill)) return
-  if (!confirm(t('skills.deleteConfirm', { name: skill.name }) || 'Are you sure you want to delete this skill?')) return
+  const confirmed = await confirmDialogRef.value.confirm(t('skills.deleteConfirm', { name: skill.name }) || 'Are you sure you want to delete this skill?')
+  if (!confirmed) return
   
   try {
     loading.value = true
