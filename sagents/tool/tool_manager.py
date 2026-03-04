@@ -903,9 +903,9 @@ class ToolManager:
                                          
                                          host_todo_path = None
                                          if isinstance(session_context.agent_workspace, str):
-                                             host_todo_path = os.path.join(session_context.agent_workspace, "todo_list.md")
+                                             host_todo_path = os.path.join(session_context.agent_workspace, f"TODO_LIST_{session_id}.md")
                                          elif hasattr(session_context.agent_workspace, 'host_path'):
-                                             host_todo_path = os.path.join(session_context.agent_workspace.host_path, "todo_list.md")
+                                             host_todo_path = os.path.join(session_context.agent_workspace.host_path, f"TODO_LIST_{session_id}.md")
                                          
                                          if host_todo_path and os.path.exists(host_todo_path):
                                              with open(host_todo_path, 'r', encoding='utf-8') as f:
