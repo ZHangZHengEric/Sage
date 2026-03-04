@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import os
 import time
 from typing import Dict, Any
@@ -46,6 +47,25 @@ class UnifiedLock:
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.release()
+
+
+async def safe_release(lock: Any, session_id: str, context: str) -> bool:
+    try:
+        release_method = getattr(lock, "release", None)
+        if release_method is None:
+            logger.bind(session_id=session_id).warning(
+                f"释放会话锁失败 - {context}: lock对象不支持release"
+            )
+            return False
+        release_result = release_method()
+        if inspect.isawaitable(release_result):
+            await release_result
+        return True
+    except Exception as e:
+        logger.bind(session_id=session_id).warning(
+            f"释放会话锁失败 - {context}: {type(e).__name__}: {e}"
+        )
+        return False
 
 
 class LockManager:
