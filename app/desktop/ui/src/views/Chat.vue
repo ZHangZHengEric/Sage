@@ -92,7 +92,7 @@
       />
 
       <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles"
-        @download-file="downloadFile" @close="showWorkspace = false" />
+        @download-file="downloadFile" @delete-file="deleteFile" @close="showWorkspace = false" />
 
       <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
         @config-change="updateConfig" @close="showSettings = false" />
@@ -157,6 +157,7 @@ const {
   handleToolClick,
   workspaceFiles,
   downloadFile,
+  deleteFile,
   updateConfig
 } = useChatPage(props)
 </script>

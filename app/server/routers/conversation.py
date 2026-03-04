@@ -20,6 +20,7 @@ from ..services.conversation import (
     get_session_status,
     interrupt_session,
     download_session_file,
+    delete_session_file,
     update_conversation_title,
 )
 
@@ -107,6 +108,18 @@ async def download_file(session_id: str, request: Request):
         )
     except Exception as e:
         logger.bind(session_id=session_id).error(f"Download failed: {e}")
+        raise
+
+
+@conversation_router.delete("/api/sessions/{session_id}/file_workspace/delete")
+async def delete_file(session_id: str, request: Request):
+    file_path = request.query_params.get("file_path")
+    logger.bind(session_id=session_id).info(f"Delete request: file_path={file_path}")
+    try:
+        await delete_session_file(session_id, file_path)
+        return await Response.succ(message=f"文件 {file_path} 已删除")
+    except Exception as e:
+        logger.bind(session_id=session_id).error(f"Delete failed: {e}")
         raise
 
 
