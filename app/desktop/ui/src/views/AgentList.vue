@@ -169,6 +169,7 @@
       v-model:visible="showAuthModal"
       :agentId="authAgentId"
     />
+    <AppConfirmDialog ref="confirmDialogRef" />
 
   </div>
 </template>
@@ -190,6 +191,7 @@ import { skillAPI } from '../api/skill.js'
 import MarkdownRenderer from '../components/chat/MarkdownRenderer.vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { dump } from 'js-yaml'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 // UI Components
 import { Button } from '@/components/ui/button'
@@ -215,6 +217,7 @@ const usageAgent = ref(null)
 const usageActiveTab = ref('curl')
 const usageCodeMap = ref({ curl: '', python: '', go: '' })
 const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
+const confirmDialogRef = ref(null)
 
 // Export Dialog State
 const showExportDialog = ref(false)
@@ -372,7 +375,7 @@ const handleDelete = async (agent) => {
     return
   }
 
-  const confirmed = window.confirm(t('agent.deleteConfirm').replace('{name}', agent.name))
+  const confirmed = await confirmDialogRef.value.confirm(t('agent.deleteConfirm').replace('{name}', agent.name))
   if (!confirmed) return
 
   try {
@@ -430,8 +433,8 @@ const confirmExport = async () => {
   // 尝试使用 Tauri API
   if (window.__TAURI__) {
     try {
-      const { save } = await import('@tauri-apps/api/dialog')
-      const { writeTextFile } = await import('@tauri-apps/api/fs')
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
       const { documentDir, join } = await import('@tauri-apps/api/path')
       
       const defaultDir = await documentDir()
@@ -522,8 +525,8 @@ const handleImport = async () => {
   // 尝试使用 Tauri API
   if (window.__TAURI__) {
     try {
-      const { open } = await import('@tauri-apps/api/dialog')
-      const { readTextFile } = await import('@tauri-apps/api/fs')
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const { readTextFile } = await import('@tauri-apps/plugin-fs')
       const { documentDir } = await import('@tauri-apps/api/path')
       
       const defaultDir = await documentDir()

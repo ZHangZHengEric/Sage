@@ -257,6 +257,7 @@
         </div>
       </DialogContent>
     </Dialog>
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -275,6 +276,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { toast } from 'vue-sonner'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 import { ChevronUp, ChevronDown } from 'lucide-vue-next'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -300,6 +302,7 @@ const isGridExpanded = ref(true)
 const isEditMode = ref(false)
 const editingServerName = ref('')
 const mcpDetails = ref({})
+const confirmDialogRef = ref(null)
 
 // Computed
 const filteredTools = computed(() => {
@@ -510,7 +513,8 @@ const canManage = (tool) => {
 const handleDeleteMcpTool = async (sourceName) => {
   const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
 
-  if (!confirm(t('tools.deleteConfirm', { name: serverName }) || 'Are you sure you want to remove this MCP server?')) {
+  const confirmed = await confirmDialogRef.value.confirm(t('tools.deleteConfirm', { name: serverName }) || 'Are you sure you want to remove this MCP server?')
+  if (!confirmed) {
     return
   }
 
