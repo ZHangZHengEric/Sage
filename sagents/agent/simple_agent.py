@@ -308,6 +308,14 @@ class SimpleAgent(AgentBase):
         if session_context.status == SessionStatus.INTERRUPTED:
             logger.info("SimpleAgent: 跳过执行，session上下文状态为中断")
             return True
+        # 检查父会话状态（如果是子会话）
+        if hasattr(session_context, 'parent_session_id') and session_context.parent_session_id:
+            parent_context = get_session_context(session_context.parent_session_id)
+            if parent_context and parent_context.status == SessionStatus.INTERRUPTED:
+                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为中断")
+                # 同时更新子会话状态
+                session_context.set_status(SessionStatus.INTERRUPTED, cascade=False)
+                return True
         return False
 
     async def _call_llm_and_process_response(self,

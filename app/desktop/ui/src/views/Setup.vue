@@ -420,7 +420,8 @@ const createDefaultAgent = async (providerId = null) => {
         'delete_task',
         'complete_task',
         'enable_task',
-        'get_task_details'
+        'get_task_details',
+        'fetch_webpages'
       ],
       availableSkills: skills.value.map(s => s.name),
       systemPrefix: systemPrompt,
