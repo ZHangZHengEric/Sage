@@ -196,7 +196,7 @@ class AgentFlow:
             if not isinstance(msg, (dict, MessageChunk)):
                 raise ValueError("每个消息必须是字典或MessageChunk类型")
         # 对dict 的消息输入，转化成MessageChunk
-        input_messages = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in input_messages]
+        input_messages = [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in input_messages]
         # 清理过长的消息历史
         logger.info(f"SAgent: 初始化消息数量: {len(input_messages)}")
         return input_messages

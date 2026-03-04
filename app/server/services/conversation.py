@@ -277,6 +277,40 @@ async def download_session_file(session_id: str, file_path: str) -> Tuple[str, s
 
     return full_path, os.path.basename(full_path), mime_type
 
+async def delete_session_file(session_id: str, file_path: str) -> bool:
+    """
+    删除会话文件或目录
+
+    :param session_id: 会话ID
+    :param file_path: 相对文件路径
+    :return: 是否删除成功
+    """
+    workspace_root = _get_workspace_root()
+    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
+    
+    # 路径安全校验
+    full_path = resolve_download_path(workspace_path, file_path)
+    
+    try:
+        if os.path.isfile(full_path):
+            os.remove(full_path)
+        elif os.path.isdir(full_path):
+            shutil.rmtree(full_path)
+        else:
+            raise SageHTTPException(
+                status_code=500,
+                detail=f"路径不存在: {file_path}",
+                error_detail=f"Path not found: {file_path}",
+            )
+        return True
+    except Exception as e:
+        logger.error(f"删除文件失败: {e}")
+        raise SageHTTPException(
+            status_code=500,
+            detail=f"删除文件失败: {str(e)}",
+            error_detail=f"Failed to delete file: {str(e)}",
+        )
+
 async def update_conversation_title(session_id: str, title: str) -> Dict[str, Any]:
     """更新会话标题"""
     dao = models.ConversationDao()

@@ -210,8 +210,8 @@ class MessageManager:
             new_messages: 新消息列表
             old_messages: 旧消息列表
         """
-        new_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in new_messages]
-        old_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in old_messages]
+        new_messages_chunks = [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in new_messages]
+        old_messages_chunks = [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in old_messages]
         for new_message in new_messages_chunks:
             old_messages_chunks = MessageManager.merge_new_message_old_messages(new_message,old_messages_chunks)
         return old_messages_chunks
@@ -230,7 +230,7 @@ class MessageManager:
         token_length = 0
         for message in messages:
             if isinstance(message, dict):
-                message = MessageChunk(**message)
+                message = MessageChunk.from_dict(message)
             token_length += MessageManager.calculate_str_token_length(message.get_content() or '')
         return token_length
 
