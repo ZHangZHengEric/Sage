@@ -26,7 +26,15 @@
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       </div>
       <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none">
+        <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
+          <button 
+            @click="handleCopy" 
+            class="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+            :title="copied ? '已复制' : '复制内容'"
+          >
+            <Check v-if="copied" class="w-3 h-3 text-green-500" />
+            <Copy v-else class="w-3 h-3" />
+          </button>
           {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
         </div>
         <div class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
