@@ -675,7 +675,7 @@ class SAgent:
             if not isinstance(msg, (dict, MessageChunk)):
                 raise ValueError("每个消息必须是字典或MessageChunk类型")
         # 对dict 的消息输入，转化成MessageChunk
-        input_messages = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in input_messages]
+        input_messages = [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in input_messages]
         # 清理过长的消息历史
         return input_messages
 

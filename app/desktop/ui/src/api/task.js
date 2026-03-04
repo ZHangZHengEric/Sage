@@ -105,6 +105,25 @@ class TaskAPI extends BaseAPI {
 
     return response.blob()
   }
+
+  /**
+   * 删除文件
+   * @param {string} agentId - Agent ID (optional)
+   * @param {string} sessionId - Session ID (optional)
+   * @param {string} filePath - 文件路径
+   * @returns {Promise<Object>}
+   */
+  deleteWorkspaceFile(agentId, sessionId, filePath) {
+    let url = ''
+    if (agentId) {
+      url = `/api/agent/${agentId}/file_workspace/delete?file_path=${encodeURIComponent(filePath)}`
+    } else if (sessionId) {
+      url = `/api/sessions/${sessionId}/file_workspace/delete?file_path=${encodeURIComponent(filePath)}`
+    } else {
+      throw new Error('agentId or sessionId is required')
+    }
+    return this.delete(url)
+  }
 }
 
 export const taskAPI = new TaskAPI()
