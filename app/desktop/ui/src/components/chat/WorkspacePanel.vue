@@ -21,6 +21,7 @@
             :key="node.path" 
             :item="node" 
             @download="handleDownload"
+            @delete="handleDelete"
           />
         </div>
         <div v-else class="flex flex-col items-center justify-center py-8 text-muted-foreground">
@@ -45,7 +46,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'downloadFile'])
+const emit = defineEmits(['close', 'downloadFile', 'deleteFile'])
 
 const { t } = useLanguage()
 
@@ -101,6 +102,10 @@ const fileTree = computed(() => {
 
 const handleDownload = (item) => {
   emit('downloadFile', item)
+}
+
+const handleDelete = (item) => {
+  emit('deleteFile', item)
 }
 </script>
 

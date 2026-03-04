@@ -255,7 +255,7 @@ class FibreOrchestrator:
         if isinstance(input_messages, list):
             for m in input_messages:
                 if isinstance(m, dict):
-                    msgs.append(MessageChunk(**m))
+                    msgs.append(MessageChunk.from_dict(m))
                 else:
                     msgs.append(m)
         return msgs
