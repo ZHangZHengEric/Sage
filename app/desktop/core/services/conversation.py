@@ -28,7 +28,7 @@ async def interrupt_session(
         logger.bind(session_id=session_id).info("会话不存在或者已完成")
         return {"session_id": session_id}
 
-    session_context.status = SessionStatus.INTERRUPTED
+    session_context.set_status(SessionStatus.INTERRUPTED)
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
 

@@ -471,12 +471,13 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
                 available_workflows=config.get('available_workflows'),
                 system_context=config.get('system_context'),
                 context_budget_config=context_budget_config,
-                max_loop_count=config.get('max_loop_count', 10)
+                max_loop_count=config.get('max_loop_count', 100)
             ):
                 for chunk in chunks:
                     if isinstance(chunk, MessageChunk):
                         all_chunks.append(deepcopy(chunk))
-                        if chunk.content is not None or chunk.type:
+                        # 处理 content 或 tool_calls
+                        if chunk.content is not None or chunk.type or chunk.tool_calls:
                             agent_name = chunk.agent_name or "FibreAgent"
                             chunk_session_id = chunk.session_id or session_id
                             session_states = active_states.setdefault(chunk_session_id, {"order": [], "messages": {}})
@@ -497,6 +498,19 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
                                 content_to_add = str(chunk.content)
                                 # 始终追加内容，避免相同 message_id 的内容被覆盖
                                 state['content'] += content_to_add
+                            # 处理 tool_calls 显示
+                            if chunk.tool_calls:
+                                for tool_call in chunk.tool_calls:
+                                    if hasattr(tool_call, 'function'):
+                                        tool_name = tool_call.function.name if hasattr(tool_call.function, 'name') else None
+                                        tool_args = tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else None
+                                    else:
+                                        tool_name = tool_call.get('function', {}).get('name')
+                                        tool_args = tool_call.get('function', {}).get('arguments')
+                                    if tool_name:
+                                        state['content'] += f"\n[Tool Call: {tool_name}]"
+                                        if tool_args:
+                                            state['content'] += f"\nArgs: {tool_args}"
                             ensure_panel(chunk_session_id)
                             refresh_all()
             main_session_chunks = [
