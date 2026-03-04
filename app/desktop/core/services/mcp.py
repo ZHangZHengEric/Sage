@@ -19,6 +19,9 @@ def _build_server_config(
     streamable_http_url: str,
     sse_url: str,
     api_key: str,
+    command: str,
+    args: List[str],
+    env: Dict[str, str],
     disabled: bool = False,
 ) -> Dict[str, Any]:
     """从请求构建服务器配置字典，去除空值"""
@@ -32,6 +35,12 @@ def _build_server_config(
         server_config["sse_url"] = sse_url
     if api_key and api_key.strip():
         server_config["api_key"] = api_key
+    if command and command.strip():
+        server_config["command"] = command
+    if args:
+        server_config["args"] = args
+    if env:
+        server_config["env"] = env
     return server_config
 
 
@@ -41,14 +50,23 @@ async def add_mcp_server(
     streamable_http_url: str,
     sse_url: str,
     api_key: str,
+    command: str,
+    args: List[str],
+    env: Dict[str, str],
     disabled: bool = False,
 ) -> str:
     """添加 MCP 服务器并保存到数据库，返回响应数据字典"""
+
+    logger.info(f"[MCP Add] Starting to add MCP server: {name}")
+    logger.info(f"[MCP Add] Protocol: {protocol}")
+    logger.debug(f"[MCP Add] command: {command}, args: {args}, env: {env}")
+    logger.debug(f"[MCP Add] streamable_http_url: {streamable_http_url}, sse_url: {sse_url}")
 
     dao = models.MCPServerDao()
     # 检查服务器名称是否已存在
     existing_server = await dao.get_by_name(name)
     if existing_server:
+        logger.warning(f"[MCP Add] Server '{name}' already exists")
         raise SageHTTPException(
             status_code=500,
             detail=f"MCP服务器 '{name}' 已存在",
@@ -56,18 +74,26 @@ async def add_mcp_server(
         )
     # 注册到全局工具管理器
     server_config = _build_server_config(
-        name, protocol, streamable_http_url, sse_url, api_key, disabled
+        name, protocol, streamable_http_url, sse_url, api_key, command, args, env, disabled
     )
+    logger.info(f"[MCP Add] Built server_config: {server_config}")
+
     tm = get_tool_manager()
+    logger.info(f"[MCP Add] Calling tool_manager.register_mcp_server for {name}")
     success = await tm.register_mcp_server(name, server_config)
+    logger.info(f"[MCP Add] tool_manager.register_mcp_server returned: {success}")
+
     if not success:
+        logger.error(f"[MCP Add] Failed to register MCP server {name} in tool_manager")
         raise SageHTTPException(
             status_code=500,
             detail=f"MCP server {name} 注册失败",
             error_detail="Tool manager registration failed",
         )
     # 保存到数据库
+    logger.info(f"[MCP Add] Saving MCP server {name} to database")
     await dao.save_mcp_server(name=name, config=server_config)
+    logger.info(f"[MCP Add] Successfully added MCP server: {name}")
     return name
 
 
