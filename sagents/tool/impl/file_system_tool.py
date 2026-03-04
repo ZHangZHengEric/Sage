@@ -464,6 +464,19 @@ class FileSystemTool:
                     pattern = re.compile(re.escape(search_pattern), re.IGNORECASE)
                     new_content, replace_count = pattern.subn(replacement, original_content)
             
+            # 如果没有匹配项，返回失败状态
+            if replace_count == 0:
+                return {
+                    "status": "error",
+                    "message": f"未找到匹配项，未进行任何替换",
+                    "statistics": {
+                        "replacements": 0,
+                        "original_length": len(original_content),
+                        "new_length": len(original_content),
+                        "length_change": 0
+                    }
+                }
+            
             # 写入修改后的内容
             with open(file_path, 'w', encoding=encoding, errors='ignore') as f:
                 f.write(new_content)
