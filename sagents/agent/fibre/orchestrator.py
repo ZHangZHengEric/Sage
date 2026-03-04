@@ -270,46 +270,27 @@ class FibreOrchestrator:
         # 2. System Mechanics (Shared)
         system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
         
-        if is_main_agent:
-            # 3. Main Agent Specifics (Orchestrator Role)
-            main_agent_rules = pm.get_prompt('main_agent_extra_prompt', agent='FibreAgent', language=lang)
-            
-            # Combine for main agent
-            return f"{base_desc}\n\n{system_mechanics}\n\n{main_agent_rules}"
-        else:
-            # 3. Sub Agent Specifics (Strand Role)
-            sub_agent_rules = pm.get_prompt('sub_agent_extra_prompt', agent='FibreAgent', language=lang)
-            
-            # Combine for sub-agent
-            return f"## Sub-Agent Identity\nYou are a Sub-Agent named '{agent_name}', working as part of the Fibre Agent System.\n\n## Specific Role & Task\n{base_desc}\n\n{system_mechanics}\n\n{sub_agent_rules}"
+        # 3. Main Agent Specifics (Orchestrator Role)
+        main_agent_rules = pm.get_prompt('main_agent_extra_prompt', agent='FibreAgent', language=lang)
+        
+        # Combine
+        return f"{base_desc}\n\n{system_mechanics}\n\n{main_agent_rules}"
 
-    async def spawn_agent(
-        self,
-        parent_session_id: str,
-        name: str,
-        system_prompt: str,
-        description: str = "",
-        available_tools=None,
-        available_skills=None,
-        available_workflows=None,
-        system_context=None
-    ) -> str:
-        """
-        Create a new agent definition.
+    def _prepare_initial_messages(self, input_messages):
+        # Helper to convert dicts to MessageChunks
+        msgs = []
+        if isinstance(input_messages, list):
+            for m in input_messages:
+                if isinstance(m, dict):
+                    msgs.append(MessageChunk.from_dict(m))
+                else:
+                    msgs.append(m)
+        return msgs
+
+    # Methods called by FibreTools
+    async def spawn_agent(self, parent_context, name, system_prompt, description="", 
+                          available_tools=None, available_skills=None, available_workflows=None, system_context=None):
         
-        Args:
-            parent_session_id: The session ID that is creating this agent
-            name: Agent name
-            system_prompt: System prompt
-            description: Description
-            available_tools: List of available tool names
-            available_skills: List of available skill names
-            available_workflows: List of available workflow names
-            system_context: Additional system context
-        
-        Returns:
-            agent_id: The created agent's ID
-        """
         # 1. Ensure unique name
         base_name = name
         counter = 1
