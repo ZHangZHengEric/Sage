@@ -89,6 +89,7 @@
                 <TableHead>{{ t('scheduledTask.status') }}</TableHead>
                 <TableHead>{{ t('scheduledTask.executeAt') }}</TableHead>
                 <TableHead>{{ t('scheduledTask.completedAt') }}</TableHead>
+                <TableHead class="w-[120px]">{{ t('common.actions') }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -107,9 +108,19 @@
                 <TableCell>
                   {{ formatDate(task.completed_at) }}
                 </TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-2">
+                    <Button variant="ghost" size="icon" @click="handleEditOneTime(task)">
+                      <Edit class="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" @click="handleDeleteOneTime(task)">
+                      <Trash2 class="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </TableCell>
               </TableRow>
               <TableRow v-if="oneTimeTasks.length === 0">
-                <TableCell colspan="5" class="h-24 text-center">
+                <TableCell colspan="6" class="h-24 text-center">
                   {{ t('common.noData') }}
                 </TableCell>
               </TableRow>
@@ -167,7 +178,7 @@
     <Dialog :open="oneTimeDialogOpen" @update:open="oneTimeDialogOpen = $event">
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>{{ t('scheduledTask.createOneTime') || 'Create One-Time Task' }}</DialogTitle>
+          <DialogTitle>{{ oneTimeIsEdit ? (t('scheduledTask.editTitle') || 'Edit One-Time Task') : (t('scheduledTask.createOneTime') || 'Create One-Time Task') }}</DialogTitle>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
@@ -236,6 +247,7 @@
         </div>
       </DialogContent>
     </Dialog>
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -277,6 +289,7 @@ import { agentAPI } from '@/api/agent'
 import { toast } from 'vue-sonner'
 import cronstrue from 'cronstrue/i18n'
 import CronEditor from '@/components/CronEditor.vue'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 const { t, isZhCN } = useLanguage()
 const tasks = ref([])
@@ -288,8 +301,11 @@ const oneTimeDialogOpen = ref(false)
 const historyOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
+const oneTimeIsEdit = ref(false)
+const currentOneTimeId = ref(null)
 const activeTab = ref('recurring')
 const minDateTime = ref('')
+const confirmDialogRef = ref(null)
 
 const form = reactive({
   name: '',
@@ -305,6 +321,16 @@ const oneTimeForm = reactive({
   agent_id: '',
   execute_at: ''
 })
+
+const toLocalISO = (date) => {
+  const pad = (num) => (num < 10 ? '0' + num : num)
+  const year = date.getFullYear()
+  const month = pad(date.getMonth() + 1)
+  const day = pad(date.getDate())
+  const hours = pad(date.getHours())
+  const minutes = pad(date.getMinutes())
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
 
 const fetchAgents = async () => {
   try {
@@ -359,25 +385,14 @@ const handleCreate = () => {
 }
 
 const handleCreateOneTime = () => {
+  oneTimeIsEdit.value = false
+  currentOneTimeId.value = null
   oneTimeForm.name = ''
   oneTimeForm.description = ''
   oneTimeForm.agent_id = ''
   
   const now = new Date()
-  const toLocalISO = (date) => {
-    const pad = (num) => (num < 10 ? '0' + num : num)
-    const year = date.getFullYear()
-    const month = pad(date.getMonth() + 1)
-    const day = pad(date.getDate())
-    const hours = pad(date.getHours())
-    const minutes = pad(date.getMinutes())
-    return `${year}-${month}-${day}T${hours}:${minutes}`
-  }
-
-  // Set min to current time
   minDateTime.value = toLocalISO(now)
-  
-  // Default to 1 hour later
   now.setHours(now.getHours() + 1)
   oneTimeForm.execute_at = toLocalISO(now)
   oneTimeDialogOpen.value = true
@@ -390,18 +405,45 @@ const submitOneTimeForm = async () => {
   }
 
   const selectedDate = new Date(oneTimeForm.execute_at)
-  if (selectedDate <= new Date()) {
+  if (!oneTimeIsEdit.value && selectedDate <= new Date()) {
     toast.error(t('scheduledTask.futureTimeRequired') || 'Execution time must be in the future')
     return
   }
 
   try {
-    await taskAPI.createOneTimeTask({
+    const payload = {
       ...oneTimeForm,
       execute_at: new Date(oneTimeForm.execute_at).toISOString()
-    })
+    }
+    if (oneTimeIsEdit.value) {
+      await taskAPI.updateOneTimeTask(currentOneTimeId.value, payload)
+    } else {
+      await taskAPI.createOneTimeTask(payload)
+    }
     toast.success(t('common.success'))
     oneTimeDialogOpen.value = false
+    fetchOneTimeTasks()
+  } catch (error) {
+    toast.error(error.message)
+  }
+}
+
+const handleEditOneTime = (task) => {
+  oneTimeIsEdit.value = true
+  currentOneTimeId.value = task.id
+  oneTimeForm.name = task.name
+  oneTimeForm.description = task.description
+  oneTimeForm.agent_id = task.agent_id
+  oneTimeForm.execute_at = toLocalISO(new Date(task.execute_at))
+  minDateTime.value = toLocalISO(new Date())
+  oneTimeDialogOpen.value = true
+}
+
+const handleDeleteOneTime = async (task) => {
+  const confirmed = await confirmDialogRef.value.confirm(t('common.confirmDelete'))
+  if (!confirmed) return
+  try {
+    await taskAPI.deleteOneTimeTask(task.id)
     fetchOneTimeTasks()
   } catch (error) {
     toast.error(error.message)
@@ -420,14 +462,13 @@ const handleEdit = (task) => {
 }
 
 const handleDelete = async (task) => {
-  if (confirm(t('common.confirmDelete'))) {
-    try {
-      await taskAPI.deleteRecurringTask(task.id)
-      toast.success(t('common.deleteSuccess'))
-      fetchTasks()
-    } catch (error) {
-      toast.error(error.message)
-    }
+  const confirmed = await confirmDialogRef.value.confirm(t('common.confirmDelete'))
+  if (!confirmed) return
+  try {
+    await taskAPI.deleteRecurringTask(task.id)
+    fetchTasks()
+  } catch (error) {
+    toast.error(error.message)
   }
 }
 

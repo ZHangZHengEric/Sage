@@ -240,7 +240,7 @@ const toggleSection = (key) => {
 // Select external path using Tauri dialog
 const selectExternalPath = async () => {
   try {
-    const { open } = await import('@tauri-apps/api/dialog')
+    const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({
       directory: true,
       multiple: false,

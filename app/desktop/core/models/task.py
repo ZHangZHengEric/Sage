@@ -13,6 +13,7 @@ class RecurringTask(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False)
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     cron_expression: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -37,8 +38,8 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    retry_count: Mapped[int] = mapped_column(Integer, default=0)
-    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    max_retries: Mapped[Optional[int]] = mapped_column(Integer, default=3)
     recurring_task_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("recurring_tasks.id"), nullable=True)
     
     # Relationship to recurring task
@@ -91,7 +92,7 @@ class TaskDao(BaseDao):
 
     async def create_recurring_task(self, task: RecurringTask) -> RecurringTask:
         """创建循环任务"""
-        await self.save(task)
+        await self.insert(task)
         return task
 
     async def update_recurring_task(self, task: RecurringTask) -> RecurringTask:
@@ -143,5 +144,19 @@ class TaskDao(BaseDao):
 
     async def create_one_time_task(self, task: Task) -> Task:
         """创建一次性任务"""
+        await self.insert(task)
+        return task
+
+    async def get_one_time_task(self, task_id: int) -> Optional[Task]:
+        """获取单个一次性任务"""
+        return await self.get_by_id(Task, task_id)
+
+    async def update_one_time_task(self, task: Task) -> Task:
+        """更新一次性任务"""
+        task.updated_at = datetime.now()
         await self.save(task)
         return task
+
+    async def delete_one_time_task(self, task_id: int) -> bool:
+        """删除一次性任务"""
+        return await self.delete_by_id(Task, task_id)

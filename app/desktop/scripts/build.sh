@@ -248,11 +248,11 @@ chmod +x "$APP_DIR/scripts/generate_cert.sh"
 "$APP_DIR/scripts/generate_cert.sh"
 
 if [ -f "$CERT_B64_FILE" ]; then
-  echo "Setting up self-signed certificate..."
-  export APPLE_CERTIFICATE="$(cat "$CERT_B64_FILE")"
-  export APPLE_CERTIFICATE_PASSWORD="sage-password"
-  export APPLE_SIGNING_IDENTITY="SageAI Self Signed"
-  echo "Code signing enabled with self-signed certificate."
+  echo "Setting up ad-hoc signing (bypass certificate requirement)..."
+  # export APPLE_CERTIFICATE="$(cat "$CERT_B64_FILE")"
+  # export APPLE_CERTIFICATE_PASSWORD="sage-password"
+  export APPLE_SIGNING_IDENTITY="-"
+  echo "Code signing enabled with ad-hoc signature."
 else
   echo "WARNING: Failed to generate certificate. Build will be unsigned."
 fi
@@ -268,9 +268,10 @@ if ! command -v cargo >/dev/null; then
   exit 1
 fi
 
-if ! cargo tauri --version >/dev/null 2>&1; then
-  echo "Installing tauri-cli v1..."
-  cargo install tauri-cli --version "^1.5"
+TAURI_CLI_VERSION="$(cargo tauri --version 2>/dev/null | awk '{print $2}' || true)"
+if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
+  echo "Installing tauri-cli v2..."
+  cargo install tauri-cli --version "^2"
 fi
 
 if [ "$MODE" = "release" ]; then

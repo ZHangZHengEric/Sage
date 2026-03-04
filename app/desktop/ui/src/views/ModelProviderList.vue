@@ -182,6 +182,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <AppConfirmDialog ref="confirmDialogRef" />
   </div>
 </template>
 
@@ -193,7 +194,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { open } from '@tauri-apps/api/shell'
+import { open } from '@tauri-apps/plugin-shell'
+import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import {
   Select,
   SelectContent,
@@ -231,6 +233,7 @@ const dialogOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
 const verifying = ref(false)
+const confirmDialogRef = ref(null)
 
 // Basic form state
 const form = reactive({
@@ -351,14 +354,14 @@ const handleEdit = (provider) => {
 }
 
 const handleDelete = async (provider) => {
-  if (confirm(t('common.confirmDelete'))) {
-     try {
-       await deleteModelProvider(provider.id)
-       toast.success(t('common.deleteSuccess'))
-       fetchProviders()
-     } catch (error) {
-       toast.error(error.message)
-     }
+  const confirmed = await confirmDialogRef.value.confirm(t('common.confirmDelete'))
+  if (!confirmed) return
+  try {
+    await deleteModelProvider(provider.id)
+    toast.success(t('common.deleteSuccess'))
+    fetchProviders()
+  } catch (error) {
+    toast.error(error.message)
   }
 }
 

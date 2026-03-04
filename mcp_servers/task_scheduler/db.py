@@ -183,10 +183,11 @@ class TaskSchedulerDB:
         """Add a recurring task template"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
+            now = datetime.now().isoformat()
             cursor.execute("""
-                INSERT INTO recurring_tasks (name, description, agent_id, session_id, cron_expression)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, description, agent_id, session_id, cron_expression))
+                INSERT INTO recurring_tasks (name, description, agent_id, session_id, cron_expression, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (name, description, agent_id, session_id, cron_expression, now, now))
             conn.commit()
             return cursor.lastrowid
 
@@ -274,10 +275,11 @@ class TaskSchedulerDB:
         """Add a one-time task (can be linked to a recurring task template)"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
+            now = datetime.now().isoformat()
             cursor.execute("""
-                INSERT INTO tasks (name, description, agent_id, session_id, execute_at, status, recurring_task_id)
-                VALUES (?, ?, ?, ?, ?, 'pending', ?)
-            """, (name, description, agent_id, session_id, execute_at, recurring_task_id))
+                INSERT INTO tasks (name, description, agent_id, session_id, execute_at, status, recurring_task_id, created_at, updated_at, retry_count, max_retries)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, 0, 3)    
+            """, (name, description, agent_id, session_id, execute_at, recurring_task_id, now, now))
             conn.commit()
             return cursor.lastrowid
 
@@ -409,9 +411,9 @@ class TaskSchedulerDB:
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO task_history (task_id, status, response, error_message)
-                VALUES (?, ?, ?, ?)
-            """, (task_id, status, response, error_message))
+                INSERT INTO task_history (task_id, status, response, error_message, executed_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (task_id, status, response, error_message, datetime.now().isoformat()))
             conn.commit()
 
     def get_task_history(self, task_id: int, limit: int = 10) -> List[Dict[str, Any]]:
