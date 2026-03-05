@@ -84,11 +84,14 @@ class FibreOrchestrator:
         logger.info(f"run_loop: tool_manager param={tool_manager}")
 
         # Register main session in sub_session_manager
+        main_agent_id = "fibre_main_agent"
+        main_agent_name = self.agent.agent_name if hasattr(self.agent, 'agent_name') else "FibreAgent"
         main_session = SubSession(
             session_id=session_id,
-            agent_id=self.agent.agent_name if hasattr(self.agent, 'agent_name') else "FibreAgent",
+            agent_id=main_agent_id,
             agent_definition=AgentDefinition(
-                name=self.agent.agent_name if hasattr(self.agent, 'agent_name') else "FibreAgent",
+                agent_id=main_agent_id,
+                name=main_agent_name,
                 system_prompt=self.agent.system_prefix or "",
                 description="Main Fibre Agent"
             ),
@@ -107,7 +110,7 @@ class FibreOrchestrator:
             logger.info(f"FibreOrchestrator: Found {len(custom_sub_agents)} custom agents to initialize.")
             for agent_cfg in custom_sub_agents:
                 if isinstance(agent_cfg, dict):
-                    agent_name = agent_cfg.get("name")
+                    agent_id = agent_cfg.get("agent_id") or agent_cfg.get("name")
                     agent_system_prompt = agent_cfg.get("system_prompt", "")
                     agent_description = agent_cfg.get("description", "")
                     agent_tools = agent_cfg.get("available_tools")
@@ -115,7 +118,7 @@ class FibreOrchestrator:
                     agent_workflows = agent_cfg.get("available_workflows")
                     agent_system_context = agent_cfg.get("system_context")
                 else:
-                    agent_name = getattr(agent_cfg, "name", None)
+                    agent_id = getattr(agent_cfg, "agent_id") or getattr(agent_cfg, "name", None)
                     agent_system_prompt = getattr(agent_cfg, "system_prompt", "")
                     agent_description = getattr(agent_cfg, "description", "")
                     agent_tools = getattr(agent_cfg, "available_tools", None)
@@ -123,10 +126,10 @@ class FibreOrchestrator:
                     agent_workflows = getattr(agent_cfg, "available_workflows", None)
                     agent_system_context = getattr(agent_cfg, "system_context", None)
                 
-                if agent_name:
+                if agent_id:
                     await self.spawn_agent(
                         parent_session_id=session_id,
-                        name=agent_name,
+                        agent_id=agent_id,
                         system_prompt=agent_system_prompt,
                         description=agent_description,
                         available_tools=agent_tools,
@@ -134,7 +137,7 @@ class FibreOrchestrator:
                         available_workflows=agent_workflows,
                         system_context=agent_system_context
                     )
-                    logger.info(f"FibreOrchestrator: Initialized custom sub-agent '{agent_name}'")
+                    logger.info(f"FibreOrchestrator: Initialized custom sub-agent '{agent_id}'")
         
         # 2. Setup and run main agent loop
         try:
@@ -242,82 +245,104 @@ class FibreOrchestrator:
         self,
         session_context: SessionContext,
         is_main_agent: bool = True,
-        agent_name: str = "",
+        agent_id: str = "",
         custom_system_prompt: str = ""
     ) -> str:
         """
         Get the Fibre System Prompt.
-        
+
         Args:
             session_context: The session context
             is_main_agent: True for main agent (orchestrator), False for sub-agent (strand)
-            agent_name: Name of the agent (for sub-agents)
+            agent_id: ID of the agent (for sub-agents)
             custom_system_prompt: Custom system prompt (for both main and sub-agents)
-            
+
         Returns:
             Complete system prompt
         """
-        
+
         # Determine language
         lang = session_context.get_language() if hasattr(session_context, 'get_language') else 'en'
-        
+
         # Load prompt parts (must exist, will raise error if not found)
         pm = PromptManager()
-        
+
         # 1. Base Description (custom_system_prompt)
         base_desc = custom_system_prompt
-        
+
         # 2. System Mechanics (Shared)
         system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
-        
-        # 3. Main Agent Specifics (Orchestrator Role)
-        main_agent_rules = pm.get_prompt('main_agent_extra_prompt', agent='FibreAgent', language=lang)
-        
-        # Combine
-        return f"{base_desc}\n\n{system_mechanics}\n\n{main_agent_rules}"
 
-    def _prepare_initial_messages(self, input_messages):
-        # Helper to convert dicts to MessageChunks
-        msgs = []
-        if isinstance(input_messages, list):
-            for m in input_messages:
-                if isinstance(m, dict):
-                    msgs.append(MessageChunk.from_dict(m))
-                else:
-                    msgs.append(m)
-        return msgs
+        if is_main_agent:
+            # 3. Main Agent Specifics (Orchestrator Role)
+            main_agent_rules = pm.get_prompt('main_agent_extra_prompt', agent='FibreAgent', language=lang)
 
-    # Methods called by FibreTools
-    async def spawn_agent(self, parent_context, name, system_prompt, description="", 
-                          available_tools=None, available_skills=None, available_workflows=None, system_context=None):
-        
-        # 1. Ensure unique name
-        base_name = name
+            # Combine for main agent
+            return f"{base_desc}\n\n{system_mechanics}\n\n{main_agent_rules}"
+        else:
+            # 3. Sub Agent Specifics (Strand Role)
+            sub_agent_rules = pm.get_prompt('sub_agent_extra_prompt', agent='FibreAgent', language=lang)
+
+            # Combine for sub-agent
+            return f"## Sub-Agent Identity\nYou are a Sub-Agent with ID '{agent_id}', working as part of the Fibre Agent System.\n\n## Specific Role & Task\n{base_desc}\n\n{system_mechanics}\n\n{sub_agent_rules}"
+
+    async def spawn_agent(
+        self,
+        parent_session_id: str,
+        agent_id: str,
+        system_prompt: str,
+        name: str = "",
+        description: str = "",
+        available_tools=None,
+        available_skills=None,
+        available_workflows=None,
+        system_context=None
+    ) -> str:
+        """
+        Create a new agent definition.
+
+        Args:
+            parent_session_id: The session ID that is creating this agent
+            agent_id: Agent ID
+            system_prompt: System prompt
+            name: Human-readable nickname for display (defaults to agent_id)
+            description: Description
+            available_tools: List of available tool names
+            available_skills: List of available skill names
+            available_workflows: List of available workflow names
+            system_context: Additional system context
+
+        Returns:
+            agent_id: The created agent's ID
+        """
+        # 1. Ensure unique agent_id
+        base_agent_id = agent_id
         counter = 1
-        while name in self.sub_agents:
-            name = f"{base_name}_{counter}"
+        while agent_id in self.sub_agents:
+            agent_id = f"{base_agent_id}_{counter}"
             counter += 1
-        
-        if name != base_name:
-            logger.info(f"FibreOrchestrator: Agent name '{base_name}' collision, renamed to '{name}'")
-        
-        logger.info(f"Registering agent definition: {name}")
-        
+
+        if agent_id != base_agent_id:
+            logger.info(f"FibreOrchestrator: Agent ID '{base_agent_id}' collision, renamed to '{agent_id}'")
+
+        logger.info(f"Registering agent definition: {agent_id}")
+
         # 2. Generate complete system prompt for sub-agent
         parent_session = self.sub_session_manager.get(parent_session_id)
         if parent_session:
             complete_system_prompt = self._get_fibre_system_prompt_content(
                 session_context=parent_session.session_context,
                 is_main_agent=False,
-                agent_name=name,
+                agent_id=agent_id,
                 custom_system_prompt=system_prompt
             )
         else:
             complete_system_prompt = system_prompt
-        
+
         # 3. Create Agent Definition (configuration only)
         agent_def = AgentDefinition(
-            name=name,
+            agent_id=agent_id,
+            name=name or agent_id,
             system_prompt=complete_system_prompt,
             description=description,
             available_tools=available_tools,
@@ -325,21 +350,21 @@ class FibreOrchestrator:
             available_workflows=available_workflows,
             system_context=system_context
         )
-        
-        self.sub_agents[name] = agent_def
-        
-        # 3. Update parent session's available_sub_agents
+
+        self.sub_agents[agent_id] = agent_def
+
+        # 4. Update parent session's available_sub_agents
         parent_session = self.sub_session_manager.get(parent_session_id)
         if parent_session:
             if 'available_sub_agents' not in parent_session.session_context.system_context:
                 parent_session.session_context.system_context['available_sub_agents'] = []
-            
-            agent_info = {"id": name, "description": description or system_prompt[:100]}
+
+            agent_info = {"id": agent_id, "name": name or agent_id, "description": description or system_prompt[:100]}
             existing_ids = [a.get("id") for a in parent_session.session_context.system_context['available_sub_agents']]
-            if name not in existing_ids:
+            if agent_id not in existing_ids:
                 parent_session.session_context.system_context['available_sub_agents'].append(agent_info)
-        
-        return name
+
+        return agent_id
 
     def _get_session_depth(self, session_id: str) -> int:
         """

@@ -225,26 +225,43 @@ const activeProvider = ref('feishu')
 const loading = ref(false)
 const saving = ref(false)
 
-const providers = computed(() => [
-  {
-    key: 'feishu',
-    label: t('im.feishu.name'),
-    icon: 'MessageSquare',
-    isEnabled: config.value.feishu.enabled,
-  },
-  {
-    key: 'dingtalk',
-    label: t('im.dingtalk.name'),
-    icon: 'MessageSquare',
-    isEnabled: config.value.dingtalk.enabled,
-  },
-  {
-    key: 'imessage',
-    label: t('im.imessage.name'),
-    icon: 'MessageSquare',
-    isEnabled: config.value.imessage.enabled,
-  },
-])
+// 检测是否在 macOS 或 iOS 平台上
+const isApplePlatform = computed(() => {
+  const platform = navigator.platform || ''
+  return platform.toLowerCase().includes('mac') || 
+         platform.toLowerCase().includes('iphone') || 
+         platform.toLowerCase().includes('ipad') ||
+         navigator.userAgent.toLowerCase().includes('macintosh')
+})
+
+const providers = computed(() => {
+  const list = [
+    {
+      key: 'feishu',
+      label: t('im.feishu.name'),
+      icon: 'MessageSquare',
+      isEnabled: config.value.feishu.enabled,
+    },
+    {
+      key: 'dingtalk',
+      label: t('im.dingtalk.name'),
+      icon: 'MessageSquare',
+      isEnabled: config.value.dingtalk.enabled,
+    },
+  ]
+  
+  // 只在 Apple 平台上显示 iMessage
+  if (isApplePlatform.value) {
+    list.push({
+      key: 'imessage',
+      label: t('im.imessage.name'),
+      icon: 'MessageSquare',
+      isEnabled: config.value.imessage.enabled,
+    })
+  }
+  
+  return list
+})
 
 const config = ref({
   feishu: {

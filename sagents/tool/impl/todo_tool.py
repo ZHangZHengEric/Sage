@@ -306,29 +306,34 @@ class ToDoTool:
         # 检查是否所有任务都已完成
         pending_tasks = [t for t in final_tasks if not t.get('completed', False)]
 
+        # 构建任务列表（用于返回）
+        task_list = [
+            {
+                "name": t.get('content', ''),
+                "status": "completed" if t.get('completed', False) else "pending"
+            }
+            for t in final_tasks
+        ]
+
         if not pending_tasks and final_tasks:
             # 所有任务都已完成，删除 todo 文件
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
                     logger.info(f"ToDoTool: All tasks completed. Deleted todo file: {file_path}", session_id=session_id)
-                    return f"所有任务已完成！任务清单已清理。\n新增: {added_count}, 更新: {updated_count}"
+                    # 返回完整的任务列表（虽然文件已删除）
+                    result = {
+                        "summary": f"所有任务已完成！任务清单已清理。\n新增: {added_count}, 更新: {updated_count}",
+                        "tasks": task_list
+                    }
+                    return json.dumps(result, ensure_ascii=False, indent=2)
             except Exception as e:
                 logger.error(f"ToDoTool: Failed to delete todo file: {e}", session_id=session_id)
 
         if self._save_todo_file(file_path, final_tasks):
             logger.info(f"ToDoTool: Tasks saved. Added: {added_count}, Updated: {updated_count}", session_id=session_id)
 
-            # 构建任务列表（只包含任务名称和状态）
-            task_list = [
-                {
-                    "name": t.get('content', ''),
-                    "status": "completed" if t.get('completed', False) else "pending"
-                }
-                for t in final_tasks
-            ]
-
-            # 构建 JSON 返回结果
+            # 构建 JSON 返回结果（task_list 已在上面的代码中构建）
             result = {
                 "summary": f"成功更新任务清单。新增: {added_count}, 更新: {updated_count}。当前未完成任务数: {len(pending_tasks)}",
                 "tasks": task_list
