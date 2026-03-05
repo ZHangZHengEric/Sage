@@ -102,6 +102,8 @@ export default {
   'chat.viewSubSession': 'View Sub-Session',
   'chat.subSessionTitle': 'Sub-Session Details',
   'chat.loadingMessages': 'Loading messages...',
+  'chat.todoList': 'Task List',
+  'chat.noTasks': 'No tasks',
   'status.failed': 'Failed',
   'status.completed': 'Completed',
   'status.inProgress': 'In Progress',

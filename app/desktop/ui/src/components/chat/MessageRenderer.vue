@@ -162,7 +162,6 @@ const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
   sys_delegate_task: SysDelegateTaskMessage,
   todo_write: TodoTaskMessage,
-  todo_read: TodoTaskMessage
 }
 
 const props = defineProps({
