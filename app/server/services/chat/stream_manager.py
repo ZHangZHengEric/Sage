@@ -83,9 +83,10 @@ class StreamManager:
             # 任务结束，释放业务锁
             if session.lock:
                 try:
-                    await safe_release(session.lock, session.session_id, "后台流结束清理")
+                    released = await safe_release(session.lock, session.session_id, "后台流结束清理")
                     delete_session_run_lock(session.session_id)
-                    logger.info(f"Released lock for session {session.session_id}")
+                    if released:
+                        logger.info(f"Released lock for session {session.session_id}")
                 except Exception as e:
                     logger.error(f"Error releasing lock for {session.session_id}: {e}")
 

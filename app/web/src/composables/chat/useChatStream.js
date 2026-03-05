@@ -131,7 +131,9 @@ export const useChatStream = ({
     try {
       await loadConversationMessages(sessionId)
       ensureFirstUserMessageForRunningSession(sessionId)
-      const resumedAndCompleted = await checkAndResumeStream(sessionId)
+      const activeMeta = activeSessions.value?.[sessionId]
+      const shouldResume = activeMeta?.status === 'running'
+      const resumedAndCompleted = shouldResume ? await checkAndResumeStream(sessionId) : false
       if (resumedAndCompleted) {
         await loadConversationMessages(sessionId)
       }
@@ -249,18 +251,20 @@ export const useChatStream = ({
   }
 
   const stopGeneration = async () => {
+    const sessionId = currentSessionId.value
     if (abortControllerRef.value) {
       abortControllerRef.value.abort()
       abortControllerRef.value = null
+    }
+    try {
+      if (sessionId) {
+        await chatAPI.interruptSession(sessionId, '用户请求中断')
+      }
+    } catch (error) {
+      console.error('Error interrupting session:', error)
+    } finally {
       isLoading.value = false
       loadingSessionId.value = null
-    }
-    if (currentSessionId.value) {
-      try {
-        await chatAPI.interruptSession(currentSessionId.value, '用户请求中断')
-      } catch (error) {
-        console.error('Error interrupting session:', error)
-      }
     }
   }
 
