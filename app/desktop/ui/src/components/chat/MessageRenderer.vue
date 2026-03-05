@@ -3,7 +3,7 @@
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
       <div class="flex-none">
-        <MessageAvatar messageType="error" role="assistant" />
+        <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
@@ -49,19 +49,14 @@
     <div
       v-else-if="message.role === 'assistant' && (message.type === 'task_analysis' || message.message_type === 'task_analysis')"       class="flex flex-row items-start gap-3 px-4">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.message_type" role="assistant" />
+        <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
-        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
-          {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
-          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
-            {{ formatTime(message.timestamp) }}
-          </span>
-        </div>
         <div class="w-full">
            <TaskAnalysisMessage 
              :content="message.content" 
              :isStreaming="isStreaming"
+             :timestamp="message.timestamp"
            />
         </div>
       </div>
@@ -70,7 +65,7 @@
     <!-- 助手消息 -->
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.message_type" role="assistant" />
+        <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
@@ -99,7 +94,7 @@
     <!-- 工具渲染 -->
     <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" />
+        <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
@@ -155,11 +150,13 @@ import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
 import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
+import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
-  sys_delegate_task: SysDelegateTaskMessage
+  sys_delegate_task: SysDelegateTaskMessage,
+  todo_write: TodoTaskMessage,
 }
 
 const props = defineProps({
@@ -182,6 +179,10 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  agentId: {
+    type: String,
+    default: ''
   }
 })
 
@@ -300,10 +301,10 @@ const getLabel = ({ role, type, messageType, toolName }) => {
 
 const formatTime = (timestamp) => {
   if (!timestamp) return ''
-  
+
   let dateVal = timestamp
   const num = Number(timestamp)
-  
+
   // 如果是数字且看起来像秒级时间戳（小于100亿，对应年份2286年之前）
   // Python后端常返回秒级浮点数时间戳，如 1769963248.061118
   if (!isNaN(num)) {
@@ -313,26 +314,27 @@ const formatTime = (timestamp) => {
       dateVal = num
     }
   }
-  
+
   const date = new Date(dateVal)
   // 检查日期是否有效
   if (isNaN(date.getTime())) return ''
-  
+
   const now = new Date()
   const isToday = date.getDate() === now.getDate() &&
     date.getMonth() === now.getMonth() &&
     date.getFullYear() === now.getFullYear()
 
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+
   if (isToday) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return `${hours}:${minutes}:${seconds}`
   } else {
-    return date.toLocaleString([], {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
   }
 }
 

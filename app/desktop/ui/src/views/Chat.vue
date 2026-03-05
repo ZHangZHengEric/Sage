@@ -60,6 +60,7 @@
               :message="message"
               :messages="filteredMessages" 
               :message-index="index" 
+              :agent-id="selectedAgentId"
               :is-loading="isLoading && index === filteredMessages.length - 1"
               @download-file="downloadWorkspaceFile"
               @toolClick="handleToolClick" 

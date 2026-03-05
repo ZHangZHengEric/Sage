@@ -51,6 +51,13 @@ class UnifiedLock:
 
 async def safe_release(lock: Any, session_id: str, context: str) -> bool:
     try:
+        locked_method = getattr(lock, "locked", None)
+        if callable(locked_method):
+            locked_result = locked_method()
+            if inspect.isawaitable(locked_result):
+                locked_result = await locked_result
+            if not locked_result:
+                return True
         release_method = getattr(lock, "release", None)
         if release_method is None:
             logger.warning(
