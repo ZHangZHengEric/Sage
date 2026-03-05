@@ -66,6 +66,9 @@ class SubSession:
         self.created_at = datetime.now().isoformat()
         self.updated_at = self.created_at
 
+        # Task workspace path (set by orchestrator when creating task folder)
+        self.task_workspace: Optional[str] = None
+
         # Internal executor (lazy initialization)
         self._executor = None
 
