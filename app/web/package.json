@@ -10,6 +10,8 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@dicebear/collection": "^9.4.0",
+    "@dicebear/core": "^9.4.0",
     "@vueuse/core": "^13.9.0",
     "axios": "^1.12.2",
     "dompurify": "^3.3.0",
