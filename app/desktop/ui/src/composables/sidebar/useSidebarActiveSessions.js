@@ -16,6 +16,7 @@ export const useSidebarActiveSessions = ({
     } catch (e) {
       activeSessions.value = {}
     }
+    ensureStatusPolling()
   }
 
   const activeSessionItems = computed(() =>
@@ -55,12 +56,13 @@ export const useSidebarActiveSessions = ({
   }
 
   const ensureStatusPolling = () => {
-    if (!activeSessionSelectionEnabled.value) {
+    const hasRunningSessions = Object.values(activeSessions.value || {}).some(s => s.status === 'running')
+    if (activeSessionSelectionEnabled.value || hasRunningSessions) {
+      syncActiveSessionStatuses()
+      startStatusPolling()
+    } else {
       stopStatusPolling()
-      return
     }
-    syncActiveSessionStatuses()
-    startStatusPolling()
   }
 
   const syncActiveSessionStatuses = async () => {
@@ -115,7 +117,7 @@ export const useSidebarActiveSessions = ({
 
   const disableActiveSessionSelection = () => {
     activeSessionSelectionEnabled.value = false
-    stopStatusPolling()
+    ensureStatusPolling()
   }
 
   onMounted(() => {

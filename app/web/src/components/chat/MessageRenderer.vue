@@ -65,6 +65,7 @@
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type }) }}
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
@@ -412,11 +413,34 @@ const copied = ref(false)
 const handleCopy = async () => {
   if (!props.message.content) return
   try {
-    await navigator.clipboard.writeText(props.message.content)
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(props.message.content)
+      copied.value = true
+      setTimeout(() => {
+        copied.value = false
+      }, 2000)
+    } else {
+      // Fallback for browsers/environments where clipboard API is not available (e.g. non-secure context)
+      const textArea = document.createElement('textarea')
+      textArea.value = props.message.content
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (successful) {
+        copied.value = true
+        setTimeout(() => {
+          copied.value = false
+        }, 2000)
+      } else {
+        console.error('Fallback copy method failed')
+      }
+    }
   } catch (err) {
     console.error('Failed to copy text: ', err)
   }
