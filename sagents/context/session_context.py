@@ -298,7 +298,17 @@ class SessionContext:
         if self.external_paths and isinstance(self.external_paths, list):
              permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
-        self.system_context['file_permission'] = f"only allow read and write files in: {paths_str} (Note: {self.virtual_workspace} is your private sandbox), and use absolute path"
+        # 在沙箱根目录下预创建通用子目录，方便归类保存数据，保持根目录简洁
+        sandbox_root = self.virtual_workspace
+        common_dirs = ["data", "outputs", "temp", "logs"]
+        for d in common_dirs:
+            dir_path = os.path.join(sandbox_root, d)
+            self.sandbox.file_system.ensure_directory(dir_path)
+
+        self.system_context['file_permission'] = (
+            f"only allow read and write files in: {paths_str} (Note: {self.virtual_workspace} is your private sandbox). "
+            f"Please save files in the pre-created folders: {', '.join(common_dirs)} and use absolute paths; avoid creating extra directories in the root."
+        )
 
         self.system_context['response_language'] = "zh-CN(简体中文)"
 
