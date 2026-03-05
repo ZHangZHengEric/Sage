@@ -305,14 +305,15 @@ class SimpleAgent(AgentBase):
         if session_id and get_session_context(session_id) is None:
             logger.info("SimpleAgent: 跳过执行，session上下文不存在或已中断")
             return True
-        if session_context.status == SessionStatus.INTERRUPTED:
-            logger.info("SimpleAgent: 跳过执行，session上下文状态为中断")
+        # 检查当前会话状态（中断、错误或已完成都应该停止）
+        if session_context.status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
+            logger.info(f"SimpleAgent: 跳过执行，session上下文状态为{session_context.status.value}")
             return True
         # 检查父会话状态（如果是子会话）
         if hasattr(session_context, 'parent_session_id') and session_context.parent_session_id:
             parent_context = get_session_context(session_context.parent_session_id)
-            if parent_context and parent_context.status == SessionStatus.INTERRUPTED:
-                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为中断")
+            if parent_context and parent_context.status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
+                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为{parent_context.status.value}")
                 # 同时更新子会话状态
                 session_context.set_status(SessionStatus.INTERRUPTED, cascade=False)
                 return True

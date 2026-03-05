@@ -1,9 +1,10 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_base import tool
 
 logger = logging.getLogger(__name__)
+
 
 class FibreTools:
     """
@@ -39,8 +40,9 @@ class FibreTools:
         if not orchestrator:
              return "Error: Orchestrator not found in session context."
 
+        # New architecture: pass parent_session_id instead of parent_context
         agent_id = await orchestrator.spawn_agent(
-            parent_context=session_context,
+            parent_session_id=session_id,
             name=agent_name,
             description=description,
             system_prompt=system_prompt
@@ -71,7 +73,7 @@ class FibreTools:
                         "session_id": {
                             "type": "string",
                             "description": "Specific session ID to reuse or create. If it's a new task, generate a new ID based on the agent name (e.g., 'session_python_expert_1_0').",
-                            "description_i18n": {"zh": "必填：指定 Session ID。如果是新任务，请基于 agent_id 生成一个新的（例如 'session_python_expert_1_0'）；如果是继续之前的任务，请复用旧的 ID。"}
+                            "description_i18n": {"zh": "必填：指定 Session ID。如果是新任务，请基于 agent_id 生成一个新的（例如 'session_python_expert_1_0'）；如果是继续之前的任务，请复用旧的 ID。不要使用当前的Session ID"}
                         }
                     },
                     "required": ["agent_id", "content", "session_id"]
@@ -79,7 +81,7 @@ class FibreTools:
             }
         }
     )
-    async def sys_delegate_task(self, tasks: list[Dict[str, str]], session_id: str = "") -> str:
+    async def sys_delegate_task(self, tasks: List[Dict[str, str]], session_id: str = "") -> str:
         """
         Delegate tasks to existing sub-agents and wait for the results. Supports parallel execution.
 
@@ -100,7 +102,7 @@ class FibreTools:
         if not orchestrator:
              return "Error: Orchestrator not found in session context."
 
-        response = await orchestrator.delegate_tasks(tasks)
+        response = await orchestrator.delegate_tasks(tasks, caller_session_id=session_id)
         return response
 
     @tool(
@@ -121,4 +123,4 @@ class FibreTools:
         """
         # This is typically called by the sub-agent, not the parent.
         # But if the parent calls it, it ends the main session?
-        return f"Task finished: {status}. Result: {result}"
+        return f"Task finished: {status}. Result had been reported to parent agent."
