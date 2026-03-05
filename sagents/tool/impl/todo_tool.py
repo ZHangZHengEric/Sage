@@ -306,13 +306,15 @@ class ToDoTool:
         # 检查是否所有任务都已完成
         pending_tasks = [t for t in final_tasks if not t.get('completed', False)]
 
-        # 构建任务列表（用于返回）
+        # 构建任务列表（用于返回）- 按任务ID排序确保顺序一致
+        sorted_tasks = sorted(final_tasks, key=lambda t: str(t.get('id', '')))
         task_list = [
             {
+                "id": str(t.get('id', '')),
                 "name": t.get('content', ''),
                 "status": "completed" if t.get('completed', False) else "pending"
             }
-            for t in final_tasks
+            for t in sorted_tasks
         ]
 
         if not pending_tasks and final_tasks:
