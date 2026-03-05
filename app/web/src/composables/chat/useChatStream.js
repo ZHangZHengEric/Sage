@@ -23,7 +23,6 @@ export const useChatStream = ({
   createSession,
   clearCurrentStreamViewState,
   loadConversationMessages,
-  ensureFirstUserMessageForRunningSession,
   isHistoryLoading,
   removeSessionFromCache
 }) => {
@@ -64,15 +63,19 @@ export const useChatStream = ({
     }
   }
 
-  const checkAndResumeStream = async (sessionId) => {
+  const checkAndResumeStream = async (sessionId, abortControllerRef) => {
     let resumedAndCompleted = false
     isLoading.value = true
     loadingSessionId.value = sessionId
     shouldAutoScroll.value = true
     let resumeLastIndex = getSessionLastIndex(sessionId)
-    abortControllerRef.value = new AbortController()
+    
+    if (abortControllerRef) {
+      abortControllerRef.value = new AbortController()
+    }
+
     try {
-      const response = await chatAPI.resumeStream(sessionId, resumeLastIndex, abortControllerRef.value)
+      const response = await chatAPI.resumeStream(sessionId, resumeLastIndex, abortControllerRef?.value)
       await readStreamResponse(
         response,
         (data) => {
@@ -130,13 +133,7 @@ export const useChatStream = ({
     isHistoryLoading.value = true
     try {
       await loadConversationMessages(sessionId)
-      ensureFirstUserMessageForRunningSession(sessionId)
-      const activeMeta = activeSessions.value?.[sessionId]
-      const shouldResume = activeMeta?.status === 'running'
-      const resumedAndCompleted = shouldResume ? await checkAndResumeStream(sessionId) : false
-      if (resumedAndCompleted) {
-        await loadConversationMessages(sessionId)
-      }
+      await checkAndResumeStream(sessionId, abortControllerRef)
     } catch (e) {
       toast.error(t('chat.loadConversationError') || 'Failed to load conversation')
     } finally {
