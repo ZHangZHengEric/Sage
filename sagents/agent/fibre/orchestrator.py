@@ -166,18 +166,18 @@ class FibreOrchestrator:
                 container_agent = AgentRuntime(container_agent, self.observability_manager)
             
             # 2.4 Process input messages
-            if input_messages:
-                for msg in input_messages:
-                    if isinstance(msg, dict):
-                        from sagents.context.messages.message import MessageChunk
-                        msg_chunk = MessageChunk(
-                            role=msg.get('role', 'user'),
-                            content=msg.get('content', ''),
-                            session_id=session_id
-                        )
-                        session_context.add_messages(msg_chunk)
-                    else:
-                        session_context.add_messages(msg)
+            # if input_messages:
+                #     for msg in input_messages:
+                #         if isinstance(msg, dict):
+            #             from sagents.context.messages.message import MessageChunk
+            #             msg_chunk = MessageChunk(
+            #                 role=msg.get('role', 'user'),
+            #                 content=msg.get('content', ''),
+            #                 session_id=session_id
+            #             )
+            #             session_context.add_messages(msg_chunk)
+            #         else:
+            #             session_context.add_messages(msg)
             
             # 2.5 Run container agent
             if tool_manager:
