@@ -155,11 +155,14 @@ import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
 import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
+import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
   sys_spawn_agent: AgentCardMessage,
-  sys_delegate_task: SysDelegateTaskMessage
+  sys_delegate_task: SysDelegateTaskMessage,
+  todo_write: TodoTaskMessage,
+  todo_read: TodoTaskMessage
 }
 
 const props = defineProps({
