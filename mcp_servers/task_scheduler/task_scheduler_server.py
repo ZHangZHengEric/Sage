@@ -716,5 +716,126 @@ async def get_task_details(task_id: str) -> str:
         return f"Error getting task details: {str(e)}"
 
 
+@mcp.tool()
+@sage_mcp_tool(server_name="task_scheduler")
+async def update_task(
+    task_id: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    schedule: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    max_retries: Optional[int] = None
+) -> str:
+    """
+    Update an existing task in the scheduler.
+
+    [Effect]
+    - For one-time tasks (once_*): Updates name, description, agent_id, session_id, execute_at, or max_retries.
+    - For recurring tasks (rec_*): Updates name, description, agent_id, session_id, cron_expression, or enabled.
+    - Only provided fields will be updated; fields not provided remain unchanged.
+
+    [When to Use]
+    - Use this to modify a scheduled task's details.
+    - Use this to change the execution time of a one-time task.
+    - Use this to change the cron schedule of a recurring task.
+    - Use this to enable/disable a recurring task.
+
+    Args:
+        task_id: The ID of the task to update (e.g., 'once_123' or 'rec_456').
+        name: New task name/title (optional).
+        description: New task description (optional).
+        agent_id: New agent ID to execute the task (optional).
+        session_id: New session ID to use (optional).
+        schedule: New schedule - ISO 8601 for one-time, cron expression for recurring (optional).
+        enabled: Enable/disable recurring task (True/False, only for recurring tasks).
+        max_retries: New max retry count (only for one-time tasks).
+
+    Returns:
+        Confirmation message with updated fields.
+    """
+    try:
+        raw_id, is_recurring = _decode_task_id(task_id)
+        
+        if is_recurring:
+            # Validate cron expression if provided
+            if schedule is not None:
+                if not croniter.is_valid(schedule):
+                    return f"Error: Invalid cron expression '{schedule}'. Use format like '0 9 * * *'."
+            
+            # Build update kwargs
+            update_kwargs = {}
+            if name is not None:
+                update_kwargs['name'] = name
+            if description is not None:
+                update_kwargs['description'] = description
+            if agent_id is not None:
+                update_kwargs['agent_id'] = agent_id
+            if session_id is not None:
+                update_kwargs['session_id'] = session_id
+            if schedule is not None:
+                update_kwargs['cron_expression'] = schedule
+            if enabled is not None:
+                update_kwargs['enabled'] = enabled
+            
+            if not update_kwargs:
+                return "Error: No fields to update."
+            
+            task = db.get_recurring_task(raw_id)
+            if not task:
+                return f"Error: Recurring task {task_id} not found."
+            
+            if db.update_recurring_task(raw_id, **update_kwargs):
+                updated_fields = ", ".join(update_kwargs.keys())
+                return f"Recurring task {task_id} updated successfully. Fields updated: {updated_fields}."
+            else:
+                return f"Error: Failed to update recurring task {task_id}."
+        else:
+            # Validate execute_at timestamp if provided
+            if schedule is not None:
+                try:
+                    datetime.fromisoformat(schedule)
+                except ValueError:
+                    return f"Error: Invalid schedule format '{schedule}'. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
+            
+            # Build update kwargs
+            update_kwargs = {}
+            if name is not None:
+                update_kwargs['name'] = name
+            if description is not None:
+                update_kwargs['description'] = description
+            if agent_id is not None:
+                update_kwargs['agent_id'] = agent_id
+            if session_id is not None:
+                update_kwargs['session_id'] = session_id
+            if schedule is not None:
+                update_kwargs['execute_at'] = schedule
+            if max_retries is not None:
+                update_kwargs['max_retries'] = max_retries
+            
+            if not update_kwargs:
+                return "Error: No fields to update."
+            
+            task = db.get_task(raw_id)
+            if not task:
+                return f"Error: Task {task_id} not found."
+            
+            # Check if task can be updated (not processing or completed)
+            if task['status'] in ['processing', 'completed']:
+                return f"Error: Cannot update task {task_id} with status '{task['status']}'. Only pending or failed tasks can be updated."
+            
+            if db.update_task(raw_id, **update_kwargs):
+                updated_fields = ", ".join(update_kwargs.keys())
+                return f"Task {task_id} updated successfully. Fields updated: {updated_fields}."
+            else:
+                return f"Error: Failed to update task {task_id}."
+                
+    except ValueError as e:
+        return f"Error: Invalid value - {str(e)}"
+    except Exception as e:
+        return f"Error updating task: {str(e)}"
+
+
 if __name__ == "__main__":
     mcp.run()
