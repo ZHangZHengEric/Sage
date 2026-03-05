@@ -1,8 +1,8 @@
 <template>
   <Avatar class="h-8 w-8 shadow-sm transition-transform hover:scale-105 border bg-muted/50">
     <AvatarFallback 
-      :class="avatarContent.bgClass"
-      class="flex items-center justify-center text-white"
+      :class="[avatarContent.bgClass, role === 'user' ? 'text-primary-foreground' : 'text-white']"
+      class="flex items-center justify-center"
       :title="avatarContent.label"
     >
       <component :is="avatarContent.icon" class="h-4 w-4" />
