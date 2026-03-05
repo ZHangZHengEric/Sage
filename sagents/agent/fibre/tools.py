@@ -15,7 +15,7 @@ class FibreTools:
         description_i18n={"zh": "创建一个新的子智能体（专家角色）。注意：创建的必须是具备通用能力的领域专家（如'Python专家'），而不是针对当前具体任务的一次性执行者（如'贪吃蛇编写者'）。"},
         param_description_i18n={
             "agent_id": {"zh": "智能体的唯一标识符（建议使用通用角色名，如 'python_expert_1', 'data_analyst_1'）"},
-            "name": {"zh": "智能体的拟人化昵称（花名），用于显示和交互。请选择自然、亲切的人名风格。"},
+            "name": {"zh": "智能体的拟人化昵称（花名），例如，'乔巴'或'Eric'，用于显示和交互。请选择自然、亲切的人名风格，避免使用专业术语（如'Python专家'）。"},
             "description": {"zh": "智能体的职能描述。**必须**定义为一类通用的专业能力（如'Python编程专家'），**严禁**描述为具体的单一任务（如'写贪吃蛇代码'）。"},
             "system_prompt": {"zh": "智能体的详细系统设定（Persona）。为了确保子智能体表现出高水平的专业能力，**System Prompt 必须详尽且结构化，字数不得少于300字**。请严格按照以下结构编写：\n1. **角色定义**：清晰定义专家的身份、背景及核心职责（如'资深Python架构师，拥有10年分布式系统开发经验...'）。\n2. **能力范围**：列举其精通的技术栈、解决的问题类型及专业技能。\n3. **行为偏好**：规定其思维方式、代码风格（如'追求极致性能'、'遵循PEP8'）及沟通习惯。\n4. **限制与约束**：明确其不应做的事情及伦理边界。\n**注意**：System Prompt 仅用于定义角色属性，**严禁**包含具体的任务指令（如'写贪吃蛇'），具体任务请在 `sys_delegate_task` 中下发。"}
         }
@@ -26,7 +26,7 @@ class FibreTools:
 
         Args:
             agent_id: Unique identifier for the agent (e.g., "sql_expert_1")
-            name: Human-readable nickname (flower name) for display. Must match the conversation language:
+            name: Human-readable nickname (a warm, real-person name like "乔巴" or "Eric") for display. Must match the conversation language:
             description: Short summary of the agent's role (should describe a class of tasks)
             system_prompt: The System Prompt defining the agent's persona, capabilities, and constraints
             session_id: The current session ID (auto-injected)
