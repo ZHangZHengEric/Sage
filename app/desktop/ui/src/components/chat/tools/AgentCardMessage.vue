@@ -33,7 +33,7 @@
           <User class="w-3.5 h-3.5" />
           {{ t('chat.agentName') }}
         </div>
-        <div class="font-semibold">{{ args.agent_name || '-' }}</div>
+        <div class="font-semibold">{{ args.name || '-' }}</div>
         
         <div class="text-muted-foreground font-medium flex items-center gap-1">
           <Info class="w-3.5 h-3.5" />
