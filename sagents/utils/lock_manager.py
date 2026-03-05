@@ -53,8 +53,9 @@ async def safe_release(lock: Any, session_id: str, context: str) -> bool:
     try:
         release_method = getattr(lock, "release", None)
         if release_method is None:
-            logger.bind(session_id=session_id).warning(
-                f"释放会话锁失败 - {context}: lock对象不支持release"
+            logger.warning(
+                f"释放会话锁失败 - {context}: lock对象不支持release",
+                session_id=session_id
             )
             return False
         release_result = release_method()
@@ -62,8 +63,9 @@ async def safe_release(lock: Any, session_id: str, context: str) -> bool:
             await release_result
         return True
     except Exception as e:
-        logger.bind(session_id=session_id).warning(
-            f"释放会话锁失败 - {context}: {type(e).__name__}: {e}"
+        logger.warning(
+            f"释放会话锁失败 - {context}: {type(e).__name__}: {e}",
+            session_id=session_id
         )
         return False
 
