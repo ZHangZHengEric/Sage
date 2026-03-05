@@ -8,6 +8,7 @@ services:
     container_name: sage-server
     volumes:
       - ${ROOT_DATA_DIR}/sage-server/agent_workspace:/app/agent_workspace
+      - ${ROOT_DATA_DIR}/sage-server/logs:/app/logs
       - ${ROOT_DATA_DIR}/sage-server/data:/app/data
       - ${ROOT_DATA_DIR}/sage-server/skills:/app/skills
     ports:
