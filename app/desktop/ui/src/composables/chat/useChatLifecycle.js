@@ -25,7 +25,10 @@ export const useChatLifecycle = ({
 }) => {
   const handleBeforeUnload = () => {
     if (typeof onLeaveChatPage === 'function') {
-      onLeaveChatPage()
+      // 页面刷新时保存状态，但不显示在侧边栏（除非之前已经显示）
+      // 这里我们传递 false，意味着如果是仅因为刷新而触发的保存，
+      // 该会话不会被强制加入侧边栏列表。
+      onLeaveChatPage(false)
     }
   }
 
@@ -58,7 +61,7 @@ export const useChatLifecycle = ({
 
   onUnmounted(() => {
     if (typeof onLeaveChatPage === 'function') {
-      onLeaveChatPage()
+      onLeaveChatPage(true)
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('user-updated', loadAgents)
@@ -94,7 +97,7 @@ export const useChatLifecycle = ({
   watch(() => route.name, (newName, oldName) => {
     if (oldName === 'Chat' && newName !== 'Chat') {
       if (typeof onLeaveChatPage === 'function') {
-        onLeaveChatPage()
+        onLeaveChatPage(true)
       }
     }
   })

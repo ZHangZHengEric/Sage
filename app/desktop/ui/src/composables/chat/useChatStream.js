@@ -23,14 +23,12 @@ export const useChatStream = ({
   createSession,
   clearCurrentStreamViewState,
   loadConversationMessages,
-  ensureFirstUserMessageForRunningSession,
   isHistoryLoading,
-  removeSessionFromCache,
-  shouldRemoveCompletedSession
+  removeSessionFromCache
 }) => {
   const markCompletedAndCleanupCurrentSession = (sessionId) => {
     updateActiveSession(sessionId, false, null, null, true)
-    if (typeof shouldRemoveCompletedSession === 'function' && shouldRemoveCompletedSession(sessionId)) {
+    if (currentSessionId.value === sessionId) {
       removeSessionFromCache(sessionId)
     }
   }
@@ -65,18 +63,19 @@ export const useChatStream = ({
     }
   }
 
-  const checkAndResumeStream = async (sessionId) => {
+  const checkAndResumeStream = async (sessionId, abortControllerRef) => {
     let resumedAndCompleted = false
     isLoading.value = true
-      loadingSessionId.value = sessionId
-      // 这里应该只初始化 shouldAutoScroll 为 true（新对话开始时），但后续流式过程中不应反复强制重置
-      // 但因为 checkAndResumeStream 是“开始”动作，所以重置为 true 是合理的，
-      // 只要后续 handleMessage 不强制重置即可
-      shouldAutoScroll.value = true
-      let resumeLastIndex = getSessionLastIndex(sessionId)
-    abortControllerRef.value = new AbortController()
+    loadingSessionId.value = sessionId
+    shouldAutoScroll.value = true
+    let resumeLastIndex = getSessionLastIndex(sessionId)
+    
+    if (abortControllerRef) {
+      abortControllerRef.value = new AbortController()
+    }
+
     try {
-      const response = await chatAPI.resumeStream(sessionId, resumeLastIndex, abortControllerRef.value)
+      const response = await chatAPI.resumeStream(sessionId, resumeLastIndex, abortControllerRef?.value)
       await readStreamResponse(
         response,
         (data) => {
@@ -89,9 +88,6 @@ export const useChatStream = ({
             markCompletedAndCleanupCurrentSession(sessionId)
           }
           if (data.type === 'chunk_start' || data.type === 'json_chunk' || data.type === 'chunk_end') return
-          // onMessage: handleMessage 已经不强制滚底了
-          // 这里也不需要额外逻辑，只要 handleMessage 调用 scrollToBottom()，
-          // 并且 shouldAutoScroll 保持用户滚动状态即可
           handleMessage(data)
         },
         () => {
@@ -135,13 +131,7 @@ export const useChatStream = ({
     isHistoryLoading.value = true
     try {
       await loadConversationMessages(sessionId)
-      ensureFirstUserMessageForRunningSession(sessionId)
-      const activeMeta = activeSessions.value?.[sessionId]
-      const shouldResume = activeMeta?.status === 'running'
-      const resumedAndCompleted = shouldResume ? await checkAndResumeStream(sessionId) : false
-      if (resumedAndCompleted) {
-        await loadConversationMessages(sessionId)
-      }
+      await checkAndResumeStream(sessionId, abortControllerRef)
     } catch (e) {
       toast.error(t('chat.loadConversationError') || 'Failed to load conversation')
     } finally {

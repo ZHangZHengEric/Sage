@@ -6,7 +6,6 @@ import { useLanguage } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache.js'
 import { useChatScroll } from '@/composables/chat/useChatScroll.js'
-import { injectFirstUserMessageIfNeeded } from '@/composables/chat/chatMessageUtils.js'
 import { useChatStream } from '@/composables/chat/useChatStream.js'
 import { useChatLifecycle } from '@/composables/chat/useChatLifecycle.js'
 import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
@@ -38,10 +37,7 @@ export const useChatPage = (props) => {
   } = useChatScroll()
 
   const showSettings = ref(false)
-  const showToolDetails = ref(false)
   const currentTraceId = ref(null)
-  const selectedToolExecution = ref(null)
-  const toolResult = ref(null)
 
   const openTraceDetails = () => {
     const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
@@ -55,7 +51,6 @@ export const useChatPage = (props) => {
 
   const messages = ref([])
   const messageIdIndexMap = ref(new Map())
-  const messageChunks = ref(new Map())
   const isLoading = ref(false)
   const loadingSessionId = ref(null)
   const abortControllerRef = ref(null)
@@ -155,23 +150,7 @@ export const useChatPage = (props) => {
       }
     }
     if (res.conversation_info && activeSessions.value[sessionId]?.status === 'running') {
-      const firstUserMessage = normalizedMessages.find(item =>
-        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
-      )
-      const firstUserInput = firstUserMessage
-        ? String(firstUserMessage.content || '').replace(/^<skill>.*?<\/skill>\s*/, '').trim()
-        : ''
-      const title = firstUserInput || res.conversation_info.title || null
-      updateActiveSession(sessionId, true, title, firstUserInput || null)
-    }
-  }
-
-  const ensureFirstUserMessageForRunningSession = (sessionId) => {
-    const activeMeta = activeSessions.value[sessionId]
-    const nextMessages = injectFirstUserMessageIfNeeded(messages.value, sessionId, activeMeta)
-    if (nextMessages !== messages.value) {
-      messages.value = nextMessages
-      rebuildMessageIdIndexMap()
+      updateActiveSession(sessionId, true, res.conversation_info.title)
     }
   }
 
@@ -243,7 +222,6 @@ export const useChatPage = (props) => {
   const clearMessages = () => {
     messages.value = []
     messageIdIndexMap.value = new Map()
-    messageChunks.value = new Map()
   }
 
   const {
@@ -307,10 +285,8 @@ export const useChatPage = (props) => {
     createSession,
     clearCurrentStreamViewState,
     loadConversationMessages,
-    ensureFirstUserMessageForRunningSession,
     isHistoryLoading,
-    removeSessionFromCache,
-    shouldRemoveCompletedSession: (sessionId) => route.name === 'Chat' && currentSessionId.value === sessionId
+    removeSessionFromCache
   })
 
   const showLoadingBubble = computed(() => !!isLoading.value)
@@ -330,8 +306,6 @@ export const useChatPage = (props) => {
         const agent = agents.value.find(a => a.id === conversation.agent_id)
         if (agent) {
           selectAgent(agent)
-        } else {
-          selectAgent(agents.value[0])
         }
       }
       if (conversation.messages && conversation.messages.length > 0) {
@@ -346,12 +320,6 @@ export const useChatPage = (props) => {
     } catch (error) {
       toast.error(t('chat.loadConversationError'))
     }
-  }
-
-  const handleToolClick = (toolExecution, result) => {
-    selectedToolExecution.value = toolExecution
-    toolResult.value = result
-    showToolDetails.value = true
   }
 
   const copyToClipboard = (text) => {
@@ -390,7 +358,12 @@ export const useChatPage = (props) => {
     })
   }
 
-  const persistRunningSessionOnLeaveChat = () => {
+  const persistRunningSessionOnLeaveChat = (includeInSidebar = true) => {
+    if (isLoading.value && abortControllerRef.value) {
+      abortControllerRef.value.abort()
+      abortControllerRef.value = null
+    }
+
     const sessionId = currentSessionId.value
     if (!sessionId) return
     const meta = activeSessions.value?.[sessionId]
@@ -406,7 +379,7 @@ export const useChatPage = (props) => {
           updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
         }
       }
-      persistRunningSessionToCache(sessionId, true)
+      persistRunningSessionToCache(sessionId, includeInSidebar)
       return
     }
     if (meta?.status === 'completed') {
@@ -464,7 +437,6 @@ export const useChatPage = (props) => {
     handleCloseSubSession,
     handleOpenSubSession,
     downloadWorkspaceFile,
-    handleToolClick,
     workspaceFiles,
     downloadFile,
     deleteFile,
