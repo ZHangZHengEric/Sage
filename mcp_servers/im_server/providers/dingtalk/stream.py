@@ -161,7 +161,12 @@ class DingTalkStreamClient:
         
         # Start client (blocks until stopped)
         logger.info("Connecting to DingTalk Stream...")
-        await self.client.start()
+        
+        try:
+            await self.client.start()
+            logger.info("DingTalk client.start() returned normally")
+        except Exception as e:
+            logger.error(f"DingTalk client.start() exception: {e}", exc_info=True)
 
 
 class _DingTalkMessageHandler(ChatbotHandler):
@@ -172,9 +177,16 @@ class _DingTalkMessageHandler(ChatbotHandler):
     
     async def process(self, callback: CallbackMessage):
         """Process incoming message."""
+        # ===== 最开始的调试日志 =====
+        logger.info(f"[DingTalk] ========== process() CALLED ==========")
+        logger.info(f"[DingTalk] callback.data: {callback.data}")
+        # =============================
+        
         try:
             # Parse message
             message = ChatbotMessage.from_dict(callback.data)
+            
+            logger.info(f"[DingTalk] Parsed message: {message}")
             
             # Extract relevant info including session_webhook for reply
             msg_data = {
@@ -189,11 +201,13 @@ class _DingTalkMessageHandler(ChatbotHandler):
                 "conversation_type": message.conversation_type,
             }
             
+            logger.info(f"[DingTalk] Calling message_handler with: {msg_data}")
+            
             # Call handler
             self.message_handler(msg_data)
             
             return AckMessage.STATUS_OK, 'OK'
             
         except Exception as e:
-            logger.error(f"Error processing DingTalk message: {e}")
+            logger.error(f"Error processing DingTalk message: {e}", exc_info=True)
             return AckMessage.STATUS_OK, 'OK'

@@ -119,6 +119,10 @@ async def save_im_config(config: IMConfig):
             try:
                 import asyncio
                 from mcp_servers.im_server.im_server import initialize_im_server
+                # Clear config cache first to ensure fresh config is loaded
+                from mcp_servers.im_server.config import clear_config_cache
+                clear_config_cache()
+                logger.info("[IM] Config cache cleared")
                 asyncio.create_task(initialize_im_server())
                 logger.info("[IM] IM service start task created")
             except Exception as e:

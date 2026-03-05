@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 class FibreSubAgent:
     """
     Fibre Sub-Agent (The Executor)
-    
+
     A lightweight executor that runs tasks based on AgentDefinition configuration.
     Does NOT manage session context - session context is managed by SubSession.
     """
-    
+
     def __init__(self, agent_definition: "AgentDefinition"):
         """
         Initialize the sub-agent executor.
@@ -28,12 +28,18 @@ class FibreSubAgent:
             agent_definition: The agent definition (configuration)
         """
         self.agent_definition = agent_definition
-        self.agent_name = agent_definition.name  # Add agent_name for compatibility
+        self.agent_id = agent_definition.agent_id
+        self.name = agent_definition.name
 
         # Internal agent instance (lazy initialization)
         self._agent: Optional[SimpleAgent] = None
         self._initialized = False
-        
+
+    @property
+    def agent_name(self) -> str:
+        """Backward compatibility property."""
+        return self.name
+
     async def _initialize_if_needed(
         self,
         model,
@@ -41,16 +47,16 @@ class FibreSubAgent:
     ):
         """
         Initialize the internal SimpleAgent if not already initialized.
-        
+
         Args:
             model: The model to use
             model_config: Model configuration
         """
         if self._initialized:
             return
-        
-        logger.info(f"Initializing FibreSubAgent: {self.agent_definition.name}")
-        
+
+        logger.info(f"Initializing FibreSubAgent: {self.agent_definition.name} (id={self.agent_definition.agent_id})")
+
         # Create SimpleAgent using AgentDefinition
         self._agent = SimpleAgent(
             model=model,
@@ -58,7 +64,7 @@ class FibreSubAgent:
             system_prefix=self.agent_definition.system_prompt
         )
         self._agent.agent_name = self.agent_definition.name
-        
+
         self._initialized = True
         logger.info(f"FibreSubAgent {self.agent_definition.name} initialized")
 

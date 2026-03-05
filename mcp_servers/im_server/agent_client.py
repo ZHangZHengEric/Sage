@@ -260,7 +260,7 @@ class AgentClient:
                 platform_info += f" - {user_name}"
             platform_info += "】\n\n"
             
-            full_content = platform_info + content
+            full_content = platform_info + content +"\n(P.S. 过程中使用 send_message_through_im 工具与用户进行IM互动)"
             
             payload = {
                 "agent_id": agent_id,
