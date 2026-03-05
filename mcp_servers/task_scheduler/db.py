@@ -428,3 +428,75 @@ class TaskSchedulerDB:
                 LIMIT ?
             """, (task_id, limit))
             return [dict(row) for row in cursor.fetchall()]
+
+    def update_recurring_task(self, task_id: int, **kwargs) -> bool:
+        """
+        Update a recurring task with the given fields.
+        
+        Args:
+            task_id: The ID of the recurring task to update.
+            **kwargs: Fields to update (name, description, agent_id, session_id, cron_expression, enabled).
+            
+        Returns:
+            True if update was successful, False otherwise.
+        """
+        if not kwargs:
+            return False
+            
+        allowed_fields = {'name', 'description', 'agent_id', 'session_id', 'cron_expression', 'enabled'}
+        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
+        
+        if not update_fields:
+            return False
+            
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys()])
+            set_clause += ", updated_at = ?"
+            values = list(update_fields.values())
+            values.append(datetime.now().isoformat())
+            values.append(task_id)
+            
+            cursor.execute(f"""
+                UPDATE recurring_tasks 
+                SET {set_clause}
+                WHERE id = ?
+            """, values)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_task(self, task_id: int, **kwargs) -> bool:
+        """
+        Update a one-time task with the given fields.
+        
+        Args:
+            task_id: The ID of the task to update.
+            **kwargs: Fields to update (name, description, agent_id, session_id, execute_at, status, max_retries).
+            
+        Returns:
+            True if update was successful, False otherwise.
+        """
+        if not kwargs:
+            return False
+            
+        allowed_fields = {'name', 'description', 'agent_id', 'session_id', 'execute_at', 'status', 'max_retries'}
+        update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
+        
+        if not update_fields:
+            return False
+            
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys()])
+            set_clause += ", updated_at = ?"
+            values = list(update_fields.values())
+            values.append(datetime.now().isoformat())
+            values.append(task_id)
+            
+            cursor.execute(f"""
+                UPDATE tasks 
+                SET {set_clause}
+                WHERE id = ?
+            """, values)
+            conn.commit()
+            return cursor.rowcount > 0

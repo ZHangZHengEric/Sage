@@ -18,6 +18,7 @@ import json
 import logging
 import threading
 import asyncio
+import time
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -66,6 +67,109 @@ logger = logging.getLogger("IMServer")
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# --- Health Check & Connection Management ---
+
+class IMConnectionHealthMonitor:
+    """
+    IM 连接健康监控器
+    用于监控飞书、钉钉等 IM 渠道的健康状态
+    """
+    
+    def __init__(self, check_interval: int = 60):
+        self.check_interval = check_interval  # 检查间隔（秒）
+        self._last_message_time: Dict[str, float] = {}  # 各渠道最后收到消息的时间
+        self._connection_status: Dict[str, bool] = {}  # 各渠道连接状态
+        self._lock = threading.Lock()
+        self._running = False
+        self._check_task: Optional[asyncio.Task] = None
+        
+    def update_message_time(self, provider: str):
+        """更新最后收到消息的时间"""
+        with self._lock:
+            self._last_message_time[provider] = time.time()
+            self._connection_status[provider] = True
+            
+    def get_last_message_time(self, provider: str) -> Optional[float]:
+        """获取最后收到消息的时间"""
+        with self._lock:
+            return self._last_message_time.get(provider)
+            
+    def set_connection_status(self, provider: str, status: bool):
+        """设置连接状态"""
+        with self._lock:
+            self._connection_status[provider] = status
+            
+    def get_connection_status(self, provider: str) -> bool:
+        """获取连接状态"""
+        with self._lock:
+            return self._connection_status.get(provider, False)
+    
+    def is_healthy(self, provider: str, timeout: int = 3600) -> bool:
+        """
+        检查渠道是否健康
+        
+        注意：飞书和钉钉 SDK 都有自己的重连机制，
+        我们只需要检查连接状态是否已建立，不需要根据"最后消息时间"来判断。
+        
+        Args:
+            provider: 渠道名称
+            timeout: 超时时间（秒），默认1小时，主要是为了兼容
+            
+        Returns:
+            是否健康 - 只看连接状态，不看最后消息时间
+        """
+        with self._lock:
+            # 只看连接状态，不根据最后消息时间判断
+            return self._connection_status.get(provider, False)
+    
+    def get_all_status(self) -> Dict[str, Dict[str, Any]]:
+        """获取所有渠道的状态"""
+        with self._lock:
+            status = {}
+            for provider in self._connection_status:
+                last_time = self._last_message_time.get(provider)
+                status[provider] = {
+                    "connected": self._connection_status[provider],
+                    "last_message_time": datetime.fromtimestamp(last_time).isoformat() if last_time else None,
+                    "seconds_since_last_message": time.time() - last_time if last_time else None,
+                    "healthy": self.is_healthy(provider)
+                }
+            return status
+    
+    async def start_monitoring(self):
+        """启动健康检查监控"""
+        self._running = True
+        while self._running:
+            try:
+                await self._check_health()
+                await asyncio.sleep(self.check_interval)
+            except Exception as e:
+                logger.error(f"[HealthMonitor] Error during health check: {e}")
+                await asyncio.sleep(5)
+    
+    async def _check_health(self):
+        """执行健康检查 - 只检查连接状态"""
+        with self._lock:
+            providers = list(self._connection_status.keys())
+        
+        for provider in providers:
+            is_healthy = self.is_healthy(provider)
+            status_str = "✓ 已连接" if is_healthy else "✗ 未连接"
+            logger.info(f"[HealthMonitor] {provider}: {status_str}")
+    
+    def stop(self):
+        """停止监控"""
+        self._running = False
+        if self._check_task:
+            self._check_task.cancel()
+
+# 全局健康监控器实例
+_health_monitor = IMConnectionHealthMonitor()
+
+def get_health_monitor() -> IMConnectionHealthMonitor:
+    """获取健康监控器实例"""
+    return _health_monitor
 
 
 async def _send_message_to_agent(
@@ -347,15 +451,29 @@ async def handle_incoming_message(
 async def _imessage_background_task():
     """Background task to process incoming iMessage messages."""
     if not IMESSAGE_AVAILABLE:
+        logger.info("[iMessage] Not available, skipping")
         return
 
     # Get iMessage config with allowed_senders whitelist
     im_config = get_im_config("imessage") or {}
-    im_mgr = get_imessage_manager(config=im_config)
-    im_mgr.start()
+    
+    # 捕获启动异常，避免阻塞其他 IM 服务
+    try:
+        im_mgr = get_imessage_manager(config=im_config)
+        im_mgr.start()
+    except Exception as e:
+        logger.error(f"[iMessage] Failed to start: {e}", exc_info=True)
+        logger.warning("[iMessage] Disabling iMessage to allow other IM services to work")
+        # 不 return，继续运行但不处理 iMessage
+        im_mgr = None
 
     while True:
         try:
+            # 如果 iMessage 管理器没有成功启动，跳过
+            if im_mgr is None:
+                await asyncio.sleep(5)
+                continue
+                
             messages = im_mgr.get_pending_messages()
 
             for msg in messages:
@@ -375,12 +493,20 @@ def _handle_feishu_message(message: Dict[str, Any]):
     """Handle incoming Feishu message from WebSocket."""
     import asyncio
     
+    logger.info(f"[Feishu] ========== Received message ==========")
+    logger.info(f"[Feishu] Raw message: {message}")
+    
+    # 更新健康监控器 - 记录收到消息的时间
+    health_monitor = get_health_monitor()
+    health_monitor.update_message_time("feishu")
+    
     # Run async handler in sync context
     # Note: Feishu SDK runs in its own thread, so we need to use the main event loop
     try:
         # Get the main event loop (from the main thread)
         loop = asyncio.get_event_loop()
         if loop.is_running():
+            logger.info(f"[Feishu] Scheduling message handling in main loop...")
             # Use run_coroutine_threadsafe to safely schedule from another thread
             asyncio.run_coroutine_threadsafe(
                 handle_incoming_message(
@@ -392,60 +518,105 @@ def _handle_feishu_message(message: Dict[str, Any]):
                 ),
                 loop
             )
-            logger.info(f"[Feishu] Scheduled message handling in main loop: {message.get('content', {}).get('text', '')[:50]}...")
+            content = message.get("content", {})
+            text = content.get("text", "") if isinstance(content, dict) else str(content)
+            logger.info(f"[Feishu] Scheduled message handling: {text[:50]}...")
+        else:
+            logger.warning(f"[Feishu] Event loop not running, cannot schedule message")
     except Exception as e:
         logger.error(f"[Feishu] Error handling message: {e}", exc_info=True)
 
 
 async def _start_feishu_websocket():
     """Start Feishu WebSocket listener."""
+    logger.info("[Feishu] ========== Starting Feishu WebSocket ==========")
+    
     if not FEISHU_WS_AVAILABLE:
-        logger.info("Feishu WebSocket not available")
+        logger.error("[Feishu] WebSocket not available - FEISHU_WS_AVAILABLE=False")
         return
     
+    from .config import get_im_config
     config = get_im_config("feishu")
     if not config:
-        logger.info("Feishu not configured")
+        logger.error("[Feishu] No configuration found")
         return
     
     if not config.get("enabled"):
-        logger.info("Feishu not enabled")
+        logger.error("[Feishu] Not enabled in config")
         return
     
     app_id = config.get("app_id")
     app_secret = config.get("app_secret")
     
     if not app_id or not app_secret:
-        logger.warning("Feishu app_id or app_secret not configured")
+        logger.error(f"[Feishu] Missing credentials - app_id={bool(app_id)}, app_secret={bool(app_secret)}")
         return
     
-    try:
-        client = FeishuWebSocketClient(app_id, app_secret, _handle_feishu_message)
-        client.start()  # This now starts its own thread internally
-        
-        logger.info("Feishu WebSocket listener started")
-        
-        # Keep the task alive
-        while True:
-            await asyncio.sleep(60)
+    logger.info(f"[Feishu] Config loaded - app_id: {app_id[:10]}..." if app_id else "[Feishu] Config loaded - no app_id")
+    
+    health_monitor = get_health_monitor()
+    
+    while True:
+        client = None
+        try:
+            logger.info(f"[Feishu] Starting WebSocket client...")
+            client = FeishuWebSocketClient(app_id, app_secret, _handle_feishu_message)
+            client.start()
             
-    except Exception as e:
-        logger.error(f"Feishu WebSocket error: {e}")
+            # 设置连接状态为已连接
+            health_monitor.set_connection_status("feishu", True)
+            logger.info("[Feishu] WebSocket listener started successfully")
+            
+            # 飞书 SDK 会在自己的线程中运行，直到连接断开
+            # 我们在这里等待，SDK 会自动重连
+            while True:
+                await asyncio.sleep(60)
+                    
+        except Exception as e:
+            logger.error(f"[Feishu] WebSocket error: {e}")
+            
+            # 设置连接状态为断开
+            health_monitor.set_connection_status("feishu", False)
+            
+            # 等待后重试
+            logger.info("[Feishu] Reconnecting in 5 seconds...")
+            await asyncio.sleep(5)
 
 
 async def initialize_im_server():
     """Initialize IM server and start background tasks."""
-    logger.info("Initializing IM server...")
+    logger.info("=" * 50)
+    logger.info("[IM Server] ========== Initializing IM Server ==========")
+    logger.info("=" * 50)
 
     # Load configuration first
     logger.info("[IM Server] Loading IM configuration...")
-    from .config import load_im_config
+    from .config import load_im_config, get_im_config, is_provider_enabled
     config = await load_im_config()
     if not config:
-        logger.error("[IM Server] Failed to load IM configuration")
+        logger.error("[IM Server] Failed to load IM configuration - no config found")
         return
 
     logger.info(f"[IM Server] IM configuration loaded: {config}")
+    
+    # Check each provider's enabled status
+    feishu_enabled = is_provider_enabled("feishu")
+    dingtalk_enabled = is_provider_enabled("dingtalk")
+    imessage_enabled = is_provider_enabled("imessage")
+    
+    logger.info(f"[IM Server] Provider status:")
+    logger.info(f"  - Feishu: enabled={feishu_enabled}, ws_available={FEISHU_WS_AVAILABLE}")
+    logger.info(f"  - DingTalk: enabled={dingtalk_enabled}, stream_available={DINGTALK_STREAM_AVAILABLE}")
+    logger.info(f"  - iMessage: enabled={imessage_enabled}, available={IMESSAGE_AVAILABLE}")
+    
+    if not feishu_enabled and not dingtalk_enabled and not imessage_enabled:
+        logger.warning("[IM Server] No IM providers enabled, exiting")
+        return
+
+    # 启动健康检查监控器
+    health_monitor = get_health_monitor()
+    asyncio.create_task(health_monitor.start_monitoring())
+    logger.info("[IM Server] Health monitor started (check interval: 30s)")
 
     # Start iMessage background task (if configured)
     if IMESSAGE_AVAILABLE:
@@ -453,16 +624,31 @@ async def initialize_im_server():
         if im_config and im_config.get("enabled"):
             asyncio.create_task(_imessage_background_task())
             logger.info("iMessage background task started")
+        else:
+            logger.info("iMessage not enabled or not configured")
 
     # Start Feishu WebSocket listener (if configured)
     if FEISHU_WS_AVAILABLE:
-        asyncio.create_task(_start_feishu_websocket())
+        if feishu_enabled:
+            asyncio.create_task(_start_feishu_websocket())
+            logger.info("[IM Server] Feishu WebSocket task started")
+        else:
+            logger.info("[IM Server] Feishu not enabled, skipping")
+    else:
+        logger.warning("[IM Server] Feishu WebSocket not available (FEISHU_WS_AVAILABLE=False)")
 
     # Start DingTalk Stream listener (if configured)
     if DINGTALK_STREAM_AVAILABLE:
-        asyncio.create_task(_start_dingtalk_stream())
+        if dingtalk_enabled:
+            asyncio.create_task(_start_dingtalk_stream())
+            logger.info("[IM Server] DingTalk Stream task started")
+        else:
+            logger.info("[IM Server] DingTalk not enabled, skipping")
+    else:
+        logger.warning("[IM Server] DingTalk Stream not available (DINGTALK_STREAM_AVAILABLE=False)")
 
-    logger.info("IM server initialized")
+    logger.info("[IM Server] ========== IM Server Initialized ==========")
+    logger.info("=" * 50)
 
 
 async def _start_dingtalk_stream():
@@ -488,22 +674,41 @@ async def _start_dingtalk_stream():
         logger.warning("DingTalk client_id/app_key or client_secret/app_secret not configured")
         return
 
-    try:
-        client = DingTalkStreamClient(client_id, client_secret, _handle_dingtalk_message)
-        client.start()
-        logger.info("DingTalk Stream listener started")
+    health_monitor = get_health_monitor()
+    
+    while True:
+        client = None
+        try:
+            logger.info(f"[DingTalk] Starting Stream client...")
+            client = DingTalkStreamClient(client_id, client_secret, _handle_dingtalk_message)
+            client.start()
 
-        # Keep the task alive
-        while True:
-            await asyncio.sleep(60)
+            # 设置连接状态为已连接
+            health_monitor.set_connection_status("dingtalk", True)
+            logger.info("[DingTalk] Stream listener started successfully")
 
-    except Exception as e:
-        logger.error(f"DingTalk Stream error: {e}")
+            # Keep the task alive - 这个循环会在连接断开后退出
+            while True:
+                await asyncio.sleep(60)
+
+        except Exception as e:
+            logger.error(f"[DingTalk] Stream error: {e}")
+
+            # 设置连接状态为断开
+            health_monitor.set_connection_status("dingtalk", False)
+
+            # 等待后重试
+            logger.info("[DingTalk] Reconnecting in 5 seconds...")
+            await asyncio.sleep(5)
 
 
 def _handle_dingtalk_message(message: Dict[str, Any]):
     """Handle incoming DingTalk message from Stream."""
     import asyncio
+
+    # 更新健康监控器 - 记录收到消息的时间
+    health_monitor = get_health_monitor()
+    health_monitor.update_message_time("dingtalk")
 
     # Run async handler in sync context
     # Note: DingTalk SDK runs in its own thread, so we need to use the main event loop
