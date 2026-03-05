@@ -413,11 +413,34 @@ const copied = ref(false)
 const handleCopy = async () => {
   if (!props.message.content) return
   try {
-    await navigator.clipboard.writeText(props.message.content)
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(props.message.content)
+      copied.value = true
+      setTimeout(() => {
+        copied.value = false
+      }, 2000)
+    } else {
+      // Fallback for browsers/environments where clipboard API is not available (e.g. non-secure context)
+      const textArea = document.createElement('textarea')
+      textArea.value = props.message.content
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (successful) {
+        copied.value = true
+        setTimeout(() => {
+          copied.value = false
+        }, 2000)
+      } else {
+        console.error('Fallback copy method failed')
+      }
+    }
   } catch (err) {
     console.error('Failed to copy text: ', err)
   }
