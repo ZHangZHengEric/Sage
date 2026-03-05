@@ -10,6 +10,7 @@ from sagents.utils.lock_manager import safe_release
 @dataclass
 class SessionState:
     session_id: str
+    query: str = ""
     history: List[str] = field(default_factory=list)  # 存储已生成的 JSON 字符串
     subscribers: Set[asyncio.Queue] = field(default_factory=set)
     task: Optional[asyncio.Task] = None
@@ -34,7 +35,7 @@ class StreamManager:
             cls._instance = cls()
         return cls._instance
 
-    async def start_session(self, session_id: str, generator, lock: asyncio.Lock):
+    async def start_session(self, session_id: str, query: str, generator, lock: asyncio.Lock):
         """
         启动一个新的会话任务，如果会话已存在且正在运行，则复用
         """
@@ -53,6 +54,7 @@ class StreamManager:
             await self.cleanup_session(session_id)
 
         session = SessionState(session_id=session_id, lock=lock)
+        session.query = query
         self._sessions[session_id] = session
 
         # 启动后台任务
@@ -106,6 +108,11 @@ class StreamManager:
         if not session:
             return False
         return bool(session.task and not session.task.done() and not session.is_completed)
+
+    async def get_session_query(self, session_id: str) -> Optional[str]:
+        if session_id in self._sessions:
+            return self._sessions[session_id].query
+        return None
 
     async def stop_session(self, session_id: Optional[str]) -> None:
         if not session_id:
