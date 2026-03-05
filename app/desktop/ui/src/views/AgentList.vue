@@ -1,7 +1,8 @@
 <template>
   <div class="h-full w-full overflow-hidden flex flex-col">
     <!-- List View -->
-    <div v-if="currentView === 'list'" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 animate-in fade-in duration-500">
+    <div v-if="currentView === 'list'"
+      class="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 animate-in fade-in duration-500">
       <div class="flex justify-end gap-3">
         <Button variant="outline" @click="handleImport">
           <Download class="mr-2 h-4 w-4" />
@@ -17,10 +18,12 @@
         <Loader class="h-8 w-8 animate-spin text-primary" />
       </div>
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 md:gap-6">
-        <Card v-for="agent in agents" :key="agent.id" class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+        <Card v-for="agent in agents" :key="agent.id"
+          class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader class="pb-3 md:pb-4">
             <div class="flex items-start gap-3 md:gap-4">
-              <div class="h-10 w-10 md:h-12 md:w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
+              <div
+                class="h-10 w-10 md:h-12 md:w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
                 <Bot class="h-5 w-5 md:h-6 md:w-6" />
               </div>
               <div class="space-y-1 overflow-hidden flex-1">
@@ -33,51 +36,49 @@
               </div>
             </div>
           </CardHeader>
-          
+
           <CardContent class="flex-1 pb-4">
-             <div class="space-y-2 md:space-y-3 text-sm">
-                <div class="flex justify-between">
-                   <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
-                   <span class="font-medium truncate max-w-[120px] md:max-w-[200px]" :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
-                </div>
-                <div class="flex justify-between items-center">
-                   <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
-                   <Badge :variant="getConfigBadgeVariant(agent.deepThinking)">{{ getConfigBadgeText(agent.deepThinking) }}</Badge>
-                </div>
-                <div class="flex justify-between items-center">
-                   <span class="text-muted-foreground">{{ t('agent.agentMode') }}:</span>
-                   <Badge variant="outline">{{ getAgentModeText(agent.agentMode) }}</Badge>
-                </div>
-                <div class="flex justify-between">
-                   <span class="text-muted-foreground">{{ t('agent.availableTools') }}:</span>
-                   <span>{{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}</span>
-                </div>
-                <div class="flex justify-between">
-                   <span class="text-muted-foreground">{{ t('agent.availableSkills') }}:</span>
-                   <span>{{ agent.availableSkills?.length || 0 }} {{ t('agent.toolsCount') }}</span>
-                </div>
-             </div>
+            <div class="space-y-2 md:space-y-3 text-sm">
+              <div class="flex justify-between">
+                <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
+                <span class="font-medium truncate max-w-[120px] md:max-w-[200px]"
+                  :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
+                <Badge :variant="getConfigBadgeVariant(agent.deepThinking)">{{ getConfigBadgeText(agent.deepThinking) }}
+                </Badge>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-muted-foreground">{{ t('agent.agentMode') }}:</span>
+                <Badge variant="outline">{{ getAgentModeText(agent.agentMode) }}</Badge>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-muted-foreground">{{ t('agent.availableTools') }}:</span>
+                <span>{{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-muted-foreground">{{ t('agent.availableSkills') }}:</span>
+                <span>{{ agent.availableSkills?.length || 0 }} {{ t('agent.toolsCount') }}</span>
+              </div>
+            </div>
           </CardContent>
 
           <CardFooter class="pt-4 border-t bg-muted/20 flex flex-wrap gap-2 justify-end">
             <Button variant="ghost" size="icon" @click="openUsageModal(agent)" :title="t('agent.usage')">
               <FileBraces class="h-4 w-4" />
             </Button>
-            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)" :title="t('agent.edit')">
+            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)"
+              :title="t('agent.edit')">
               <Edit class="h-4 w-4" />
             </Button>
-       
+
             <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
               <Upload class="h-4 w-4" />
             </Button>
-            <Button 
-              v-if="canDelete(agent)" 
-              variant="ghost" 
-              size="icon" 
-              class="text-destructive hover:text-destructive hover:bg-destructive/10"
-              @click="handleDelete(agent)" 
-              :title="t('agent.delete')"
-            >
+            <Button v-if="canDelete(agent)" variant="ghost" size="icon"
+              class="text-destructive hover:text-destructive hover:bg-destructive/10" @click="handleDelete(agent)"
+              :title="t('agent.delete')">
               <Trash2 class="h-4 w-4" />
             </Button>
           </CardFooter>
@@ -85,14 +86,8 @@
       </div>
     </div>
     <div v-else class="flex-1 overflow-hidden">
-       <AgentEdit 
-      :visible="currentView !== 'list'" 
-      :agent="editingAgent" 
-      :tools="tools" 
-      :skills="skills" 
-      @save="handleSaveAgent"
-      @update:visible="handleCloseEdit" 
-    />
+      <AgentEdit :visible="currentView !== 'list'" :agent="editingAgent" :tools="tools" :skills="skills"
+        @save="handleSaveAgent" @update:visible="handleCloseEdit" />
     </div>
     <!-- Export Dialog -->
     <Dialog :open="showExportDialog" @update:open="showExportDialog = $event">
@@ -109,14 +104,16 @@
               {{ t('agent.exportFormat') }}
             </Label>
             <div class="col-span-3 flex gap-4">
-               <div class="flex items-center space-x-2">
-                  <input type="radio" id="json" value="json" v-model="exportFormat" class="accent-primary h-4 w-4" />
-                  <label for="json" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">JSON</label>
-               </div>
-               <div class="flex items-center space-x-2">
-                  <input type="radio" id="yaml" value="yaml" v-model="exportFormat" class="accent-primary h-4 w-4" />
-                  <label for="yaml" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">YAML</label>
-               </div>
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="json" value="json" v-model="exportFormat" class="accent-primary h-4 w-4" />
+                <label for="json"
+                  class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">JSON</label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="yaml" value="yaml" v-model="exportFormat" class="accent-primary h-4 w-4" />
+                <label for="yaml"
+                  class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">YAML</label>
+              </div>
             </div>
           </div>
         </div>
@@ -155,20 +152,12 @@
 
       </DialogContent>
     </Dialog>
-    
-    <!-- Agent Creation Option Modal -->
-    <AgentCreationOption 
-      :isOpen="showCreationModal" 
-      :tools="tools" 
-      @create-blank="handleBlankConfig"
-      @create-smart="handleSmartConfig" 
-      @close="showCreationModal = false" 
-    />
 
-    <AgentAuthModal 
-      v-model:visible="showAuthModal"
-      :agentId="authAgentId"
-    />
+    <!-- Agent Creation Option Modal -->
+    <AgentCreationOption :isOpen="showCreationModal" :tools="tools" @create-blank="handleBlankConfig"
+      @create-smart="handleSmartConfig" @close="showCreationModal = false" />
+
+    <AgentAuthModal v-model:visible="showAuthModal" :agentId="authAgentId" />
     <AppConfirmDialog ref="confirmDialogRef" />
 
   </div>
@@ -396,7 +385,10 @@ const handleExport = (agent) => {
 const confirmExport = async () => {
   if (!agentToExport.value) return
   const agent = agentToExport.value
-  
+  const safeAgentName = (agent.name || 'agent')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    .trim() || 'agent'
+
   // 创建导出的配置对象
   const exportConfig = {
     id: agent.id,
@@ -423,23 +415,23 @@ const confirmExport = async () => {
   if (exportFormat.value === 'json') {
     dataStr = JSON.stringify(exportConfig, null, 2)
     mimeType = 'application/json'
-     extension = 'json'
-   } else {
-     dataStr = dump(exportConfig)
-     mimeType = 'application/x-yaml'
-     extension = 'yaml'
-   }
+    extension = 'json'
+  } else {
+    dataStr = dump(exportConfig)
+    mimeType = 'application/x-yaml'
+    extension = 'yaml'
+  }
+  const exportFileName = `agent_${safeAgentName}_${new Date().toISOString().split('T')[0]}.${extension}`
 
   // 尝试使用 Tauri API
   if (window.__TAURI__) {
     try {
       const { save } = await import('@tauri-apps/plugin-dialog')
-      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+      const { writeTextFile, stat } = await import('@tauri-apps/plugin-fs')
       const { documentDir, join } = await import('@tauri-apps/api/path')
-      
+
       const defaultDir = await documentDir()
-      const fileName = `agent_${agent.name}_${new Date().toISOString().split('T')[0]}.${extension}`
-      const defaultPath = await join(defaultDir, fileName)
+      const defaultPath = await join(defaultDir, exportFileName)
 
       const filePath = await save({
         defaultPath: defaultPath,
@@ -450,14 +442,29 @@ const confirmExport = async () => {
       })
 
       if (filePath) {
-        await writeTextFile(filePath, dataStr)
+        let targetPath = filePath
+        const pathInfo = await stat(filePath).catch(() => null)
+        if (pathInfo?.isDirectory) {
+          targetPath = await join(filePath, exportFileName)
+        }
+        await writeTextFile(targetPath, dataStr)
         toast.success(t('agent.exportSuccess') || '导出成功')
         showExportDialog.value = false
         agentToExport.value = null
       }
       return
     } catch (e) {
-      console.warn('Tauri export failed, falling back to web download', e)
+      console.error('Export failed:', e)
+      let errorMsg = ''
+      if (typeof e === 'string') {
+        errorMsg = e
+      } else if (e instanceof Error) {
+        errorMsg = e.message
+      } else {
+        errorMsg = JSON.stringify(e)
+      }
+      toast.error((t('agent.saveError') || '保存失败') + (errorMsg ? `: ${errorMsg}` : ''))
+      return
     }
   }
 
@@ -468,14 +475,14 @@ const confirmExport = async () => {
   // 创建下载链接并触发下载
   const link = document.createElement('a')
   link.href = url
-  link.download = `agent_${agent.name}_${new Date().toISOString().split('T')[0]}.${extension}`
+  link.download = exportFileName
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
 
   // 清理URL对象
   URL.revokeObjectURL(url)
-  
+
   showExportDialog.value = false
   agentToExport.value = null
 }
@@ -505,10 +512,10 @@ const processImportContent = (content) => {
       availableWorkflows: importedConfig.availableWorkflows || {},
       llmConfig: importedConfig.llmConfig || {}
     }
-    
+
     // 移除可能存在的id，确保是创建新Agent
     if (newAgent.id) {
-        delete newAgent.id
+      delete newAgent.id
     }
 
     // 切换到编辑视图并预填数据
@@ -528,7 +535,7 @@ const handleImport = async () => {
       const { open } = await import('@tauri-apps/plugin-dialog')
       const { readTextFile } = await import('@tauri-apps/plugin-fs')
       const { documentDir } = await import('@tauri-apps/api/path')
-      
+
       const defaultDir = await documentDir()
 
       const selected = await open({
@@ -582,7 +589,7 @@ const handleCreateAgent = () => {
 
 const handleBlankConfig = async (selectedTools = []) => {
   showCreationModal.value = false
-  
+
   let systemPrefix = ''
   try {
     // 强制使用中文模板
@@ -635,7 +642,7 @@ const handleCloseEdit = () => {
 const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null) => {
   try {
     const result = await saveAgent(agentData)
-    
+
     if (shouldExit) {
       currentView.value = 'list'
       editingAgent.value = null
@@ -649,13 +656,13 @@ const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null
         } else if (result && result.id) {
           newAgent = result
         }
-        
+
         // 如果API没有直接返回agent对象，尝试从列表中查找
         if (!newAgent && agents.value.length > 0) {
           // 尝试通过名称匹配 (注意：名称可能不唯一，这是一个fallback)
           newAgent = agents.value.find(a => a.name === agentData.name)
         }
-        
+
         if (newAgent) {
           editingAgent.value = newAgent
         }
