@@ -267,7 +267,7 @@ class AgentClient:
                 "messages": [{"role": "user", "content": full_content}],
                 "session_id": session_id,
                 "force_summary": force_summary,
-                "user_id": user_id,
+                # "user_id": user_id,
             }
             
             logger.info(f"Sending async message to agent {agent_id}...")
