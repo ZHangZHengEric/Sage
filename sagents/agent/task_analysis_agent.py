@@ -68,14 +68,6 @@ class TaskAnalysisAgent(AgentBase):
 
         # 为整个分析流程生成统一的message_id
         message_id = str(uuid.uuid4())
-        # 获取多语言支持的任务分析提示文本
-        task_analysis_prompt = PromptManager().get_agent_prompt_auto('task_analysis_prompt', language=session_context.get_language())
-        yield [MessageChunk(
-            role=MessageRole.ASSISTANT.value,
-            content=task_analysis_prompt,
-            message_id=message_id,
-            message_type=MessageType.TASK_ANALYSIS.value
-        )]
 
         llm_request_message = [
             self.prepare_unified_system_message(
