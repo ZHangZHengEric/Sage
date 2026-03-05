@@ -15,8 +15,8 @@ services:
       - 30050:8080
     env_file:
       - .env
-    mem_limit: 4g
-    cpus: 1.0
+    mem_limit: 16g
+    cpus: 4.0
 
   sage-web:
     restart: always
