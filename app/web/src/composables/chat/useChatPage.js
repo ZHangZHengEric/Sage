@@ -125,21 +125,6 @@ export const useChatPage = (props) => {
       ...msg,
       session_id: msg.session_id || sessionId
     }))
-    const activeMeta = activeSessions.value[sessionId]
-    const shouldInjectFirstUserMessage =
-      activeMeta?.status === 'running' &&
-      !!activeMeta?.user_input &&
-      (normalizedMessages.length === 0 || normalizedMessages[0]?.role !== 'user')
-    if (shouldInjectFirstUserMessage) {
-      normalizedMessages.unshift({
-        role: 'user',
-        content: activeMeta.user_input,
-        message_id: `pending_user_${sessionId}`,
-        type: 'USER',
-        session_id: sessionId,
-        timestamp: Date.now()
-      })
-    }
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
     if (res.conversation_info?.agent_id) {
