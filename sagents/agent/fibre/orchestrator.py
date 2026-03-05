@@ -169,7 +169,7 @@ class FibreOrchestrator:
             # if input_messages:
                 #     for msg in input_messages:
                 #         if isinstance(msg, dict):
-            #             from sagents.context.messages.message import MessageChunk
+                #             from sagents.context.messages.message import MessageChunk
             #             msg_chunk = MessageChunk(
             #                 role=msg.get('role', 'user'),
             #                 content=msg.get('content', ''),
