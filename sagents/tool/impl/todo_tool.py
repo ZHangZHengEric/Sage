@@ -319,13 +319,24 @@ class ToDoTool:
         if self._save_todo_file(file_path, final_tasks):
             logger.info(f"ToDoTool: Tasks saved. Added: {added_count}, Updated: {updated_count}", session_id=session_id)
 
-            # 获取未完成任务用于显示
-            summary = f"成功更新任务清单。新增: {added_count}, 更新: {updated_count}。\n"
-            summary += f"当前未完成任务数: {len(pending_tasks)}"
-            return summary
+            # 构建任务列表（只包含任务名称和状态）
+            task_list = [
+                {
+                    "name": t.get('content', ''),
+                    "status": "completed" if t.get('completed', False) else "pending"
+                }
+                for t in final_tasks
+            ]
+
+            # 构建 JSON 返回结果
+            result = {
+                "summary": f"成功更新任务清单。新增: {added_count}, 更新: {updated_count}。当前未完成任务数: {len(pending_tasks)}",
+                "tasks": task_list
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
         else:
             logger.error(f"ToDoTool: Failed to save tasks to {file_path}", session_id=session_id)
-            return "保存任务清单失败。"
+            return json.dumps({"summary": "保存任务清单失败。", "tasks": []}, ensure_ascii=False)
 
     def clean_old_tasks(self, session_id: Optional[str] = None, session_context: Optional[Any] = None, time_threshold: int = 300):
         """

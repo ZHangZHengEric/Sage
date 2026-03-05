@@ -360,6 +360,23 @@ class FibreOrchestrator:
         
         return name
 
+    def _get_session_depth(self, session_id: str) -> int:
+        """
+        Get the depth of a session in the hierarchy.
+        Root session has depth 0.
+        """
+        depth = 0
+        current_session = self.sub_session_manager.get(session_id)
+        
+        while current_session and current_session.parent_session_id:
+            depth += 1
+            current_session = self.sub_session_manager.get(current_session.parent_session_id)
+            # Prevent infinite loop
+            if depth > 100:
+                break
+        
+        return depth
+
     async def delegate_tasks(
         self,
         tasks: List[Dict[str, Any]],
@@ -378,6 +395,11 @@ class FibreOrchestrator:
         caller_session = self.sub_session_manager.get(caller_session_id)
         if not caller_session:
             return f"Error: Caller session '{caller_session_id}' not found"
+        
+        # Check session depth - limit to 4 levels
+        session_depth = self._get_session_depth(caller_session_id)
+        if session_depth >= 4:
+            return f"Error: Maximum delegation depth (4) reached. You are at level {session_depth}. Please complete the task yourself instead of delegating."
         
         # Pre-validation
         validation_errors = []
@@ -428,7 +450,9 @@ class FibreOrchestrator:
             agent_id = task.get('agent_id')
             content = task.get('content')
             session_id = task.get('session_id')
-            return await self.delegate_task(agent_id, content, session_id, caller_session_id)
+            task_name = task.get('task_name', agent_id)
+            original_task = task.get('original_task', '')
+            return await self.delegate_task(agent_id, content, session_id, caller_session_id, task_name, original_task)
 
         results = await asyncio.gather(*[_run_single_task(t) for t in tasks])
         
@@ -440,40 +464,136 @@ class FibreOrchestrator:
         
         return "\n\n".join(final_output)
     
-    async def delegate_task(self, agent_id: str, content: str, session_id: str, caller_session_id: str) -> str:
+    def _sanitize_task_name(self, name: str) -> str:
+        """清理任务名，使其适合作为文件夹名"""
+        import re
+        # 替换非法字符
+        illegal_chars = r'[\\/:*?"<>|]'
+        sanitized = re.sub(illegal_chars, '_', name)
+        # 截断
+        if len(sanitized) > 50:
+            sanitized = sanitized[:50]
+        return sanitized.strip() or "unnamed_task"
+
+    def _get_task_path(self, base_path: str, task_name: str, session_id: str) -> str:
+        """获取任务路径，复用已存在的文件夹"""
+        import os
+        task_path = os.path.join(base_path, task_name)
+
+        # 如果路径已存在，检查是否是同一个 session
+        if os.path.exists(task_path):
+            # 复用已存在的文件夹
+            logger.info(f"Reusing existing task workspace: {task_path} for session {session_id}")
+            return task_path
+
+        return task_path
+
+    def _create_task_workspace(self, session_id: str, task_name: str, parent_session_id: Optional[str], session_context: SessionContext) -> str:
+        """创建任务工作目录（使用沙箱文件系统）"""
+        import os
+
+        # 1. 清理任务名
+        task_name = self._sanitize_task_name(task_name)
+
+        # 2. 确定父目录（使用虚拟路径）
+        if parent_session_id:
+            # 子任务：在父任务的 sub_tasks 下创建
+            parent_session = self.sub_session_manager.get(parent_session_id)
+            parent_workspace = getattr(parent_session, 'task_workspace', None) if parent_session else None
+
+            if parent_workspace:
+                # parent_workspace 是虚拟路径，直接使用
+                base_path = f"{parent_workspace}/sub_tasks"
+            else:
+                # 回退到 session_context 的 virtual_workspace
+                base_path = f"{session_context.virtual_workspace}/tasks"
+        else:
+            # 根任务：直接在 tasks 下创建
+            base_path = f"{session_context.virtual_workspace}/tasks"
+
+        # 3. 获取任务路径（复用已存在的文件夹）
+        task_path = self._get_task_path(base_path, task_name, session_id)
+
+        # 4. 使用沙箱文件系统创建文件夹
+        fs = session_context.agent_workspace  # SandboxFileSystem
+        fs.ensure_directory(task_path)
+        fs.ensure_directory(f"{task_path}/execution")
+        fs.ensure_directory(f"{task_path}/sub_tasks")
+
+        # 5. 记录到 SubSession（方便后续查找）
+        sub_session = self.sub_session_manager.get(session_id)
+        if sub_session:
+            sub_session.task_workspace = task_path
+
+        logger.info(f"Created task workspace: {task_path}")
+        return task_path
+
+    async def delegate_task(
+        self,
+        agent_id: str,
+        content: str,
+        session_id: str,
+        caller_session_id: str,
+        task_name: str = "",
+        original_task: str = ""
+    ) -> str:
         """
         Delegate a single task to a sub-agent.
-        
+
         Args:
             agent_id: The agent definition ID
             content: Task content
             session_id: The session ID to use
             caller_session_id: The parent session ID
-            
+            task_name: The task name (for workspace folder)
+            original_task: The original task description
+
         Returns:
             Task result string
         """
         if agent_id not in self.sub_agents:
             return f"Error: Agent '{agent_id}' not found"
-        
+
+        # Use task_name if provided, otherwise fallback to agent_id
+        effective_task_name = task_name if task_name else agent_id
+
         # Get or create SubSession
         sub_session = await self._get_or_create_sub_session(
             session_id=session_id,
             agent_id=agent_id,
             parent_session_id=caller_session_id
         )
-        
+
         if isinstance(sub_session, str):  # Error message
             return sub_session
-        
+
+        # Create task workspace using task_name
+        task_workspace = self._create_task_workspace(
+            session_id=session_id,
+            task_name=effective_task_name,
+            parent_session_id=caller_session_id,
+            session_context=sub_session.session_context
+        )
+
+        # Build enhanced content with workspace info
+        original_task_section = f"【用户最初任务需求】\n{original_task}\n\n" if original_task else ""
+        enhanced_content = f"""{original_task_section}【你本次需要完成的子任务】
+{content}
+
+【子任务工作目录】
+请在以下目录中执行任务，并将最终执行结果汇报整理保存到 {task_workspace}/output.md：
+工作目录：{task_workspace}
+执行过程文件请放在：{task_workspace}/execution/
+"""
+
         # Update status to running
         sub_session.update_status("running")
-        
+
         try:
             task_result = None
             all_filtered_chunks = []
             # Stream the response
-            async for chunks in sub_session.run_stream(content):
+            async for chunks in sub_session.run_stream(enhanced_content):
                 filtered_chunks = [
                         c for c in chunks 
                         if c.session_id == sub_session.session_id and c.role == MessageRole.ASSISTANT.value
