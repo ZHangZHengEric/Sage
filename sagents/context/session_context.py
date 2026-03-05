@@ -164,7 +164,7 @@ class SessionContext:
             # 3. agent 工作目录（宿主机）
             _agent_workspace_host_path = os.path.join(self.session_workspace, "agent_workspace")
             os.makedirs(_agent_workspace_host_path, exist_ok=True)
-        
+        self._agent_workspace_host_path = _agent_workspace_host_path
         logger.info(f"SessionContext: agent_workspace_host_path: {_agent_workspace_host_path}")
         # 1. 虚拟工作空间路径（容器内路径）
         # 使用 /sage-workspace 避免与宿主机可能存在的 /workspace 冲突
@@ -521,7 +521,7 @@ class SessionContext:
         # 级联传播到子会话（当状态为 INTERRUPTED 或 ERROR 时）
         if cascade and status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR]:
             if self.child_session_ids:
-                logger.info(f"SessionContext: Cascading status {status.value} to {len(self.child_session_ids)} child sessions")
+                logger.info(f"SessionContext: Cascading status {status.value} to {len(self.child_session_ids)} child sessions: {self.child_session_ids}")
                 for child_session_id in self.child_session_ids:
                     try:
                         # 从 _active_sessions 获取子会话上下文
@@ -530,9 +530,11 @@ class SessionContext:
                             child_context.set_status(status, cascade=False)  # 子会话不再级联，避免循环
                             logger.info(f"SessionContext: Set child session {child_session_id} status to {status.value}")
                         else:
-                            logger.warning(f"SessionContext: Child session {child_session_id} not found")
+                            logger.warning(f"SessionContext: Child session {child_session_id} not found in _active_sessions, cannot cascade status")
                     except Exception as e:
                         logger.error(f"SessionContext: Failed to cascade status to child session {child_session_id}: {e}")
+            else:
+                logger.info(f"SessionContext: No child sessions to cascade status {status.value}")
 
     def add_child_session(self, child_session_id: str) -> None:
         """添加子会话ID
