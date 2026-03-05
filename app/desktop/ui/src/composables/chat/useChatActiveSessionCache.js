@@ -42,35 +42,42 @@ export const useChatActiveSessionCache = () => {
       ...sessionStreamOffsets.value,
       [sessionId]: safeIndex
     }
+
+    // 更新内存中的状态
+    if (activeSessions.value[sessionId]) {
+      activeSessions.value[sessionId] = {
+        ...activeSessions.value[sessionId],
+        last_index: safeIndex
+      }
+    }
+
     if (!persist) return
-    activeSessions.value = readActiveSessionsCache()
-    const existing = activeSessions.value[sessionId]
+    
+    // 持久化到缓存，但不要覆盖 activeSessions.value（避免丢失内存中尚未持久化的新会话）
+    const cache = readActiveSessionsCache()
+    const existing = cache[sessionId]
     if (!existing) return
-    activeSessions.value[sessionId] = {
+    
+    cache[sessionId] = {
       ...existing,
       last_index: safeIndex,
       lastUpdate: Date.now()
     }
-    localStorage.setItem('activeSessions', JSON.stringify(activeSessions.value))
+    localStorage.setItem('activeSessions', JSON.stringify(cache))
   }
 
   const updateActiveSession = (sessionId, isActive, title = null, userInput = null, persist = true) => {
     if (persist) {
       activeSessions.value = readActiveSessionsCache()
     }
-    if (isActive) {
+ if (isActive) {
       const existing = activeSessions.value[sessionId] || {}
-      const incomingUserInput = String(userInput || '').trim()
-      const preservedUserInput = String(existing.user_input || '').trim()
-      const finalUserInput = incomingUserInput || preservedUserInput || ''
-      const incomingTitle = String(title || '').trim()
-      const validIncomingTitle = incomingTitle && incomingTitle !== '进行中的会话' ? incomingTitle : ''
-      const preservedTitle = existing.title && existing.title !== '进行中的会话' ? existing.title : ''
-      const finalTitle = validIncomingTitle || preservedTitle || '进行中的会话'
+      const preservedTitle = existing.title && existing.title !== '进行中的会话' ? existing.title : null
+      const preservedUserInput = existing.user_input || null
       activeSessions.value[sessionId] = {
         lastUpdate: Date.now(),
-        title: finalTitle,
-        user_input: finalUserInput,
+        title: preservedTitle || title || '进行中的会话',
+        user_input: preservedUserInput || userInput || '',
         status: 'running',
         last_index: 0,
         include_in_sidebar: !!existing.include_in_sidebar
