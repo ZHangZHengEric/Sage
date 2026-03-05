@@ -4,10 +4,12 @@
 import asyncio
 import json
 import time
+import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from sqlalchemy.orm import query
 from sagents.context.session_context import delete_session_run_lock
 from sagents.utils.lock_manager import safe_release
 
@@ -31,13 +33,18 @@ chat_router = APIRouter()
 
 async def stream_with_manager(
     session_id: str,
-    last_index: int = 0
+    last_index: int = 0,
+    resume: bool = False
 ):
     """
     通过 StreamManager 订阅会话流
     """
     manager = StreamManager.get_instance()
     has_stream_data = False
+    if resume and last_index == 0:
+        query = await manager.get_session_query(session_id)
+        if query:
+            yield json.dumps({"role": "user", "content": query, "message_id": str(uuid.uuid4()), "type": "user", "session_id": session_id}, ensure_ascii=False) + "\n"
     async for chunk in manager.subscribe(session_id, last_index):
         has_stream_data = True
         yield chunk
@@ -199,15 +206,16 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     await populate_request_from_agent_config(request, require_agent_id=False)
     stream_service, lock = await prepare_session(request)
     session_id = request.session_id
-
+    query = request.messages[0].content
     await manager.start_session(
         session_id, 
+        query,
         execute_chat_session(mode="web-stream", stream_service=stream_service),
         lock
     )
 
     return StreamingResponse(
-        stream_with_manager(session_id, last_index=0),
+        stream_with_manager(session_id, last_index=0, resume=False),
         media_type="text/plain",
     )
 
@@ -218,8 +226,9 @@ async def resume_stream(session_id: str, last_index: int = 0):
     :param session_id: 会话ID
     :param last_index: 已收到的最后一条消息索引
     """
+
     return StreamingResponse(
-        stream_with_manager(session_id, last_index),
+        stream_with_manager(session_id, last_index, resume=True),
         media_type="text/plain"
     )
 
