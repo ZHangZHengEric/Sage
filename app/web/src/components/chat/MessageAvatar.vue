@@ -44,7 +44,6 @@ const avatarUrl = computed(() => {
 
 // 根据消息类型、角色和工具名称确定头像内容
 const avatarContent = computed(() => {
-  console.log(props.messageType, props.role, props.toolName, props.agentId)
   if (props.role === 'user') {
     return {
       icon: User,
