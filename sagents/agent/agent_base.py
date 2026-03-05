@@ -14,7 +14,7 @@ from sagents.context.messages.message_manager import MessageManager
 import traceback
 import time
 import os
-from openai import AsyncOpenAI, APIError, RateLimitError
+from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
 from openai.types.chat import chat_completion_chunk
 from openai.types.chat import (
     ChatCompletion,
@@ -212,7 +212,7 @@ class AgentBase(ABC):
                 # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
                 serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
                 logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries})")
-
+                logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={final_config}")
                 stream = await self.model.chat.completions.create(
                     model=model_name,
                     messages=cast(List[Any], serializable_messages),
@@ -238,20 +238,23 @@ class AgentBase(ABC):
                 # 成功完成，跳出重试循环
                 break
 
-            except (RateLimitError, APIError) as e:
+            except (RateLimitError, APIError, APIConnectionError) as e:
                 retry_count += 1
                 last_exception = e
                 error_message = str(e).lower()
 
                 # 检查是否是限流错误
                 is_rate_limit = isinstance(e, RateLimitError) or "rate limit" in error_message or "too many requests" in error_message
+                # 检查是否是网络连接错误（包括连接中断、超时等）
+                is_connection_error = isinstance(e, APIConnectionError) or "connection" in error_message or "incomplete chunked read" in error_message
 
-                if is_rate_limit and retry_count < max_retries:
+                if retry_count < max_retries and (is_rate_limit or is_connection_error):
                     wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
-                    logger.warning(f"{self.__class__.__name__}: 遇到限流错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    error_type = "限流" if is_rate_limit else "网络连接"
+                    logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                 else:
-                    # 非限流错误或已达到最大重试次数
+                    # 非可重试错误或已达到最大重试次数
                     logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
                     all_chunks.append(
                         chat_completion_chunk.ChatCompletionChunk(
@@ -275,8 +278,21 @@ class AgentBase(ABC):
                     raise e
 
             except Exception as e:
-                # 其他非API错误，直接抛出
-                logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                # 其他非API错误，检查是否是网络相关错误
+                retry_count += 1
+                last_exception = e
+                error_message = str(e).lower()
+
+                # 检查是否是网络相关错误（如 httpx.RemoteProtocolError）
+                is_network_error = any(keyword in error_message for keyword in ["connection", "incomplete chunked read", "peer closed", "remoteprotocolerror"])
+
+                if is_network_error and retry_count < max_retries:
+                    wait_time = 2 ** retry_count
+                    logger.warning(f"{self.__class__.__name__}: 遇到网络错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    # 非网络错误或已达到最大重试次数
+                    logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
                 all_chunks.append(
                     chat_completion_chunk.ChatCompletionChunk(
                         id="",
