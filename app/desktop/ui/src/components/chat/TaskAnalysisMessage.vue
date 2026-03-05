@@ -10,7 +10,7 @@
             <Check v-if="isCompleted" class="w-4 h-4" />
             <Loader2 v-else class="w-4 h-4 animate-spin" />
           </span>
-          <span class="header-text text-sm font-medium text-foreground">{{ isCompleted ? '任务分析完成' : '任务分析中...' }}</span>
+          <span class="header-text text-sm font-medium text-foreground">任务分析</span>
           <div class="expand-icon text-muted-foreground transition-transform duration-200" >
             <ChevronRight v-if="!isOpen" class="w-4 h-4" />
             <ChevronDown v-else class="w-4 h-4" />

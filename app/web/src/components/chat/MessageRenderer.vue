@@ -65,6 +65,7 @@
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {{ getLabel({ role: 'assistant', type: message.type }) }}
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
