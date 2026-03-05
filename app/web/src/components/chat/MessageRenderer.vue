@@ -3,7 +3,7 @@
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
       <div class="flex-none">
-        <MessageAvatar messageType="error" role="assistant" />
+        <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
@@ -48,17 +48,11 @@
     <div v-else-if="message.role === 'assistant' && message.type === 'task_analysis'"
       class="flex flex-row items-start gap-3 px-4">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="assistant" />
+        <MessageAvatar :messageType="message.type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
-        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
-          {{ getLabel({ role: 'assistant', type: message.type }) }}
-          <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
-            {{ formatTime(message.timestamp) }}
-          </span>
-        </div>
         <div class="w-full">
-          <TaskAnalysisMessage :content="message.content" :isStreaming="isStreaming" />
+          <TaskAnalysisMessage :content="message.content" :isStreaming="isStreaming" :timestamp="message.timestamp" />
         </div>
       </div>
     </div>
@@ -67,11 +61,10 @@
     <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content"
       class="flex flex-row items-start gap-3 px-4 group">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="assistant" />
+        <MessageAvatar :messageType="message.type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
-          {{ getLabel({ role: 'assistant', type: message.type }) }}
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
@@ -91,7 +84,7 @@
     <!-- 工具渲染 -->
     <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
       <div class="flex-none mt-1">
-        <MessageAvatar :messageType="message.type" role="assistant" :toolName="getToolName(message)" />
+        <MessageAvatar :messageType="message.type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
@@ -168,6 +161,10 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  agentId: {
+    type: String,
+    default: ''
   }
 })
 
@@ -309,16 +306,17 @@ const formatTime = (timestamp) => {
     date.getMonth() === now.getMonth() &&
     date.getFullYear() === now.getFullYear()
 
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+
   if (isToday) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return `${hours}:${minutes}:${seconds}`
   } else {
-    return date.toLocaleString([], {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
   }
 }
 

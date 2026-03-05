@@ -1,5 +1,6 @@
 <template>
-  <Avatar class="h-8 w-8 shadow-sm transition-transform hover:scale-105 border bg-muted/50">
+  <Avatar class="h-8 w-8 shadow-sm transition-transform hover:scale-105 bg-muted/50" :class="{ 'border': !avatarUrl }">
+    <AvatarImage v-if="avatarUrl && role === 'assistant'" :src="avatarUrl" :alt="avatarContent.label" />
     <AvatarFallback 
       :class="[avatarContent.bgClass, role === 'user' ? 'text-primary-foreground' : 'text-white']"
       class="flex items-center justify-center"
@@ -12,7 +13,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { User, Bot, Terminal, FileText, Edit3, Save, Zap, Settings, AlertTriangle, MessageSquare, Search } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -27,7 +28,19 @@ const props = defineProps({
   toolName: {
     type: String,
     default: ''
+  },
+  agentId: {
+    type: String,
+    default: ''
   }
+})
+
+
+const avatarUrl = computed(() => {
+  if (props.role === 'assistant' && props.agentId) {
+    return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(props.agentId)}`
+  }
+  return ''
 })
 
 // 根据消息类型、角色和工具名称确定头像内容

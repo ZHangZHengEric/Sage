@@ -14,7 +14,6 @@ class ContentProcessor:
 
     @classmethod
     def clean_content(cls, result: Dict[str, Any]) -> Dict[str, Any]:
-        result['timestamp'] = time.time()
         # 1. 处理tool_calls 的content 内容
         if result.get('role') == MessageRole.ASSISTANT.value and result.get('tool_calls'):
             result.pop('content', None)
