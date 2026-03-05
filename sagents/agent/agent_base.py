@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, cast
 import json
 import uuid
+import asyncio
 from app.server.models import User
 from sagents.utils.logger import logger
 from sagents.tool.tool_schema import AgentToolSpec
@@ -13,7 +14,7 @@ from sagents.context.messages.message_manager import MessageManager
 import traceback
 import time
 import os
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIError, RateLimitError
 from openai.types.chat import chat_completion_chunk
 from openai.types.chat import (
     ChatCompletion,
@@ -176,105 +177,153 @@ class AgentBase(ABC):
         final_config.pop('base_url', None)
         all_chunks = []
 
-        try:
-            if self.model is None:
-                raise ValueError("Model is not initialized")
+        # 重试配置
+        max_retries = 5
+        retry_count = 0
+        last_exception = None
 
-            # 发起LLM请求
-            # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
-            start_request_time = time.time()
-            first_token_time = None
-            serializable_messages = []
-            for msg in messages:
-                if isinstance(msg, MessageChunk):
-                    serializable_messages.append(msg.to_dict())
-                else:
-                    serializable_messages.append(msg)
-            # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
-            serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
-            # print("serializable_messages:",serializable_messages)
-            # 确保所有的messages 中都包含role 和 content
-            for msg in serializable_messages:
-                if 'role' not in msg:
-                    msg['role'] = MessageRole.USER.value
-                if 'content' not in msg:
-                    msg['content'] = ''
+        while retry_count < max_retries:
+            try:
+                if self.model is None:
+                    raise ValueError("Model is not initialized")
 
-            # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
-            serializable_messages = self._remove_tool_call_without_id(serializable_messages)
-            # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
-            serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
-            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成")
+                # 发起LLM请求
+                # 将 MessageChunk 对象转换为字典，以便进行 JSON 序列化
+                start_request_time = time.time()
+                first_token_time = None
+                serializable_messages = []
+                for msg in messages:
+                    if isinstance(msg, MessageChunk):
+                        serializable_messages.append(msg.to_dict())
+                    else:
+                        serializable_messages.append(msg)
+                # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
+                serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
+                # print("serializable_messages:",serializable_messages)
+                # 确保所有的messages 中都包含role 和 content
+                for msg in serializable_messages:
+                    if 'role' not in msg:
+                        msg['role'] = MessageRole.USER.value
+                    if 'content' not in msg:
+                        msg['content'] = ''
 
-            stream = await self.model.chat.completions.create(
-                model=model_name,
-                messages=cast(List[Any], serializable_messages),
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body={
-                    "chat_template_kwargs": {"enable_thinking": False},
-                    "enable_thinking": False,
-                    "thinking": {'type': "disabled"},
-                    "top_k": 20,
-                    "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
-                },
-                **final_config
-            )
-            async for chunk in stream:
-                # print(chunk)
-                # 记录首token时间
-                if first_token_time is None:
-                    first_token_time = time.time()
-                all_chunks.append(chunk)
-                yield chunk
+                # 需要处理 serializable_messages 中，如果有tool call ，但是没有后续的tool call id,需要去掉这条消息
+                serializable_messages = self._remove_tool_call_without_id(serializable_messages)
+                # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
+                serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
+                logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries})")
 
-        except Exception as e:
-            logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
-            all_chunks.append(
-                chat_completion_chunk.ChatCompletionChunk(
-                    id="",
-                    object="chat.completion.chunk",
-                    created=0,
-                    model="",
-                    choices=[
-                        chat_completion_chunk.Choice(
-                            index=0,
-                            delta=chat_completion_chunk.ChoiceDelta(
-                                content=traceback.format_exc(),
-                                tool_calls=None,
-                            ),
-                            finish_reason="stop",
-                        )
-                    ],
-                    usage=None,
+                stream = await self.model.chat.completions.create(
+                    model=model_name,
+                    messages=cast(List[Any], serializable_messages),
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    extra_body={
+                        "chat_template_kwargs": {"enable_thinking": False},
+                        "enable_thinking": False,
+                        "thinking": {'type': "disabled"},
+                        "top_k": 20,
+                        "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
+                    },
+                    **final_config
                 )
-            )
-            raise e
-        finally:
-            # 将次请求记录在session context 中的llm调用记录中
-            total_time = time.time() - start_request_time
-            first_token_latency = first_token_time - start_request_time if first_token_time else None
-            first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
-            logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
-            if session_id:
-                session_context = get_session_context(session_id) if session_id else None
+                async for chunk in stream:
+                    # print(chunk)
+                    # 记录首token时间
+                    if first_token_time is None:
+                        first_token_time = time.time()
+                    all_chunks.append(chunk)
+                    yield chunk
 
-                llm_request = {
-                    "step_name": step_name,
-                    "model_config": final_config,
-                    "messages": messages,
-                }
-                # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
-                try:
-                    llm_response = self.merge_stream_response_to_non_stream_response(all_chunks)
-                except Exception:
-                    logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
-                    logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
-                    llm_response = None
-                if session_context:
-                    session_context.add_llm_request(llm_request, llm_response)
+                # 成功完成，跳出重试循环
+                break
+
+            except (RateLimitError, APIError) as e:
+                retry_count += 1
+                last_exception = e
+                error_message = str(e).lower()
+
+                # 检查是否是限流错误
+                is_rate_limit = isinstance(e, RateLimitError) or "rate limit" in error_message or "too many requests" in error_message
+
+                if is_rate_limit and retry_count < max_retries:
+                    wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
+                    logger.warning(f"{self.__class__.__name__}: 遇到限流错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    await asyncio.sleep(wait_time)
                 else:
-                    logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
+                    # 非限流错误或已达到最大重试次数
+                    logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                    all_chunks.append(
+                        chat_completion_chunk.ChatCompletionChunk(
+                            id="",
+                            object="chat.completion.chunk",
+                            created=0,
+                            model="",
+                            choices=[
+                                chat_completion_chunk.Choice(
+                                    index=0,
+                                    delta=chat_completion_chunk.ChoiceDelta(
+                                        content=traceback.format_exc(),
+                                        tool_calls=None,
+                                    ),
+                                    finish_reason="stop",
+                                )
+                            ],
+                            usage=None,
+                        )
+                    )
+                    raise e
+
+            except Exception as e:
+                # 其他非API错误，直接抛出
+                logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
+                all_chunks.append(
+                    chat_completion_chunk.ChatCompletionChunk(
+                        id="",
+                        object="chat.completion.chunk",
+                        created=0,
+                        model="",
+                        choices=[
+                            chat_completion_chunk.Choice(
+                                index=0,
+                                delta=chat_completion_chunk.ChoiceDelta(
+                                    content=traceback.format_exc(),
+                                    tool_calls=None,
+                                ),
+                                finish_reason="stop",
+                            )
+                        ],
+                        usage=None,
+                    )
+                )
+                raise e
+            finally:
+                # 只有在成功完成或最终失败时才记录
+                if retry_count == 0 or retry_count >= max_retries or (last_exception and not isinstance(last_exception, (RateLimitError, APIError))):
+                    # 将次请求记录在session context 中的llm调用记录中
+                    total_time = time.time() - start_request_time
+                    first_token_latency = first_token_time - start_request_time if first_token_time else None
+                    first_token_str = f"{first_token_latency:.3f}s" if first_token_latency else "N/A"
+                    logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成，总耗时: {total_time:.3f}s, 首token延迟: {first_token_str}, 返回{len(all_chunks)}个chunk")
+                    if session_id:
+                        session_context = get_session_context(session_id) if session_id else None
+
+                        llm_request = {
+                            "step_name": step_name,
+                            "model_config": final_config,
+                            "messages": messages,
+                        }
+                        # 将流式的chunk，进行合并成非流式的response，保存下chunk所有的记录
+                        try:
+                            llm_response = self.merge_stream_response_to_non_stream_response(all_chunks)
+                        except Exception:
+                            logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {traceback.format_exc()}")
+                            logger.error(f"{self.__class__.__name__}: 合并流式响应失败: {all_chunks}")
+                            llm_response = None
+                        if session_context:
+                            session_context.add_llm_request(llm_request, llm_response)
+                        else:
+                            logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
     def prepare_unified_system_message(self,
                                        session_id: Optional[str] = None,
@@ -709,7 +758,7 @@ class AgentBase(ABC):
 **优化建议**:
 {chr(10).join(suggestions)}
 
-请重新组织您的请求，确保工具参数格式正确。"""
+我需要重新优化我的工具调用方式和参数，确保工具参数格式正确。"""
 
         return MessageChunk(
             role=MessageRole.ASSISTANT.value,
