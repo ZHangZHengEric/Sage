@@ -308,7 +308,7 @@ class SAgent:
                  # You might want to yield an error message here even without session context
                  yield [MessageChunk(
                      role="assistant", 
-                     content=f"Error initializing session: {str(e)}", 
+                     content=f"Error initializing session: {str(e)},traceback: {traceback.format_exc()}", 
                      type="text"
                  )]
         finally:

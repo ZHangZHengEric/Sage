@@ -65,10 +65,20 @@ class FibreTools:
                             "description": "The target agent ID to delegate the task to (e.g., 'python_expert_1').",
                             "description_i18n": {"zh": "目标子智能体ID（例如 'python_expert_1'）。"}
                         },
+                        "task_name": {
+                            "type": "string",
+                            "description": "A unique identifier for the task (e.g., 'task_write_snake').",
+                            "description_i18n": {"zh": "任务的唯一标识符（例如 'task_write_snake'）。用于后续查询任务状态或结果。"}
+                        },
+                        "original_task": {
+                            "type": "string",
+                            "description": "The original task description provided by the user.",
+                            "description_i18n": {"zh": "最初的任务初衷，用于记录和跟踪任务的原始需求。"}
+                        },
                         "content": {
                             "type": "string",
                             "description": "Detailed task description, context, requirements, and expected return format.",
-                            "description_i18n": {"zh": "详细的任务描述、上下文信息、具体要求以及期望的返回格式。"}
+                            "description_i18n": {"zh": "详细的子任务描述、上下文信息、具体要求以及期望的返回格式。"}
                         },
                         "session_id": {
                             "type": "string",
@@ -76,7 +86,7 @@ class FibreTools:
                             "description_i18n": {"zh": "必填：指定 Session ID。如果是新任务，请基于 agent_id 生成一个新的（例如 'session_python_expert_1_0'）；如果是继续之前的任务，请复用旧的 ID。不要使用当前的Session ID"}
                         }
                     },
-                    "required": ["agent_id", "content", "session_id"]
+                    "required": ["agent_id", "task_name", "original_task", "content", "session_id"]
                 }
             }
         }
