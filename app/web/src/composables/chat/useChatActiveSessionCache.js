@@ -42,16 +42,26 @@ export const useChatActiveSessionCache = () => {
       ...sessionStreamOffsets.value,
       [sessionId]: safeIndex
     }
+
+    if (activeSessions.value[sessionId]) {
+      activeSessions.value[sessionId] = {
+        ...activeSessions.value[sessionId],
+        last_index: safeIndex
+      }
+    }
+
     if (!persist) return
-    activeSessions.value = readActiveSessionsCache()
-    const existing = activeSessions.value[sessionId]
+
+    const cache = readActiveSessionsCache()
+    const existing = cache[sessionId]
     if (!existing) return
-    activeSessions.value[sessionId] = {
+
+    cache[sessionId] = {
       ...existing,
       last_index: safeIndex,
       lastUpdate: Date.now()
     }
-    localStorage.setItem('activeSessions', JSON.stringify(activeSessions.value))
+    localStorage.setItem('activeSessions', JSON.stringify(cache))
   }
 
   const updateActiveSession = (sessionId, isActive, title = null, userInput = null, persist = true) => {
