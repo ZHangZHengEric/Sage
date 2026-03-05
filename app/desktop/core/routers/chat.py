@@ -109,7 +109,6 @@ async def chat(request: ChatRequest, http_request: Request):
     inner_request = StreamRequest(
         messages=request.messages,
         session_id=request.session_id,
-        user_id=request.user_id,
         system_context=request.system_context,
         agent_id=request.agent_id,
     )
