@@ -36,6 +36,13 @@ class FeishuWebSocketClient:
 
     def _handle_message(self, data: P2ImMessageReceiveV1) -> None:
         """Handle incoming message event."""
+        # ===== 最开始的调试日志 =====
+        logger.info(f"[Feishu] ========== _handle_message CALLED ==========")
+        logger.info(f"[Feishu] data type: {type(data)}")
+        logger.info(f"[Feishu] data dir: {dir(data)}")
+        logger.info(f"[Feishu] data: {data}")
+        # =============================
+        
         try:
             import json
 
