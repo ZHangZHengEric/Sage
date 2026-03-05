@@ -175,3 +175,9 @@ Por favor, analise seguindo este processo de pensamento (mantenha a primeira pes
 - **Saída Direta**: Produza a análise diretamente como se fosse um processo de pensamento, sem adicionar explicações ou anotações extras, e sem questionar ou perguntar de volta ao usuário. Seja o mais coloquial e detalhado possível. Não mencione os nomes originais das ferramentas ou IDs de banco de dados ou base de conhecimento. """
 }
 
+# 任务分析提示文本 - 用于显示给用户的分析开始提示
+task_analysis_prompt = {
+    "zh": "任务分析：",
+    "en": "Task Analysis:",
+    "pt": "Análise de Tarefa:"
+}
