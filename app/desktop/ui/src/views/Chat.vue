@@ -63,7 +63,6 @@
               :agent-id="selectedAgentId"
               :is-loading="isLoading && index === filteredMessages.length - 1"
               @download-file="downloadWorkspaceFile"
-              @toolClick="handleToolClick" 
               @sendMessage="handleSendMessage" 
               @openSubSession="handleOpenSubSession"
             />
@@ -88,7 +87,6 @@
         :is-loading="isLoading"
         @close="handleCloseSubSession"
         @download-file="downloadWorkspaceFile"
-        @toolClick="handleToolClick"
         @openSubSession="handleOpenSubSession"
       />
 
@@ -155,7 +153,6 @@ const {
   handleCloseSubSession,
   handleOpenSubSession,
   downloadWorkspaceFile,
-  handleToolClick,
   workspaceFiles,
   downloadFile,
   deleteFile,

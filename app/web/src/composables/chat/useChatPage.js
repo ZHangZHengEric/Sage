@@ -355,7 +355,6 @@ export const useChatPage = (props) => {
       toast.error(t('chat.shareFailed') || 'Failed to copy link')
     })
   }
-
   const persistRunningSessionOnLeaveChat = (includeInSidebar = true) => {
     if (isLoading.value && abortControllerRef.value) {
       abortControllerRef.value.abort()
@@ -366,6 +365,17 @@ export const useChatPage = (props) => {
     if (!sessionId) return
     const meta = activeSessions.value?.[sessionId]
     if (meta?.status === 'running') {
+      const firstUserMessage = (messages.value || []).find(item =>
+        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
+      )
+      if (firstUserMessage) {
+        const firstUserInput = String(firstUserMessage.content || '')
+          .replace(/^<skill>.*?<\/skill>\s*/, '')
+          .trim()
+        if (firstUserInput) {
+          updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
+        }
+      }
       persistRunningSessionToCache(sessionId, includeInSidebar)
       return
     }

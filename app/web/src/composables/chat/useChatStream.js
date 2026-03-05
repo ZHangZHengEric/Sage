@@ -215,7 +215,8 @@ export const useChatStream = ({
       isLoading.value = true
       loadingSessionId.value = sessionId
       shouldAutoScroll.value = true
-      scrollToBottom()
+      // 这里的 scrollToBottom(true) 强制滚动是必要的，因为用户刚发了消息
+      scrollToBottom(true)
       await sendMessageApi({
         message: content,
         sessionId,
