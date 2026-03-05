@@ -6,7 +6,6 @@ import { useLanguage } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache.js'
 import { useChatScroll } from '@/composables/chat/useChatScroll.js'
-import { injectFirstUserMessageIfNeeded } from '@/composables/chat/chatMessageUtils.js'
 import { useChatStream } from '@/composables/chat/useChatStream.js'
 import { useChatLifecycle } from '@/composables/chat/useChatLifecycle.js'
 import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
@@ -37,10 +36,7 @@ export const useChatPage = (props) => {
     clearScrollTimer
   } = useChatScroll()
   const showSettings = ref(false)
-  const showToolDetails = ref(false)
   const currentTraceId = ref(null)
-  const selectedToolExecution = ref(null)
-  const toolResult = ref(null)
 
   const openTraceDetails = () => {
     const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
@@ -54,7 +50,6 @@ export const useChatPage = (props) => {
 
   const messages = ref([])
   const messageIdIndexMap = ref(new Map())
-  const messageChunks = ref(new Map())
   const isLoading = ref(false)
   const loadingSessionId = ref(null)
   const abortControllerRef = ref(null)
@@ -158,15 +153,6 @@ export const useChatPage = (props) => {
     }
   }
 
-  const ensureFirstUserMessageForRunningSession = (sessionId) => {
-    const activeMeta = activeSessions.value[sessionId]
-    const nextMessages = injectFirstUserMessageIfNeeded(messages.value, sessionId, activeMeta)
-    if (nextMessages !== messages.value) {
-      messages.value = nextMessages
-      rebuildMessageIdIndexMap()
-    }
-  }
-
   const handleMessage = (messageData) => {
     if (messageData.type === 'stream_end') return
     const messageId = messageData.message_id
@@ -234,7 +220,6 @@ export const useChatPage = (props) => {
   const clearMessages = () => {
     messages.value = []
     messageIdIndexMap.value = new Map()
-    messageChunks.value = new Map()
   }
 
   const {
@@ -296,7 +281,6 @@ export const useChatPage = (props) => {
     createSession,
     clearCurrentStreamViewState,
     loadConversationMessages,
-    ensureFirstUserMessageForRunningSession,
     isHistoryLoading,
     removeSessionFromCache
   })
@@ -336,12 +320,6 @@ export const useChatPage = (props) => {
     }
   }
 
-  const handleToolClick = (toolExecution, result) => {
-    selectedToolExecution.value = toolExecution
-    toolResult.value = result
-    showToolDetails.value = true
-  }
-
   const copyToClipboard = (text) => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       return navigator.clipboard.writeText(text)
@@ -378,12 +356,17 @@ export const useChatPage = (props) => {
     })
   }
 
-  const persistRunningSessionOnLeaveChat = () => {
+  const persistRunningSessionOnLeaveChat = (includeInSidebar = true) => {
+    if (isLoading.value && abortControllerRef.value) {
+      abortControllerRef.value.abort()
+      abortControllerRef.value = null
+    }
+
     const sessionId = currentSessionId.value
     if (!sessionId) return
     const meta = activeSessions.value?.[sessionId]
     if (meta?.status === 'running') {
-      persistRunningSessionToCache(sessionId, true)
+      persistRunningSessionToCache(sessionId, includeInSidebar)
       return
     }
     if (meta?.status === 'completed') {
@@ -441,7 +424,6 @@ export const useChatPage = (props) => {
     handleCloseSubSession,
     handleOpenSubSession,
     downloadWorkspaceFile,
-    handleToolClick,
     workspaceFiles,
     downloadFile,
     updateConfig
