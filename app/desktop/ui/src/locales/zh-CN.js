@@ -102,6 +102,8 @@ export default {
   'chat.viewSubSession': '查看子会话',
   'chat.subSessionTitle': '子会话详情',
   'chat.loadingMessages': '加载消息中...',
+  'chat.todoList': '任务清单',
+  'chat.noTasks': '暂无任务',
   'status.failed': '失败',
   'status.completed': '完成',
   'status.inProgress': '进行中',
