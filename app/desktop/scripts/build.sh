@@ -271,17 +271,27 @@ if ! command -v cargo >/dev/null; then
   exit 1
 fi
 
-TAURI_CLI_VERSION="$(cargo tauri --version 2>/dev/null | awk '{print $2}' || true)"
-if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
-  echo "Installing tauri-cli v2..."
-  cargo install tauri-cli --version "^2"
+# Use tauri CLI from node_modules if available (much faster to install)
+if [ -f "$UI_DIR/node_modules/.bin/tauri" ]; then
+  echo "Using local Tauri CLI..."
+  TAURI_CMD="$UI_DIR/node_modules/.bin/tauri"
+elif command -v cargo-tauri >/dev/null; then
+  echo "Using Cargo Tauri CLI..."
+  TAURI_CMD="cargo tauri"
+else
+  echo "Installing Tauri CLI (via npm)..."
+  # Fallback to global npm install (faster than cargo install)
+  npm install -g @tauri-apps/cli
+  TAURI_CMD="tauri"
 fi
+
+echo "Tauri CLI: $TAURI_CMD"
 
 if [ "$MODE" = "release" ]; then
   # Cargo.toml now has [profile.release] for optimization
-  cargo tauri build
+  $TAURI_CMD build
 else
-  cargo tauri build --debug
+  $TAURI_CMD build --debug
 fi
 
 echo "======================================"
