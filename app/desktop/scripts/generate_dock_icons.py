@@ -43,11 +43,17 @@ def generate_all_icons():
     """生成所有尺寸的图标"""
 
     # 图标目录
-    icons_dir = "/Users/zhangzheng/zavixai/Sage/app/desktop/tauri/icons"
+    # Get the directory where the script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Go up two levels to reach app/desktop
+    base_dir = os.path.dirname(os.path.dirname(script_dir))
+    
+    icons_dir = os.path.join(base_dir, "tauri", "icons")
     backup_dir = os.path.join(icons_dir, "backup")
 
-    # 使用备份的 icon.png 作为源文件
-    source_icon = os.path.join(backup_dir, "icon.png")
+    # 使用 sage_logo.png 作为源文件
+    source_icon = os.path.join(base_dir, "ui", "public", "sage_logo.png")
+
 
     if not os.path.exists(source_icon):
         print(f"Error: Source icon not found: {source_icon}")
