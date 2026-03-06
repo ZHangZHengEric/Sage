@@ -341,12 +341,19 @@ fn main() {
 
                 println!("Spawning backend: {} {:?}", command, args);
 
-                let mut child = Command::new(command)
-                    .args(args)
+                let mut cmd = Command::new(command);
+                cmd.args(args)
                     .env("SAGE_PORT", port.to_string())
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
+                    .stderr(Stdio::piped());
+
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                }
+
+                let mut child = cmd.spawn()
                     .expect("Failed to spawn backend");
 
                 if let Some(id) = child.id() {

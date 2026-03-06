@@ -8,7 +8,14 @@ import os
 import sys
 # 1. Setup paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
+
+if getattr(sys, 'frozen', False):
+    if hasattr(sys, '_MEIPASS'):
+        current_dir = sys._MEIPASS
+    project_root = current_dir
+else:
+    project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
+
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "app"))
 
