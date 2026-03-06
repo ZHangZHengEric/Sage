@@ -23,6 +23,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -78,10 +80,13 @@ jobs:
 
       - name: Rename Artifacts
         run: |
-          # Rename dmg to include arch to avoid conflicts in release
+          # Rename dmg to include arch and version to avoid conflicts in release
+          # Extract version from tag (e.g., desktop-v0.1.0 -> 0.1.0)
+          VERSION="${GITHUB_REF#refs/tags/desktop-v}"
+          
           cd app/desktop/tauri/target/release/bundle/dmg/
           for file in *.dmg; do
-            mv "$file" "${file%.dmg}-${{ matrix.arch }}.dmg"
+            mv "$file" "SageAI-${VERSION}-${{ matrix.arch }}.dmg"
           done
 
       - name: Upload Artifacts
