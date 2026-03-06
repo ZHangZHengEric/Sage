@@ -159,6 +159,11 @@ install_python_deps() {
 
         echo "正在安装依赖..."
         pip install -r "$REQ_FILE" --index-url "$PIP_INDEX_URL"
+        
+        # 强制重新安装 chardet 和 charset-normalizer 为纯 Python 版本 (no-binary)
+        # 这样 PyInstaller 可以正确打包它们，避免 mypyc 编译模块的隐藏导入问题
+        echo "正在强制安装纯 Python 版 chardet 和 charset-normalizer..."
+        pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url "$PIP_INDEX_URL"
 
         if ! command -v pyinstaller >/dev/null; then
             pip install pyinstaller --index-url "$PIP_INDEX_URL"
