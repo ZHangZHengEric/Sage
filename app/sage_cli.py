@@ -154,7 +154,18 @@ def select_skill_interactive(console, skill_manager, initial_input: str = "") ->
         return None
 
 
-async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], skill_manager: Optional[Union[SkillManager, SkillProxy]], config: Dict[str, Any], context_budget_config: Optional[Dict[str, Any]] = None):
+async def chat_simple(
+    agent: SAgent,
+    model: Any,
+    model_config: Dict[str, Any],
+    system_prefix: str,
+    agent_workspace: str,
+    default_memory_type: str,
+    tool_manager: Union[ToolManager, ToolProxy],
+    skill_manager: Optional[Union[SkillManager, SkillProxy]],
+    config: Dict[str, Any],
+    context_budget_config: Optional[Dict[str, Any]] = None,
+):
     """
     原 sage_cli.py 的对话逻辑，适用于 simple 和 multi 模式
     """
@@ -211,14 +222,19 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
 
             async for chunks in agent.run_stream(
                 input_messages=messages,
+                model=model,
+                model_config=model_config,
+                system_prefix=system_prefix,
+                agent_workspace=agent_workspace,
+                default_memory_type=default_memory_type,
                 tool_manager=tool_manager,
                 skill_manager=skill_manager,
                 session_id=session_id,
-                user_id=config['user_id'],
-                deep_thinking=config['use_deepthink'],
+                user_id=config.get('user_id'),
+                deep_thinking=config.get('use_deepthink'),
                 agent_mode=config.get('agent_mode'), # 传入 agent_mode
-                available_workflows=config['available_workflows'],
-                system_context=config['system_context'],
+                available_workflows=config.get('available_workflows'),
+                system_context=config.get('system_context'),
                 context_budget_config=context_budget_config
             ):
                 for chunk in chunks:
@@ -300,7 +316,211 @@ async def chat_simple(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy]
             exit(0)
 
 
-async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy], skill_manager: Optional[Union[SkillManager, SkillProxy]], config: Dict[str, Any], context_budget_config: Optional[Dict[str, Any]] = None):
+async def chat_fibre_simple(
+    agent: SAgent,
+    model: Any,
+    model_config: Dict[str, Any],
+    system_prefix: str,
+    agent_workspace: str,
+    default_memory_type: str,
+    tool_manager: Union[ToolManager, ToolProxy],
+    skill_manager: Optional[Union[SkillManager, SkillProxy]],
+    config: Dict[str, Any],
+    context_budget_config: Optional[Dict[str, Any]] = None,
+):
+    """
+    简化版 fibre 模式对话逻辑，不使用 prompt_toolkit，使用标准输入输出
+    """
+    console = Console()
+    
+    # 使用配置的 session_id 或生成新的
+    if config.get('session_id'):
+        session_id = config['session_id']
+    else:
+        session_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '_' + str(uuid.uuid4())[:4]
+    
+    messages = []
+    active_states: Dict[str, Dict[str, Any]] = {session_id: {"order": [], "messages": {}}}
+    
+    def build_tools_text():
+        if hasattr(tool_manager, 'list_tools_simplified'):
+            available_tools = tool_manager.list_tools_simplified()
+        elif hasattr(tool_manager, 'tool_manager') and hasattr(tool_manager.tool_manager, 'list_tools_simplified'):
+            available_tools = tool_manager.tool_manager.list_tools_simplified()
+        else:
+            available_tools = []
+        if not available_tools:
+            return "未检测到可用工具。"
+        tool_names = [tool.get('name', '未知工具') for tool in available_tools]
+        tool_names.sort()
+        lines = [f"{idx + 1}. {name}" for idx, name in enumerate(tool_names)]
+        return "📋 可用工具列表(共{}个)：\n{}".format(len(tool_names), "\n".join(lines))
+    
+    def append_log(sid: str, agent_name: str, content: str, msg_type: str = "normal"):
+        msg_id = str(uuid.uuid4())
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        active_states.setdefault(sid, {"order": [], "messages": {}})
+        active_states[sid]["messages"][msg_id] = {
+            "agent_name": agent_name,
+            "content": content,
+            "timestamp": timestamp,
+            "type": msg_type
+        }
+        active_states[sid]["order"].append(msg_id)
+    
+    def render_session_messages(sid: str, limit: int = 50):
+        """渲染指定 session 的最新消息"""
+        session_states = active_states.get(sid, {})
+        if not session_states:
+            return []
+        session_messages = session_states.get("messages", {})
+        session_order = session_states.get("order", [])
+        if not session_messages:
+            return []
+        
+        lines = []
+        for msg_id in session_order[-limit:]:
+            state = session_messages.get(msg_id)
+            if not state:
+                continue
+            agent_name = state.get('agent_name') or 'FibreAgent'
+            timestamp = state.get('timestamp') or ""
+            content = state.get('content') or ""
+            
+            if not content or not content.strip():
+                continue
+            
+            prefix = f"[{timestamp}] {agent_name}" if timestamp else f"{agent_name}"
+            lines.append(f"{prefix}:")
+            for line in content.splitlines():
+                lines.append(f"  {line}")
+            lines.append("")
+        return lines
+    
+    def display_all_sessions():
+        """显示所有 session 的消息"""
+        for sid in active_states.keys():
+            is_main = (sid == session_id)
+            title = f"主会话 {sid}" if is_main else f"子会话 {sid}"
+            console.print(f"\n[bold cyan]{'='*20} {title} {'='*20}[/bold cyan]")
+            lines = render_session_messages(sid)
+            for line in lines:
+                console.print(line)
+    
+    # 初始化显示
+    console.print(build_tools_text())
+    if skill_manager:
+        console.print(f"[cyan]已加载技能: {skill_manager.list_skills()}[/cyan]")
+    console.print(f"[green]欢迎使用 SAgent CLI (Fibre 模式 - 简化版)。输入 'exit' 或 'quit' 退出。[/green]")
+    console.print(f"[dim]当前session id: {session_id}[/dim]")
+    console.print("-" * 60)
+    
+    while True:
+        try:
+            # 显示当前所有会话状态
+            display_all_sessions()
+            
+            # 获取用户输入
+            user_input = input("\n\033[1;34m你: \033[0m").strip()
+            
+            if not user_input:
+                continue
+            
+            if user_input.lower() in ['exit', 'quit']:
+                console.print("[green]再见！[/green]")
+                break
+            
+            # 记录用户消息
+            append_log(session_id, "你", user_input, "user")
+            messages.append(MessageChunk(role='user', content=user_input, type=MessageType.NORMAL.value))
+            
+            console.print("\n[magenta]FibreAgent 思考中...[/magenta]\n")
+            
+            all_chunks = []
+            try:
+                async for chunks in agent.run_stream(
+                    session_id=session_id,
+                    input_messages=messages,
+                    tool_manager=tool_manager,
+                    skill_manager=skill_manager,
+                    model=model,
+                    model_config=model_config,
+                    system_prefix=system_prefix,
+                    agent_workspace=agent_workspace,
+                    default_memory_type=default_memory_type,
+                    user_id=config.get('user_id'),
+                    deep_thinking=config.get('use_deepthink'),
+                    agent_mode=config.get('agent_mode'),
+                    available_workflows=config.get('available_workflows'),
+                    system_context=config.get('system_context'),
+                    context_budget_config=context_budget_config,
+                    max_loop_count=config.get('max_loop_count', 100)
+                ):
+                    for chunk in chunks:
+                        if isinstance(chunk, MessageChunk):
+                            all_chunks.append(deepcopy(chunk))
+                            
+                            # 处理 content 或 tool_calls
+                            if chunk.content is not None or chunk.type or chunk.tool_calls:
+                                agent_name = chunk.agent_name or "FibreAgent"
+                                chunk_session_id = chunk.session_id or session_id
+                                
+                                content_parts = []
+                                if chunk.content:
+                                    content_parts.append(str(chunk.content))
+                                
+                                # 处理 tool_calls 显示
+                                if chunk.tool_calls:
+                                    for tool_call in chunk.tool_calls:
+                                        if hasattr(tool_call, 'function'):
+                                            tool_name = tool_call.function.name if hasattr(tool_call.function, 'name') else None
+                                            tool_args = tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else None
+                                        else:
+                                            tool_name = tool_call.get('function', {}).get('name')
+                                            tool_args = tool_call.get('function', {}).get('arguments')
+                                        if tool_name:
+                                            content_parts.append(f"\n[Tool Call: {tool_name}]")
+                                            if tool_args:
+                                                content_parts.append(f"Args: {tool_args}")
+                                
+                                if content_parts:
+                                    full_content = "\n".join(content_parts)
+                                    # append_log(chunk_session_id, agent_name, full_content, chunk.type or "normal")
+                
+                # 更新主会话的消息历史
+                main_session_chunks = [
+                    c for c in all_chunks
+                    if c.session_id == session_id or c.session_id is None
+                ]
+                messages = MessageManager.merge_new_messages_to_old_messages(main_session_chunks, messages)
+                
+            except Exception as e:
+                console.print(f"[red]执行出错: {e}[/red]")
+                traceback.print_exc()
+        
+        except KeyboardInterrupt:
+            console.print("\n[green]再见！[/green]")
+            break
+        except EOFError:
+            console.print("\n[green]再见！[/green]")
+            break
+        except Exception as e:
+            console.print(f"[red]发生错误: {e}[/red]")
+            traceback.print_exc()
+
+
+async def chat_fibre(
+    agent: SAgent,
+    model: Any,
+    model_config: Dict[str, Any],
+    system_prefix: str,
+    agent_workspace: str,
+    default_memory_type: str,
+    tool_manager: Union[ToolManager, ToolProxy],
+    skill_manager: Optional[Union[SkillManager, SkillProxy]],
+    config: Dict[str, Any],
+    context_budget_config: Optional[Dict[str, Any]] = None,
+):
     """
     原 fibre_cli.py 的对话逻辑，适用于 fibre 模式，支持多 Agent 面板显示和键盘中断
     """
@@ -461,13 +681,18 @@ async def chat_fibre(agent: SAgent, tool_manager: Union[ToolManager, ToolProxy],
         all_chunks = []
         try:
             async for chunks in agent.run_stream(
+                session_id=session_id,
                 input_messages=messages,
                 tool_manager=tool_manager,
                 skill_manager=skill_manager,
-                session_id=session_id,
+                model=model,
+                model_config=model_config,
+                system_prefix=system_prefix,
+                agent_workspace=agent_workspace,
+                default_memory_type=default_memory_type,
                 user_id=config.get('user_id'),
                 deep_thinking=config.get('use_deepthink'),
-                agent_mode='fibre',
+                agent_mode=config.get('agent_mode'),
                 available_workflows=config.get('available_workflows'),
                 system_context=config.get('system_context'),
                 context_budget_config=context_budget_config,
@@ -607,10 +832,12 @@ def parse_arguments() -> Dict[str, Any]:
     parser.add_argument('--deepthink', action='store_true', default=None, help='开启深度思考')
     parser.add_argument('--no-deepthink', action='store_true', default=None, help='禁用深度思考')
     parser.add_argument('--agent_mode', type=str, default=None, choices=['fibre', 'simple', 'multi'], help='智能体模式: fibre, simple, multi')
+    parser.add_argument('--simple_ui', action='store_true', default=False, help='使用简化版 UI（不使用 prompt_toolkit，适用于 fibre 模式）')
     
     parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
     parser.add_argument('--show_terminal_log', action='store_false', dest='no_terminal_log', help='开启终端打印log')
     parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录')
+    parser.add_argument('--session_root', type=str, default=None, help='会话根目录（默认在工作目录下的 agent_sessions 文件夹）')
     parser.add_argument('--session_id', type=str, default=None, help='指定会话 ID（可选）')
     parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'),
                         help="""MCP 设置文件路径，文件内容为json格式""")
@@ -666,7 +893,7 @@ def parse_arguments() -> Dict[str, Any]:
         'system_context': preset_running_agent_config.get('systemContext', {}),
         'available_tools': preset_running_agent_config.get('availableTools', []),
         'system_prefix': preset_running_agent_config.get('systemPrefix', ''),
-        'max_loop_count': preset_running_agent_config.get('maxLoopCount', 10),
+        'max_loop_count': preset_running_agent_config.get('maxLoopCount', 99),
         'user_id': args.user_id,
         'memory_root': args.memory_root,
         'context_history_ratio': args.context_history_ratio,
@@ -675,6 +902,8 @@ def parse_arguments() -> Dict[str, Any]:
         'context_recent_turns': args.context_recent_turns,
         'no_terminal_log': args.no_terminal_log,
         'memory_type': args.memory_type if args.memory_type else preset_running_agent_config.get('memoryType', 'session'),
+        'session_root': args.session_root,
+        'simple_ui': args.simple_ui,
     }
     logger.info(f"config: {config}")
     return config
@@ -767,25 +996,71 @@ if __name__ == '__main__':
         if config['memory_root']:
             os.environ["MEMORY_ROOT_PATH"] = config['memory_root']
 
+        model_config = {
+            "model": config['model_name'],
+            "max_tokens": config['max_tokens'],
+            "temperature": config['temperature'],
+            "max_model_len": config['max_model_len'],
+            "top_p": config['top_p'],
+            "presence_penalty": config['presence_penalty']
+        }
+        # session_root_space 独立于 agent_workspace
+        agent_workspace = config['workspace']
+        
+        # 优先使用命令行参数指定的 session_root，否则使用默认值
+        if config['session_root']:
+             session_root_space = os.path.abspath(config['session_root'])
+        else:
+             session_root_space = os.path.join(os.path.dirname(os.path.abspath(agent_workspace)), "agent_sessions")
+             
+        os.makedirs(session_root_space, exist_ok=True)
+
         sagent = SAgent(
-            model=client,
-            model_config={
-                "model": config['model_name'],
-                "max_tokens": config['max_tokens'],
-                "temperature": config['temperature'],
-                "max_model_len": config['max_model_len'],
-                "top_p": config['top_p'],
-                "presence_penalty": config['presence_penalty']
-            },
-            system_prefix=config['system_prefix'],
-            workspace=config['workspace'],
-            memory_type=config['memory_type'],
+            session_root_space=session_root_space,
+            enable_obs=True,
+            use_sandbox=config.get('use_sandbox', True)
         )
 
         # 根据模式选择不同的 chat 函数
         if config['agent_mode'] == 'fibre':
-            await chat_fibre(sagent, tool_proxy, skill_manager, config, context_budget_config)
+            if config.get('simple_ui'):
+                await chat_fibre_simple(
+                    sagent,
+                    client,
+                    model_config,
+                    config['system_prefix'],
+                    config['workspace'],
+                    config['memory_type'],
+                    tool_proxy,
+                    skill_manager,
+                    config,
+                    context_budget_config,
+                )
+            else:
+                await chat_fibre(
+                    sagent,
+                    client,
+                    model_config,
+                    config['system_prefix'],
+                    config['workspace'],
+                    config['memory_type'],
+                    tool_proxy,
+                    skill_manager,
+                    config,
+                    context_budget_config,
+                )
         else:
-            await chat_simple(sagent, tool_proxy, skill_manager, config, context_budget_config)
+            await chat_simple(
+                sagent,
+                client,
+                model_config,
+                config['system_prefix'],
+                config['workspace'],
+                config['memory_type'],
+                tool_proxy,
+                skill_manager,
+                config,
+                context_budget_config,
+            )
 
     asyncio.run(main_async())

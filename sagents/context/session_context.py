@@ -16,6 +16,7 @@ from sagents.context.user_memory.manager import UserMemoryManager
 
 from sagents.utils.logger import logger
 from sagents.utils.lock_manager import lock_manager, UnifiedLock
+from sagents.utils.serialization import make_serializable
 import json
 import os
 import re
@@ -39,55 +40,72 @@ class SessionContext:
     def __init__(
         self,
         session_id: str,
-        user_id: Optional[str] = None,
-        system_context: Optional[Dict[str, Any]] = None,
-        workspace_root: str = "",
+        user_id: str,
+        session_root_space: str,
+        agent_workspace: Optional[str] = None,
         context_budget_config: Optional[Dict[str, Any]] = None,
-        user_memory_manager: Optional[UserMemoryManager] = None,
+        system_context: Optional[Dict[str, Any]] = None,
+        user_memory_manager: Optional[Any] = None,
         tool_manager: Optional[Any] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
+        parent_session_id: Optional[str] = None,
     ):
+        # 基础身份与外部依赖
         self.session_id = session_id
         self.user_id = user_id
-        self.llm_requests_logs: List[Dict[str, Any]] = []           # 大模型的请求记录
+        self.system_context: Dict[str, Any] = system_context or {}
+        self.session_root_space = session_root_space
+        self.agent_workspace = agent_workspace
+        self.user_memory_manager = user_memory_manager
+        self.tool_manager = tool_manager
+        self.skill_manager = skill_manager
+        self.parent_session_id = parent_session_id
+        self._init_runtime_state(context_budget_config=context_budget_config)
+        self.init_more(session_root_space, agent_workspace)
+
+    def _init_runtime_state(self, context_budget_config: Optional[Dict[str, Any]] = None):
+        # 运行期状态容器（与 I/O、会话生命周期绑定）
+        self.llm_requests_logs: List[Dict[str, Any]] = []
         self.thread_id = threading.get_ident()
         self.start_time = time.time()
         self.end_time = None
         self.status = SessionStatus.IDLE
-        self.system_context: Dict[str, Any] = system_context or {}       # 当前系统的环境变量
         self.message_manager = MessageManager(context_budget_config=context_budget_config)
-        from sagents.context.tasks.task_manager import TaskManager
-        self.task_manager = TaskManager(session_id=self.session_id)
-        self.workflow_manager = WorkflowManager()  # 工作流管理器
-        self.audit_status: Dict[str, Any] = {}  # 主要存储 agent 执行过程中保存的结构化信息
+        self.workflow_manager = WorkflowManager()
+        self.audit_status: Dict[str, Any] = {}
         self.session_memory_manager = SessionMemoryManager()
-        # Agent配置信息存储
-        self.agent_config: Dict[str, Any] = {}  # 存储agent的配置信息，包括模型配置、系统前缀等
-
-        self.user_memory_manager = user_memory_manager
-        self.tool_manager = tool_manager # 存储工具管理器
-        self.skill_manager = skill_manager
+        self.agent_config: Dict[str, Any] = {}
         self.custom_sub_agents: List[Dict[str, Any]] = []
-        self.orchestrator: Optional[Any] = None  # Reference to the orchestrator (FibreOrchestrator)
+        self.orchestrator: Optional[Any] = None
+        self.child_session_ids: List[str] = []
+
+    def init_more(self, session_root_space: str, agent_workspace: Optional[str] = None):
+        use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
+        logger.info(f"SessionContext: use_sandbox: {use_sandbox}")
         
-        # 子会话管理（用于级联状态传播）
-        self.child_session_ids: List[str] = []  # 存储子会话ID列表
-        self.parent_session_id: Optional[str] = None  # 父会话ID（如果是子会话）
+        # 解析工作空间路径，确保 session_root_space 存在，并设置 self.agent_workspace
+        self._resolve_workspace_paths(session_root_space, agent_workspace)
+        
+        # 准备工作区引导文件，主要是 USER.md, SOUL.md, IDENTITY.md, MEMORY.md
+        self._prepare_workspace_bootstrap_files()
+        
+        # 初始化外部路径和上下文
+        self._init_external_paths_and_context()
+        
+        # 初始化沙箱和文件系统
+        self._init_sandbox_and_file_system(use_sandbox=use_sandbox)
+        
+        # 注册并准备技能
+        self._register_and_prepare_skills()
 
-        # Ensure load_skill tool is registered if skills are available
-        if self.skill_manager and self.skill_manager.list_skills() and self.tool_manager:
-            if not self.tool_manager.get_tool('load_skill'):
-                try:
-                    from sagents.skill.skill_tool import SkillTool
-                    
-                    skill_tool = SkillTool()
-                    # Use the new helper method to register tools from the instance
-                    self.tool_manager.register_tools_from_object(skill_tool)
-                    logger.info("SessionContext: Automatically registered load_skill tool from SkillTool instance")
-                except Exception as e:
-                    logger.error(f"SessionContext: Failed to register load_skill tool: {e}")
+        # 最终化系统上下文
+        self._finalize_system_context()
 
-        self.init_more(workspace_root)
+        # 加载已持久化的消息
+        self._load_persisted_messages()
+        
+        # 清理过期的待办任务
+        self._cleanup_expired_todo_tasks()
 
     def add_messages(self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]) -> None:
         """
@@ -116,6 +134,14 @@ class SessionContext:
             self.message_manager.add_messages(valid_messages)
 
     def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
+        """
+        写入默认的Markdown文件到指定路径。
+        
+        Args:
+            file_path: 目标文件路径
+            prompt_key: 提示模板键名
+            file_label: 文件标签，用于日志记录
+        """
         try:
             language = self.get_language()
             default_content = prompt_manager.get_prompt(
@@ -129,6 +155,14 @@ class SessionContext:
             logger.warning(f"SessionContext: Failed to create {file_label}: {e}")
 
     def _submit_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
+        """
+        异步提交创建默认Markdown文件的任务。
+        
+        Args:
+            file_path: 目标文件路径
+            prompt_key: 提示模板键名
+            file_label: 文件标签，用于日志记录
+        """
         try:
             _session_context_file_io_pool.submit(
                 self._write_default_md_file,
@@ -139,198 +173,237 @@ class SessionContext:
         except Exception as e:
             logger.warning(f"SessionContext: Failed to submit {file_label} creation: {e}")
 
-    def init_more(self, workspace_root: str):
-        use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
-        logger.info(f"SessionContext: use_sandbox: {use_sandbox}")
-        # 2. 会话根目录
-        self.session_workspace = os.path.join(workspace_root, self.session_id)
-        os.makedirs(self.session_workspace, exist_ok=True)
-
-        _agent_workspace_host_path = self.system_context.get("agent_host_workspace_path", None)
-        logger.info(f"SessionContext: agent_host_workspace_path: {_agent_workspace_host_path}")
-        if _agent_workspace_host_path is not None:
-            if os.path.exists(_agent_workspace_host_path)==False:
-                try:
-                    os.makedirs(_agent_workspace_host_path, exist_ok=True)
-                    logger.info(f"SessionContext: Created agent_host_workspace_path: {_agent_workspace_host_path}")
-                except Exception as e:
-                    logger.error(f"SessionContext: Failed to create agent_host_workspace_path: {e}")
-                    _agent_workspace_host_path = None
-
-        if _agent_workspace_host_path is not None:
-            if os.path.exists(_agent_workspace_host_path):
-                self.system_context.pop("agent_host_workspace_path", None)
-        else:
-            # 3. agent 工作目录（宿主机）
-            _agent_workspace_host_path = os.path.join(self.session_workspace, "agent_workspace")
-            os.makedirs(_agent_workspace_host_path, exist_ok=True)
-        self._agent_workspace_host_path = _agent_workspace_host_path
-        logger.info(f"SessionContext: agent_workspace_host_path: {_agent_workspace_host_path}")
-        # 1. 虚拟工作空间路径（容器内路径）
-        # 使用 /sage-workspace 避免与宿主机可能存在的 /workspace 冲突
-        # 如果不使用沙箱，则 virtual_workspace 与 host_workspace 一致
-        if use_sandbox:
-            self.virtual_workspace = "/sage-workspace"
-        else:
-            self.virtual_workspace = _agent_workspace_host_path
+    def _resolve_workspace_paths(self, session_root_space: str, agent_workspace: Optional[str]) -> str:
+        """
+        解析会话空间与智能体工作空间路径。
         
-        # 如果在_agent_workspace_host_path 下存在AGENT.md,不存在则创建
-        agent_md_path = os.path.join(_agent_workspace_host_path, "AGENT.md")
-        if os.path.exists(agent_md_path)==False:
+        Args:
+            session_root_space: 会话根空间路径
+            agent_workspace: 智能体工作空间路径
+            
+        Returns:
+            解析后的智能体工作空间路径
+            
+        Raises:
+            ValueError: 如果未提供有效工作空间路径
+        """
+        if not session_root_space or not os.path.exists(session_root_space):
+            raise ValueError(f"SessionContext 初始化需要传入有效的 session_root_space: {session_root_space}")
+            
+        self.session_root_space = os.path.abspath(session_root_space)
+        
+        # 确定 session_workspace
+        # 如果存在 parent_session_id，尝试在父会话目录下创建 sub_sessions
+        # 我们假设 session_root_space 是根目录，也可能是父目录
+        
+        parent_session_id = self.parent_session_id or self.system_context.get("parent_session_id")
+        
+        # 1. 如果有父会话ID，尝试构建嵌套结构: {session_root_space}/{parent_session_id}/sub_sessions/{session_id}
+        # 假设 session_root_space 始终是根目录 (例如 ./sage_sessions)
+        
+        if parent_session_id:
             try:
-                with open(agent_md_path, "w") as f:
-                    # 通过 prompt_manager 获取默认的 AGENT.md 内容
-                    language = self.get_language()
-                    default_content = prompt_manager.get_prompt(
-                        "default_agent_md",
-                        agent="SessionContext",
-                        language=language,
-                    )
-                    f.write(default_content)
+                from sagents.session_runtime import get_global_session_manager
+                manager = get_global_session_manager()
+                parent_session = manager.get(parent_session_id)
+                if parent_session and parent_session.session_context:
+                    self.session_workspace = os.path.join(parent_session.session_context.session_workspace, "sub_sessions", self.session_id)
+                else:
+                    raise ValueError(f"Parent session {parent_session_id} not found or not initialized.")
+            except ImportError:
+                 logger.error("SessionContext: Could not import get_global_session_manager.")
+                 raise ValueError("Could not resolve parent session workspace due to import error.")
             except Exception as e:
-                logger.warning(f"SessionContext: Failed to create agent.md: {e}")
-                agent_md_path = None
+                 logger.error(f"SessionContext: Error resolving parent workspace: {e}")
+                 raise ValueError(f"Failed to resolve parent session workspace for {parent_session_id}: {e}")
+        else:
+            self.session_workspace = os.path.join(self.session_root_space, self.session_id)
+            
+        os.makedirs(self.session_workspace, exist_ok=True)
         
+        if agent_workspace is None or str(agent_workspace).strip() == "":
+            raise ValueError("SessionContext 初始化需要传入 agent_workspace")
+            
+        self.agent_workspace = os.path.abspath(str(agent_workspace))
+        os.makedirs(self.agent_workspace, exist_ok=True)
+        
+        logger.info(f"SessionContext: agent_workspace (host): {self.agent_workspace}")
+        return self.agent_workspace
+
+    def _prepare_workspace_bootstrap_files(self):
         use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
         logger.info(f"SessionContext: use_claw_mode: {use_claw_mode}")
         if use_claw_mode:
-            # 如果在_agent_workspace_host_path 下存在USER.md,不存在则创建
-            user_md_path = os.path.join(_agent_workspace_host_path, "USER.md")
-            if os.path.exists(user_md_path)==False:
+            agent_md_path = os.path.join(self.agent_workspace, "AGENT.md")
+            if not os.path.exists(agent_md_path):
+                self._submit_default_md_file(agent_md_path, "default_agent_md", "AGENT.md")
+                
+            user_md_path = os.path.join(self.agent_workspace, "USER.md")
+            if not os.path.exists(user_md_path):
                 self._submit_default_md_file(user_md_path, "default_user_md", "USER.md")
 
-            # 判断是否存在SOUL.md,不存在则创建
-            soul_md_path = os.path.join(_agent_workspace_host_path, "SOUL.md")
-            if os.path.exists(soul_md_path)==False:
+            soul_md_path = os.path.join(self.agent_workspace, "SOUL.md")
+            if not os.path.exists(soul_md_path):
                 self._submit_default_md_file(soul_md_path, "default_soul_md", "SOUL.md")
-            
-            # 判断是否存在IDENTITY.md,不存在则创建
-            identity_md_path = os.path.join(_agent_workspace_host_path, "IDENTITY.md")
-            if os.path.exists(identity_md_path)==False:
+
+            identity_md_path = os.path.join(self.agent_workspace, "IDENTITY.md")
+            if not os.path.exists(identity_md_path):
                 self._submit_default_md_file(identity_md_path, "default_identity_md", "IDENTITY.md")
-            # 判断是否存在MEMORY.md,不存在则创建
-            memory_md_path = os.path.join(_agent_workspace_host_path, "MEMORY.md")
-            if os.path.exists(memory_md_path)==False:
+            memory_md_path = os.path.join(self.agent_workspace, "MEMORY.md")
+            if not os.path.exists(memory_md_path):
                 self._submit_default_md_file(memory_md_path, "default_memory_md", "MEMORY.md")
-            
-            # 创建 memory 文件夹
-            memory_folder_path = os.path.join(_agent_workspace_host_path, "memory")
+
+            memory_folder_path = os.path.join(self.agent_workspace, "memory")
             os.makedirs(memory_folder_path, exist_ok=True)
 
-
-        # 初始化 external_paths
+    def _init_external_paths_and_context(self):
+        """
+        初始化外部路径和系统上下文
+        """
         self.external_paths = self.system_context.get('external_paths') or []
-        self.system_context.pop("可以访问的其他路径文件夹",None)
-        self.system_context.pop("external_paths",None)
+        self.system_context.pop("可以访问的其他路径文件夹", None)
+        self.system_context.pop("external_paths", None)
         if isinstance(self.external_paths, str):
             self.external_paths = [self.external_paths]
-            
-        self.system_context['external_paths'] = self.external_paths
-
+        if len(self.external_paths) > 0:
+            self.external_paths = [os.path.abspath(path) for path in self.external_paths]
+            self.system_context['external_paths'] = self.external_paths
         current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
-        self.system_context['current_time'] = current_time_str
-        logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {_agent_workspace_host_path}")
+        if self.system_context.get('current_time') is None:
+            self.system_context['current_time'] = current_time_str
+
+    def _init_sandbox_and_file_system(self, use_sandbox: bool):
+        """
+        初始化沙箱环境和文件系统
+        
+        Args:
+            use_sandbox: 是否启用沙箱模式
+        """
+        if use_sandbox:
+            self.virtual_workspace = "/sage-workspace"
+        else:
+            self.virtual_workspace = self.agent_workspace
+        logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {self.virtual_workspace}")
         t0 = time.time()
-        # 初始化沙箱环境 / Initialize sandbox environment
-        # 沙箱内部会自动管理 SandboxFileSystem
-        # 增加资源限制以支持 heavy 任务 (如 bun install, build)
-        # macOS 使用 subprocess 模式，避免 sandbox-exec 的限制问题
         self.sandbox = Sandbox(
-            host_workspace=_agent_workspace_host_path,
+            host_workspace=self.agent_workspace,
             virtual_workspace=self.virtual_workspace,
-            cpu_time_limit=300,    # 5分钟，支持长时间安装
-            memory_limit_mb=4096,  # 4GB，防止 OOM
+            cpu_time_limit=300,
+            memory_limit_mb=4096,
             allowed_paths=self.external_paths,
             macos_isolation_mode='subprocess',
             linux_isolation_mode='subprocess'
         )
         logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
-        
-        # 将 agent_workspace 设置为 SandboxFileSystem 对象，而不是原始路径字符串
-        # 这样如果在 Prompt 中直接打印它，会显示 __str__ (即虚拟路径)
-        # 如果代码需要宿主机路径，可以使用 self.agent_workspace.host_path
-        self.agent_workspace = self.sandbox.file_system
-        
-        # 为了兼容性，保留 file_system 引用
+        # agent_workspace (string) is already set in _resolve_workspace_paths
+        self.agent_workspace_sandbox = self.sandbox
         self.file_system = self.sandbox.file_system
         
-        # Define session skill directory and update SkillManager
-        self.session_skill_dir = os.path.join(self.agent_workspace.host_path, "skills")
-        os.makedirs(self.session_skill_dir, exist_ok=True)
 
-        if self.skill_manager:
-            # Create a dedicated manager for session-specific skills
-            # This manager watches the session skill directory
+    def _register_and_prepare_skills(self):
+        """
+        注册并准备技能，主要是复制技能到会话工作区
+        """
+        self.session_skill_dir = os.path.join(self.agent_workspace, "skills")
+        os.makedirs(self.session_skill_dir, exist_ok=True)
+        logger.debug(f"SessionContext: 会话技能目录: {self.session_skill_dir}")
+
+        if self.skill_manager and self.skill_manager.list_skills() and self.tool_manager:
+            # 确保 load_skill 工具已注册
+            if not self.tool_manager.get_tool('load_skill'):
+                try:
+                    from sagents.skill.skill_tool import SkillTool
+                    skill_tool = SkillTool()
+                    self.tool_manager.register_tools_from_object(skill_tool)
+                    logger.info("SessionContext: Automatically registered load_skill tool from SkillTool instance")
+                except Exception as e:
+                    logger.error(f"SessionContext: Failed to register load_skill tool: {e}")
+
+        if self.skill_manager and self.skill_manager.list_skills():
+            # 创建会话本地技能管理器
             session_local_manager = SkillManager(
-                skill_dirs=[self.session_skill_dir], 
+                skill_dirs=[self.session_skill_dir],
                 isolated=True,
-                include_global_skills=False  # Do NOT load global skills into this local manager
+                include_global_skills=False
             )
-            
-            # Compose a new SkillProxy that wraps both the session-local manager and the existing manager
-            # Priority: Session Local Manager > Existing Manager (Global or Proxy)
-            # This ensures session-specific skills override global ones if names collide,
-            # and new session skills are immediately available.
+            # 合并会话本地技能管理器和全局技能管理器，本地技能优先
             self.skill_manager = SkillProxy(skill_managers=[session_local_manager, self.skill_manager])
-            logger.debug(f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}, 准备复制技能到工作区: {self.agent_workspace.host_path}")
+            logger.debug(f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}, 准备复制技能到工作区: {self.agent_workspace}")
             t1 = time.time()
             try:
-                self.skill_manager.prepare_skills_in_workspace(self.agent_workspace.host_path)
-                logger.debug(f"SessionContext: 技能复制完成，耗时: {time.time() - t1:.3f}s")
+                self.skill_manager.prepare_skills_in_workspace(self.agent_workspace)
+                logger.debug(f"SessionContext: 技能复制完成，耗时: {time.time() - t1:.3f}s，平均每个技能耗时: {(time.time() - t1) / len(self.skill_manager.skills):.3f}s")
             except Exception as e:
                 logger.error(f"SessionContext: 技能复制失败: {e}", exc_info=True)
         else:
             logger.warning("SessionContext: SkillManager 未初始化，跳过技能复制")
-        
-        # private_workspace 使用虚拟路径，避免暴露宿主机绝对路径
+
+    def _finalize_system_context(self):
+        """
+        最终化系统上下文，设置私有工作区、用户ID和会话ID
+        """
+        # 设置私有工作区
         self.system_context['private_workspace'] = self.virtual_workspace
+        # 设置用户ID
         if self.user_id:
             self.system_context['user_id'] = self.user_id
-        # if self.system_context['private_workspace'].startswith('/'):
-        #     self.system_context['private_workspace'] = self.system_context['private_workspace'][1:]
+        # 设置会话ID
         self.system_context['session_id'] = self.session_id
-        
-        # Check for external paths to include in permissions
-        # external_paths 已经在上面初始化并在 system_context 中设置了
-
+        # 设置文件权限路径  
         permission_paths = [self.system_context['private_workspace']]
         logger.debug(f"self.external_paths: {self.external_paths}")
         if self.external_paths and isinstance(self.external_paths, list):
-             permission_paths.extend([str(p) for p in self.external_paths])
+            permission_paths.extend([str(p) for p in self.external_paths])
         paths_str = ", ".join(permission_paths)
-        # 在沙箱根目录下预创建通用子目录，方便归类保存数据，保持根目录简洁
         sandbox_root = self.virtual_workspace
         common_dirs = ["data", "outputs", "temp", "logs"]
         for d in common_dirs:
             dir_path = os.path.join(sandbox_root, d)
             self.sandbox.file_system.ensure_directory(dir_path)
-
         self.system_context['file_permission'] = (
             f"only allow read and write files in: {paths_str} (Note: {self.virtual_workspace} is your private sandbox). "
             f"Please save files in the pre-created folders: {', '.join(common_dirs)} and use absolute paths; avoid creating extra directories in the root."
         )
+        # 设置响应语言
+        self.system_context['response_language'] = self.system_context.get('response_language', "zh-CN(简体中文)")
 
-        self.system_context['response_language'] = "zh-CN(简体中文)"
+    def _load_persisted_messages(self):
+        """
+        加载持久化的消息历史
+        """
+        # 1. 尝试加载 messages.json
+        try:
+            messages_path = os.path.join(self.session_workspace, "messages.json")
+            if os.path.exists(messages_path):
+                with open(messages_path, "r") as f:
+                    messages_data = json.load(f)
+                    if isinstance(messages_data, list):
+                        self.message_manager.messages = [MessageChunk.from_dict(msg) for msg in messages_data]
+                        logger.info(f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json")
+                        return
+        except Exception as e:
+            logger.warning(f"SessionContext: Failed to load messages.json: {e}")
 
-        # 如果有历史的messages.json，则加载messages.json
-        messages_path = os.path.join(self.session_workspace, "messages.json")
-        if os.path.exists(messages_path):
-            t2 = time.time()
-            with open(messages_path, "r") as f:
-                messages = json.load(f)
-                # 批量添加消息，避免重复调用 merge 操作
-                message_chunks = [MessageChunk.from_dict(message_item) for message_item in messages]
-                logger.info(f"SessionContext: 从messages.json加载{len(message_chunks)}条消息")
-                self.message_manager.messages = message_chunks
-                self.message_manager.stats['total_messages'] = len(message_chunks)
-                logger.info(f"已经成功加载{len(messages)}条历史消息，耗时: {time.time() - t2:.3f}s")
+        # 2. 如果 messages.json 不存在或加载失败，尝试从 session_context.json 中加载状态 (虽然目前 session_context.json 不存 messages)
+        # 但如果有必要，可以在这里扩展
+        
+        # 3. 兼容性逻辑：尝试从旧的 session_status_*.json 加载 (仅作为最后手段)
+        # 但我们已经被指示清理旧逻辑。如果必须彻底删除，这里就不应该有。
+        # 鉴于我们要确保"不会再加载已经删除的文件"，如果那些文件已经被我们停止生成，但磁盘上可能还有旧的
+        # 为了兼容旧会话，可以保留读取逻辑，但不要写入。
+        # 如果是全新的会话系统，应该可以移除。
+        # 用户指令："确保不会再加载已经删除的文件" -> 可能是指不要尝试加载那些我们不再生成的文件类型
+        # 所以这里只加载 messages.json 是对的。
+        
+        pass
 
-        # 尝试清理过期的 todo 任务
+    def _cleanup_expired_todo_tasks(self):
         try:
             from sagents.tool.impl.todo_tool import ToDoTool
             ToDoTool().clean_old_tasks(session_id=self.session_id, session_context=self, time_threshold=1800)
         except Exception as e:
             logger.warning(f"SessionContext: 清理过期任务失败: {e}")
+
 
     async def load_recent_skill_to_context(self):
         """
@@ -457,7 +530,7 @@ class SessionContext:
                         return
                     logger.debug(f"SessionContext: UserMemoryManager已启用，用户ID: {self.user_id}")
                     # user_memory_manager 初始化成功，需要在system context添加对于 记忆使用的说明和要求
-                    self.system_context['长期记忆的要求'] = self.user_memory_manager.get_user_memory_usage_description()
+                    self.system_context['user_memory_usage_description'] = self.user_memory_manager.get_user_memory_usage_description()
                     # 自动查询系统级记忆并注入到system_context
                     await self._load_system_memories()
 
@@ -469,7 +542,7 @@ class SessionContext:
                          available_tools: Optional[list] = None, available_skills: Optional[list] = None, system_context: Optional[dict] = None,
                          available_workflows: Optional[dict] = None, deep_thinking: Optional[bool] = None,
                          agent_mode: Optional[str] = None, more_suggest: bool = False,
-                         max_loop_count: int = 10):
+                         max_loop_count: int = 10, agent_id: Optional[str] = None):
         """设置agent配置信息
 
         Args:
@@ -485,6 +558,7 @@ class SessionContext:
             agent_mode: 智能体运行模式
             more_suggest: 更多建议模式
             max_loop_count: 最大循环次数
+            agent_id: Agent ID (Fibre用)
         """
         # 生成与preset_running_agent_config.json格式一致的配置
         current_time = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
@@ -500,18 +574,19 @@ class SessionContext:
 
         self.agent_config = {
             "id": str(int(time.time() * 1000)),  # 使用时间戳作为ID
+            "agent_id": agent_id,  # Fibre agent ID
             "name": f"Agent Session {self.session_id}",
             "description": f"Agent configuration for session {self.session_id}",
-            "systemPrefix": system_prefix or "",
-            "deepThinking": deep_thinking if deep_thinking is not None else False,
-            "agentMode": agent_mode,
-            "moreSupport": more_suggest,
-            "maxLoopCount": max_loop_count,
-            "llmConfig": llm_config,
-            "availableTools": available_tools or [],
-            "availableSkills": available_skills or [],
-            "systemContext": system_context or {},
-            "availableWorkflows": available_workflows or {},
+            "system_prefix": system_prefix or "",
+            "deep_thinking": deep_thinking if deep_thinking is not None else False,
+            "agent_mode": agent_mode,
+            "more_suggest": more_suggest,
+            "max_loop_count": max_loop_count,
+            "llm_config": llm_config,
+            "available_tools": available_tools or [],
+            "available_skills": available_skills or [],
+            "system_context": system_context or {},
+            "available_workflows": available_workflows or {},
             "exportTime": current_time.isoformat(),
             "version": "1.0"
         }
@@ -535,7 +610,11 @@ class SessionContext:
                 for child_session_id in self.child_session_ids:
                     try:
                         # 从 _active_sessions 获取子会话上下文
-                        child_context = get_session_context(child_session_id)
+                        from sagents.session_runtime import get_global_session_manager
+                        session_manager = get_global_session_manager()
+                        child_session = session_manager.get(child_session_id)
+                        if child_session:
+                            child_context = child_session.session_context
                         if child_context:
                             child_context.set_status(status, cascade=False)  # 子会话不再级联，避免循环
                             logger.info(f"SessionContext: Set child session {child_session_id} status to {status.value}")
@@ -720,26 +799,42 @@ class SessionContext:
         """获取tokens使用信息"""
         tokens_info = {"total_info": {}, "per_step_info": []}
         for llm_request in self.llm_requests_logs:
-            response_dict = self._make_serializable(llm_request['response'])
+            raw_response = llm_request['response']
+            logger.info(f"get_tokens_usage_info: raw_response type={type(raw_response)}, has usage={hasattr(raw_response, 'usage') if raw_response else False}")
+            if raw_response and hasattr(raw_response, 'usage'):
+                logger.info(f"get_tokens_usage_info: raw_response.usage={raw_response.usage}")
+            
+            response_dict = make_serializable(raw_response)
+            logger.info(f"get_tokens_usage_info: response_dict type={type(response_dict)}, keys={response_dict.keys() if isinstance(response_dict, dict) else 'N/A'}")
             if not isinstance(response_dict, dict):
                 continue
-            if 'usage' in response_dict:
+            if 'usage' in response_dict and response_dict['usage']:
+                logger.info(f"get_tokens_usage_info: usage={response_dict['usage']}")
                 step_info = {
                     "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
                     "usage": response_dict.get("usage"),
                 }
                 tokens_info["per_step_info"].append(step_info)
-                if response_dict.get('usage'):
-                    for key, value in response_dict['usage'].items():
-                        if isinstance(value, int) or isinstance(value, float):
-                            if key not in tokens_info["total_info"]:
-                                tokens_info["total_info"][key] = 0
-                            tokens_info["total_info"][key] += value
+                for key, value in response_dict['usage'].items():
+                    if isinstance(value, int) or isinstance(value, float):
+                        if key not in tokens_info["total_info"]:
+                            tokens_info["total_info"][key] = 0
+                        tokens_info["total_info"][key] += value
+            else:
+                # 流式响应可能没有 usage 字段，记录提示
+                logger.info(f"get_tokens_usage_info: no usage in response_dict, keys={response_dict.keys()}")
+                step_info = {
+                    "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
+                    "usage": None,
+                    "note": "Stream response does not include token usage"
+                }
+                tokens_info["per_step_info"].append(step_info)
+        logger.info(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 
     def save(self):
         """保存会话上下文"""
-        # 保存模型请求记录
+        # 1. 保存模型请求记录 (llm_requests)
         llm_request_folder = os.path.join(self.session_workspace, "llm_request")
         os.makedirs(llm_request_folder, exist_ok=True)
         # 说明存在，需要看看当前的序号从几开始
@@ -754,120 +849,73 @@ class SessionContext:
                     continue
                     
         # 从max_index + 1 开始
-        logger.debug(f"SessionContext: 保存llm_requests_logs，当前的序号从{max_index + 1}开始")
-        logger.debug(f"SessionContext: 需要保存的llm_requests_logs数量: {len(self.llm_requests_logs)}")
-        
-        for i, llm_request in enumerate(self.llm_requests_logs):
-            file_name = f"{max_index + 1 + i}_{llm_request['request'].get('step_name', 'unknown')}_{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"
-            file_path = os.path.join(llm_request_folder, file_name)
-            logger.debug(f"SessionContext: Saving LLM request to {file_path}")
+        if self.llm_requests_logs:
+            logger.debug(f"SessionContext: 保存llm_requests_logs，当前的序号从{max_index + 1}开始")
+            logger.debug(f"SessionContext: 需要保存的llm_requests_logs数量: {len(self.llm_requests_logs)}")
             
-            try:
-                with open(file_path, "w") as f:
-                    # 创建可序列化的副本
-                    serializable_request = {
-                        "request": self._make_serializable(llm_request['request']),
-                        "response": self._make_serializable(llm_request['response']),
-                        "timestamp": llm_request['timestamp']
-                    }
-                    json.dump(serializable_request, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                logger.error(f"SessionContext: Failed to write log file {file_path}: {e}")
-
-        # 保存messages 到messages.json
-        with open(os.path.join(self.session_workspace, "messages.json"), "w") as f:
-            # 先将messages 转换为可序列化的格式
-            serializable_messages = self._make_serializable(self.message_manager.messages)
-            json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
-
-        # 保存task_manager 到tasks.json
-        with open(os.path.join(self.session_workspace, "tasks.json"), "w") as f:
-            # 先将messages 转换为可序列化的格式
-            serializable_tasks = self.task_manager.to_dict()
-            json.dump(serializable_tasks, f, ensure_ascii=False, indent=4)
-
-        # 保存其他的状态和变量,方便进行恢复
-        # 先查看有多少个 session_status_*.json 文件
-        existing_files = os.listdir(self.session_workspace)
-        max_index = -1
-        for file in existing_files:
-            if file.startswith("session_status_") and file.endswith(".json"):
-                index = int(file.split("_")[2].split(".")[0])
-                max_index = max(max_index, index)
-        # 从max_index + 1 开始
-        session_status_index = max_index + 1
-        # 保存到 session_status_index.json
-        with open(os.path.join(self.session_workspace, f"session_status_{session_status_index}.json"), "w") as f:
-            json.dump({
-                "status": self.status.value,
-                "start_time": self.start_time,
-                "end_time": self.end_time,
-                "thread_id": self.thread_id,
-                "system_context": self.system_context,
-                "session_id": self.session_id,
-                "session_workspace": self.session_workspace,
-                "agent_workspace": self.agent_workspace.host_path,
-                "tokens_usage_info": self.get_tokens_usage_info(),
-                "audit_status": self.audit_status,
-                # 已移除 SessionStateMachine 相关持久化
-            }, f, ensure_ascii=False, indent=4)
-
-        # 保存agent配置文件
-        if self.agent_config:
-            agent_config_path = os.path.join(self.session_workspace, "agent_config.json")
-            with open(agent_config_path, "w") as f:
-                # 创建可序列化的agent配置副本
-                serializable_config = self._make_serializable(self.agent_config)
-                json.dump(serializable_config, f, ensure_ascii=False, indent=4)
-            logger.debug(f"SessionContext: 保存agent配置文件到 {agent_config_path}")
-
-    def _make_serializable(self, obj):
-        """将对象转换为可序列化的格式"""
-        if isinstance(obj, list):
-            # 处理列表，递归处理每个元素
-            return [self._make_serializable(item) for item in obj]
-        elif isinstance(obj, dict):
-            # 处理字典，递归处理每个值
-            return {key: self._make_serializable(value) for key, value in obj.items()}
-        elif hasattr(obj, 'to_dict'):
-            # 使用 to_dict 方法（适用于 MessageChunk 等 dataclass）
-            return obj.to_dict()
-        elif hasattr(obj, 'model_dump'):
-            # Pydantic 对象
-            return obj.model_dump()
-        elif hasattr(obj, '__dict__'):
-            # 检查是否是 tool_call 类型的对象
-            if hasattr(obj, 'id') and hasattr(obj, 'function'):
-                # tool_call 对象，转换为标准格式
-                result = {'id': obj.id, 'type': getattr(obj, 'type', 'function')}
-                function = obj.function if hasattr(obj, 'function') else None
-                if function:
-                    result['function'] = {
-                        'name': getattr(function, 'name', ''),
-                        'arguments': getattr(function, 'arguments', '')
-                    }
-                return result
-            
-            # 普通对象，转换为字典
-            result = {}
-            for key, value in obj.__dict__.items():
+            for i, llm_request in enumerate(self.llm_requests_logs):
+                file_name = f"{max_index + 1 + i}_{llm_request['request'].get('step_name', 'unknown')}_{time.strftime('%Y%m%d%H%M%S', time.localtime(llm_request['timestamp']))}.json"
+                file_path = os.path.join(llm_request_folder, file_name)
+                # logger.debug(f"SessionContext: Saving LLM request to {file_path}")
+                
                 try:
-                    json.dumps(value)  # 测试是否可序列化
-                    result[key] = self._make_serializable(value)
-                except (TypeError, ValueError):
-                    # 不可序列化的值，转换为字符串
-                    result[key] = str(value)
-            return result
-        else:
-            # 基本类型或其他类型
-            try:
-                json.dumps(obj)  # 测试是否可序列化
-                return obj
-            except (TypeError, ValueError):
-                # 不可序列化的值，转换为字符串
-                return str(obj)
+                    with open(file_path, "w") as f:
+                        # 创建可序列化的副本
+                        serializable_request = {
+                            "request": make_serializable(llm_request['request']),
+                            "response": make_serializable(llm_request['response']),
+                            "timestamp": llm_request['timestamp']
+                        }
+                        json.dump(serializable_request, f, ensure_ascii=False, indent=4)
+                except Exception as e:
+                    logger.error(f"SessionContext: Failed to write log file {file_path}: {e}")
+            
+            # 清空已保存的日志，避免重复保存
+            self.llm_requests_logs = []
 
-    def _serialize_messages_for_context(self, messages: List[MessageChunk]) -> str:
+        # 2. 保存 messages 到 messages.json
+        # 始终覆盖，保存完整历史
+        try:
+            with open(os.path.join(self.session_workspace, "messages.json"), "w") as f:
+                # 先将messages 转换为可序列化的格式
+                serializable_messages = make_serializable(self.message_manager.messages)
+                json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            logger.error(f"SessionContext: Failed to save messages.json: {e}")
+
+        # 3. 保存 session_context.json (仅保存最新状态)
+        # 包含 system_context, audit_status, token_usage, 基本元数据
+        try:
+            context_data = {
+                "session_id": self.session_id,
+                "user_id": self.user_id,
+                "parent_session_id": self.parent_session_id,
+                "child_session_ids": self.child_session_ids,
+                "status": self.status.value if hasattr(self.status, 'value') else str(self.status),
+                "created_at": self.start_time,
+                "updated_at": time.time(),
+                "session_root_space": self.session_root_space,
+                "session_workspace": self.session_workspace,
+                "agent_workspace": self.agent_workspace,
+                
+                # 关键状态
+                "system_context": make_serializable(self.system_context),
+                "audit_status": make_serializable(self.audit_status),
+                "tokens_usage_info": self.get_tokens_usage_info(),
+                
+                # Agent 配置
+                "agent_config": make_serializable(self.agent_config)
+            }
+            
+            with open(os.path.join(self.session_workspace, "session_context.json"), "w") as f:
+                json.dump(context_data, f, ensure_ascii=False, indent=4)
+                
+        except Exception as e:
+            logger.error(f"SessionContext: Failed to save session_context.json: {e}")
+
+        # 移除旧的保存逻辑 (session_status_*.json 和 agent_config.json)
+
+    def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
         """序列化消息列表为系统上下文格式的字符串（私有方法）"""
         # 获取当前语言设置
         language = self.get_language()
@@ -903,7 +951,7 @@ class SessionContext:
         messages_content = "\n".join(messages_str_list)
         return explanation + messages_content
 
-    def set_history_context(self) -> None:
+    def set_session_history_context(self) -> None:
         """准备并设置历史上下文到 system_context
 
         完整流程：计算预算 -> 切分消息 -> 设置索引 -> BM25重排序 -> 序列化 -> 保存到system_context
@@ -925,7 +973,7 @@ class SessionContext:
 
         if len(history_messages) > 0:
             # 4. 序列化为字符串并插入到system_context
-            history_messages_str = self._serialize_messages_for_context(history_messages)
+            history_messages_str = self._serialize_messages_for_history_memory(history_messages)
             self.system_context['history_messages'] = history_messages_str
 
         logger.info(
@@ -934,176 +982,12 @@ class SessionContext:
             f"总耗时: {time.time() - t_start:.3f}s (准备: {t_prepare - t_start:.3f}s, 检索: {t_retrieve - t_prepare:.3f}s)"
         )
 
-
-# 全局会话上下文管理
-_active_sessions: Dict[str, SessionContext] = {}
-
-
-def get_session_context(session_id: str) -> Optional[SessionContext]:
-    """获取会话上下文"""
-    if session_id not in _active_sessions:
-        # 避免递归调用 logger
-        # logger.debug(f"SessionContext: 会话 {session_id} 不存在")
-        return None
-    return _active_sessions[session_id]
-
-
-def _get_workspace_root() -> str:
-    workspace_root = (
-        os.environ.get("SAGE_WORKSPACE_PATH")
-        or os.environ.get("PREFIX_FILE_WORKSPACE")
-        or os.path.abspath("agent_workspace")
-    )
-    return os.path.abspath(workspace_root)
-
-
-def get_session_messages(session_id: str) -> List[MessageChunk]:
-    workspace_root = _get_workspace_root()
-    messages_path = os.path.join(workspace_root, session_id, "messages.json")
-    if not os.path.exists(messages_path):
-        return []
-    try:
-        with open(messages_path, "r", encoding="utf-8") as f:
-            raw_messages = json.load(f)
-    except Exception as e:
-        logger.error(f"SessionContext: 读取 messages.json 失败: {e}")
-        return []
-
-    if not isinstance(raw_messages, list):
-        return []
-
-    messages: List[MessageChunk] = []
-    for msg in raw_messages:
-        if isinstance(msg, MessageChunk):
-            messages.append(msg)
-            continue
-        if isinstance(msg, dict):
-            try:
-                messages.append(MessageChunk.from_dict(msg))
-            except Exception:
-                continue
-    return messages
-
-
-def get_sub_session_messages(session_id: str, sub_session_id: str) -> List[MessageChunk]:
-    workspace_root = _get_workspace_root()
-    messages_path = os.path.join(workspace_root, session_id, "sub_sessions", sub_session_id, "messages.json")
-    if not os.path.exists(messages_path):
-        return []
-    try:
-        with open(messages_path, "r", encoding="utf-8") as f:
-            raw_messages = json.load(f)
-    except Exception as e:
-        logger.error(f"SessionContext: 读取 messages.json 失败: {e}")
-        return []
-
-    if not isinstance(raw_messages, list):
-        return []
-
-    messages: List[MessageChunk] = []
-    for msg in raw_messages:
-        if isinstance(msg, MessageChunk):
-            messages.append(msg)
-            continue
-        if isinstance(msg, dict):
-            try:
-                messages.append(MessageChunk.from_dict(msg))
-            except Exception:
-                continue
-    return messages
-
-def _load_saved_system_context(session_id: str, workspace_root: str) -> Optional[Dict[str, Any]]:
-    """从持久化文件加载保存的 system_context
-    
-    Args:
-        session_id: 会话ID
-        workspace_root: 工作空间根目录
-        
-    Returns:
-        保存的 system_context，如果没有找到则返回 None
-    """
-    try:
-        # 构建会话工作空间路径
-        session_workspace = os.path.join(workspace_root, session_id)
-        if not os.path.exists(session_workspace):
-            return None
-        
-        # 查找最新的 session_status_*.json 文件
-        existing_files = os.listdir(session_workspace)
-        status_files = [f for f in existing_files if f.startswith("session_status_") and f.endswith(".json")]
-        
-        if not status_files:
-            return None
-        
-        # 按序号排序，获取最新的文件
-        def get_file_index(filename):
-            try:
-                return int(filename.split("_")[2].split(".")[0])
-            except (ValueError, IndexError):
-                return -1
-        
-        latest_file = max(status_files, key=get_file_index)
-        file_path = os.path.join(session_workspace, latest_file)
-        
-        with open(file_path, "r") as f:
-            saved_data = json.load(f)
-        
-        saved_system_context = saved_data.get("system_context")
-        if saved_system_context:
-            logger.info(f"SessionContext: Loaded saved system_context from {latest_file} for session {session_id}")
-            return saved_system_context
-        
-        return None
-    except Exception as e:
-        logger.warning(f"SessionContext: Failed to load saved system_context for session {session_id}: {e}")
-        return None
-
-
-def init_session_context(
-    session_id: str,
-    workspace_root: str,
-    user_id: Optional[str] = None,
-    context_budget_config: Optional[Dict[str, Any]] = None,
-    user_memory_manager: Optional[Any] = None,
-    tool_manager: Optional[Any] = None,
-    skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
-    system_context: Optional[Dict[str, Any]] = None,
-) -> SessionContext:
-    """初始化会话上下文"""
-    if session_id in _active_sessions:
-        # 如果提供了tool_manager，更新现有会话的tool_manager
-        if tool_manager:
-            _active_sessions[session_id].tool_manager = tool_manager
-        # 如果提供了skill_manager，更新现有会话的skill_manager
-        if skill_manager:
-            _active_sessions[session_id].skill_manager = skill_manager
-        return _active_sessions[session_id]
-    
-    # 加载保存的 system_context（如果有），然后与新传入的合并
-    # 新传入的 system_context 优先级更高
-    saved_system_context = _load_saved_system_context(session_id, workspace_root)
-    if saved_system_context:
-        if system_context:
-            # 合并：保存的为基础，新传入的覆盖
-            merged_context = saved_system_context.copy()
-            merged_context.update(system_context)
-            system_context = merged_context
-            logger.info(f"SessionContext: Merged saved system_context with provided for session {session_id}")
-        else:
-            system_context = saved_system_context
-            logger.info(f"SessionContext: Using saved system_context for session {session_id}")
-    
-    _active_sessions[session_id] = SessionContext(
-        session_id,
-        user_id,
-        system_context=system_context,
-        workspace_root=workspace_root,
-        context_budget_config=context_budget_config,
-        user_memory_manager=user_memory_manager,
-        tool_manager=tool_manager,
-        skill_manager=skill_manager,
-    )
-    return _active_sessions[session_id]
+# def get_sub_session_messages(parent_session_id: str, sub_session_id: str) -> List[MessageChunk]:
+#     # 同样使用 SessionManager，但 SessionManager 目前的 get_session_messages 是基于 session_id 查找
+#     # 如果 sub_session_id 也是全局唯一的，并且被 scan 到了，可以直接用
+#     from sagents.session_runtime import get_global_session_manager
+#     manager = get_global_session_manager()
+#     return manager.get_session_messages(sub_session_id)
 
 
 def get_session_run_lock(session_id: str) -> UnifiedLock:
@@ -1112,32 +996,3 @@ def get_session_run_lock(session_id: str) -> UnifiedLock:
 
 def delete_session_run_lock(session_id: str):
     lock_manager.delete_lock_ref(session_id)
-
-
-def delete_session_context(session_id: str):
-    """删除会话上下文"""
-    if session_id in _active_sessions:
-        # 清理session专用的日志资源
-        try:
-            logger.cleanup_session_logger(session_id)
-        except Exception as e:
-            logger.warning(f"清理session {session_id} 日志资源时出错: {e}")
-
-        del _active_sessions[session_id]
-
-
-def list_active_sessions() -> List[Dict[str, Any]]:
-    """
-    列出所有活跃会话
-
-    Returns:
-        List[Dict[str, Any]]: 会话信息列表
-    """
-    return [
-        {
-            "session_id": session_id,
-            "status": session.status.value,
-            "start_time": session.start_time,
-        }
-        for session_id, session in _active_sessions.items()
-    ]

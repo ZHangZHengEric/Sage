@@ -22,10 +22,11 @@ def get_sandbox_python_path(session_id: Optional[str] = None) -> Optional[str]:
         return python_path
     
     if session_id:
-        from sagents.context.session_context import get_session_context
-        session_context = get_session_context(session_id)
-        if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-            return session_context.sandbox.get_venv_python()
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if session and session.session_context and hasattr(session.session_context, 'agent_workspace_sandbox') and session.session_context.agent_workspace_sandbox:
+            return session.session_context.agent_workspace_sandbox.get_venv_python()
     
     return sys.executable
 
@@ -38,15 +39,16 @@ def get_sandbox_workdir(workdir: Optional[str], session_id: Optional[str] = None
         return None
     
     if session_id:
-        from sagents.context.session_context import get_session_context
-        session_context = get_session_context(session_id)
-        if session_context:
-            if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                fs = session_context.sandbox.file_system
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if session and session.session_context:
+            if hasattr(session.session_context, 'agent_workspace_sandbox') and session.session_context.agent_workspace_sandbox:
+                fs = session.session_context.agent_workspace_sandbox.file_system
                 if hasattr(fs, 'map_text_to_host'):
                     return fs.map_text_to_host(workdir)
-            if hasattr(session_context, 'agent_workspace'):
-                ws = session_context.agent_workspace
+            if hasattr(session.session_context, 'agent_workspace'):
+                ws = session.session_context.agent_workspace
                 if isinstance(ws, str):
                     return ws
                 elif hasattr(ws, 'host_path'):
@@ -60,10 +62,11 @@ def get_sandbox_host_path(session_id: Optional[str] = None) -> Optional[str]:
     if not session_id:
         return None
     
-    from sagents.context.session_context import get_session_context
-    session_context = get_session_context(session_id)
-    if session_context and hasattr(session_context, 'agent_workspace'):
-        ws = session_context.agent_workspace
+    from sagents.session_runtime import get_global_session_manager
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id)
+    if session and session.session_context and hasattr(session.session_context, 'agent_workspace_sandbox'):
+        ws = session.session_context.agent_workspace_sandbox.file_system
         if hasattr(ws, 'host_path'):
             return ws.host_path
     return None
@@ -76,10 +79,11 @@ def get_sandbox_venv_bin(session_id: Optional[str] = None) -> Optional[str]:
         return os.path.join(venv_path, 'bin')
     
     if session_id:
-        from sagents.context.session_context import get_session_context
-        session_context = get_session_context(session_id)
-        if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
-            venv_dir = session_context.sandbox.venv_dir
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if session and session.session_context and hasattr(session.session_context, 'agent_workspace_sandbox') and session.session_context.agent_workspace_sandbox:
+            venv_dir = session.session_context.agent_workspace_sandbox.venv_dir
             if venv_dir:
                 return os.path.join(venv_dir, 'bin')
     return None

@@ -157,7 +157,6 @@ class ExecuteCommandTool:
     
     def _write_script_file(self, file_path: str, content: str, workdir: str = None, session_id: Optional[str] = None):
         """写入脚本文件"""
-        from sagents.utils.sandbox import get_sandbox_workdir
         
         # 写入文件
         try:
@@ -175,19 +174,18 @@ class ExecuteCommandTool:
         """记录 Shell 命令历史"""
         if not session_id:
             return
-        
-        from sagents.utils.sandbox import get_sandbox_workdir
-        
+                
         try:
-            from sagents.context.session_context import get_session_context
-            session_context = get_session_context(session_id)
-            if not session_context:
+            from sagents.session_runtime import get_global_session_manager
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            if not session or not session.session_context:
                 return
-            
+            session_context = session.session_context
             # 获取 host_path
             host_path = None
-            if hasattr(session_context, 'agent_workspace'):
-                host_path = getattr(session_context.agent_workspace, 'host_path', None)
+            if hasattr(session_context, 'agent_workspace_sandbox'):
+                host_path = getattr(session_context.agent_workspace_sandbox.file_system, 'host_path', None)
             
             if not host_path:
                 return
@@ -259,7 +257,6 @@ class ExecuteCommandTool:
         
         使用 sandbox_utils 统一处理沙箱路径映射，兼容有沙箱和没有沙箱的环境。
         """
-        from sagents.utils.sandbox import get_sandbox_workdir
         
         start_time = time.time()
         process_id = self.process_manager.generate_process_id()
@@ -270,27 +267,29 @@ class ExecuteCommandTool:
         actual_workdir = workdir
         logger.info(f"[execute_shell_command] 原始 workdir: {workdir}, session_id: {session_id}")
         if actual_workdir is None and session_id:
-            from sagents.context.session_context import get_session_context
-            session_context = get_session_context(session_id)
-            logger.info(f"[execute_shell_command] session_context: {session_context}")
-            if session_context:
+            from sagents.session_runtime import get_global_session_manager
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            logger.info(f"[execute_shell_command] session: {session}")
+            if session and session.session_context:
+                session_context = session.session_context
                 # 优先使用 sandbox.file_system.host_path（这是实际的主机路径）
-                if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                    if hasattr(session_context.sandbox, 'file_system') and session_context.sandbox.file_system:
-                        actual_workdir = session_context.sandbox.file_system.host_path
-                        logger.info(f"[execute_shell_command] 使用 sandbox.file_system.host_path: {actual_workdir}")
+                if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
+                    if hasattr(session_context.agent_workspace_sandbox, 'file_system') and session_context.agent_workspace_sandbox.file_system:
+                        actual_workdir = session_context.agent_workspace_sandbox.file_system.host_path  
+                        logger.info(f"[execute_shell_command] 使用 agent_workspace_sandbox.file_system.host_path: {actual_workdir}")
                     else:
                         # 如果没有 file_system，使用 host_workspace
-                        actual_workdir = session_context.sandbox.host_workspace
-                        logger.info(f"[execute_shell_command] 使用 sandbox.host_workspace: {actual_workdir}")
-                # 如果没有 sandbox，再尝试 agent_workspace
-                elif hasattr(session_context, 'agent_workspace'):
-                    agent_ws = session_context.agent_workspace
+                        actual_workdir = session_context.agent_workspace_sandbox.host_workspace
+                        logger.info(f"[execute_shell_command] 使用 agent_workspace_sandbox.host_workspace: {actual_workdir}")
+                # 如果没有 sandbox，再尝试 agent_workspace_sandbox
+                elif hasattr(session_context, 'agent_workspace_sandbox'):
+                    agent_ws = session_context.agent_workspace_sandbox.file_system
                     if isinstance(agent_ws, str):
                         actual_workdir = agent_ws
                     elif hasattr(agent_ws, 'host_path'):
                         actual_workdir = agent_ws.host_path
-                    logger.info(f"[execute_shell_command] 使用 agent_workspace: {actual_workdir}")
+                    logger.info(f"[execute_shell_command] 使用 agent_workspace_sandbox: {actual_workdir}")
         logger.info(f"[execute_shell_command] 最终 actual_workdir: {actual_workdir}")
         
         try:

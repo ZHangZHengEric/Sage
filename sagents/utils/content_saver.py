@@ -3,7 +3,7 @@ import re
 import time
 from typing import Optional
 from sagents.utils.logger import logger
-from sagents.context.session_context import get_session_context
+from sagents.context.session_context import SessionContext
 
 def save_agent_response_content(content: str, session_id: str):
     """
@@ -18,9 +18,16 @@ def save_agent_response_content(content: str, session_id: str):
         return
 
     try:
-        # Avoid circular import by importing inside function if needed, 
-        # but get_session_context is already imported.
-        session_context = get_session_context(session_id)
+        # Import inside function to avoid circular import
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or not session.session_context:
+            logger.error(f"SaveContent: Session {session_id} not found or has no context")
+            return
+        session_context = session.session_context
+        
+        
         if not session_context or not hasattr(session_context, 'agent_workspace'):
             # This is expected if session is not found or mock environment
             return

@@ -3,7 +3,7 @@ from .agent_base import AgentBase
 from typing import Any, Dict, List, Optional, AsyncGenerator, Union, cast
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext, get_session_context, SessionStatus
+from sagents.context.session_context import SessionContext, SessionStatus
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.utils.content_saver import save_agent_response_content
@@ -55,11 +55,16 @@ class SimpleAgent(AgentBase):
         self.agent_description = """SimpleAgent: 简单智能体，负责无推理策略的直接任务执行，比ReAct策略更快速。适用于不需要推理或早期处理的任务。"""
         logger.debug(f"SimpleAgent 初始化完成，最大循环次数为 {self.max_loop_count}")
 
-    async def run_stream(self, session_context: SessionContext,
-                         tool_manager: Optional[ToolManager] = None,
-                         session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        if self._should_abort_due_to_session(session_id, session_context):
+    async def run_stream(
+        self,
+        session_context: SessionContext,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
+        if not session_context.tool_manager:
+            raise ValueError("ToolManager is not initialized in SessionContext")
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
             return
+        tool_manager = session_context.tool_manager
 
         # 重新获取agent_custom_system_prefix以支持动态语言切换
         current_system_prefix = PromptManager().get_agent_prompt_auto(
@@ -90,15 +95,16 @@ class SimpleAgent(AgentBase):
             language=session_context.get_language(),
         )
         history_messages.insert(0, system_message)
-        async for chunk in self._execute_loop(
+        async for chunks in self._execute_loop(
             messages_input=history_messages,
             tools_json=tools_json,
             tool_manager=tool_manager,
             session_id=session_id or "",
             session_context=session_context
         ):
-            yield chunk
-
+            for chunk in chunks:
+                chunk.session_id = session_id
+            yield chunks
     def _prepare_tools(self,
                        tool_manager: Optional[Any],
                        suggested_tools: List[str],
@@ -217,15 +223,15 @@ class SimpleAgent(AgentBase):
             List[MessageChunk]: 执行结果消息块
         """
 
-        if self._should_abort_due_to_session(session_id, session_context):
+        if self._should_abort_due_to_session(session_context):
             return
         all_new_response_chunks: List[MessageChunk] = []
         loop_count = 0
         # 从session context 检查一下是否有max_loop_count ，如果有，本次请求使用session context 中的max_loop_count
-        max_loop_count = session_context.agent_config.get('maxLoopCount', self.max_loop_count)
+        max_loop_count = session_context.agent_config.get('max_loop_count', self.max_loop_count)
         logger.info(f"SimpleAgent: 开始执行主循环，最大循环次数：{max_loop_count}")
         while True:
-            if self._should_abort_due_to_session(session_id, session_context):
+            if self._should_abort_due_to_session(session_context):
                 break
             loop_count += 1
             logger.info(f"SimpleAgent: 循环计数: {loop_count}")
@@ -294,30 +300,13 @@ class SimpleAgent(AgentBase):
                 # 任务暂停，返回一个超长的错误消息块
                 yield [MessageChunk(role=MessageRole.ASSISTANT.value, content=f"消息长度超过最大长度：{self.max_model_input_len},是否需要继续执行？", type=MessageType.ERROR.value)]
                 break
-            if self._should_abort_due_to_session(session_id, session_context):
+            if self._should_abort_due_to_session(session_context):
                 break
             # 检查任务是否完成
             if await self._is_task_complete(messages_input, session_id, tool_manager, session_context):
                 logger.info("SimpleAgent: 任务完成，终止执行")
                 break
 
-    def _should_abort_due_to_session(self, session_id: Optional[str], session_context: SessionContext) -> bool:
-        if session_id and get_session_context(session_id) is None:
-            logger.info("SimpleAgent: 跳过执行，session上下文不存在或已中断")
-            return True
-        # 检查当前会话状态（中断、错误或已完成都应该停止）
-        if session_context.status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
-            logger.info(f"SimpleAgent: 跳过执行，session上下文状态为{session_context.status.value}")
-            return True
-        # 检查父会话状态（如果是子会话）
-        if hasattr(session_context, 'parent_session_id') and session_context.parent_session_id:
-            parent_context = get_session_context(session_context.parent_session_id)
-            if parent_context and parent_context.status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR, SessionStatus.COMPLETED]:
-                logger.info(f"SimpleAgent: 跳过执行，父会话 {session_context.parent_session_id} 状态为{parent_context.status.value}")
-                # 同时更新子会话状态
-                session_context.set_status(SessionStatus.INTERRUPTED, cascade=False)
-                return True
-        return False
 
     async def _call_llm_and_process_response(self,
                                              messages_input: List[MessageChunk],
