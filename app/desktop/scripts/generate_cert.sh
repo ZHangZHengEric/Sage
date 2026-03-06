@@ -56,7 +56,28 @@ fi
 
 # Export to P12
 if [ ! -f "$CERT_DIR/cert.p12" ]; then
-    openssl pkcs12 -export -legacy -out "$CERT_DIR/cert.p12" \
+    # Detect OpenSSL version
+    OPENSSL_VERSION=$(openssl version | awk '{print $2}')
+    
+    # Check if OpenSSL 3.x or later (starts with 3.)
+    if [[ "$OPENSSL_VERSION" == 3.* ]]; then
+        LEGACY_FLAG="-legacy"
+    else
+        LEGACY_FLAG=""
+    fi
+    
+    # Some LibreSSL versions on macOS report "LibreSSL 3.3.6" but don't support -legacy flag for pkcs12 command yet,
+    # or they behave like OpenSSL 1.1. So we try with flag first, if fails, try without.
+    # However, simpler approach: check if 'openssl pkcs12 -help' lists -legacy
+    if openssl pkcs12 -help 2>&1 | grep -q -- "-legacy"; then
+        LEGACY_FLAG="-legacy"
+    else
+        LEGACY_FLAG=""
+    fi
+
+    echo "Exporting PKCS12 with flags: $LEGACY_FLAG"
+
+    openssl pkcs12 -export $LEGACY_FLAG -out "$CERT_DIR/cert.p12" \
         -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" \
         -passout pass:"$CERT_PASS" \
         -name "$CERT_NAME"
