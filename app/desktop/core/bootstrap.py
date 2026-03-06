@@ -152,12 +152,13 @@ async def copy_default_skills():
             if 'TAURI_RESOURCES_DIR' in os.environ:
                 default_skills_dir = Path(os.environ['TAURI_RESOURCES_DIR']) / "skills"
             elif getattr(sys, 'frozen', False):
-                # 打包环境：
-                # build.sh 将 skills 复制到了 TARGET_MCP_DIR (通常是 _internal)
-                # 而代码通常位于 _internal/app/desktop/core/bootstrap.py
-                # 因此需要向上 4 级才能找到 _internal 根目录
-                current_file = Path(__file__).resolve()
-                default_skills_dir = current_file.parent.parent.parent.parent / "skills"
+                # 打包环境：使用 _MEIPASS 临时目录
+                if hasattr(sys, '_MEIPASS'):
+                    default_skills_dir = Path(sys._MEIPASS) / "skills"
+                else:
+                    # 备用方案：向上查找
+                    current_file = Path(__file__).resolve()
+                    default_skills_dir = current_file.parent.parent.parent.parent / "skills"
                 
                 # 如果找不到，尝试相对于可执行文件的位置
                 if not default_skills_dir.exists():

@@ -199,6 +199,7 @@ skills/*
 .pyinstaller
 .rustup
 app/desktop/tauri/bin/*
+app/desktop/tauri/gen
 
 # Nuitka build artifacts
 app/desktop/build_nuitka/
