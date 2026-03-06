@@ -317,7 +317,7 @@ fn main() {
                     .args(args)
                     .env("SAGE_PORT", port.to_string())
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::inherit())
+                    .stderr(Stdio::piped())
                     .spawn()
                     .expect("Failed to spawn backend");
 
@@ -329,6 +329,19 @@ fn main() {
                 println!("Python sidecar spawned");
                 
                 let stdout = child.stdout.take().expect("Failed to capture stdout");
+                let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+                let app_handle_clone = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut reader = BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        eprintln!("PYTHON STDERR: {}", line);
+                        if line.contains("Permission denied") && line.contains("Full Disk Access") {
+                             app_handle_clone.emit("imessage-permission-denied", ()).unwrap();
+                        }
+                    }
+                });
+
                 let mut reader = BufReader::new(stdout).lines();
 
                 // Read events from sidecar
