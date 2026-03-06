@@ -190,7 +190,6 @@ cython_debug/
 agent_workspace
 .conda
 .idea
-.github
 data
 .trae
 skills/*
