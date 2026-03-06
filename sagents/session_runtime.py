@@ -406,15 +406,8 @@ class Session:
             if self.observability_manager:
                 self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
             session_context = self.session_context
-            if session_context:
-                try:
-                    logger.info("SAgent: 会话状态保存")
-                    session_context.save()
-                except Exception as e:
-                    logger.error(f"SAgent: 会话状态保存时出错: {e}")
-
-            # 清理逻辑提取出来，这里不再调用 _emit_token_usage_if_any (因为它是 run_stream 的内部逻辑)
-            # 或者将其变为公共方法
+            
+            # 先发送 token usage（在保存之前，因为保存会清空 llm_requests_logs）
             if session_context:
                 try:
                      chunks = await self._emit_token_usage_if_any(session_context, session_id)
@@ -425,6 +418,14 @@ class Session:
                              yield [chunk]
                 except Exception as e:
                     logger.error(f"SAgent: 发送 token usage 失败: {e}")
+            
+            # 再保存会话状态
+            if session_context:
+                try:
+                    logger.info("SAgent: 会话状态保存")
+                    session_context.save()
+                except Exception as e:
+                    logger.error(f"SAgent: 会话状态保存时出错: {e}")
 
             await self._cleanup_session_resources(session_id)
 
