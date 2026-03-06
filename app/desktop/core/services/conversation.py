@@ -109,19 +109,25 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
             error_detail="workspace_path or file_path missing",
         )
     full_file_path = os.path.join(workspace_path, file_path)
-    if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
+    workspace_abs = os.path.normcase(os.path.abspath(workspace_path))
+    full_file_abs = os.path.normcase(os.path.abspath(full_file_path))
+    try:
+        in_workspace = os.path.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+    except ValueError:
+        in_workspace = False
+    if not in_workspace:
         raise SageHTTPException(
             status_code=500,
             detail="访问被拒绝：文件路径超出工作空间范围",
             error_detail="Access denied: file path outside workspace",
         )
-    if not os.path.exists(full_file_path):
+    if not os.path.exists(full_file_abs):
         raise SageHTTPException(
             status_code=500,
             detail=f"文件不存在: {file_path}",
             error_detail=f"File not found: {file_path}",
         )
-    return full_file_path
+    return full_file_abs
 
 
 async def get_conversations_paginated(
