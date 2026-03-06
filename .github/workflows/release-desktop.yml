@@ -3,7 +3,7 @@ name: Release Desktop App
 on:
   push:
     tags:
-      - 'v*'
+      - 'desktop-v*'
   workflow_dispatch:
 
 jobs:
