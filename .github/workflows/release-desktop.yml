@@ -59,6 +59,8 @@ jobs:
           activate-environment: sage-desktop-env
           auto-activate-base: false
           architecture: ${{ matrix.arch == 'x86_64' && 'x64' || 'arm64' }}
+          channels: conda-forge,defaults
+          channel-priority: flexible
 
       - name: Install System Dependencies
         run: |

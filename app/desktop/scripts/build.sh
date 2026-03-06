@@ -151,6 +151,12 @@ install_python_deps() {
 
         pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
 
+        # 解决 x86_64 下 llvmlite 编译报错问题：优先使用 conda 安装预编译包
+        if [ "${CONDA_DEFAULT_ENV:-}" = "$ENV_NAME" ]; then
+            echo "正在通过 Conda 预安装 llvmlite 和 numba (防止 x86 编译错误)..."
+            conda install -y -c conda-forge llvmlite numba
+        fi
+
         echo "正在安装依赖..."
         pip install -r "$REQ_FILE" --index-url "$PIP_INDEX_URL"
 
