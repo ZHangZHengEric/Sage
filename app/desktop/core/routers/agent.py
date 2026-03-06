@@ -117,6 +117,22 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
 # 创建路由器
 agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
+def _resolve_workspace_file_path(workspace_path: Path, file_path: str) -> str:
+    if not workspace_path or not file_path:
+        raise SageHTTPException(status_code=500, detail="缺少必要的路径参数")
+    full_file_path = os.path.join(workspace_path, file_path)
+    workspace_abs = os.path.normcase(os.path.abspath(workspace_path))
+    full_file_abs = os.path.normcase(os.path.abspath(full_file_path))
+    try:
+        in_workspace = os.path.commonpath([workspace_abs, full_file_abs]) == workspace_abs
+    except ValueError:
+        in_workspace = False
+    if not in_workspace:
+        raise SageHTTPException(status_code=500, detail="访问被拒绝：文件路径超出工作空间范围")
+    if not os.path.exists(full_file_abs):
+        raise SageHTTPException(status_code=500, detail=f"文件不存在: {file_path}")
+    return full_file_abs
+
 
 @agent_router.get("/list")
 async def list(http_request: Request):
@@ -341,18 +357,7 @@ async def download_file(agent_id: str, request: Request):
     workspace_path = sage_home / "agents" / agent_id
 
     try:
-        # Resolve path logic
-        if not workspace_path or not file_path:
-             raise SageHTTPException(status_code=500, detail="缺少必要的路径参数")
-        
-        full_file_path = os.path.join(workspace_path, file_path)
-        if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
-             raise SageHTTPException(status_code=500, detail="访问被拒绝：文件路径超出工作空间范围")
-        
-        if not os.path.exists(full_file_path):
-             raise SageHTTPException(status_code=500, detail=f"文件不存在: {file_path}")
-             
-        path = full_file_path
+        path = _resolve_workspace_file_path(workspace_path, file_path)
         
         # Directory zip logic
         if os.path.isdir(path):
@@ -394,15 +399,7 @@ async def delete_file(agent_id: str, request: Request):
     workspace_path = sage_home / "agents" / agent_id
 
     try:
-        if not workspace_path or not file_path:
-             raise SageHTTPException(status_code=500, detail="缺少必要的路径参数")
-        
-        full_file_path = os.path.join(workspace_path, file_path)
-        if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
-             raise SageHTTPException(status_code=500, detail="访问被拒绝：文件路径超出工作空间范围")
-        
-        if not os.path.exists(full_file_path):
-             raise SageHTTPException(status_code=500, detail=f"文件不存在: {file_path}")
+        full_file_path = _resolve_workspace_file_path(workspace_path, file_path)
 
         if os.path.isfile(full_file_path):
             os.remove(full_file_path)

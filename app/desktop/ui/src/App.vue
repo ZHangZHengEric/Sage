@@ -56,6 +56,7 @@ import { useLanguage } from './utils/i18n'
 const { t } = useLanguage()
 const router = useRouter()
 const route = useRoute()
+const isMacOS = /mac/i.test(navigator.platform || '')
 
 const isBackendReady = ref(false)
 const currentApiPrefix = ref(import.meta.env.VITE_BACKEND_API_PREFIX || '')
@@ -185,9 +186,9 @@ const handleSelectConversation = (conversation) => {
            );
            
            if (confirmed) {
-               // Try to open Privacy & Security settings
-               // For macOS 13+ (Ventura/Sonoma), this redirects or opens the right pane
-               await open('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
+               if (isMacOS) {
+                 await open('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles')
+               }
            }
        })
 
@@ -215,4 +216,3 @@ const handleSelectConversation = (conversation) => {
     if (unlistenPermission) unlistenPermission()
   })
 </script>
-
