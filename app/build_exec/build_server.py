@@ -50,7 +50,8 @@ class ServerBuilder:
         "typing_extensions", "starlette", "pydantic_core",
         "annotated_types", "email_validator", "python-dateutil",
         "six", "urllib3", "certifi", "charset_normalizer",
-        "requests", "pyyaml", "markupsafe", "blinker",
+        "requests", "markupsafe", "blinker",
+        "charset_normalizer", "chardet",
         "greenlet", "sqlalchemy", "alembic", "psycopg2", "redis",
         "celery", "kombu", "billiard", "amqp", "vine",
         "importlib_metadata", "zipp", "packaging", "pyparsing",
@@ -58,6 +59,7 @@ class ServerBuilder:
         "platformdirs", "tomli", "pep517", "pyproject_hooks",
         "build", "hatchling", "hatch_vcs", "hatch_fancy_pypi_readme",
         "editables", "pathspec", "pluggy",
+        "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp",
     ]
 
     def __init__(self):
