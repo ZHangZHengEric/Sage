@@ -82,6 +82,7 @@ class SimpleBuilder:
                 "--hidden-import", "fastmcp",
                 "--hidden-import", "docstring_parser",
                 "--hidden-import", "chardet",
+                "--hidden-import", "charset_normalizer",
                 "--hidden-import", "httpx",
                 "--hidden-import", "pdfplumber",
                 "--hidden-import", "html2text",
@@ -154,6 +155,7 @@ class SimpleBuilder:
                 "--collect-all", "pandas",
                 "--collect-all", "pyarrow",
                 "--collect-all", "chardet",
+                "--collect-all", "charset_normalizer",
                 "--collect-all", "asyncio",
                 "--collect-all", "aiofiles",
                 "--collect-all", "websockets",
@@ -209,6 +211,9 @@ class SimpleBuilder:
                 "--collect-all", "editables",
                 "--collect-all", "pathspec",
                 "--collect-all", "pluggy",
+                "--collect-all", "opentelemetry-api",
+                "--collect-all", "opentelemetry-sdk",
+                "--collect-all", "opentelemetry-exporter-otlp",
                 # 测试相关依赖不需要打包到生产二进制
                 "app/sage_server.py"
             ]
