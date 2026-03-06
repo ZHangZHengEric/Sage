@@ -48,6 +48,19 @@ jobs:
           python-version: 3.11
           activate-environment: sage-desktop-env
 
+      - name: Get pip cache dir
+        id: pip-cache
+        shell: bash -l {0}
+        run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Pip Cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('app/desktop/core/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install System Dependencies
         run: |
           brew install create-dmg
