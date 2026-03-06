@@ -102,13 +102,16 @@ echo "Python version: $(python --version)"
 echo "Pip version: $(pip --version)"
 
 echo "Upgrading build tools..."
-pip install --upgrade pip setuptools wheel
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+echo "Using pip index url: $PIP_INDEX_URL"
+
+pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
 
 echo "Installing dependencies..."
-pip install -r "$APP_DIR/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r "$APP_DIR/core/requirements.txt" --index-url "$PIP_INDEX_URL"
 
 if ! command -v pyinstaller >/dev/null; then
-  pip install pyinstaller --index-url https://pypi.org/simple
+  pip install pyinstaller --index-url "$PIP_INDEX_URL"
 fi
 
 ########################################
