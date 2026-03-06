@@ -50,6 +50,7 @@ class SimpleBuilder:
                 "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'utils'}/*{os.pathsep}sagents/utils/",
                 "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'context'}/*{os.pathsep}sagents/context/",
                 "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'tool'}/*{os.pathsep}sagents/tool/",
+                "--add-data", f"{self.project_root.parent / 'Sage' / 'sagents' / 'flow'}/*{os.pathsep}sagents/flow/",
 
                 "--hidden-import", "fastapi",
                 "--hidden-import", "uvicorn",
@@ -58,6 +59,10 @@ class SimpleBuilder:
                 "--hidden-import", "openai",
                 "--hidden-import", "sagents",
                 "--hidden-import", "sagents.agent",
+                "--hidden-import", "sagents.flow",
+                "--hidden-import", "sagents.flow.schema",
+                "--hidden-import", "sagents.flow.executor",
+                "--hidden-import", "sagents.flow.conditions",
                 "--hidden-import", "sagents.prompts",
                 "--hidden-import", "sagents.prompts.simple_agent_prompts",
                 "--hidden-import", "sagents.prompts.simple_react_agent_prompts",

@@ -13,6 +13,7 @@ app/fastapi_react_demo/frontend/node_modules/
 __pycache__/
 logs/
 workspace/
+app/agent_sessions/
 *.py[cod]
 *$py.class
 

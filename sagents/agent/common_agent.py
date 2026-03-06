@@ -7,7 +7,7 @@ from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
-from sagents.context.session_context import SessionContext, get_session_context
+from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.tool.tool_schema import AgentToolSpec
 
@@ -20,18 +20,21 @@ class CommonAgent(AgentBase):
         self.tools_name = tools_name
         self.max_history_context_length = max_model_len
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: ToolManager = None, session_id: str = None) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
         """
         运行智能体，返回消息流
 
         Args:
             session_context: 会话上下文
-            tool_manager: 工具管理器
-            session_id: 会话ID
 
         Returns:
             消息流
         """
+        if not session_context.tool_manager:
+            raise ValueError("ToolManager is not initialized in SessionContext")
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(recent_turns=10, max_length=self.max_history_context_length, last_turn_user_only=False)
         # 根据 active_budget 压缩消息
@@ -39,8 +42,7 @@ class CommonAgent(AgentBase):
         if budget_info:
             all_messages = MessageManager.compress_messages(all_messages, budget_info.get('active_budget', 8000))
         # all_messages  = message_manager.messages
-        if tool_manager is None:
-            tool_manager = session_context.tool_manager
+        tool_manager = session_context.tool_manager
         
         tools_json = tool_manager.get_openai_tools(lang=session_context.get_language(), fallback_chain=["en"])
         tools_json = [tools_json[tool_name] for tool_name in self.tools_name if tool_name in tools_json]

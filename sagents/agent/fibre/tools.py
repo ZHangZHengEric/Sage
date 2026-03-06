@@ -33,11 +33,12 @@ class FibreTools:
         """
         logger.info(f"Tool Call: sys_spawn_agent(id={agent_id}, name={name}, description={description})")
 
-        from sagents.context.session_context import get_session_context
-        session_context = get_session_context(session_id)
-        if not session_context:
-            return f"Error: Session context not found for session_id: {session_id}"
-
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session:
+            return f"Error: Session not found for session_id: {session_id}"
+        session_context = session.session_context
         orchestrator = getattr(session_context, "orchestrator", None)
         if not orchestrator:
              return "Error: Orchestrator not found in session context."
@@ -55,7 +56,7 @@ class FibreTools:
     @tool(
         description_i18n={"zh": "给子agent 分配具体任务并执行，支持并发执行多个子任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。"},
         param_description_i18n={
-            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content', 'session_id' 字段。其中 'session_id' 为必填项，用于明确指定上下文。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。'session_id' 为可选项，仅在需要继续之前的会话时才填写。"}
         },
         param_schema={
             "tasks": {
@@ -85,11 +86,11 @@ class FibreTools:
                         },
                         "session_id": {
                             "type": "string",
-                            "description": "Specific session ID to reuse or create. If it's a new task, generate a new ID based on the agent name (e.g., 'session_python_expert_1_0').",
-                            "description_i18n": {"zh": "必填：指定 Session ID。如果是新任务，请基于 agent_id 生成一个新的（例如 'session_python_expert_1_0'）；如果是继续之前的任务，请复用旧的 ID。不要使用当前的Session ID"}
+                            "description": "Optional: Session ID to continue an existing conversation. Leave empty to create a new session.",
+                            "description_i18n": {"zh": "可选：如需继续之前的会话，请填写已有的 Session ID；如为新任务，请留空，系统会自动创建新会话。"}
                         }
                     },
-                    "required": ["agent_id", "task_name", "original_task", "content", "session_id"]
+                    "required": ["agent_id", "task_name", "original_task", "content"]
                 }
             }
         }
@@ -99,18 +100,19 @@ class FibreTools:
         Delegate tasks to existing sub-agents and wait for the results. Supports parallel execution.
 
         Args:
-            tasks: A list of tasks, where each task is a dictionary containing 'agent_id', 'content', and 'session_id'.
-                   'session_id' is required to explicitly manage conversation context.
+            tasks: A list of tasks, where each task is a dictionary containing 'agent_id', 'content', and optionally 'session_id'.
+                   'session_id' is optional and only needed when continuing an existing conversation.
                    'content' should be detailed and specify exactly what information needs to be returned via sys_finish_task.
             session_id: The current session ID (auto-injected)
         """
         logger.info(f"Tool Call: sys_delegate_task(tasks_count={len(tasks)})")
         
-        from sagents.context.session_context import get_session_context
-        session_context = get_session_context(session_id)
-        if not session_context:
-            return f"Error: Session context not found for session_id: {session_id}"
-            
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session:
+            return f"Error: Session not found for session_id: {session_id}"
+        session_context = session.session_context
         orchestrator = getattr(session_context, "orchestrator", None)
         if not orchestrator:
              return "Error: Orchestrator not found in session context."

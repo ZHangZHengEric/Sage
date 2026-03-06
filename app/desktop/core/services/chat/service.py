@@ -9,7 +9,6 @@ import os
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
-    get_session_context,
     get_session_run_lock,
 )
 from sagents.sagents import SAgent
@@ -281,23 +280,29 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
-        if os.environ.get("SAGE_WORKSPACE_PATH"):
-            workspace = Path(os.environ.get("SAGE_WORKSPACE_PATH"))
+        if os.environ.get("SAGE_SESSIONS_PATH"):
+            sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))
         else:
             user_home = Path.home()
             sage_home = user_home / ".sage"
-            workspace = sage_home / "workspace"
+            sessions_root = sage_home / "sessions"
         
-        workspace.mkdir(parents=True, exist_ok=True)
+        sessions_root.mkdir(parents=True, exist_ok=True)
+        
+        # Agent Workspace 处理
+        if os.environ.get("SAGE_AGENTS_PATH"):
+             self.agent_workspace_root = Path(os.environ.get("SAGE_AGENTS_PATH"))
+        else:
+             self.agent_workspace_root = sage_home / "agents"
+             
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
-                model=model_client,
-                model_config=request.llm_model_config,
-                system_prefix=request.system_prefix,
-                workspace=workspace,
-                memory_type=request.memory_type,
+                session_root_space=str(sessions_root),
+                enable_obs=True,
+                use_sandbox=False
             )
+        self.model_client = model_client
 
     async def process_stream(self):
         """处理流式聊天请求"""
@@ -314,14 +319,18 @@ class SageStreamService:
         await _ensure_conversation(self.request)
         try:
             stream_result = self.sage_engine.run_stream(
+                session_id=session_id,
                 input_messages=messages,
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
-                session_id=session_id,
+                model=self.model_client,
+                model_config=self.request.llm_model_config,
+                system_prefix=self.request.system_prefix,
+                agent_workspace=str(self.agent_workspace_root / self.request.agent_id),
+                default_memory_type=self.request.memory_type,
                 user_id="default_user",
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
-                multi_agent=self.request.multi_agent,
                 agent_mode=self.request.agent_mode,
                 more_suggest=self.request.more_suggest,
                 system_context=self.request.system_context,
@@ -360,8 +369,9 @@ async def prepare_session(request: StreamRequest):
     lock = get_session_run_lock(session_id)
     acquired = False
     if lock.locked():
-        ctx = get_session_context(session_id)
-        if not ctx or ctx.status != SessionStatus.INTERRUPTED:
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or session.session_context.status != SessionStatus.INTERRUPTED:
              raise SageHTTPException(status_code=500, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
