@@ -25,7 +25,7 @@ setup(
         "mcp>=1.9.2",
         "fastmcp>=0.9.0",
         "docstring_parser>=0.16",
-        "chardet>=5.0.0",
+        "chardet<5.0.0",
         "httpx>=0.24.0",
         "pdfplumber",
         "html2text",
