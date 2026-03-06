@@ -1,0 +1,86 @@
+name: Release Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    name: Build & Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+          - os: macos-13
+            arch: x86_64
+            target: x86_64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/desktop/ui/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/desktop/tauri
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: 3.11
+          activate-environment: sage-desktop-env
+
+      - name: Install System Dependencies
+        run: |
+          brew install create-dmg
+
+      - name: Build Application
+        shell: bash -l {0}
+        env:
+          PIP_INDEX_URL: "https://pypi.org/simple"
+        run: |
+          chmod +x app/desktop/scripts/build.sh
+          chmod +x app/desktop/scripts/generate_cert.sh
+          
+          # The script detects OS/Arch automatically
+          app/desktop/scripts/build.sh release
+
+      - name: Rename Artifacts
+        run: |
+          # Rename dmg to include arch to avoid conflicts in release
+          cd app/desktop/tauri/target/release/bundle/dmg/
+          for file in *.dmg; do
+            mv "$file" "${file%.dmg}-${{ matrix.arch }}.dmg"
+          done
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SageAI-macOS-${{ matrix.arch }}
+          path: app/desktop/tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: app/desktop/tauri/target/release/bundle/dmg/*.dmg
+          draft: true
+          prerelease: true
