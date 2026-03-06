@@ -1,10 +1,13 @@
 name: Release Desktop App
-
+permissions:
+    contents: write
+    
 on:
   push:
     tags:
       - 'desktop-v*'
   workflow_dispatch:
+
 
 jobs:
   build-and-release:
@@ -46,22 +49,24 @@ jobs:
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
-          auto-update-conda: true
+          auto-update-conda: false
           python-version: 3.11
           activate-environment: sage-desktop-env
 
-      - name: Get pip cache dir
-        id: pip-cache
-        shell: bash -l {0}
-        run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Pip Cache
-        uses: actions/cache@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-${{ hashFiles('app/desktop/core/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          enable-cache: true
+
+      - name: Install Python Dependencies
+        shell: bash -l {0}
+        env:
+          UV_SYSTEM_PYTHON: 1
+        run: |
+          # Use uv for faster installation
+          # We are in a conda environment, so we treat it as system
+          uv pip install -r app/desktop/core/requirements.txt
+          uv pip install pyinstaller
 
       - name: Install System Dependencies
         run: |
@@ -70,7 +75,7 @@ jobs:
       - name: Build Application
         shell: bash -l {0}
         env:
-          PIP_INDEX_URL: "https://pypi.org/simple"
+          SKIP_PIP_INSTALL: "true"
         run: |
           chmod +x app/desktop/scripts/build.sh
           chmod +x app/desktop/scripts/generate_cert.sh
