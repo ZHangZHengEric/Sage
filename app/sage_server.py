@@ -28,7 +28,7 @@ from pydantic import BaseModel
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sagents.context.session_context import get_session_context
+from sagents.session_runtime import get_global_session_manager
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, ToolProxy
 from sagents.skill import SkillManager, SkillProxy
@@ -60,6 +60,7 @@ parser.add_argument("--logs-dir", default="logs", help="日志目录")
 parser.add_argument("--preset_running_config", default="", help="预设配置，system_context，以及workflow，与接口中传过来的合并使用")
 parser.add_argument("--memory_root", default=None, help="记忆存储根目录（已废弃，请使用 --memory_type）")
 parser.add_argument("--memory_type", default="session", help="记忆类型: session | user")
+parser.add_argument("--session-root", default=None, help="会话存储根目录，默认为 agent_workspace 同级目录下的 server_sessions")
 parser.add_argument("--daemon", action="store_true", help="以守护进程模式运行")
 parser.add_argument("--pid-file", default="sage_stream.pid", help="PID文件路径")
 parser.add_argument("--context_history_ratio", type=float, default=0.2,
@@ -213,16 +214,6 @@ class SageStreamService:
         else:
             self.preset_deep_thinking = None
             logger.debug("未使用预设deepThinking")
-        # 设置multiAgent
-        if "multiAgent" in self.preset_running_config:
-            self.preset_multi_agent = self.preset_running_config['multiAgent']
-            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
-        elif "multiAgent" in self.preset_running_config:
-            self.preset_multi_agent = self.preset_running_config['multiAgent']
-            logger.debug(f"使用预设multiAgent: {self.preset_multi_agent}")
-        else:
-            self.preset_multi_agent = None
-            logger.debug("未使用预设multiAgent")
 
         # 设置agent_mode
         if "agent_mode" in self.preset_running_config:
@@ -245,12 +236,21 @@ class SageStreamService:
             workspace = os.path.abspath("agent_workspace")
 
         # 创建 Sage AgentController 实例
+        # session_root_space 独立于 agent_workspace
+        self.agent_workspace = workspace
+        
+        # 优先使用命令行参数指定的 session_root，否则使用默认值
+        if server_args.session_root:
+             self.session_root_space = os.path.abspath(server_args.session_root)
+        else:
+             self.session_root_space = os.path.join(os.path.dirname(os.path.abspath(workspace)), "server_sessions")
+             
+        os.makedirs(self.session_root_space, exist_ok=True)
+        
         self.sage_controller = SAgent(
-            model=model,
-            model_config=model_config,
-            system_prefix=self.preset_system_prefix,
-            workspace=workspace if workspace.endswith('/') else workspace+'/',
-            memory_type=memory_type
+            session_root_space=self.session_root_space,
+            enable_obs=True,
+            use_sandbox=True
         )
         self.tool_manager = tool_manager
         if self.preset_available_tools:
@@ -262,14 +262,14 @@ class SageStreamService:
         logger.info("SageStreamService 初始化完成")
     
     async def process_stream(self, messages, session_id=None, user_id=None, deep_thinking=None, 
-                           max_loop_count=None, multi_agent=None, agent_mode=None, more_suggest=False,
+                           max_loop_count=None, agent_mode=None, more_suggest=False,
                             system_context: Optional[Dict] = None, 
                            available_workflows: Optional[Dict] = None,
                            force_summary: bool=False,
                            custom_agents: Optional[List[Dict[str, Any]]] = None):
         """处理流式聊天请求"""
         logger.info(f"🚀 SageStreamService.process_stream 开始，会话ID: {session_id}")
-        logger.info(f"📝 参数: deep_thinking={deep_thinking}, multi_agent={multi_agent}, agent_mode={agent_mode}, messages_count={len(messages)}")
+        logger.info(f"📝 参数: deep_thinking={deep_thinking}, agent_mode={agent_mode}, messages_count={len(messages)}")
         if isinstance(deep_thinking, str):
             if deep_thinking == 'auto':
                 deep_thinking = None
@@ -277,13 +277,6 @@ class SageStreamService:
                 deep_thinking = False
             if deep_thinking == 'on':
                 deep_thinking = True
-        if isinstance(multi_agent, str):
-            if multi_agent == 'auto':
-                multi_agent = None
-            if multi_agent == 'off':
-                multi_agent = False
-            if multi_agent == 'on':
-                multi_agent = True
         
         
         # 如果 self.preset_system_context 不是空，将self.preset_system_context 的内容，更新到 system_context，不是赋值，要检查一下system_context 是不是空
@@ -304,21 +297,25 @@ class SageStreamService:
             
             # 直接调用同步的 run_stream 方法
             stream_result = self.sage_controller.run_stream(
+                session_id=session_id,
                 input_messages=messages,
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
-                session_id=session_id,
+                model=self.model,
+                model_config=self.model_config,
+                system_prefix=self.preset_system_prefix,
+                agent_workspace=self.agent_workspace, # 显式传入 agent_workspace
+                default_memory_type=self.memory_type,
                 user_id=user_id,
                 deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,
                 max_loop_count = max_loop_count if max_loop_count is not None else self.preset_max_loop_count ,
-                multi_agent=multi_agent if multi_agent is not None else self.preset_multi_agent,
                 agent_mode=agent_mode if agent_mode is not None else self.preset_agent_mode,
-                more_suggest = more_suggest,
+                # more_suggest = more_suggest,
                 system_context=system_context,
                 available_workflows=available_workflows,
                 force_summary=force_summary,
                 context_budget_config=self.context_budget_config,
-                custom_agents=custom_agents
+                custom_sub_agents=custom_agents
             )
             
             logger.info("✅ run_stream 调用成功，开始处理结果...")
@@ -1190,7 +1187,8 @@ async def get_file_workspace(session_id: str):
             "files": []
         }
     try:
-        session_context = get_session_context(session_id)
+        session_manager = get_global_session_manager()
+        session_context = session_manager.get(session_id).session_context
     except Exception:
         return {
             "status": "success",

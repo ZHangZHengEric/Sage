@@ -391,7 +391,7 @@ Agent系统提示词：
                 "deepThinking": False,
                 "multiAgent": False,
                 "moreSupport": False,
-                "maxLoopCount": 10,
+                "maxLoopCount": 100,
                 "llmConfig": {
                     "model": "",
                     "maxTokens": "",

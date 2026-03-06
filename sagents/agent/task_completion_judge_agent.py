@@ -16,25 +16,21 @@ class TaskCompletionJudgeAgent(AgentBase):
         self.agent_description = "完成判断智能体，专门负责判断任务是否完成"
         logger.debug("TaskCompletionJudgeAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        # 重新获取系统前缀，使用正确的语言
+    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_completion_judge_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager
 
-        if 'task_rewrite' in session_context.audit_status:
-            task_description_messages_str = MessageManager.convert_messages_to_str([MessageChunk(
-                role=MessageRole.USER.value,
-                content = session_context.audit_status['task_rewrite'],
-                message_type=MessageType.NORMAL.value
-            )])
-        else:
-            history_messages = message_manager.extract_all_context_messages(recent_turns=3)
-            # 根据 active_budget 压缩消息
-            budget_info = message_manager.context_budget_manager.budget_info
-            if budget_info:
-                history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('max_model_len', 20000)*0.6,4000))
-            history_messages_str = MessageManager.convert_messages_to_str(history_messages)
+        
+        history_messages = message_manager.extract_all_context_messages(recent_turns=3)
+        # 根据 active_budget 压缩消息
+        budget_info = message_manager.context_budget_manager.budget_info
+        if budget_info:
+            history_messages = MessageManager.compress_messages(history_messages, min(budget_info.get('max_model_len', 20000)*0.6,4000))
+        history_messages_str = MessageManager.convert_messages_to_str(history_messages)
 
         prompt = PromptManager().get_agent_prompt_auto('task_completion_judge_template', language=session_context.get_language()).format(
             task_description=history_messages_str,

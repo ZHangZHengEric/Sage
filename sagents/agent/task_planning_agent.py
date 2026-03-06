@@ -19,8 +19,11 @@ class TaskPlanningAgent(AgentBase):
         self.agent_description = "规划智能体，专门负责基于当前状态生成下一步执行计划"
         logger.debug("PlanningAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        # 重新获取系统前缀，使用正确的语言
+    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
+        tool_manager = session_context.tool_manager
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_planning_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager

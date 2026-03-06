@@ -12,6 +12,7 @@ from .tool_schema import (
 )
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext
+from sagents.utils.serialization import make_serializable
 from pathlib import Path
 import json
 import asyncio
@@ -844,7 +845,7 @@ class ToolManager:
                 if tool.name in SANDBOX_TOOLS:
                     try:
                         # Use sandbox if available
-                        if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                        if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
                             # Check if pip/npm is needed
                             needs_pip = False
                             needs_npm = False
@@ -879,8 +880,8 @@ class ToolManager:
                             # We pass the function object from the tool spec
                             # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
                             # usually it's bound method if created from class)
-                            result = await session_context.sandbox.run_tool(tool.func, kwargs)
-                            final_result = json.dumps({"content": result}, ensure_ascii=False, indent=2)
+                            result = await session_context.agent_workspace_sandbox.run_tool(tool.func, kwargs)
+                            final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
                             # Sync context for ToDo tools after successful sandbox execution
                             if tool.name in ["todo_write", "todo_read", "todo_update"]:
@@ -890,22 +891,17 @@ class ToolManager:
                                     from sagents.tool.impl.todo_tool import ToDoTool
                                     
                                     # Read directly from sandbox file system
-                                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                                         # Use sandbox to read file content (ensure we get the file from sandbox perspective)
-                                         # But wait, we need the path.
-                                         # We can reconstruct the path logic or just read "todo_list.md" from workspace root
-                                         # SandboxFileSystem maps workspace root.
-                                         
-                                         # Let's try to read "todo_list.md" from the sandbox current working directory
-                                         # We can use 'cat todo_list.md' or similar via sandbox, OR use file_read tool logic?
-                                         # Actually, if we are in the main process, we can access the file via the host path if we know it.
-                                         # session_context.agent_workspace might be a string (host path) or SandboxFileSystem.
-                                         
-                                         host_todo_path = None
-                                         if isinstance(session_context.agent_workspace, str):
-                                             host_todo_path = os.path.join(session_context.agent_workspace, f"TODO_LIST_{session_id}.md")
-                                         elif hasattr(session_context.agent_workspace, 'host_path'):
-                                             host_todo_path = os.path.join(session_context.agent_workspace.host_path, f"TODO_LIST_{session_id}.md")
+                                    if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
+                                         # Use the same path logic as todo_write to ensure consistency
+                                         ws = session_context.agent_workspace_sandbox.file_system
+                                         filename = f"TODO_LIST_{session_id}.md"
+                                         if isinstance(ws, str):
+                                             host_todo_path = os.path.join(ws, filename)
+                                         elif hasattr(ws, 'host_path'):  # SandboxFileSystem
+                                             host_todo_path = os.path.join(ws.host_path, filename)
+                                         else:
+                                             # Fallback to agent_workspace
+                                             host_todo_path = os.path.join(session_context.agent_workspace, filename)
                                          
                                          if host_todo_path and os.path.exists(host_todo_path):
                                              with open(host_todo_path, 'r', encoding='utf-8') as f:
@@ -922,7 +918,12 @@ class ToolManager:
                                                  session_context.system_context.update({'todo_list': tasks})
                                                  logger.info(f"Session context synced successfully via file read. Tasks: {len(tasks)}")
                                          else:
-                                             logger.warning(f"Could not locate todo_list.md at {host_todo_path}")
+                                             # File was deleted (all tasks completed), clear todo_list in session_context
+                                             if hasattr(session_context, 'system_context') and isinstance(session_context.system_context, dict):
+                                                 session_context.system_context.update({'todo_list': []})
+                                                 logger.info(f"Todo file deleted, cleared todo_list in session context")
+                                             else:
+                                                 logger.warning(f"Could not locate todo_list.md at {host_todo_path}")
                                 except Exception as e:
                                     logger.warning(f"Failed to sync session context after sandbox execution: {e}")
 
@@ -1021,10 +1022,10 @@ class ToolManager:
                 else:
                     formatted_content = content
                 return json.dumps(
-                    {"content": formatted_content}, ensure_ascii=False, indent=2
+                    {"content": make_serializable(formatted_content)}, ensure_ascii=False, indent=2
                 )
             else:
-                return json.dumps(result, ensure_ascii=False, indent=2)
+                return json.dumps(make_serializable(result), ensure_ascii=False, indent=2)
 
         except Exception as e:
             if isinstance(e, BaseExceptionGroup):
@@ -1085,7 +1086,7 @@ class ToolManager:
             execute_cost = time.perf_counter() - execute_start
             if execute_cost > 0.2:
                 logger.warning(f"Standard tool slow: {tool.name}, cost={execute_cost:.3f}s")
-            return json.dumps({"content": result}, ensure_ascii=False, indent=2)
+            return json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
         except Exception as e:
             logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
