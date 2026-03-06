@@ -45,6 +45,11 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: app/desktop/tauri
+          # The cache key is built based on the runner OS and the hash of Cargo.lock
+          # Enabling cache-all-crates ensures that all crates are cached, not just the ones in the workspace
+          cache-all-crates: "true"
+          # Shared key to allow sharing cache between jobs if needed (though matrix jobs are separate)
+          shared-key: "desktop-build"
 
       - name: Setup Python
         uses: actions/setup-python@v5
