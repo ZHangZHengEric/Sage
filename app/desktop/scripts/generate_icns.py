@@ -1,75 +1,136 @@
 #!/usr/bin/env python3
-"""生成 macOS icns 图标文件"""
+"""生成 macOS icns 图标文件 - 使用 iconutil"""
 
 import os
-import struct
+import shutil
+import subprocess
 from PIL import Image
 
-
-def create_icns_png_section(png_data, icon_type):
-    """创建 icns 中的 PNG 段"""
-    # icns 段格式: 4字节类型 + 4字节长度 + 数据
-    length = 8 + len(png_data)
-    return struct.pack('>4sI', icon_type.encode('ascii'), length) + png_data
-
-
-def create_icns(icons_dir, output_path):
-    """从 PNG 文件创建 icns 文件"""
-
-    # 定义 icns 图标类型和尺寸映射
-    icon_types = {
-        16: 'icp4',    # 16x16
-        32: 'icp5',    # 32x32
-        64: 'icp6',    # 64x64 (32@2x)
-        128: 'ic07',   # 128x128
-        256: 'ic08',   # 256x256
-        512: 'ic09',   # 512x512
-        1024: 'ic10',  # 1024x1024 (512@2x)
-    }
-
-    sections = []
-
-    # 读取各个尺寸的图标
-    icon_files = {
-        16: '32x32.png',      # 16x16 通常用 32x32 缩小
-        32: '32x32.png',
-        64: '32x32@2x.png',
-        128: '128x128.png',
-        256: '128x128@2x.png',
-        512: 'icon.png',
-    }
-
-    for size, filename in icon_files.items():
-        filepath = os.path.join(icons_dir, filename)
-        if os.path.exists(filepath) and size in icon_types:
-            with open(filepath, 'rb') as f:
-                png_data = f.read()
-            sections.append(create_icns_png_section(png_data, icon_types[size]))
-            print(f"Added: {icon_types[size]} ({size}x{size})")
-
-    if not sections:
-        print("Error: No icon files found")
+def generate_iconset(source_path, iconset_dir):
+    """从源图像生成 .iconset 目录"""
+    if not os.path.exists(source_path):
+        print(f"Error: Source image not found at {source_path}")
+        return False
+        
+    if not os.path.exists(iconset_dir):
+        os.makedirs(iconset_dir)
+        
+    print(f"Generating iconset from {source_path}...")
+    
+    try:
+        with Image.open(source_path) as img:
+            # Convert to RGBA if not already
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+                
+            # Define required sizes and filenames for iconutil
+            # iconutil requires specific filenames: icon_<size>x<size>[@2x].png
+            sizes = {
+                16: ['icon_16x16.png'],
+                32: ['icon_16x16@2x.png', 'icon_32x32.png'],
+                64: ['icon_32x32@2x.png'],
+                128: ['icon_128x128.png'],
+                256: ['icon_128x128@2x.png', 'icon_256x256.png'],
+                512: ['icon_256x256@2x.png', 'icon_512x512.png'],
+                1024: ['icon_512x512@2x.png']
+            }
+            
+            for size, filenames in sizes.items():
+                # High-quality resize
+                resized_img = img.resize((size, size), Image.Resampling.LANCZOS)
+                
+                for filename in filenames:
+                    output_path = os.path.join(iconset_dir, filename)
+                    resized_img.save(output_path, 'PNG')
+                    print(f"Generated: {filename} ({size}x{size})")
+                
+            return True
+    except Exception as e:
+        print(f"Error generating iconset: {e}")
         return False
 
-    # 创建 icns 文件
-    # icns 文件头: 4字节魔数 'icns' + 4字节总长度
-    total_length = 8 + sum(len(s) for s in sections)
-    header = struct.pack('>4sI', b'icns', total_length)
 
-    with open(output_path, 'wb') as f:
-        f.write(header)
-        for section in sections:
-            f.write(section)
-
-    print(f"\nCreated: {output_path}")
-    return True
+def create_icns_with_iconutil(iconset_dir, output_path):
+    """使用 iconutil 创建 icns 文件"""
+    print(f"Running iconutil to create {output_path}...")
+    try:
+        # iconutil -c icns <iconset_dir> -o <output_path>
+        result = subprocess.run(
+            ['iconutil', '-c', 'icns', iconset_dir, '-o', output_path],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            print(f"Successfully created: {output_path}")
+            return True
+        else:
+            print(f"Error running iconutil: {result.stderr}")
+            return False
+    except Exception as e:
+        print(f"Exception running iconutil: {e}")
+        return False
 
 
 if __name__ == "__main__":
-    icons_dir = "/Users/zhangzheng/zavixai/Sage/app/desktop/tauri/icons"
+    # Get the directory where the script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Source image path (sage_logo.png)
+    # script_dir is .../app/desktop/scripts
+    # source is .../app/desktop/ui/public/sage_logo.png
+    source_image = os.path.join(os.path.dirname(script_dir), "ui", "public", "sage_logo.png")
+    
+    # Icons directory
+    icons_dir = os.path.join(os.path.dirname(script_dir), "tauri", "icons")
+    
+    # Temporary iconset directory
+    iconset_dir = os.path.join(icons_dir, "icon.iconset")
+    
+    # Output path
     output_path = os.path.join(icons_dir, "icon.icns")
+    
+    print(f"Source image: {source_image}")
+    print(f"Iconset directory: {iconset_dir}")
+    print(f"Output path: {output_path}")
 
-    if create_icns(icons_dir, output_path):
-        print("ICNS file generated successfully!")
+    # 1. Generate .iconset directory with PNGs
+    if generate_iconset(source_image, iconset_dir):
+        # 2. Use iconutil to pack into .icns
+        if create_icns_with_iconutil(iconset_dir, output_path):
+            print("ICNS file generated successfully!")
+            
+            # 3. Clean up iconset directory
+            try:
+                shutil.rmtree(iconset_dir)
+                print("Cleaned up iconset directory.")
+            except Exception as e:
+                print(f"Warning: Failed to clean up iconset directory: {e}")
+                
+            # 4. Generate other standalone PNGs needed by Tauri (e.g. for Windows/Linux or other uses)
+            # Tauri often expects: 32x32.png, 128x128.png, 128x128@2x.png, icon.png
+            print("\nGenerating standalone PNGs for Tauri configuration...")
+            try:
+                with Image.open(source_image) as img:
+                     if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
+                        
+                     standalone_sizes = {
+                        32: '32x32.png',
+                        64: '32x32@2x.png',
+                        128: '128x128.png',
+                        256: '128x128@2x.png',
+                        512: 'icon.png'
+                     }
+                     
+                     for size, filename in standalone_sizes.items():
+                         out_p = os.path.join(icons_dir, filename)
+                         img.resize((size, size), Image.Resampling.LANCZOS).save(out_p, 'PNG')
+                         print(f"Generated standalone: {filename}")
+            except Exception as e:
+                print(f"Error generating standalone PNGs: {e}")
+
+        else:
+            print("Failed to generate ICNS file using iconutil")
     else:
-        print("Failed to generate ICNS file")
+        print("Failed to generate iconset")
