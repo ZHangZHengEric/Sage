@@ -46,12 +46,10 @@ jobs:
         with:
           workspaces: app/desktop/tauri
 
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          auto-update-conda: false
-          python-version: 3.11
-          activate-environment: sage-desktop-env
+          python-version: '3.11'
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -59,12 +57,11 @@ jobs:
           enable-cache: true
 
       - name: Install Python Dependencies
-        shell: bash -l {0}
+        shell: bash
         env:
           UV_SYSTEM_PYTHON: 1
         run: |
           # Use uv for faster installation
-          # We are in a conda environment, so we treat it as system
           uv pip install -r app/desktop/core/requirements.txt
           uv pip install pyinstaller
 
@@ -73,9 +70,11 @@ jobs:
           brew install create-dmg
 
       - name: Build Application
-        shell: bash -l {0}
+        shell: bash
         env:
           SKIP_PIP_INSTALL: "true"
+          # Fake conda env to skip conda setup in build.sh
+          CONDA_DEFAULT_ENV: "sage-desktop-env"
         run: |
           chmod +x app/desktop/scripts/build.sh
           chmod +x app/desktop/scripts/generate_cert.sh
