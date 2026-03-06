@@ -1,0 +1,150 @@
+name: Release Desktop App
+permissions:
+    contents: write
+    
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+
+
+jobs:
+  build-and-release:
+    name: Build & Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            arch: x86_64
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/desktop/ui/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/desktop/tauri
+          # The cache key is built based on the runner OS and the hash of Cargo.lock
+          # Enabling cache-all-crates ensures that all crates are cached, not just the ones in the workspace
+          cache-all-crates: "true"
+          # Shared key to allow sharing cache between jobs if needed (though matrix jobs are separate)
+          shared-key: "desktop-build"
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: 3.11
+          activate-environment: sage-desktop-env
+          auto-activate-base: false
+          architecture: ${{ matrix.arch == 'x86_64' && 'x64' || 'arm64' }}
+          channels: conda-forge,defaults
+          channel-priority: flexible
+
+      - name: Install System Dependencies
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install create-dmg
+
+      - name: Build Application (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash -l {0}
+        env:
+          PIP_INDEX_URL: https://pypi.org/simple
+        run: |
+          chmod +x app/desktop/scripts/build.sh
+          chmod +x app/desktop/scripts/generate_cert.sh
+          app/desktop/scripts/build.sh release
+
+      - name: Build Application (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          PIP_INDEX_URL: https://pypi.org/simple
+        run: |
+          ./app/desktop/scripts/build_windows.ps1 release
+
+      - name: Rename Artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/desktop-v}"
+          cd app/desktop/tauri/target/release/bundle/dmg/
+          for file in *.dmg; do
+            mv "$file" "SageAI-${VERSION}-${{ matrix.arch }}.dmg"
+          done
+
+      - name: Rename Artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF}" -replace '^refs/tags/desktop-v', ''
+          $nsisDir = "app/desktop/tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          $msiDir = "app/desktop/tauri/target/x86_64-pc-windows-msvc/release/bundle/msi"
+          if (Test-Path $nsisDir) {
+            Get-ChildItem $nsisDir -Filter *.exe | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $nsisDir ("SageAI-$version-x86_64-setup.exe")) -Force
+            }
+          }
+          if (Test-Path $msiDir) {
+            Get-ChildItem $msiDir -Filter *.msi | ForEach-Object {
+              Move-Item $_.FullName (Join-Path $msiDir ("SageAI-$version-x86_64.msi")) -Force
+            }
+          }
+
+      - name: Upload Artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SageAI-macOS-${{ matrix.arch }}
+          path: app/desktop/tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Upload Artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SageAI-Windows-${{ matrix.arch }}
+          path: |
+            app/desktop/tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            app/desktop/tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+
+      - name: Release (macOS)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest'
+        with:
+          files: app/desktop/tauri/target/release/bundle/dmg/*.dmg
+          draft: true
+          prerelease: true
+
+      - name: Release (Windows)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest'
+        with:
+          files: |
+            app/desktop/tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            app/desktop/tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          draft: true
+          prerelease: true

@@ -49,9 +49,14 @@ import request, { setBaseURL } from './utils/request.js'
 import { systemAPI } from './api/system'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { confirm } from '@tauri-apps/plugin-dialog'
+import { open } from '@tauri-apps/plugin-shell'
+import { useLanguage } from './utils/i18n'
 
+const { t } = useLanguage()
 const router = useRouter()
 const route = useRoute()
+const isMacOS = /mac/i.test(navigator.platform || '')
 
 const isBackendReady = ref(false)
 const currentApiPrefix = ref(import.meta.env.VITE_BACKEND_API_PREFIX || '')
@@ -144,6 +149,7 @@ const handleSelectConversation = (conversation) => {
 }
 
   let unlisten = null
+  let unlistenPermission = null
 
   onMounted(async () => {
     // Listen for Tauri backend ready event
@@ -162,6 +168,29 @@ const handleSelectConversation = (conversation) => {
       unlisten = await listen('sage-desktop-ready', (event) => {
          updatePort(event.payload.port)
       })
+      
+      let permissionDialogShown = false
+       
+       unlistenPermission = await listen('imessage-permission-denied', async () => {
+           if (permissionDialogShown) return
+           permissionDialogShown = true
+           
+           const confirmed = await confirm(
+               t('permission.fullDiskAccess.message'),
+               {
+                   title: t('permission.fullDiskAccess.title'),
+                   kind: 'warning',
+                   okLabel: t('permission.openSettings'),
+                   cancelLabel: t('permission.cancel')
+               }
+           );
+           
+           if (confirmed) {
+               if (isMacOS) {
+                 await open('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles')
+               }
+           }
+       })
 
       // Also try to get port actively, in case we missed the event
       try {
@@ -184,6 +213,6 @@ const handleSelectConversation = (conversation) => {
 
   onUnmounted(() => {
     if (unlisten) unlisten()
+    if (unlistenPermission) unlistenPermission()
   })
 </script>
-

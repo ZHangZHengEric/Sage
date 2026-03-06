@@ -247,20 +247,36 @@ fn main() {
                     if entry_py.exists() {
                         println!("Running python script directly: {:?}", entry_py);
                         // Use environment variable SAGE_PYTHON if set, otherwise try common conda paths
-                        let python_cmd = if let Ok(sage_python) = std::env::var("SAGE_PYTHON") {
+                        let (python_cmd, mut python_args) = if let Ok(sage_python) = std::env::var("SAGE_PYTHON") {
                             println!("Using SAGE_PYTHON: {}", sage_python);
-                            sage_python
+                            (sage_python, vec![])
                         } else {
-                            // Try common conda paths for sage-desktop-env
-                            let home_dir = std::env::var("HOME").unwrap_or_default();
-                            let possible_paths = [
-                                format!("{}/.conda/envs/sage-desktop-env/bin/python", home_dir),
-                                format!("{}/opt/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
-                                format!("{}/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
-                                format!("{}/miniconda3/envs/sage-desktop-env/bin/python", home_dir),
-                                format!("/opt/anaconda3/envs/sage-desktop-env/bin/python"),
-                                format!("/opt/miniconda3/envs/sage-desktop-env/bin/python"),
-                            ];
+                            let mut possible_paths: Vec<String> = if cfg!(target_os = "windows") {
+                                let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
+                                vec![
+                                    format!(r"{}\miniconda3\envs\sage-desktop-env\python.exe", user_profile),
+                                    format!(r"{}\anaconda3\envs\sage-desktop-env\python.exe", user_profile),
+                                    r"C:\ProgramData\miniconda3\envs\sage-desktop-env\python.exe".to_string(),
+                                    r"C:\ProgramData\anaconda3\envs\sage-desktop-env\python.exe".to_string(),
+                                ]
+                            } else {
+                                let home_dir = std::env::var("HOME").unwrap_or_default();
+                                vec![
+                                    format!("{}/.conda/envs/sage-desktop-env/bin/python", home_dir),
+                                    format!("{}/opt/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
+                                    format!("{}/anaconda3/envs/sage-desktop-env/bin/python", home_dir),
+                                    format!("{}/miniconda3/envs/sage-desktop-env/bin/python", home_dir),
+                                    "/opt/anaconda3/envs/sage-desktop-env/bin/python".to_string(),
+                                    "/opt/miniconda3/envs/sage-desktop-env/bin/python".to_string(),
+                                ]
+                            };
+                            if let Ok(conda_prefix) = std::env::var("CONDA_PREFIX") {
+                                if cfg!(target_os = "windows") {
+                                    possible_paths.insert(0, format!(r"{}\python.exe", conda_prefix));
+                                } else {
+                                    possible_paths.insert(0, format!("{}/bin/python", conda_prefix));
+                                }
+                            }
                             let mut found = None;
                             for path in &possible_paths {
                                 if PathBuf::from(path).exists() {
@@ -271,15 +287,27 @@ fn main() {
                             match found {
                                 Some(path) => {
                                     println!("Using conda python: {}", path);
-                                    path
+                                    (path, vec![])
                                 }
                                 None => {
-                                    println!("Conda python not found, falling back to python3");
-                                    "python3".to_string()
+                                    if cfg!(target_os = "windows") {
+                                        let py_launcher = PathBuf::from(r"C:\Windows\py.exe");
+                                        if py_launcher.exists() {
+                                            println!("Conda python not found, falling back to py -3");
+                                            ("py".to_string(), vec!["-3".to_string()])
+                                        } else {
+                                            println!("Conda python not found, falling back to python");
+                                            ("python".to_string(), vec![])
+                                        }
+                                    } else {
+                                        println!("Conda python not found, falling back to python3");
+                                        ("python3".to_string(), vec![])
+                                    }
                                 }
                             }
                         };
-                        (python_cmd, vec![entry_py.to_string_lossy().to_string()])
+                        python_args.push(entry_py.to_string_lossy().to_string());
+                        (python_cmd, python_args)
                     } else {
                         // Fallback to sidecar if script not found
                          println!("Python script not found at {:?}, falling back to sidecar", script_path);
@@ -313,12 +341,19 @@ fn main() {
 
                 println!("Spawning backend: {} {:?}", command, args);
 
-                let mut child = Command::new(command)
-                    .args(args)
+                let mut cmd = Command::new(command);
+                cmd.args(args)
                     .env("SAGE_PORT", port.to_string())
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::inherit())
-                    .spawn()
+                    .stderr(Stdio::piped());
+
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                }
+
+                let mut child = cmd.spawn()
                     .expect("Failed to spawn backend");
 
                 if let Some(id) = child.id() {
@@ -329,6 +364,19 @@ fn main() {
                 println!("Python sidecar spawned");
                 
                 let stdout = child.stdout.take().expect("Failed to capture stdout");
+                let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+                let app_handle_clone = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut reader = BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        eprintln!("PYTHON STDERR: {}", line);
+                        if line.contains("Permission denied") && line.contains("Full Disk Access") {
+                             app_handle_clone.emit("imessage-permission-denied", ()).unwrap();
+                        }
+                    }
+                });
+
                 let mut reader = BufReader::new(stdout).lines();
 
                 // Read events from sidecar

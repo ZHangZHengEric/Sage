@@ -1,7 +1,7 @@
 {
   "name": "zavixai-agent",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -45,6 +45,7 @@
   "devDependencies": {
     "@pinia/testing": "^1.0.3",
     "@tailwindcss/typography": "^0.5.19",
+    "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/test-utils": "^2.4.6",
     "autoprefixer": "^10.4.23",

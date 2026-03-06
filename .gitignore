@@ -191,7 +191,6 @@ cython_debug/
 agent_workspace
 .conda
 .idea
-.github
 data
 .trae
 skills/*
@@ -200,6 +199,7 @@ skills/*
 .pyinstaller
 .rustup
 app/desktop/tauri/bin/*
+app/desktop/tauri/gen
 
 # Nuitka build artifacts
 app/desktop/build_nuitka/
@@ -213,3 +213,6 @@ sidecar
 
 # Certificates
 app/desktop/scripts/certs
+
+# Build Cache
+.build_cache/

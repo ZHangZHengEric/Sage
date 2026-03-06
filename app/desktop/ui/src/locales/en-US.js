@@ -772,4 +772,10 @@ export default {
   'tour.agent.step2.skills.desc': 'Add specialized skill modules to enhance agent capabilities.',
   'tour.agent.step2.paths.title': 'File Access',
   'tour.agent.step2.paths.desc': 'Authorize the agent to access specific local folders.',
+  
+  // Permissions
+  'permission.fullDiskAccess.title': 'Full Disk Access Required',
+  'permission.fullDiskAccess.message': 'Sage needs Full Disk Access to read iMessage history.\n\nWould you like to open System Settings to grant permission?',
+  'permission.openSettings': 'Open Settings',
+  'permission.cancel': 'Cancel',
 }

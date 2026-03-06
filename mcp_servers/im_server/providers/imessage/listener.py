@@ -236,7 +236,11 @@ class iMessageDatabasePoller:
                                 })
                 else:
                     if "authorization" in result.stderr.lower() or "permission" in result.stderr.lower():
-                        logger.error(f"[iMessage] Permission denied. Please grant Full Disk Access permission to Terminal/IDE")
+                        logger.error(f"[iMessage] Permission denied accessing {db_path}. Please grant Full Disk Access to your Terminal/IDE in System Settings > Privacy & Security > Full Disk Access.")
+                        # Stop the loop to avoid flooding logs and CPU
+                        logger.info(f"[iMessage] Stopping poller due to permission denied. Please restart the application after granting permission.")
+                        self.running = False
+                        break
                     else:
                         logger.debug(f"[iMessage] Query returned no results or error: {result.stderr}")
                             

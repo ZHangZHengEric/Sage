@@ -774,4 +774,10 @@ export default {
   'tour.agent.step2.skills.desc': '添加专门的技能模块来增强智能体的能力。',
   'tour.agent.step2.paths.title': '文件访问',
   'tour.agent.step2.paths.desc': '授权智能体访问特定的本地文件夹。',
+  
+  // 权限
+  'permission.fullDiskAccess.title': '需要完全磁盘访问权限',
+  'permission.fullDiskAccess.message': 'Sage 需要完全磁盘访问权限来读取 iMessage 历史记录。\n\n是否打开系统设置进行授权？',
+  'permission.openSettings': '打开设置',
+  'permission.cancel': '取消',
 }

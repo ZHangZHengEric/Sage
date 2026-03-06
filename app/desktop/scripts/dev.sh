@@ -19,9 +19,9 @@ NO_PYTHON_BUILD=1
 MODE="debug"
 
 echo "======================================"
-echo " Sage Desktop Dev ($MODE)"
-echo " Root: $ROOT_DIR"
-echo " Tip: Set NO_PYTHON_BUILD=1 to skip sidecar build (Default: 1)"
+echo " Sage 桌面开发环境 ($MODE)"
+echo " 根目录: $ROOT_DIR"
+echo " 提示: 设置 NO_PYTHON_BUILD=1 跳过 Sidecar 构建 (默认: 1)"
 echo "======================================"
 
 ########################################
@@ -49,13 +49,13 @@ case "$OS" in
     TARGET="x86_64-pc-windows-msvc"
     ;;
   *)
-    echo "Unsupported OS: $OS"
+    echo "不支持的操作系统: $OS"
     exit 1
     ;;
 esac
 
-echo "OS: $OS_TYPE"
-echo "Target: $TARGET"
+echo "操作系统: $OS_TYPE"
+echo "目标平台: $TARGET"
 
 ########################################
 # 1. Python Environment Setup (Conda)
@@ -76,7 +76,7 @@ elif [ -f "/opt/anaconda3/bin/conda" ]; then
 fi
 
 if [ -z "$CONDA_EXE" ]; then
-  echo "ERROR: Conda not found. Please install Miniconda or Anaconda."
+  echo "错误: 未找到 Conda。请安装 Miniconda 或 Anaconda。"
   exit 1
 fi
 
@@ -88,41 +88,41 @@ ENV_NAME="sage-desktop-env"
 
 # Check if environment exists
 if conda info --envs | grep -q "$ENV_NAME"; then
-  echo "Conda environment '$ENV_NAME' exists."
+  echo "Conda 环境 '$ENV_NAME' 已存在。"
 else
-  echo "Creating Conda environment '$ENV_NAME' with Python 3.11..."
+  echo "正在创建 Conda 环境 '$ENV_NAME' (Python 3.11)..."
   conda create -n "$ENV_NAME" python=3.11 -y
 fi
 
-echo "Activating Conda environment '$ENV_NAME'..."
+echo "正在激活 Conda 环境 '$ENV_NAME'..."
 conda activate "$ENV_NAME"
 
 # Export Python path for Tauri
 # Use 'which python' to get the path from the active environment
 export SAGE_PYTHON="$(which python)"
-echo "Set SAGE_PYTHON: $SAGE_PYTHON"
+echo "设置 SAGE_PYTHON: $SAGE_PYTHON"
 
 if [[ "$CONDA_EXE" == *"anaconda3"* ]]; then
     conda install -n "$ENV_NAME" numba -y
 fi
-echo "Installing dependencies..."
-pip install -r "$APP_DIR/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+echo "正在安装依赖..."
+pip install -r "$APP_DIR/core/requirements.txt" --index-url https://mirrors.aliyun.com/pypi/simple
 
 if ! command -v pyinstaller >/dev/null; then
-  pip install pyinstaller --index-url https://pypi.org/simple
+  pip install pyinstaller --index-url https://mirrors.aliyun.com/pypi/simple
 fi
 
 ########################################
 # 2. Build Python Sidecar (Wrapper Script)
 ########################################
 
-echo "Setting up Python sidecar wrapper..."
+echo "正在设置 Python Sidecar 包装器..."
 
 mkdir -p "$TAURI_BIN_DIR"
 mkdir -p "$TAURI_SIDECAR_DIR"
 
 # Link resources for dev mode
-echo "Linking resources for dev mode..."
+echo "正在链接开发模式资源..."
 rm -rf "$TAURI_SIDECAR_DIR/skills" "$TAURI_SIDECAR_DIR/mcp_servers"
 ln -sf "$ROOT_DIR/app/skills" "$TAURI_SIDECAR_DIR/skills"
 ln -sf "$ROOT_DIR/mcp_servers" "$TAURI_SIDECAR_DIR/mcp_servers"
@@ -137,7 +137,7 @@ if [ "$OS_TYPE" = "windows" ]; then
   SIDECAR_WRAPPER="$TAURI_SIDECAR_DIR/sage-desktop.exe"
 fi
 
-echo "Generating sidecar wrapper at: $SIDECAR_WRAPPER"
+echo "正在生成 Sidecar 包装器: $SIDECAR_WRAPPER"
 
 cat > "$SIDECAR_WRAPPER" <<EOF
 #!/bin/bash
@@ -153,21 +153,21 @@ chmod +x "$SIDECAR_WRAPPER"
 # Also create a .keep file
 touch "$TAURI_SIDECAR_DIR/.keep"
 
-echo "Sidecar wrapper created."
+echo "Sidecar 包装器已创建。"
 
 ########################################
 # 4. Frontend Setup
 ########################################
 
-echo "Setting up frontend dependencies..."
+echo "正在设置前端依赖..."
 cd "$UI_DIR"
 
 if ! command -v npm >/dev/null; then
-  echo "ERROR: npm not found. Please install Node.js."
+  echo "错误: 未找到 npm。请安装 Node.js。"
   exit 1
 fi
 
-echo "Installing frontend dependencies..."
+echo "正在安装前端依赖..."
 npm install
 
 cd "$ROOT_DIR"
@@ -179,18 +179,18 @@ cd "$ROOT_DIR"
 cd "$TAURI_DIR"
 
 if ! command -v cargo >/dev/null; then
-  echo "Cargo not found. Install Rust first."
+  echo "未找到 Cargo。请先安装 Rust。"
   exit 1
 fi
 
 TAURI_CLI_VERSION="$(cargo tauri --version 2>/dev/null | awk '{print $2}' || true)"
 if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
-  echo "Installing tauri-cli v2..."
+  echo "正在安装 tauri-cli v2..."
   cargo install tauri-cli --version "^2"
 fi
 
 echo "======================================"
-echo " Dev Server Running"
+echo " 开发服务器运行中"
 echo "======================================"
 
 cargo tauri dev

@@ -44,7 +44,22 @@
       "exceptionDomain": "",
       "frameworks": [],
       "providerShortName": null,
-      "signingIdentity": null
+      "signingIdentity": null,
+      "dmg": {
+        "background": "./icons/dmg-background.png",
+        "windowSize": {
+          "width": 600,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 160,
+          "y": 200
+        },
+        "applicationFolderPosition": {
+          "x": 460,
+          "y": 200
+        }
+      }
     },
     "resources": [
       "../../skills",
@@ -54,12 +69,24 @@
     "shortDescription": "",
     "targets": [
       "app",
-      "dmg"
+      "dmg",
+      "msi",
+      "nsis"
     ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "",
+      "wix": {
+        "language": "zh-CN",
+        "dialogImagePath": "icons/icon.png"
+      },
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/icon.png",
+        "sidebarImage": "icons/icon.png"
+      }
     },
     "linux": {
       "deb": {
