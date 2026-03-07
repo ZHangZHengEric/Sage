@@ -810,7 +810,6 @@ class SessionContext:
     def get_tokens_usage_info(self):
         """获取tokens使用信息"""
         tokens_info = {"total_info": {}, "per_step_info": []}
-        logger.info(f"get_tokens_usage_info: llm_requests_logs count={len(self.llm_requests_logs)}")
         for i, llm_request in enumerate(self.llm_requests_logs):
             # logger.info(f"get_tokens_usage_info: processing request {i}")
             raw_response = llm_request['response']
