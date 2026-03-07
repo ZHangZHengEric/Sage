@@ -59,7 +59,7 @@ class StreamManager:
 
         # 启动后台任务
         session.task = asyncio.create_task(self._background_worker(session, generator))
-        logger.info(f"Started background task for session {session_id}")
+        logger.debug(f"Started background task for session {session_id}")
 
     async def _background_worker(self, session: SessionState, generator):
         try:

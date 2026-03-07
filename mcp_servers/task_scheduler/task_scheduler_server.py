@@ -54,7 +54,7 @@ DB_PATH = Path(SAGE_ROOT) / "sage.db"
 
 # Ensure directory exists
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-logger.info(f"Task scheduler database: {DB_PATH}")
+logger.debug(f"Task scheduler database: {DB_PATH}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -343,7 +343,7 @@ def scheduler_loop():
     2. Then, process pending tasks grouped by session_id (sequential execution per session)
     """
     logger.info("Task scheduler started.")
-    logger.info(f"API Base URL: {_get_api_base_url()}")
+    logger.debug(f"API Base URL: {_get_api_base_url()}")
     
     while True:
         try:
