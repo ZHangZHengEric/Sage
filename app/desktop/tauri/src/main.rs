@@ -349,6 +349,7 @@ fn main() {
 
                 #[cfg(target_os = "windows")]
                 {
+                    #[allow(unused_imports)]
                     use std::os::windows::process::CommandExt;
                     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
                 }
