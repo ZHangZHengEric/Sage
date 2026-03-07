@@ -43,6 +43,18 @@ cargo install tauri-cli --version "^2"
 
 请访问 [Rust 官网](https://www.rust-lang.org/tools/install) 下载并运行 `rustup-init.exe`。
 
+或者使用 winget 安装：
+
+```powershell
+winget install Rustlang.Rust.MSVC
+```
+
+验证安装：
+
+```powershell
+cargo --version
+```
+
 ### 1.2 安装 Node.js
 
 前端构建依赖 Node.js。推荐使用 LTS 版本 (v18+)。
@@ -56,6 +68,12 @@ brew install node
 **Windows:**
 
 请访问 [Node.js 官网](https://nodejs.org/) 下载安装包。
+
+或者使用 winget 安装：
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
 
 验证安装：
 
@@ -80,22 +98,40 @@ brew install python@3.11
 
 请访问 [Python 官网](https://www.python.org/downloads/) 下载安装包。
 
+或者使用 winget 安装（推荐）：
+
+```powershell
+winget install Python.Python.3.11
+```
+
+验证安装：
+
+```powershell
+python --version
+pip --version
+```
+
 ### 1.4 (可选) 安装 Conda
 
 为了更好地管理 Python 环境，推荐使用 Miniconda 或 Anaconda。
 
 [Miniconda 下载地址](https://docs.conda.io/en/latest/miniconda.html)
-
+Invoke-WebRequest -Uri "https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe" -OutFile ".\Miniconda3-latest-Windows-x86_64.exe"
+# 运行安装程序
+.\Miniconda3-latest-Windows-x86_64.exe /S /F /D=:\Miniconda3
 ---
 
 ## 2. 开发模式启动
-我们提供了一个脚本 `dev.sh` 来简化开发模式的启动。
-在项目根目录下运行：
 
-```bash
-chmod +x app/desktop/scripts/dev.sh
-./app/desktop/scripts/dev.sh
+我们提供了一个脚本 `dev_windows.ps1` 来简化开发模式的启动。
+
+在 PowerShell 中运行：
+
+```powershell
+ powershell -ExecutionPolicy Bypass -File ".\app\desktop\scripts\dev_windows.ps1"
 ```
+
+> 注意：首次运行时会自动安装 Python 依赖和前端依赖，可能需要较长时间。
 
 ## 3. 编译打包
 
@@ -106,6 +142,10 @@ chmod +x app/desktop/scripts/dev.sh
 ```bash
 chmod +x app/desktop/scripts/build.sh
 ./app/desktop/scripts/build.sh
+```
+
+```powershell
+ powershell -ExecutionPolicy Bypass -File ".\app\desktop\scripts\build_windows.ps1"
 ```
 
 **构建产物位置：**

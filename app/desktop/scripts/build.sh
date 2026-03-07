@@ -146,7 +146,7 @@ install_python_deps() {
         echo "Python 依赖未变更且环境正常，跳过安装。"
     else
         echo "正在升级构建工具..."
-        PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+        PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}"
         echo "使用 pip 索引 URL: $PIP_INDEX_URL"
 
         pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
