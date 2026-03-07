@@ -240,8 +240,16 @@ class SkillManager:
         except OSError:
             return ""
 
+        # 需要过滤掉的缓存/临时文件夹和文件
+        excluded_names = {
+            '__pycache__', '.pytest_cache', '.mypy_cache', '.tox', '.egg-info',
+            '.git', '.svn', '.hg', '.DS_Store', 'node_modules', 'dist', 'build',
+            '.idea', '.vscode', '.vs', '*.pyc', '*.pyo', '*.pyd', '.coverage',
+            '.nyc_output', '.cache', 'venv', '.venv', 'env', '.env'
+        }
+
         # Filter items
-        items = [i for i in items if not i.startswith('.')]
+        items = [i for i in items if not i.startswith('.') and i not in excluded_names]
 
         for item in items:
             full_path = os.path.join(path, item)
