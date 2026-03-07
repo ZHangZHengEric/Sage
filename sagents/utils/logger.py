@@ -213,9 +213,8 @@ class Logger:
     def _get_current_session_id(self) -> Optional[str]:
         """尝试获取当前session id"""
         try:
-            # 优先从session上下文管理器获取
-            from sagents.context.session_context_manager import session_manager
-            session_id = session_manager.get_session_id()
+            from sagents.session_runtime import get_current_session_id
+            session_id = get_current_session_id()
             if session_id:
                 return session_id
 
@@ -247,10 +246,11 @@ class Logger:
         if not has_file_handler:
             try:
                 # 获取session workspace路径
-                from sagents.context.session_context import get_session_context
-                session_context = get_session_context(session_id)
-                if session_context:
-                    session_workspace = session_context.session_workspace
+                from sagents.session_runtime import get_global_session_manager
+                session_manager = get_global_session_manager()
+                session = session_manager.get(session_id)
+                if session and session.session_context:
+                    session_workspace = session.session_context.session_workspace
 
                     # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
                     session_log_file = os.path.join(session_workspace, f'session_{session_id}.log')

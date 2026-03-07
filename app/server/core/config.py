@@ -79,6 +79,9 @@ class StartupConfig:
     # Trace
     trace_jaeger_endpoint: Optional[str] = None
 
+    # Session (使用 workspace 作为会话根目录)
+    enable_obs: bool = True
+
 
 class ENV:
     # 新版 LLM 相关

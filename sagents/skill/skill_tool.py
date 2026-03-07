@@ -40,10 +40,11 @@ class SkillTool:
         if session_id:
             try:
                 # Use local import to avoid circular dependency
-                from sagents.context.session_context import get_session_context
-                session_context = get_session_context(session_id)
-                if session_context and session_context.skill_manager:
-                    skill_manager = session_context.skill_manager
+                from sagents.session_runtime import get_global_session_manager
+                session_manager = get_global_session_manager()
+                session = session_manager.get(session_id)
+                if session and session.session_context and session.session_context.skill_manager:
+                    skill_manager = session.session_context.skill_manager
             except Exception as e:
                 logger.warning(f"Failed to get skill manager from session context for {session_id}: {e}")
         
