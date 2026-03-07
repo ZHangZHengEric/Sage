@@ -83,9 +83,8 @@
           </button>
         </div>
         <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
-          <MarkdownRenderer
+          <MarkdownRendererWithPreview
             :content="formatMessageContent(message.content)"
-            :components="markdownComponents"
           />
         </div>
       </div>
@@ -139,6 +138,7 @@ import { computed, h, ref } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
+import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
@@ -418,6 +418,8 @@ const isLatestMessage = computed(() => {
     }
     return true
 })
+
+
 
 
 const isCustomToolMessage = computed(() => {
