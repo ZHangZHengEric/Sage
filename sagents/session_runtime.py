@@ -181,6 +181,7 @@ class Session:
         parent_session_id: Optional[str] = None,
     ) -> SessionContext:
         if self.session_context:
+            self._cache_session_workspace(session_id, self.session_context)
             if tool_manager:
                 self.session_context.tool_manager = tool_manager
             if skill_manager:
@@ -216,6 +217,7 @@ class Session:
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
         )
+        self._cache_session_workspace(session_id, self.session_context)
         return self.session_context
 
     def _get_agent(self, agent_key: str) -> AgentBase:
@@ -409,27 +411,23 @@ class Session:
             if self.observability_manager:
                 self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
             session_context = self.session_context
+            self._cache_session_workspace(session_id, session_context)
             
-            # 先发送 token usage（在保存之前，因为保存会清空 llm_requests_logs）
             if session_context:
                 try:
                      chunks = await self._emit_token_usage_if_any(session_context, session_id)
-                     logger.info(f"SAgent: _emit_token_usage_if_any 返回 {len(chunks)} 个 chunks")
                      if chunks:
                          for i, chunk in enumerate(chunks):
-                             logger.info(f"SAgent: chunk[{i}] = {chunk}")
                              yield [chunk]
                 except Exception as e:
                     logger.error(f"SAgent: 发送 token usage 失败: {e}")
             
-            # 再保存会话状态
             if session_context:
                 try:
                     logger.debug("SAgent: 会话状态保存")
                     session_context.save()
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
-
             await self._cleanup_session_resources(session_id)
 
 
@@ -495,6 +493,16 @@ class Session:
         except Exception as e:
             logger.error(f"SAgent: 生成 token_usage MessageChunk 失败，会话 {session_id}: {e}")
             return []
+
+    def _cache_session_workspace(self, session_id: Optional[str], session_context: Optional[SessionContext]):
+        if not session_id or not session_context:
+            return
+        try:
+            manager = get_global_session_manager()
+            if manager:
+                manager.cache_session_workspace(session_id, session_context.session_workspace)
+        except Exception as e:
+            logger.warning(f"SAgent: 缓存会话路径失败: {e}")
 
     async def _cleanup_session_resources(self, session_id: str):
         """
@@ -574,6 +582,11 @@ class SessionManager:
             工作区路径，找不到则返回 None
         """
         return self._all_session_paths.get(session_id)
+
+    def cache_session_workspace(self, session_id: str, session_workspace: Optional[str]):
+        if not session_id or not session_workspace:
+            return
+        self._all_session_paths[session_id] = os.path.abspath(session_workspace)
 
     def get_or_create(
         self, 
