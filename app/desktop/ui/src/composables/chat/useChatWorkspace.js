@@ -44,7 +44,8 @@ export const useChatWorkspace = ({
     if (!filePath) return
     try {
       const blob = await taskAPI.downloadFile(agentId, filePath)
-      let filename = filePath.split('/').pop()
+      // Support both Unix '/' and Windows '\' path separators
+      let filename = filePath.split(/[/\\]/).pop()
       if (isDirectory && !filename.endsWith('.zip')) {
         filename += '.zip'
       }
