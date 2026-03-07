@@ -425,7 +425,7 @@ class Session:
             # 再保存会话状态
             if session_context:
                 try:
-                    logger.info("SAgent: 会话状态保存")
+                    logger.debug("SAgent: 会话状态保存")
                     session_context.save()
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
@@ -513,7 +513,7 @@ class Session:
             manager = get_global_session_manager()
             if manager:
                 manager.remove_session_context(session_id)
-            logger.info(f"SAgent: 会话 {session_id} 已清理", session_id=session_id)
+                logger.debug(f"SAgent: 会话 {session_id} 已清理", session_id=session_id)
         except Exception as e:
             logger.error(f"SAgent: 清理会话 {session_id} 时出错: {e}", session_id=session_id)
 
