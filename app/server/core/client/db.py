@@ -55,7 +55,6 @@ class SessionManager:
     def __init__(self, cfg: StartupConfig):
         self.cfg = cfg
         self.db_type = cfg.db_type
-        self.db_path = cfg.db_path
         self._lock = asyncio.Lock()
 
         self._engine_name = "sqlite"
@@ -64,8 +63,7 @@ class SessionManager:
 
         # 数据库初始化
         if self.db_type == "file":
-            os.makedirs(self.db_path, exist_ok=True)
-            self.db_file = os.path.join(self.db_path, "agent_platform.db")
+            self.db_file = os.path.join("./agent_platform.db")
             logger.debug(f"使用file数据库, 数据地址: {self.db_file}")
         elif self.db_type == "memory":
             self.db_file = ":memory:"
