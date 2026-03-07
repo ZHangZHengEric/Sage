@@ -1,12 +1,14 @@
 from typing import Any, Dict, List, Optional, Union
-import contextvars
 from sagents.observability.manager import ObservabilityManager
 from sagents.tool import tool_manager
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import SessionContext
 from sagents.utils.logger import logger
-# ContextVar to hold the current session_id for the ObservableModel
-session_id_var = contextvars.ContextVar("session_id", default=None)
+
+
+def _get_current_observability_session_id() -> Optional[str]:
+    from sagents.session_runtime import get_current_session_id
+    return get_current_session_id()
 
 class ObservableToolManager:
     """
@@ -83,7 +85,7 @@ class ObservableCompletions:
         """
         Intercepts LLM creation.
         """
-        session_id = session_id_var.get()
+        session_id = _get_current_observability_session_id()
         model_name = kwargs.get('model', 'unknown')
         messages = kwargs.get('messages', [])
         
@@ -152,8 +154,6 @@ class AgentRuntime:
                          session_context: SessionContext):
         session_id = session_context.session_id
         input_messages = session_context.message_manager.messages
-        # 1. Set ContextVar for Model Observability
-        token = session_id_var.set(session_id)
         tool_manager = session_context.tool_manager
         # 2. Start Chain Span
         # We use agent name as the chain name
@@ -180,4 +180,3 @@ class AgentRuntime:
             raise e
         finally:
             self.observability_manager.on_agent_end({"status": "finished"}, session_id=session_id)
-            session_id_var.reset(token)
