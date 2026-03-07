@@ -142,6 +142,7 @@ echo "正在生成 Sidecar 包装器: $SIDECAR_WRAPPER"
 cat > "$SIDECAR_WRAPPER" <<EOF
 #!/bin/bash
 export PYTHONPATH="$ROOT_DIR:\$PYTHONPATH"
+export AGENT_BROWSER_HEADED=1
 # Ensure mcp_servers are accessible (dev mode relies on source path)
 # The app expects mcp_servers relative to executable or in a known location
 # In dev, we can just point to source
