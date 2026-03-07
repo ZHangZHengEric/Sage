@@ -26,17 +26,17 @@ npx -y clawhub search "weather"
 
 ### Installing Skills
 
-To install a skill, you must install it into the session's skill directory. The session's skill directory is mapped to `/workspace/skills` in the sandbox.
+To install a skill, you must install it into the session's skill directory. The session's skill directory is mapped to `{skills_folder_path}` in the sandbox.
 
-**Important**: You MUST specify the `--dir` parameter as `/workspace/skills`.
+**Important**: You MUST specify the `--dir` parameter as `{skills_folder_path}`.
 
 ```bash
-npx -y clawhub install <slug> --dir /workspace/skills
+npx -y clawhub install <slug> --dir {skills_folder_path}
 ```
 
 Example:
 ```bash
-npx -y clawhub install "google-search" --dir /workspace/skills
+npx -y clawhub install "google-search" --dir {skills_folder_path}
 ```
 
 ### After Installation

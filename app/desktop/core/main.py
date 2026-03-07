@@ -6,6 +6,10 @@ Sage Stream Service
 """
 import os
 import sys
+
+# 设置浏览器 headed 模式环境变量（必须在导入其他模块之前设置）
+os.environ["AGENT_BROWSER_HEADED"] = "1"
+
 # 1. Setup paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 

@@ -1,0 +1,22 @@
+:root{
+  --page-bg:#0B1220;
+  --title-color:#E5E7EB;
+  --subtitle-color:#94A3B8;
+  --body-color:#CBD5E1;
+  --muted-color:#94A3B8;
+  --title-size:40;
+  --subtitle-size:18;
+  --body-size:16;
+  --muted-size:14;
+  --card-fill:#111827;
+  --card-line:#1F2937;
+  --card-line-width:1;
+  --card-radius:0.18;
+  --outline-line:#1F2937;
+  --outline-line-width:1;
+  --table-font-size:12;
+  --table-header-fill:#111827;
+  --table-header-color:#E5E7EB;
+  --table-cell-fill:#0F172A;
+  --table-cell-color:#CBD5E1;
+}
