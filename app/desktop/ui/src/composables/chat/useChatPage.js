@@ -10,6 +10,8 @@ import { useChatStream } from '@/composables/chat/useChatStream.js'
 import { useChatLifecycle } from '@/composables/chat/useChatLifecycle.js'
 import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
+import { useWorkbenchStore } from '@/stores/workbench.js'
+import { usePanelStore } from '@/stores/panel.js'
 
 export const useChatPage = (props) => {
   const { t } = useLanguage()
@@ -36,8 +38,58 @@ export const useChatPage = (props) => {
     clearScrollTimer
   } = useChatScroll()
 
+  // 使用 panelStore 管理面板状态
+  const panelStore = usePanelStore()
+  const workbenchStore = useWorkbenchStore()
+
   const showSettings = ref(false)
   const currentTraceId = ref(null)
+
+  // 打开工作台（统一方法）
+  const openWorkbench = (options = {}) => {
+    const { toolCallId = null, realtime = true } = options
+
+    // 打开工作台
+    panelStore.openWorkbench()
+
+    // 设置实时模式
+    if (realtime) {
+      workbenchStore.setRealtime(true)
+    }
+
+    // 如果指定了 toolCallId，跳转到对应项
+    if (toolCallId) {
+      const filteredItems = workbenchStore.filteredItems
+      const index = filteredItems.findIndex(item =>
+        item.type === 'tool_call' && item.data.id === toolCallId
+      )
+      if (index !== -1) {
+        workbenchStore.setCurrentIndex(index)
+        workbenchStore.setRealtime(false)
+      }
+    }
+  }
+
+  // 切换面板（互斥）
+  const togglePanel = (panel) => {
+    if (panel === 'workbench') {
+      // 使用统一方法打开工作台
+      openWorkbench()
+    } else if (panel === 'workspace') {
+      if (panelStore.activePanel === 'workspace') {
+        panelStore.closeAll()
+      } else {
+        panelStore.openWorkspace()
+        refreshWorkspace()
+      }
+    } else if (panel === 'settings') {
+      if (panelStore.activePanel === 'settings') {
+        panelStore.closeAll()
+      } else {
+        panelStore.openSettings()
+      }
+    }
+  }
 
   const openTraceDetails = () => {
     const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
@@ -120,13 +172,19 @@ export const useChatPage = (props) => {
   }
 
   const loadConversationMessages = async (sessionId) => {
+    // 进入会话时清空工作台
+    const workbenchStore = useWorkbenchStore()
+    workbenchStore.clearItems()
+    workbenchStore.setSessionId(sessionId)
+    console.log('[ChatPage] Cleared workbench for session:', sessionId)
+
     const res = await chatAPI.getConversationMessages(sessionId)
     if (!res || !res.messages) return
     const normalizedMessages = (res.messages || []).map(msg => ({
       ...msg,
       session_id: msg.session_id || sessionId
     }))
-  
+
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
     if (res.conversation_info?.agent_id) {
@@ -234,7 +292,8 @@ export const useChatPage = (props) => {
     downloadWorkspaceFile,
     downloadFile,
     deleteFile,
-    clearTaskAndWorkspace
+    clearTaskAndWorkspace,
+    refreshWorkspace
   } = useChatWorkspace({
     t,
     toast,
@@ -406,13 +465,14 @@ export const useChatPage = (props) => {
     messagesListRef,
     messagesEndRef,
     showSettings,
-    showWorkspace,
     showLoadingBubble,
     filteredMessages,
     isLoading,
     isCurrentSessionLoading,
     handleAgentChange,
     handleWorkspacePanel,
+    togglePanel,
+    openWorkbench,
     handleShare,
     openTraceDetails,
     handleScroll,
