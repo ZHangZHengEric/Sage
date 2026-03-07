@@ -1,15 +1,13 @@
 <template>
-  <div class="fixed inset-0 z-50 sm:static sm:z-auto w-full sm:w-[35%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-    <!-- 移动端头部 -->
-    <div class="flex items-center justify-between p-4 border-b sm:hidden">
-      <h3 class="font-semibold">{{ t('chat.settings') }}</h3>
-      <Button variant="ghost" size="icon" @click="$emit('close')">
-        <X class="h-4 w-4" />
-      </Button>
-    </div>
-
-    <div class="flex-1 overflow-y-auto p-6 space-y-6">
-      
+  <ResizablePanel 
+    :title="t('chat.settings')"
+    @close="$emit('close')"
+  >
+    <template #icon>
+      <Settings class="w-4 h-4 text-muted-foreground" />
+    </template>
+    
+    <div class="h-full overflow-y-auto p-6 space-y-6">
       <!-- 深度思考 -->
       <div class="space-y-2">
         <ThreeOptionSwitch
@@ -73,18 +71,18 @@
         </p>
       </div>
     </div>
-  </div>
+  </ResizablePanel>
 </template>
 
 <script setup>
 import { useLanguage } from '../../utils/i18n.js'
+import { Settings } from 'lucide-vue-next'
+import ResizablePanel from './ResizablePanel.vue'
 import ThreeOptionSwitch from './ThreeOptionSwitch.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { X } from 'lucide-vue-next'
 
 // Props
 const props = defineProps({
@@ -103,7 +101,7 @@ const props = defineProps({
 })
 
 // Emits
-const emit = defineEmits(['configChange', 'agentSelect'])
+const emit = defineEmits(['configChange', 'agentSelect', 'close'])
 
 // Composables
 const { t } = useLanguage()
@@ -131,4 +129,3 @@ const handleAgentChange = (e) => {
   emit('agentSelect', agent)
 }
 </script>
-

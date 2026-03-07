@@ -1,8 +1,8 @@
 <template>
-  <div class="rounded-lg border bg-muted/40 overflow-hidden my-4">
-    <div v-if="showHeader" class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b text-xs text-muted-foreground">
+  <div class="h-full flex flex-col">
+    <div v-if="showHeader" class="flex items-center justify-between px-4 py-2 bg-muted/50 border-b text-xs text-muted-foreground flex-none">
       <span class="font-medium uppercase tracking-wider text-[10px]">{{ language || 'text' }}</span>
-      <button 
+      <button
         v-if="showCopyButton"
         @click="copyCode"
         class="flex items-center gap-1 hover:text-foreground transition-colors focus:outline-none"
@@ -12,7 +12,9 @@
         <span v-else class="text-xs">✅</span>
       </button>
     </div>
-    <pre class="m-0 p-4 overflow-x-auto text-sm font-mono leading-relaxed bg-background/50"><code :class="['hljs', codeClass]" v-html="highlightedCode"></code></pre>
+    <div class="flex-1 overflow-auto bg-background/50">
+      <pre class="m-0 p-4 text-sm font-mono leading-relaxed min-w-full min-h-full"><code :class="['hljs', codeClass]" v-html="highlightedCode"></code></pre>
+    </div>
   </div>
 </template>
 
