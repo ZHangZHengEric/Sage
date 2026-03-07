@@ -5,13 +5,13 @@ from typing import List, Dict, Any, Optional
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
-from sagents.context.session_context import get_session_context
+from sagents.context.session_context import SessionContext
 import datetime
 
 class ToDoTool:
     """任务清单管理工具"""
 
-    def _get_todo_path(self, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> str:
+    def _get_todo_path(self, session_id: Optional[str] = None, session_context: Optional[SessionContext] = None) -> str:
         """获取任务清单文件路径"""
         # 确定文件名
         if session_id:
@@ -22,7 +22,7 @@ class ToDoTool:
         # 优先使用传入的 session_context
         if session_context:
             try:
-                ws = session_context.agent_workspace
+                ws = session_context.agent_workspace_sandbox.file_system
                 if isinstance(ws, str):
                     return os.path.join(ws, filename)
                 elif hasattr(ws, 'host_path'): # SandboxFileSystem
@@ -33,9 +33,12 @@ class ToDoTool:
         # 尝试通过 session_id 获取上下文
         if session_id:
             try:
-                session_context = get_session_context(session_id)
-                if session_context:
-                    ws = session_context.agent_workspace
+                from sagents.session_runtime import get_global_session_manager
+                session_manager = get_global_session_manager()
+                session = session_manager.get(session_id)
+                if session and session.session_context:
+                    session_context = session.session_context
+                    ws = session_context.agent_workspace_sandbox.file_system
                     if isinstance(ws, str):
                         return os.path.join(ws, filename)
                     elif hasattr(ws, 'host_path'): # SandboxFileSystem
@@ -57,7 +60,7 @@ class ToDoTool:
             workspace_dir = None
 
             if session_context:
-                ws = session_context.agent_workspace
+                ws = session_context.agent_workspace_sandbox.file_system
                 if hasattr(ws, 'host_path'):  # SandboxFileSystem
                     fs = ws
                     workspace_dir = ws.host_path
@@ -65,9 +68,12 @@ class ToDoTool:
                     workspace_dir = ws
             elif session_id:
                 try:
-                    sc = get_session_context(session_id)
-                    if sc:
-                        ws = sc.agent_workspace
+                    from sagents.session_runtime import get_global_session_manager
+                    session_manager = get_global_session_manager()
+                    session = session_manager.get(session_id)
+                    if session and session.session_context:
+                        sc = session.session_context
+                        ws = sc.agent_workspace_sandbox.file_system
                         if hasattr(ws, 'host_path'):  # SandboxFileSystem
                             fs = ws
                             workspace_dir = ws.host_path
@@ -262,8 +268,14 @@ class ToDoTool:
             raise ValueError("ToDoTool: session_id is required")
         
         logger.debug(f"ToDoTool: todo_write called. session_id={session_id}")
+
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or not session.session_context:
+            raise ValueError(f"ToDoTool: Invalid session_id={session_id}")
         
-        session_context = get_session_context(session_id)
+        session_context = session.session_context
         file_path = self._get_todo_path(session_id, session_context)
         current_tasks = self._read_todo_file(file_path)
         
@@ -280,9 +292,12 @@ class ToDoTool:
             if not task_id:
                 continue
             
-            # 兼容旧的 status 字段，优先使用 completed 字段
+            # 兼容旧的 status 字段，转换为 completed 字段
             if 'status' in new_task:
-                 new_task.pop('status')
+                status = new_task.pop('status')
+                # 如果 status 是 "completed"，设置 completed 为 True
+                if status == 'completed' and 'completed' not in new_task:
+                    new_task['completed'] = True
 
             # Set updated_at
             new_task['updated_at'] = now_str
@@ -293,6 +308,10 @@ class ToDoTool:
                 updated_count += 1
             else:
                 # 新增
+                # 如果没有 content 但有 conclusion，使用 conclusion 作为 content
+                if ('content' not in new_task or not new_task['content']) and 'conclusion' in new_task:
+                    new_task['content'] = new_task['conclusion']
+                
                 if 'content' not in new_task or not new_task['content']:
                      logger.warning(f"ToDoTool: New task {task_id} missing content. Skipping.", session_id=session_id)
                      continue
@@ -317,9 +336,12 @@ class ToDoTool:
             for t in sorted_tasks
         ]
 
+        logger.debug(f"ToDoTool: Checking deletion condition - pending_tasks: {len(pending_tasks)}, final_tasks: {len(final_tasks)}, file_path: {file_path}", session_id=session_id)
+        
         if not pending_tasks and final_tasks:
             # 所有任务都已完成，删除 todo 文件
             try:
+                logger.debug(f"ToDoTool: Attempting to delete file: {file_path}, exists: {os.path.exists(file_path)}", session_id=session_id)
                 if os.path.exists(file_path):
                     os.remove(file_path)
                     logger.info(f"ToDoTool: All tasks completed. Deleted todo file: {file_path}", session_id=session_id)
@@ -329,6 +351,8 @@ class ToDoTool:
                         "tasks": task_list
                     }
                     return json.dumps(result, ensure_ascii=False, indent=2)
+                else:
+                    logger.warning(f"ToDoTool: File does not exist, cannot delete: {file_path}", session_id=session_id)
             except Exception as e:
                 logger.error(f"ToDoTool: Failed to delete todo file: {e}", session_id=session_id)
 

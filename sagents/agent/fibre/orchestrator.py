@@ -5,23 +5,26 @@ Separates Agent Definition from Session Runtime:
 - sub_agents: Agent definitions (configuration only)
 - sub_session_manager: Running sessions with SubSession interface
 """
+from __future__ import annotations
 import asyncio
 import logging
+import os
 import traceback
-from typing import List, Dict, Any, Optional, Union, AsyncGenerator
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator, TYPE_CHECKING
 import uuid
 import copy
+
+if TYPE_CHECKING:
+    from sagents.session_runtime import Session, SessionManager
 
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_manager import PromptManager
-from sagents.context.session_context import SessionContext, init_session_context, SessionStatus, get_session_context
-from sagents.context.session_context_manager import session_manager
+from sagents.context.session_context import SessionContext, SessionStatus
 from sagents.tool import ToolManager, ToolProxy
 from sagents.skill import SkillManager, SkillProxy
 from sagents.agent.fibre.tools import FibreTools
 from sagents.agent.fibre.agent_definition import AgentDefinition
-from sagents.agent.fibre.sub_session import SubSession, SubSessionManager
 from sagents.agent.simple_agent import SimpleAgent
 
 logger = logging.getLogger(__name__)
@@ -33,14 +36,27 @@ class FibreOrchestrator:
     
     Architecture:
     - sub_agents: Dict[str, AgentDefinition] - Agent configurations
-    - sub_session_manager: SubSessionManager - Running sessions with SubSession interface
+    - sub_session_manager: SessionManager - Running sessions
     """
     
     def __init__(self, agent, observability_manager=None):
         self.agent = agent
         self.observability_manager = observability_manager
         self.sub_agents: Dict[str, AgentDefinition] = {}  # Agent definitions only
-        self.sub_session_manager = SubSessionManager()    # Running sessions
+        
+        # Use global session manager instance if available, or create one with default path
+        # Actually, SessionManager is designed to be a singleton or shared instance per process usually
+        # But here we might want to attach to the same session space as the main agent
+        # The main agent's session manager is what we should use.
+        # However, Orchestrator doesn't hold reference to the main session's manager directly.
+        # But we can get it via get_global_session_manager
+        
+        from sagents.session_runtime import get_global_session_manager
+        # We don't initialize with specific path here, assuming it's already initialized by main process
+        # If not, it will use default.
+        self.session_manager = get_global_session_manager()
+        self.sub_session_manager = self.session_manager
+        
         self.output_queue: Optional[asyncio.Queue] = None
 
     async def run_loop(
@@ -64,17 +80,28 @@ class FibreOrchestrator:
         self.output_queue = asyncio.Queue()
         
         # Initialize Main Session Context
+        main_session = None
         if session_context is None:
-            from sagents.context.session_context import init_session_context
-            session_context = init_session_context(
-                session_id=session_id,
-                user_id=user_id,
-                workspace_root=session_manager.workspace_root,
-                tool_manager=tool_manager,
-                skill_manager=skill_manager,
-                system_context=system_context,
-                context_budget_config=context_budget_config
+            from sagents.session_runtime import get_global_session_manager
+            workspace_root = (
+                os.environ.get("SAGE_WORKSPACE_PATH")
+                or os.environ.get("PREFIX_FILE_WORKSPACE")
+                or os.path.abspath("agent_workspace")
             )
+            manager = get_global_session_manager(session_root_space=workspace_root)
+            main_session = manager.get_or_create(session_id)
+            if main_session.session_context is None:
+                main_session.session_context = SessionContext(
+                    session_id=session_id,
+                    user_id=user_id,
+                    system_context=system_context,
+                    session_space=workspace_root,
+                    agent_workspace=os.path.join(workspace_root, session_id, "agent_workspace"),
+                    context_budget_config=context_budget_config,
+                    tool_manager=tool_manager,
+                    skill_manager=skill_manager,
+                )
+            session_context = main_session.session_context
         
         # Register orchestrator in session context
         session_context.orchestrator = self
@@ -83,24 +110,10 @@ class FibreOrchestrator:
         logger.info(f"run_loop: session_context.tool_manager={session_context.tool_manager}")
         logger.info(f"run_loop: tool_manager param={tool_manager}")
 
-        # Register main session in sub_session_manager
-        main_agent_id = "fibre_main_agent"
-        main_agent_name = self.agent.agent_name if hasattr(self.agent, 'agent_name') else "FibreAgent"
-        main_session = SubSession(
-            session_id=session_id,
-            agent_id=main_agent_id,
-            agent_definition=AgentDefinition(
-                agent_id=main_agent_id,
-                name=main_agent_name,
-                system_prompt=self.agent.system_prefix or "",
-                description="Main Fibre Agent"
-            ),
-            parent_session_id=None,
-            session_context=session_context,
-            model=self.agent.model,
-            model_config=self.agent.model_config
-        )
-        self.sub_session_manager.register(main_session)
+        # Register main session in sub_session_manager (actually just SessionManager now)
+        # Main session is already created via SessionContext, but let's ensure it's tracked if needed
+        # However, SubSessionManager logic was different. SessionManager tracks by ID.
+        # We need to adapt the logic to use Session objects.
         
         # 1.1 Load Custom Agents from Configuration
         custom_sub_agents = getattr(session_context, 'custom_sub_agents', None) or \
@@ -141,7 +154,10 @@ class FibreOrchestrator:
         
         # 2. Setup and run main agent loop
         try:
-            main_session.update_status("running")
+            # main_session.update_status("running") 
+            # Session status is managed by SessionContext now
+            if session_context:
+                session_context.set_status(SessionStatus.RUNNING)
             
             # 2.1 Get Fibre System Prompt for main agent
             fibre_prompt = self._get_fibre_system_prompt_content(
@@ -194,15 +210,13 @@ class FibreOrchestrator:
             # Set max_loop_count
             if session_context.agent_config is None:
                 session_context.agent_config = {}
-            session_context.agent_config['maxLoopCount'] = max_loop_count
+            session_context.agent_config['max_loop_count'] = max_loop_count
             
             # Producer/Consumer pattern for stream processing
             async def run_container_stream():
                 try:
                     async for chunks in container_agent.run_stream(
                         session_context=session_context,
-                        tool_manager=tool_manager,
-                        session_id=session_id
                     ):
                         await self.output_queue.put(chunks)
                 except Exception as e:
@@ -226,20 +240,23 @@ class FibreOrchestrator:
                 await producer_task
                 
                 # Update status on completion
-                if main_session.status != "interrupted":
+                if main_session and main_session.status != "interrupted":
                     main_session.update_status("completed")
                     
             except asyncio.CancelledError:
                 logger.warning(f"FibreOrchestrator: Session {session_id} interrupted")
-                main_session.update_status("interrupted")
+                if main_session:
+                    main_session.update_status("interrupted")
                 raise
             except Exception as e:
                 logger.error(f"FibreOrchestrator: Session {session_id} failed: {e}", exc_info=True)
-                main_session.update_status("error")
+                if main_session:
+                    main_session.update_status("error")
                 raise
         finally:
             # Save session state
-            main_session.save_state()
+            if main_session:
+                main_session.save_state()
     
     def _get_fibre_system_prompt_content(
         self,
@@ -374,9 +391,12 @@ class FibreOrchestrator:
         depth = 0
         current_session = self.sub_session_manager.get(session_id)
         
-        while current_session and current_session.parent_session_id:
+        while current_session and current_session.session_context:
+            parent_session_id = current_session.session_context.system_context.get("parent_session_id")
+            if not parent_session_id:
+                break
             depth += 1
-            current_session = self.sub_session_manager.get(current_session.parent_session_id)
+            current_session = self.sub_session_manager.get(parent_session_id)
             # Prevent infinite loop
             if depth > 100:
                 break
@@ -399,26 +419,52 @@ class FibreOrchestrator:
         
         # Get caller's session to determine parent-child relationship
         caller_session = self.sub_session_manager.get(caller_session_id)
-        if not caller_session:
+        if not caller_session or not caller_session.session_context:
             return f"Error: Caller session '{caller_session_id}' not found"
+
+        # Get caller agent_id from session_context
+        caller_agent_id = caller_session.session_context.agent_config.get("agent_id")
         
         # Check session depth - limit to 4 levels
         session_depth = self._get_session_depth(caller_session_id)
         if session_depth >= 4:
             return f"Error: Maximum delegation depth (4) reached. You are at level {session_depth}. Please complete the task yourself instead of delegating."
         
-        # Pre-validation
+        # Track used session IDs to avoid conflicts within this batch
+        used_session_ids = set()
+        _session_counter = 0
+
+        def generate_unique_session_id() -> str:
+            """Generate a unique session ID based on caller_session_id"""
+            nonlocal _session_counter
+            base_id = f"{caller_session_id}_sub"
+            # Check if already exists in session_manager
+            session_id = f"{base_id}_{_session_counter}"
+            while session_id in used_session_ids or self.sub_session_manager.get_session_workspace(session_id):
+                _session_counter += 1
+                session_id = f"{base_id}_{_session_counter}"
+            used_session_ids.add(session_id)
+            _session_counter += 1
+            return session_id
+
+        # Pre-validation and auto-generate session_id if needed
         validation_errors = []
         for i, task in enumerate(tasks):
             agent_id = task.get('agent_id')
             session_id = task.get('session_id')
+
+            # Auto-generate session_id if not provided
+            if not session_id:
+                session_id = generate_unique_session_id()
+                task['session_id'] = session_id
+                logger.info(f"FibreOrchestrator: Auto-generated session_id '{session_id}' for task {i}")
             
             if not agent_id or not task.get('content'):
                 validation_errors.append(f"Task {i}: Invalid task format - missing agent_id or content")
                 continue
             
             # Prevent self-delegation
-            if agent_id == caller_session.agent_id:
+            if agent_id == caller_agent_id:
                 validation_errors.append(
                     f"Task {i}: Cannot delegate to yourself (agent '{agent_id}'). "
                     f"You should complete this task yourself or create a more specialized sub-agent."
@@ -431,17 +477,20 @@ class FibreOrchestrator:
             
             # Check if session is already running
             existing_session = self.sub_session_manager.get(session_id)
-            if existing_session:
-                if existing_session.is_active():
+            if existing_session and existing_session.session_context:
+                # Check if session is active via session_context status
+                from sagents.context.session_context import SessionStatus
+                if existing_session.session_context.status == SessionStatus.RUNNING:
                     validation_errors.append(
                         f"Task {i}: Session '{session_id}' is currently running a task. "
                         f"Please wait for it to complete or use a different session ID."
                     )
                     continue
                 # Check if session is bound to different agent
-                if existing_session.agent_id != agent_id:
+                existing_agent_id = existing_session.session_context.agent_config.get("agent_id") if existing_session.session_context else None
+                if existing_agent_id and existing_agent_id != agent_id:
                     validation_errors.append(
-                        f"Task {i}: Session '{session_id}' is already bound to agent '{existing_session.agent_id}', "
+                        f"Task {i}: Session '{session_id}' is already bound to agent '{existing_agent_id}', "
                         f"cannot be reused for agent '{agent_id}'."
                     )
                     continue
@@ -461,7 +510,7 @@ class FibreOrchestrator:
             return await self.delegate_task(agent_id, content, session_id, caller_session_id, task_name, original_task)
 
         results = await asyncio.gather(*[_run_single_task(t) for t in tasks])
-        
+
         # Format results
         final_output = []
         for i, result in enumerate(results):
@@ -521,9 +570,10 @@ class FibreOrchestrator:
         task_path = self._get_task_path(base_path, task_name, session_id)
 
         # 4. 使用沙箱文件系统创建文件夹
-        fs = session_context.agent_workspace  # SandboxFileSystem
+        fs = session_context.agent_workspace_sandbox.file_system  # SandboxFileSystem
         fs.ensure_directory(task_path)
         fs.ensure_directory(f"{task_path}/execution")
+        fs.ensure_directory(f"{task_path}/results")
         fs.ensure_directory(f"{task_path}/sub_tasks")
 
         # 5. 记录到 SubSession（方便后续查找）
@@ -574,6 +624,13 @@ class FibreOrchestrator:
             return sub_session
 
         # Create task workspace using task_name
+        # Note: _create_task_workspace relies on sub_session_manager.get(session_id)
+        # But we replaced it with session_manager.get_session(session_id)
+        # We need to check if _create_task_workspace is compatible.
+        
+        # Also, sub_session is now a Session object, not SubSession wrapper.
+        # Session object has session_context.
+        
         task_workspace = self._create_task_workspace(
             session_id=session_id,
             task_name=effective_task_name,
@@ -587,22 +644,63 @@ class FibreOrchestrator:
 {content}
 
 【子任务工作目录】
-请在以下目录中执行任务，并将最终执行结果汇报整理保存到 {task_workspace}/output.md：
+请在以下目录中执行任务，并将最终执行结果汇报整理保存到 {task_workspace}/results/：
 工作目录：{task_workspace}
 执行过程文件请放在：{task_workspace}/execution/
 """
+        
+        # Prepare input messages
+        from sagents.context.messages.message import MessageChunk, MessageRole
+        input_messages = [MessageChunk(role=MessageRole.USER.value, content=enhanced_content, session_id=session_id)]
 
         # Update status to running
-        sub_session.update_status("running")
+        from sagents.context.session_context import SessionStatus
+        sub_session.session_context.set_status(SessionStatus.RUNNING) # Use session_context status
 
         try:
             task_result = None
             all_filtered_chunks = []
+            
+            # Use run_stream_with_flow or run_stream (which delegates to run_stream_with_flow)
+            # Since we want to use AgentFlow for simple agent execution
+            # We need to construct a flow or rely on default flow.
+            # But here we are delegating to a specific agent definition (SimpleAgent usually).
+            
+            # The agent logic is encapsulated in the SessionRuntime.
+            # SessionRuntime uses _get_agent to retrieve agent implementation.
+            # But sub_session is just a Session instance.
+            # We need to call sub_session.run_stream(...)
+            
+            # However, sub_session.run_stream expects standard params.
+            # We need to pass agent_mode="simple" (or whatever the sub agent definition implies)
+            # Actually, Fibre sub-agents are usually SimpleAgents.
+            
+            # We can use a custom flow for this sub-session to just run a SimpleAgent.
+            from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode
+            
+            # If the sub-agent is defined as a specific type, we might need to adjust.
+            # But typically they are SimpleAgents.
+            
+            simple_flow = AgentFlow(
+                name=f"SubAgent Flow - {agent_id}",
+                root=SequenceNode(steps=[AgentNode(agent_key="simple")])
+            )
+            
+            logger.info(f"Starting sub-agent flow for {agent_id} session_id: {session_id}")
             # Stream the response
-            async for chunks in sub_session.run_stream(enhanced_content):
+            async for chunks in sub_session.run_stream_with_flow(
+                input_messages=input_messages,
+                flow=simple_flow,
+                tool_manager=sub_session.session_context.tool_manager,
+                skill_manager=sub_session.session_context.skill_manager,
+                session_id=session_id,
+                max_loop_count=sub_session.session_context.agent_config.get("max_loop_count", 10),
+                deep_thinking=sub_session.session_context.agent_config.get("deep_thinking", False),
+                agent_mode=sub_session.session_context.agent_config.get("agent_mode", "simple")
+            ):
                 filtered_chunks = [
                         c for c in chunks 
-                        if c.session_id == sub_session.session_id and c.role == MessageRole.ASSISTANT.value
+                        if c.session_id == session_id and c.role == MessageRole.ASSISTANT.value
                     ]
                 if filtered_chunks:
                     all_filtered_chunks.extend(filtered_chunks)
@@ -610,7 +708,7 @@ class FibreOrchestrator:
                 if self.output_queue:
                     await self.output_queue.put(chunks)
                 
-                # Check for sys_finish_task
+                # Check for sys_finish_task (if tools are used)
                 for chunk in chunks:
                     if chunk.tool_calls:
                         for tool_call in chunk.tool_calls:
@@ -626,10 +724,12 @@ class FibreOrchestrator:
             
             # If sys_finish_task was called, return its result
             if task_result:
-                sub_session.update_status("completed")
+                if sub_session.session_context:
+                    sub_session.session_context.set_status(SessionStatus.COMPLETED)
                 return f"SubSessionID: {session_id}\n{task_result}"
 
             # If sub-agent finished without calling sys_finish_task, generate summary using LLM
+            accumulated_messages = []
             try:
                 if all_filtered_chunks:
                     accumulated_messages = MessageManager.merge_new_messages_to_old_messages(
@@ -649,11 +749,12 @@ class FibreOrchestrator:
                 # Use sub-agent's internal agent to generate summary
                 messages_input = [{'role': 'user', 'content': prompt}]
 
-                # Get executor and its internal agent
-                executor = await sub_session._get_executor()
-                if executor and executor.agent:
-                    with session_manager.session_context(session_id):
-                        response_stream = executor.agent._call_llm_streaming(
+                # Get agent from sub_session's agent registry
+                agent = sub_session._get_agent("simple") if hasattr(sub_session, '_get_agent') else None
+                if agent:
+                    from sagents.session_runtime import session_scope
+                    with session_scope(session_id):
+                        response_stream = agent._call_llm_streaming(
                             messages=messages_input,
                             session_id=session_id,
                             step_name="sub_agent_fallback_summary"
@@ -664,11 +765,11 @@ class FibreOrchestrator:
                             if chunk.choices and chunk.choices[0].delta.content:
                                 summary_content += chunk.choices[0].delta.content
 
-                    sub_session.update_status("completed")
+                    sub_session.session_context.set_status(SessionStatus.COMPLETED)
                     return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
 
             except Exception as e:
-                sub_session.update_status("error")
+                sub_session.session_context.set_status(SessionStatus.ERROR)
                 return f"Error generating summary: {e},{traceback.format_exc()}"
 
             # Fallback: return aggregated response
@@ -678,19 +779,21 @@ class FibreOrchestrator:
             
         except Exception as e:
             logger.error(f"Error executing sub-agent task: {e}", exc_info=True)
-            sub_session.update_status("error")
+            sub_session.session_context.set_status(SessionStatus.ERROR)
             return f"Error executing sub-agent task: {e},{traceback.format_exc()}"
         finally:
-            sub_session.save_state()
+            # Save state via session_context
+            if sub_session.session_context:
+                sub_session.session_context.save()
 
     async def _get_or_create_sub_session(
         self,
         session_id: str,
         agent_id: str,
         parent_session_id: str
-    ) -> Union[SubSession, str]:
+    ) -> Union[Session, str]:
         """
-        Get existing SubSession or create a new one.
+        Get existing Session or create a new one (replacing SubSession).
         
         Args:
             session_id: Session ID
@@ -698,11 +801,12 @@ class FibreOrchestrator:
             parent_session_id: Parent session ID
             
         Returns:
-            SubSession instance or error message string
+            Session instance or error message string
         """
-        # Check if session already exists
-        existing_session = self.sub_session_manager.get(session_id)
+        # Check if session already exists in global manager
+        existing_session = self.session_manager.get(session_id)
         if existing_session:
+            logger.warning(f"Session {session_id} already exists. Returning existing session.")
             return existing_session
         
         # Get agent definition
@@ -712,55 +816,114 @@ class FibreOrchestrator:
         agent_def = self.sub_agents[agent_id]
         
         # Get parent session
-        parent_session = self.sub_session_manager.get(parent_session_id)
-        if not parent_session:
-            return f"Error: Parent session '{parent_session_id}' not found"
-        
-        # Create sub-session workspace under parent's workspace
-        import os
-        workspace_root = os.path.join(
-            parent_session.session_context.session_workspace,
-            "sub_sessions",
-        )
-        os.makedirs(workspace_root, exist_ok=True)
+        parent_session = self.session_manager.get(parent_session_id)
         
         # Prepare system_context with shared agent_workspace
-        sub_agent_system_context = copy.deepcopy(agent_def.system_context)
-        sub_agent_system_context["agent_host_workspace_path"] = parent_session.session_context._agent_workspace_host_path
-
-        # Log tool_manager status for debugging
-        logger.info(f"_get_or_create_sub_session: parent tool_manager={parent_session.session_context.tool_manager}")
-        logger.info(f"_get_or_create_sub_session: parent session_id={parent_session.session_id}")
-
-        sub_session_context = init_session_context(
-            session_id=session_id,
-            user_id=parent_session.session_context.user_id,
-            workspace_root=workspace_root,
-            tool_manager=parent_session.session_context.tool_manager,
-            skill_manager=parent_session.session_context.skill_manager,
-            system_context=sub_agent_system_context
-        )
-
-        # Log after init
-        logger.info(f"_get_or_create_sub_session: created sub_session_context.tool_manager={sub_session_context.tool_manager}")
+        # Use parent's agent_workspace if available
+        agent_workspace = None
+        tool_manager = None
+        skill_manager = None
         
-        # Register orchestrator in session context
-        sub_session_context.orchestrator = self
+        if parent_session:
+            agent_workspace = parent_session.session_context.agent_workspace
+            parent_tool_manager = parent_session.session_context.tool_manager
+            skill_manager = parent_session.session_context.skill_manager
+
+            # 确保子会话有 tool_manager，继承父会话的工具
+            if parent_tool_manager:
+                # 检查父会话是否有 sys_finish_task
+                parent_tools = parent_tool_manager.list_all_tools_name() if hasattr(parent_tool_manager, 'list_all_tools_name') else []
+                if "sys_finish_task" not in parent_tools:
+                    # 父会话没有 sys_finish_task，需要添加
+                    fibre_tools_impl = FibreTools()
+                    local_tool_manager = ToolManager(is_auto_discover=False, isolated=True)
+                    local_tool_manager.register_tools_from_object(fibre_tools_impl)
+                    if isinstance(parent_tool_manager, ToolManager):
+                        tool_manager = ToolProxy([local_tool_manager, parent_tool_manager])
+                    else:
+                        tool_manager = ToolProxy([local_tool_manager] + parent_tool_manager.tool_managers)
+                else:
+                    # 父会话已有 sys_finish_task，直接继承
+                    tool_manager = parent_tool_manager
+            else:
+                # 父会话没有 tool_manager，创建新的
+                tool_manager = ToolManager()
+                fibre_tools_impl = FibreTools()
+                tool_manager.register_tools_from_object(fibre_tools_impl)
+
+        else:
+             # Handle orphaned sub-sessions (no parent)
+             workspace_root = os.path.join(self.session_manager.session_root_space, "orphaned_sub_sessions")
+             # For now we leave agent_workspace as None or we could initialize a new one if needed
+             # agent_workspace = ...
+             pass
         
-        # Create SubSession (which will lazily create FibreSubAgent)
-        sub_session = SubSession(
-            session_id=session_id,
-            agent_id=agent_id,
-            agent_definition=agent_def,
-            parent_session_id=parent_session_id,
-            session_context=sub_session_context,
+        # Create sub-session via global manager
+        # We pass the parent_session's session_space as the workspace root for the sub-session
+        
+        sub_session = self.session_manager.get_or_create(session_id, session_space=self.session_manager.session_root_space) # Pass root space
+        sub_session.configure_runtime(
             model=self.agent.model,
-            model_config=self.agent.model_config
+            model_config=self.agent.model_config,
+            system_prefix=agent_def.system_prompt or "",
+            session_root_space=self.session_manager.session_root_space,
+            agent_workspace=agent_workspace,
+            default_memory_type="session"
+        )
+
+        # Initialize context if needed
+        # configure_runtime only sets parameters, we need to ensure context is created with those params
+        # But _ensure_session_context is usually called inside run_stream.
+        # However, for sub-session, we might want to ensure context structure NOW, especially for orchestrator linkage.
+        
+        # Let's manually ensure context, similar to run_stream logic but without execution
+        sub_agent_system_context = copy.deepcopy(agent_def.system_context)
+        
+        # Inherit context_budget_config and user_memory_manager from parent session
+        parent_context = parent_session.session_context if parent_session and parent_session.session_context else None
+        # context_budget_config is passed to MessageManager, not stored in SessionContext
+        context_budget_config = None
+        user_memory_manager = parent_context.user_memory_manager if parent_context else None
+        
+        # Merge parent session's system_context (excluding specific keys)
+        if parent_context and parent_context.system_context:
+            excluded_keys = {"todo_list", "session_id", "current_time"}
+            for key, value in parent_context.system_context.items():
+                if key not in excluded_keys and key not in sub_agent_system_context:
+                    sub_agent_system_context[key] = copy.deepcopy(value)
+        
+        sub_session.session_context = sub_session._ensure_session_context(
+             session_id=session_id,
+             user_id=parent_session.session_context.user_id if parent_session else "unknown",
+             system_context=sub_agent_system_context,
+             context_budget_config=context_budget_config,
+             user_memory_manager=user_memory_manager,
+             tool_manager=tool_manager,
+             skill_manager=skill_manager,
+             parent_session_id=parent_session_id
+        )
+        logger.info(f"[Orchestrator] Created sub-session {session_id} and system context {sub_session.session_context.system_context}")
+        
+        # Set agent_config with agent_id for Fibre (inherit from parent session)
+        parent_agent_config = parent_session.session_context.agent_config if parent_session and parent_session.session_context else {}
+        sub_session.session_context.set_agent_config(
+            model=parent_agent_config.get("llm_config", {}).get("model") or self.agent.model,
+            model_config=self.agent.model_config,
+            system_prefix=agent_def.system_prompt or "",
+            available_tools=parent_agent_config.get("available_tools", []),
+            available_skills=parent_agent_config.get("available_skills", []),
+            system_context=sub_agent_system_context,
+            available_workflows=parent_agent_config.get("available_workflows", {}),
+            deep_thinking=parent_agent_config.get("deep_thinking", False),
+            agent_mode=parent_agent_config.get("agent_mode"),
+            more_suggest=parent_agent_config.get("more_suggest", False),
+            max_loop_count=parent_agent_config.get("max_loop_count", 10),
+            agent_id=agent_id,
         )
         
-        # Register in manager
-        self.sub_session_manager.register(sub_session)
-        
+        # Register orchestrator reference
+        sub_session.session_context.orchestrator = self 
+
         return sub_session
 
     def get_session_hierarchy(self, session_id: str) -> Dict[str, Any]:
@@ -773,16 +936,50 @@ class FibreOrchestrator:
         Returns:
             Tree structure with session info and children
         """
-        session = self.sub_session_manager.get(session_id)
+        # SessionManager doesn't support get_by_parent directly yet
+        # We need to iterate over sessions or add index to SessionManager
+        # For now, let's iterate since sub_session_manager only holds sessions for this orchestrator
+        
+        session = self.session_manager.get(session_id)
         if not session:
             return {}
         
-        children = self.sub_session_manager.get_by_parent(session_id)
+        # We need to know parent-child relationship.
+        # SessionContext holds parent_session_id and child_session_ids
+        # But we need access to SessionContext
+        
+        ctx = session.session_context
+        if not ctx:
+            return {}
+            
+        # Get status from context
+        status = ctx.status.value if ctx.status else "unknown"
+        
+        # Get children
+        children = []
+        # Need to fix: SessionContext might not maintain child_session_ids automatically
+        # Orchestrator logic should probably maintain this or we scan all sessions
+        
+        # Scan all sessions in manager to find children
+        # This is inefficient but works for now
+        all_sessions = self.session_manager.list_active_sessions()
+        # list_active_sessions returns dicts, not objects.
+        # We need access to objects.
+        
+        # Let's rely on child_session_ids if it's maintained.
+        # If not, we iterate self.session_manager._sessions (internal access)
+        
+        for s_id, sess in self.session_manager._sessions.items():
+            if sess.session_context:
+                parent_id = sess.session_context.system_context.get("parent_session_id")
+                if parent_id == session_id:
+                    children.append(self.get_session_hierarchy(s_id))
+            
         return {
             "session_id": session_id,
-            "agent_id": session.agent_id,
-            "status": session.status,
-            "children": [self.get_session_hierarchy(child.session_id) for child in children]
+            # "agent_id": session.agent_id, # Session object doesn't have agent_id directly, maybe in context or tags
+            "status": status,
+            "children": children
         }
 
     def interrupt_session(self, session_id: str) -> bool:
@@ -795,4 +992,4 @@ class FibreOrchestrator:
         Returns:
             True if interrupted, False if not found
         """
-        return self.sub_session_manager.interrupt_session(session_id)
+        return self.session_manager.interrupt_session(session_id)

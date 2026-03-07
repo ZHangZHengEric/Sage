@@ -2,6 +2,7 @@
 from loguru import logger
 from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
+from sagents.session_runtime import initialize_global_session_manager
 
 from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
@@ -85,6 +86,39 @@ async def initialize_skill_manager():
         return skill_manager_instance
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")
+        return None
+
+
+def get_session_root_space() -> str:
+    """获取会话根目录，与 service.py 保持一致"""
+    from pathlib import Path
+    import os
+    
+    if os.environ.get("SAGE_SESSIONS_PATH"):
+        sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))
+    else:
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        sessions_root = sage_home / "sessions"
+    
+    sessions_root.mkdir(parents=True, exist_ok=True)
+    return str(sessions_root)
+
+
+async def initialize_session_manager():
+    """初始化全局 SessionManager"""
+    try:
+        from sagents.session_runtime import initialize_global_session_manager
+        # 使用与 service.py 相同的路径配置
+        session_root_space = get_session_root_space()
+        session_manager = initialize_global_session_manager(
+            session_root_space=session_root_space,
+            enable_obs=True
+        )
+        logger.info(f"全局 SessionManager 已初始化，会话根目录: {session_root_space}")
+        return session_manager
+    except Exception as e:
+        logger.error(f"全局 SessionManager 初始化失败: {e}")
         return None
 
 

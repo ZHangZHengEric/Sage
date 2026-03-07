@@ -7,6 +7,7 @@ from .bootstrap import (
     initialize_im_service,
     initialize_skill_manager,
     initialize_tool_manager,
+    initialize_session_manager,
     shutdown_clients,
     validate_and_disable_mcp_servers,
 )
@@ -18,6 +19,7 @@ async def initialize_system():
     await initialize_db_connection()
     await initialize_tool_manager()
     await initialize_skill_manager()
+    await initialize_session_manager()
     await initialize_im_service()
     StreamManager.get_instance()
     logger.info("sage-desktop：StreamManager 已预初始化")

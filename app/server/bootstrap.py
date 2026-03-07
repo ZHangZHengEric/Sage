@@ -10,6 +10,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from streamlit import form
 from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
+from sagents.session_runtime import initialize_global_session_manager
 
 from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
@@ -105,6 +106,23 @@ async def initialize_skill_manager():
 async def close_skill_manager():
     """关闭技能管理器"""
     set_skill_manager(None)
+
+
+async def initialize_session_manager(cfg: StartupConfig):
+    """初始化全局 SessionManager"""
+    try:
+        from sagents.session_runtime import initialize_global_session_manager
+        # 使用 workspace 作为会话根目录
+        session_root_space = cfg.workspace or "agent_workspace"
+        session_manager = initialize_global_session_manager(
+            session_root_space=session_root_space,
+            enable_obs=cfg.enable_obs if hasattr(cfg, 'enable_obs') else True
+        )
+        logger.info(f"全局 SessionManager 已初始化，会话根目录: {session_root_space}")
+        return session_manager
+    except Exception as e:
+        logger.error(f"全局 SessionManager 初始化失败: {e}")
+        return None
 
 
 async def _should_initialize_data(cfg: StartupConfig) -> bool:

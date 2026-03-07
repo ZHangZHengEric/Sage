@@ -11,6 +11,7 @@ from .bootstrap import (
     initialize_scheduler,
     initialize_skill_manager,
     initialize_tool_manager,
+    initialize_session_manager,
     shutdown_clients,
     shutdown_scheduler,
     validate_and_disable_mcp_servers,
@@ -43,6 +44,9 @@ async def initialize_system(cfg: StartupConfig):
     """初始化工具与技能管理器"""
     await initialize_tool_manager()
     await initialize_skill_manager()
+
+    """初始化全局 SessionManager"""
+    await initialize_session_manager(cfg)
 
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)

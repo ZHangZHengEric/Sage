@@ -13,45 +13,79 @@ import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import SessionStatus, get_session_context, get_session_messages, _get_workspace_root, get_sub_session_messages
-
+from sagents.context.session_context import SessionStatus
+from sagents.session_runtime import get_global_session_manager
+from pathlib import Path
 from .. import models
 from ..core.exceptions import SageHTTPException
 from .chat.processor import ContentProcessor
+
+def _get_agent_workspace_root() -> str:
+    if os.environ.get("SAGE_AGENTS_PATH"):
+        return os.environ.get("SAGE_AGENTS_PATH")
+    else:
+        return os.path.join(str(Path.home()), ".sage", "agents")
 
 async def interrupt_session(
     session_id: str, message: str = "用户请求中断"
 ) -> Dict[str, Any]:
     """中断指定会话，返回数据字典"""
-    session_context = get_session_context(session_id)
-    if not session_context:
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id)
+    if not session:
         logger.bind(session_id=session_id).info("会话不存在或者已完成")
         return {"session_id": session_id}
 
-    session_context.set_status(SessionStatus.INTERRUPTED)
+    session.session_context.set_status(SessionStatus.INTERRUPTED)
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
 
 
 async def get_session_status(session_id: str) -> Dict[str, Any]:
     """获取指定会话的状态"""
-    session_context = get_session_context(session_id)
-    if not session_context:
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id)
+    if not session:
         raise SageHTTPException(
             status_code=500,
             detail=f"会话 {session_id} 已完成或者不存在",
             error_detail=f"Session '{session_id}' completed or not found",
         )
 
-    tasks_status = session_context.task_manager.to_dict()
+    # tasks_status = session.session_context.task_manager.to_dict()
+    tasks_status = {}
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks_status.get('tasks', []))}")
     return {"session_id": session_id, "tasks_status": tasks_status}
 
 
 async def get_file_workspace(session_id: str) -> Dict[str, Any]:
     """获取指定会话的文件工作空间内容"""
-    workspace_root = _get_workspace_root()
-    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
+    
+    # 尝试从 SessionContext 获取 agent_workspace
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id)
+    if session:
+        workspace_path = session.session_context.agent_workspace
+    else:
+        # 如果 SessionContext 不存在（可能是历史会话），尝试从数据库或约定路径推断
+        # 约定路径：{sage_home}/agents/{agent_id}
+        # 需要先获取 agent_id
+        dao = models.ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        
+        if conversation and conversation.agent_id:
+            # 修正：直接使用 {sage_home}/agents/{agent_id} 作为 workspace_path
+            # 这与 run_stream 中传入的 agent_workspace 保持一致
+            workspace_path = os.path.join(_get_agent_workspace_root(), conversation.agent_id)
+        else:
+             # 如果无法获取 agent_id，则无法确定 workspace
+             # 这里可以返回空，或者记录错误
+            logger.warning(f"无法确定会话 {session_id} 的 agent_id，无法定位工作空间")
+            return {
+                "session_id": session_id,
+                "files": [],
+                "message": "无法确定工作空间路径",
+            }
 
     if not workspace_path or not os.path.exists(workspace_path):
         return {
@@ -155,7 +189,8 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
         )
 
     messages = []
-    for m in get_session_messages(conversation_id):
+    session_manager = get_global_session_manager()
+    for m in session_manager.get_session_messages(conversation_id):
         result = m.to_dict()
         result = ContentProcessor.clean_content(result)
         messages.append(result)
@@ -177,13 +212,14 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
                                 if isinstance(task, dict):
                                     sub_session_id = task.get('session_id')
                                     if sub_session_id:
-                                        sub_msgs = get_sub_session_messages(conversation_id, sub_session_id)
+                                        sub_msgs = session_manager.get_session_messages(sub_session_id)
                                         for sub_msg in sub_msgs:
                                             sub_result = sub_msg.to_dict()
                                             sub_result = ContentProcessor.clean_content(sub_result)
                                             messages.append(sub_result)
                     except Exception as e:
                         logger.warning(f"处理子任务消息失败: {e}")
+                        
     return {
         "conversation_id": conversation_id,
         "messages": messages,

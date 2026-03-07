@@ -11,7 +11,6 @@ from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
     delete_session_run_lock,
-    get_session_context,
     get_session_run_lock,
 )
 from sagents.utils.lock_manager import safe_release
@@ -296,12 +295,11 @@ class SageStreamService:
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
-                model=model_client,
-                model_config=request.llm_model_config,
-                system_prefix=request.system_prefix,
-                workspace=workspace,
-                memory_type=request.memory_type,
+                session_root_space=workspace,
+                enable_obs=True,
+                use_sandbox=True # Server 默认开启沙箱
             )
+        self.model_client = model_client
 
     async def process_stream(self):
         """处理流式聊天请求"""
@@ -318,19 +316,24 @@ class SageStreamService:
         await _ensure_conversation(self.request)
         try:
             stream_result = self.sage_engine.run_stream(
+                session_id=session_id,
                 input_messages=messages,
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
-                session_id=session_id,
+                model=self.model_client,
+                model_config=self.request.llm_model_config,
+                system_prefix=self.request.system_prefix,
+                # agent_workspace=None, # 由 SessionContext 自动管理
+                default_memory_type=self.request.memory_type,
                 user_id=self.request.user_id,
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
-                multi_agent=self.request.multi_agent,
+                # multi_agent=self.request.multi_agent, # 不再支持
                 agent_mode=self.request.agent_mode,
-                more_suggest=self.request.more_suggest,
+                # more_suggest=self.request.more_suggest, # Flow 内部处理
                 system_context=self.request.system_context,
                 available_workflows=self.request.available_workflows,
-                force_summary=self.request.force_summary,
+                # force_summary=self.request.force_summary, # System context 控制
                 context_budget_config=self.request.context_budget_config,
                 custom_sub_agents=[agent.model_dump() for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
             )
@@ -364,8 +367,9 @@ async def prepare_session(request: StreamRequest):
     lock = get_session_run_lock(session_id)
     acquired = False
     if lock.locked():
-        ctx = get_session_context(session_id)
-        if not ctx or ctx.status != SessionStatus.INTERRUPTED:
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or session.session_context.status != SessionStatus.INTERRUPTED:
              raise SageHTTPException(status_code=500, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:

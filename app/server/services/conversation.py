@@ -13,7 +13,7 @@ import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import SessionStatus, get_session_context, get_session_messages, _get_workspace_root, get_sub_session_messages
+from sagents.context.session_context import SessionStatus, get_session_messages, _get_workspace_root, get_sub_session_messages
 
 from .. import models
 from ..core.exceptions import SageHTTPException
@@ -23,27 +23,29 @@ async def interrupt_session(
     session_id: str, message: str = "用户请求中断"
 ) -> Dict[str, Any]:
     """中断指定会话，返回数据字典"""
-    session_context = get_session_context(session_id)
-    if not session_context:
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id)
+    if not session:
         logger.bind(session_id=session_id).info("会话不存在或者已完成")
         return {"session_id": session_id}
 
-    session_context.status = SessionStatus.INTERRUPTED
+    session.session_context.status = SessionStatus.INTERRUPTED
     logger.bind(session_id=session_id).info("会话中断成功")
     return {"session_id": session_id}
 
 
 async def get_session_status(session_id: str) -> Dict[str, Any]:
     """获取指定会话的状态"""
-    session_context = get_session_context(session_id)
-    if not session_context:
+    session_manager = get_global_session_manager()
+    session = session_manager.get(session_id)
+    if not session:
         raise SageHTTPException(
             status_code=500,
             detail=f"会话 {session_id} 已完成或者不存在",
             error_detail=f"Session '{session_id}' completed or not found",
         )
 
-    tasks_status = session_context.task_manager.to_dict()
+    tasks_status = session.session_context.task_manager.to_dict()
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks_status.get('tasks', []))}")
     return {"session_id": session_id, "tasks_status": tasks_status}
 
