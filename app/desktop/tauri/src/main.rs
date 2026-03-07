@@ -214,7 +214,7 @@ fn main() {
             let skill_workspace = format!("{}/.sage/skills", home_dir);
             let session_workspace = format!("{}/.sage/workspace", home_dir);
             std::env::set_var("SAGE_SKILL_WORKSPACE", &skill_workspace);
-            std::env::set_var("SAGE_WORKSPACE_PATH", &session_workspace);
+            std::env::set_var("SAGE_SESSION_DIR", &session_workspace);
             std::env::set_var("SAGE_ROOT", format!("{}/.sage", home_dir));
             println!("Set SAGE_SKILL_WORKSPACE: {}", skill_workspace);
 

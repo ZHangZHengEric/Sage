@@ -1,21 +1,20 @@
 import asyncio
-import hashlib
 import json
 import os
-from re import S
 import time
 import traceback
 import uuid
+import random
+import string
 
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
-    delete_session_run_lock,
     get_session_run_lock,
 )
 from sagents.utils.lock_manager import safe_release
 from sagents.sagents import SAgent
-from sagents.tool import ToolManager, get_tool_manager
+from sagents.tool import get_tool_manager
 from ... import models
 from ...core.exceptions import SageHTTPException
 from ...schemas.chat import StreamRequest, CustomSubAgentConfig
@@ -32,9 +31,7 @@ from .utils import (
 _SAGENT_CACHE = {}
 
 
-async def populate_request_from_agent_config(
-    request: StreamRequest, *, require_agent_id: bool = False
-) -> None:
+async def populate_request_from_agent_config(request: StreamRequest, *, require_agent_id: bool = False) -> None:
     agent = None
     if request.agent_id is None:
         # 如果要求必须有 Agent ID，则抛出异常
@@ -261,11 +258,7 @@ async def populate_request_from_agent_config(
                         
                         if tool_name:
                             new_tool_names.append(tool_name)
-                    # if new_tool_names:
-                        # request.available_tools.extend(new_tool_names)
-                        # logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
-                    # 移除system context 中的extra_mcp_config
-                   
+
                 else:
                     logger.warning(f"Failed to register MCP server {key} with tools")
             if 'extra_mcp_config' in request.system_context:
@@ -285,18 +278,16 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
-        config = get_startup_config()
-        workspace = config.workspace
-        if workspace:
-            workspace = os.path.abspath(workspace)
-            if not workspace.endswith('/'):
-                workspace += '/'
-
+        cfg = get_startup_config()
+        # agent工作空间由 agent_dir + user_id + agent_id来。 如果user_id 为空。用 default_user 如果agent_id 为空，用 随机8位英文字母
+        user_id = self.request.user_id or "default_user"
+        agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
+        self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
-                session_root_space=workspace,
-                enable_obs=True,
+                session_root_space=cfg.session_dir,
+                enable_obs=cfg.trace_jaeger_endpoint is not None,
                 use_sandbox=True # Server 默认开启沙箱
             )
         self.model_client = model_client
@@ -323,17 +314,14 @@ class SageStreamService:
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
-                # agent_workspace=None, # 由 SessionContext 自动管理
+                agent_workspace=self.agent_workspace,
                 default_memory_type=self.request.memory_type,
                 user_id=self.request.user_id,
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
-                # multi_agent=self.request.multi_agent, # 不再支持
                 agent_mode=self.request.agent_mode,
-                # more_suggest=self.request.more_suggest, # Flow 内部处理
                 system_context=self.request.system_context,
                 available_workflows=self.request.available_workflows,
-                # force_summary=self.request.force_summary, # System context 控制
                 context_budget_config=self.request.context_budget_config,
                 custom_sub_agents=[agent.model_dump() for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
             )
@@ -392,7 +380,6 @@ async def prepare_session(request: StreamRequest):
 
 
 async def execute_chat_session(
-    mode: str,
     stream_service: SageStreamService,
     **kwargs,
 ):

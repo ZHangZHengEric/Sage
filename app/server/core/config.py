@@ -1,12 +1,10 @@
 """
-配置相关, 支持命令行参数、环境变量、默认值
+配置相关, 支持环境变量、默认值
 """
 
-import argparse
-import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # ===== 全局启动参数（统一存放于此） =====
 _GLOBAL_STARTUP_CONFIG: Optional[Any] = None
@@ -14,26 +12,21 @@ _GLOBAL_STARTUP_CONFIG: Optional[Any] = None
 
 @dataclass
 class StartupConfig:
-    """启动参数结构体，优先级：命令行 > 环境变量 > 默认值"""
+    """启动参数结构体，优先级：环境变量 > 默认值"""
 
     # Server
     port: int = 8080
     logs_dir: str = "logs"
-    workspace: str = "agent_workspace"
-
+    session_dir: str = "sessions"
+    agents_dir: str = "agents"
     # DB
     db_type: str = "file"  # file | memory | mysql
-    db_path: str = "./data/"  # file 模式为目录；memory 为忽略；mysql 支持 DSN/JSON/ENV
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 3306
     mysql_user: str = "root"
     mysql_password: str = "sage.1234"
     mysql_database: str = "sage"
     mysql_charset: str = "utf8mb4"
-
-    # Presets
-    preset_mcp_config: str = "mcp_setting.json"
-    preset_running_config: str = "agent_setting.json"
 
     # LLM defaults
     default_llm_api_key: str = ""
@@ -79,9 +72,6 @@ class StartupConfig:
     # Trace
     trace_jaeger_endpoint: Optional[str] = None
 
-    # Session (使用 workspace 作为会话根目录)
-    enable_obs: bool = True
-
 
 class ENV:
     # 新版 LLM 相关
@@ -105,19 +95,11 @@ class ENV:
 
     # 服务器与运行配置
     PORT = "SAGE_PORT"
-    PRESET_MCP_CONFIG = "SAGE_MCP_CONFIG_PATH"
-    PRESET_RUNNING_CONFIG = "SAGE_PRESET_RUNNING_CONFIG_PATH"
-    WORKSPACE = "SAGE_WORKSPACE_PATH"
+    SESSION_DIR = "SAGE_SESSION_DIR"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
-
+    AGENTS_DIR = "SAGE_AGENTS_DIR"
     # 数据库
     DB_TYPE = "SAGE_DB_TYPE"
-    DB_PATH = "SAGE_DB_PATH"
-
-    # 旧版 LLM 环境变量兜底
-    LEGACY_LLM_API_KEY = "LLM_API_KEY"
-    LEGACY_LLM_API_BASE_URL = "LLM_API_BASE_URL"
-    LEGACY_LLM_MODEL_NAME = "LLM_MODEL_NAME"
 
     # S3
     S3_ENDPOINT = "SAGE_S3_ENDPOINT"
@@ -183,416 +165,139 @@ def env_bool(name: str, default: bool = False) -> bool:
     return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
 
 
-def pick_str(
-    arg_val: Optional[str], env_name: str, default: Optional[str] = None
-) -> Optional[str]:
-    return arg_val if arg_val is not None else env_str(env_name, default)
-
-
-def pick_int(
-    arg_val: Optional[int], env_name: str, default: Optional[int] = None
-) -> Optional[int]:
-    return arg_val if arg_val is not None else env_int(env_name, default)
-
-
-def pick_float(
-    arg_val: Optional[float], env_name: str, default: Optional[float] = None
-) -> Optional[float]:
-    return arg_val if arg_val is not None else env_float(env_name, default)
-
-
-def pick_bool(arg_flag: bool, env_name: str, default: bool = False) -> bool:
-    return True if arg_flag else env_bool(env_name, default)
-
-
-def pick_str_list(
-    arg_val: Optional[str], env_name: str, default: Optional[list[str]] = None
-) -> Optional[list[str]]:
-    val_str = pick_str(arg_val, env_name)
-    if val_str:
-        return [x.strip() for x in val_str.split(",") if x.strip()]
-    return default
-
-
-def pick_json_list(
-    arg_val: Optional[str], env_name: str, default: Optional[List[Dict[str, str]]] = None
-) -> Optional[List[Dict[str, str]]]:
-    val_str = pick_str(arg_val, env_name)
-    if val_str:
-        try:
-            val = json.loads(val_str)
-            if isinstance(val, list):
-                return val
-        except json.JSONDecodeError:
-            pass
-    return default
-
-
-def pick_json_dict_list(
-    arg_val: Optional[str], env_name: str, default: Optional[Dict[str, List[Dict[str, str]]]] = None
-) -> Optional[Dict[str, List[Dict[str, str]]]]:
-    val_str = pick_str(arg_val, env_name)
-    if val_str:
-        try:
-            val = json.loads(val_str)
-            if isinstance(val, dict):
-                return val
-        except json.JSONDecodeError:
-            pass
-    return default
-
-
-def create_argument_parser():
-    """创建命令行参数解析器，支持环境变量，优先级：指定入参 > 环境变量 > 默认值"""
-    parser = argparse.ArgumentParser(description="Sage Stream Service")
-
-    # 新格式参数
-    parser.add_argument(
-        "--default_llm_api_key",
-        help=f"默认LLM API Key (环境变量: {ENV.DEFAULT_LLM_API_KEY})",
-    )
-
-    parser.add_argument(
-        "--default_llm_api_base_url",
-        help=f"默认LLM API Base (环境变量: {ENV.DEFAULT_LLM_API_BASE_URL})",
-    )
-    parser.add_argument(
-        "--default_llm_model_name",
-        help=f"默认LLM API Model (环境变量: {ENV.DEFAULT_LLM_MODEL_NAME})",
-    )
-    parser.add_argument(
-        "--default_llm_max_tokens",
-        type=int,
-        help=f"默认LLM API Max Tokens (环境变量: {ENV.DEFAULT_LLM_MAX_TOKENS})",
-    )
-    parser.add_argument(
-        "--default_llm_temperature",
-        type=float,
-        help=f"默认LLM API Temperature (环境变量: {ENV.DEFAULT_LLM_TEMPERATURE})",
-    )
-    parser.add_argument(
-        "--default_llm_max_model_len",
-        type=int,
-        help=f"默认LLM 最大上下文 (环境变量: {ENV.DEFAULT_LLM_MAX_MODEL_LEN})",
-    )
-    parser.add_argument(
-        "--default_llm_top_p",
-        type=float,
-        help=f"默认LLM API Top P (环境变量: {ENV.DEFAULT_LLM_TOP_P})",
-    )
-    parser.add_argument(
-        "--default_llm_presence_penalty",
-        type=float,
-        help=f"默认LLM API Presence Penalty (环境变量: {ENV.DEFAULT_LLM_PRESENCE_PENALTY})",
-    )
-    parser.add_argument(
-        "--context_history_ratio",
-        type=float,
-        help=f"历史消息比例 (环境变量: {ENV.CONTEXT_HISTORY_RATIO})",
-    )
-    parser.add_argument(
-        "--context_active_ratio",
-        type=float,
-        help=f"活跃消息比例 (环境变量: {ENV.CONTEXT_ACTIVE_RATIO})",
-    )
-    parser.add_argument(
-        "--context_max_new_message_ratio",
-        type=float,
-        help=f"新消息最大比例 (环境变量: {ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO})",
-    )
-    parser.add_argument(
-        "--context_recent_turns",
-        type=int,
-        help=f"最近对话轮数 (环境变量: {ENV.CONTEXT_RECENT_TURNS})",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        help=f"Server Port (环境变量: {ENV.PORT})",
-    )
-    parser.add_argument(
-        "--preset_mcp_config",
-        help=f"MCP配置文件路径 (环境变量: {ENV.PRESET_MCP_CONFIG})",
-    )
-    parser.add_argument(
-        "--preset_running_config",
-        help=f"预设配置，system_context，以及workflow，与接口中传过来的合并使用 (环境变量: {ENV.PRESET_RUNNING_CONFIG})",
-    )
-    parser.add_argument(
-        "--workspace",
-        help=f"工作空间目录 (环境变量: {ENV.WORKSPACE})",
-    )
-    parser.add_argument(
-        "--logs-dir",
-        help=f"日志目录 (环境变量: {ENV.LOGS_DIR})",
-    )
-
-    # Auth 配置
-    parser.add_argument(
-        "--jwt_key",
-        help=f"JWT Key (环境变量: {ENV.JWT_KEY})",
-    )
-    parser.add_argument(
-        "--jwt_expire_hours",
-        type=int,
-        help=f"JWT Expire Hours (环境变量: {ENV.JWT_EXPIRE_HOURS})",
-    )
-    parser.add_argument(
-        "--refresh_token_secret",
-        help=f"Refresh Token Secret (环境变量: {ENV.REFRESH_TOKEN_SECRET})",
-    )
-
-    # Embedding 配置
-    parser.add_argument(
-        "--embedding_api_key",
-        help=f"Embedding API Key (环境变量: {ENV.EMBEDDING_API_KEY})",
-    )
-    parser.add_argument(
-        "--embedding_base_url",
-        help=f"Embedding Base URL (环境变量: {ENV.EMBEDDING_BASE_URL})",
-    )
-    parser.add_argument(
-        "--embedding_model",
-        help=f"Embedding Model (环境变量: {ENV.EMBEDDING_MODEL})",
-    )
-    parser.add_argument(
-        "--embedding_dims",
-        type=int,
-        help=f"Embedding Dims (环境变量: {ENV.EMBEDDING_DIMS})",
-    )
-
-    # Elasticsearch 配置
-    parser.add_argument(
-        "--es_url",
-        help=f"Elasticsearch URL (环境变量: {ENV.ES_URL})",
-    )
-    parser.add_argument(
-        "--es_api_key",
-        help=f"Elasticsearch API Key (环境变量: {ENV.ES_API_KEY})",
-    )
-    parser.add_argument(
-        "--es_username",
-        help=f"Elasticsearch Username (环境变量: {ENV.ES_USERNAME})",
-    )
-    parser.add_argument(
-        "--es_password",
-        help=f"Elasticsearch Password (环境变量: {ENV.ES_PASSWORD})",
-    )
-
-    # S3 配置
-    parser.add_argument(
-        "--s3_endpoint",
-        help=f"S3 Endpoint (环境变量: {ENV.S3_ENDPOINT})",
-    )
-    parser.add_argument(
-        "--s3_access_key",
-        help=f"S3 Access Key (环境变量: {ENV.S3_ACCESS_KEY})",
-    )
-    parser.add_argument(
-        "--s3_secret_key",
-        help=f"S3 Secret Key (环境变量: {ENV.S3_SECRET_KEY})",
-    )
-    parser.add_argument(
-        "--s3_secure",
-        action="store_true",
-        help=f"S3 使用 https (环境变量: {ENV.S3_SECURE})",
-    )
-    parser.add_argument(
-        "--s3_bucket_name",
-        help=f"S3 Bucket (环境变量: {ENV.S3_BUCKET_NAME})",
-    )
-    parser.add_argument(
-        "--s3_public_base_url",
-        help=f"S3 Public Base URL (环境变量: {ENV.S3_PUBLIC_BASE_URL})",
-    )
-
-    # Trace 配置
-    parser.add_argument(
-        "--trace_jaeger_endpoint",
-        help=f"Jaeger OTLP Endpoint (http/grpc), e.g. http://localhost:4317 (环境变量: {ENV.TRACE_JAEGER_URL})",
-    )
-
-    # 数据库相关参数
-    parser.add_argument(
-        "--db_type",
-        choices=["file", "memory", "mysql"],
-        help=f"数据库类型：file、memory、mysql (环境变量: {ENV.DB_TYPE})",
-    )
-    parser.add_argument(
-        "--db_path",
-        help=f"数据库文件存储路径，仅在file模式下有效 (环境变量: {ENV.DB_PATH})",
-    )
-
-    # MySQL 连接参数
-    parser.add_argument("--mysql_host")
-    parser.add_argument("--mysql_port", type=int)
-    parser.add_argument("--mysql_user")
-    parser.add_argument("--mysql_password")
-    parser.add_argument("--mysql_database")
-
-    return parser
-
-
 def build_startup_config() -> StartupConfig:
-    """解析命令行并按优先级合并环境变量与默认值，得到结构化启动配置"""
-    parser = create_argument_parser()
-    args = parser.parse_args()
+    """解析环境变量与默认值，得到结构化启动配置"""
 
     cfg = StartupConfig(
-        port=pick_int(args.port, ENV.PORT, StartupConfig.port),
-        logs_dir=pick_str(args.logs_dir, ENV.LOGS_DIR, StartupConfig.logs_dir),
-        workspace=pick_str(args.workspace, ENV.WORKSPACE, StartupConfig.workspace),
+        port=env_int(ENV.PORT, StartupConfig.port),
+        logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),
+        session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),
+        agents_dir=env_str(ENV.AGENTS_DIR, StartupConfig.agents_dir),
 
-        db_type=pick_str(args.db_type, ENV.DB_TYPE, StartupConfig.db_type),
-        db_path=pick_str(args.db_path, ENV.DB_PATH, StartupConfig.db_path),
-        mysql_host=pick_str(args.mysql_host, ENV.MYSQL_HOST, StartupConfig.mysql_host),
-        mysql_port=pick_int(args.mysql_port, ENV.MYSQL_PORT, StartupConfig.mysql_port),
-        mysql_user=pick_str(args.mysql_user, ENV.MYSQL_USER, StartupConfig.mysql_user),
-        mysql_password=pick_str(
-            args.mysql_password, ENV.MYSQL_PASSWORD, StartupConfig.mysql_password
+        db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type),
+        mysql_host=env_str(ENV.MYSQL_HOST, StartupConfig.mysql_host),
+        mysql_port=env_int(ENV.MYSQL_PORT, StartupConfig.mysql_port),
+        mysql_user=env_str(ENV.MYSQL_USER, StartupConfig.mysql_user),
+        mysql_password=env_str(
+            ENV.MYSQL_PASSWORD, StartupConfig.mysql_password
         ),
-        mysql_database=pick_str(
-            args.mysql_database, ENV.MYSQL_DATABASE, StartupConfig.mysql_database
+        mysql_database=env_str(
+            ENV.MYSQL_DATABASE, StartupConfig.mysql_database
         ),
         mysql_charset=StartupConfig.mysql_charset,
-        preset_mcp_config=pick_str(
-            args.preset_mcp_config,
-            ENV.PRESET_MCP_CONFIG,
-            StartupConfig.preset_mcp_config,
-        ),
-        preset_running_config=pick_str(
-            args.preset_running_config,
-            ENV.PRESET_RUNNING_CONFIG,
-            StartupConfig.preset_running_config,
-        ),
-        default_llm_api_key=pick_str(
-            args.default_llm_api_key,
+
+        default_llm_api_key=env_str(
             ENV.DEFAULT_LLM_API_KEY,
             StartupConfig.default_llm_api_key,
         ),
-        default_llm_api_base_url=pick_str(
-            args.default_llm_api_base_url,
+        default_llm_api_base_url=env_str(
             ENV.DEFAULT_LLM_API_BASE_URL,
             StartupConfig.default_llm_api_base_url,
         ),
-        default_llm_model_name=pick_str(
-            args.default_llm_model_name,
+        default_llm_model_name=env_str(
             ENV.DEFAULT_LLM_MODEL_NAME,
             StartupConfig.default_llm_model_name,
         ),
-        default_llm_max_tokens=pick_int(
-            args.default_llm_max_tokens,
+        default_llm_max_tokens=env_int(
             ENV.DEFAULT_LLM_MAX_TOKENS,
             StartupConfig.default_llm_max_tokens,
         ),
-        default_llm_temperature=pick_float(
-            args.default_llm_temperature,
+        default_llm_temperature=env_float(
             ENV.DEFAULT_LLM_TEMPERATURE,
             StartupConfig.default_llm_temperature,
         ),
-        default_llm_max_model_len=pick_int(
-            args.default_llm_max_model_len,
+        default_llm_max_model_len=env_int(
             ENV.DEFAULT_LLM_MAX_MODEL_LEN,
             StartupConfig.default_llm_max_model_len,
         ),
-        default_llm_top_p=pick_float(
-            args.default_llm_top_p,
+        default_llm_top_p=env_float(
             ENV.DEFAULT_LLM_TOP_P,
             StartupConfig.default_llm_top_p,
         ),
-        default_llm_presence_penalty=pick_float(
-            args.default_llm_presence_penalty,
+        default_llm_presence_penalty=env_float(
             ENV.DEFAULT_LLM_PRESENCE_PENALTY,
             StartupConfig.default_llm_presence_penalty,
         ),
-        context_history_ratio=pick_float(
-            args.context_history_ratio,
+        context_history_ratio=env_float(
             ENV.CONTEXT_HISTORY_RATIO,
             StartupConfig.context_history_ratio,
         ),
-        context_active_ratio=pick_float(
-            args.context_active_ratio,
+        context_active_ratio=env_float(
             ENV.CONTEXT_ACTIVE_RATIO,
             StartupConfig.context_active_ratio,
         ),
-        context_max_new_message_ratio=pick_float(
-            args.context_max_new_message_ratio,
+        context_max_new_message_ratio=env_float(
             ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
             StartupConfig.context_max_new_message_ratio,
         ),
-        context_recent_turns=pick_int(
-            args.context_recent_turns,
+        context_recent_turns=env_int(
             ENV.CONTEXT_RECENT_TURNS,
             StartupConfig.context_recent_turns,
         ),
-        jwt_key=pick_str(args.jwt_key, ENV.JWT_KEY, StartupConfig.jwt_key),
-        jwt_expire_hours=pick_int(
-            args.jwt_expire_hours, ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
+        jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key),
+        jwt_expire_hours=env_int(
+            ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
         ),
-        refresh_token_secret=pick_str(
-            args.refresh_token_secret,
+        refresh_token_secret=env_str(
             ENV.REFRESH_TOKEN_SECRET,
             StartupConfig.refresh_token_secret,
         ),
-        embed_api_key=pick_str(
-            args.embedding_api_key, ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
+        embed_api_key=env_str(
+            ENV.EMBEDDING_API_KEY, StartupConfig.embed_api_key
         ),
-        embed_base_url=pick_str(
-            args.embedding_base_url,
+        embed_base_url=env_str(
             ENV.EMBEDDING_BASE_URL,
             StartupConfig.embed_base_url,
         ),
-        embed_model=pick_str(
-            args.embedding_model, ENV.EMBEDDING_MODEL, StartupConfig.embed_model
+        embed_model=env_str(
+            ENV.EMBEDDING_MODEL, StartupConfig.embed_model
         ),
-        embed_dims=pick_int(
-            args.embedding_dims, ENV.EMBEDDING_DIMS, StartupConfig.embed_dims
+        embed_dims=env_int(
+            ENV.EMBEDDING_DIMS, StartupConfig.embed_dims
         ),
-        es_url=pick_str(args.es_url, ENV.ES_URL, StartupConfig.es_url),
-        es_api_key=pick_str(args.es_api_key, ENV.ES_API_KEY, StartupConfig.es_api_key),
-        es_username=pick_str(
-            args.es_username, ENV.ES_USERNAME, StartupConfig.es_username
+        es_url=env_str(ENV.ES_URL, StartupConfig.es_url),
+        es_api_key=env_str(ENV.ES_API_KEY, StartupConfig.es_api_key),
+        es_username=env_str(
+            ENV.ES_USERNAME, StartupConfig.es_username
         ),
-        es_password=pick_str(
-            args.es_password, ENV.ES_PASSWORD, StartupConfig.es_password
+        es_password=env_str(
+            ENV.ES_PASSWORD, StartupConfig.es_password
         ),
-        s3_endpoint=pick_str(
-            args.s3_endpoint, ENV.S3_ENDPOINT, StartupConfig.s3_endpoint
+        s3_endpoint=env_str(
+            ENV.S3_ENDPOINT, StartupConfig.s3_endpoint
         ),
-        s3_access_key=pick_str(
-            args.s3_access_key, ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key
+        s3_access_key=env_str(
+            ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key
         ),
-        s3_secret_key=pick_str(
-            args.s3_secret_key, ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key
+        s3_secret_key=env_str(
+            ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key
         ),
-        s3_secure=pick_bool(
-            args.s3_secure, ENV.S3_SECURE, StartupConfig.s3_secure
+        s3_secure=env_bool(
+            ENV.S3_SECURE, StartupConfig.s3_secure
         ),
-        s3_bucket_name=pick_str(
-            args.s3_bucket_name,
+        s3_bucket_name=env_str(
             ENV.S3_BUCKET_NAME,
             StartupConfig.s3_bucket_name,
         ),
-        s3_public_base_url=pick_str(
-            args.s3_public_base_url,
+        s3_public_base_url=env_str(
             ENV.S3_PUBLIC_BASE_URL,
             StartupConfig.s3_public_base_url,
         ),
-        trace_jaeger_endpoint=pick_str(
-            args.trace_jaeger_endpoint,
+        trace_jaeger_endpoint=env_str(
             ENV.TRACE_JAEGER_URL,
             StartupConfig.trace_jaeger_endpoint,
         ),
     )
     # 规范化路径
-    if cfg.workspace:
-        cfg.workspace = os.path.abspath(cfg.workspace)
-        os.makedirs(cfg.workspace, exist_ok=True)
+    if cfg.session_dir:
+        cfg.session_dir = os.path.abspath(cfg.session_dir)
+        os.makedirs(cfg.session_dir, exist_ok=True)
     if cfg.logs_dir:
         cfg.logs_dir = os.path.abspath(cfg.logs_dir)
         os.makedirs(cfg.logs_dir, exist_ok=True)
-    if cfg.db_type == "file" and cfg.db_path:
-        cfg.db_path = os.path.abspath(cfg.db_path)
+    if cfg.agents_dir:
+        cfg.agents_dir = os.path.abspath(cfg.agents_dir)
+        os.makedirs(cfg.agents_dir, exist_ok=True)
 
     return cfg
 

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+from fastapi.responses import FileResponse
 
 from ..core.render import Response
 from ..services.agent import (
@@ -18,9 +19,12 @@ from ..services.agent import (
     update_agent,
     get_agent_authorized_users,
     update_agent_authorizations,
+    get_file_workspace,
+    download_agent_file,
+    delete_agent_file,
 )
 from sagents.utils.prompt_manager import PromptManager
-
+from loguru import logger
 # ============= Agent相关模型 =============
 
 
@@ -320,3 +324,48 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     
     await update_agent_authorizations(agent_id, req.user_ids, user_id, role)
     return await Response.succ(data={}, message="更新授权成功")
+
+@agent_router.post("/{agent_id}/file_workspace")
+async def get_workspace(agent_id: str, request: Request):
+    """获取指定会话的文件工作空间"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+
+    result = await get_file_workspace(agent_id, user_id)
+    files = result.get("files", [])
+    logger.bind(agent_id=agent_id).info(f"获取工作空间文件数量：{len(files)}")
+    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
+
+@agent_router.get("/{agent_id}/file_workspace/download")
+async def download_file(agent_id: str, request: Request):
+    """获取指定会话的文件工作空间"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+
+    file_path = request.query_params.get("file_path")
+    logger.info(f"Download request: file_path={file_path}")
+    try:
+        path, filename, media_type = await download_agent_file(agent_id, user_id, file_path)
+        logger.info(f"Download resolved: path={path}")
+        return FileResponse(
+            path=path, filename=filename, media_type=media_type
+        )
+    except Exception as e:
+        logger.error(f"Download failed: {e}")
+        raise
+
+
+@agent_router.delete("/{agent_id}/file_workspace/delete")
+async def delete_file(agent_id: str, request: Request):
+    """删除指定会话的文件"""
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+
+    file_path = request.query_params.get("file_path")
+    logger.info(f"Delete request: file_path={file_path}")
+    try:
+        await delete_agent_file(agent_id, user_id, file_path)
+        return await Response.succ(message=f"文件 {file_path} 已删除")
+    except Exception as e:
+        logger.error(f"Delete failed: {e}")
+        raise

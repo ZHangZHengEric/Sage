@@ -84,7 +84,7 @@ class FibreOrchestrator:
         if session_context is None:
             from sagents.session_runtime import get_global_session_manager
             workspace_root = (
-                os.environ.get("SAGE_WORKSPACE_PATH")
+                os.environ.get("SAGE_SESSION_DIR")
                 or os.environ.get("PREFIX_FILE_WORKSPACE")
                 or os.path.abspath("agent_workspace")
             )

@@ -23,7 +23,6 @@ class StartupConfig:
 
     # DB
     db_type: str = "file"  # file | memory
-    db_path: str = "./data/"  # file 模式为目录；memory 为忽略
 
     # Presets
     preset_mcp_config: str = "mcp_setting.json"
@@ -90,7 +89,6 @@ class ENV:
 
     # 数据库
     DB_TYPE = "SAGE_DB_TYPE"
-    DB_PATH = "SAGE_DB_PATH"
 
     # 旧版 LLM 环境变量兜底
     LEGACY_LLM_API_KEY = "LLM_API_KEY"
