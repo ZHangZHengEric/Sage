@@ -38,7 +38,6 @@ export const messageTypeLabels = new Map([
 export const toolLabels = {
   'search_codebase': '代码搜索',
   'view_files': '查看文件',
-  'update_file': '编辑文件',
   'file_update': '编辑文件',
   'write_to_file': '写入文件',
   'run_command': '执行命令',

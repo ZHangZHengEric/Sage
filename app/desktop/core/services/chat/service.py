@@ -177,12 +177,12 @@ async def populate_request_from_agent_config(
     # 处理可用技能
     available_skills = request.available_skills
     if available_skills:
-        # file_read execute_python_code execute_shell_command file_write update_file 五种工具注入
+        # file_read execute_python_code execute_shell_command file_write file_update 五种工具注入
         current_skills = getattr(request, "available_skills", [])
         if current_skills is None:
             current_skills = []
             setattr(request, "available_skills", current_skills)
-        need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
+        need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "file_update"]
         current_tools = request.available_tools
         for tool in need_tools:
             if tool not in current_tools:
