@@ -52,8 +52,12 @@ DEFAULT_SLIDE = """<ppt-slide width="13.333" height="7.5" theme="{theme}" auto-b
   <ppt-notes>
     讲者备注：这页是可编辑的PPT对象（非PNG）。可以在这里写演讲提示、口播稿、补充数据来源。
   </ppt-notes>
+  <!-- DEFAULT_SLIDE_MARKER: This is the auto-generated default slide -->
 </ppt-slide>
 """
+
+# 用于识别默认封面的标记
+DEFAULT_SLIDE_MARKER = "DEFAULT_SLIDE_MARKER"
 
 
 @dataclass
@@ -349,7 +353,28 @@ class PPTProjectManager:
             # 验证通过，重命名为正式文件
             temp_file.rename(target_file)
             
+            # 检查是否存在默认封面页（通过内容标记判断），如果存在则删除并用当前页面替换
+            default_slide = self.slides_dir / "01-cover.xml"
+            deleted_default = False
+            if default_slide.exists():
+                # 读取内容检查是否是默认封面
+                try:
+                    content = default_slide.read_text(encoding="utf-8")
+                    if DEFAULT_SLIDE_MARKER in content:
+                        # 是默认封面，删除它
+                        default_slide.unlink()
+                        # 重命名当前页面为01
+                        new_name = self.slides_dir / _format_slide_filename(1, name)
+                        target_file.rename(new_name)
+                        target_file = new_name
+                        deleted_default = True
+                except Exception:
+                    # 读取失败，不删除
+                    pass
+            
             success_msg = f"已添加页面: {target_file.name}"
+            if deleted_default:
+                success_msg += "\n已删除默认封面页"
             if fixes and auto_fix:
                 success_msg += "\n自动修复的问题:\n"
                 for fix in fixes:

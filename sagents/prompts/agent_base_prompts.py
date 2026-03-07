@@ -219,8 +219,9 @@ skills_usage_hint = {
 4. 如果现有 Skill 的能力范围与用户的请求相关，也请优先加载使用。
 
 **注意**：
-- 同时只能加载一个 Skill。
-- 可以通过多次调用 `load_skill` 来切换加载不同的 Skill（新 Skill 会替换旧 Skill）。
+- 可以同时加载多个 Skill，总 token 数限制为 8000。
+- 如果超过限制，系统会自动移除最早加载的 Skill。
+- 可以通过多次调用 `load_skill` 来加载更多 Skill。
 
 **使用步骤**：
 1. 分析用户的意图。
@@ -242,8 +243,9 @@ You **MUST prioritize** using the `load_skill` tool to load a new skill when:
 4. An existing Skill is relevant to the user's request.
 
 **Note**:
-- Only one Skill can be loaded at a time.
-- You can switch loaded Skills by calling `load_skill` multiple times (the new Skill will replace the old one).
+- Multiple Skills can be loaded simultaneously, with a total token limit of 8000.
+- If the limit is exceeded, the system will automatically remove the oldest loaded Skill.
+- You can load more Skills by calling `load_skill` multiple times.
 
 **Steps**:
 1. Analyze the user's intent.
@@ -265,8 +267,9 @@ Você **DEVE priorizar** o uso da ferramenta `load_skill` para carregar uma nova
 4. Uma Skill existente é relevante para a solicitação do usuário.
 
 **Nota**:
-- Apenas uma Skill pode ser carregada por vez.
-- Você pode alternar as Skills carregadas chamando `load_skill` várias vezes (a nova Skill substituirá a antiga).
+- Múltiplas Skills podem ser carregadas simultaneamente, com um limite total de 8000 tokens.
+- Se o limite for excedido, o sistema removerá automaticamente a Skill carregada mais antiga.
+- Você pode carregar mais Skills chamando `load_skill` várias vezes.
 
 **Passos**:
 1. Analise a intenção do usuário.

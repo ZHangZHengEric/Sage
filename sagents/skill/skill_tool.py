@@ -83,7 +83,7 @@ class SkillTool:
         # 鉴于 Agent 框架的通常实现，Tool Output 本身就是 Context 的一部分。
         # 所以我们把 SKILL.md 的内容和文件树作为 Tool Output 返回即可。
 
-        result = [
+        result_content = [
             f"## Skill: {skill.name}",
             "",
             "### Skill Folder Path:",
@@ -96,4 +96,9 @@ class SkillTool:
             skill.instructions
         ]
 
-        return "\n".join(result)
+        # 返回包含 skill_name 和 content 的字典，方便 tool_manager 处理
+        import json
+        return json.dumps({
+            "skill_name": skill.name,
+            "content": "\n".join(result_content)
+        }, ensure_ascii=False, indent=2)
