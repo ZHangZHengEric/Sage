@@ -63,7 +63,7 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group" data-message-type="assistant">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
@@ -83,16 +83,15 @@
           </button>
         </div>
         <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
-          <MarkdownRenderer
+          <MarkdownRendererWithPreview
             :content="formatMessageContent(message.content)"
-            :components="markdownComponents"
           />
         </div>
       </div>
     </div>
 
     <!-- 工具渲染 -->
-    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
+    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2" data-message-type="tool">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
@@ -139,6 +138,7 @@ import { computed, h, ref } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
+import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
@@ -213,7 +213,9 @@ const tokenUsageData = computed(() => {
 })
 
 const hasToolCalls = computed(() => {
-  return props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
+  const hasCalls = props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
+  console.log('MessageRenderer - role:', props.message.role, 'hasToolCalls:', hasCalls, 'content:', props.message.content?.substring(0, 100))
+  return hasCalls
 })
 
 
@@ -418,6 +420,8 @@ const isLatestMessage = computed(() => {
     }
     return true
 })
+
+
 
 
 const isCustomToolMessage = computed(() => {
