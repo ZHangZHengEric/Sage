@@ -59,8 +59,8 @@ graph TD
 |------|------|--------|------|
 | `SAGE_PORT` | integer | 8080 | 服务端口 |
 | `SAGE_LOGS_DIR_PATH` | string | "logs" | 日志目录 |
-| `SAGE_WORKSPACE_PATH` | string | "agent_workspace" | 工作空间目录 |
-| `SAGE_MEMORY_ROOT` | string | None | 记忆存储根目录（可选） |
+| `SAGE_SESSION_DIR` | string | "sessions" | 会话目录 |
+
 | `SAGE_FORCE_SUMMARY` | boolean | false | 是否强制生成总结 |
 | `SAGE_MCP_CONFIG_PATH` | string | "mcp_setting.json" | MCP 配置文件路径 |
 | `SAGE_PRESET_RUNNING_CONFIG_PATH` | string | "agent_setting.json" | 预设运行配置文件路径 |
@@ -92,7 +92,6 @@ graph TD
 | 变量 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
 | `SAGE_DB_TYPE` | string | "file" | 数据库类型（file/memory/mysql） |
-| `SAGE_DB_PATH` | string | "./data/" | 数据库文件路径（file 模式） |
 
 ### MySQL 设置
 
@@ -186,10 +185,9 @@ SAGE_CONTEXT_RECENT_TURNS=6
 
 # 运行设置
 SAGE_PORT=8080
-SAGE_WORKSPACE_PATH=./agent_workspace
+SAGE_SESSION_DIR=./sessions
 SAGE_LOGS_DIR_PATH=./logs
 SAGE_DB_TYPE=file
-SAGE_DB_PATH=./data/
 
 # 存储设置
 SAGE_EMBEDDING_MODEL=text-embedding-3-large
