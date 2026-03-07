@@ -41,10 +41,6 @@ async def stream_with_manager(
     """
     manager = StreamManager.get_instance()
     has_stream_data = False
-    if resume and last_index == 0:
-        query = await manager.get_session_query(session_id)
-        if query:
-            yield json.dumps({"role": "user", "content": query, "message_id": str(uuid.uuid4()), "type": "user", "session_id": session_id}, ensure_ascii=False) + "\n"
     async for chunk in manager.subscribe(session_id, last_index):
         has_stream_data = True
         yield chunk
