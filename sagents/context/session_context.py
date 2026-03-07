@@ -798,18 +798,20 @@ class SessionContext:
     def get_tokens_usage_info(self):
         """获取tokens使用信息"""
         tokens_info = {"total_info": {}, "per_step_info": []}
-        for llm_request in self.llm_requests_logs:
+        logger.info(f"get_tokens_usage_info: llm_requests_logs count={len(self.llm_requests_logs)}")
+        for i, llm_request in enumerate(self.llm_requests_logs):
+            # logger.info(f"get_tokens_usage_info: processing request {i}")
             raw_response = llm_request['response']
-            logger.info(f"get_tokens_usage_info: raw_response type={type(raw_response)}, has usage={hasattr(raw_response, 'usage') if raw_response else False}")
+            # logger.info(f"get_tokens_usage_info: raw_response type={type(raw_response)}, has usage={hasattr(raw_response, 'usage') if raw_response else False}")
             if raw_response and hasattr(raw_response, 'usage'):
-                logger.info(f"get_tokens_usage_info: raw_response.usage={raw_response.usage}")
+                logger.debug(f"get_tokens_usage_info: raw_response.usage={raw_response.usage}")
             
             response_dict = make_serializable(raw_response)
-            logger.info(f"get_tokens_usage_info: response_dict type={type(response_dict)}, keys={response_dict.keys() if isinstance(response_dict, dict) else 'N/A'}")
+            # logger.info(f"get_tokens_usage_info: response_dict type={type(response_dict)}, keys={response_dict.keys() if isinstance(response_dict, dict) else 'N/A'}")
             if not isinstance(response_dict, dict):
                 continue
             if 'usage' in response_dict and response_dict['usage']:
-                logger.info(f"get_tokens_usage_info: usage={response_dict['usage']}")
+                # logger.info(f"get_tokens_usage_info: usage={response_dict['usage']}")
                 step_info = {
                     "step_name": (llm_request.get("request") or {}).get("step_name", "unknown"),
                     "usage": response_dict.get("usage"),
