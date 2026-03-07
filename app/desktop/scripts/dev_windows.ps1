@@ -134,6 +134,7 @@ $SidecarWrapper = "$TauriSidecarDir\sage-desktop.cmd"
 $WrapperContent = @"
 @echo off
 set PYTHONPATH=$RootDir;%PYTHONPATH%
+set AGENT_BROWSER_HEADED=1
 "$PythonExec" "$AppDir\entry.py" %*
 "@
 
