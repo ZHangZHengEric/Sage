@@ -486,6 +486,11 @@ const convertLocalPathLinksToSystemOpen = (html) => {
     (match, pre, href, post, text) => {
       if (!isLocalAbsolutePath(href)) return match
       const localPath = normalizeLocalPath(href)
+      const filename = localPath.split('/').pop() || 'file'
+      
+      // 获取文件图标
+      const icon = getFileIcon(filename)
+      
       return `
         <a
           ${pre}
@@ -493,9 +498,10 @@ const convertLocalPathLinksToSystemOpen = (html) => {
           ${post}
           data-local-path="${escapeHtml(localPath)}"
           onclick="window.openMarkdownLocalPath(this); return false;"
-          class="text-primary underline underline-offset-4 hover:opacity-80 break-all cursor-pointer select-none"
+          class="text-primary underline underline-offset-4 hover:opacity-80 inline-flex items-center gap-1 break-all cursor-pointer select-none"
         >
-          ${text || localPath}
+          <span class="file-icon">${icon}</span>
+          <span>${text || filename}</span>
         </a>
       `
     }
@@ -504,10 +510,26 @@ const convertLocalPathLinksToSystemOpen = (html) => {
 
 const preprocessContent = (content) => {
   if (!content) return ''
-  return content.replace(
+  
+  // 处理 skill 标签，转换为特殊格式
+  let processed = content.replace(
+    /<skill>(.*?)<\/skill>/gi,
+    (match, skillName) => {
+      const trimmedName = skillName.trim()
+      return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-xs font-medium border border-primary/20 mx-0.5 align-middle">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+        ${trimmedName}
+      </span>`
+    }
+  )
+  
+  // 处理文件链接
+  processed = processed.replace(
     /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
     (match) => match.replace(/\s/g, '%20')
   )
+  
+  return processed
 }
 
 const renderedContent = computed(() => {
