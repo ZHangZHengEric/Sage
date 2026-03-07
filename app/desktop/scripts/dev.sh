@@ -106,10 +106,10 @@ if [[ "$CONDA_EXE" == *"anaconda3"* ]]; then
     conda install -n "$ENV_NAME" numba -y
 fi
 echo "正在安装依赖..."
-pip install -r "$APP_DIR/core/requirements.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r "$APP_DIR/core/requirements.txt" --index-url https://mirrors.aliyun.com/pypi/simple
 
 if ! command -v pyinstaller >/dev/null; then
-  pip install pyinstaller --index-url https://pypi.org/simple
+  pip install pyinstaller --index-url https://mirrors.aliyun.com/pypi/simple
 fi
 
 ########################################
