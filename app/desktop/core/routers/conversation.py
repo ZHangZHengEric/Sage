@@ -114,24 +114,23 @@ async def list_conversations(
 @conversation_router.get("/api/conversations/{session_id}/messages")
 async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
-
     data = await get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取消息成功")
 
 
-@conversation_router.get("/api/share/conversations/{conversation_id}/messages")
-async def get_shared_messages(conversation_id: str):
+@conversation_router.get("/api/share/conversations/{session_id}/messages")
+async def get_shared_messages(session_id: str):
     """获取分享对话的消息（无权限校验）"""
-    data = await get_conversation_messages(conversation_id)
+    data = await get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取分享消息成功")
 
 
-@conversation_router.delete("/api/conversations/{conversation_id}")
-async def delete(conversation_id: str, request: Request):
+@conversation_router.delete("/api/conversations/{session_id}")
+async def delete(session_id: str, request: Request):
     """删除指定对话"""
-    conversation_id_res = await delete_conversation(conversation_id)
-    logger.bind(session_id=conversation_id).info("会话删除成功")
+    session_id_res = await delete_conversation(session_id)
+    logger.bind(session_id=session_id).info("会话删除成功")
     return await Response.succ(
-        message=f"会话 {conversation_id} 已删除",
-        data={"conversation_id": conversation_id_res},
+        message=f"会话 {session_id} 已删除",
+        data={"session_id": session_id_res},
     )

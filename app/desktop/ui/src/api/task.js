@@ -40,14 +40,6 @@ class TaskAPI extends BaseAPI {
   getTaskHistory(id, params) {
     return this.get(`/tasks/recurring/${id}/history`, params)
   }
-  /**
-   * 获取任务状态
-   * @param {string} sessionId - 会话ID
-   * @returns {Promise<Object>}
-   */
-  getTaskStatus(sessionId) {
-    return this.post(`/api/sessions/${sessionId}/tasks_status`, {})
-  }
 
   /**
    * 获取工作空间文件

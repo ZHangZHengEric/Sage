@@ -155,7 +155,6 @@ async def chat(request: ChatRequest, http_request: Request):
     return StreamingResponse(
         stream_api_with_disconnect_check(
             execute_chat_session(
-                mode="chat",
                 stream_service=stream_service,
             ),
             http_request,
@@ -177,7 +176,6 @@ async def stream_chat(request: StreamRequest, http_request: Request):
     return StreamingResponse(
         stream_api_with_disconnect_check(
             execute_chat_session(
-                mode="stream",
                 stream_service=stream_service,
             ),
             http_request,
@@ -210,7 +208,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     await manager.start_session(
         session_id, 
         query,
-        execute_chat_session(mode="web-stream", stream_service=stream_service),
+        execute_chat_session(stream_service=stream_service),
         lock
     )
 

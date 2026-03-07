@@ -6,7 +6,6 @@ from .bootstrap import (
     close_tool_manager,
     initialize_db_connection,
     initialize_global_clients,
-    initialize_preset_data,
     initialize_observability,
     initialize_scheduler,
     initialize_skill_manager,
@@ -30,9 +29,6 @@ async def initialize_system(cfg: StartupConfig):
 
     # 2. 确保数据库表存在 (Ensure tables exist)
     await ensure_system_init(cfg)
-
-    # 3. 初始化数据库预置数据 (Initialize preset data)
-    await initialize_preset_data(cfg)
 
     # 4. 初始化观测链路上报 (Initialize Observability - needs DB)
     await initialize_observability(cfg)

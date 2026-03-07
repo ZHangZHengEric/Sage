@@ -6,10 +6,7 @@
 
 import json
 import os
-import mimetypes
-import tempfile
-import zipfile
-import shutil
+
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -52,83 +49,6 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks_status.get('tasks', []))}")
     return {"session_id": session_id, "tasks_status": tasks_status}
 
-
-async def get_file_workspace(session_id: str) -> Dict[str, Any]:
-    """获取指定会话的文件工作空间内容"""
-    workspace_root = _get_workspace_root()
-    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
-
-    if not workspace_path or not os.path.exists(workspace_path):
-        return {
-            "session_id": session_id,
-            "files": [],
-            "message": "工作空间为空",
-        }
-
-    files: List[Dict[str, Any]] = []
-    for root, dirs, filenames in os.walk(workspace_path):
-        # 过滤掉隐藏文件和文件夹
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        filenames = [f for f in filenames if not f.startswith(".")]
-        for filename in filenames:
-            file_path = os.path.join(root, filename)
-            relative_path = os.path.relpath(file_path, workspace_path)
-            file_stat = os.stat(file_path)
-            files.append(
-                {
-                    "name": filename,
-                    "path": relative_path,
-                    "size": file_stat.st_size,
-                    "modified_time": file_stat.st_mtime,
-                    "is_directory": False,
-                }
-            )
-
-        for dirname in dirs:
-            dir_path = os.path.join(root, dirname)
-            relative_path = os.path.relpath(dir_path, workspace_path)
-            files.append(
-                {
-                    "name": dirname,
-                    "path": relative_path,
-                    "size": 0,
-                    "modified_time": os.stat(dir_path).st_mtime,
-                    "is_directory": True,
-                }
-            )
-
-    logger.bind(session_id=session_id).info(f"获取工作空间文件数量：{len(files)}")
-    return {
-        "session_id": session_id,
-        "files": files,
-        "message": "获取文件列表成功",
-    }
-
-
-def resolve_download_path(workspace_path: str, file_path: str) -> str:
-    """校验并返回可下载的文件绝对路径"""
-    if not workspace_path or not file_path:
-        raise SageHTTPException(
-            status_code=500,
-            detail="缺少必要的路径参数",
-            error_detail="workspace_path or file_path missing",
-        )
-    full_file_path = os.path.join(workspace_path, file_path)
-    if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
-        raise SageHTTPException(
-            status_code=500,
-            detail="访问被拒绝：文件路径超出工作空间范围",
-            error_detail="Access denied: file path outside workspace",
-        )
-    if not os.path.exists(full_file_path):
-        raise SageHTTPException(
-            status_code=500,
-            detail=f"文件不存在: {file_path}",
-            error_detail=f"File not found: {file_path}",
-        )
-    return full_file_path
-
-
 async def get_conversations_paginated(
     page: int = 1,
     page_size: int = 10,
@@ -150,19 +70,20 @@ async def get_conversations_paginated(
     return conversations, total_count
 
 
-async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
+async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
     dao = models.ConversationDao()
-    conversation = await dao.get_by_session_id(conversation_id)
+    conversation = await dao.get_by_session_id(session_id)
     if not conversation:
         raise SageHTTPException(
             status_code=500,
-            detail=f"会话 {conversation_id} 不存在",
-            error_detail=f"Conversation '{conversation_id}' not found",
+            detail=f"会话 {session_id} 不存在",
+            error_detail=f"Conversation '{session_id}' not found",
         )
 
     messages = []
-    for m in session_manager.get_session_messages(conversation_id):
+    session_manager = get_global_session_manager()
+    for m in session_manager.get_session_messages(session_id):
         result = m.to_dict()
         result = ContentProcessor.clean_content(result)
         messages.append(result)
@@ -193,7 +114,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
                         logger.warning(f"处理子任务消息失败: {e}")
                         
     return {
-        "conversation_id": conversation_id,
+        "conversation_id": session_id,
         "messages": messages,
         "message_count": len(messages),
         "conversation_info": {
@@ -228,93 +149,6 @@ async def delete_conversation(conversation_id: str) -> str:
     logger.bind(session_id=conversation_id).info("会话删除成功")
     return conversation_id
 
-
-async def download_session_file(session_id: str, file_path: str) -> Tuple[str, str, str]:
-    """
-    下载会话文件
-
-    :param session_id: 会话ID
-    :param file_path: 相对文件路径
-    :return: (file_path, filename, media_type)
-    """
-    workspace_root = _get_workspace_root()
-    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
-
-    full_path = resolve_download_path(workspace_path, file_path)
-
-    # 检查是否为文件或目录
-    if os.path.isdir(full_path):
-        # 如果是目录，创建zip文件并下载
-        try:
-            # 使用临时文件存储zip
-            temp_dir = tempfile.gettempdir()
-            zip_filename = f"{os.path.basename(full_path)}.zip"
-            zip_path = os.path.join(temp_dir, zip_filename)
-
-            # 创建zip文件
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(full_path):
-                    for file in files:
-                        file_abs_path = os.path.join(root, file)
-                        # 计算在zip中的相对路径
-                        rel_path = os.path.relpath(file_abs_path, full_path)
-                        zipf.write(file_abs_path, rel_path)
-
-            return zip_path, zip_filename, "application/zip"
-        except Exception as e:
-            raise SageHTTPException(
-                status_code=500,
-                detail=f"创建压缩文件失败: {str(e)}",
-                error_detail=f"Failed to create zip file: {str(e)}",
-            )
-
-    if not os.path.isfile(full_path):
-        raise SageHTTPException(
-            status_code=500,
-            detail=f"路径不是文件: {file_path}",
-            error_detail=f"Path is not a file: {file_path}",
-        )
-
-    # 获取MIME类型
-    mime_type, _ = mimetypes.guess_type(full_path)
-    if mime_type is None:
-        mime_type = "application/octet-stream"
-
-    return full_path, os.path.basename(full_path), mime_type
-
-async def delete_session_file(session_id: str, file_path: str) -> bool:
-    """
-    删除会话文件或目录
-
-    :param session_id: 会话ID
-    :param file_path: 相对文件路径
-    :return: 是否删除成功
-    """
-    workspace_root = _get_workspace_root()
-    workspace_path = os.path.join(workspace_root, session_id, "agent_workspace")
-    
-    # 路径安全校验
-    full_path = resolve_download_path(workspace_path, file_path)
-    
-    try:
-        if os.path.isfile(full_path):
-            os.remove(full_path)
-        elif os.path.isdir(full_path):
-            shutil.rmtree(full_path)
-        else:
-            raise SageHTTPException(
-                status_code=500,
-                detail=f"路径不存在: {file_path}",
-                error_detail=f"Path not found: {file_path}",
-            )
-        return True
-    except Exception as e:
-        logger.error(f"删除文件失败: {e}")
-        raise SageHTTPException(
-            status_code=500,
-            detail=f"删除文件失败: {str(e)}",
-            error_detail=f"Failed to delete file: {str(e)}",
-        )
 
 async def update_conversation_title(session_id: str, title: str) -> Dict[str, Any]:
     """更新会话标题"""

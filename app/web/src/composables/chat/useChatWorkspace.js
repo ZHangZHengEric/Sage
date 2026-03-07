@@ -1,10 +1,10 @@
 import { ref } from 'vue'
-import { taskAPI } from '@/api/task.js'
+import { agentAPI } from '@/api/agent.js'
 
 export const useChatWorkspace = ({
   t,
   toast,
-  currentSessionId
+  agentId
 }) => {
   const showWorkspace = ref(false)
   const workspaceFiles = ref([])
@@ -12,36 +12,36 @@ export const useChatWorkspace = ({
   const expandedTasks = ref(new Set())
   const lastMessageId = ref(null)
 
-  const fetchWorkspaceFiles = async (sessionId) => {
-    if (!sessionId) return
+  const fetchWorkspaceFiles = async (id) => {
+    if (!id) return
     try {
-      const data = await taskAPI.getWorkspaceFiles(sessionId)
+      const data = await agentAPI.getWorkspaceFiles(id)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
     }
   }
 
-  const updateTaskAndWorkspace = (sessionId) => {
-    if (sessionId) {
-      fetchWorkspaceFiles(sessionId)
+  const updateTaskAndWorkspace = (id) => {
+    if (id) {
+      fetchWorkspaceFiles(id)
     }
   }
 
   const handleWorkspacePanel = () => {
     showWorkspace.value = !showWorkspace.value
     if (showWorkspace.value) {
-      updateTaskAndWorkspace(currentSessionId.value)
+      updateTaskAndWorkspace(agentId.value)
     }
   }
 
-  const downloadWorkspaceFile = async (sessionId, itemOrPath) => {
-    if (!sessionId || !itemOrPath) return
+  const downloadWorkspaceFile = async (id, itemOrPath) => {
+    if (!id || !itemOrPath) return
     const filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
     const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false
     if (!filePath) return
     try {
-      const blob = await taskAPI.downloadFile(sessionId, filePath)
+      const blob = await agentAPI.downloadFile(id, filePath)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
@@ -63,8 +63,8 @@ export const useChatWorkspace = ({
 
   const downloadFile = async (item) => {
     try {
-      if (currentSessionId.value) {
-        await downloadWorkspaceFile(currentSessionId.value, item)
+      if (agentId.value) {
+        await downloadWorkspaceFile(agentId.value, item)
       }
     } catch (error) {
       toast.error(t('chat.downloadError'))
