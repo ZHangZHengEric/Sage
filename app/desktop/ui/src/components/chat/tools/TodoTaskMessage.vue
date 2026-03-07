@@ -18,7 +18,7 @@
       </div>
 
       <!-- Tasks List -->
-      <div v-if="tasks.length > 0" class="space-y-2">
+      <div v-if="tasks.length > 0" class="space-y-2 max-h-[300px] overflow-y-auto pr-1">
         <div 
           v-for="(task, index) in tasks" 
           :key="index" 
