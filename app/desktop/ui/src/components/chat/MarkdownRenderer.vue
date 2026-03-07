@@ -344,6 +344,50 @@ const addImageDownloadButton = (html) => {
   })
 }
 
+// 文件类型图标映射
+const getFileIcon = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase()
+  const iconMap = {
+    // 文档
+    'pdf': '📄',
+    'doc': '📝', 'docx': '📝',
+    'xls': '📊', 'xlsx': '📊',
+    'ppt': '📽️', 'pptx': '📽️',
+    'txt': '📃',
+    'md': '📑',
+    // 视频
+    'mp4': '🎬', 'webm': '🎬', 'mov': '🎬', 'avi': '🎬',
+    // 音频
+    'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵',
+    // 代码
+    'js': '📜', 'ts': '📜', 'py': '📜', 'java': '📜', 'cpp': '📜', 'c': '📜', 'go': '📜', 'rs': '📜',
+    'html': '🌐', 'css': '🎨', 'vue': '💚', 'jsx': '⚛️', 'tsx': '⚛️',
+    'json': '📋', 'xml': '📋', 'yaml': '📋', 'yml': '📋',
+    // 压缩包
+    'zip': '📦', 'rar': '📦', '7z': '📦', 'tar': '📦', 'gz': '📦',
+    // 其他
+    'csv': '📊', 'sql': '🗄️', 'exe': '⚙️', 'dmg': '💿', 'apk': '📱'
+  }
+  return iconMap[ext] || '📎' // 默认图标
+}
+
+// 检测是否为文件链接（有扩展名且不是图片）
+const isFileLink = (url) => {
+  try {
+    const cleanUrl = url.split(/[?#]/)[0]
+    const filename = cleanUrl.split('/').pop()
+    if (!filename || !filename.includes('.') || filename.endsWith('.')) {
+      return false
+    }
+    // 排除图片文件
+    const ext = filename.split('.').pop().toLowerCase()
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']
+    return !imageExts.includes(ext)
+  } catch (e) {
+    return false
+  }
+}
+
 const convertHttpLinksToDownload = (html) => {
   return html.replace(
     /<a([^>]*?)href="(https?:\/\/[^"]+)"([^>]*)>(.*?)<\/a>/gi,
@@ -358,6 +402,9 @@ const convertHttpLinksToDownload = (html) => {
         filename = cleanUrl.split('/').pop() || 'download'
       } catch (e) { console.warn('解析URL文件名失败:', e) }
 
+      // 如果是文件链接，添加图标
+      const icon = isFileLink(href) ? getFileIcon(filename) : '🔗'
+
       return `
         <a
           href="${href.replace(/ /g, '%20')}"
@@ -366,7 +413,8 @@ const convertHttpLinksToDownload = (html) => {
           rel="noopener"
           class="text-primary underline underline-offset-4 hover:opacity-80 inline-flex items-center gap-1"
         >
-          ${filename}
+          <span class="file-icon">${icon}</span>
+          <span>${filename}</span>
         </a>
       `
     }
