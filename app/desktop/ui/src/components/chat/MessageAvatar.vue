@@ -1,6 +1,6 @@
 <template>
   <Avatar class="h-8 w-8 shadow-sm transition-transform hover:scale-105 bg-muted/50" :class="{ 'border': !avatarUrl }">
-    <AvatarImage v-if="avatarUrl && role === 'assistant'" :src="avatarUrl" :alt="avatarContent.label" />
+    <AvatarImage v-if="avatarUrl" :src="avatarUrl" :alt="avatarContent.label" />
     <AvatarFallback 
       :class="[avatarContent.bgClass, role === 'user' ? 'text-primary-foreground' : 'text-white']"
       class="flex items-center justify-center"
@@ -15,6 +15,7 @@
 import { computed } from 'vue'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { User, Bot, Terminal, FileText, Edit3, Save, Zap, Settings, AlertTriangle, MessageSquare, Search } from 'lucide-vue-next'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps({
   messageType: {
@@ -35,9 +36,15 @@ const props = defineProps({
   }
 })
 
+const userStore = useUserStore()
 
 const avatarUrl = computed(() => {
+  if (props.role === 'user') {
+    // 用户头像使用 Avataaars 风格
+    return userStore.avatarUrl
+  }
   if (props.role === 'assistant' && props.agentId) {
+    // Agent 头像使用 bottts 风格
     return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(props.agentId)}`
   }
   return ''
