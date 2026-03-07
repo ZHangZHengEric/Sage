@@ -67,6 +67,7 @@ const jsToJson = (jsStr) => {
 
 const chartList = [] // 存放所有图表容器与配置项
 const mermaidList = [] // 存放所有 mermaid 图表
+const excalidrawList = [] // 存放所有 excalidraw 图表
 const renderer = new marked.Renderer()
 
 // 修改 renderer.code，不再使用 Prism，只返回基础 HTML
@@ -99,6 +100,48 @@ renderer.code = (code, language) => {
     const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`
     mermaidList.push({id, code: codeText})
     return `<div id="${id}" class="mermaid my-4 flex justify-center">${escapeHtml(codeText)}</div>`
+  }
+
+  if (lang === 'excalidraw') {
+    // 尝试解析并显示 Excalidraw 预览
+    try {
+      const data = JSON.parse(codeText)
+      const elementCount = data.elements?.length || 0
+      const appState = data.appState || {}
+      const bgColor = appState.viewBackgroundColor || '#ffffff'
+      
+      return `
+        <div class="excalidraw-preview my-4 border rounded-lg overflow-hidden bg-white">
+          <div class="flex items-center justify-between px-3 py-2 bg-muted border-b">
+            <div class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-primary">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+              </svg>
+              <span class="text-sm font-medium">Excalidraw 图表</span>
+              <span class="text-xs text-muted-foreground">(${elementCount} 个元素)</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button 
+                onclick="this.closest('.excalidraw-preview').querySelector('.excalidraw-content').classList.toggle('hidden')"
+                class="px-2 py-1 text-xs bg-background hover:bg-muted rounded border"
+              >
+                显示/隐藏 JSON
+              </button>
+            </div>
+          </div>
+          <div class="excalidraw-content hidden p-3 bg-muted/30">
+            <pre class="text-xs overflow-auto max-h-[200px]"><code>${escapeHtml(codeText.substring(0, 2000))}${codeText.length > 2000 ? '...' : ''}</code></pre>
+          </div>
+          <div class="p-3 text-sm text-muted-foreground bg-[${bgColor}]" style="background-color: ${bgColor}">
+            <p>💡 提示：将内容保存为 .excalidraw 文件，然后在 <a href="https://excalidraw.com" target="_blank" class="text-primary underline">Excalidraw</a> 中打开查看完整图表</p>
+          </div>
+        </div>
+      `
+    } catch (e) {
+      return `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">无效的 Excalidraw 格式: ${e.message}</pre>`
+    }
   }
 
   return `<pre><code class="language-${lang}">${escapeHtml(codeText)}</code></pre>`
@@ -440,7 +483,7 @@ const convertVideoLinks = (html) => {
   return html
 }
 
-const unixAbsolutePathPattern = /^\/(Users|home|Volumes|private|tmp|var|opt|Applications|System|Library)\//
+const unixAbsolutePathPattern = /^\/((Users|home|Volumes|private|tmp|var|opt|Applications|System|Library)\/.+|\.sage\/.+)/
 const windowsAbsolutePathPattern = /^[a-zA-Z]:[\\/]/
 const fileProtocolPattern = /^file:\/\//i
 
@@ -484,13 +527,15 @@ const convertLocalPathLinksToSystemOpen = (html) => {
   return html.replace(
     /<a([^>]*?)href="([^"]+)"([^>]*)>(.*?)<\/a>/gi,
     (match, pre, href, post, text) => {
+      // 如果链接已经有 file-icon，说明已经在 preprocessContent 中处理过了
+      if (text.includes('file-icon')) return match
       if (!isLocalAbsolutePath(href)) return match
       const localPath = normalizeLocalPath(href)
       const filename = localPath.split('/').pop() || 'file'
-      
+
       // 获取文件图标
       const icon = getFileIcon(filename)
-      
+
       return `
         <a
           ${pre}
@@ -523,12 +568,33 @@ const preprocessContent = (content) => {
     }
   )
   
-  // 处理文件链接
+  // 处理本地文件链接 - 将 Markdown 格式的本地文件链接转换为 HTML，避免 marked 解析问题
+  // 匹配 [text](/path/to/file) 格式，路径可以包含括号
   processed = processed.replace(
-    /(https?:\/\/[^\n\r"<>)]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
+    /\[([^\]]*)\]\((\/(?:[^()]*|\([^)]*\))*)\)/g,
+    (match, text, path) => {
+      // 检查是否是本地绝对路径
+      if (isLocalAbsolutePath(path)) {
+        const icon = getFileIcon(path.split('/').pop() || 'file')
+        // 如果 [] 中的文字为空，使用路径中的文件名
+        let displayText = text.trim()
+        if (!displayText) {
+          displayText = path.split('/').pop() || 'file'
+          // 清理文件名，去掉时间戳后缀
+          displayText = displayText.replace(/_\d{14}\.([^.]+)$/, '.$1')
+        }
+        return `<a href="${escapeHtml(path)}" data-local-path="${escapeHtml(normalizeLocalPath(path))}" onclick="window.openMarkdownLocalPath(this); return false;" class="text-primary underline underline-offset-4 hover:opacity-80 inline-flex items-center gap-1 break-all cursor-pointer select-none"><span class="file-icon">${icon}</span><span>${escapeHtml(displayText)}</span></a>`
+      }
+      return match
+    }
+  )
+
+  // 处理 HTTP 文件链接
+  processed = processed.replace(
+    /(https?:\/\/[^\n\r"<>]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
     (match) => match.replace(/\s/g, '%20')
   )
-  
+
   return processed
 }
 

@@ -248,10 +248,18 @@ const handleSubmit = (e) => {
     }
 
     if (uploadedFiles.value.length > 0) {
-      const fileInfos = uploadedFiles.value.filter(f => f.url).map(f => ({
-        url: f.url,
-        name: f.name || '文件'
-      }))
+      const fileInfos = uploadedFiles.value.filter(f => f.url).map(f => {
+        // 清理文件名，去掉时间戳后缀（如 _20260307191202.md）
+        let cleanName = f.name || '文件'
+        // 移除时间戳模式：_YYYYMMDDhhmmss.扩展名
+        cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
+        // 如果还有时间戳在中间，也尝试移除
+        cleanName = cleanName.replace(/_\d{14}_/, '_')
+        return {
+          url: f.url,
+          name: cleanName
+        }
+      })
 
       if (fileInfos.length > 0) {
         if (messageContent) {
