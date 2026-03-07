@@ -153,7 +153,7 @@ class SimpleAgent(AgentBase):
                                 session_context: SessionContext) -> bool:
         # 如果最后一个messages role 是tool，说明是工具调用的结果，不是用户的请求，所以不是任务完成
         if messages_input[-1].role == 'tool':
-            logger.info("messages_input[-1].role是 tool 调用结果，不是任务完成")
+            logger.debug("messages_input[-1].role是 tool 调用结果，不是任务完成")
             return False
 
         # 只提取最后一个user以及之后的messages
