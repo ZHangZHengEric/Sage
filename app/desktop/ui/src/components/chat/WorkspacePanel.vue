@@ -60,18 +60,18 @@ const fileTree = computed(() => {
   const root = []
   const map = {}
   
-  // Initialize map with all items
-  // Deep copy to avoid mutating props and to handle children array
+  const hasBackslash = props.workspaceFiles.some(f => f.path.includes('\\'))
+  const separator = hasBackslash ? '\\' : '/'
+  
   props.workspaceFiles.forEach(file => {
     map[file.path] = { ...file, children: [] }
   })
   
-  // Build tree
   props.workspaceFiles.forEach(file => {
     const node = map[file.path]
-    const parts = file.path.split('/')
+    const parts = file.path.split(/[/\\]/)
     if (parts.length > 1) {
-      const parentPath = parts.slice(0, -1).join('/')
+      const parentPath = parts.slice(0, -1).join(separator)
       if (map[parentPath]) {
         map[parentPath].children.push(node)
       } else {

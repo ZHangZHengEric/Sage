@@ -377,29 +377,44 @@ class ExecuteCommandTool:
             pass
     
     def _execute_background(self, command: str, workdir: Optional[str], env: Dict, process_id: str) -> Dict[str, Any]:
-        """后台执行"""
-        logger.info(f"[_execute_background] 开始, workdir={workdir}")
+        """後台執行"""
+        logger.info(f"[_execute_background] 開始, workdir={workdir}")
         log_dir = os.path.join(workdir or os.getcwd(), ".sandbox_logs")
         logger.info(f"[_execute_background] log_dir={log_dir}")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"bg_{process_id}.log")
         logger.info(f"[_execute_background] log_file={log_file}")
         
-        # 使用括号包裹，确保 cd 在子 shell 中执行
-        nohup_cmd = f"nohup sh -c '{command}' > {log_file} 2>&1 &"
-        logger.info(f"[_execute_background] nohup_cmd={nohup_cmd}")
+        if platform.system() == "Windows":
+            cmd_exe = os.environ.get("COMSPEC", "cmd.exe")
+            bg_cmd = f'start "" /B {command} > "{log_file}" 2>&1'
+            logger.info(f"[_execute_background] Windows 模式, cmd={bg_cmd}")
+            
+            process = subprocess.Popen(
+                bg_cmd,
+                cwd=workdir,
+                shell=True,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+        else:
+            nohup_cmd = f"nohup sh -c '{command}' > {log_file} 2>&1 &"
+            logger.info(f"[_execute_background] Unix 模式, nohup_cmd={nohup_cmd}")
+            
+            logger.info(f"[_execute_background] 啟動 subprocess, cwd={workdir}")
+            process = subprocess.Popen(
+                nohup_cmd,
+                cwd=workdir,
+                shell=True,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
         
-        logger.info(f"[_execute_background] 启动 subprocess, cwd={workdir}")
-        process = subprocess.Popen(
-            nohup_cmd,
-            cwd=workdir,
-            shell=True,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        logger.info(f"[_execute_background] subprocess 启动完成, pid={process.pid}")
+        logger.info(f"[_execute_background] subprocess 啟動完成, pid={process.pid}")
         
         return {
             "success": True,
