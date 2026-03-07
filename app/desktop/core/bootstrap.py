@@ -123,7 +123,7 @@ async def initialize_session_manager():
 
 
 async def copy_default_skills():
-    """复制默认 skills 到用户目录（如果是首次运行）"""
+    """复制默认 skills 到用户目录（每次启动都检查并同步）"""
     try:
         import shutil
         from pathlib import Path
@@ -132,12 +132,6 @@ async def copy_default_skills():
         user_home = Path.home()
         user_skills_dir = user_home / ".sage" / "skills"
         user_skills_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 检查是否已初始化（通过检查标记文件）
-        init_marker = user_skills_dir / ".defaults_copied"
-        if init_marker.exists():
-            logger.debug("默认 skills 已复制，跳过")
-            return
         
         # 获取打包的默认 skills 目录
         # 在开发环境中使用相对路径，在生产环境中使用 tauri 资源路径
@@ -175,20 +169,19 @@ async def copy_default_skills():
             logger.warning(f"默认 skills 目录不存在: {default_skills_dir}")
             return
         
-        logger.info(f"复制默认 skills 从 {default_skills_dir} 到 {user_skills_dir}")
+        logger.info(f"同步内置 skills 从 {default_skills_dir} 到 {user_skills_dir}")
         
-        # 复制每个 skill
+        # 复制每个 skill（只复制不存在的，已存在的跳过）
         copied_count = 0
+        skipped_count = 0
         for skill_path in default_skills_dir.iterdir():
             if skill_path.is_dir():
                 target_path = user_skills_dir / skill_path.name
                 try:
                     if target_path.exists():
-                        logger.debug(f"Skill {skill_path.name} 已存在，准备覆盖")
-                        if target_path.is_dir():
-                            shutil.rmtree(target_path)
-                        else:
-                            target_path.unlink()
+                        logger.debug(f"Skill {skill_path.name} 已存在，跳过")
+                        skipped_count += 1
+                        continue
 
                     shutil.copytree(skill_path, target_path)
                     logger.info(f"已复制 skill: {skill_path.name}")
@@ -196,12 +189,10 @@ async def copy_default_skills():
                 except Exception as e:
                     logger.error(f"复制 skill {skill_path.name} 失败: {e}")
         
-        # 创建标记文件
-        init_marker.touch()
-        logger.info(f"默认 skills 复制完成，共复制 {copied_count} 个")
+        logger.info(f"内置 skills 同步完成，新增 {copied_count} 个，跳过 {skipped_count} 个已存在")
         
     except Exception as e:
-        logger.error(f"复制默认 skills 失败: {e}")
+        logger.error(f"同步内置 skills 失败: {e}")
 
 
 async def close_skill_manager():
