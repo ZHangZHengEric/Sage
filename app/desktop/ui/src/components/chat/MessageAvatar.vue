@@ -109,11 +109,6 @@ const getToolAvatar = (toolName) => {
       bgClass: 'bg-cyan-500',
       label: '查看文件'
     },
-    'update_file': {
-      icon: Edit3,
-      bgClass: 'bg-emerald-500',
-      label: '编辑文件'
-    },
     'file_update': {
       icon: Edit3,
       bgClass: 'bg-emerald-500',

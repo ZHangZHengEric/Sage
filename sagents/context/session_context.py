@@ -81,7 +81,7 @@ class SessionContext:
 
     def init_more(self, session_root_space: str, agent_workspace: Optional[str] = None):
         use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
-        logger.info(f"SessionContext: use_sandbox: {use_sandbox}")
+        logger.debug(f"SessionContext: use_sandbox: {use_sandbox}")
         
         # 解析工作空间路径，确保 session_root_space 存在，并设置 self.agent_workspace
         self._resolve_workspace_paths(session_root_space, agent_workspace)
@@ -241,7 +241,7 @@ class SessionContext:
 
     def _prepare_workspace_bootstrap_files(self):
         use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
-        logger.info(f"SessionContext: use_claw_mode: {use_claw_mode}")
+        logger.debug(f"SessionContext: use_claw_mode: {use_claw_mode}")
         if use_claw_mode:
             agent_md_path = os.path.join(self.agent_workspace, "AGENT.md")
             if not os.path.exists(agent_md_path):
@@ -292,7 +292,7 @@ class SessionContext:
             self.virtual_workspace = "/sage-workspace"
         else:
             self.virtual_workspace = self.agent_workspace
-        logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {self.virtual_workspace}")
+        logger.info(f"SessionContext: 开始初始化沙箱环境，工作区: {self.virtual_workspace}")
         t0 = time.time()
         self.sandbox = Sandbox(
             host_workspace=self.agent_workspace,
@@ -303,7 +303,7 @@ class SessionContext:
             macos_isolation_mode='subprocess',
             linux_isolation_mode='subprocess'
         )
-        logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
+        logger.info(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         # agent_workspace (string) is already set in _resolve_workspace_paths
         self.agent_workspace_sandbox = self.sandbox
         self.file_system = self.sandbox.file_system
@@ -843,7 +843,7 @@ class SessionContext:
                     "note": "Stream response does not include token usage"
                 }
                 tokens_info["per_step_info"].append(step_info)
-        logger.info(f"get_tokens_usage_info: final tokens_info={tokens_info}")
+        logger.debug(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 
     def save(self):

@@ -912,7 +912,6 @@ class AgentBase(ABC):
                     yield chunk
                 return
 
-            logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
             if not tool_manager:
                 raise ValueError("Tool manager is not provided")
 
@@ -1297,7 +1296,6 @@ class AgentBase(ABC):
             tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
         """
         logger.info(f"{self.agent_name}: LLM响应包含 {len(tool_calls)} 个工具调用")
-        logger.info(f"{self.agent_name}: 工具调用: {tool_calls}")
 
         for tool_call_id, tool_call in tool_calls.items():
             tool_name = tool_call['function']['name']

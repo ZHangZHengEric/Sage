@@ -48,10 +48,10 @@ class Sandbox:
                  virtual_workspace: str = "/sage-workspace", 
                  linux_isolation_mode: str = 'auto', 
                  macos_isolation_mode: str = 'subprocess'):
-        logger.info(f"初始化沙箱 Sandbox")
-        logger.info(f"  平台: {sys.platform}")
-        logger.info(f"  host_workspace: {host_workspace}")
-        logger.info(f"  virtual_workspace: {virtual_workspace}")
+        logger.debug(f"初始化沙箱 Sandbox")
+        logger.debug(f"  平台: {sys.platform}")
+        logger.debug(f"  host_workspace: {host_workspace}")
+        logger.debug(f"  virtual_workspace: {virtual_workspace}")
         
         self.linux_isolation_mode = self._resolve_linux_mode(linux_isolation_mode)
         self.macos_isolation_mode = macos_isolation_mode
@@ -61,7 +61,7 @@ class Sandbox:
         else:
             self.isolation_mode = self.linux_isolation_mode
             
-        logger.info(f"  隔离模式: {self.isolation_mode}")
+        logger.debug(f"  隔离模式: {self.isolation_mode}")
         
         self.limits = {
             'cpu_time': cpu_time_limit,
@@ -109,7 +109,7 @@ class Sandbox:
             self._ensure_venv_async()
             self._init_isolation()
 
-        logger.info(f"沙箱初始化完成")
+        logger.debug(f"沙箱初始化完成")
 
     def _resolve_linux_mode(self, mode: str) -> str:
         if mode != 'auto':
@@ -241,7 +241,7 @@ class Sandbox:
         运行工具函数（异步版本）。
         """
         import asyncio
-        logger.info(f"[Sandbox.run_tool] 开始执行")
+        logger.debug(f"[Sandbox.run_tool] 开始执行")
         
         # 映射路径
         host_kwargs = self._map_to_host(kwargs)
