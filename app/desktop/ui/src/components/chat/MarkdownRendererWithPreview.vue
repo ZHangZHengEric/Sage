@@ -33,6 +33,7 @@ const props = defineProps({
 
 // 检测内容中的可预览文件链接
 const filePreviews = computed(() => {
+  console.log('MarkdownRendererWithPreview content:', props.content?.substring(0, 200))
   if (!props.content) return []
 
   const files = []
@@ -76,6 +77,20 @@ const filePreviews = computed(() => {
   const plainPathRegex = /(?:^|\s)(\/[^\s]+\.(?:pdf|png|jpg|jpeg|gif|webp|svg|html|htm|md|markdown|excalidraw|txt|json|xml|yaml|yml|csv|js|ts|jsx|tsx|py|java|cpp|c|go|rs|css|scss|vue|php|rb|sql|sh|bash))(?:\s|$)/gi
   while ((match = plainPathRegex.exec(props.content)) !== null) {
     checkAndAddFile(match[1], counter++)
+  }
+
+  // 匹配不完整的 Markdown 链接 [filename.ext]（缺少路径部分）
+  // 尝试从后面的文本中查找对应的路径
+  const incompleteLinkRegex = /\[([^\]]+\.(?:pdf|png|jpg|jpeg|gif|webp|svg|html|htm|md|markdown|excalidraw|txt|json|xml|yaml|yml|csv|js|ts|jsx|tsx|py|java|cpp|c|go|rs|css|scss|vue|php|rb|sql|sh|bash))\](?!\()/gi
+  while ((match = incompleteLinkRegex.exec(props.content)) !== null) {
+    const filename = match[1]
+    // 在链接后面的文本中查找包含该文件名的路径
+    const afterLink = props.content.substring(match.index + match[0].length)
+    const pathRegex = new RegExp(`(\/[^\s]*${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`)
+    const pathMatch = afterLink.match(pathRegex)
+    if (pathMatch) {
+      checkAndAddFile(pathMatch[1], counter++)
+    }
   }
 
   return files
