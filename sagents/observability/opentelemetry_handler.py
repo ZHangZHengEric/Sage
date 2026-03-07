@@ -24,7 +24,15 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def __init__(self, service_name: str = "sagents", export_to_console: bool = False):
         self.service_name = service_name
         self.tracer = trace.get_tracer(service_name)
+        self._detached_token_ids: set[int] = set()
         # No longer using self.span_stacks for concurrency safety
+
+    def _safe_detach(self, token: Any):
+        token_id = id(token)
+        if token_id in self._detached_token_ids:
+            return
+        self._detached_token_ids.add(token_id)
+        context.detach(token)
 
     def _push_span(self, span: trace.Span):
         """Helper to activate span and push to stack"""
@@ -51,12 +59,12 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         # If we have a valid token, it means we haven't detached/ended yet.
         # We end it now to prevent leaks if finally block is missed.
         if token is not None:
-            span.end()
-            context.detach(token)
-
-            # Update stack to replace token with None (marking as ended/detached)
-            # This ensures subsequent _pop_span (in finally) won't try to end/detach again.
             _span_token_stack.set(current_stack[:-1] + ((span, None),))
+            try:
+                span.end()
+                self._safe_detach(token)
+            except Exception as e:
+                logger.warning(f"OpenTelemetry: Failed to finalize span on error: {e}")
 
     def _pop_span(self) -> Optional[trace.Span]:
         """Helper to pop span, end it (if not already), and detach context"""
@@ -65,18 +73,16 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             return None
 
         span, token = current_stack[-1]
+        _span_token_stack.set(current_stack[:-1])
 
         # Only end/detach if token exists (not already handled by error handler)
         if token is not None:
             try:
                 span.end()
-                context.detach(token)
-            except RuntimeError as e:
+                self._safe_detach(token)
+            except Exception as e:
                 # Token may have already been used/detached in a different context
                 logger.warning(f"OpenTelemetry: Failed to detach context (may be already detached): {e}")
-
-        # Always remove from stack
-        _span_token_stack.set(current_stack[:-1])
         return span
 
     def _get_current_span(self) -> Optional[trace.Span]:
@@ -98,7 +104,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
                 for span, token in reversed(current_stack):
                     if token is not None:
                         try:
-                            context.detach(token)
+                            self._safe_detach(token)
                         except Exception as e:
                             logger.warning(f"Failed to detach leaked token: {e}")
                     
