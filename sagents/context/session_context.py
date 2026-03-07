@@ -133,6 +133,15 @@ class SessionContext:
         if valid_messages:
             self.message_manager.add_messages(valid_messages)
 
+    def get_messages(self) -> List[MessageChunk]:
+        """
+        获取会话中的所有消息
+        
+        Returns:
+            List[MessageChunk]: 消息列表
+        """
+        return self.message_manager.messages
+
     def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
         """
         写入默认的Markdown文件到指定路径。
@@ -375,12 +384,14 @@ class SessionContext:
         try:
             messages_path = os.path.join(self.session_workspace, "messages.json")
             if os.path.exists(messages_path):
-                with open(messages_path, "r") as f:
+                with open(messages_path, "r", encoding="utf-8") as f:
                     messages_data = json.load(f)
                     if isinstance(messages_data, list):
                         self.message_manager.messages = [MessageChunk.from_dict(msg) for msg in messages_data]
                         logger.info(f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json")
                         return
+        except UnicodeDecodeError:
+            logger.warning(f"SessionContext: messages.json decode failed, file may be in legacy encoding, will start with empty messages")
         except Exception as e:
             logger.warning(f"SessionContext: Failed to load messages.json: {e}")
 
@@ -862,8 +873,7 @@ class SessionContext:
                 # logger.debug(f"SessionContext: Saving LLM request to {file_path}")
                 
                 try:
-                    with open(file_path, "w") as f:
-                        # 创建可序列化的副本
+                    with open(file_path, "w", encoding="utf-8") as f:
                         serializable_request = {
                             "request": make_serializable(llm_request['request']),
                             "response": make_serializable(llm_request['response']),
@@ -879,8 +889,7 @@ class SessionContext:
         # 2. 保存 messages 到 messages.json
         # 始终覆盖，保存完整历史
         try:
-            with open(os.path.join(self.session_workspace, "messages.json"), "w") as f:
-                # 先将messages 转换为可序列化的格式
+            with open(os.path.join(self.session_workspace, "messages.json"), "w", encoding="utf-8") as f:
                 serializable_messages = make_serializable(self.message_manager.messages)
                 json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
         except Exception as e:
@@ -910,7 +919,7 @@ class SessionContext:
                 "agent_config": make_serializable(self.agent_config)
             }
             
-            with open(os.path.join(self.session_workspace, "session_context.json"), "w") as f:
+            with open(os.path.join(self.session_workspace, "session_context.json"), "w", encoding="utf-8") as f:
                 json.dump(context_data, f, ensure_ascii=False, indent=4)
                 
         except Exception as e:

@@ -54,8 +54,6 @@
 </template>
 
 <script setup>
-import { defineOptions } from 'vue'
-
 // Enable recursive component
 defineOptions({
   name: 'JsonDataViewer'
