@@ -63,7 +63,7 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group" data-message-type="assistant">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
@@ -91,7 +91,7 @@
     </div>
 
     <!-- 工具渲染 -->
-    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2">
+    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2" data-message-type="tool">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
@@ -213,7 +213,9 @@ const tokenUsageData = computed(() => {
 })
 
 const hasToolCalls = computed(() => {
-  return props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
+  const hasCalls = props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
+  console.log('MessageRenderer - role:', props.message.role, 'hasToolCalls:', hasCalls, 'content:', props.message.content?.substring(0, 100))
+  return hasCalls
 })
 
 
