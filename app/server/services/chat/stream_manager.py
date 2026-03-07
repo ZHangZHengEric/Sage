@@ -77,7 +77,6 @@ class StreamManager:
                 await q.put(error_json)
         finally:
             session.is_completed = True
-            logger.info(f"Session {session.session_id} completed. Total chunks: {len(session.history)}")
             # 发送结束信号给订阅者 (None)
             for q in list(session.subscribers):
                 await q.put(None)
@@ -88,7 +87,7 @@ class StreamManager:
                     released = await safe_release(session.lock, session.session_id, "后台流结束清理")
                     delete_session_run_lock(session.session_id)
                     if released:
-                        logger.info(f"Released lock for session {session.session_id}")
+                        logger.debug(f"Released lock for session {session.session_id}")
                 except Exception as e:
                     logger.error(f"Error releasing lock for {session.session_id}: {e}")
 
