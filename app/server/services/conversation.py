@@ -13,7 +13,10 @@ import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
-from sagents.context.session_context import SessionStatus, get_session_messages, _get_workspace_root, get_sub_session_messages
+from sagents.context.session_context import SessionStatus
+from sagents.session_runtime import get_global_session_manager
+
+
 
 from .. import models
 from ..core.exceptions import SageHTTPException
@@ -159,7 +162,7 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
         )
 
     messages = []
-    for m in get_session_messages(conversation_id):
+    for m in session_manager.get_session_messages(conversation_id):
         result = m.to_dict()
         result = ContentProcessor.clean_content(result)
         messages.append(result)
@@ -181,20 +184,20 @@ async def get_conversation_messages(conversation_id: str) -> Dict[str, Any]:
                                 if isinstance(task, dict):
                                     sub_session_id = task.get('session_id')
                                     if sub_session_id:
-                                        sub_msgs = get_sub_session_messages(conversation_id, sub_session_id)
+                                        sub_msgs = session_manager.get_session_messages(sub_session_id)
                                         for sub_msg in sub_msgs:
                                             sub_result = sub_msg.to_dict()
                                             sub_result = ContentProcessor.clean_content(sub_result)
                                             messages.append(sub_result)
                     except Exception as e:
                         logger.warning(f"处理子任务消息失败: {e}")
+                        
     return {
         "conversation_id": conversation_id,
         "messages": messages,
         "message_count": len(messages),
         "conversation_info": {
             "session_id": conversation.session_id,
-            "user_id": conversation.user_id,
             "agent_id": conversation.agent_id,
             "agent_name": conversation.agent_name,
             "title": conversation.title,
