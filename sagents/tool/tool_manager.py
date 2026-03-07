@@ -882,7 +882,19 @@ class ToolManager:
                             # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
                             # usually it's bound method if created from class)
                             result = await session_context.agent_workspace_sandbox.run_tool(tool.func, kwargs)
-                            final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
+                            
+                            # Preserve skill_name for load_skill tool
+                            if tool_name == 'load_skill':
+                                try:
+                                    result_dict = json.loads(result) if isinstance(result, str) else result
+                                    final_result = json.dumps({
+                                        "skill_name": result_dict.get("skill_name", "unknown"),
+                                        "content": make_serializable(result_dict.get("content", result))
+                                    }, ensure_ascii=False, indent=2)
+                                except Exception:
+                                    final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
+                            else:
+                                final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
                             # Sync context for ToDo tools after successful sandbox execution
                             if tool.name in ["todo_write", "todo_read", "todo_update"]:
