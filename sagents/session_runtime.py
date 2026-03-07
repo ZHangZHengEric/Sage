@@ -537,7 +537,7 @@ class SessionManager:
                 continue
                 
             # 检查是否是根会话
-            if os.path.exists(os.path.join(entry_path, "session_context.json")):
+            if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
                 self._all_session_paths[entry] = entry_path
                 logger.debug(f"Found root session: {entry}")
             
@@ -547,7 +547,7 @@ class SessionManager:
                 for sub_entry in os.listdir(sub_sessions_dir):
                     sub_entry_path = os.path.join(sub_sessions_dir, sub_entry)
                     if os.path.isdir(sub_entry_path):
-                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")):
+                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
                             self._all_session_paths[sub_entry] = sub_entry_path
                             logger.debug(f"Found sub session: {sub_entry}")
         
