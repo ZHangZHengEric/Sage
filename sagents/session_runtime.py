@@ -152,15 +152,18 @@ class Session:
                 if session_workspace:
                     context_path = os.path.join(session_workspace, "session_context.json")
                     if os.path.exists(context_path):
-                        with open(context_path, "r") as f:
+                        with open(context_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             return data.get("system_context")
                             
-            # 如果没找到，尝试在默认路径下查找 (session_root_space/session_id)
             default_path = os.path.join(self.session_root_space, session_id, "session_context.json")
             if os.path.exists(default_path):
-                 return json.load(open(default_path)).get("system_context")
+                with open(default_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("system_context")
                  
+        except UnicodeDecodeError:
+            logger.warning(f"SessionRuntime: Failed to decode session_context.json for {session_id}, file may be in legacy encoding")
         except Exception as e:
             logger.warning(f"SessionRuntime: Failed to load saved system_context for {session_id}: {e}")
             
@@ -697,6 +700,12 @@ class SessionManager:
         try:
             with open(messages_path, "r", encoding="utf-8") as f:
                 raw_messages = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error(f"SessionManager: Failed to decode messages.json for session {session_id}: {e}")
+            return []
+        except UnicodeDecodeError:
+            logger.error(f"SessionManager: messages.json encoding error for session {session_id}, file may be in legacy encoding")
+            return []
         except Exception as e:
             logger.error(f"SessionManager: 读取 messages.json 失败: {e}")
             return []
