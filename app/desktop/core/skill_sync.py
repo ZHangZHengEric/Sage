@@ -162,33 +162,33 @@ def sync_skills() -> dict:
 
 def sync_skills_with_logging():
     """Sync skills and print results."""
-    logger.info("=" * 60)
-    logger.info("Sage Skill Synchronization")
-    logger.info("=" * 60)
+    logger.debug("=" * 60)
+    logger.debug("Sage Skill Synchronization")
+    logger.debug("=" * 60)
     
     results = sync_skills()
     
-    logger.info(f"\nFound {results['total_ide_folders']} IDE skill folders")
-    logger.info(f"Skills copied: {results['copied']}")
-    logger.info(f"Skills skipped (already exist): {results['skipped']}")
+    logger.debug(f"\nFound {results['total_ide_folders']} IDE skill folders")
+    logger.debug(f"Skills copied: {results['copied']}")
+    logger.debug(f"Skills skipped (already exist): {results['skipped']}")
     
     if results['details']:
-        logger.info("\nDetails:")
+        logger.debug("\nDetails:")
         for detail in results['details']:
             action = detail['action']
             skill = detail['skill']
             source = detail['source']
             if action == 'copied':
-                logger.info(f"  ✓ [{source}] {skill} -> copied")
+                logger.debug(f"  ✓ [{source}] {skill} -> copied")
             else:
-                logger.info(f"  ⊘ [{source}] {skill} -> skipped ({detail.get('reason', '')})")
+                logger.debug(f"  ⊘ [{source}] {skill} -> skipped ({detail.get('reason', '')})")
     
     if results['errors']:
-        logger.info("\nErrors:")
+        logger.debug("\nErrors:")
         for error in results['errors']:
-            logger.info(f"  ✗ {error}")
+            logger.debug(f"  ✗ {error}")
     
-    logger.info("=" * 60)
+    logger.debug("=" * 60)
     
     return results
 

@@ -532,7 +532,7 @@ class SessionManager:
             logger.info(f"SessionManager: Session root space does not exist: {self.session_root_space}")
             return
         
-        logger.info(f"SessionManager: Scanning all sessions in {self.session_root_space}")
+        logger.debug(f"SessionManager: Scanning all sessions in {self.session_root_space}")
         
         for entry in os.listdir(self.session_root_space):
             entry_path = os.path.join(self.session_root_space, entry)

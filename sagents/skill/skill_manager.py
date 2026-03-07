@@ -87,7 +87,7 @@ class SkillManager:
         Reload all skills from disk.
         从磁盘重新加载所有技能。
         """
-        logger.info("Reloading skills...")
+        logger.debug("Reloading skills...")
         # Invalidate cache before reloading (重新加载前使缓存失效)
         self._skills_cache_valid = False
         self._load_skills_from_workspace()

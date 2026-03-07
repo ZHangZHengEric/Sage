@@ -454,7 +454,7 @@ class ToolManager:
                 return True
             elif new_priority == existing_priority:
                 # 相同优先级，保持现有工具
-                logger.warning(
+                logger.debug(
                     f"Tool '{tool_spec.name}' already registered with same priority, keeping existing tool"
                 )
                 return False
