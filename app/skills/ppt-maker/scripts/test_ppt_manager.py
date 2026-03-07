@@ -169,7 +169,10 @@ class TestPPTProjectManager(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIsNotNone(result.file_path)
         self.assertTrue(result.file_path.exists())
-        self.assertEqual(result.file_path.name, "02-content.xml")
+        # 第一个添加的页面会替换默认封面，所以是 01 而不是 02
+        self.assertEqual(result.file_path.name, "01-content.xml")
+        # 验证默认封面已被删除
+        self.assertFalse((self.project_dir / "slides" / "01-cover.xml").exists())
 
     def test_add_slide_validation_error(self):
         """测试添加页面验证失败"""
@@ -212,18 +215,18 @@ class TestPPTProjectManager(unittest.TestCase):
         manager = PPTProjectManager(self.project_dir)
         manager.init()
         
-        # 先添加一个页面
+        # 先添加一个页面（会替换默认封面，成为第1页）
         xml1 = '''<ppt-slide width="13.333" height="7.5" theme="tech-dark" auto-bg="true">
             <ppt-text class="title" x="1" y="0.9" w="11.333" h="1.2" color="#E5E7EB">旧标题</ppt-text>
         </ppt-slide>'''
         add_result = manager.add(name="content", xml_content=xml1)
         self.assertTrue(add_result.success)
         
-        # 更新第 2 页
+        # 更新第 1 页（因为默认封面已被删除）
         xml2 = '''<ppt-slide width="13.333" height="7.5" theme="tech-dark" auto-bg="true">
             <ppt-text class="title" x="1" y="0.9" w="11.333" h="1.2" color="#E5E7EB">新标题</ppt-text>
         </ppt-slide>'''
-        result = manager.update(position=2, xml_content=xml2)
+        result = manager.update(position=1, xml_content=xml2)
         
         self.assertTrue(result.success)
         self.assertIsNotNone(result.file_path)
@@ -248,7 +251,7 @@ class TestPPTProjectManager(unittest.TestCase):
         manager = PPTProjectManager(self.project_dir)
         manager.init()
         
-        # 添加两个页面
+        # 添加两个页面（第一个会替换默认封面）
         xml = '''<ppt-slide width="13.333" height="7.5" theme="tech-dark" auto-bg="true">
             <ppt-text class="title" x="1" y="0.9" w="11.333" h="1.2" color="#E5E7EB">页面</ppt-text>
         </ppt-slide>'''
@@ -261,9 +264,9 @@ class TestPPTProjectManager(unittest.TestCase):
         result = manager.remove(position=2)
         self.assertTrue(result.success)
         
-        # 检查只剩下 2 页
+        # 检查只剩下 1 页（因为第一个添加的页面替换了默认封面，然后删除了第2页）
         slides = _get_all_slides(manager.slides_dir)
-        self.assertEqual(len(slides), 2)
+        self.assertEqual(len(slides), 1)
 
     def test_list_slides(self):
         """测试列出页面"""
@@ -278,7 +281,8 @@ class TestPPTProjectManager(unittest.TestCase):
         
         list_result = manager.list_slides()
         self.assertTrue(list_result.success)
-        self.assertIn("共 2 页", list_result.message)
+        # 第一个添加的页面替换了默认封面，所以只有 1 页
+        self.assertIn("共 1 页", list_result.message)
 
     def test_view_slide(self):
         """测试查看页面"""
