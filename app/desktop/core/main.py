@@ -143,9 +143,9 @@ def main():
         agents_workspace_dir = sage_home / "agents"
         agents_workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        workspace = sage_home / "workspace"
-        workspace.mkdir(parents=True, exist_ok=True)
-        os.environ["SAGE_WORKSPACE_PATH"] = str(workspace)
+        sessions_dir = sage_home / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["SAGE_SESSIONS_PATH"] = str(sessions_dir)
 
         cfg = init_startup_config()
         
