@@ -12,6 +12,7 @@ from .tool_schema import (
 )
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext
+from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.serialization import make_serializable
 from pathlib import Path
 import json
@@ -976,16 +977,62 @@ class ToolManager:
                 try:
                     result_data = json.loads(final_result)
                     skill_content = result_data.get("content", "")
+                    skill_name = result_data.get("skill_name", "unknown")
                     
-                    # Update SessionContext: Store skill instruction in system_context
-                    # This automatically implements "replace existing" logic as we overwrite the key
-                    session_context.system_context['active_skill_instruction'] = skill_content
+                    # Update SessionContext: Store skill instruction in system_context as a list
+                    # Initialize active_skills list if not exists
+                    if 'active_skills' not in session_context.system_context:
+                        session_context.system_context['active_skills'] = []
+                    
+                    active_skills = session_context.system_context['active_skills']
+                    
+                    # Check if skill already exists, remove old entry
+                    active_skills = [s for s in active_skills if s.get('skill_name') != skill_name]
+                    
+                    # Add new skill to the end (newest)
+                    active_skills.append({
+                        'skill_name': skill_name,
+                        'skill_content': skill_content
+                    })
+                    
+                    # Limit total tokens to 8000, remove oldest if exceeded
+                    # But always keep at least one skill, even if it exceeds the limit
+                    MAX_SKILL_TOKENS = 8000
+                    total_tokens = 0
+                    # Use calculate_str_token_length for accurate token calculation
+                    for skill in active_skills:
+                        skill_content = skill.get('skill_content', '')
+                        skill_tokens = MessageManager.calculate_str_token_length(skill_content)
+                        total_tokens += skill_tokens
+                    
+                    # Remove oldest skills if total exceeds limit, but keep at least one
+                    while total_tokens > MAX_SKILL_TOKENS and len(active_skills) > 1:
+                        removed_skill = active_skills.pop(0)  # Remove oldest (first)
+                        removed_content = removed_skill.get('skill_content', '')
+                        removed_tokens = MessageManager.calculate_str_token_length(removed_content)
+                        total_tokens -= removed_tokens
+                        logger.info(f"Removed skill '{removed_skill.get('skill_name')}' due to token limit. Total tokens: {total_tokens}")
+                    
+                    # Ensure at least one skill remains (even if it exceeds token limit)
+                    if len(active_skills) == 0:
+                        logger.warning("All skills were removed due to token limit, but at least one skill should remain")
+                    
+                    session_context.system_context['active_skills'] = active_skills
+                    
+                    # Also update legacy field for backward compatibility
+                    # Concatenate all active skills
+                    all_instructions = "\n\n".join([
+                        f"=== {s.get('skill_name', 'Unknown')} ===\n{s.get('skill_content', '')}"
+                        for s in active_skills
+                    ])
+                    session_context.system_context['active_skill_instruction'] = all_instructions
                     
                     # Modify the return result to be a simple confirmation
-                    new_message = "Skill loaded successfully. Please follow the instructions in the System Prompt."
+                    skill_list = ", ".join([s.get('skill_name', 'Unknown') for s in active_skills])
+                    new_message = f"Skill '{skill_name}' loaded successfully. Current Active skills: {skill_list}. Total skills: {len(active_skills)}. Please follow the instructions in the System Prompt."
                     final_result = json.dumps({"content": new_message}, ensure_ascii=False, indent=2)
                     
-                    logger.info(f"Intercepted load_skill output and updated session_context for session {session_id}")
+                    logger.info(f"Intercepted load_skill output and updated session_context for session {session_id}. Active skills: {skill_list}")
                 except Exception as e:
                     logger.error(f"Failed to process load_skill interception: {e}")
                     # If interception fails, we continue with original result but log the error

@@ -177,8 +177,8 @@ class AgentBase(ABC):
         final_config.pop('base_url', None)
         all_chunks = []
 
-        # 重试配置
-        max_retries = 5
+        # 重试配置 - 增加重试次数以应对网络不稳定情况
+        max_retries = 8
         retry_count = 0
         last_exception = None
 
@@ -289,32 +289,35 @@ class AgentBase(ABC):
                 is_network_error = any(keyword in error_message for keyword in ["connection", "incomplete chunked read", "peer closed", "remoteprotocolerror"])
 
                 if is_network_error and retry_count < max_retries:
-                    wait_time = 2 ** retry_count
-                    logger.warning(f"{self.__class__.__name__}: 遇到网络错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    # 使用指数退避 + 随机抖动，避免同时重试
+                    import random
+                    wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
+                    logger.warning(f"{self.__class__.__name__}: 遇到网络错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
+                    continue  # 继续重试循环
                 else:
                     # 非网络错误或已达到最大重试次数
                     logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
-                all_chunks.append(
-                    chat_completion_chunk.ChatCompletionChunk(
-                        id="",
-                        object="chat.completion.chunk",
-                        created=0,
-                        model="",
-                        choices=[
-                            chat_completion_chunk.Choice(
-                                index=0,
-                                delta=chat_completion_chunk.ChoiceDelta(
-                                    content=traceback.format_exc(),
-                                    tool_calls=None,
-                                ),
-                                finish_reason="stop",
-                            )
-                        ],
-                        usage=None,
+                    all_chunks.append(
+                        chat_completion_chunk.ChatCompletionChunk(
+                            id="",
+                            object="chat.completion.chunk",
+                            created=0,
+                            model="",
+                            choices=[
+                                chat_completion_chunk.Choice(
+                                    index=0,
+                                    delta=chat_completion_chunk.ChoiceDelta(
+                                        content=traceback.format_exc(),
+                                        tool_calls=None,
+                                    ),
+                                    finish_reason="stop",
+                                )
+                            ],
+                            usage=None,
+                        )
                     )
-                )
-                raise e
+                    raise e
             finally:
                 # 只有在成功完成或最终失败时才记录
                 if retry_count == 0 or retry_count >= max_retries or (last_exception and not isinstance(last_exception, (RateLimitError, APIError))):
@@ -434,17 +437,17 @@ class AgentBase(ABC):
                             identity_content = identity_content[:300]+"……"
                         system_prefix += f"<identity>\n{identity_content}\n</identity>\n"
 
-            # 处理 active_skill_instruction (无论是否包含system_context，都先提取出来，避免污染通用context)
-            active_skill_instruction = None
-            if 'active_skill_instruction' in system_context_info:
-                active_skill_instruction = system_context_info.pop('active_skill_instruction')
+            # 处理 active_skills (无论是否包含system_context，都先提取出来，避免污染通用context)
+            active_skills = None
+            if 'active_skills' in system_context_info:
+                active_skills = system_context_info.pop('active_skills')
 
             # 2. System Context
             if 'system_context' in include_sections:
                 system_prefix += "<system_context>\n"
 
                 # Exclude external_paths from generic system_context display as they are handled separately
-                excluded_keys = {'active_skill_instruction', '可以访问的其他路径文件夹', 'external_paths'}
+                excluded_keys = {'active_skills', 'active_skill_instruction', '可以访问的其他路径文件夹', 'external_paths'}
 
                 for key, value in system_context_info.items():
                     if key in excluded_keys:
@@ -464,9 +467,16 @@ class AgentBase(ABC):
                         system_prefix += f"  <{key}>{str(value)}</{key}>\n"
                 system_prefix += "</system_context>\n"
 
-            # 3. Active Skill
-            if 'active_skill' in include_sections and active_skill_instruction:
-                system_prefix += f"<active_skill>\n{str(active_skill_instruction)}\n</active_skill>\n"
+            # 3. Active Skills - 使用新的格式 <active_skills><skill_name>content</skill_name>...</active_skills>
+            if 'active_skill' in include_sections and active_skills:
+                system_prefix += "<active_skills>\n"
+                for skill in active_skills:
+                    skill_name = skill.get('skill_name', 'unknown')
+                    skill_content = skill.get('skill_content', '')
+                    # 转义 XML 特殊字符
+                    skill_content_escaped = str(skill_content).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    system_prefix += f"  <{skill_name}>\n{skill_content_escaped}\n  </{skill_name}>\n"
+                system_prefix += "</active_skills>\n"
 
             logger.debug(f"{self.__class__.__name__}: 系统消息生成完成，总长度: {len(system_prefix)}")
 

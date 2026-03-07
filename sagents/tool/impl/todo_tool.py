@@ -319,16 +319,22 @@ class ToDoTool:
                 task_map[task_id] = new_task
                 added_count += 1
         
-        # 转换回列表
+        # 转换回列表，并添加 index 字段
         final_tasks = list(task_map.values())
+
+        # 按原始任务列表的顺序分配 index（如果传入的任务有顺序，保留该顺序）
+        # 首先给现有任务分配 index（基于它们在 task_map 中的顺序）
+        for idx, task in enumerate(final_tasks, start=1):
+            task['index'] = idx
 
         # 检查是否所有任务都已完成
         pending_tasks = [t for t in final_tasks if not t.get('completed', False)]
 
-        # 构建任务列表（用于返回）- 按任务ID排序确保顺序一致
-        sorted_tasks = sorted(final_tasks, key=lambda t: str(t.get('id', '')))
+        # 构建任务列表（用于返回）- 按 index 排序确保顺序一致
+        sorted_tasks = sorted(final_tasks, key=lambda t: t.get('index', 0))
         task_list = [
             {
+                "index": t.get('index', 0),
                 "id": str(t.get('id', '')),
                 "name": t.get('content', ''),
                 "status": "completed" if t.get('completed', False) else "pending"

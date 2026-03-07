@@ -280,11 +280,12 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        
         if os.environ.get("SAGE_SESSIONS_PATH"):
             sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))
         else:
-            user_home = Path.home()
-            sage_home = user_home / ".sage"
             sessions_root = sage_home / "sessions"
         
         sessions_root.mkdir(parents=True, exist_ok=True)
