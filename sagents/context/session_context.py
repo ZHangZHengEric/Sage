@@ -81,7 +81,7 @@ class SessionContext:
 
     def init_more(self, session_root_space: str, agent_workspace: Optional[str] = None):
         use_sandbox = os.environ.get("SAGE_USE_SANDBOX", "true").lower() == "true"
-        logger.info(f"SessionContext: use_sandbox: {use_sandbox}")
+        logger.debug(f"SessionContext: use_sandbox: {use_sandbox}")
         
         # 解析工作空间路径，确保 session_root_space 存在，并设置 self.agent_workspace
         self._resolve_workspace_paths(session_root_space, agent_workspace)
@@ -132,6 +132,15 @@ class SessionContext:
 
         if valid_messages:
             self.message_manager.add_messages(valid_messages)
+
+    def get_messages(self) -> List[MessageChunk]:
+        """
+        获取会话中的所有消息
+        
+        Returns:
+            List[MessageChunk]: 消息列表
+        """
+        return self.message_manager.messages
 
     def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
         """
@@ -232,7 +241,7 @@ class SessionContext:
 
     def _prepare_workspace_bootstrap_files(self):
         use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
-        logger.info(f"SessionContext: use_claw_mode: {use_claw_mode}")
+        logger.debug(f"SessionContext: use_claw_mode: {use_claw_mode}")
         if use_claw_mode:
             agent_md_path = os.path.join(self.agent_workspace, "AGENT.md")
             if not os.path.exists(agent_md_path):
@@ -283,7 +292,7 @@ class SessionContext:
             self.virtual_workspace = "/sage-workspace"
         else:
             self.virtual_workspace = self.agent_workspace
-        logger.debug(f"SessionContext: 开始初始化沙箱环境，工作区: {self.virtual_workspace}")
+        logger.info(f"SessionContext: 开始初始化沙箱环境，工作区: {self.virtual_workspace}")
         t0 = time.time()
         self.sandbox = Sandbox(
             host_workspace=self.agent_workspace,
@@ -294,7 +303,7 @@ class SessionContext:
             macos_isolation_mode='subprocess',
             linux_isolation_mode='subprocess'
         )
-        logger.debug(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
+        logger.info(f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s")
         # agent_workspace (string) is already set in _resolve_workspace_paths
         self.agent_workspace_sandbox = self.sandbox
         self.file_system = self.sandbox.file_system
@@ -375,12 +384,14 @@ class SessionContext:
         try:
             messages_path = os.path.join(self.session_workspace, "messages.json")
             if os.path.exists(messages_path):
-                with open(messages_path, "r") as f:
+                with open(messages_path, "r", encoding="utf-8") as f:
                     messages_data = json.load(f)
                     if isinstance(messages_data, list):
                         self.message_manager.messages = [MessageChunk.from_dict(msg) for msg in messages_data]
                         logger.info(f"SessionContext: Loaded {len(self.message_manager.messages)} messages from messages.json")
                         return
+        except UnicodeDecodeError:
+            logger.warning(f"SessionContext: messages.json decode failed, file may be in legacy encoding, will start with empty messages")
         except Exception as e:
             logger.warning(f"SessionContext: Failed to load messages.json: {e}")
 
@@ -799,7 +810,6 @@ class SessionContext:
     def get_tokens_usage_info(self):
         """获取tokens使用信息"""
         tokens_info = {"total_info": {}, "per_step_info": []}
-        logger.info(f"get_tokens_usage_info: llm_requests_logs count={len(self.llm_requests_logs)}")
         for i, llm_request in enumerate(self.llm_requests_logs):
             # logger.info(f"get_tokens_usage_info: processing request {i}")
             raw_response = llm_request['response']
@@ -832,7 +842,7 @@ class SessionContext:
                     "note": "Stream response does not include token usage"
                 }
                 tokens_info["per_step_info"].append(step_info)
-        logger.info(f"get_tokens_usage_info: final tokens_info={tokens_info}")
+        logger.debug(f"get_tokens_usage_info: final tokens_info={tokens_info}")
         return tokens_info
 
     def save(self):
@@ -862,8 +872,7 @@ class SessionContext:
                 # logger.debug(f"SessionContext: Saving LLM request to {file_path}")
                 
                 try:
-                    with open(file_path, "w") as f:
-                        # 创建可序列化的副本
+                    with open(file_path, "w", encoding="utf-8") as f:
                         serializable_request = {
                             "request": make_serializable(llm_request['request']),
                             "response": make_serializable(llm_request['response']),
@@ -879,8 +888,7 @@ class SessionContext:
         # 2. 保存 messages 到 messages.json
         # 始终覆盖，保存完整历史
         try:
-            with open(os.path.join(self.session_workspace, "messages.json"), "w") as f:
-                # 先将messages 转换为可序列化的格式
+            with open(os.path.join(self.session_workspace, "messages.json"), "w", encoding="utf-8") as f:
                 serializable_messages = make_serializable(self.message_manager.messages)
                 json.dump(serializable_messages, f, ensure_ascii=False, indent=4)
         except Exception as e:
@@ -910,7 +918,7 @@ class SessionContext:
                 "agent_config": make_serializable(self.agent_config)
             }
             
-            with open(os.path.join(self.session_workspace, "session_context.json"), "w") as f:
+            with open(os.path.join(self.session_workspace, "session_context.json"), "w", encoding="utf-8") as f:
                 json.dump(context_data, f, ensure_ascii=False, indent=4)
                 
         except Exception as e:

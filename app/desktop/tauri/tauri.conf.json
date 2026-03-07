@@ -70,7 +70,6 @@
     "targets": [
       "app",
       "dmg",
-      "msi",
       "nsis"
     ],
     "windows": {
@@ -84,8 +83,7 @@
       "nsis": {
         "languages": ["SimpChinese"],
         "installerIcon": "icons/icon.ico",
-        "headerImage": "icons/icon.png",
-        "sidebarImage": "icons/icon.png"
+        "installMode": "perMachine"
       }
     },
     "linux": {

@@ -265,23 +265,22 @@ class ExecuteCommandTool:
         # 获取实际工作目录
         # 优先使用用户传入的 workdir，否则使用 sandbox.file_system.host_path（主机路径）
         actual_workdir = workdir
-        logger.info(f"[execute_shell_command] 原始 workdir: {workdir}, session_id: {session_id}")
+        logger.debug(f"[execute_shell_command] 原始 workdir: {workdir}, session_id: {session_id}")
         if actual_workdir is None and session_id:
             from sagents.session_runtime import get_global_session_manager
             session_manager = get_global_session_manager()
             session = session_manager.get(session_id)
-            logger.info(f"[execute_shell_command] session: {session}")
             if session and session.session_context:
                 session_context = session.session_context
                 # 优先使用 sandbox.file_system.host_path（这是实际的主机路径）
                 if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
                     if hasattr(session_context.agent_workspace_sandbox, 'file_system') and session_context.agent_workspace_sandbox.file_system:
                         actual_workdir = session_context.agent_workspace_sandbox.file_system.host_path  
-                        logger.info(f"[execute_shell_command] 使用 agent_workspace_sandbox.file_system.host_path: {actual_workdir}")
+                        logger.debug(f"[execute_shell_command] 使用 agent_workspace_sandbox.file_system.host_path: {actual_workdir}")
                     else:
                         # 如果没有 file_system，使用 host_workspace
                         actual_workdir = session_context.agent_workspace_sandbox.host_workspace
-                        logger.info(f"[execute_shell_command] 使用 agent_workspace_sandbox.host_workspace: {actual_workdir}")
+                        logger.debug(f"[execute_shell_command] 使用 agent_workspace_sandbox.host_workspace: {actual_workdir}")
                 # 如果没有 sandbox，再尝试 agent_workspace_sandbox
                 elif hasattr(session_context, 'agent_workspace_sandbox'):
                     agent_ws = session_context.agent_workspace_sandbox.file_system
@@ -289,11 +288,11 @@ class ExecuteCommandTool:
                         actual_workdir = agent_ws
                     elif hasattr(agent_ws, 'host_path'):
                         actual_workdir = agent_ws.host_path
-                    logger.info(f"[execute_shell_command] 使用 agent_workspace_sandbox: {actual_workdir}")
+                    logger.debug(f"[execute_shell_command] 使用 agent_workspace_sandbox: {actual_workdir}")
         logger.info(f"[execute_shell_command] 最终 actual_workdir: {actual_workdir}")
         
         try:
-            logger.info(f"[execute_shell_command] 开始安全检查")
+            logger.debug(f"[execute_shell_command] 开始安全检查")
             # 安全检查
             is_safe, reason = self.security_manager.is_command_safe(command)
             if not is_safe:
@@ -305,10 +304,10 @@ class ExecuteCommandTool:
                     "process_id": process_id,
                     "execution_time": time.time() - start_time
                 }
-            logger.info(f"[execute_shell_command] 安全检查通过")
+            logger.debug(f"[execute_shell_command] 安全检查通过")
             
             # 验证工作目录
-            logger.info(f"[execute_shell_command] 验证工作目录: {actual_workdir}")
+            logger.debug(f"[execute_shell_command] 验证工作目录: {actual_workdir}")
             if actual_workdir and not os.path.exists(actual_workdir):
                 logger.error(f"[execute_shell_command] 工作目录不存在: {actual_workdir}")
                 return {
@@ -317,32 +316,32 @@ class ExecuteCommandTool:
                     "process_id": process_id,
                     "execution_time": time.time() - start_time
                 }
-            logger.info(f"[execute_shell_command] 工作目录验证通过")
+            logger.debug(f"[execute_shell_command] 工作目录验证通过")
             
             # 准备环境变量
-            logger.info(f"[execute_shell_command] 准备环境变量")
+            logger.debug(f"[execute_shell_command] 准备环境变量")
             env = os.environ.copy()
             if env_vars:
                 env.update(env_vars)
-                logger.info(f"[execute_shell_command] 更新环境变量: {env_vars.keys()}")
+                logger.debug(f"[execute_shell_command] 更新环境变量: {env_vars.keys()}")
             
             # 自动修复权限
-            logger.info(f"[execute_shell_command] 检查执行权限")
+            logger.debug(f"[execute_shell_command] 检查执行权限")
             self._fix_execute_permission(command, actual_workdir)
             
             # 执行命令
             exec_start_time = time.time()
-            logger.info(f"[execute_shell_command] 准备执行命令, background={background}")
+            logger.debug(f"[execute_shell_command] 准备执行命令, background={background}")
             
             if background:
-                logger.info(f"[execute_shell_command] 调用 _execute_background")
+                logger.debug(f"[execute_shell_command] 调用 _execute_background")
                 result = self._execute_background(command, actual_workdir, env, process_id)
             else:
-                logger.info(f"[execute_shell_command] 调用 _execute_normal")
+                logger.debug(f"[execute_shell_command] 调用 _execute_normal")
                 result = self._execute_normal(command, actual_workdir, env, timeout, process_id)
             
             result["execution_time"] = time.time() - exec_start_time
-            logger.info(f"[execute_shell_command] 执行完成, result: {result.get('success')}")
+            logger.info(f"✅ [execute_shell_command] 执行完成 [{process_id}] - success: {result.get('success')}, cost: {result.get('execution_time', 0):.2f}s")
             return result
             
         except Exception as e:
@@ -378,29 +377,44 @@ class ExecuteCommandTool:
             pass
     
     def _execute_background(self, command: str, workdir: Optional[str], env: Dict, process_id: str) -> Dict[str, Any]:
-        """后台执行"""
-        logger.info(f"[_execute_background] 开始, workdir={workdir}")
+        """後台執行"""
+        logger.info(f"[_execute_background] 開始, workdir={workdir}")
         log_dir = os.path.join(workdir or os.getcwd(), ".sandbox_logs")
         logger.info(f"[_execute_background] log_dir={log_dir}")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"bg_{process_id}.log")
         logger.info(f"[_execute_background] log_file={log_file}")
         
-        # 使用括号包裹，确保 cd 在子 shell 中执行
-        nohup_cmd = f"nohup sh -c '{command}' > {log_file} 2>&1 &"
-        logger.info(f"[_execute_background] nohup_cmd={nohup_cmd}")
+        if platform.system() == "Windows":
+            cmd_exe = os.environ.get("COMSPEC", "cmd.exe")
+            bg_cmd = f'start "" /B {command} > "{log_file}" 2>&1'
+            logger.info(f"[_execute_background] Windows 模式, cmd={bg_cmd}")
+            
+            process = subprocess.Popen(
+                bg_cmd,
+                cwd=workdir,
+                shell=True,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+        else:
+            nohup_cmd = f"nohup sh -c '{command}' > {log_file} 2>&1 &"
+            logger.info(f"[_execute_background] Unix 模式, nohup_cmd={nohup_cmd}")
+            
+            logger.info(f"[_execute_background] 啟動 subprocess, cwd={workdir}")
+            process = subprocess.Popen(
+                nohup_cmd,
+                cwd=workdir,
+                shell=True,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
         
-        logger.info(f"[_execute_background] 启动 subprocess, cwd={workdir}")
-        process = subprocess.Popen(
-            nohup_cmd,
-            cwd=workdir,
-            shell=True,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        logger.info(f"[_execute_background] subprocess 启动完成, pid={process.pid}")
+        logger.info(f"[_execute_background] subprocess 啟動完成, pid={process.pid}")
         
         return {
             "success": True,

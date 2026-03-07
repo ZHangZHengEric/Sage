@@ -152,15 +152,18 @@ class Session:
                 if session_workspace:
                     context_path = os.path.join(session_workspace, "session_context.json")
                     if os.path.exists(context_path):
-                        with open(context_path, "r") as f:
+                        with open(context_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
                             return data.get("system_context")
                             
-            # 如果没找到，尝试在默认路径下查找 (session_root_space/session_id)
             default_path = os.path.join(self.session_root_space, session_id, "session_context.json")
             if os.path.exists(default_path):
-                 return json.load(open(default_path)).get("system_context")
+                with open(default_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("system_context")
                  
+        except UnicodeDecodeError:
+            logger.warning(f"SessionRuntime: Failed to decode session_context.json for {session_id}, file may be in legacy encoding")
         except Exception as e:
             logger.warning(f"SessionRuntime: Failed to load saved system_context for {session_id}: {e}")
             
@@ -178,6 +181,7 @@ class Session:
         parent_session_id: Optional[str] = None,
     ) -> SessionContext:
         if self.session_context:
+            self._cache_session_workspace(session_id, self.session_context)
             if tool_manager:
                 self.session_context.tool_manager = tool_manager
             if skill_manager:
@@ -213,6 +217,7 @@ class Session:
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
         )
+        self._cache_session_workspace(session_id, self.session_context)
         return self.session_context
 
     def _get_agent(self, agent_key: str) -> AgentBase:
@@ -406,27 +411,23 @@ class Session:
             if self.observability_manager:
                 self.observability_manager.on_chain_end(output_data={"status": "finished"}, session_id=session_id)
             session_context = self.session_context
+            self._cache_session_workspace(session_id, session_context)
             
-            # 先发送 token usage（在保存之前，因为保存会清空 llm_requests_logs）
             if session_context:
                 try:
                      chunks = await self._emit_token_usage_if_any(session_context, session_id)
-                     logger.info(f"SAgent: _emit_token_usage_if_any 返回 {len(chunks)} 个 chunks")
                      if chunks:
                          for i, chunk in enumerate(chunks):
-                             logger.info(f"SAgent: chunk[{i}] = {chunk}")
                              yield [chunk]
                 except Exception as e:
                     logger.error(f"SAgent: 发送 token usage 失败: {e}")
             
-            # 再保存会话状态
             if session_context:
                 try:
-                    logger.info("SAgent: 会话状态保存")
+                    logger.debug("SAgent: 会话状态保存")
                     session_context.save()
                 except Exception as e:
                     logger.error(f"SAgent: 会话状态保存时出错: {e}")
-
             await self._cleanup_session_resources(session_id)
 
 
@@ -493,6 +494,16 @@ class Session:
             logger.error(f"SAgent: 生成 token_usage MessageChunk 失败，会话 {session_id}: {e}")
             return []
 
+    def _cache_session_workspace(self, session_id: Optional[str], session_context: Optional[SessionContext]):
+        if not session_id or not session_context:
+            return
+        try:
+            manager = get_global_session_manager()
+            if manager:
+                manager.cache_session_workspace(session_id, session_context.session_workspace)
+        except Exception as e:
+            logger.warning(f"SAgent: 缓存会话路径失败: {e}")
+
     async def _cleanup_session_resources(self, session_id: str):
         """
         统一的会话清理逻辑
@@ -510,7 +521,7 @@ class Session:
             manager = get_global_session_manager()
             if manager:
                 manager.remove_session_context(session_id)
-            logger.info(f"SAgent: 会话 {session_id} 已清理", session_id=session_id)
+                logger.debug(f"SAgent: 会话 {session_id} 已清理", session_id=session_id)
         except Exception as e:
             logger.error(f"SAgent: 清理会话 {session_id} 时出错: {e}", session_id=session_id)
 
@@ -529,7 +540,7 @@ class SessionManager:
             logger.info(f"SessionManager: Session root space does not exist: {self.session_root_space}")
             return
         
-        logger.info(f"SessionManager: Scanning all sessions in {self.session_root_space}")
+        logger.debug(f"SessionManager: Scanning all sessions in {self.session_root_space}")
         
         for entry in os.listdir(self.session_root_space):
             entry_path = os.path.join(self.session_root_space, entry)
@@ -537,7 +548,7 @@ class SessionManager:
                 continue
                 
             # 检查是否是根会话
-            if os.path.exists(os.path.join(entry_path, "session_context.json")):
+            if os.path.exists(os.path.join(entry_path, "session_context.json")) or os.path.exists(os.path.join(entry_path, "messages.json")):
                 self._all_session_paths[entry] = entry_path
                 logger.debug(f"Found root session: {entry}")
             
@@ -547,7 +558,7 @@ class SessionManager:
                 for sub_entry in os.listdir(sub_sessions_dir):
                     sub_entry_path = os.path.join(sub_sessions_dir, sub_entry)
                     if os.path.isdir(sub_entry_path):
-                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")):
+                        if os.path.exists(os.path.join(sub_entry_path, "session_context.json")) or os.path.exists(os.path.join(sub_entry_path, "messages.json")):
                             self._all_session_paths[sub_entry] = sub_entry_path
                             logger.debug(f"Found sub session: {sub_entry}")
         
@@ -571,6 +582,11 @@ class SessionManager:
             工作区路径，找不到则返回 None
         """
         return self._all_session_paths.get(session_id)
+
+    def cache_session_workspace(self, session_id: str, session_workspace: Optional[str]):
+        if not session_id or not session_workspace:
+            return
+        self._all_session_paths[session_id] = os.path.abspath(session_workspace)
 
     def get_or_create(
         self, 
@@ -697,6 +713,12 @@ class SessionManager:
         try:
             with open(messages_path, "r", encoding="utf-8") as f:
                 raw_messages = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error(f"SessionManager: Failed to decode messages.json for session {session_id}: {e}")
+            return []
+        except UnicodeDecodeError:
+            logger.error(f"SessionManager: messages.json encoding error for session {session_id}, file may be in legacy encoding")
+            return []
         except Exception as e:
             logger.error(f"SessionManager: 读取 messages.json 失败: {e}")
             return []
