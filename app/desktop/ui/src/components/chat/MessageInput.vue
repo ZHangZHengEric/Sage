@@ -248,13 +248,18 @@ const handleSubmit = (e) => {
     }
 
     if (uploadedFiles.value.length > 0) {
-      const fileUrls = uploadedFiles.value.filter(f => f.url).map(f => f.url)
+      const fileInfos = uploadedFiles.value.filter(f => f.url).map(f => ({
+        url: f.url,
+        name: f.name || '文件'
+      }))
 
-      if (fileUrls.length > 0) {
+      if (fileInfos.length > 0) {
         if (messageContent) {
           messageContent += '\n\n'
         }
-        messageContent += fileUrls.join('\n')
+        // 使用 Markdown 链接格式显示文件
+        const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
+        messageContent += markdownLinks.join('\n')
       }
     }
     if (messageContent) {
