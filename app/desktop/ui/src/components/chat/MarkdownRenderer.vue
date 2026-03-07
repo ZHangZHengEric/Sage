@@ -7,6 +7,7 @@ import {computed, nextTick, onMounted, watch} from 'vue'
 import {marked} from 'marked'
 import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
+import mermaid from 'mermaid'
 import { open } from '@tauri-apps/plugin-shell'
 import { unified } from 'unified'
 import rehypeParse from 'rehype-parse'
@@ -16,7 +17,14 @@ import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
 
 // 常用语言高亮样式
-import 'prismjs/themes/prism-tomorrow.css' 
+import 'prismjs/themes/prism-tomorrow.css'
+
+// 初始化 Mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'strict',
+}) 
 
 const props = defineProps({
   content: {
@@ -58,6 +66,7 @@ const jsToJson = (jsStr) => {
 }
 
 const chartList = [] // 存放所有图表容器与配置项
+const mermaidList = [] // 存放所有 mermaid 图表
 const renderer = new marked.Renderer()
 
 // 修改 renderer.code，不再使用 Prism，只返回基础 HTML
@@ -85,6 +94,13 @@ renderer.code = (code, language) => {
       return `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">图表配置错误: ${err.message}</pre>`
     }
   }
+
+  if (lang === 'mermaid') {
+    const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`
+    mermaidList.push({id, code: codeText})
+    return `<div id="${id}" class="mermaid my-4 flex justify-center">${escapeHtml(codeText)}</div>`
+  }
+
   return `<pre><code class="language-${lang}">${escapeHtml(codeText)}</code></pre>`
 }
 
@@ -451,6 +467,7 @@ const renderedContent = computed(() => {
 
   try {
     chartList.length = 0
+    mermaidList.length = 0
     const preprocessed = preprocessContent(props.content)
     let html = marked(preprocessed)
 
@@ -513,6 +530,27 @@ const renderCharts = async () => {
       }
     }
   })
+}
+
+// 渲染 Mermaid
+const renderMermaid = async () => {
+  await nextTick()
+  await new Promise(resolve => setTimeout(resolve, 100))
+
+  for (const {id, code} of mermaidList) {
+    const el = document.getElementById(id)
+    if (!el) continue
+
+    try {
+      // 使用 mermaid.render 生成 SVG
+      const { svg } = await mermaid.render(`mermaid-svg-${id}`, code)
+      el.innerHTML = svg
+      el.classList.add('mermaid-rendered')
+    } catch (err) {
+      console.error(`✗ Mermaid 图表 ${id} 渲染失败:`, err)
+      el.innerHTML = `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">Mermaid 渲染错误: ${err.message}</pre>`
+    }
+  }
 }
 
 const resolveAnchorFromEvent = (event) => {
@@ -659,9 +697,11 @@ onMounted(() => {
   }
   
   renderCharts()
+  renderMermaid()
 })
 
 watch(() => props.content, async () => {
   await renderCharts()
+  await renderMermaid()
 }, {flush: 'post'})
 </script>
