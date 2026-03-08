@@ -107,8 +107,8 @@
       </div>
       
       <!-- Markdown 预览 -->
-      <div v-else-if="fileType === 'markdown'" class="markdown-preview p-4 max-h-[400px] overflow-auto">
-        <div class="prose prose-sm max-w-none" v-html="renderedMarkdown"></div>
+      <div v-else-if="fileType === 'markdown'" class="markdown-preview p-4 max-h-[400px] overflow-auto bg-background rounded">
+        <div class="prose prose-sm max-w-none dark:prose-invert" v-html="renderedMarkdown"></div>
       </div>
       
       <!-- 代码文件预览 -->
@@ -166,7 +166,24 @@
       <div v-else-if="fileType === 'text'" class="text-preview">
         <pre class="p-3 text-xs overflow-auto max-h-[350px] bg-muted/30"><code>{{ fileContent }}</code></pre>
       </div>
-      
+
+      <!-- Office 文件预览 -->
+      <div v-else-if="fileType === 'office'" class="office-preview">
+        <div class="p-4 text-center text-muted-foreground bg-muted/30">
+          <FileText class="w-12 h-12 mx-auto mb-2 opacity-50" />
+          <p class="text-sm mb-2">{{ officeFileType }} 文件</p>
+          <p class="text-xs text-muted-foreground/60 mb-3">Office 文件无法直接在浏览器中预览</p>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="openFile"
+          >
+            <ExternalLink class="w-4 h-4 mr-1" />
+            打开文件
+          </Button>
+        </div>
+      </div>
+
       <!-- 其他文件 -->
       <div v-else class="other-preview p-4 text-center text-muted-foreground">
         <File class="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -256,7 +273,10 @@ const fileType = computed(() => {
     'vue': 'code', 'svelte': 'code',
     'php': 'code', 'rb': 'code', 'swift': 'code', 'kt': 'code',
     'sql': 'code', 'sh': 'code', 'bash': 'code', 'zsh': 'code',
-    'txt': 'text', 'log': 'text', 'csv': 'text'
+    'txt': 'text', 'log': 'text', 'csv': 'text',
+    'pptx': 'office', 'ppt': 'office',
+    'docx': 'office', 'doc': 'office',
+    'xlsx': 'office', 'xls': 'office'
   }
   return typeMap[ext] || 'other'
 })
@@ -271,6 +291,7 @@ const fileIcon = computed(() => {
     'excalidraw': '🔷',
     'code': '📜',
     'text': '📃',
+    'office': '📊',
     'other': '📎'
   }
   return icons[fileType.value] || '📎'
@@ -294,6 +315,16 @@ const language = computed(() => {
     'bash': 'Bash', 'zsh': 'Zsh'
   }
   return langMap[fileExtension.value] || fileExtension.value.toUpperCase()
+})
+
+// Office 文件类型名称
+const officeFileType = computed(() => {
+  const officeMap = {
+    'pptx': 'PowerPoint', 'ppt': 'PowerPoint',
+    'docx': 'Word', 'doc': 'Word',
+    'xlsx': 'Excel', 'xls': 'Excel'
+  }
+  return officeMap[fileExtension.value] || 'Office'
 })
 
 // 文件 URL

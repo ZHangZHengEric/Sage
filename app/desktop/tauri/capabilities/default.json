@@ -25,6 +25,9 @@
           "path": "$HOME/**"
         },
         {
+          "path": "$HOME/.sage/**"
+        },
+        {
           "path": "$DOWNLOAD/**"
         },
         {

@@ -887,8 +887,10 @@ class ToolManager:
                             if tool_name == 'load_skill':
                                 try:
                                     result_dict = json.loads(result) if isinstance(result, str) else result
+                                    # Get skill_name from result_dict, fallback to kwargs (the original input parameter)
+                                    skill_name_from_result = result_dict.get("skill_name") or kwargs.get("skill_name", "unknown")
                                     final_result = json.dumps({
-                                        "skill_name": result_dict.get("skill_name", "unknown"),
+                                        "skill_name": skill_name_from_result,
                                         "content": make_serializable(result_dict.get("content", result))
                                     }, ensure_ascii=False, indent=2)
                                 except Exception:
@@ -989,7 +991,8 @@ class ToolManager:
                 try:
                     result_data = json.loads(final_result)
                     skill_content = result_data.get("content", "")
-                    skill_name = result_data.get("skill_name", "unknown")
+                    # Get skill_name from result_data, fallback to kwargs (the original input parameter)
+                    skill_name = result_data.get("skill_name") or kwargs.get("skill_name", "unknown")
                     
                     # Update SessionContext: Store skill instruction in system_context as a list
                     # Initialize active_skills list if not exists

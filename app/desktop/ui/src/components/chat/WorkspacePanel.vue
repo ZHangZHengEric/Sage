@@ -1,19 +1,15 @@
 <template>
-  <div class="w-[30%] flex flex-col border-l border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-    <div class="flex items-center justify-between p-4 border-b border-border">
-      <h3 class="text-base font-semibold">{{ t('workspace.title') }}</h3>
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        class="h-8 w-8" 
-        @click="$emit('close')"
-      >
-        <X class="w-4 h-4" />
-      </Button>
-    </div>
+  <ResizablePanel 
+    :title="t('workspace.title')" 
+    :badge="workspaceFiles?.length || 0"
+    size="large"
+    @close="$emit('close')"
+  >
+    <template #icon>
+      <FolderOpen class="w-4 h-4 text-muted-foreground" />
+    </template>
     
-    <div class="flex-1 overflow-y-auto p-4 space-y-4">
-
+    <div class="h-full overflow-y-auto p-4 space-y-4">
       <div class="space-y-1">
         <div v-if="hasValidFiles" class="flex flex-col gap-1">
           <WorkspaceFileTree 
@@ -29,14 +25,14 @@
         </div>
       </div>
     </div>
-  </div>
+  </ResizablePanel>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
-import { Button } from '@/components/ui/button'
-import { X } from 'lucide-vue-next'
+import { FolderOpen } from 'lucide-vue-next'
+import ResizablePanel from './ResizablePanel.vue'
 import WorkspaceFileTree from './WorkspaceFileTree.vue'
 
 const props = defineProps({
@@ -108,4 +104,3 @@ const handleDelete = (item) => {
   emit('deleteFile', item)
 }
 </script>
-
