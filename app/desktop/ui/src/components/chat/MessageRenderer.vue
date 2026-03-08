@@ -282,13 +282,29 @@ const formatMessageContent = (content) => {
 const getToolResult = (toolCall) => {
   if (!props.messages || !Array.isArray(props.messages)) return null
   
+  console.log('[MessageRenderer] getToolResult looking for:', toolCall.id, 'messageIndex:', props.messageIndex, 'total messages:', props.messages.length)
+  
   // 在后续消息中查找对应的工具结果
   for (let i = props.messageIndex + 1; i < props.messages.length; i++) {
     const msg = props.messages[i]
+    console.log('[MessageRenderer] Checking message', i, 'role:', msg.role, 'tool_call_id:', msg.tool_call_id)
     if (msg.role === 'tool' && msg.tool_call_id === toolCall.id) {
+      console.log('[MessageRenderer] Found tool result for:', toolCall.id)
       return msg
     }
   }
+  
+  // 如果没找到，检查当前消息是否包含工具结果（某些格式）
+  const currentMsg = props.messages[props.messageIndex]
+  if (currentMsg && currentMsg.tool_results) {
+    const toolResult = currentMsg.tool_results.find(r => r.tool_call_id === toolCall.id)
+    if (toolResult) {
+      console.log('[MessageRenderer] Found tool result in current message tool_results:', toolCall.id)
+      return toolResult
+    }
+  }
+  
+  console.log('[MessageRenderer] Tool result not found for:', toolCall.id)
   return null
 }
 
@@ -463,13 +479,23 @@ const getToolComponent = (toolName) => {
 
 // 发送工作台事件
 onMounted(() => {
-  // 只处理助手消息和工具调用
-  if (props.message.role !== 'assistant') return
-
   const messageId = props.message.message_id || props.message.id
   const sessionId = props.message.session_id
 
-  console.log('[MessageRenderer] onMounted, messageId:', messageId, 'tool_calls:', props.message.tool_calls?.length)
+  console.log('[MessageRenderer] onMounted, messageId:', messageId, 'role:', props.message.role, 'tool_calls:', props.message.tool_calls?.length)
+
+  // 处理工具结果消息（role='tool'）
+  if (props.message.role === 'tool' && props.message.tool_call_id) {
+    console.log('[MessageRenderer] Processing tool result message:', messageId, 'tool_call_id:', props.message.tool_call_id)
+    // 更新工作台中的工具结果
+    const plainToolResult = JSON.parse(JSON.stringify(props.message))
+    const updateResult = workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult)
+    console.log('[MessageRenderer] updateToolResult for tool message:', props.message.tool_call_id, 'result:', updateResult)
+    return
+  }
+
+  // 只处理助手消息和工具调用
+  if (props.message.role !== 'assistant') return
 
   // 检查该消息的工作台项是否已经添加过
   const existingItems = workbenchStore.items.filter(item =>
@@ -487,16 +513,17 @@ onMounted(() => {
   if (props.message.tool_calls && props.message.tool_calls.length > 0) {
     console.log('[MessageRenderer] Adding tool_calls to workbench:', props.message.tool_calls.length)
     props.message.tool_calls.forEach((toolCall, index) => {
-      const toolResult = getParsedToolResult(toolCall)
-      console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id, 'toolResult:', toolResult)
+      console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id)
+      // 注意：不在 onMounted 中传递 toolResult，因为实时流中工具结果还没到达
+      // toolResult 会在后续更新
       workbenchStore.addItem({
         type: 'tool_call',
         role: 'assistant',
         timestamp: timestamp,
         sessionId: sessionId,
         messageId: messageId,
-        data: toolCall,
-        toolResult: toolResult
+        data: toolCall
+        // toolResult 会在 watch 中更新
       })
     })
   }
@@ -569,7 +596,8 @@ function extractFileReferences(content) {
       path = path.replace(/^file:\/\/\/?/i, '/')
     }
 
-    if (path.startsWith('/')) {
+    // 过滤掉文件夹路径（以 / 结尾的路径）
+    if (path.startsWith('/') && !path.endsWith('/')) {
       files.push({
         filePath: path,
         fileName: fileName || path.split('/').pop()

@@ -62,217 +62,45 @@
       </div>
 
       <!-- PDF 预览 -->
-      <div v-else-if="fileType === 'pdf'" class="h-full flex flex-col items-center justify-center p-4 text-muted-foreground bg-muted/20">
-        <FileText class="w-16 h-16 mb-3 opacity-50" />
-        <p class="text-sm mb-1">PDF 文件</p>
-        <p class="text-xs text-muted-foreground/60 mb-4">由于浏览器安全限制，无法直接预览本地 PDF</p>
-        <Button 
-          variant="outline" 
-          size="sm"
-          @click="openFile"
-        >
-          <ExternalLink class="w-4 h-4 mr-1" />
-          打开 PDF
-        </Button>
-      </div>
+      <PdfRenderer v-else-if="fileType === 'pdf'" :file-path="filePath" />
 
       <!-- 图片预览 -->
-      <div v-else-if="fileType === 'image'" class="h-full flex flex-col items-center justify-center p-4 text-muted-foreground bg-muted/20">
-        <ImageIcon class="w-16 h-16 mb-3 opacity-50" />
-        <p class="text-sm mb-1">图片文件</p>
-        <p class="text-xs text-muted-foreground/60 mb-4">{{ displayFileName }}</p>
-        <Button 
-          variant="outline" 
-          size="sm"
-          @click="openFile"
-        >
-          <ExternalLink class="w-4 h-4 mr-1" />
-          打开图片
-        </Button>
-      </div>
+      <ImageRenderer v-else-if="fileType === 'image'" :file-path="filePath" :file-name="displayFileName" />
 
       <!-- HTML 预览 -->
-      <div v-else-if="fileType === 'html'" class="h-full flex flex-col">
-        <!-- HTML 工具栏 -->
-        <div class="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border flex-none">
-          <div class="flex items-center gap-2 text-xs text-muted-foreground">
-            <Globe class="w-3 h-3" />
-            <span>HTML 预览</span>
-          </div>
-          <div class="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-7 px-2 text-xs"
-              @click="refreshHtmlPreview"
-            >
-              <RefreshCw class="w-3 h-3 mr-1" />
-              刷新
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-7 px-2 text-xs"
-              @click="openFile"
-            >
-              <ExternalLink class="w-3 h-3 mr-1" />
-              外部打开
-            </Button>
-          </div>
-        </div>
-        <!-- HTML iframe 渲染 -->
-        <div class="flex-1 relative bg-white">
-          <iframe
-            v-if="htmlDataUrl"
-            :src="htmlDataUrl"
-            class="w-full h-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-            title="HTML Preview"
-          ></iframe>
-          <div v-else class="h-full flex items-center justify-center text-muted-foreground">
-            <div class="text-center">
-              <Loader2 class="w-8 h-8 animate-spin mx-auto mb-2" />
-              <p class="text-sm">加载中...</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <HtmlRenderer v-else-if="fileType === 'html'" :file-path="filePath" :content="fileContent" />
 
       <!-- Markdown 预览 -->
-      <div v-else-if="fileType === 'markdown'" class="markdown-preview p-4">
-        <!-- 如果内容看起来是二进制文件，显示错误 -->
-        <div v-if="isBinaryContent" class="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <FileText class="w-16 h-16 mb-3 opacity-50" />
-          <p class="text-sm mb-1">文件内容异常</p>
-          <p class="text-xs text-destructive mb-4">该文件可能不是有效的 Markdown 文件</p>
-          <Button variant="outline" size="sm" @click="openFile">
-            <ExternalLink class="w-4 h-4 mr-1" />
-            打开文件
-          </Button>
-        </div>
-        <div v-else class="prose prose-sm max-w-none dark:prose-invert" v-html="renderedMarkdown"></div>
-      </div>
+      <MarkdownRenderer v-else-if="fileType === 'markdown'" :file-path="filePath" :content="fileContent" />
 
       <!-- 代码文件预览 -->
-      <div v-else-if="fileType === 'code'" class="code-preview h-full">
-        <div class="flex items-center justify-between px-3 py-2 bg-muted/50 border-b text-xs sticky top-0">
-          <span class="text-muted-foreground">{{ language }}</span>
-        </div>
-        <pre class="p-4 text-sm overflow-auto"><code>{{ fileContent }}</code></pre>
-      </div>
+      <CodeRenderer v-else-if="fileType === 'code'" :content="fileContent" :language="language" />
 
       <!-- Excalidraw 预览 -->
-      <div v-else-if="fileType === 'excalidraw'" class="excalidraw-preview h-full overflow-auto" :style="{ backgroundColor: excalidrawBgColor }">
-        <div class="p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2 text-xs" :class="isDark ? 'text-gray-400' : 'text-muted-foreground'">
-              <span>{{ excalidrawElementCount }} 个元素</span>
-              <span v-if="excalidrawTypeSummary" class="opacity-50">|</span>
-              <span v-if="excalidrawTypeSummary" class="truncate max-w-[200px]" :title="excalidrawTypeSummary">{{ excalidrawTypeSummary }}</span>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              @click="openInExcalidraw"
-            >
-              <ExternalLink class="w-3 h-3 mr-1" />
-              在 Excalidraw 打开
-            </Button>
-          </div>
-          <!-- SVG 预览 -->
-          <div class="overflow-auto border rounded" :class="isDark ? 'border-gray-700 bg-gray-800/50' : 'border-border/30 bg-white/80'">
-            <svg
-              :viewBox="`0 0 ${excalidrawWidth + 100} ${excalidrawHeight + 100}`"
-              class="w-full h-auto"
-              style="min-height: 200px;"
-              v-html="excalidrawSvg"
-            ></svg>
-          </div>
-          <div v-if="excalidrawElementCount > 100" class="mt-2 text-[10px] text-center" :class="isDark ? 'text-gray-500' : 'text-muted-foreground/60'">
-            仅显示前 100 个元素
-          </div>
-        </div>
+      <div v-else-if="fileType === 'excalidraw'" class="excalidraw-preview h-full">
+        <ExcalidrawRenderer
+          v-if="excalidrawData"
+          :data="excalidrawData"
+          :theme="isDark ? 'dark' : 'light'"
+          class="w-full h-full"
+        />
       </div>
 
       <!-- 文本文件预览 -->
-      <div v-else-if="fileType === 'text'" class="text-preview h-full">
-        <pre class="p-4 text-sm overflow-auto"><code>{{ fileContent }}</code></pre>
-      </div>
+      <TextRenderer v-else-if="fileType === 'text'" :content="fileContent" />
 
       <!-- Office 文件预览 -->
-      <div v-else-if="fileType === 'office'" class="office-preview h-full overflow-auto p-4">
-        <!-- 加载中 -->
-        <div v-if="officeLoading" class="flex items-center justify-center h-full text-muted-foreground">
-          <div class="text-center">
-            <Loader2 class="w-8 h-8 animate-spin mx-auto mb-2" />
-            <p class="text-sm">正在解析 {{ officeFileType }} 文件...</p>
-          </div>
-        </div>
-        <!-- 错误提示 -->
-        <div v-else-if="officeError" class="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <FileText class="w-16 h-16 mb-3 opacity-50" />
-          <p class="text-sm mb-1">{{ officeFileType }} 文件</p>
-          <p class="text-xs text-destructive mb-4">{{ officeError }}</p>
-          <Button variant="outline" size="sm" @click="openFile">
-            <ExternalLink class="w-4 h-4 mr-1" />
-            打开文件
-          </Button>
-        </div>
-        <!-- DOCX 内容 -->
-        <div v-else-if="fileExtension === 'docx' || fileExtension === 'doc'" class="docx-content prose prose-sm dark:prose-invert max-w-none">
-          <div v-html="officeContent"></div>
-        </div>
-        <!-- XLSX 内容 -->
-        <div v-else-if="fileExtension === 'xlsx' || fileExtension === 'xls'" class="xlsx-content">
-          <div v-for="(sheet, sheetName) in officeContent" :key="sheetName" class="mb-6">
-            <h3 class="text-sm font-medium mb-2 text-muted-foreground">{{ sheetName }}</h3>
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm border-collapse border border-border">
-                <tbody>
-                  <tr v-for="(row, rowIndex) in sheet" :key="rowIndex" class="border-b border-border">
-                    <td v-for="(cell, cellIndex) in row" :key="cellIndex" class="px-3 py-2 border-r border-border min-w-[80px]">
-                      {{ cell }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <!-- PPTX 内容 - 使用 pptx-preview -->
-        <div v-else-if="fileExtension === 'pptx' || fileExtension === 'ppt'" class="pptx-content h-full flex flex-col">
-          <!-- 加载中 -->
-          <div v-show="pptxLoading" class="flex items-center justify-center h-full text-muted-foreground">
-            <div class="text-center">
-              <Loader2 class="w-8 h-8 animate-spin mx-auto mb-2" />
-              <p class="text-sm">正在加载 PPT...</p>
-            </div>
-          </div>
-          <!-- 错误提示 -->
-          <div v-show="!pptxLoading && pptxError" class="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <FileText class="w-16 h-16 mb-3 opacity-50" />
-            <p class="text-sm mb-1">PowerPoint 文件</p>
-            <p class="text-xs text-destructive mb-4">{{ pptxError }}</p>
-            <Button variant="outline" size="sm" @click="openFile">
-              <ExternalLink class="w-4 h-4 mr-1" />
-              打开文件
-            </Button>
-          </div>
-          <!-- PPT 预览容器 - 始终存在，使用 v-show 控制显示 -->
-          <div ref="pptxContainer" v-show="!pptxLoading && !pptxError" class="pptx-preview-container flex-1 overflow-auto">
-            <!-- pptx-preview 将在这里渲染 -->
-          </div>
-        </div>
-        <!-- 不支持的 Office 类型 -->
-        <div v-else class="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <FileText class="w-16 h-16 mb-3 opacity-50" />
-          <p class="text-sm mb-1">{{ officeFileType }} 文件</p>
-          <p class="text-xs text-muted-foreground/60 mb-4">此格式暂不支持预览</p>
-          <Button variant="outline" size="sm" @click="openFile">
-            <ExternalLink class="w-4 h-4 mr-1" />
-            打开文件
-          </Button>
-        </div>
+      <DocxRenderer v-else-if="fileType === 'office' && (fileExtension === 'docx' || fileExtension === 'doc')" :file-path="filePath" :file-content="fileContent" />
+      <XlsxRenderer v-else-if="fileType === 'office' && (fileExtension === 'xlsx' || fileExtension === 'xls')" :file-path="filePath" :file-content="fileContent" />
+      <PptxRenderer v-else-if="fileType === 'office' && (fileExtension === 'pptx' || fileExtension === 'ppt')" :file-path="filePath" />
+      <div v-else-if="fileType === 'office'" class="h-full flex flex-col items-center justify-center p-4 text-muted-foreground bg-muted/20">
+        <FileText class="w-16 h-16 mb-3 opacity-50" />
+        <p class="text-sm mb-1">{{ officeFileType }} 文件</p>
+        <p class="text-xs text-muted-foreground/60 mb-4">此格式暂不支持预览</p>
+        <Button variant="outline" size="sm" @click="openFile">
+          <ExternalLink class="w-4 h-4 mr-1" />
+          打开文件
+        </Button>
       </div>
 
       <!-- 其他文件 -->
@@ -318,6 +146,16 @@ import * as XLSX from 'xlsx'
 import mammoth from 'mammoth'
 import JSZip from 'jszip'
 import { init as initPptxPreview } from 'pptx-preview'
+import ExcalidrawRenderer from './filerender/ExcalidrawRenderer.vue'
+import PdfRenderer from './filerender/PdfRenderer.vue'
+import ImageRenderer from './filerender/ImageRenderer.vue'
+import HtmlRenderer from './filerender/HtmlRenderer.vue'
+import MarkdownRenderer from './filerender/MarkdownRenderer.vue'
+import CodeRenderer from './filerender/CodeRenderer.vue'
+import TextRenderer from './filerender/TextRenderer.vue'
+import DocxRenderer from './filerender/DocxRenderer.vue'
+import XlsxRenderer from './filerender/XlsxRenderer.vue'
+import PptxRenderer from './filerender/PptxRenderer.vue'
 
 const props = defineProps({
   filePath: {
@@ -553,6 +391,7 @@ const excalidrawTypeSummary = ref('')
 const excalidrawWidth = ref(800)
 const excalidrawHeight = ref(600)
 const excalidrawSvg = ref('')
+const excalidrawData = ref(null)
 
 // Excalidraw 背景色 - 根据主题动态变化
 const excalidrawBgColor = computed(() => {
@@ -653,7 +492,6 @@ const loadContent = async () => {
       try {
         const data = JSON.parse(fileContent.value)
         excalidrawElementCount.value = data.elements?.length || 0
-        excalidrawBgColor.value = data.appState?.viewBackgroundColor || '#ffffff'
 
         const typeCount = {}
         data.elements?.forEach(el => {
@@ -663,6 +501,29 @@ const loadContent = async () => {
           .map(([type, count]) => `${type}: ${count}`)
           .join(', ')
 
+        // 设置 Excalidraw 数据用于组件渲染
+        // 限制画布尺寸以避免浏览器限制 (最大 8000 x 8000 = 64000000 像素)
+        const maxCanvasSize = 4000
+        const contentWidth = excalidrawWidth.value
+        const contentHeight = excalidrawHeight.value
+        const scale = Math.min(1, maxCanvasSize / Math.max(contentWidth, contentHeight))
+        
+        excalidrawData.value = {
+          elements: data.elements || [],
+          appState: {
+            ...data.appState,
+            viewBackgroundColor: isDark.value ? '#1e1e1e' : (data.appState?.viewBackgroundColor || '#ffffff'),
+            theme: isDark.value ? 'dark' : 'light',
+            // 限制画布尺寸
+            width: Math.min(contentWidth, maxCanvasSize),
+            height: Math.min(contentHeight, maxCanvasSize),
+            // 设置缩放以适应内容
+            zoom: { value: scale }
+          },
+          files: data.files || {}
+        }
+
+        // 同时生成 SVG 作为备用
         excalidrawSvg.value = generateExcalidrawSvg(data)
       } catch (e) {
         console.warn('解析 Excalidraw 数据失败:', e)
@@ -901,32 +762,19 @@ const loadOfficeContent = async () => {
 
   const ext = fileExtension.value
 
-  // PPT 文件使用 pptx-preview 单独处理
+  // PPT 文件现在由 PptxRenderer 组件处理，这里不需要处理
   if (ext === 'pptx' || ext === 'ppt') {
-    await loadPptxPreview()
     return
   }
 
-  officeLoading.value = true
-  officeError.value = ''
-  officeContent.value = null
-
-  try {
-    if (ext === 'docx' || ext === 'doc') {
-      const html = await parseDocx(props.filePath)
-      officeContent.value = DOMPurify.sanitize(html)
-    } else if (ext === 'xlsx' || ext === 'xls') {
-      const sheets = await parseXlsx(props.filePath)
-      officeContent.value = sheets
-    } else {
-      officeError.value = '不支持的 Office 格式'
-    }
-  } catch (err) {
-    console.error('加载 Office 文件失败:', err)
-    officeError.value = err.message || '加载失败'
-  } finally {
-    officeLoading.value = false
+  // DOCX 和 XLSX 现在由各自的组件处理，这里不需要处理
+  if (ext === 'docx' || ext === 'doc' || ext === 'xlsx' || ext === 'xls') {
+    return
   }
+
+  // 其他 Office 格式显示错误
+  officeLoading.value = false
+  officeError.value = '不支持的 Office 格式'
 }
 
 // 使用 pptx-preview 加载 PPT

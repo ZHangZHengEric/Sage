@@ -30,6 +30,11 @@ const props = defineProps({
   workbenchItemId: {
     type: String,
     default: ''
+  },
+  // 是否是文件夹
+  isDirectory: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -54,27 +59,32 @@ const iconType = computed(() => {
 })
 
 const iconSrc = computed(() => {
+  // 如果是文件夹，返回文件夹图标
+  if (props.isDirectory) {
+    return '📁'
+  }
+
   const ext = fileExtension.value
-  
+
   // 图片文件 - 使用文件路径作为图标
   if (iconType.value === 'image') {
     return props.filePath
   }
-  
+
   // 使用更真实的文件图标
   const iconMap = {
     // Microsoft Office
     'doc': '📘', 'docx': '📘',
     'xls': '📗', 'xlsx': '📗', 'csv': '📗',
     'ppt': '📙', 'pptx': '📙',
-    
+
     // PDF
     'pdf': '📕',
-    
+
     // 图片
-    'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 
+    'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️',
     'webp': '🖼️', 'svg': '🎨', 'ico': '🎨',
-    
+
     // 代码文件
     'html': '🌐', 'htm': '🌐',
     'css': '🎨', 'scss': '🎨', 'less': '🎨',
@@ -87,31 +97,31 @@ const iconSrc = computed(() => {
     'rb': '💎', 'php': '🐘',
     'swift': '🐦', 'kt': '🎯',
     'sql': '🗄️',
-    
+
     // 数据格式
     'json': '📋', 'xml': '📋', 'yaml': '📋', 'yml': '📋',
-    
+
     // 文本
     'md': '📝', 'markdown': '📝',
     'txt': '📃', 'log': '📃',
-    
+
     // 脚本
     'sh': '🔧', 'bash': '🔧', 'zsh': '🔧', 'ps1': '🔧',
-    
+
     // 特殊
     'excalidraw': '✏️',
     'drawio': '📊',
-    
+
     // 压缩包
     'zip': '📦', 'rar': '📦', '7z': '📦', 'tar': '📦', 'gz': '📦',
-    
+
     // 可执行
     'exe': '⚡', 'dmg': '🍎', 'app': '🍎',
-    
+
     // 音频视频
     'mp3': '🎵', 'mp4': '🎬', 'wav': '🎵', 'avi': '🎬', 'mov': '🎬'
   }
-  
+
   return iconMap[ext] || '📎'
 })
 

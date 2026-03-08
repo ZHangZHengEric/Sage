@@ -1,4 +1,4 @@
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import SparkMD5 from 'spark-md5'
@@ -187,6 +187,12 @@ export const useChatPage = (props) => {
 
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
+
+    // 只有在有消息且有工作台 item 时，才自动打开工作台
+    if (normalizedMessages.length > 0 && workbenchStore.filteredItems.length > 0) {
+      openWorkbench({ realtime: true })
+    }
+
     if (res.conversation_info?.agent_id) {
       const agent = agents.value.find(a => a.id === res.conversation_info.agent_id)
       if (agent) {
@@ -341,6 +347,12 @@ export const useChatPage = (props) => {
     clearCurrentStreamViewState()
     clearMessages()
     clearTaskAndWorkspace()
+    // 重置工作台所有状态
+    workbenchStore.resetState()
+    console.log('[ChatPage] Reset workbench state for new session')
+    // 关闭工作台 panel
+    panelStore.closeAll()
+    console.log('[ChatPage] Closed panel for new session')
     createSession()
   }
 
@@ -440,7 +452,13 @@ export const useChatPage = (props) => {
     makeTraceId: (sessionId) => SparkMD5.hash(sessionId),
     loadAgents,
     handleActiveSessionsUpdated,
-    handleSessionLoad,
+    handleSessionLoad: async (sessionId) => {
+      // 切换会话时重置工作台状态
+      workbenchStore.resetState()
+      panelStore.closeAll()
+      console.log('[ChatPage] Reset workbench state before loading session:', sessionId)
+      await handleSessionLoad(sessionId)
+    },
     createSession,
     clearScrollTimer,
     agents,
@@ -454,6 +472,31 @@ export const useChatPage = (props) => {
     isLoading,
     isHistoryLoading,
     onLeaveChatPage: persistRunningSessionOnLeaveChat
+  })
+
+  // 监听工作台 items 变化，当有新 item 且处于实时模式时，自动打开工作台
+  watch(() => workbenchStore.filteredItems.length, (newLength, oldLength) => {
+    if (newLength > oldLength && workbenchStore.isRealtime) {
+      // 有新 item 添加且处于实时模式，自动打开工作台
+      if (!panelStore.showWorkbench) {
+        console.log('[ChatPage] New workbench item added, auto-opening workbench')
+        panelStore.openWorkbench()
+      }
+    }
+  })
+
+  // 监听 session id 变化，当 session id 变化或变为 null 时重置工作台
+  watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
+    console.log('[ChatPage] Session ID changed:', oldSessionId, '->', newSessionId)
+    if (newSessionId !== oldSessionId) {
+      // Session ID 变化，重置工作台
+      workbenchStore.resetState()
+      // 如果 session id 为 null，关闭工作台弹窗
+      if (!newSessionId) {
+        panelStore.closeAll()
+        console.log('[ChatPage] Session ID is null, closed workbench')
+      }
+    }
   })
 
   return {
@@ -478,6 +521,7 @@ export const useChatPage = (props) => {
     handleScroll,
     handleSendMessage,
     stopGeneration,
+    currentSessionId,
     activeSubSessionId,
     subSessionMessages,
     handleCloseSubSession,
