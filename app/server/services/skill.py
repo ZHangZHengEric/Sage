@@ -48,7 +48,7 @@ def _set_permissions_recursive(path, dir_mode=0o755, file_mode=0o644):
         logger.warning(f"Failed to set permissions for {path}: {e}")
 
 
-async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
+async def list_skills(user_id: str, role: str = "user", agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """获取可用技能列表"""
     tm = get_skill_manager()
     if not tm:
@@ -61,15 +61,30 @@ async def list_skills(user_id: str, role: str = "user") -> List[Dict[str, Any]]:
     all_ownerships = await dao.get_all_ownerships()
     ownership_map = {obj.skill_name: obj.user_id for obj in all_ownerships}
 
+    # If agent_id is provided, get the agent's allowed skills
+    allowed_skills = None
+    if agent_id:
+        agent_dao = models.AgentConfigDao()
+        agent = await agent_dao.get_by_id(agent_id)
+        if agent and agent.config:
+            allowed_skills = agent.config.get("availableSkills") or agent.config.get("available_skills")
+
     skills = []
     if role == "admin":
         for skill in all_skills:
             name = skill.name
+            # Filter by agent's allowed skills if specified
+            if allowed_skills is not None and name not in allowed_skills:
+                continue
             skills.append({"name": skill.name, "description": skill.description, "user_id": ownership_map.get(name, "")})
     else:
         # Filter for user: System skills (no owner) + Own skills
         for skill in all_skills:
             name = skill.name
+            
+            # Filter by agent's allowed skills if specified
+            if allowed_skills is not None and name not in allowed_skills:
+                continue
 
             owner = ownership_map.get(name, "")
             if not owner or owner == user_id:

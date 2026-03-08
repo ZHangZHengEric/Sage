@@ -140,6 +140,10 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  agentId: {
+    type: String,
+    default: null
   }
 })
 
@@ -158,6 +162,10 @@ const skills = ref([])
 const selectedSkillIndex = ref(0)
 const skillKeyword = ref('')
 const currentSkill = ref(null)
+
+watch(() => props.agentId, () => {
+  skills.value = []
+})
 
 const filteredSkills = computed(() => {
   if (!skillKeyword.value) return skills.value
@@ -214,7 +222,7 @@ watch(inputValue, async (newVal) => {
       try {
         loadingSkills.value = true
         console.log('Fetching skills...')
-        const res = await skillAPI.getSkills()
+        const res = await skillAPI.getSkills({ agent_id: props.agentId })
         if (res.skills) {
             skills.value = res.skills
         }

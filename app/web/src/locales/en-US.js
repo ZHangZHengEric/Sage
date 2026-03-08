@@ -723,4 +723,19 @@ export default {
   'agent.auth.saveError': 'Failed to save authorization',
   'common.you': 'You',
   'agent.authorize': 'Authorize',
+
+    // Workbench
+  'workbench.title': 'Workbench',
+  'workbench.emptyTitle': 'Workbench is empty',
+  'workbench.emptyDesc': 'Tool calls, files and code from conversations will appear here',
+  'workbench.noSelection': 'Please select an item to view',
+  'workbench.play': 'Play',
+  'workbench.pause': 'Pause',
+  'workbench.stepBackward': 'Step Back',
+  'workbench.stepForward': 'Step Forward',
+  'workbench.realtime': 'Realtime',
+  'workbench.history': 'History',
+  'workbench.listView': 'List View',
+  'workbench.singleView': 'Single View',
+
 }

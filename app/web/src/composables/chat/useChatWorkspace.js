@@ -1,12 +1,14 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { agentAPI } from '@/api/agent.js'
+import { usePanelStore } from '@/stores/panel.js'
 
 export const useChatWorkspace = ({
   t,
   toast,
   agentId
 }) => {
-  const showWorkspace = ref(false)
+  const panelStore = usePanelStore()
+  // const showWorkspace = ref(false) // Use panelStore instead
   const workspaceFiles = ref([])
   const taskStatus = ref(null)
   const expandedTasks = ref(new Set())
@@ -28,16 +30,27 @@ export const useChatWorkspace = ({
     }
   }
 
-  const handleWorkspacePanel = () => {
-    showWorkspace.value = !showWorkspace.value
-    if (showWorkspace.value) {
+  // Watch for panel open to fetch files
+  watch(() => panelStore.showWorkspace, (newVal) => {
+    if (newVal) {
       updateTaskAndWorkspace(agentId.value)
     }
-  }
+  })
 
   const downloadWorkspaceFile = async (id, itemOrPath) => {
     if (!id || !itemOrPath) return
-    const filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
+    let filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
+    
+    // Clean path: remove /sage-workspace/ prefix and leading slash
+    if (filePath) {
+      if (filePath.startsWith('/sage-workspace/')) {
+        filePath = filePath.replace('/sage-workspace/', '')
+      }
+      if (filePath.startsWith('/')) {
+        filePath = filePath.substring(1)
+      }
+    }
+
     const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false
     if (!filePath) return
     try {
@@ -79,9 +92,7 @@ export const useChatWorkspace = ({
   }
 
   return {
-    showWorkspace,
     workspaceFiles,
-    handleWorkspacePanel,
     downloadWorkspaceFile,
     downloadFile,
     clearTaskAndWorkspace
