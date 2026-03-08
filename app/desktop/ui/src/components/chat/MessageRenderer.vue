@@ -555,31 +555,62 @@ onMounted(() => {
   })
 })
 
-// 监听消息变化，更新工具结果
-watch(() => props.message, (newMessage) => {
+// 监听消息变化，更新工具结果、文件引用、代码块（用于实时消息流）
+watch(() => props.message, (newMessage, oldMessage) => {
   console.log('[MessageRenderer] Watch triggered, message:', newMessage?.message_id, 'tool_calls:', newMessage?.tool_calls?.length)
 
-  if (!newMessage?.tool_calls || newMessage.tool_calls.length === 0) {
-    console.log('[MessageRenderer] No tool_calls, skipping')
-    return
+  const messageId = newMessage?.message_id || newMessage?.id
+  const sessionId = newMessage?.session_id
+  const timestamp = newMessage?.timestamp || Date.now()
+
+  // 1. 处理工具调用结果
+  if (newMessage?.tool_calls && newMessage.tool_calls.length > 0) {
+    newMessage.tool_calls.forEach((toolCall) => {
+      const toolResult = getParsedToolResult(toolCall)
+      console.log('[MessageRenderer] toolCall.id:', toolCall.id, 'toolResult:', toolResult)
+      if (toolResult) {
+        // 将 Proxy 转换为普通对象
+        const plainToolResult = JSON.parse(JSON.stringify(toolResult))
+        console.log('[MessageRenderer] Calling updateToolResult with id:', toolCall.id)
+        workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+      }
+    })
   }
 
-  newMessage.tool_calls.forEach((toolCall) => {
-    const toolResult = getParsedToolResult(toolCall)
-    console.log('[MessageRenderer] toolCall.id:', toolCall.id, 'toolResult:', toolResult)
-    if (toolResult) {
-      // 将 Proxy 转换为普通对象
-      const plainToolResult = JSON.parse(JSON.stringify(toolResult))
-      console.log('[MessageRenderer] Plain toolResult:', plainToolResult)
-      console.log('[MessageRenderer] typeof plainToolResult:', typeof plainToolResult)
-      console.log('[MessageRenderer] plainToolResult keys:', Object.keys(plainToolResult))
-      // 更新工作台中的工具结果
-      console.log('[MessageRenderer] Calling updateToolResult with id:', toolCall.id, 'result:', plainToolResult)
-      const updateResult = workbenchStore.updateToolResult(toolCall.id, plainToolResult)
-      console.log('[MessageRenderer] updateToolResult returned:', updateResult)
-    }
-  })
-}, { deep: true, immediate: true })
+  // 2. 处理文件引用（实时流中文件引用可能在消息更新时出现）
+  if (newMessage?.content && newMessage.content !== oldMessage?.content) {
+    const fileMatches = extractFileReferences(newMessage.content)
+    console.log('[MessageRenderer] Watch found file references:', fileMatches.length)
+    fileMatches.forEach((file) => {
+      // addItem 内部会去重
+      workbenchStore.addItem({
+        type: 'file',
+        role: 'assistant',
+        timestamp: timestamp,
+        sessionId: sessionId,
+        messageId: messageId,
+        data: file
+      })
+    })
+  }
+
+  // 3. 处理代码块（实时流中代码块可能在消息更新时出现）
+  if (newMessage?.content && newMessage.content !== oldMessage?.content) {
+    const codeBlocks = extractCodeBlocks(newMessage.content)
+    console.log('[MessageRenderer] Watch found code blocks:', codeBlocks.length)
+    codeBlocks.forEach((code) => {
+      // addItem 内部会去重
+      workbenchStore.addItem({
+        type: 'code',
+        role: 'assistant',
+        timestamp: timestamp,
+        sessionId: sessionId,
+        messageId: messageId,
+        data: code
+      })
+    })
+  }
+}, { deep: true })
 
 // 辅助函数：提取文件引用
 function extractFileReferences(content) {
