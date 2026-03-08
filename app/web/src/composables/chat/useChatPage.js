@@ -10,9 +10,11 @@ import { useChatStream } from '@/composables/chat/useChatStream.js'
 import { useChatLifecycle } from '@/composables/chat/useChatLifecycle.js'
 import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
+import { usePanelStore } from '@/stores/panel.js'
 
 export const useChatPage = (props) => {
   const { t } = useLanguage()
+  const panelStore = usePanelStore()
   const route = useRoute()
   const router = useRouter()
 
@@ -35,7 +37,7 @@ export const useChatPage = (props) => {
     handleScroll,
     clearScrollTimer
   } = useChatScroll()
-  const showSettings = ref(false)
+  // const showSettings = ref(false) // Use panelStore instead
   const currentTraceId = ref(null)
 
   const openTraceDetails = () => {
@@ -227,7 +229,6 @@ export const useChatPage = (props) => {
   const {
     showWorkspace,
     workspaceFiles,
-    handleWorkspacePanel,
     downloadWorkspaceFile,
     downloadFile,
     clearTaskAndWorkspace
@@ -401,14 +402,13 @@ export const useChatPage = (props) => {
     config,
     messagesListRef,
     messagesEndRef,
-    showSettings,
     showWorkspace,
     showLoadingBubble,
     filteredMessages,
     isLoading,
     isCurrentSessionLoading,
+    currentSessionId,
     handleAgentChange,
-    handleWorkspacePanel,
     handleShare,
     openTraceDetails,
     handleScroll,

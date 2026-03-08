@@ -725,4 +725,20 @@ export default {
   'agent.auth.saveError': '授权保存失败',
   'common.you': '你自己',
   'agent.authorize': '授权',
+
+
+  // 工作台
+  'workbench.title': '工作台',
+  'workbench.emptyTitle': '工作台为空',
+  'workbench.emptyDesc': '对话中的工具调用、文件和代码将显示在这里',
+  'workbench.noSelection': '请选择要查看的项目',
+  'workbench.play': '播放',
+  'workbench.pause': '暂停',
+  'workbench.stepBackward': '后退',
+  'workbench.stepForward': '前进',
+  'workbench.realtime': '实时',
+  'workbench.history': '历史',
+  'workbench.listView': '列表视图',
+  'workbench.singleView': '单例视图',
+
 }

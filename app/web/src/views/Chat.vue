@@ -20,12 +20,23 @@
           <div class="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="handleWorkspacePanel">
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleWorkspace">
                   <FolderOpen class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
                 <p>{{ t('workspace.title') }}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleWorkbench">
+                  <Monitor class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>工作台</p>
               </TooltipContent>
             </Tooltip>
 
@@ -53,7 +64,7 @@
 
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="showSettings = !showSettings">
+                <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleSettings">
                   <Settings class="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -98,7 +109,7 @@
         </div>
         
         <div class="flex-none p-4  bg-background" v-if="selectedAgent">
-            <MessageInput :is-loading="isCurrentSessionLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+            <MessageInput :agent-id="selectedAgentId" :is-loading="isCurrentSessionLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
 
@@ -111,24 +122,32 @@
         @download-file="downloadWorkspaceFile"
         @openSubSession="handleOpenSubSession"
       />
+      <WorkspacePanel v-if="panelStore.showWorkspace" :workspace-files="workspaceFiles"
+        @download-file="downloadFile" @close="panelStore.closeAll()" />
+      
+      <WorkbenchPreview 
+        v-if="panelStore.showWorkbench" 
+        :messages="filteredMessages"
+        :session-id="currentSessionId"
+        class="border-l border-border bg-background flex-none z-20"
+        @close="panelStore.closeAll()"
+      />
 
-      <WorkspacePanel v-if="showWorkspace" :workspace-files="workspaceFiles"
-        @download-file="downloadFile" @close="showWorkspace = false" />
-
-      <ConfigPanel v-if="showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
-        @config-change="updateConfig" @close="showSettings = false" />
+      <ConfigPanel v-if="panelStore.showSettings" :agents="agents" :selected-agent="selectedAgent" :config="config"
+        @config-change="updateConfig" @close="panelStore.closeAll()" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { Bot, Settings, Share2, FolderOpen, Search } from 'lucide-vue-next'
+import { Bot, Settings, Share2, FolderOpen, Search, Monitor } from 'lucide-vue-next'
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
 import ConfigPanel from '@/components/chat/ConfigPanel.vue'
 import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
+import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 
@@ -143,6 +162,9 @@ import {
 } from '@/components/ui/select'
 
 import { useChatPage } from '@/composables/chat/useChatPage.js'
+import { useWorkbenchStore } from '@/stores/workbench'
+import { usePanelStore } from '@/stores/panel'
+import { watch } from 'vue'
 
 const props = defineProps({
   selectedConversation: {
@@ -161,16 +183,13 @@ const {
   selectedAgent,
   selectedAgentId,
   config,
-  messagesListRef,
-  messagesEndRef,
   showSettings,
-  showWorkspace,
   showLoadingBubble,
   filteredMessages,
   isLoading,
   isCurrentSessionLoading,
+  currentSessionId,
   handleAgentChange,
-  handleWorkspacePanel,
   handleShare,
   openTraceDetails,
   handleScroll,
@@ -185,4 +204,32 @@ const {
   downloadFile,
   updateConfig
 } = useChatPage(props)
+
+const workbenchStore = useWorkbenchStore()
+const panelStore = usePanelStore()
+
+const toggleWorkbench = () => {
+  panelStore.toggleWorkbench()
+}
+
+const toggleWorkspace = () => {
+  panelStore.toggleWorkspace()
+}
+
+const toggleSettings = () => {
+  panelStore.toggleSettings()
+}
+
+// 监听消息变化，提取数据到 workbench
+watch(() => filteredMessages.value, (messages) => {
+  if (!messages) return
+  messages.forEach(msg => {
+     workbenchStore.extractFromMessage(msg, selectedAgentId.value)
+  })
+}, { deep: true, immediate: true })
+
+// 监听 Session ID 变化
+watch(() => currentSessionId.value, (id) => {
+    if (id) workbenchStore.setSessionId(id)
+}, { immediate: true })
 </script>
