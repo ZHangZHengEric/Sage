@@ -24,6 +24,11 @@ from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
 from .message import MessageRole, MessageType, MessageChunk
 
+# 全局动态 token 比例计算（所有 MessageManager 实例共享）
+_global_token_ratio_samples: List[Dict[str, float]] = []  # 存储字符数和token数的样本
+_global_max_ratio_samples = 10  # 最多保留10个样本
+_global_default_token_ratio = 0.4  # 默认比例（中文约0.6，英文约0.25，混合约0.4）
+
 class MessageManager:
     """
     优化版消息管理器
@@ -85,11 +90,6 @@ class MessageManager:
             'created_at': datetime.datetime.now().isoformat(),
             'last_updated': datetime.datetime.now().isoformat()
         }
-        
-        # 动态 token 比例计算
-        self._token_ratio_samples: List[Dict[str, float]] = []  # 存储字符数和token数的样本
-        self._max_ratio_samples = 10  # 最多保留10个样本
-        self._default_token_ratio = 0.4  # 默认比例（中文约0.6，英文约0.25，混合约0.4）
         
     
     def update_messages(self, messages: Union[MessageChunk, List[MessageChunk]]) -> None:
@@ -221,7 +221,8 @@ class MessageManager:
             old_messages_chunks = MessageManager.merge_new_message_old_messages(new_message,old_messages_chunks)
         return old_messages_chunks
 
-    def calculate_messages_token_length(self, messages: Sequence[Union[MessageChunk,Dict]]) -> int:
+    @staticmethod
+    def calculate_messages_token_length(messages: Sequence[Union[MessageChunk,Dict]]) -> int:
         """
         计算消息列表的token长度, 只计算content字段
         优先使用动态比例计算，如果没有样本则使用静态规则
@@ -233,18 +234,19 @@ class MessageManager:
             int: 消息列表的token长度
         """
         # 如果有动态比例样本，优先使用动态计算
-        if self._token_ratio_samples:
-            return self._calculate_messages_token_length_dynamic(messages)
+        if _global_token_ratio_samples:
+            return MessageManager._calculate_messages_token_length_dynamic(messages)
         
         # 否则使用静态规则计算
         token_length = 0
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk.from_dict(message)
-            token_length += self._calculate_str_token_length_static(message.get_content() or '')
+            token_length += MessageManager._calculate_str_token_length_static(message.get_content() or '')
         return token_length
 
-    def _calculate_str_token_length_static(self, content: str) -> int:
+    @staticmethod
+    def _calculate_str_token_length_static(content: str) -> int:
         """
         使用静态规则计算字符串的token长度
         一个中文等于0.6 个token，
@@ -275,6 +277,29 @@ class MessageManager:
                 token_length += 0.4
         return int(token_length)
 
+    @staticmethod
+    def calculate_str_token_length(content: str) -> int:
+        """
+        计算字符串的token长度（公共静态方法）
+        优先使用动态比例，如果没有样本则使用静态规则
+
+        Args:
+            content: 字符串内容
+
+        Returns:
+            int: 字符串的token长度
+        """
+        if not content:
+            return 0
+
+        # 如果有动态比例样本，使用动态比例
+        if _global_token_ratio_samples:
+            ratio = MessageManager.get_dynamic_token_ratio()
+            return int(len(content) * ratio)
+
+        # 否则使用静态规则
+        return MessageManager._calculate_str_token_length_static(content)
+
     def update_token_ratio(self, char_count: int, actual_token_count: int) -> None:
         """
         根据实际的 LLM 响应更新 token 比例
@@ -288,8 +313,9 @@ class MessageManager:
 
         ratio = actual_token_count / char_count
 
-        # 添加到样本列表
-        self._token_ratio_samples.append({
+        # 添加到全局样本列表
+        global _global_token_ratio_samples
+        _global_token_ratio_samples.append({
             'char_count': char_count,
             'token_count': actual_token_count,
             'ratio': ratio,
@@ -297,40 +323,44 @@ class MessageManager:
         })
 
         # 限制样本数量
-        if len(self._token_ratio_samples) > self._max_ratio_samples:
-            self._token_ratio_samples.pop(0)
+        if len(_global_token_ratio_samples) > _global_max_ratio_samples:
+            _global_token_ratio_samples.pop(0)
 
-        logger.debug(f"MessageManager: 更新 token 比例样本，当前比例={ratio:.4f}，样本数={len(self._token_ratio_samples)}")
+        logger.debug(f"MessageManager: 更新 token 比例样本，当前比例={ratio:.4f}，样本数={len(_global_token_ratio_samples)}")
 
-    def get_dynamic_token_ratio(self) -> float:
+    @staticmethod
+    def get_dynamic_token_ratio() -> float:
         """
-        获取动态的 token 比例
+        获取动态的 token 比例（静态方法，所有实例共享）
 
         Returns:
             float: 基于历史样本的平均 token 比例，如果没有样本则返回默认值
         """
-        if not self._token_ratio_samples:
-            return self._default_token_ratio
+        global _global_token_ratio_samples, _global_default_token_ratio
+
+        if not _global_token_ratio_samples:
+            return _global_default_token_ratio
 
         # 计算加权平均（最近的样本权重更高）
         total_weight = 0
         weighted_sum = 0
 
-        for i, sample in enumerate(self._token_ratio_samples):
+        for i, sample in enumerate(_global_token_ratio_samples):
             weight = i + 1  # 越新的样本权重越高
             weighted_sum += sample['ratio'] * weight
             total_weight += weight
 
-        avg_ratio = weighted_sum / total_weight if total_weight > 0 else self._default_token_ratio
+        avg_ratio = weighted_sum / total_weight if total_weight > 0 else _global_default_token_ratio
 
         # 限制在合理范围内（防止异常值）
         avg_ratio = max(0.1, min(1.0, avg_ratio))
 
         return avg_ratio
 
-    def _calculate_messages_token_length_dynamic(self, messages: Sequence[Union[MessageChunk, Dict]]) -> int:
+    @staticmethod
+    def _calculate_messages_token_length_dynamic(messages: Sequence[Union[MessageChunk, Dict]]) -> int:
         """
-        使用动态比例计算消息列表的 token 长度
+        使用动态比例计算消息列表的 token 长度（静态方法）
 
         Args:
             messages: 消息列表
@@ -338,7 +368,7 @@ class MessageManager:
         Returns:
             int: 估算的 token 长度
         """
-        ratio = self.get_dynamic_token_ratio()
+        ratio = MessageManager.get_dynamic_token_ratio()
         total_chars = 0
 
         for message in messages:
@@ -468,7 +498,7 @@ class MessageManager:
                 messages_str_list.append(f"Tool: {msg.content}")
         
         result = "\n".join(messages_str_list) or "None"
-        logger.info(f"AgentBase: 转换后字符串长度: {MessageManager.calculate_str_token_length(result)}")
+        logger.info(f"AgentBase: 转换后字符串长度: {MessageManager._calculate_str_token_length_static(result)}")
         return result
 
     def filter_messages(self,context_length_limited:int=10000,
@@ -1012,7 +1042,7 @@ class MessageManager:
         max_model_len = budget_info.get('max_model_len', 40000)
 
         # 使用动态比例计算当前消息长度
-        current_tokens = self.calculate_messages_token_length_dynamic(messages)
+        current_tokens = MessageManager._calculate_messages_token_length_dynamic(messages)
         
         # 阈值判断
         remaining_tokens = max_model_len - current_tokens
@@ -1022,7 +1052,7 @@ class MessageManager:
         
         if remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens:
             logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}), 触发压缩...")
-            logger.info(f"MessageManager: 使用动态token比例={self.get_dynamic_token_ratio():.4f}, 样本数={len(self._token_ratio_samples)}")
+            logger.info(f"MessageManager: 使用动态token比例={MessageManager.get_dynamic_token_ratio():.4f}, 样本数={len(_global_token_ratio_samples)}")
             
             # 执行压缩
             compressed_messages = MessageManager.compress_messages(
@@ -1031,7 +1061,7 @@ class MessageManager:
             )
             
             # 记录压缩效果（使用动态比例）
-            new_tokens = self.calculate_messages_token_length_dynamic(compressed_messages)
+            new_tokens = MessageManager._calculate_messages_token_length_dynamic(compressed_messages)
             logger.info(f"MessageManager: 临时压缩完成，Token从 {current_tokens} 降至 {new_tokens}")
             return compressed_messages
             

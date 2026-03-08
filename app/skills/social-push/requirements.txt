@@ -1,0 +1,17 @@
+# 小红书笔记创作技能依赖
+
+# Markdown 处理
+markdown>=3.4.0
+PyYAML>=6.0
+
+# 浏览器自动化（渲染图片）
+playwright>=1.40.0
+
+# 小红书发布
+xhs>=0.4.0
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# HTTP 请求（API 模式）
+requests>=2.28.0
