@@ -23,6 +23,8 @@ class LoginResponse(BaseModel):
 
 class UserInfoResponse(BaseModel):
     user: Dict[str, Any]
+    has_provider: bool = False
+    has_agent: bool = False
 
 class UserDTO(BaseModel):
     user_id: str
@@ -42,6 +44,12 @@ class UserAddRequest(RegisterRequest):
 class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
+
+class UserConfigResponse(BaseModel):
+    config: Dict[str, Any]
+
+class UserConfigUpdateRequest(BaseModel):
+    config: Dict[str, Any]
 
 class UserDeleteRequest(BaseModel):
     user_id: str

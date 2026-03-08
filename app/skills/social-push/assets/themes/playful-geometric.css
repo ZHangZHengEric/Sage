@@ -1,0 +1,224 @@
+/* ============================================
+   Playful Geometric - 活泼几何风格
+   Memphis 设计与现代波普艺术的融合
+   适配小红书卡片渲染
+   ============================================ */
+
+/* 配色定义
+   背景色: #FFFDF5 (温暖奶油白 - 纸质感)
+   前景色: #1E293B (石板色 800)
+   主紫色: #8B5CF6 (Vivid Violet - 品牌主色)
+   粉色: #F472B6 (Hot Pink - 俏皮活力)
+   黄色: #FBBF24 (Amber/Yellow - 乐观积极)
+   薄荷绿: #34D399 (Emerald/Mint - 清新感)
+*/
+
+.card-inner {
+  background-color: #fffdf5;
+  /* 几何点阵背景装饰 */
+  background-image: radial-gradient(circle, #e2e8f0 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+}
+
+.card-content {
+  color: #1e293b;
+  font-size: 42px;
+  line-height: 1.7;
+}
+
+/* 标题样式 */
+.card-content h1 {
+  font-size: 72px;
+  font-weight: 800;
+  padding: 0.4em 0.65em;
+  background-color: #8b5cf6;
+  color: #ffffff;
+  border: 3px solid #1e293b;
+  border-radius: 0 28px 0 28px;
+  box-shadow: 6px 6px 0 #1e293b;
+  margin-bottom: 40px;
+  line-height: 1.25;
+}
+
+.card-content h2 {
+  font-size: 56px;
+  font-weight: 800;
+  padding: 0.3em 0.6em;
+  background-color: #fffdf5;
+  color: #7c3aed;
+  border: 3px solid #1e293b;
+  border-left: 10px solid #8b5cf6;
+  border-radius: 0 20px 20px 0;
+  box-shadow: 5px 5px 0 #f472b6;
+  margin: 50px 0 25px 0;
+  line-height: 1.25;
+}
+
+.card-content h3 {
+  font-size: 48px;
+  font-weight: 800;
+  padding: 0.25em 0.65em;
+  color: #1e293b;
+  background-color: #fbbf24;
+  border: 2px solid #1e293b;
+  border-radius: 9999px;
+  display: inline-block;
+  box-shadow: 4px 4px 0 #1e293b;
+  margin: 40px 0 20px 0;
+  line-height: 1.25;
+}
+
+/* 段落 */
+.card-content p {
+  margin-bottom: 35px;
+}
+
+/* 粗体 - 黄色高亮贴纸效果 */
+.card-content strong,
+.card-content b {
+  font-weight: 700;
+  color: #1e293b;
+  background-color: #fbbf24;
+  padding: 0.1em 0.3em;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 rgba(30, 41, 59, 0.2);
+}
+
+/* 斜体 - 紫色强调 */
+.card-content em,
+.card-content i {
+  font-style: italic;
+  color: #8b5cf6;
+  font-weight: 500;
+}
+
+/* 链接 - 活泼几何风格 */
+.card-content a {
+  color: #8b5cf6;
+  text-decoration: none;
+  font-weight: 500;
+  background-color: rgba(139, 92, 246, 0.1);
+  padding: 0.08em 0.25em;
+  border-radius: 5px;
+  border-bottom: 2px solid #8b5cf6;
+}
+
+/* 列表 */
+.card-content ul,
+.card-content ol {
+  margin: 30px 0;
+  padding-left: 60px;
+}
+
+.card-content li {
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.card-content li::marker {
+  color: #8b5cf6;
+  font-weight: 700;
+}
+
+/* 引用块 - 气泡贴纸风格 */
+.card-content blockquote {
+  margin: 35px 0;
+  padding: 0.8em 1.1em 0.8em 1.6em;
+  background-color: #f472b6;
+  color: #1e293b;
+  border: 3px solid #1e293b;
+  border-left: 10px solid #fbbf24;
+  border-radius: 0 28px 28px 0;
+  box-shadow: 6px 6px 0 #1e293b;
+}
+
+.card-content blockquote p {
+  margin: 0;
+  font-style: normal;
+}
+
+/* 行内代码 - 黄色贴纸 */
+.card-content code {
+  font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 38px;
+  background-color: #fbbf24;
+  color: #1e293b;
+  padding: 0.15em 0.5em;
+  border: 2px solid #1e293b;
+  border-radius: 8px;
+}
+
+/* 代码块 - 深色背景配紫色硬阴影 */
+.card-content pre {
+  margin: 35px 0;
+  padding: 40px;
+  background-color: #1e293b;
+  border: 3px solid #1e293b;
+  border-radius: 20px;
+  box-shadow: 8px 8px 0 #8b5cf6;
+  overflow-x: visible;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.card-content pre code {
+  background-color: transparent;
+  color: #ffffff;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-size: 36px;
+  line-height: 1.55;
+}
+
+/* 分割线 - 彩虹几何装饰条 */
+.card-content hr {
+  margin: 50px 0;
+  border: none;
+  height: 10px;
+  background: repeating-linear-gradient(
+    90deg,
+    #8b5cf6 0px,
+    #8b5cf6 24px,
+    #f472b6 24px,
+    #f472b6 48px,
+    #fbbf24 48px,
+    #fbbf24 72px,
+    #34d399 72px,
+    #34d399 96px
+  );
+  border-radius: 9999px;
+}
+
+/* 图片 - 贴纸框架风格 */
+.card-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 4px solid #1e293b;
+  border-radius: 20px;
+  box-shadow: 8px 8px 0 #1e293b;
+  margin: 35px auto;
+}
+
+/* Tags 标签样式 */
+.tags-container {
+  margin-top: 50px;
+  padding-top: 30px;
+  border-top: 5px solid #fbbf24;
+}
+
+.tag {
+  display: inline-block;
+  background-color: #8b5cf6;
+  color: white;
+  padding: 12px 28px;
+  border-radius: 9999px;
+  font-size: 34px;
+  margin: 10px 15px 10px 0;
+  font-weight: 600;
+  border: 2px solid #1e293b;
+  box-shadow: 3px 3px 0 #1e293b;
+}

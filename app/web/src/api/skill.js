@@ -11,7 +11,7 @@ export const skillAPI = {
    * @returns {Promise<Array>}
    */
   getSkills: async (params = {}) => {
-    return await baseAPI.get('/api/skills')
+    return await baseAPI.get('/api/skills', params)
   },
 
   /**

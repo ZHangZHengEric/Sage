@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前版本-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_版本-0.9.9-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_版本-1.0.0-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage 多智能体框架**
 
@@ -20,16 +20,47 @@
 
 ---
 
+## 📸 **产品截图**
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/workbench.png" width="100%" alt="工作台"/>
+      <br/><strong>可视化工作台</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/chat.png" width="100%" alt="对话"/>
+      <br/><strong>实时协作</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/preview.png" width="100%" alt="预览"/>
+      <br/><strong>多格式支持</strong>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+> 📖 **详细文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
+
+---
+
 ## ✨ **核心亮点**
 
-- 🧠 **多智能体编排**：支持 **TaskExecutor** (串行) 和 **FibreAgent** (并行) 两种编排模式。
-- 🏗️ **企业级架构**：基于 **Elasticsearch** (向量), **RustFS** (对象), 和 **SQLAlchemy** (关系型) 的强大存储层。
-- 📚 **RAG 引擎 2.0**：支持 **RRF** (Reciprocal Rank Fusion) 和混合检索的全新检索增强生成引擎。
+- 🧠 **多智能体编排**：支持 **TaskExecutor** (串行)、**FibreAgent** (并行) 和 **AgentFlow** (声明式) 三种编排模式。
+- � **模型能力最大化**：即使在 **Qwen3.5 35B-A3B** 等小模型上也能稳定完成复杂任务，框架级优化释放模型潜能。
+- 🧩 **内置高稳定性 Skill**：预装多种经过实战验证的 Skill，开箱即用，确保关键任务稳定执行。
 - 🛡️ **安全沙箱**：提供隔离执行环境 (`sagents.utils.sandbox`) 确保智能体代码执行安全。
 - 👁️ **全链路可观测性**：集成 **OpenTelemetry** 追踪，可视化智能体思考与执行路径。
-- 🧩 **模块化组件**：**Skills**, **Tools**, 和 **MCP Servers** 的即插即用架构。
+- 🧩 **模块化组件**：**Skills**、**Tools** 和 **MCP Servers** 的即插即用架构。
 - 📊 **上下文管理**：先进的 **Context Budget** 控制，实现精准的 Token 优化。
-- 🐍 **Python 3.11+ 优化**：全类型注解和代码风格检查，确保企业级可靠性。
+- 💻 **跨平台桌面端**：原生桌面应用支持 **macOS** (Intel/Apple Silicon)、**Windows** 和 **Linux**。
+- 🛠️ **可视化工作台**：统一的文件预览、工具结果和代码执行工作空间，支持 15+ 种格式。
+- 🔌 **MCP 协议**：Model Context Protocol 支持，实现标准化工具集成。
+
+---
 
 ## 🚀 **快速开始**
 
@@ -39,18 +70,23 @@
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 pip install -r requirements.txt
-# 如果需要 Web UI
-pip install -r app/server/requirements.txt
 ```
 
 ### 运行 Sage
 
-**交互式 Web 演示 (Streamlit)**：
+**桌面应用（推荐）**：
+
+下载适合您平台的最新版本：
+- **macOS**: `.dmg` (Intel & Apple Silicon)
+- **Windows**: `.exe` (NSIS 安装包)
+- **Linux**: 从源码构建
+
 ```bash
-streamlit run app/sage_demo.py -- \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_model deepseek-chat \
-  --default_llm_api_base_url https://api.deepseek.com
+# macOS/Linux
+app/desktop/scripts/build.sh release
+
+# Windows
+./app/desktop/scripts/build_windows.ps1 release
 ```
 
 **命令行工具 (CLI)**：
@@ -61,63 +97,133 @@ python app/sage_cli.py \
   --default_llm_base_url https://api.deepseek.com
 ```
 
-**现代化 Web 应用 (FastAPI + React)**：
+**Web 应用 (FastAPI + Vue3)**：
 
-现代化 Web 应用现在重构为 `app/server` (后端) 和 `app/web` (前端)。
-
-**使用 Docker Compose 部署 (推荐)**：
 ```bash
-docker-compose up -d
+# 启动后端
+cd app/desktop/core
+python main.py
+
+# 启动前端（在另一个终端）
+cd app/desktop/ui
+npm install
+npm run dev
 ```
-访问应用地址：`http://localhost:30051` (Web) / `http://localhost:30050/docs` (API)。
+
+---
 
 ## 🏗️ **系统架构**
 
 ```mermaid
 graph TD
-    User[User/Client] --> API[Sage Server API]
-    API --> Orch[🧠 Agent Orchestrator]
+    User[用户/客户端] --> Desktop[💻 桌面应用]
+    User --> Web[🌐 Web 界面]
+    Desktop --> API[Sage Server API]
+    Web --> API
     
     subgraph Core[核心引擎]
-        Orch -- "调度" --> Agents["🤖 Agents (Fibre/Standard)"]
-        Agents -- "使用" --> RAG[📚 RAG Engine]
-        Agents -- "使用" --> Tools[🛠️ Tools & Skills]
-        Agents -- "运行于" --> Box[📦 Security Sandbox]
+        API --> Orch[🧠 智能体编排器]
+        Orch -- "调度" --> Flow[📋 AgentFlow]
+        Flow -- "执行" --> Agents["🤖 智能体<br/>Fibre / Simple / Multi"]
+        Agents -- "使用" --> RAG[📚 RAG 引擎]
+        Agents -- "使用" --> Tools[🛠️ 工具与技能]
+        Agents -- "使用" --> MCP[🔌 MCP 服务器]
+        Agents -- "运行于" --> Box[📦 安全沙箱]
     end
 
     subgraph Infra[企业级基础设施]
         RAG <--> ES[(Elasticsearch)]
         Tools <--> RustFS[(RustFS)]
-        Orch <--> DB[(SQL Database)]
+        Orch <--> DB[(SQL 数据库)]
     end
     
-    Core -.-> Obs["👁️ Observability (OpenTelemetry)"]
+    Core -.-> Obs["👁️ 可观测性<br/>OpenTelemetry"]
+    Core -.-> Workbench["🛠️ 可视化工作台"]
 ```
 
-## 📅 **v0.9.9 更新内容**
+---
 
-- **智能工具选择**：基于工具 ID 的推荐系统，提升准确性并统一 Agent 逻辑。
-- **任务调度 MCP**：内置任务调度服务，支持 SQLite 持久化和定时任务。
-- **Agent Hub MCP**：智能体间消息中心，实现多智能体协作和任务委派。
-- **Brave Search MCP**：网络搜索集成，支持实时信息获取。
-- **暗色主题**：完整的暗色模式支持，自动检测系统偏好。
-- **模型提供商管理**：动态 LLM 提供商配置，支持多模型源。
-- **子任务可视化**：实时子智能体执行追踪和消息流展示。
-- **上下文预算**：智能上下文压缩，支持长对话场景。
-- **[查看完整版本发布说明](release_notes/v0.9.9.md)**
+## 📅 **v1.0.0 更新内容**
+
+### 🤖 **SAgents 内核更新**
+
+- **Session 管理体系重构**：全局 `SessionManager`，支持父子会话关联追踪
+- **AgentFlow 编排引擎**：声明式工作流编排，支持 Router → DeepThink → Mode Switch → Suggest 流程
+- **Fibre 模式深度优化**：
+  - `sys_spawn_agent` 动态子智能体生成
+  - `sys_delegate_task` 并行任务委派
+  - 支持小时级长时任务执行
+  - 4 级层级深度控制
+  - 递归编排能力
+- **锁管理**：全局 `LockManager` 实现会话级隔离
+- **可观测性**：OpenTelemetry 集成，支持性能监控
+
+### 💻 **应用层更新**
+
+- **可视化工作台**：
+  - 20+ 渲染组件
+  - 15+ 文件格式支持（PDF、DOCX、PPTX、XLSX 等）
+  - 列表/单例双模式
+  - 时间轴导航
+  - 会话隔离的状态管理
+- **跨平台桌面端**：
+  - macOS (Intel/Apple Silicon) - DMG
+  - Windows - NSIS 安装包
+  - Linux - DEB 支持
+- **实时协作**：
+  - 消息流优化
+  - 文件引用提取
+  - 代码块高亮
+  - 断开检测与恢复
+- **MCP 支持**：Model Context Protocol 外部工具集成
+
+### 🔧 **基础设施**
+
+- **Tauri 2.0**：升级至稳定版，新的权限系统
+- **构建优化**：Rust 缓存、并行构建、自动签名
+- **状态管理**：Pinia Store 会话隔离
+
+**[查看完整发布说明](release_notes/v1.0.0.md)**
+
+---
 
 ## 📚 **文档资源**
 
-- [**完整文档首页**](docs/README.md)
-- [**Server 部署指南**](docs/SERVER_DEPLOYMENT_CN.md) - Docker 与源码部署
-- [**示例使用指南**](docs/EXAMPLES_USAGE_CN.md) - CLI、Web 与 API Server
-- [**更新日志**](docs/CHANGELOG_CN.md) - 最新更新与历史记录
-- [**智能体框架架构**](docs/ARCHITECTURE_CN.md)
-- [**API 参考**](docs/API_REFERENCE_CN.md)
-- [**配置指南**](docs/CONFIGURATION_CN.md)
-- [**工具开发**](docs/TOOL_DEVELOPMENT_CN.md)
+- 📖 **完整文档**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
+- 📝 **发布说明**: [release_notes/](release_notes/)
+- 🏗️ **架构说明**: 查看 `sagents/` 目录了解核心框架
+- 🔧 **配置指南**: `app/desktop/` 目录下的环境变量和配置文件
 
 ---
+
+## 🛠️ **开发**
+
+### 项目结构
+
+```
+Sage/
+├── sagents/                    # 核心智能体框架
+│   ├── agent/                  # 智能体实现
+│   │   ├── fibre/              # Fibre 多智能体编排
+│   │   ├── simple_agent.py     # 简单模式智能体
+│   │   └── ...
+│   ├── flow/                   # AgentFlow 引擎
+│   ├── context/                # 会话与消息管理
+│   ├── tool/                   # 工具系统
+│   └── session_runtime.py      # 会话管理器
+├── app/desktop/                # 桌面应用
+│   ├── core/                   # Python 后端 (FastAPI)
+│   ├── ui/                     # Vue3 前端
+│   └── tauri/                  # Tauri 2.0 桌面壳
+└── skills/                     # 内置技能
+```
+
+### 参与贡献
+
+我们欢迎贡献！请查看我们的 [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) 了解任务和讨论。
+
+---
+
 <div align="center">
 Built with ❤️ by the Sage Team
 </div>

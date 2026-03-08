@@ -1,0 +1,23 @@
+{
+  "name": "md2redbook",
+  "version": "2.0.0",
+  "description": "小红书笔记素材创作工具 - 支持多种排版样式和智能分页",
+  "main": "scripts/render_xhs_v2.js",
+  "scripts": {
+    "render": "node scripts/render_xhs_v2.js",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "keywords": [
+    "xiaohongshu",
+    "markdown",
+    "image-generation",
+    "social-media"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "marked": "^11.0.0",
+    "playwright": "^1.58.0"
+  }
+}

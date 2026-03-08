@@ -54,14 +54,15 @@ class SkillManager:
         """
         if path not in self.skill_dirs:
             self.skill_dirs.append(path)
+            # Invalidate cache when adding new directory (添加新目录时使缓存失效)
+            self._skills_cache_valid = False
             self.reload()
 
     def _initialize(self, skill_dirs: List[str] = None, include_global_skills: bool = True):
         logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.skill_workspace = os.path.join(base_dir, "skills")
+        self.skill_workspace = os.environ.get("SAGE_SKILL_WORKSPACE", "skills")
         
         # Combine custom directories with the default workspace (合并自定义目录和默认工作区)
         dirs = skill_dirs or []
@@ -69,6 +70,8 @@ class SkillManager:
              dirs.append(self.skill_workspace)
              
         self.skill_dirs = list(dict.fromkeys(dirs))
+        # Flag to track if skills cache is valid (标志：跟踪技能缓存是否有效)
+        self._skills_cache_valid = False
         self._load_skills_from_workspace()
 
     @classmethod
@@ -84,7 +87,9 @@ class SkillManager:
         Reload all skills from disk.
         从磁盘重新加载所有技能。
         """
-        logger.info("Reloading skills...")
+        logger.debug("Reloading skills...")
+        # Invalidate cache before reloading (重新加载前使缓存失效)
+        self._skills_cache_valid = False
         self._load_skills_from_workspace()
 
     def list_skills(self) -> List[str]:
@@ -169,7 +174,31 @@ class SkillManager:
     def load_new_skills(self):
         """
         Load new skills from disk without reloading existing ones.
+        If skills cache is valid, skip scanning and return immediately.
         """
+        # Check if cache is valid, if so, skip scanning (检查缓存是否有效，如果有效则跳过扫描)
+        # 除了要判断 _skills_cache_valid 是否有效，还得看一下目录中的文件夹数量与已加载 skill 数量是否一致
+        if getattr(self, '_skills_cache_valid', False):
+            # 快速统计所有 skill_dirs 下的文件夹总数
+            total_dirs = 0
+            for workspace in self.skill_dirs:
+                if not os.path.exists(workspace):
+                    continue
+                try:
+                    total_dirs += sum(
+                        1 for item in os.listdir(workspace)
+                        if os.path.isdir(os.path.join(workspace, item))
+                    )
+                except Exception:
+                    pass
+            # 如果文件夹总数与已加载技能数量不一致，则视为缓存失效
+            if total_dirs != len(self.skills):
+                logger.debug("Skills cache invalid: folder count != loaded skill count")
+                self._skills_cache_valid = False
+            else:
+                logger.debug("Skills cache is valid, skipping load_new_skills scan")
+                return
+        
         count = 0
         
         # Build a set of existing skill paths for fast lookup
@@ -181,7 +210,7 @@ class SkillManager:
                 logger.warning(f"Skill workspace directory not found: {workspace}")
                 continue
 
-            logger.info(f"Scanning skill workspace: {workspace}")
+            logger.debug(f"Scanning skill workspace: {workspace}")
             try:
                 for item in os.listdir(workspace):
                     skill_path = os.path.join(workspace, item)
@@ -199,6 +228,9 @@ class SkillManager:
             except Exception as e:
                 logger.error(f"Error scanning workspace {workspace}: {e}")
         logger.debug(f"Total skills loaded/checked: {count}")
+        
+        # Mark cache as valid after successful loading (加载成功后标记缓存为有效)
+        self._skills_cache_valid = True
 
 
     def _generate_file_list(self, path: str, root_path: str, skill_name: str) -> str:
@@ -208,8 +240,16 @@ class SkillManager:
         except OSError:
             return ""
 
+        # 需要过滤掉的缓存/临时文件夹和文件
+        excluded_names = {
+            '__pycache__', '.pytest_cache', '.mypy_cache', '.tox', '.egg-info',
+            '.git', '.svn', '.hg', '.DS_Store', 'node_modules', 'dist', 'build',
+            '.idea', '.vscode', '.vs', '*.pyc', '*.pyo', '*.pyd', '.coverage',
+            '.nyc_output', '.cache', 'venv', '.venv', 'env', '.env'
+        }
+
         # Filter items
-        items = [i for i in items if not i.startswith('.')]
+        items = [i for i in items if not i.startswith('.') and i not in excluded_names]
 
         for item in items:
             full_path = os.path.join(path, item)
@@ -302,6 +342,8 @@ class SkillManager:
 
         skill_name = self._load_skill_from_dir(skill_path)
         if skill_name:
+            # Invalidate cache when registering new skill (注册新技能时使缓存失效)
+            self._skills_cache_valid = False
             return skill_name
         else:
             # Validation failed, remove the directory
@@ -323,7 +365,8 @@ class SkillManager:
         Returns:
             bool: True if successful, False otherwise
         """
-
+        # Invalidate cache when reloading skill (重新加载技能时使缓存失效)
+        self._skills_cache_valid = False
         skill_name = self._load_skill_from_dir(skill_path)
         return skill_name is not None
 
@@ -333,6 +376,8 @@ class SkillManager:
         """
         if skill_name in self.skills:
             del self.skills[skill_name]
+            # Invalidate cache when removing skill (移除技能时使缓存失效)
+            self._skills_cache_valid = False
             logger.info(f"Removed skill from manager: {skill_name}")
 
     def get_skill_metadata(self, name: str) -> Optional[Dict[str, Any]]:
@@ -375,6 +420,25 @@ class SkillManager:
                 logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
             else:
                 pass
+        except shutil.Error as e:
+            # 处理部分复制成功但部分文件失败的情况
+            errors = e.args[0] if e.args else []
+            copied_files = []
+            failed_files = []
+            
+            for src, dst, err in errors:
+                if 'socket' in str(err).lower() or 'lock' in str(err).lower():
+                    # 忽略 socket 和 lock 文件错误
+                    logger.debug(f"Skipped socket/lock file: {src}")
+                    continue
+                failed_files.append((src, dst, err))
+            
+            # 如果有非 socket/lock 错误，重新抛出
+            if failed_files:
+                logger.warning(f"部分文件复制失败: {failed_files}")
+                # 继续返回目标目录，部分文件应该已经复制成功
+                
+            logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
         except Exception as e:
             logger.error(f"Failed to copy skill {skill_name} to workspace: {e}")
             return None

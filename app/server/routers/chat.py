@@ -2,11 +2,16 @@
 流式聊天接口路由模块
 """
 import asyncio
+import json
+import time
+import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from sqlalchemy.orm import query
 from sagents.context.session_context import delete_session_run_lock
+from sagents.utils.lock_manager import safe_release
 
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
@@ -20,10 +25,40 @@ from ..services.chat import (
     populate_request_from_agent_config,
     prepare_session,
 )
-from ..services.conversation import interrupt_session
+from ..services.chat.stream_manager import StreamManager
+from ..services.conversation import interrupt_session, get_conversation_messages
 
 # 创建路由器
 chat_router = APIRouter()
+
+async def stream_with_manager(
+    session_id: str,
+    last_index: int = 0,
+    resume: bool = False
+):
+    """
+    通过 StreamManager 订阅会话流
+    """
+    manager = StreamManager.get_instance()
+    has_stream_data = False
+    async for chunk in manager.subscribe(session_id, last_index):
+        has_stream_data = True
+        yield chunk
+    if has_stream_data:
+        return
+    try:
+        await get_conversation_messages(session_id)
+    except Exception:
+        return
+    yield json.dumps(
+        {
+            "type": "stream_end",
+            "session_id": session_id,
+            "timestamp": time.time(),
+            "resume_fallback": True,
+        },
+        ensure_ascii=False,
+    ) + "\n"
 
 async def stream_api_with_disconnect_check(
     generator, 
@@ -66,62 +101,9 @@ async def stream_api_with_disconnect_check(
         # 清理资源
         logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
         try:
-            if hasattr(lock, "locked") and lock.locked():
-                await lock.release()
-            elif isinstance(lock, dict):
-                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
+            await safe_release(lock, session_id, "流结束清理")
 
             delete_session_run_lock(session_id)
-            logger.bind(session_id=session_id).info("资源已清理")
-        except Exception as e:
-            logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
-
-
-
-async def stream_with_disconnect_check(
-    generator, 
-    request: Request,
-    lock: asyncio.Lock,
-    session_id: str
-):
-    try:
-        async for chunk in generator:
-            # 仅用于提前结束流，不中断会话
-            if await request.is_disconnected():
-                logger.bind(session_id=session_id).info("Client disconnected (SSE closed)")
-                break   # 不 raise，不触发中断逻辑
-
-            yield chunk
-
-    # ⭐ 客户端断开时的正常路径
-    except asyncio.CancelledError:
-        logger.bind(session_id=session_id).info("Streaming task cancelled (client likely disconnected)")
-        # 不 interrupt_session
-        raise  # 必须继续抛出，让 ASGI 正确处理取消
-
-    # ⭐ 业务逻辑异常
-    except Exception as e:
-        logger.bind(session_id=session_id).error(f"Stream generator error: {e}")
-        raise
-
-    finally:
-        # 仅关闭 streaming generator
-        try:
-            if hasattr(generator, "aclose"):
-                await generator.aclose()
-        except Exception as e:
-            logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
-
-        logger.bind(session_id=session_id).debug("流处理结束，清理会话资源")
-
-        try:
-            if hasattr(lock, "locked") and lock.locked():
-                await lock.release()
-            elif isinstance(lock, dict):
-                 logger.bind(session_id=session_id).warning(f"Lock object is a dict (expected UnifiedLock): {lock}")
-
-            delete_session_run_lock(session_id)
-
             logger.bind(session_id=session_id).info("资源已清理")
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
@@ -169,7 +151,6 @@ async def chat(request: ChatRequest, http_request: Request):
     return StreamingResponse(
         stream_api_with_disconnect_check(
             execute_chat_session(
-                mode="chat",
                 stream_service=stream_service,
             ),
             http_request,
@@ -191,7 +172,6 @@ async def stream_chat(request: StreamRequest, http_request: Request):
     return StreamingResponse(
         stream_api_with_disconnect_check(
             execute_chat_session(
-                mode="stream",
                 stream_service=stream_service,
             ),
             http_request,
@@ -206,21 +186,49 @@ async def stream_chat(request: StreamRequest, http_request: Request):
 async def stream_chat_web(request: StreamRequest, http_request: Request):
     """这个接口有用户鉴权"""
     validate_and_prepare_request(request, http_request)
+    
+    session_id = request.session_id
+    manager = StreamManager.get_instance()
+
+    if manager.has_running_session(session_id):
+        logger.bind(session_id=session_id).info("同会话重入，先中断旧会话")
+        try:
+            await interrupt_session(session_id, "同会话重入，先中断旧会话")
+        finally:
+            await manager.stop_session(session_id)
 
     await populate_request_from_agent_config(request, require_agent_id=False)
     stream_service, lock = await prepare_session(request)
     session_id = request.session_id
+    query = request.messages[0].content
+    await manager.start_session(
+        session_id, 
+        query,
+        execute_chat_session(stream_service=stream_service),
+        lock
+    )
 
     return StreamingResponse(
-        stream_with_disconnect_check(
-            execute_chat_session(
-                mode="stream",
-                stream_service=stream_service,
-            ),
-            http_request,
-            lock,
-            session_id,
-        ),
+        stream_with_manager(session_id, last_index=0, resume=False),
         media_type="text/plain",
     )
 
+@chat_router.get("/api/stream/resume/{session_id}")
+async def resume_stream(session_id: str, last_index: int = 0):
+    """
+    断线重连或页面切换回来后，继续订阅流
+    :param session_id: 会话ID
+    :param last_index: 已收到的最后一条消息索引
+    """
+
+    return StreamingResponse(
+        stream_with_manager(session_id, last_index, resume=True),
+        media_type="text/plain"
+    )
+
+@chat_router.get("/api/stream/active_sessions")
+async def get_active_sessions():
+    """获取当前正在生成流的会话列表"""
+    manager = StreamManager.get_instance()
+
+    return manager.get_active_sessions()

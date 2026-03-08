@@ -213,9 +213,8 @@ class Logger:
     def _get_current_session_id(self) -> Optional[str]:
         """尝试获取当前session id"""
         try:
-            # 优先从session上下文管理器获取
-            from sagents.context.session_context_manager import session_manager
-            session_id = session_manager.get_session_id()
+            from sagents.session_runtime import get_current_session_id
+            session_id = get_current_session_id()
             if session_id:
                 return session_id
 
@@ -247,10 +246,11 @@ class Logger:
         if not has_file_handler:
             try:
                 # 获取session workspace路径
-                from sagents.context.session_context import get_session_context
-                session_context = get_session_context(session_id)
-                if session_context:
-                    session_workspace = session_context.session_workspace
+                from sagents.session_runtime import get_global_session_manager
+                session_manager = get_global_session_manager()
+                session = session_manager.get(session_id)
+                if session and session.session_context:
+                    session_workspace = session.session_context.session_workspace
 
                     # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
                     session_log_file = os.path.join(session_workspace, f'session_{session_id}.log')
@@ -269,23 +269,36 @@ class Logger:
 
     def _log(self, level, message, explicit_session_id: Optional[str] = None, **kwargs):
         # Get caller frame info to include filename and line number
-        # 使用inspect.stack获取调用栈，跳过前两层（_log方法和debug/info等方法）
-        stack = inspect.stack()
-        if len(stack) >= 3:
-            caller_frame = stack[2][0]
+        # 优化：使用sys._getframe替代inspect.stack，因为inspect.stack在Docker/OverlayFS下非常慢
+        try:
+            # 0: current frame (_log)
+            # 1: caller of _log (debug/info/etc)
+            # 2: caller of debug/info/etc (user code)
+            f = sys._getframe(2)
+            filepath = f.f_code.co_filename
+            lineno = f.f_lineno
+            
+            # 优化路径处理
             try:
-                # 尝试使用相对路径，并只保留最后两层
-                rel_path = os.path.relpath(caller_frame.f_code.co_filename, os.getcwd())
+                # 缓存cwd避免频繁系统调用
+                if not hasattr(self, '_cwd'):
+                    self._cwd = os.getcwd()
+                
+                # 简单的字符串操作替代 os.path.relpath
+                if filepath.startswith(self._cwd):
+                    rel_path = filepath[len(self._cwd):].lstrip(os.sep)
+                else:
+                    rel_path = filepath
+                
                 parts = rel_path.split(os.sep)
                 if len(parts) > 2:
                     filename = os.path.join(*parts[-2:])
                 else:
                     filename = rel_path
             except Exception:
-                # 如果失败（例如在不同驱动器上），回退到basename
-                filename = os.path.basename(caller_frame.f_code.co_filename)
-            lineno = caller_frame.f_lineno
-        else:
+                filename = os.path.basename(filepath)
+                
+        except (ValueError, AttributeError):
             filename = 'unknown.py'
             lineno = 0
 

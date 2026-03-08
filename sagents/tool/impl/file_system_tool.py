@@ -11,7 +11,6 @@ import asyncio
 from ..tool_base import tool
 from sagents.utils.logger import logger
 from sagents.utils.file_system_utils import SecurityValidator, FileMetadata, file_read_core
-from sagents.context.session_context import get_session_context
 class FileSystemError(Exception):
     """文件系统异常"""
     pass
@@ -28,19 +27,19 @@ class FileSystemTool:
         param_description_i18n={
             "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
             "start_line": {"zh": "开始行号，默认0", "en": "Start line number, default 0", "pt": "Linha inicial, padrão 0"},
-            "end_line": {"zh": "结束行号（不包含），默认200，None表示读取到文件末尾", "en": "End line number (exclusive), default 200, None means read to end", "pt": "Linha final (exclusiva), padrão 200, None significa ler até o final"},
+            "end_line": {"zh": "结束行号（不包含），默认400，None表示读取到文件末尾", "en": "End line number (exclusive), default 200, None means read to end", "pt": "Linha final (exclusiva), padrão 200, None significa ler até o final"},
             "encoding": {"zh": "文件编码，auto自动检测", "en": "File encoding, 'auto' for detection", "pt": "Codificação, 'auto' para detectar"},
             "max_size_mb": {"zh": "最大读取文件大小（MB）", "en": "Maximum file size to read (MB)", "pt": "Tamanho máximo do arquivo para leitura (MB)"}
         }
     )
-    async def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 200, 
+    async def file_read(self, file_path: str, start_line: int = 0, end_line: Optional[int] = 400, 
                   encoding: str = "auto", max_size_mb: float = 10.0) -> Dict[str, Any]:
         """高级文件读取工具，读取文本文件，例如txt，以及配置文件和代码文件
 
         Args:
             file_path (str): 文件绝对路径
             start_line (int): 开始行号，默认0
-            end_line (int): 结束行号（不包含），默认200，None表示读取到文件末尾
+            end_line (int): 结束行号（不包含），默认400，None表示读取到文件末尾
             encoding (str): 文件编码，'auto'表示自动检测
             max_size_mb (float): 最大读取文件大小（MB），默认10MB
 
@@ -175,18 +174,18 @@ class FileSystemTool:
             logger.error(f"💥 文件写入异常 [{operation_id}] - 错误: {str(e)}")
             return {"status": "error", "message": f"文件写入失败: {str(e)}", "operation_id": operation_id}
 
-    @tool(
-        description_i18n={
-            "zh": "按关键词检索文件并返回上下文",
-            "en": "Search file by keywords and return context",
-            "pt": "Pesquisa por palavras-chave e retorna contexto"
-        },
-        param_description_i18n={
-            "file_path": {"zh": "要搜索的文件路径", "en": "File path to search", "pt": "Caminho do arquivo para buscar"},
-            "keywords": {"zh": "关键词列表", "en": "List of keywords", "pt": "Lista de palavras-chave"},
-            "return_search_item": {"zh": "返回的匹配条目数量", "en": "Number of matched items to return", "pt": "Quantidade de resultados retornados"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "按关键词检索文件并返回上下文",
+    #         "en": "Search file by keywords and return context",
+    #         "pt": "Pesquisa por palavras-chave e retorna contexto"
+    #     },
+    #     param_description_i18n={
+    #         "file_path": {"zh": "要搜索的文件路径", "en": "File path to search", "pt": "Caminho do arquivo para buscar"},
+    #         "keywords": {"zh": "关键词列表", "en": "List of keywords", "pt": "Lista de palavras-chave"},
+    #         "return_search_item": {"zh": "返回的匹配条目数量", "en": "Number of matched items to return", "pt": "Quantidade de resultados retornados"}
+    #     }
+    # )
     def search_content_in_file(self, file_path: str, keywords:list[str],return_search_item=5) -> Dict[str, Any]:
         
         """在文件中通过关键词匹配，搜索相关的内容的上下文内容
@@ -464,6 +463,19 @@ class FileSystemTool:
                     pattern = re.compile(re.escape(search_pattern), re.IGNORECASE)
                     new_content, replace_count = pattern.subn(replacement, original_content)
             
+            # 如果没有匹配项，返回失败状态
+            if replace_count == 0:
+                return {
+                    "status": "error",
+                    "message": f"未找到匹配项，未进行任何替换",
+                    "statistics": {
+                        "replacements": 0,
+                        "original_length": len(original_content),
+                        "new_length": len(original_content),
+                        "length_change": 0
+                    }
+                }
+            
             # 写入修改后的内容
             with open(file_path, 'w', encoding=encoding, errors='ignore') as f:
                 f.write(new_content)
@@ -484,17 +496,17 @@ class FileSystemTool:
         except Exception as e:
             return {"status": "error", "message": f"搜索替换失败: {str(e)}"} 
     
-    @tool(
-        description_i18n={
-            "zh": "将CSV转换为Excel",
-            "en": "Convert CSV to Excel",
-            "pt": "Converte CSV para Excel"
-        },
-        param_description_i18n={
-            "csv_file_path": {"zh": "输入CSV文件路径", "en": "Input CSV file path", "pt": "Caminho do arquivo CSV de entrada"},
-            "excel_file_path": {"zh": "输出Excel文件路径", "en": "Output Excel file path", "pt": "Caminho do arquivo Excel de saída"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "将CSV转换为Excel",
+    #         "en": "Convert CSV to Excel",
+    #         "pt": "Converte CSV para Excel"
+    #     },
+    #     param_description_i18n={
+    #         "csv_file_path": {"zh": "输入CSV文件路径", "en": "Input CSV file path", "pt": "Caminho do arquivo CSV de entrada"},
+    #         "excel_file_path": {"zh": "输出Excel文件路径", "en": "Output Excel file path", "pt": "Caminho do arquivo Excel de saída"}
+    #     }
+    # )
     def convert_csv_to_excel(self, csv_file_path: str, excel_file_path: str) -> Dict[str, Any]:
         """将CSV文件转换为Excel文件
 

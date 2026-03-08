@@ -201,11 +201,11 @@
           </div>
         </CardHeader>
         <div class="px-5 pb-5 pt-4 space-y-4">
-          <div v-for="(workflow, index) in store.workflowPairs" :key="index"
+          <div v-for="(workflow, index) in store.workflowPairs" :key="workflow.id || index"
             class="rounded-lg p-3 bg-muted/20 hover:bg-muted/40 transition-colors border border-transparent hover:border-border/50">
             <div class="flex items-center gap-2 mb-2">
-              <Button variant="ghost" size="sm" class="h-8 w-8 p-0" @click="toggleWorkflow(index)">
-                <ChevronDown v-if="isWorkflowExpanded(index)" class="h-4 w-4" />
+              <Button variant="ghost" size="sm" class="h-8 w-8 p-0" @click="toggleWorkflow(workflow.id)">
+                <ChevronDown v-if="isWorkflowExpanded(workflow.id)" class="h-4 w-4" />
                 <ChevronRight v-else class="h-4 w-4" />
               </Button>
               <Input :model-value="workflow.key" :placeholder="t('agent.workflowName')" class="flex-1 h-8 bg-background"
@@ -215,9 +215,9 @@
                 <Trash2 class="h-4 w-4" />
               </Button>
             </div>
-            <div v-show="isWorkflowExpanded(index)" :ref="el => setStepListRef(el, index)" class="pl-10 space-y-2"
-              :key="workflowRenderKeys[index] || 0">
-              <div v-for="(step, stepIndex) in workflow.steps" :key="`${workflowRenderKeys[index] || 0}-${stepIndex}`"
+            <div v-show="isWorkflowExpanded(workflow.id)" :ref="el => setStepListRef(el, workflow.id)" class="pl-10 space-y-2"
+              :key="workflowRenderKeys[workflow.id] || 0">
+              <div v-for="(step, stepIndex) in workflow.steps" :key="`${workflowRenderKeys[workflow.id] || 0}-${stepIndex}`"
                 class="flex items-start gap-2 group">
                 <div
                   class="drag-handle cursor-move mt-2.5 text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted flex-shrink-0">
@@ -341,9 +341,9 @@ const handleAddWorkflow = () => {
   // Expand the new workflow (last index)
   // We wait for the store to update
   setTimeout(() => {
-    const newIndex = store.workflowPairs.length - 1
-    if (newIndex >= 0) {
-      expandedWorkflows.add(newIndex)
+    const newWorkflow = store.workflowPairs[store.workflowPairs.length - 1]
+    if (newWorkflow && newWorkflow.id) {
+      expandedWorkflows.add(newWorkflow.id)
     }
   }, 0)
 }
@@ -394,18 +394,18 @@ const handleApplyOptimization = () => {
 }
 
 // Drag and Drop for Workflow Steps
-const stepListRefs = ref([])
+const stepListRefs = ref({})
 const sortableInstances = new Map()
 const workflowRenderKeys = reactive({})
 
-const setStepListRef = (el, index) => {
+const setStepListRef = (el, id) => {
   if (el) {
-    stepListRefs.value[index] = el
-    initSortable(index, el)
+    stepListRefs.value[id] = el
+    initSortable(id, el)
   }
 }
 
-const initSortable = (index, el) => {
+const initSortable = (id, el) => {
   if (sortableInstances.has(el)) return
 
   const sortable = Sortable.create(el, {
@@ -416,6 +416,10 @@ const initSortable = (index, el) => {
       const { oldIndex, newIndex } = evt
       if (oldIndex === newIndex) return
 
+      // Find index by ID
+      const index = store.workflowPairs.findIndex(w => w.id === id)
+      if (index === -1) return
+
       // Update data
       const steps = store.workflowPairs[index].steps
       const item = steps[oldIndex]
@@ -424,8 +428,8 @@ const initSortable = (index, el) => {
       
       // Force re-render to ensure Vue state matches DOM
       // This is necessary because we are using index as key and Sortable modifies DOM directly
-      if (workflowRenderKeys[index] === undefined) workflowRenderKeys[index] = 0
-      workflowRenderKeys[index]++
+      if (workflowRenderKeys[id] === undefined) workflowRenderKeys[id] = 0
+      workflowRenderKeys[id]++
     }
   })
   

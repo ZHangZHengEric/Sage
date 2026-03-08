@@ -19,12 +19,20 @@ class TaskDecomposeAgent(AgentBase):
         self.agent_description = "任务分解智能体，专门负责将复杂任务分解为可执行的子任务"
         logger.debug("TaskDecomposeAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        # 重新获取系统前缀，使用正确的语言
+    async def run_stream(
+        self,
+        session_context: SessionContext,
+    ) -> AsyncGenerator[List[MessageChunk], None]:
+        if not session_context.tool_manager:
+            raise ValueError("ToolManager is not initialized in SessionContext")
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
+        tool_manager = session_context.tool_manager
+        session_id = session_context.session_id        # 重新获取系统前缀，使用正确的语言
         current_system_prefix = PromptManager().get_agent_prompt_auto('task_decompose_system_prefix', language=session_context.get_language())
 
         message_manager = session_context.message_manager
-        task_manager = session_context.task_manager
 
         if 'task_rewrite' in session_context.audit_status:
             recent_message_str = MessageManager.convert_messages_to_str([MessageChunk(
