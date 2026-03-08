@@ -249,12 +249,18 @@ class AgentBase(ABC):
                 is_rate_limit = isinstance(e, RateLimitError) or "rate limit" in error_message or "too many requests" in error_message
                 # 检查是否是网络连接错误（包括连接中断、超时等）
                 is_connection_error = isinstance(e, APIConnectionError) or "connection" in error_message or "incomplete chunked read" in error_message
+                # 检查是否是 token 超限错误
+                is_token_limit_error = "range of input length" in error_message or "token" in error_message and "exceed" in error_message
 
                 if retry_count < max_retries and (is_rate_limit or is_connection_error):
                     wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
                     error_type = "限流" if is_rate_limit else "网络连接"
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
+                elif is_token_limit_error:
+                    # token 超限错误，直接抛出，由上层处理压缩逻辑
+                    logger.error(f"{self.__class__.__name__}: Token 超限错误，需要压缩消息: {e}")
+                    raise
                 else:
                     # 非可重试错误或已达到最大重试次数
                     logger.error(f"{self.__class__.__name__}: LLM流式调用失败: {e}\n{traceback.format_exc()}")
@@ -346,6 +352,21 @@ class AgentBase(ABC):
                             llm_response = None
                         if session_context:
                             session_context.add_llm_request(llm_request, llm_response)
+
+                            # 更新动态 token 比例
+                            if llm_response and llm_response.usage:
+                                # 计算总字符数（输入+输出）
+                                input_chars = sum(len(str(m.get('content', ''))) for m in messages)
+                                output_content = llm_response.choices[0].message.content or ''
+                                output_chars = len(output_content)
+                                total_chars = input_chars + output_chars
+
+                                # 获取实际 token 数
+                                actual_tokens = llm_response.usage.total_tokens
+
+                                # 更新 token 比例（message_manager 内部会处理中英文比例）
+                                session_context.message_manager.update_token_ratio(total_chars, actual_tokens)
+                                logger.debug(f"{self.__class__.__name__}: 更新 token 比例，字符数={total_chars}，token数={actual_tokens}，比例={actual_tokens/total_chars:.4f}")
                         else:
                             logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
