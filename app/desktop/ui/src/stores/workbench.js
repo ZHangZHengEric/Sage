@@ -9,6 +9,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const isListView = ref(false)
   const currentSessionId = ref(null) // 当前会话ID
   const pendingToolResults = ref(new Map()) // 待处理的工具结果
+  let itemIdCounter = 0 // 用于生成唯一 item id 的计数器
 
   // Getters
   // 按当前会话过滤的 items
@@ -90,8 +91,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       return existingItem
     }
 
+    // 生成唯一 id：使用时间戳 + 计数器 + 随机数
+    itemIdCounter++
     const newItem = {
-      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `item-${Date.now()}-${itemIdCounter}-${Math.random().toString(36).substr(2, 5)}`,
       timestamp: Date.now(),
       sessionId: currentSessionId.value, // 关联当前会话
       ...item
