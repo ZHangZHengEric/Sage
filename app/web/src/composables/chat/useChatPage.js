@@ -1,4 +1,4 @@
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import SparkMD5 from 'spark-md5'
@@ -11,10 +11,12 @@ import { useChatLifecycle } from '@/composables/chat/useChatLifecycle.js'
 import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { usePanelStore } from '@/stores/panel.js'
+import { useWorkbenchStore } from '@/stores/workbench.js'
 
 export const useChatPage = (props) => {
   const { t } = useLanguage()
   const panelStore = usePanelStore()
+  const workbenchStore = useWorkbenchStore()
   const route = useRoute()
   const router = useRouter()
 
@@ -39,6 +41,52 @@ export const useChatPage = (props) => {
   } = useChatScroll()
   // const showSettings = ref(false) // Use panelStore instead
   const currentTraceId = ref(null)
+
+
+  // 打开工作台（统一方法）
+  const openWorkbench = (options = {}) => {
+    const { toolCallId = null, realtime = true } = options
+
+    // 打开工作台
+    panelStore.openWorkbench()
+
+    // 设置实时模式
+    if (realtime) {
+      workbenchStore.setRealtime(true)
+    }
+
+    // 如果指定了 toolCallId，跳转到对应项
+    if (toolCallId) {
+      const filteredItems = workbenchStore.filteredItems
+      const index = filteredItems.findIndex(item =>
+        item.type === 'tool_call' && item.data.id === toolCallId
+      )
+      if (index !== -1) {
+        workbenchStore.setCurrentIndex(index)
+        workbenchStore.setRealtime(false)
+      }
+    }
+  }
+
+  // 切换面板（互斥）
+  const togglePanel = (panel) => {
+    if (panel === 'workbench') {
+      // 使用统一方法打开工作台
+      openWorkbench()
+    } else if (panel === 'workspace') {
+      if (panelStore.activePanel === 'workspace') {
+        panelStore.closeAll()
+      } else {
+        panelStore.openWorkspace()
+      }
+    } else if (panel === 'settings') {
+      if (panelStore.activePanel === 'settings') {
+        panelStore.closeAll()
+      } else {
+        panelStore.openSettings()
+      }
+    }
+  }
 
   const messages = ref([])
   const messageIdIndexMap = ref(new Map())
@@ -111,6 +159,11 @@ export const useChatPage = (props) => {
   }
 
   const loadConversationMessages = async (sessionId) => {
+    // 进入会话时清空工作台
+    workbenchStore.clearItems()
+    workbenchStore.setSessionId(sessionId)
+    console.log('[ChatPage] Cleared workbench for session:', sessionId)
+
     const res = await chatAPI.getConversationMessages(sessionId)
     if (!res || !res.messages) return
     const normalizedMessages = (res.messages || []).map(msg => ({
@@ -119,6 +172,12 @@ export const useChatPage = (props) => {
     }))
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
+
+    // 只有在有消息且有工作台 item 时，才自动打开工作台
+    if (normalizedMessages.length > 0 && workbenchStore.filteredItems.length > 0) {
+      openWorkbench({ realtime: true })
+    }
+
     if (res.conversation_info?.agent_id) {
       const agent = agents.value.find(a => a.id === res.conversation_info.agent_id)
       if (agent) {
@@ -268,6 +327,12 @@ export const useChatPage = (props) => {
     clearCurrentStreamViewState()
     clearMessages()
     clearTaskAndWorkspace()
+    // 重置工作台所有状态
+    workbenchStore.resetState()
+    console.log('[ChatPage] Reset workbench state for new session')
+    // 关闭工作台 panel
+    panelStore.closeAll()
+    console.log('[ChatPage] Closed panel for new session')
     createSession()
   }
 
@@ -368,7 +433,13 @@ export const useChatPage = (props) => {
     makeTraceId: (sessionId) => SparkMD5.hash(sessionId),
     loadAgents,
     handleActiveSessionsUpdated,
-    handleSessionLoad,
+    handleSessionLoad: async (sessionId) => {
+      // 切换会话时重置工作台状态
+      workbenchStore.resetState()
+      panelStore.closeAll()
+      console.log('[ChatPage] Reset workbench state before loading session:', sessionId)
+      await handleSessionLoad(sessionId)
+    },
     createSession,
     clearScrollTimer,
     agents,
@@ -382,7 +453,33 @@ export const useChatPage = (props) => {
     isLoading,
     isHistoryLoading,
     onLeaveChatPage: persistRunningSessionOnLeaveChat
+  })  
+  
+  // 监听工作台 items 变化，当有新 item 且处于实时模式时，自动打开工作台
+  watch(() => workbenchStore.filteredItems.length, (newLength, oldLength) => {
+    if (newLength > oldLength && workbenchStore.isRealtime) {
+      // 有新 item 添加且处于实时模式，自动打开工作台
+      if (!panelStore.showWorkbench) {
+        console.log('[ChatPage] New workbench item added, auto-opening workbench')
+        panelStore.openWorkbench()
+      }
+    }
   })
+
+  // 监听 session id 变化，当 session id 变化或变为 null 时重置工作台
+  watch(() => currentSessionId.value, (newSessionId, oldSessionId) => {
+    console.log('[ChatPage] Session ID changed:', oldSessionId, '->', newSessionId)
+    if (newSessionId !== oldSessionId) {
+      // Session ID 变化，重置工作台
+      workbenchStore.resetState()
+      // 如果 session id 为 null，关闭工作台弹窗
+      if (!newSessionId) {
+        panelStore.closeAll()
+        console.log('[ChatPage] Session ID is null, closed workbench')
+      }
+    }
+  })
+
 
   return {
     t,
@@ -399,6 +496,8 @@ export const useChatPage = (props) => {
     isCurrentSessionLoading,
     currentSessionId,
     handleAgentChange,
+    togglePanel,
+    openWorkbench,
     handleShare,
     handleScroll,
     handleSendMessage,
