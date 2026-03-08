@@ -742,8 +742,7 @@ const todoTasks = computed(() => {
   const content = toolResult.value.content
   try {
     const parsed = typeof content === 'string' ? JSON.parse(content) : content
-    const tasks = parsed.tasks || []
-    return tasks.sort((a, b) => (a.index || 0) - (b.index || 0))
+    return parsed.tasks || []
   } catch {
     return []
   }
