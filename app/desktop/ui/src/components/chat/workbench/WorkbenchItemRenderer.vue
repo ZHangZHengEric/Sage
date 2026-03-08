@@ -11,6 +11,7 @@
       <!-- 文件预览 -->
       <FileRenderer
         v-else-if="item.type === 'file'"
+        :key="item.id || item.data.filePath"
         :file-path="item.data.filePath"
         :file-name="item.data.fileName"
         :item="item"

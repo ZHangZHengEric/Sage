@@ -122,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -886,6 +886,18 @@ onMounted(() => {
 
   // 监听窗口大小变化
   window.addEventListener('resize', handleResize)
+})
+
+// 监听文件路径变化，重新加载内容
+watch(() => props.filePath, (newPath, oldPath) => {
+  if (newPath && newPath !== oldPath) {
+    console.log('[FileRenderer] File path changed from', oldPath, 'to', newPath)
+    loadContent()
+    // 如果是 Office 文件，额外加载 Office 内容
+    if (fileType.value === 'office') {
+      loadOfficeContent()
+    }
+  }
 })
 
 // 清理
