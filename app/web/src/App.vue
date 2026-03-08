@@ -32,6 +32,10 @@
         @close="showLoginModal = false"
         @login-success="handleLoginSuccess"
     />
+    <SetupModal
+        :visible="showSetupModal"
+        @close="showSetupModal = false"
+    />
     <Teleport to="body">
       <Toaster position="top-center" richColors />
     </Teleport>
@@ -46,9 +50,12 @@ import Sidebar from './views/Sidebar.vue'
 import MobileTabBar from './components/mobile/MobileTabBar.vue'
 import LoginModal from './components/LoginModal.vue'
 import { Toaster } from '@/components/ui/sonner'
-import { isLoggedIn } from './utils/auth.js'
+import { isLoggedIn, getCurrentUser } from './utils/auth.js'
 // import { Menu } from 'lucide-vue-next'
 // import { Button } from '@/components/ui/button'
+import { toast } from 'vue-sonner'
+import SetupModal from './components/SetupModal.vue'
+import { userAPI } from '@/api/user'
 
 const router = useRouter()
 const route = useRoute()
@@ -57,6 +64,7 @@ const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.s
 
 // 登录模态框显示状态
 const showLoginModal = ref(false)
+const showSetupModal = ref(false)
 
 // Check login status on mount and route change
 watch(() => [route.path, route.name], () => {
@@ -86,8 +94,21 @@ const handleSelectConversation = (conversation) => {
 
 
 // 登录成功处理（从LoginModal接收）
-const handleLoginSuccess = (userData) => {
+const handleLoginSuccess = async (userData) => {
   showLoginModal.value = false
+  
+  try {
+    const configRes = await userAPI.getUserConfig()
+    const config = configRes.config || {}
+    const user = getCurrentUser()
+    
+    // 如果没有 provider 且没有完成过引导，则显示引导弹窗
+    if (user && user.has_provider === false && !config.is_setup_completed) {
+      showSetupModal.value = true
+    }
+  } catch (e) {
+    console.error('Failed to check user setup status:', e)
+  }
 }
 
 const handleUserUpdated = () => {
