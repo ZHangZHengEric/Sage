@@ -165,6 +165,10 @@ class SimpleAgent(AgentBase):
             messages_for_complete = messages_input[last_user_index:]
         else:
             messages_for_complete = messages_input
+        
+        # 压缩消息，避免token超限
+        messages_for_complete = MessageManager.compress_messages(messages_for_complete,min(session_context.message_manager.context_budget_manager.budget_info.get('active_budget', 8000),8000))
+        
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
 
         task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())

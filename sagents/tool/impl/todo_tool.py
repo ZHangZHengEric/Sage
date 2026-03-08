@@ -125,18 +125,18 @@ class ToDoTool:
     def parse_todo_list(content: str) -> List[Dict[str, Any]]:
         """
         静态方法：解析任务清单内容字符串
-        
+
         Args:
             content: 任务清单文件内容
-            
+
         Returns:
             List[Dict[str, Any]]: 解析后的任务列表
         """
         tasks = []
         lines = content.splitlines()
-        
-        # Regex for "- [ ] content (ID: id) (Updated: timestamp)"
-        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Updated: (.*?)\))?(?: \(Conclusion: (.*?)\))?$')
+
+        # Regex for "- [ ] content (ID: id) (Created: timestamp) (Updated: timestamp)"
+        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Created: (.*?)\))?(?: \(Updated: (.*?)\))?(?: \(Conclusion: (.*?)\))?$')
 
         for line in lines:
             line = line.strip()
@@ -145,13 +145,19 @@ class ToDoTool:
                 is_completed = match.group(1) == 'x'
                 content_text = match.group(2).strip()
                 task_id = match.group(3).strip()
-                updated_at = match.group(4)
-                conclusion = match.group(5)
+                created_at = match.group(4)
+                updated_at = match.group(5)
+                conclusion = match.group(6)
+
+                # 兼容旧文件：如果没有 created_at，使用 updated_at 代替
+                if not created_at and updated_at:
+                    created_at = updated_at
 
                 tasks.append({
                     'id': task_id,
                     'content': content_text,
                     'completed': is_completed,
+                    'created_at': created_at if created_at else None,
                     'updated_at': updated_at if updated_at else None,
                     'conclusion': conclusion if conclusion else None
                 })
@@ -175,16 +181,18 @@ class ToDoTool:
         try:
             # 生成 Markdown 内容
             md_content = "# ToDo List\n\n"
-            
+
             pending_tasks = [t for t in tasks if not t.get('completed', False)]
             completed_tasks = [t for t in tasks if t.get('completed', False)]
-            
+
             if not tasks:
                 md_content += "(No tasks yet)\n"
             else:
                 md_content += "## Pending\n"
                 for t in pending_tasks:
                     line = f"- [ ] {t.get('content', '')} (ID: {t.get('id')})"
+                    if t.get('created_at'):
+                        line += f" (Created: {t.get('created_at')})"
                     if t.get('updated_at'):
                         line += f" (Updated: {t.get('updated_at')})"
                     md_content += line + "\n"
@@ -192,15 +200,17 @@ class ToDoTool:
                 md_content += "\n## Completed\n"
                 for t in completed_tasks:
                     line = f"- [x] {t.get('content', '')} (ID: {t.get('id')})"
+                    if t.get('created_at'):
+                        line += f" (Created: {t.get('created_at')})"
                     if t.get('updated_at'):
                         line += f" (Updated: {t.get('updated_at')})"
                     if t.get('conclusion'):
                         line += f" (Conclusion: {t.get('conclusion')})"
                     md_content += line + "\n"
-            
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(md_content)
-                
+
             return True
         except Exception as e:
             logger.error(f"保存任务清单失败: {e}")
@@ -291,7 +301,7 @@ class ToDoTool:
             task_id = str(new_task.get('id'))
             if not task_id:
                 continue
-            
+
             # 兼容旧的 status 字段，转换为 completed 字段
             if 'status' in new_task:
                 status = new_task.pop('status')
@@ -303,43 +313,48 @@ class ToDoTool:
             new_task['updated_at'] = now_str
 
             if task_id in task_map:
-                # 更新
+                # 更新 - 保留原有的 created_at
+                existing_task = task_map[task_id]
+                new_task['created_at'] = existing_task.get('created_at', now_str)
                 task_map[task_id].update(new_task)
                 updated_count += 1
             else:
-                # 新增
+                # 新增 - 设置 created_at 为当前时间
+                # 使用微秒级时间戳确保唯一性
+                created_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                new_task['created_at'] = created_at
+
                 # 如果没有 content 但有 conclusion，使用 conclusion 作为 content
                 if ('content' not in new_task or not new_task['content']) and 'conclusion' in new_task:
                     new_task['content'] = new_task['conclusion']
-                
+
                 if 'content' not in new_task or not new_task['content']:
                      logger.warning(f"ToDoTool: New task {task_id} missing content. Skipping.", session_id=session_id)
                      continue
 
                 task_map[task_id] = new_task
                 added_count += 1
-        
-        # 转换回列表，并添加 index 字段
-        final_tasks = list(task_map.values())
 
-        # 按原始任务列表的顺序分配 index（如果传入的任务有顺序，保留该顺序）
-        # 首先给现有任务分配 index（基于它们在 task_map 中的顺序）
-        for idx, task in enumerate(final_tasks, start=1):
-            task['index'] = idx
+        # 转换回列表
+        final_tasks = list(task_map.values())
 
         # 检查是否所有任务都已完成
         pending_tasks = [t for t in final_tasks if not t.get('completed', False)]
 
-        # 构建任务列表（用于返回）- 按 index 排序确保顺序一致
-        sorted_tasks = sorted(final_tasks, key=lambda t: t.get('index', 0))
+        # 构建任务列表（用于返回）- 按 created_at 排序（如果没有 created_at 则使用 updated_at）
+        def get_sort_key(task):
+            # 优先使用 created_at，如果没有则使用 updated_at，如果都没有则返回空字符串
+            return task.get('created_at') or task.get('updated_at') or ''
+
+        sorted_tasks = sorted(final_tasks, key=get_sort_key)
         task_list = [
             {
-                "index": t.get('index', 0),
+                "index": idx,
                 "id": str(t.get('id', '')),
                 "name": t.get('content', ''),
                 "status": "completed" if t.get('completed', False) else "pending"
             }
-            for t in sorted_tasks
+            for idx, t in enumerate(sorted_tasks, start=1)
         ]
 
         logger.debug(f"ToDoTool: Checking deletion condition - pending_tasks: {len(pending_tasks)}, final_tasks: {len(final_tasks)}, file_path: {file_path}", session_id=session_id)
