@@ -2,7 +2,7 @@
 工具执行接口路由模块
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel
@@ -24,7 +24,7 @@ class SkillUpdateRequest(BaseModel):
 
 
 @skill_router.get("")
-async def get_skills(http_request: Request):
+async def get_skills(http_request: Request, agent_id: Optional[str] = None):
     """
     获取可用技能列表
     """
@@ -32,7 +32,7 @@ async def get_skills(http_request: Request):
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
 
-    skills = await skill_service.list_skills(user_id, role)
+    skills = await skill_service.list_skills(user_id, role, agent_id)
     return await Response.succ(
         message="获取技能列表成功", data={"skills": skills}
     )
