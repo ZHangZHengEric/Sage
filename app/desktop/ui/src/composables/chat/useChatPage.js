@@ -91,15 +91,6 @@ export const useChatPage = (props) => {
     }
   }
 
-  const openTraceDetails = () => {
-    const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
-    if (!baseUrl || !currentTraceId.value) {
-      if (!baseUrl) toast.error('Jaeger URL not configured')
-      if (!currentTraceId.value) toast.error('No trace ID available')
-      return
-    }
-    window.open(`${baseUrl}/trace/${currentTraceId.value}`, '_blank')
-  }
 
   const messages = ref([])
   const messageIdIndexMap = ref(new Map())
@@ -517,7 +508,6 @@ export const useChatPage = (props) => {
     togglePanel,
     openWorkbench,
     handleShare,
-    openTraceDetails,
     handleScroll,
     handleSendMessage,
     stopGeneration,

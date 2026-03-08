@@ -347,7 +347,8 @@ import {
   Monitor,
   Check,
   LoaderCircle,
-  CircleCheckBig
+  CircleCheckBig,
+  Activity
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { useThemeStore } from '../stores/theme.js'
@@ -501,7 +502,7 @@ const predefinedServices = computed(() => {
     }
   ]
 
-  if (currentUser.value?.role === 'admin') {
+    if (currentUser.value?.role === 'admin') {
     services.push({
       id: 'cat_sys',
       key: 'system_management',
@@ -509,6 +510,20 @@ const predefinedServices = computed(() => {
       children: [
         { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
         { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
+      ]
+    })
+    
+    services.push({
+      id: 'cat_ops',
+      key: 'operation_management',
+      nameKey: 'sidebar.operationManagement',
+      children: [
+        { 
+          id: 'svc_request_records', 
+          nameKey: 'sidebar.requestRecords', 
+          url: import.meta.env.VITE_SAGE_TRACE_WEB_URL || '#', 
+          isInternal: false 
+        }
       ]
     })
   }
@@ -523,7 +538,8 @@ const expandedCategories = ref({
   history: false,
   api_reference: false,
   skills: false,
-  system_management: false
+  system_management: false,
+  operation_management: false
 })
 
 const getCategoryIcon = (key) => {
@@ -536,7 +552,8 @@ const getCategoryIcon = (key) => {
     knowledge_base: Book,
     history: Clock,
     api_reference: Code,
-    system_management: Settings
+    system_management: Settings,
+    operation_management: Activity
   }
   return map[key] || LayoutGrid
 }
