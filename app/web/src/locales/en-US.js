@@ -22,6 +22,8 @@ export default {
   'sidebar.systemManagement': 'System',
   'sidebar.userList': 'Users',
   'sidebar.systemSettings': 'Settings',
+  'sidebar.operationManagement': 'Operation Management',
+  'sidebar.requestRecords': 'Request Records',
   'system.generalSettings': 'General Settings',
   'system.allowRegistration': 'Allow Registration',
   'system.allowRegistrationDesc': 'If enabled, new users can register',

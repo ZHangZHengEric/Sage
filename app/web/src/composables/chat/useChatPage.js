@@ -40,16 +40,6 @@ export const useChatPage = (props) => {
   // const showSettings = ref(false) // Use panelStore instead
   const currentTraceId = ref(null)
 
-  const openTraceDetails = () => {
-    const baseUrl = import.meta.env.VITE_SAGE_TRACE_WEB_URL
-    if (!baseUrl || !currentTraceId.value) {
-      if (!baseUrl) toast.error('Jaeger URL not configured')
-      if (!currentTraceId.value) toast.error('No trace ID available')
-      return
-    }
-    window.open(`${baseUrl}/trace/${currentTraceId.value}`, '_blank')
-  }
-
   const messages = ref([])
   const messageIdIndexMap = ref(new Map())
   const isLoading = ref(false)
@@ -410,7 +400,6 @@ export const useChatPage = (props) => {
     currentSessionId,
     handleAgentChange,
     handleShare,
-    openTraceDetails,
     handleScroll,
     handleSendMessage,
     stopGeneration,
