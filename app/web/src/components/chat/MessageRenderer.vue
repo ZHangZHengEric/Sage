@@ -117,7 +117,7 @@
 </template>
 
 <script setup>
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, onMounted, watch } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -134,6 +134,7 @@ import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
+import { useWorkbenchStore } from '@/stores/workbench.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -173,6 +174,7 @@ const props = defineProps({
 const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSession'])
 
 const { t } = useLanguage()
+const workbenchStore = useWorkbenchStore()
 
 // 计算属性
 const shouldRenderMessage = computed(() => {
@@ -451,5 +453,38 @@ const getToolComponent = (toolName) => {
   if (!toolName) return ToolDefaultCard
   return TOOL_COMPONENT_MAP[toolName] || ToolDefaultCard
 }
+
+// 自动提取并推送到工作台
+onMounted(() => {
+  // 1. 处理工具调用结果消息 (role='tool')
+  if (props.message.role === 'tool' && props.message.tool_call_id) {
+    // 将 Proxy 转换为普通对象
+    const plainToolResult = JSON.parse(JSON.stringify(props.message))
+    workbenchStore.updateToolResult(props.message.tool_call_id, plainToolResult)
+    return
+  }
+
+  // 2. 提取工具调用、文件引用和代码块
+  workbenchStore.extractFromMessage(props.message, props.agentId)
+})
+
+// 监听消息变化（用于流式输出）
+watch(() => props.message, (newMessage) => {
+  if (!newMessage) return
+
+  // 1. 实时提取新出现的工具调用、文件引用和代码块
+  workbenchStore.extractFromMessage(newMessage, props.agentId)
+
+  // 2. 实时更新工具结果
+  if (newMessage.tool_calls && newMessage.tool_calls.length > 0) {
+    newMessage.tool_calls.forEach((toolCall) => {
+      const toolResult = getParsedToolResult(toolCall)
+      if (toolResult) {
+        const plainToolResult = JSON.parse(JSON.stringify(toolResult))
+        workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+      }
+    })
+  }
+}, { deep: true })
 
 </script>

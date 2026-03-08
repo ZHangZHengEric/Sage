@@ -99,6 +99,16 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         existingItem.agentId = item.agentId
       }
       
+      // 如果处于实时模式且是当前会话的项，尝试跳转到该项（针对流式输出时已存在但需要聚焦的情况）
+      if (isRealtime.value && existingItem.sessionId === currentSessionId.value) {
+         // 找到该项在 filteredItems 中的索引
+         const index = filteredItems.value.indexOf(existingItem)
+         if (index !== -1 && index !== currentIndex.value) {
+            currentIndex.value = index
+            console.log('[Workbench] Auto-jump to existing item index:', index)
+         }
+      }
+
       console.log('[Workbench] Item already exists, skipping:', {
         type: item.type,
         filePath: item.data?.filePath,
@@ -349,6 +359,13 @@ function extractFileReferences(content) {
   while ((match = markdownRegex.exec(content)) !== null) {
     let path = match[2]
     const fileName = match[1]
+
+    // 处理路径中的编码和空白字符
+    try {
+      path = decodeURIComponent(path).trim()
+    } catch (e) {
+      console.warn('[Workbench] Failed to decode path:', path)
+    }
 
     if (path.startsWith('file://')) {
       path = path.replace(/^file:\/\/\/?/i, '/')
