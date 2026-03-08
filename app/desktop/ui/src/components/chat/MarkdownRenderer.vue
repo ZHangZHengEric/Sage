@@ -525,6 +525,7 @@ const renderedContent = computed(() => {
   try {
     chartList.length = 0
     mermaidList.length = 0
+    excalidrawList.length = 0
     const preprocessed = preprocessContent(props.content)
     let html = marked(preprocessed)
 

@@ -1,4 +1,6 @@
 import { onMounted, onUnmounted, watch } from 'vue'
+import { useWorkbenchStore } from '@/stores/workbench.js'
+import { usePanelStore } from '@/stores/panel.js'
 
 export const useChatLifecycle = ({
   props,
@@ -55,6 +57,12 @@ export const useChatLifecycle = ({
     if (routeSessionId) {
       await handleSessionLoad(routeSessionId)
     } else {
+      // 新会话时重置工作台状态并关闭面板
+      const workbenchStore = useWorkbenchStore()
+      const panelStore = usePanelStore()
+      workbenchStore.resetState() // 重置所有状态（包括实时模式）
+      panelStore.closeAll()
+      console.log('[ChatLifecycle] Reset workbench state and closed panels for new session')
       createSession()
     }
   })
