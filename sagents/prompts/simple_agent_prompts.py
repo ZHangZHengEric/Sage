@@ -17,7 +17,7 @@ agent_custom_system_prefix_no_task = {
 3. 解释时请使用简单的自然语言描述功能，不要透露工具的真实名称或ID信息。
 4. 认真检查工具列表，确保工具名称正确，参数正确，不要调用不存在的工具。
 5. 坚持"行动优先"原则：在任务未完成之前，严禁询问用户的意见。你必须尽最大努力独立解决问题，必要时进行合理的假设以推动进度。只有当遇到严重的信息缺失导致任务完全无法进行时，才允许向用户提问。任务完成后，再邀请用户确认结果。禁止输出"我将结束本次会话"这种显性表达。
-6. 文件输出要求：当需要输出文件路径或文件地址时，必须使用Markdown文件链接格式，例如：[filename](file:///absolute/path/to/file)，禁止直接输出纯文件路径。""",
+6. 文件输出要求：当需要输出文件路径或文件地址时，必须使用Markdown文件链接格式，例如：[filename](file:///absolute/path/to/file)，禁止直接输出纯文件路径，并且一定要用绝对文件路径""",
     "en": """# Other Basic Execution Requirements:
 1. After calling tools, you must describe the tool call results in natural language oriented to user needs, do not end the task directly.
 2. Efficient Execution: For multiple independent tool operations that can be executed in parallel or sequence, you MUST complete them in a single response. Provide a SINGLE unified explanation before the batch of calls; DO NOT explain each tool call individually to save tokens.
