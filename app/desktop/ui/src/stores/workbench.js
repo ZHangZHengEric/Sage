@@ -61,20 +61,40 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const addItem = (item) => {
-    // 检查是否有待处理的工具结果
-    let toolResult = item.toolResult
-    if (item.type === 'tool_call' && item.data?.id && pendingToolResults.value.has(item.data.id)) {
-      toolResult = pendingToolResults.value.get(item.data.id)
-      pendingToolResults.value.delete(item.data.id)
-      console.log('[Workbench] Applied pending tool result for:', item.data.id)
+    // 检查是否已存在相同的项（根据 type 和唯一标识）
+    const existingItem = items.value.find(i => {
+      if (i.type !== item.type) return false
+      // 文件类型：根据 filePath 或 path 去重
+      if (item.type === 'file') {
+        const itemPath = item.data?.filePath || item.data?.path || ''
+        const existingPath = i.data?.filePath || i.data?.path || ''
+        return itemPath && existingPath && itemPath === existingPath
+      }
+      // 代码块类型：根据 code 内容去重
+      if (item.type === 'code' && item.data?.code) {
+        return i.data?.code === item.data.code
+      }
+      // 工具调用类型：根据 toolCall id 去重
+      if (item.type === 'tool_call' && item.data?.id) {
+        return i.data?.id === item.data.id
+      }
+      return false
+    })
+
+    if (existingItem) {
+      console.log('[Workbench] Item already exists, skipping:', {
+        type: item.type,
+        filePath: item.data?.filePath,
+        toolCallId: item.data?.id
+      })
+      return existingItem
     }
 
     const newItem = {
       id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
       sessionId: currentSessionId.value, // 关联当前会话
-      ...item,
-      toolResult: toolResult
+      ...item
     }
     items.value.push(newItem)
 
@@ -104,6 +124,17 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     console.log('[Workbench] clearItems')
     items.value = []
     currentIndex.value = 0
+  }
+
+  // 重置所有状态（用于切换会话或退出页面）
+  const resetState = () => {
+    console.log('[Workbench] resetState - clearing all state')
+    items.value = []
+    currentIndex.value = 0
+    isRealtime.value = true // 默认实时模式
+    isListView.value = false
+    currentSessionId.value = null
+    pendingToolResults.value.clear()
   }
 
   // 清除当前会话的 items
@@ -236,7 +267,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     })
   }
 
-  // 更新工具结果
+  // 更新工具结果 - 简化逻辑，直接更新，不依赖 pendingToolResults
   const updateToolResult = (toolCallId, result) => {
     console.log('[Workbench] updateToolResult called with:', toolCallId, result)
     const item = items.value.find(i =>
@@ -245,10 +276,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     if (item) {
       item.toolResult = result
       console.log('[Workbench] Tool result updated for:', toolCallId)
+      return true
     } else {
-      // 如果找不到 item，存入待处理队列
-      pendingToolResults.value.set(toolCallId, result)
-      console.log('[Workbench] Tool result stored in pending queue for:', toolCallId)
+      console.log('[Workbench] Tool call item not found for:', toolCallId)
+      return false
     }
   }
 
@@ -259,6 +290,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     isRealtime,
     isListView,
     currentSessionId,
+    pendingToolResults,
     // Getters
     filteredItems,
     totalItems,
@@ -269,6 +301,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     setSessionId,
     addItem,
     clearItems,
+    resetState,
     clearSessionItems,
     setCurrentIndex,
     setCurrentIndexByMessageId,
@@ -296,7 +329,8 @@ function extractFileReferences(content) {
       path = path.replace(/^file:\/\/\/?/i, '/')
     }
 
-    if (path.startsWith('/')) {
+    // 过滤掉文件夹路径（以 / 结尾的路径）
+    if (path.startsWith('/') && !path.endsWith('/')) {
       files.push({
         filePath: path,
         fileName: fileName || path.split('/').pop()

@@ -12,6 +12,7 @@
         :key="fileInfo.id"
         :file-path="fileInfo.path"
         :file-name="fileInfo.name"
+        :is-directory="fileInfo.isDirectory"
         class="my-1"
       />
     </div>
@@ -60,8 +61,8 @@ const fileIcons = computed(() => {
     const name = match[1]
     path = normalizePath(path)
 
-    // 检查是否是本地绝对路径
-    if (path.startsWith('/') && !seenPaths.has(path)) {
+    // 检查是否是本地绝对路径，且不是文件夹
+    if (path.startsWith('/') && !seenPaths.has(path) && !path.endsWith('/')) {
       seenPaths.add(path)
       files.push({
         id: `file-${counter++}-${path}`,

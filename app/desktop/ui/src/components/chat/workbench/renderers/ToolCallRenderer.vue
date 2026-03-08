@@ -273,7 +273,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -335,6 +335,17 @@ const toolResult = computed(() => {
 
 const toolName = computed(() => {
   return toolCall.value.function?.name || ''
+})
+
+// 监听 toolResult 变化，用于调试实时数据同步问题
+watch(() => props.item.toolResult, (newVal, oldVal) => {
+  console.log('[ToolCallRenderer] toolResult changed:', {
+    toolName: toolName.value,
+    hasNewVal: !!newVal,
+    hasOldVal: !!oldVal,
+    newValKeys: newVal ? Object.keys(newVal) : [],
+    content: newVal?.content
+  })
 })
 
 const toolArgs = computed(() => {
