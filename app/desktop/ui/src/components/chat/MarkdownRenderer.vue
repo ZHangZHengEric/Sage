@@ -16,8 +16,7 @@ import rehypeStringify from 'rehype-stringify'
 import { visit } from 'unist-util-visit'
 import { toast } from 'vue-sonner'
 
-// 常用语言高亮样式
-import 'prismjs/themes/prism-tomorrow.css'
+// 不使用 prism 默认主题，使用自定义样式
 
 // 初始化 Mermaid
 mermaid.initialize({
@@ -202,138 +201,60 @@ marked.setOptions({
   renderer
 })
 
-// Rehype 插件：代码块包装（添加语言标签和复制按钮）
+// Rehype 插件：代码块处理（简化样式，直接显示）
 const rehypeCodeBlockWrapper = () => {
   return (tree) => {
     visit(tree, 'element', (node, index, parent) => {
-      // Rehype Prism Plus 可能会修改 pre/code 的结构
-      // 它通常保持 pre > code 的结构，但 code 内部会有 span
-      // 我们需要找到 pre 元素，并且它包含一个 code 元素
+      // 找到 pre 元素，并且它包含一个 code 元素
       if (node.tagName === 'pre' && node.children && node.children.length > 0) {
         const codeNode = node.children.find(n => n.tagName === 'code')
         if (codeNode) {
           // 获取语言
           let lang = 'text'
-          
+
           // 检查 code 元素上的 class
           if (codeNode.properties && codeNode.properties.className) {
-            const classes = Array.isArray(codeNode.properties.className) 
-              ? codeNode.properties.className 
+            const classes = Array.isArray(codeNode.properties.className)
+              ? codeNode.properties.className
               : [codeNode.properties.className]
-            
+
             const langClass = classes.find(c => String(c).startsWith('language-'))
             if (langClass) {
               lang = String(langClass).replace('language-', '')
             }
           }
-          
-          // 如果 code 上没找到，有时 rehype-prism-plus 可能会把 class 移到 pre 上（取决于配置，默认通常在 code 上）
+
+          // 如果 code 上没找到，检查 pre 上的 class
           if (lang === 'text' && node.properties && node.properties.className) {
-             const classes = Array.isArray(node.properties.className) 
-              ? node.properties.className 
+             const classes = Array.isArray(node.properties.className)
+              ? node.properties.className
               : [node.properties.className]
-            
+
             const langClass = classes.find(c => String(c).startsWith('language-'))
             if (langClass) {
               lang = String(langClass).replace('language-', '')
             }
           }
 
-          // SVG Icons AST
-          const copyIcon = {
-            type: 'element',
-            tagName: 'svg',
-            properties: {
-              xmlns: "http://www.w3.org/2000/svg",
-              width: "14",
-              height: "14",
-              viewBox: "0 0 24 24",
-              fill: "none",
-              stroke: "currentColor",
-              "stroke-width": "2",
-              "stroke-linecap": "round",
-              "stroke-linejoin": "round",
-              class: "lucide lucide-copy"
-            },
-            children: [
-              { type: 'element', tagName: 'rect', properties: { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2" }, children: [] },
-              { type: 'element', tagName: 'path', properties: { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }, children: [] }
+          // 直接修改 pre 元素的样式，不添加卡片包裹
+          node.properties = {
+            ...node.properties,
+            className: [
+              'my-4',
+              'p-4',
+              'rounded-lg',
+              'overflow-auto',
+              'text-sm',
+              'font-mono',
+              'leading-relaxed',
+              'bg-muted/50',
+              'border',
+              'border-border/50'
             ]
           }
 
-          const checkIcon = {
-             type: 'element',
-             tagName: 'svg',
-             properties: {
-               xmlns: "http://www.w3.org/2000/svg",
-               width: "14",
-               height: "14",
-               viewBox: "0 0 24 24",
-               fill: "none",
-               stroke: "currentColor",
-               "stroke-width": "2",
-               "stroke-linecap": "round",
-               "stroke-linejoin": "round",
-               class: "lucide lucide-check hidden" // 默认隐藏
-             },
-             children: [
-                { type: 'element', tagName: 'polyline', properties: { points: "20 6 9 17 4 12" }, children: [] }
-             ]
-          }
-
-          // 包装结构
-          const wrapper = {
-            type: 'element',
-            tagName: 'div',
-            properties: {
-              className: ['relative', 'group', 'my-4', 'rounded-lg', 'border', 'bg-[#2b2b2b]', 'border-zinc-700']
-            },
-            children: [
-              // 顶部栏
-              {
-                type: 'element',
-                tagName: 'div',
-                properties: {
-                  className: ['flex', 'items-center', 'justify-between', 'px-3', 'py-2', 'bg-[#383838]', 'rounded-t-lg', 'border-b', 'border-zinc-600']
-                },
-                children: [
-                  // 语言标签
-                  {
-                    type: 'element',
-                    tagName: 'span',
-                    properties: {
-                      className: ['text-xs', 'font-medium', 'text-zinc-300', 'uppercase']
-                    },
-                    children: [{ type: 'text', value: lang }]
-                  },
-                  // 复制按钮
-                  {
-                    type: 'element',
-                    tagName: 'button',
-                    properties: {
-                      className: ['copy-btn', 'p-1.5', 'hover:bg-zinc-600', 'rounded-md', 'transition-colors', 'text-zinc-300', 'hover:text-zinc-50', 'flex', 'items-center', 'gap-1'],
-                      title: 'Copy code',
-                      onclick: 'window.copyToClipboard(this)'
-                    },
-                    children: [
-                      copyIcon,
-                      checkIcon
-                    ]
-                  }
-                ]
-              },
-              // 原 pre 元素，修改样式
-              {
-                ...node,
-                properties: {
-                  ...node.properties,
-                  className: [...(node.properties.className || []), '!my-0', '!rounded-t-none', '!border-0', '!bg-transparent']
-                }
-              }
-            ]
-          }
-
-          parent.children[index] = wrapper
+          // 添加 data-language 属性用于显示语言
+          node.properties['data-language'] = lang
         }
       }
     })

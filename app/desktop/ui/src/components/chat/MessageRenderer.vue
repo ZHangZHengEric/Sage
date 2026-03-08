@@ -134,7 +134,7 @@
 </template>
 
 <script setup>
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, onMounted, watch } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import MessageAvatar from './MessageAvatar.vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -151,6 +151,7 @@ import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
+import { useWorkbenchStore } from '../../stores/workbench.js'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -183,12 +184,17 @@ const props = defineProps({
   agentId: {
     type: String,
     default: ''
+  },
+  openWorkbench: {
+    type: Function,
+    default: null
   }
 })
 
 const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSession'])
 
 const { t } = useLanguage()
+const workbenchStore = useWorkbenchStore()
 
 // 计算属性
 const shouldRenderMessage = computed(() => {
@@ -359,11 +365,17 @@ const handleToolClick = (toolCall, result) => {
   if (toolCall instanceof Event) {
     return
   }
-  
+
+  // 使用统一的 openWorkbench 方法
+  if (props.openWorkbench) {
+    props.openWorkbench({ toolCallId: toolCall.id, realtime: false })
+  }
+
+  // 保留原来的弹窗逻辑（代码可以保留）
   selectedToolExecution.value = toolCall
   toolResult.value = result
-  showToolDetails.value = true
-  
+  // showToolDetails.value = true  // 注释掉弹窗
+
   emit('toolClick', toolCall, result)
 }
 
@@ -449,6 +461,141 @@ const getToolComponent = (toolName) => {
   return TOOL_COMPONENT_MAP[toolName] || ToolDefaultCard
 }
 
+// 发送工作台事件
+onMounted(() => {
+  // 只处理助手消息和工具调用
+  if (props.message.role !== 'assistant') return
+
+  const messageId = props.message.message_id || props.message.id
+  const sessionId = props.message.session_id
+
+  console.log('[MessageRenderer] onMounted, messageId:', messageId, 'tool_calls:', props.message.tool_calls?.length)
+
+  // 检查该消息的工作台项是否已经添加过
+  const existingItems = workbenchStore.items.filter(item =>
+    item.messageId === messageId && item.sessionId === sessionId
+  )
+
+  if (existingItems.length > 0) {
+    console.log('[MessageRenderer] Workbench items already exist for message:', messageId)
+    return
+  }
+
+  const timestamp = props.message.timestamp || Date.now()
+
+  // 发送工具调用事件
+  if (props.message.tool_calls && props.message.tool_calls.length > 0) {
+    console.log('[MessageRenderer] Adding tool_calls to workbench:', props.message.tool_calls.length)
+    props.message.tool_calls.forEach((toolCall, index) => {
+      const toolResult = getParsedToolResult(toolCall)
+      console.log(`[MessageRenderer] Adding tool_call ${index}:`, toolCall.id, 'toolResult:', toolResult)
+      workbenchStore.addItem({
+        type: 'tool_call',
+        role: 'assistant',
+        timestamp: timestamp,
+        sessionId: sessionId,
+        messageId: messageId,
+        data: toolCall,
+        toolResult: toolResult
+      })
+    })
+  }
+
+  // 发送文件引用事件
+  const fileMatches = extractFileReferences(props.message.content)
+  fileMatches.forEach((file) => {
+    workbenchStore.addItem({
+      type: 'file',
+      role: 'assistant',
+      timestamp: timestamp,
+      sessionId: sessionId,
+      messageId: messageId,
+      data: file
+    })
+  })
+
+  // 发送代码块事件
+  const codeBlocks = extractCodeBlocks(props.message.content)
+  codeBlocks.forEach((code) => {
+    workbenchStore.addItem({
+      type: 'code',
+      role: 'assistant',
+      timestamp: timestamp,
+      sessionId: sessionId,
+      messageId: messageId,
+      data: code
+    })
+  })
+})
+
+// 监听消息变化，更新工具结果
+watch(() => props.message, (newMessage) => {
+  console.log('[MessageRenderer] Watch triggered, message:', newMessage?.message_id, 'tool_calls:', newMessage?.tool_calls?.length)
+
+  if (!newMessage?.tool_calls || newMessage.tool_calls.length === 0) {
+    console.log('[MessageRenderer] No tool_calls, skipping')
+    return
+  }
+
+  newMessage.tool_calls.forEach((toolCall) => {
+    const toolResult = getParsedToolResult(toolCall)
+    console.log('[MessageRenderer] toolCall.id:', toolCall.id, 'toolResult:', toolResult)
+    if (toolResult) {
+      // 将 Proxy 转换为普通对象
+      const plainToolResult = JSON.parse(JSON.stringify(toolResult))
+      console.log('[MessageRenderer] Plain toolResult:', plainToolResult)
+      console.log('[MessageRenderer] typeof plainToolResult:', typeof plainToolResult)
+      console.log('[MessageRenderer] plainToolResult keys:', Object.keys(plainToolResult))
+      // 更新工作台中的工具结果
+      console.log('[MessageRenderer] Calling updateToolResult with id:', toolCall.id, 'result:', plainToolResult)
+      const updateResult = workbenchStore.updateToolResult(toolCall.id, plainToolResult)
+      console.log('[MessageRenderer] updateToolResult returned:', updateResult)
+    }
+  })
+}, { deep: true, immediate: true })
+
+// 辅助函数：提取文件引用
+function extractFileReferences(content) {
+  if (!content) return []
+  const files = []
+  const markdownRegex = /\[([^\]]+)\]\(([^)]+)\)/g
+  let match
+
+  while ((match = markdownRegex.exec(content)) !== null) {
+    let path = match[2]
+    const fileName = match[1]
+
+    if (path.startsWith('file://')) {
+      path = path.replace(/^file:\/\/\/?/i, '/')
+    }
+
+    if (path.startsWith('/')) {
+      files.push({
+        filePath: path,
+        fileName: fileName || path.split('/').pop()
+      })
+    }
+  }
+
+  return files
+}
+
+// 辅助函数：提取代码块
+function extractCodeBlocks(content) {
+  if (!content) return []
+  const codeBlocks = []
+  const codeRegex = /```(\w+)?\n([\s\S]*?)```/g
+  let match
+
+  while ((match = codeRegex.exec(content)) !== null) {
+    codeBlocks.push({
+      language: match[1] || 'text',
+      code: match[2].trim()
+    })
+  }
+
+  return codeBlocks
+}
 
 </script>
 

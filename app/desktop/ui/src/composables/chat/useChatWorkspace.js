@@ -133,6 +133,12 @@ export const useChatWorkspace = ({
     lastMessageId.value = null
   }
 
+  const refreshWorkspace = () => {
+    if (selectedAgentId.value) {
+      fetchWorkspaceFiles(selectedAgentId.value)
+    }
+  }
+
   return {
     showWorkspace,
     workspaceFiles,
@@ -140,6 +146,7 @@ export const useChatWorkspace = ({
     downloadWorkspaceFile,
     downloadFile,
     deleteFile,
-    clearTaskAndWorkspace
+    clearTaskAndWorkspace,
+    refreshWorkspace
   }
 }
