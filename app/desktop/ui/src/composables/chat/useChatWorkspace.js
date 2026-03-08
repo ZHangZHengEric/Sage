@@ -92,8 +92,8 @@ export const useChatWorkspace = ({
 
   const downloadFile = async (item) => {
     try {
-      if (currentSessionId.value) {
-        await downloadWorkspaceFile(currentSessionId.value, item)
+      if (selectedAgentId.value) {
+        await downloadWorkspaceFile(selectedAgentId.value, item)
       }
     } catch (error) {
       toast.error(t('chat.downloadError'))
@@ -106,14 +106,6 @@ export const useChatWorkspace = ({
     try {
       const filePath = item.path
       const agentId = selectedAgentId.value
-      // 如果有 sessionId，优先使用 session 接口（目前逻辑是混用的，需要厘清）
-      // 这里根据后端实现，Agent 路由和 Session 路由是分开的。
-      // useChatWorkspace 中 fetchWorkspaceFiles 用的是 taskAPI.getWorkspaceFiles(agentId)
-      // 这意味着当前 WorkspacePanel 展示的是 Agent 的 workspace，而不是 Session 的。
-      // 但是 downloadWorkspaceFile 里却用了 currentSessionId.value ? 
-      // 不，fetchWorkspaceFiles 用的是 agentId。
-      // downloadWorkspaceFile 的第一个参数被命名为 _sessionId，但在实现里是用 selectedAgentId.value 作为 agentId。
-      
       // 所以删除也应该用 agentId。
       if (agentId) {
         await taskAPI.deleteWorkspaceFile(agentId, null, filePath)
