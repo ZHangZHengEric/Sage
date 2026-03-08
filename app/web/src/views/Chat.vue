@@ -53,17 +53,6 @@
 
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="hidden sm:inline-flex h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="openTraceDetails">
-                  <Search class="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Jaeger 详情</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger as-child>
                 <Button variant="ghost" size="icon" class="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/80" @click="toggleSettings">
                   <Settings class="h-4 w-4" />
                 </Button>
@@ -140,7 +129,7 @@
 </template>
 
 <script setup>
-import { Bot, Settings, Share2, FolderOpen, Search, Monitor } from 'lucide-vue-next'
+import { Bot, Settings, Share2, FolderOpen, Monitor } from 'lucide-vue-next'
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
@@ -191,7 +180,6 @@ const {
   currentSessionId,
   handleAgentChange,
   handleShare,
-  openTraceDetails,
   handleScroll,
   handleSendMessage,
   stopGeneration,
