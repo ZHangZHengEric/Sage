@@ -165,10 +165,9 @@ Sage Server supports configuration via **Command Line Arguments** or **Environme
 | Command Line Argument | Environment Variable | Default Value | Description |
 | :--- | :--- | :--- | :--- |
 | `--port` | `SAGE_PORT` | `8080` | Server listening port |
-| `--workspace` | `SAGE_WORKSPACE_PATH` | `agent_workspace` | Workspace directory (storing files, temporary data, etc.) |
+| `--workspace` | `SAGE_SESSION_DIR` | `sessions` | Session directory (storing session records, etc.) |
 | `--logs-dir` | `SAGE_LOGS_DIR_PATH` | `logs` | Log file storage directory |
 | `--force_summary` | `SAGE_FORCE_SUMMARY` | `False` | Whether to force enable summary function |
-| `--no_auth` | `SAGE_NO_AUTH` | `True` | Whether to disable authentication (disabled by default, fetch data based on user_id) |
 | `--preset_mcp_config` | `SAGE_MCP_CONFIG_PATH` | `mcp_setting.json` | MCP configuration file path |
 | `--preset_running_config` | `SAGE_PRESET_RUNNING_CONFIG_PATH` | `agent_setting.json` | Preset running configuration (system_context, workflow, etc.) |
 
@@ -201,7 +200,7 @@ Sage Server supports configuration via **Command Line Arguments** or **Environme
 | Command Line Argument | Environment Variable | Default Value | Description |
 | :--- | :--- | :--- | :--- |
 | `--db_type` | `SAGE_DB_TYPE` | `memory` | Database Type (`file`, `memory`, `mysql`) |
-| `--db_path` | `SAGE_DB_PATH` | `./data/` | Database file path (file mode only) |
+
 | `--mysql_host` | `SAGE_MYSQL_HOST` | `127.0.0.1` | MySQL Host Address |
 | `--mysql_port` | `SAGE_MYSQL_PORT` | `3306` | MySQL Port |
 | `--mysql_user` | `SAGE_MYSQL_USER` | `root` | MySQL Username |

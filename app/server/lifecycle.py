@@ -6,16 +6,17 @@ from .bootstrap import (
     close_tool_manager,
     initialize_db_connection,
     initialize_global_clients,
-    initialize_preset_data,
     initialize_observability,
     initialize_scheduler,
     initialize_skill_manager,
     initialize_tool_manager,
+    initialize_session_manager,
     shutdown_clients,
     shutdown_scheduler,
     validate_and_disable_mcp_servers,
     ensure_system_init,
 )
+from .services.chat.stream_manager import StreamManager
 from .core.config import StartupConfig
 from .utils.async_utils import create_safe_task
 
@@ -29,9 +30,6 @@ async def initialize_system(cfg: StartupConfig):
     # 2. 确保数据库表存在 (Ensure tables exist)
     await ensure_system_init(cfg)
 
-    # 3. 初始化数据库预置数据 (Initialize preset data)
-    await initialize_preset_data(cfg)
-
     # 4. 初始化观测链路上报 (Initialize Observability - needs DB)
     await initialize_observability(cfg)
 
@@ -43,8 +41,14 @@ async def initialize_system(cfg: StartupConfig):
     await initialize_tool_manager()
     await initialize_skill_manager()
 
+    """初始化全局 SessionManager"""
+    await initialize_session_manager(cfg)
+
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)
+
+    StreamManager.get_instance()
+    logger.info("sage-server：StreamManager 已预初始化")
 
     logger.info("sage-server：初始化完成")
 

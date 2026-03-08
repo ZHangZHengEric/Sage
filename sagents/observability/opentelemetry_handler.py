@@ -24,7 +24,15 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def __init__(self, service_name: str = "sagents", export_to_console: bool = False):
         self.service_name = service_name
         self.tracer = trace.get_tracer(service_name)
+        self._detached_token_ids: set[int] = set()
         # No longer using self.span_stacks for concurrency safety
+
+    def _safe_detach(self, token: Any):
+        token_id = id(token)
+        if token_id in self._detached_token_ids:
+            return
+        self._detached_token_ids.add(token_id)
+        context.detach(token)
 
     def _push_span(self, span: trace.Span):
         """Helper to activate span and push to stack"""
@@ -51,12 +59,12 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         # If we have a valid token, it means we haven't detached/ended yet.
         # We end it now to prevent leaks if finally block is missed.
         if token is not None:
-            span.end()
-            context.detach(token)
-
-            # Update stack to replace token with None (marking as ended/detached)
-            # This ensures subsequent _pop_span (in finally) won't try to end/detach again.
             _span_token_stack.set(current_stack[:-1] + ((span, None),))
+            try:
+                span.end()
+                self._safe_detach(token)
+            except Exception as e:
+                logger.warning(f"OpenTelemetry: Failed to finalize span on error: {e}")
 
     def _pop_span(self) -> Optional[trace.Span]:
         """Helper to pop span, end it (if not already), and detach context"""
@@ -65,14 +73,16 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             return None
 
         span, token = current_stack[-1]
+        _span_token_stack.set(current_stack[:-1])
 
         # Only end/detach if token exists (not already handled by error handler)
         if token is not None:
-            span.end()
-            context.detach(token)
-
-        # Always remove from stack
-        _span_token_stack.set(current_stack[:-1])
+            try:
+                span.end()
+                self._safe_detach(token)
+            except Exception as e:
+                # Token may have already been used/detached in a different context
+                logger.warning(f"OpenTelemetry: Failed to detach context (may be already detached): {e}")
         return span
 
     def _get_current_span(self) -> Optional[trace.Span]:
@@ -94,7 +104,7 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
                 for span, token in reversed(current_stack):
                     if token is not None:
                         try:
-                            context.detach(token)
+                            self._safe_detach(token)
                         except Exception as e:
                             logger.warning(f"Failed to detach leaked token: {e}")
                     
@@ -211,14 +221,20 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
     def on_agent_error(self, error: Exception, **kwargs: Any) -> Any:
         self._end_span_on_error(error)
 
-    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], **kwargs: Any) -> Any:
+    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], step_name: str, **kwargs: Any) -> Any:
         span = self.tracer.start_span(
-            name=f"LLM调用:{model_name}",
+            name=f"阶段：{step_name}",
             kind=trace.SpanKind.CLIENT
         )
         llm_system = kwargs.get("llm_system", "openai")
         span.set_attribute("llm.system", llm_system)
         span.set_attribute("llm.model", model_name)
+        try:
+            messages_str = json.dumps(messages, ensure_ascii=False)
+            span.set_attribute("llm.messages", messages_str)
+        except Exception as e:
+            logger.error(f"Error setting llm.messages attribute: {e}")
+            pass
         span.set_attribute("session_id", session_id)
         self._push_span(span)
 
@@ -227,12 +243,12 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
         if not span:
             return
 
-        # Record usage if available
-        if hasattr(response, 'usage') and response.usage:
-            span.set_attribute("llm.usage.prompt_tokens", response.usage.prompt_tokens)
-            span.set_attribute("llm.usage.completion_tokens", response.usage.completion_tokens)
-            span.set_attribute("llm.usage.total_tokens", response.usage.total_tokens)
-
+        try:
+            span.set_attribute("llm.response", json.dumps(response, ensure_ascii=False))
+        except Exception as e:
+            logger.error(f"Error setting llm.response attribute: {e}")
+            pass
+        
         span.set_status(Status(StatusCode.OK))
         self._pop_span()
 

@@ -19,7 +19,12 @@ class WorkflowSelectAgent(AgentBase):
         self.agent_description = "工作流选择智能体，专门负责根据用户需求选择最合适的工作流"
         logger.debug("WorkflowSelectAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+        if not session_context.tool_manager:
+            raise ValueError("ToolManager is not initialized in SessionContext")
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
         message_manager = session_context.message_manager
 
         # 提取最近的对话历史

@@ -219,8 +219,9 @@ skills_usage_hint = {
 4. 如果现有 Skill 的能力范围与用户的请求相关，也请优先加载使用。
 
 **注意**：
-- 同时只能加载一个 Skill。
-- 可以通过多次调用 `load_skill` 来切换加载不同的 Skill（新 Skill 会替换旧 Skill）。
+- 可以同时加载多个 Skill，总 token 数限制为 8000。
+- 如果超过限制，系统会自动移除最早加载的 Skill。
+- 可以通过多次调用 `load_skill` 来加载更多 Skill。
 
 **使用步骤**：
 1. 分析用户的意图。
@@ -242,8 +243,9 @@ You **MUST prioritize** using the `load_skill` tool to load a new skill when:
 4. An existing Skill is relevant to the user's request.
 
 **Note**:
-- Only one Skill can be loaded at a time.
-- You can switch loaded Skills by calling `load_skill` multiple times (the new Skill will replace the old one).
+- Multiple Skills can be loaded simultaneously, with a total token limit of 8000.
+- If the limit is exceeded, the system will automatically remove the oldest loaded Skill.
+- You can load more Skills by calling `load_skill` multiple times.
 
 **Steps**:
 1. Analyze the user's intent.
@@ -265,8 +267,9 @@ Você **DEVE priorizar** o uso da ferramenta `load_skill` para carregar uma nova
 4. Uma Skill existente é relevante para a solicitação do usuário.
 
 **Nota**:
-- Apenas uma Skill pode ser carregada por vez.
-- Você pode alternar as Skills carregadas chamando `load_skill` várias vezes (a nova Skill substituirá a antiga).
+- Múltiplas Skills podem ser carregadas simultaneamente, com um limite total de 8000 tokens.
+- Se o limite for excedido, o sistema removerá automaticamente a Skill carregada mais antiga.
+- Você pode carregar mais Skills chamando `load_skill` várias vezes.
 
 **Passos**:
 1. Analise a intenção do usuário.
@@ -290,11 +293,11 @@ tool_suggestion_template = {
 ## agent的配置要求
 {agent_config}
 
-## 可用工具
-{available_tools_str}
-
 ## 用户的对话历史以及新的请求
 {messages}
+
+## 可用工具
+{available_tools_str}
 
 输出格式：
 ```json
@@ -307,7 +310,7 @@ tool_suggestion_template = {
 注意：
 1. 工具ID必须是可用工具中的序号。
 2. 返回所有可能用到的工具ID，对于不可能用到的工具，不要返回。
-3. 可能的工具最多返回15个。""",
+3. 尽可能多的返回相关的工具ID，但是不要超过15个。""",
     "en": """You are a tool recommendation expert. Your task is to recommend suitable tools for users based on their needs.
 You need to identify all possible tools that could be used to solve the user's request based on the conversation history, user's request, and agent configuration.
 
@@ -331,7 +334,7 @@ Output Format:
 Notes:
 1. Tool IDs must be the numbers from the available tools list.
 2. Return all possible tool IDs that might be used. Do not return tools that are unlikely to be used.
-3. Return at most 7 possible tools.""",
+3. Return as many relevant tool IDs as possible, but do not exceed 15.""",
     "pt": """Você é um especialista em recomendação de ferramentas. Sua tarefa é recomendar ferramentas adequadas para os usuários com base em suas necessidades.
 Você precisa identificar todas as ferramentas possíveis que podem ser usadas para resolver a solicitação do usuário com base no histórico de conversas, solicitação do usuário e configuração do agente.
 
@@ -355,5 +358,5 @@ Formato de Saída:
 Notas:
 1. Os IDs das ferramentas devem ser os números da lista de ferramentas disponíveis.
 2. Retorne todos os IDs de ferramentas possíveis que possam ser usados. Não retorne ferramentas que provavelmente não serão usadas.
-3. Retorne no máximo 15 ferramentas possíveis."""
+3. Retorne o máximo possível de IDs de ferramentas relevantes, mas não exceda 15."""
 }

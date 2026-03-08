@@ -21,7 +21,10 @@ class QuerySuggestAgent(AgentBase):
         self.agent_description = "查询建议智能体，专门负责根据用户对话生成接下来用户可能会问的问题，或者可能帮助用户解决相关更加深入的事情。"
         logger.debug("QuerySuggestAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
         message_manager = session_context.message_manager
 
         conversation_messages = message_manager.extract_all_context_messages(recent_turns=2, last_turn_user_only=False)

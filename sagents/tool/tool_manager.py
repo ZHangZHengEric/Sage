@@ -12,6 +12,8 @@ from .tool_schema import (
 )
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext
+from sagents.context.messages.message_manager import MessageManager
+from sagents.utils.serialization import make_serializable
 from pathlib import Path
 import json
 import asyncio
@@ -21,6 +23,110 @@ import traceback
 import time
 import os
 import sys
+import shutil
+import subprocess
+
+
+def _check_command_exists(command: str) -> bool:
+    """检查命令是否存在"""
+    return shutil.which(command) is not None
+
+
+async def _install_uvx() -> bool:
+    """自动安装 uvx (uv package manager)
+    
+    Returns:
+        bool: 安装是否成功
+    """
+    try:
+        logger.info("[Auto Install] uvx not found, attempting to install uv...")
+        
+        # 检查是否已经安装了 uv
+        if _check_command_exists("uv"):
+            logger.info("[Auto Install] uv is already installed")
+            return True
+        
+        # 尝试使用 pip 安装 uv
+        logger.info("[Auto Install] Installing uv via pip...")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", "uv",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode == 0:
+            logger.info("[Auto Install] Successfully installed uv via pip")
+            # 刷新 PATH
+            os.environ["PATH"] = os.environ.get("PATH", "")
+            return True
+        else:
+            logger.error(f"[Auto Install] Failed to install uv via pip: {stderr.decode()}")
+            
+            # 尝试使用官方安装脚本
+            logger.info("[Auto Install] Trying to install uv via official installer...")
+            import platform
+            system = platform.system().lower()
+            
+            if system == "darwin" or system == "linux":
+                # macOS 或 Linux
+                install_cmd = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+                process = await asyncio.create_subprocess_shell(
+                    install_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0:
+                    logger.info("[Auto Install] Successfully installed uv via official installer")
+                    # 添加 uv 到 PATH (通常安装在 ~/.local/bin)
+                    home = os.path.expanduser("~")
+                    uv_bin_path = os.path.join(home, ".local", "bin")
+                    if uv_bin_path not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = f"{uv_bin_path}{os.pathsep}{os.environ.get('PATH', '')}"
+                    return True
+                else:
+                    logger.error(f"[Auto Install] Failed to install uv via official installer: {stderr.decode()}")
+            
+            return False
+            
+    except Exception as e:
+        logger.error(f"[Auto Install] Error during uvx installation: {e}")
+        return False
+
+
+def _ensure_command_available(command: str) -> bool:
+    """确保命令可用，如果不存在则尝试安装
+    
+    Args:
+        command: 命令名称 (如 'uvx', 'npx' 等)
+        
+    Returns:
+        bool: 命令是否可用
+    """
+    if _check_command_exists(command):
+        return True
+    
+    # 特殊处理 uvx/uv
+    if command in ["uvx", "uv"]:
+        # 异步安装 uv
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果事件循环正在运行，创建新任务
+                future = asyncio.ensure_future(_install_uvx())
+                # 这里不能直接等待，需要返回 False 让调用者重试
+                logger.info(f"[Auto Install] Installation of {command} started in background")
+                return False
+            else:
+                # 如果事件循环未运行，可以直接运行
+                return loop.run_until_complete(_install_uvx())
+        except Exception as e:
+            logger.error(f"[Auto Install] Error ensuring {command} available: {e}")
+            return False
+    
+    return False
 try:
     BaseExceptionGroup
 except NameError:
@@ -213,19 +319,11 @@ class ToolManager:
         if path:
             self._discover_import_path(path=path, root_package="sagents")
         else:
-            # 默认情况：扫描 sagents.tool.impl 包下的所有模块
-            # impl/__init__.py 已清空以避免全量导入，此处使用 pkgutil 显式导入所有子模块
+            # 默认情况：直接导入 sagents.tool.impl，由其 __init__.py 控制导出哪些工具
             try:
                 import sagents.tool.impl
-                import pkgutil
-                import importlib
-                for module_info in pkgutil.walk_packages(sagents.tool.impl.__path__, sagents.tool.impl.__name__ + "."):
-                    try:
-                        importlib.import_module(module_info.name)
-                    except Exception as e:
-                        logger.warning(f"Failed to import {module_info.name}: {e}")
             except Exception as e:
-                logger.warning(f"Failed to discover tools in impl package: {e}")
+                logger.warning(f"Failed to import tools in impl package: {e}")
 
         count = 0
         for funcs in _DISCOVERED_TOOLS.values():
@@ -356,7 +454,7 @@ class ToolManager:
                 return True
             elif new_priority == existing_priority:
                 # 相同优先级，保持现有工具
-                logger.warning(
+                logger.debug(
                     f"Tool '{tool_spec.name}' already registered with same priority, keeping existing tool"
                 )
                 return False
@@ -449,12 +547,20 @@ class ToolManager:
         bool_registered = False
         registered_tools = RegisteredToolList()
         logger.info(f"Registering MCP server: {server_name}")
+        logger.debug(f"MCP server config: {config}")
         if config.get("disabled", True):
             logger.debug(f"Server {server_name} is disabled, skipping")
             return bool_registered
         server_name = server_name.strip()
         server_params: Optional[Union[StdioServerParameters, SseServerParameters, StreamableHttpServerParameters]] = None
         try:
+            protocol_type = "stdio"
+            if "sse_url" in config:
+                protocol_type = "sse"
+            elif "url" in config or "streamable_http_url" in config:
+                protocol_type = "streamable_http"
+            logger.info(f"Detected protocol type for {server_name}: {protocol_type}")
+            
             if "sse_url" in config:
                 server_params = SseServerParameters(
                     url=config["sse_url"], api_key=config.get("api_key", None)
@@ -468,19 +574,63 @@ class ToolManager:
                     url=url_val
                 )
             else:
+                # stdio protocol
+                command = config.get("command")
+                args = config.get("args", [])
+                env = config.get("env", None)
+                logger.info(f"Creating StdioServerParameters for {server_name}")
+                logger.debug(f"  command: {command}")
+                logger.debug(f"  args: {args}")
+                logger.debug(f"  env: {env}")
+                
+                if not command:
+                    logger.error(f"Missing 'command' field in config for {server_name}")
+                    logger.error(f"Available config keys: {list(config.keys())}")
+                    return False
+                
+                # 检查命令是否存在，如果不存在尝试自动安装
+                if not _check_command_exists(command):
+                    logger.warning(f"Command '{command}' not found, attempting to install...")
+                    if command in ["uvx", "uv"]:
+                        # 对于 uvx/uv，尝试异步安装
+                        install_success = await _install_uvx()
+                        if not install_success:
+                            logger.error(f"Failed to install {command}. Please install it manually:")
+                            logger.error(f"  curl -LsSf https://astral.sh/uv/install.sh | sh")
+                            logger.error(f"  or: pip install uv")
+                            return False
+                        # 安装成功后，再次检查命令是否存在
+                        if not _check_command_exists(command):
+                            logger.error(f"Installation completed but '{command}' still not found in PATH")
+                            logger.error(f"Please restart the application or check your PATH configuration")
+                            return False
+                    else:
+                        logger.error(f"Command '{command}' not found and auto-installation is not supported")
+                        logger.error(f"Please install it manually")
+                        return False
+                
                 server_params = StdioServerParameters(
-                    command=config["command"],
-                    args=config.get("args", []),
-                    env=config.get("env", None),
+                    command=command,
+                    args=args,
+                    env=env,
                 )
             mcp_proxy = McpProxy()
             mcp_tools = await mcp_proxy.get_mcp_tools(server_name, server_params)
             for mcp_tool in mcp_tools:
                 await self._register_mcp_tool(server_name, mcp_tool, server_params)
                 registered_tools.append(mcp_tool)
+        except KeyError as e:
+            missing_key = str(e).strip("'")
+            logger.error(f"Missing required key '{missing_key}' in config for MCP server {server_name}")
+            logger.error(f"Full config: {config}")
+            return bool_registered
         except Exception as e:
             error_detail = _innermost_exception_message(e)
-            logger.warning(f"Error registering MCP server {server_name}: {error_detail}")
+            logger.error(f"Error registering MCP server {server_name}: {error_detail}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Full config: {config}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return bool_registered
         bool_registered = True
         logger.info(f"Successfully registered MCP server: {server_name}")
@@ -665,6 +815,18 @@ class ToolManager:
                 kwargs.pop("session_id", None)
                 final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, ToolSpec):
+                # 检查必填参数
+                required_params = getattr(tool, 'required', []) or []
+                missing_params = [p for p in required_params if p not in kwargs or kwargs.get(p) is None]
+                if missing_params:
+                    # 返回错误信息而不是 raise
+                    return json.dumps({
+                        "success": False,
+                        "error": f"缺少必填参数: {', '.join(missing_params)}",
+                        "required_params": required_params,
+                        "provided_params": list(kwargs.keys())
+                    }, ensure_ascii=False, indent=2)
+                
                 # Check for sandbox execution
                 # Define sandbox tools (can be moved to config later)
                 SANDBOX_TOOLS = [
@@ -684,7 +846,7 @@ class ToolManager:
                 if tool.name in SANDBOX_TOOLS:
                     try:
                         # Use sandbox if available
-                        if hasattr(session_context, 'sandbox') and session_context.sandbox:
+                        if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
                             # Check if pip/npm is needed
                             needs_pip = False
                             needs_npm = False
@@ -699,8 +861,8 @@ class ToolManager:
                                 if "npm " in cmd or "node " in cmd:
                                     needs_npm = True
                             
-                            if needs_pip:
-                                session_context.sandbox.ensure_pip()
+                            # Note: pip is automatically available in the sandbox venv
+                            # No need to explicitly call ensure_pip()
                             # We might want to ensure npm here too in future if sandbox environment management supports it
                             # session_context.sandbox.ensure_npm() 
 
@@ -719,8 +881,22 @@ class ToolManager:
                             # We pass the function object from the tool spec
                             # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
                             # usually it's bound method if created from class)
-                            result = session_context.sandbox.run_tool(tool.func, kwargs)
-                            final_result = json.dumps({"content": result}, ensure_ascii=False, indent=2)
+                            result = await session_context.agent_workspace_sandbox.run_tool(tool.func, kwargs)
+                            
+                            # Preserve skill_name for load_skill tool
+                            if tool_name == 'load_skill':
+                                try:
+                                    result_dict = json.loads(result) if isinstance(result, str) else result
+                                    # Get skill_name from result_dict, fallback to kwargs (the original input parameter)
+                                    skill_name_from_result = result_dict.get("skill_name") or kwargs.get("skill_name", "unknown")
+                                    final_result = json.dumps({
+                                        "skill_name": skill_name_from_result,
+                                        "content": make_serializable(result_dict.get("content", result))
+                                    }, ensure_ascii=False, indent=2)
+                                except Exception:
+                                    final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
+                            else:
+                                final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
                             # Sync context for ToDo tools after successful sandbox execution
                             if tool.name in ["todo_write", "todo_read", "todo_update"]:
@@ -730,22 +906,17 @@ class ToolManager:
                                     from sagents.tool.impl.todo_tool import ToDoTool
                                     
                                     # Read directly from sandbox file system
-                                    if hasattr(session_context, 'sandbox') and session_context.sandbox:
-                                         # Use sandbox to read file content (ensure we get the file from sandbox perspective)
-                                         # But wait, we need the path.
-                                         # We can reconstruct the path logic or just read "todo_list.md" from workspace root
-                                         # SandboxFileSystem maps workspace root.
-                                         
-                                         # Let's try to read "todo_list.md" from the sandbox current working directory
-                                         # We can use 'cat todo_list.md' or similar via sandbox, OR use file_read tool logic?
-                                         # Actually, if we are in the main process, we can access the file via the host path if we know it.
-                                         # session_context.agent_workspace might be a string (host path) or SandboxFileSystem.
-                                         
-                                         host_todo_path = None
-                                         if isinstance(session_context.agent_workspace, str):
-                                             host_todo_path = os.path.join(session_context.agent_workspace, "todo_list.md")
-                                         elif hasattr(session_context.agent_workspace, 'host_path'):
-                                             host_todo_path = os.path.join(session_context.agent_workspace.host_path, "todo_list.md")
+                                    if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
+                                         # Use the same path logic as todo_write to ensure consistency
+                                         ws = session_context.agent_workspace_sandbox.file_system
+                                         filename = f"TODO_LIST_{session_id}.md"
+                                         if isinstance(ws, str):
+                                             host_todo_path = os.path.join(ws, filename)
+                                         elif hasattr(ws, 'host_path'):  # SandboxFileSystem
+                                             host_todo_path = os.path.join(ws.host_path, filename)
+                                         else:
+                                             # Fallback to agent_workspace
+                                             host_todo_path = os.path.join(session_context.agent_workspace, filename)
                                          
                                          if host_todo_path and os.path.exists(host_todo_path):
                                              with open(host_todo_path, 'r', encoding='utf-8') as f:
@@ -762,7 +933,12 @@ class ToolManager:
                                                  session_context.system_context.update({'todo_list': tasks})
                                                  logger.info(f"Session context synced successfully via file read. Tasks: {len(tasks)}")
                                          else:
-                                             logger.warning(f"Could not locate todo_list.md at {host_todo_path}")
+                                             # File was deleted (all tasks completed), clear todo_list in session_context
+                                             if hasattr(session_context, 'system_context') and isinstance(session_context.system_context, dict):
+                                                 session_context.system_context.update({'todo_list': []})
+                                                 logger.info(f"Todo file deleted, cleared todo_list in session context")
+                                             else:
+                                                 logger.warning(f"Could not locate todo_list.md at {host_todo_path}")
                                 except Exception as e:
                                     logger.warning(f"Failed to sync session context after sandbox execution: {e}")
 
@@ -815,16 +991,63 @@ class ToolManager:
                 try:
                     result_data = json.loads(final_result)
                     skill_content = result_data.get("content", "")
+                    # Get skill_name from result_data, fallback to kwargs (the original input parameter)
+                    skill_name = result_data.get("skill_name") or kwargs.get("skill_name", "unknown")
                     
-                    # Update SessionContext: Store skill instruction in system_context
-                    # This automatically implements "replace existing" logic as we overwrite the key
-                    session_context.system_context['active_skill_instruction'] = skill_content
+                    # Update SessionContext: Store skill instruction in system_context as a list
+                    # Initialize active_skills list if not exists
+                    if 'active_skills' not in session_context.system_context:
+                        session_context.system_context['active_skills'] = []
+                    
+                    active_skills = session_context.system_context['active_skills']
+                    
+                    # Check if skill already exists, remove old entry
+                    active_skills = [s for s in active_skills if s.get('skill_name') != skill_name]
+                    
+                    # Add new skill to the end (newest)
+                    active_skills.append({
+                        'skill_name': skill_name,
+                        'skill_content': skill_content
+                    })
+                    
+                    # Limit total tokens to 8000, remove oldest if exceeded
+                    # But always keep at least one skill, even if it exceeds the limit
+                    MAX_SKILL_TOKENS = 8000
+                    total_tokens = 0
+                    # Use calculate_str_token_length for accurate token calculation
+                    for skill in active_skills:
+                        skill_content = skill.get('skill_content', '')
+                        skill_tokens = MessageManager.calculate_str_token_length(skill_content)
+                        total_tokens += skill_tokens
+                    
+                    # Remove oldest skills if total exceeds limit, but keep at least one
+                    while total_tokens > MAX_SKILL_TOKENS and len(active_skills) > 1:
+                        removed_skill = active_skills.pop(0)  # Remove oldest (first)
+                        removed_content = removed_skill.get('skill_content', '')
+                        removed_tokens = MessageManager.calculate_str_token_length(removed_content)
+                        total_tokens -= removed_tokens
+                        logger.info(f"Removed skill '{removed_skill.get('skill_name')}' due to token limit. Total tokens: {total_tokens}")
+                    
+                    # Ensure at least one skill remains (even if it exceeds token limit)
+                    if len(active_skills) == 0:
+                        logger.warning("All skills were removed due to token limit, but at least one skill should remain")
+                    
+                    session_context.system_context['active_skills'] = active_skills
+                    
+                    # Also update legacy field for backward compatibility
+                    # Concatenate all active skills
+                    all_instructions = "\n\n".join([
+                        f"=== {s.get('skill_name', 'Unknown')} ===\n{s.get('skill_content', '')}"
+                        for s in active_skills
+                    ])
+                    session_context.system_context['active_skill_instruction'] = all_instructions
                     
                     # Modify the return result to be a simple confirmation
-                    new_message = "Skill loaded successfully. Please follow the instructions in the System Prompt."
+                    skill_list = ", ".join([s.get('skill_name', 'Unknown') for s in active_skills])
+                    new_message = f"Skill '{skill_name}' loaded successfully. Current Active skills: {skill_list}. Total skills: {len(active_skills)}. Please follow the instructions in the System Prompt."
                     final_result = json.dumps({"content": new_message}, ensure_ascii=False, indent=2)
                     
-                    logger.info(f"Intercepted load_skill output and updated session_context for session {session_id}")
+                    logger.info(f"Intercepted load_skill output and updated session_context for session {session_id}. Active skills: {skill_list}")
                 except Exception as e:
                     logger.error(f"Failed to process load_skill interception: {e}")
                     # If interception fails, we continue with original result but log the error
@@ -861,10 +1084,10 @@ class ToolManager:
                 else:
                     formatted_content = content
                 return json.dumps(
-                    {"content": formatted_content}, ensure_ascii=False, indent=2
+                    {"content": make_serializable(formatted_content)}, ensure_ascii=False, indent=2
                 )
             else:
-                return json.dumps(result, ensure_ascii=False, indent=2)
+                return json.dumps(make_serializable(result), ensure_ascii=False, indent=2)
 
         except Exception as e:
             if isinstance(e, BaseExceptionGroup):
@@ -877,6 +1100,7 @@ class ToolManager:
     async def _execute_standard_tool_async(self, tool: ToolSpec, session_id: str = "", **kwargs) -> str:
         """Execute standard tool and format result (async version)"""
         logger.debug(f"Executing standard tool: {tool.name}")
+        execute_start = time.perf_counter()
 
         try:
             # Inject session_id if the tool function expects it
@@ -921,7 +1145,10 @@ class ToolManager:
                         result = tool.func(**kwargs)
 
             # Format result - 避免双重JSON序列化
-            return json.dumps({"content": result}, ensure_ascii=False, indent=2)
+            execute_cost = time.perf_counter() - execute_start
+            if execute_cost > 0.2:
+                logger.warning(f"Standard tool slow: {tool.name}, cost={execute_cost:.3f}s")
+            return json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
 
         except Exception as e:
             logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")

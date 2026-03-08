@@ -10,7 +10,7 @@ from .workflow_select_agent import WorkflowSelectAgent
 from .task_completion_judge_agent import TaskCompletionJudgeAgent
 from .query_suggest_agent import QuerySuggestAgent
 from .task_router_agent import TaskRouterAgent
-from .fibre.agent import FibreAgent
+from .fibre.fibre_agent import FibreAgent
 
 __all__ = [
     "AgentBase",
