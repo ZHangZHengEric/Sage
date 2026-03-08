@@ -96,6 +96,9 @@ const parsedContent = computed(() => {
 })
 
 const summary = computed(() => parsedContent.value.summary || '')
-const tasks = computed(() => parsedContent.value.tasks || [])
+const tasks = computed(() => {
+  const taskList = parsedContent.value.tasks || []
+  return taskList.sort((a, b) => (a.index || 0) - (b.index || 0))
+})
 
 </script>
