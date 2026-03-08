@@ -236,6 +236,13 @@
   />
 </template>
 
+<script>
+// 禁用属性继承，因为组件使用了 Dialog (teleport) 导致多根节点
+export default {
+  inheritAttrs: false
+}
+</script>
+
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'

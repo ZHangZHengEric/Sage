@@ -24,7 +24,6 @@
         class="h-8 w-8"
         @click="handleStepBackward"
         :title="t('workbench.stepBackward')"
-        :disabled="isRealtime"
       >
         <SkipBack class="w-4 h-4" />
       </Button>
@@ -38,7 +37,6 @@
           :step="1"
           @update:model-value="handleSliderChange"
           class="w-full"
-          :disabled="isRealtime"
         />
       </div>
 
@@ -49,7 +47,6 @@
         class="h-8 w-8"
         @click="handleStepForward"
         :title="t('workbench.stepForward')"
-        :disabled="isRealtime"
       >
         <SkipForward class="w-4 h-4" />
       </Button>

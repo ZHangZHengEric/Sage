@@ -62,8 +62,14 @@
       >
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
           <div v-if="!filteredMessages || filteredMessages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
-            <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm">
-               <Bot :size="32" class="opacity-80 text-primary" />
+            <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden">
+               <img
+                 v-if="selectedAgent"
+                 :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
+                 :alt="selectedAgent.name"
+                 class="w-full h-full object-cover"
+               />
+               <Bot v-else :size="32" class="opacity-80 text-primary" />
             </div>
             <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
             <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
@@ -116,7 +122,7 @@
         />
 
         <WorkbenchPreview
-          v-else-if="showWorkbench"
+          v-else-if="showWorkbench && currentSessionId"
           :messages="filteredMessages"
           :session-id="currentSessionId"
           @close="showWorkbench = false"
@@ -192,6 +198,7 @@ const {
   handleScroll,
   handleSendMessage,
   stopGeneration,
+  currentSessionId,
   activeSubSessionId,
   subSessionMessages,
   handleCloseSubSession,
