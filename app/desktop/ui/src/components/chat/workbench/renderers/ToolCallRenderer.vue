@@ -500,6 +500,44 @@ watch(isLoadSkill, (newVal) => {
   }
 }, { immediate: true })
 
+// 监听 skillName 变化，重置 skillInfo
+watch(skillName, (newVal, oldVal) => {
+  console.log('[ToolCallRenderer] skillName changed:', oldVal, '->', newVal)
+  if (newVal !== oldVal) {
+    // 重置 skillInfo
+    skillInfo.value = {
+      name: '',
+      description: '',
+      content: ''
+    }
+    skillError.value = ''
+    console.log('[ToolCallRenderer] skillInfo reset for new skill:', newVal)
+    // 如果新的 skillName 不为空，获取新 skill 的信息
+    if (newVal && isLoadSkill.value) {
+      fetchSkillInfo()
+    }
+  }
+})
+
+// 监听 item 变化，确保组件复用时重置状态
+watch(() => props.item, (newVal, oldVal) => {
+  console.log('[ToolCallRenderer] item changed:', oldVal?.id, '->', newVal?.id)
+  if (newVal?.id !== oldVal?.id) {
+    // 重置 skillInfo
+    skillInfo.value = {
+      name: '',
+      description: '',
+      content: ''
+    }
+    skillError.value = ''
+    console.log('[ToolCallRenderer] item changed, skillInfo reset')
+    // 如果是 load_skill，获取新 skill 的信息
+    if (isLoadSkill.value && skillName.value) {
+      fetchSkillInfo()
+    }
+  }
+}, { deep: true })
+
 // ============ 3. File Read ============
 const readFilePath = computed(() => toolArgs.value.file_path || '')
 const readFileType = computed(() => {
