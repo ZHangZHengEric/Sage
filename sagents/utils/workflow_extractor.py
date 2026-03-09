@@ -361,7 +361,7 @@ class WorkflowExtractor:
         try:
             # 添加时间戳和元数据
             output_data = {
-                "extracted_at": datetime.now().isoformat(),
+                "extracted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "extractor_version": "1.0",
                 "workflows": workflows
             }

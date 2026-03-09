@@ -433,7 +433,7 @@ class EMLParser(BaseFileParser):
                 components.append(date)
             else:
                 # 如果没有日期，使用当前时间
-                components.append(datetime.now().isoformat())
+                components.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
             # 如果有内容，添加内容的一部分
             try:

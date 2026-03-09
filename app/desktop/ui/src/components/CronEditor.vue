@@ -304,10 +304,10 @@ const generateCron = () => {
       cron = `*/${minuteState.interval} * * * *`
       break
     case 'hourly':
-      cron = `${hourlyState.minute} */${hourlyState.interval} * * * *`
+      cron = `${hourlyState.minute} */${hourlyState.interval} * * *`
       break
     case 'daily':
-      cron = `${dailyState.minute} ${dailyState.hour} * * * *`
+      cron = `${dailyState.minute} ${dailyState.hour} * * *`
       break
     case 'weekly':
       const days = weeklyState.days.length > 0 ? weeklyState.days.sort().join(',') : '*'
