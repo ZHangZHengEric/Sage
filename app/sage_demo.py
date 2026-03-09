@@ -62,7 +62,8 @@ class ComponentManager:
                  context_history_ratio: Optional[float] = None,
                  context_active_ratio: Optional[float] = None,
                  context_max_new_message_ratio: Optional[float] = None,
-                 context_recent_turns: Optional[int] = None):
+                 context_recent_turns: Optional[int] = None,
+                 session_root: Optional[str] = None):
         logger.debug(f"使用配置 - 模型: {model_name}, 温度: {temperature}")
         self.api_key = api_key
         self.model_name = model_name
@@ -82,6 +83,7 @@ class ComponentManager:
         self.preset_running_config = preset_running_config
         self.logs_dir = logs_dir
         self.skills_path = skills_path
+        self.session_root = session_root
 
         # 处理preset_running_config（参考sage_server.py的实现）
         self.preset_config_dict = {}
@@ -235,25 +237,18 @@ class ComponentManager:
     def _init_controller(self) -> SAgent:
         """初始化控制器"""
         try:
-            model_config = {
-                "model": self.model_name,
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
-                "max_model_len": self.max_model_len,
-                "top_p": self.top_p,
-                "presence_penalty": self.presence_penalty
-            }
-
-            # 使用preset_running_config中的system_prefix（参考sage_server.py的实现）
-
+            # session_root_space 独立于 agent_workspace
+            if self.session_root:
+                 session_root_space = os.path.abspath(self.session_root)
+            else:
+                 session_root_space = os.path.join(os.path.dirname(os.path.abspath(self.workspace)), "demo_sessions")
+            os.makedirs(session_root_space, exist_ok=True)
+            
             controller = SAgent(
-                self._model,
-                model_config,
-                system_prefix=self.system_prefix,
-                workspace=self.workspace,
-                memory_type=self.memory_type
+                session_root_space=session_root_space,
+                enable_obs=True,
+                use_sandbox=True
             )
-
             return controller
 
         except Exception as e:
@@ -306,7 +301,7 @@ class StreamingHandler:
                              skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
                              session_id: Optional[str] = None,
                              use_deepthink: bool = True,
-                             use_multi_agent: bool = True,
+                             agent_mode: str = "simple",
                              context_budget_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """处理消息流"""
         logger.debug("开始处理流式响应")
@@ -325,15 +320,37 @@ class StreamingHandler:
             if self.component_manager.preset_max_loop_count is not None:
                 max_loop_count = self.component_manager.preset_max_loop_count
 
+        # 准备模型配置
+        model_config = {
+            "model": self.component_manager.model_name,
+            "temperature": self.component_manager.temperature,
+            "max_tokens": self.component_manager.max_tokens,
+            "max_model_len": self.component_manager.max_model_len,
+            "top_p": self.component_manager.top_p,
+            "presence_penalty": self.component_manager.presence_penalty
+        }
+        
+        # 准备模型客户端
+        model_client = AsyncOpenAI(
+            api_key=self.component_manager.api_key,
+            base_url=self.component_manager.base_url
+        )
+
         try:
             async for chunk in self.controller.run_stream(
-                messages,
-                tool_manager,
-                skill_manager=skill_manager,
                 session_id=session_id,
+                input_messages=messages,
+                tool_manager=tool_manager,
+                skill_manager=skill_manager,
+                model=model_client,
+                model_config=model_config,
+                system_prefix=self.component_manager.system_prefix,
+                agent_workspace=self.component_manager.workspace, # 显式传入 agent_workspace
+                default_memory_type=self.component_manager.memory_type,
+                user_id="default_user",
                 deep_thinking=use_deepthink,
-                multi_agent=use_multi_agent,
                 max_loop_count=max_loop_count,
+                agent_mode=agent_mode,
                 system_context=system_context,
                 available_workflows=available_workflows,
                 context_budget_config=context_budget_config
@@ -341,7 +358,7 @@ class StreamingHandler:
                 # 将message chunk类型的chunks 转化成字典
                 chunks_dict = [msg.to_dict() for msg in chunk]
                 new_messages.extend(chunks_dict)
-                self._update_display(messages, new_messages)
+                await self._update_display(messages, new_messages)
 
         except Exception as e:
             logger.error(traceback.format_exc())
@@ -354,7 +371,7 @@ class StreamingHandler:
 
         return new_messages
 
-    def _update_display(self, base_messages: List[Dict], new_messages: List[Dict]):
+    async def _update_display(self, base_messages: List[Dict], new_messages: List[Dict]):
         """更新显示内容"""
         merged_messages = MessageManager.merge_new_messages_to_old_messages(new_messages, base_messages.copy())
         merged_messages_dict = [msg.to_dict() for msg in merged_messages]
@@ -390,11 +407,25 @@ def setup_ui(config: Dict):
     with st.sidebar:
         st.header("⚙️ 设置")
 
-        # 多智能体选项
-        use_multi_agent = st.toggle('🤖 启用多智能体推理',
-                                    value=config.get('use_multi_agent', False))
+        # 智能体模式选项
+        agent_mode_options = {
+            "simple": "Simple (基础模式)",
+            "fibre": "Fibre (多智能体协作)",
+            "multi": "Multi (多智能体 - 旧版)" # 保留兼容
+        }
+        agent_mode = st.selectbox(
+            '🤖 智能体模式',
+            options=list(agent_mode_options.keys()),
+            format_func=lambda x: agent_mode_options[x],
+            index=1 if config.get('agent_mode') == 'fibre' else 0
+        )
+        
         use_deepthink = st.toggle('🧠 启用深度思考',
                                   value=config.get('use_deepthink', True))
+
+        session_root = st.text_input("Session Root Directory", value="demo_sessions", help="会话存储根目录")
+        
+        # 内存设置
 
         # 系统信息
         st.subheader("📊 系统信息")
@@ -411,7 +442,7 @@ def setup_ui(config: Dict):
         if st.button("🗑️ 清除对话历史", type="secondary"):
             clear_history()
 
-    return use_multi_agent, use_deepthink
+    return agent_mode, use_deepthink, session_root
 
 
 def display_tools(tool_manager: Union[ToolManager, ToolProxy]):
@@ -505,7 +536,7 @@ def generate_response(tool_manager: Union[ToolManager, ToolProxy], controller: S
         skill_manager=skill_manager,
         session_id=st.session_state.session_id,
         use_deepthink=st.session_state.get('use_deepthink', True),
-        use_multi_agent=st.session_state.get('use_multi_agent', False),
+        agent_mode=st.session_state.get('agent_mode', 'simple'),
         context_budget_config=context_budget_config
     ))
 
@@ -576,10 +607,10 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
         'context_recent_turns': context_recent_turns
     }
     # 设置界面（此时能获取到正确的配置）
-    use_multi_agent, use_deepthink = setup_ui(config)
+    agent_mode, use_deepthink, session_root = setup_ui(config)
 
     # 存储设置到会话状态
-    st.session_state.use_multi_agent = use_multi_agent
+    st.session_state.agent_mode = agent_mode
     st.session_state.use_deepthink = use_deepthink
 
     # 初始化组件（只执行一次）
@@ -587,25 +618,26 @@ def run_web_demo(api_key: str, model_name: Optional[str] = None, base_url: Optio
         try:
             with st.spinner("正在初始化系统组件..."):
                 component_manager = ComponentManager(
-                    api_key=api_key,
-                    model_name=model_name,
-                    base_url=base_url,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    max_model_len=max_model_len,
-                    top_p=top_p,
-                    presence_penalty=presence_penalty,
-                    workspace=workspace,
-                    memory_type=memory_type,
-                    mcp_config=mcp_config,
-                    preset_running_config=preset_running_config,
-                    logs_dir=logs_dir,
-                    skills_path=skills_path,
-                    context_history_ratio=context_history_ratio,
-                    context_active_ratio=context_active_ratio,
-                    context_max_new_message_ratio=context_max_new_message_ratio,
-                    context_recent_turns=context_recent_turns
-                )
+                api_key=api_key,
+                model_name=model_name,
+                base_url=base_url,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                max_model_len=max_model_len,
+                top_p=top_p,
+                presence_penalty=presence_penalty,
+                workspace=workspace,
+                memory_type=memory_type,
+                mcp_config=mcp_config,
+                preset_running_config=preset_running_config,
+                logs_dir=logs_dir,
+                skills_path=skills_path,
+                context_history_ratio=context_history_ratio,
+                context_active_ratio=context_active_ratio,
+                context_max_new_message_ratio=context_max_new_message_ratio,
+                context_recent_turns=context_recent_turns,
+                session_root=session_root,
+            )
                 tool_manager, skill_manager, controller = asyncio.run(component_manager.initialize())
                 st.session_state.tool_manager = tool_manager
                 st.session_state.skill_manager = skill_manager

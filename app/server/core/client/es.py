@@ -17,35 +17,6 @@ def get_es_client() -> AsyncElasticsearch:
         raise RuntimeError("ES 客户端未初始化，请先调用 init_es_client()")
     return ES_CLIENT
 
-
-async def _configure_disk_thresholds(client: AsyncElasticsearch) -> None:
-    """
-    配置 Elasticsearch 磁盘阈值（解决 flood stage disk watermark 问题）
-    """
-    try:
-        # 1. 设置集群磁盘分配设置（使用绝对值，适应大磁盘开发环境）
-        await client.cluster.put_settings(
-            body={
-                "transient": {
-                    "cluster.routing.allocation.disk.threshold_enabled": True,
-                    "cluster.routing.allocation.disk.watermark.low": "10gb",
-                    "cluster.routing.allocation.disk.watermark.high": "5gb",
-                    "cluster.routing.allocation.disk.watermark.flood_stage": "2gb",
-                    "cluster.info.update.interval": "1m",
-                }
-            }
-        )
-        logger.info("ES 集群磁盘阈值已更新 (10gb/5gb/2gb)")
-
-        # 2. 解除索引只读锁定（如果之前被锁）
-        await client.indices.put_settings(
-            body={"index.blocks.read_only_allow_delete": None}, index="_all"
-        )
-        logger.info("ES 索引只读锁定已解除")
-    except Exception as e:
-        logger.warning(f"配置 ES 磁盘阈值失败 (可能权限不足或版本不兼容): {e}")
-
-
 async def init_es_client(
     cfg: Optional[StartupConfig] = None,
 ) -> Optional[AsyncElasticsearch]:

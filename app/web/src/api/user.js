@@ -46,6 +46,13 @@ export const userAPI = {
   },
   getUserOptions: async () => {
     return await baseAPI.get('/api/user/options')
+  },
+  // User Config
+  getUserConfig: async () => {
+    return await baseAPI.get('/api/user/config')
+  },
+  updateUserConfig: async (config) => {
+    return await baseAPI.post('/api/user/config', { config })
   }
 }
 

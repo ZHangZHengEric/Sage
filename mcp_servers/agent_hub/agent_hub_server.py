@@ -19,8 +19,9 @@ mcp = FastMCP("Agent Hub Service")
 SAGE_API_BASE_URL = os.getenv("SAGE_API_BASE_URL", "http://localhost:8080")
 logger = logging.getLogger("AgentHub")
 
-# Base storage path - relative to execution directory
-BASE_DIR = Path("./data/mcp/agent_hub")
+# Base storage path - use SAGE_ROOT if available, otherwise use user's home directory
+SAGE_ROOT = os.getenv("SAGE_ROOT", str(Path.home() / ".sage"))
+BASE_DIR = Path(SAGE_ROOT) / "data" / "mcp" / "agent_hub"
 DB_PATH = BASE_DIR / "agent_hub.db"
 
 # Ensure data directory exists

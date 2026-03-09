@@ -8,7 +8,6 @@ class WorkflowManager:
     
     def __init__(self):
         self.workflows: Dict[str, Workflow] = {}
-        logger.info("WorkflowManager: 初始化完成")
     
     def add_workflow(self, workflow: Workflow) -> None:
         """添加工作流"""

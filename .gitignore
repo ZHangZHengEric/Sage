@@ -13,6 +13,7 @@ app/fastapi_react_demo/frontend/node_modules/
 __pycache__/
 logs/
 workspace/
+app/agent_sessions/
 *.py[cod]
 *$py.class
 
@@ -190,7 +191,28 @@ cython_debug/
 agent_workspace
 .conda
 .idea
-.github
 data
 .trae
 skills/*
+
+.cargo
+.pyinstaller
+.rustup
+app/desktop/tauri/bin/*
+app/desktop/tauri/gen
+
+# Nuitka build artifacts
+app/desktop/build_nuitka/
+app/desktop/dist_nuitka/
+.nuitka_cache/
+*.build/
+*.dist/
+*.onefile-build/
+sidecar
+
+
+# Certificates
+app/desktop/scripts/certs
+
+# Build Cache
+.build_cache/

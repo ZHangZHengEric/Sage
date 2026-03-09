@@ -6,20 +6,17 @@ import math
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from ..core.render import Response
-from ..core.exceptions import SageHTTPException
 from ..services.conversation import (
     delete_conversation,
     get_conversation_messages,
     get_conversations_paginated,
-    get_file_workspace,
     get_session_status,
     interrupt_session,
-    download_session_file,
+    update_conversation_title,
 )
 
 # ============= 会话相关模型 =============
@@ -59,6 +56,17 @@ async def interrupt(session_id: str, request: Request, body: InterruptRequest = 
     return await Response.succ(message=f"会话 {session_id} 已中断", data={**data, "user_id": user_id})
 
 
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+
+@conversation_router.post("/api/conversations/{session_id}/title")
+async def update_title(session_id: str, request: Request, body: UpdateTitleRequest):
+    """更新会话标题"""
+    data = await update_conversation_title(session_id, body.title)
+    return await Response.succ(message=f"会话 {session_id} 标题已更新", data=data)
+
+
 @conversation_router.post("/api/sessions/{session_id}/tasks_status")
 async def get_status(session_id: str, request: Request):
     """获取指定会话的状态"""
@@ -70,32 +78,6 @@ async def get_status(session_id: str, request: Request):
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks)}")
     return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result, "user_id": user_id})
 
-
-@conversation_router.post("/api/sessions/{session_id}/file_workspace")
-async def get_workspace(session_id: str, request: Request):
-    """获取指定会话的文件工作空间"""
-    claims = getattr(request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-
-    result = await get_file_workspace(session_id)
-    files = result.get("files", [])
-    logger.bind(session_id=session_id).info(f"获取工作空间文件数量：{len(files)}")
-    return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
-
-
-@conversation_router.get("/api/sessions/{session_id}/file_workspace/download")
-async def download_file(session_id: str, request: Request):
-    file_path = request.query_params.get("file_path")
-    logger.bind(session_id=session_id).info(f"Download request: file_path={file_path}")
-    try:
-        path, filename, media_type = await download_session_file(session_id, file_path)
-        logger.bind(session_id=session_id).info(f"Download resolved: path={path}")
-        return FileResponse(
-            path=path, filename=filename, media_type=media_type
-        )
-    except Exception as e:
-        logger.bind(session_id=session_id).error(f"Download failed: {e}")
-        raise
 
 
 @conversation_router.get("/api/conversations")
@@ -168,19 +150,19 @@ async def get_messages(session_id: str, request: Request):
     return await Response.succ(data=data, message="获取消息成功")
 
 
-@conversation_router.get("/api/share/conversations/{conversation_id}/messages")
-async def get_shared_messages(conversation_id: str):
+@conversation_router.get("/api/share/conversations/{session_id}/messages")
+async def get_shared_messages(session_id: str):
     """获取分享对话的消息（无权限校验）"""
-    data = await get_conversation_messages(conversation_id)
+    data = await get_conversation_messages(session_id)
     return await Response.succ(data=data, message="获取分享消息成功")
 
 
-@conversation_router.delete("/api/conversations/{conversation_id}")
-async def delete(conversation_id: str, request: Request):
+@conversation_router.delete("/api/conversations/{session_id}")
+async def delete(session_id: str, request: Request):
     """删除指定对话"""
-    conversation_id_res = await delete_conversation(conversation_id)
-    logger.bind(session_id=conversation_id).info("会话删除成功")
+    session_id_res = await delete_conversation(session_id)
+    logger.bind(session_id=session_id).info("会话删除成功")
     return await Response.succ(
-        message=f"会话 {conversation_id} 已删除",
-        data={"conversation_id": conversation_id_res, "user_id": target_user_id},
+        message=f"会话 {session_id} 已删除",
+        data={"session_id": session_id_res},
     )

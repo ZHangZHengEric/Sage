@@ -55,10 +55,10 @@ class ObservabilityManager(BaseTraceHandler):
             except Exception as e:
                 logger.error(f"Error in handler {handler.__class__.__name__}.on_agent_error: {e}")
 
-    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], **kwargs: Any) -> Any:
+    def on_llm_start(self, session_id: str, model_name: str, messages: List[Any], step_name: str = None, **kwargs: Any) -> Any:
         for handler in self.handlers:
             try:
-                handler.on_llm_start(session_id, model_name, messages, **kwargs)
+                handler.on_llm_start(session_id, model_name, messages, step_name, **kwargs)
             except Exception as e:
                 logger.error(f"Error in handler {handler.__class__.__name__}.on_llm_start: {e}")
 

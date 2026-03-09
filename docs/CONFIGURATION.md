@@ -59,10 +59,9 @@ graph TD
 |----------|------|---------|-------------|
 | `SAGE_PORT` | integer | 8080 | Server port |
 | `SAGE_LOGS_DIR_PATH` | string | "logs" | Logs directory |
-| `SAGE_WORKSPACE_PATH` | string | "agent_workspace" | Workspace directory |
-| `SAGE_MEMORY_ROOT` | string | None | Memory storage root directory (optional) |
+| `SAGE_SESSION_DIR` | string | "sessions" | Session directory |
+
 | `SAGE_FORCE_SUMMARY` | boolean | false | Force summary generation |
-| `SAGE_NO_AUTH` | boolean | true | Disable authentication (fetch data by user_id) |
 | `SAGE_MCP_CONFIG_PATH` | string | "mcp_setting.json" | MCP config file path |
 | `SAGE_PRESET_RUNNING_CONFIG_PATH` | string | "agent_setting.json" | Preset running config path |
 
@@ -93,7 +92,7 @@ graph TD
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SAGE_DB_TYPE` | string | "file" | Database type (file/memory/mysql) |
-| `SAGE_DB_PATH` | string | "./data/" | Database file path (file mode) |
+
 
 ### MySQL Settings
 
@@ -146,7 +145,7 @@ graph TD
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SAGE_TRACE_JAEGER_ENDPOINT` | string | None | Jaeger OTLP endpoint |
+| `SAGE_TRACE_JAEGER_URL` | string | None | Jaeger OTLP endpoint |
 
 ### Knowledge Base MCP Settings
 
@@ -187,10 +186,9 @@ SAGE_CONTEXT_RECENT_TURNS=6
 
 # Server Settings
 SAGE_PORT=8080
-SAGE_WORKSPACE_PATH=./agent_workspace
+SAGE_SESSION_DIR=./sessions
 SAGE_LOGS_DIR_PATH=./logs
 SAGE_DB_TYPE=file
-SAGE_DB_PATH=./data/
 
 # Storage Settings
 SAGE_EMBEDDING_MODEL=text-embedding-3-large

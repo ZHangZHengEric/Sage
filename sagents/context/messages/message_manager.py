@@ -24,6 +24,11 @@ from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
 from .message import MessageRole, MessageType, MessageChunk
 
+# 全局动态 token 比例计算（所有 MessageManager 实例共享）
+_global_token_ratio_samples: List[Dict[str, float]] = []  # 存储字符数和token数的样本
+_global_max_ratio_samples = 10  # 最多保留10个样本
+_global_default_token_ratio = 0.4  # 默认比例（中文约0.6，英文约0.25，混合约0.4）
+
 class MessageManager:
     """
     优化版消息管理器
@@ -86,7 +91,6 @@ class MessageManager:
             'last_updated': datetime.datetime.now().isoformat()
         }
         
-        logger.info(f"MessageManager: 初始化完成，会话ID: {self.session_id}")
     
     def update_messages(self, messages: Union[MessageChunk, List[MessageChunk]]) -> None:
         """
@@ -114,7 +118,7 @@ class MessageManager:
             index: 活跃消息的起始索引，None表示所有消息都是活跃消息
         """  
         self.active_start_index = index
-        logger.info(f"MessageManager: 设置 active_start_index = {index}，"
+        logger.debug(f"MessageManager: 设置 active_start_index = {index}，"
                    f"历史消息: {index if index else 0}条，"
                    f"活跃消息: {len(self.messages) - (index if index else 0)}条")
     
@@ -211,8 +215,8 @@ class MessageManager:
             new_messages: 新消息列表
             old_messages: 旧消息列表
         """
-        new_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in new_messages]
-        old_messages_chunks = [MessageChunk(**msg) if isinstance(msg, dict) else msg for msg in old_messages]
+        new_messages_chunks = [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in new_messages]
+        old_messages_chunks = [MessageChunk.from_dict(msg) if isinstance(msg, dict) else msg for msg in old_messages]
         for new_message in new_messages_chunks:
             old_messages_chunks = MessageManager.merge_new_message_old_messages(new_message,old_messages_chunks)
         return old_messages_chunks
@@ -221,6 +225,7 @@ class MessageManager:
     def calculate_messages_token_length(messages: Sequence[Union[MessageChunk,Dict]]) -> int:
         """
         计算消息列表的token长度, 只计算content字段
+        优先使用动态比例计算，如果没有样本则使用静态规则
         
         Args:
             messages: 消息列表
@@ -228,17 +233,22 @@ class MessageManager:
         Returns:
             int: 消息列表的token长度
         """
+        # 如果有动态比例样本，优先使用动态计算
+        if _global_token_ratio_samples:
+            return MessageManager._calculate_messages_token_length_dynamic(messages)
+        
+        # 否则使用静态规则计算
         token_length = 0
         for message in messages:
             if isinstance(message, dict):
-                message = MessageChunk(**message)
-            token_length += MessageManager.calculate_str_token_length(message.get_content() or '')
+                message = MessageChunk.from_dict(message)
+            token_length += MessageManager._calculate_str_token_length_static(message.get_content() or '')
         return token_length
 
     @staticmethod
-    def calculate_str_token_length(content: str) -> int:
+    def _calculate_str_token_length_static(content: str) -> int:
         """
-        计算字符串的token长度, 只计算content字段。
+        使用静态规则计算字符串的token长度
         一个中文等于0.6 个token，
         一个英文等于0.25个token，
         一个数字等于0.2 token
@@ -251,7 +261,7 @@ class MessageManager:
             int: 字符串的token长度
         """
         # 处理None或空字符串的情况
-        if content is None:
+        if not content:
             return 0
             
         token_length = 0.0
@@ -268,7 +278,109 @@ class MessageManager:
         return int(token_length)
 
     @staticmethod
-    def merge_new_message_old_messages(new_message:MessageChunk,old_messages:List[MessageChunk])->List[MessageChunk]:
+    def calculate_str_token_length(content: str) -> int:
+        """
+        计算字符串的token长度（公共静态方法）
+        优先使用动态比例，如果没有样本则使用静态规则
+
+        Args:
+            content: 字符串内容
+
+        Returns:
+            int: 字符串的token长度
+        """
+        if not content:
+            return 0
+
+        # 如果有动态比例样本，使用动态比例
+        if _global_token_ratio_samples:
+            ratio = MessageManager.get_dynamic_token_ratio()
+            return int(len(content) * ratio)
+
+        # 否则使用静态规则
+        return MessageManager._calculate_str_token_length_static(content)
+
+    def update_token_ratio(self, char_count: int, actual_token_count: int) -> None:
+        """
+        根据实际的 LLM 响应更新 token 比例
+        
+        Args:
+            char_count: 字符数（输入+输出的总字符数）
+            actual_token_count: 实际的 token 数（从 LLM 响应中获取）
+        """
+        if char_count <= 0 or actual_token_count <= 0:
+            return
+
+        ratio = actual_token_count / char_count
+
+        # 添加到全局样本列表
+        global _global_token_ratio_samples
+        _global_token_ratio_samples.append({
+            'char_count': char_count,
+            'token_count': actual_token_count,
+            'ratio': ratio,
+            'timestamp': time.time()
+        })
+
+        # 限制样本数量
+        if len(_global_token_ratio_samples) > _global_max_ratio_samples:
+            _global_token_ratio_samples.pop(0)
+
+        logger.debug(f"MessageManager: 更新 token 比例样本，当前比例={ratio:.4f}，样本数={len(_global_token_ratio_samples)}")
+
+    @staticmethod
+    def get_dynamic_token_ratio() -> float:
+        """
+        获取动态的 token 比例（静态方法，所有实例共享）
+
+        Returns:
+            float: 基于历史样本的平均 token 比例，如果没有样本则返回默认值
+        """
+        global _global_token_ratio_samples, _global_default_token_ratio
+
+        if not _global_token_ratio_samples:
+            return _global_default_token_ratio
+
+        # 计算加权平均（最近的样本权重更高）
+        total_weight = 0
+        weighted_sum = 0
+
+        for i, sample in enumerate(_global_token_ratio_samples):
+            weight = i + 1  # 越新的样本权重越高
+            weighted_sum += sample['ratio'] * weight
+            total_weight += weight
+
+        avg_ratio = weighted_sum / total_weight if total_weight > 0 else _global_default_token_ratio
+
+        # 限制在合理范围内（防止异常值）
+        avg_ratio = max(0.1, min(1.0, avg_ratio))
+
+        return avg_ratio
+
+    @staticmethod
+    def _calculate_messages_token_length_dynamic(messages: Sequence[Union[MessageChunk, Dict]]) -> int:
+        """
+        使用动态比例计算消息列表的 token 长度（静态方法）
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            int: 估算的 token 长度
+        """
+        ratio = MessageManager.get_dynamic_token_ratio()
+        total_chars = 0
+
+        for message in messages:
+            if isinstance(message, dict):
+                message = MessageChunk.from_dict(message)
+            content = message.get_content() or ''
+            total_chars += len(content)
+
+        return int(total_chars * ratio)
+
+    @staticmethod
+    def merge_new_message_old_messages(new_message: MessageChunk, old_messages: List[MessageChunk]) -> List[MessageChunk]:
         """
         合并新消息和旧消息
         
@@ -286,8 +398,73 @@ class MessageManager:
         if existing_message:
             # 流式消息的特点是每次传递的都是新的增量内容
             if new_message.content is not None:
-                existing_message.content = (existing_message.content or '') + new_message.content                    
-        else:                    
+                existing_message.content = (existing_message.content or '') + new_message.content
+            
+            # 合并 tool_calls（流式 tool_calls 增量合并）
+            if new_message.tool_calls is not None:
+                if existing_message.tool_calls is None:
+                    existing_message.tool_calls = []
+                
+                # 遍历新的 tool_calls，按 id 合并
+                for new_tc in new_message.tool_calls:
+                    # 兼容字典和对象形式（如 ChoiceDeltaToolCall）
+                    if hasattr(new_tc, 'id'):
+                        # 对象形式
+                        tc_id = new_tc.id
+                        tc_function = new_tc.function if hasattr(new_tc, 'function') else None
+                        tc_name = tc_function.name if tc_function and hasattr(tc_function, 'name') else None
+                        tc_args = tc_function.arguments if tc_function and hasattr(tc_function, 'arguments') else None
+                    else:
+                        # 字典形式
+                        tc_id = new_tc.get('id')
+                        tc_function = new_tc.get('function', {})
+                        tc_name = tc_function.get('name') if isinstance(tc_function, dict) else getattr(tc_function, 'name', None)
+                        tc_args = tc_function.get('arguments') if isinstance(tc_function, dict) else getattr(tc_function, 'arguments', None)
+                    
+                    # 如果 id 为空，则尝试合并到最后一个 tool_call（流式特性）
+                    if not tc_id and existing_message.tool_calls:
+                        existing_tc = existing_message.tool_calls[-1]
+                        # 合并 function 参数
+                        if tc_name is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'name'):
+                                existing_tc.function.name = tc_name
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_tc['function']['name'] = tc_name
+                        if tc_args is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'arguments'):
+                                existing_args = existing_tc.function.arguments or ''
+                                existing_tc.function.arguments = existing_args + tc_args
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_args = existing_tc['function'].get('arguments') or ''
+                                existing_tc['function']['arguments'] = existing_args + tc_args
+                        continue
+                    
+                    # 查找是否已存在相同 id 的 tool_call
+                    existing_tc = None
+                    for etc in existing_message.tool_calls:
+                        etc_id = etc.id if hasattr(etc, 'id') else etc.get('id')
+                        if etc_id == tc_id:
+                            existing_tc = etc
+                            break
+                    
+                    if existing_tc:
+                        # 合并 function 参数
+                        if tc_name is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'name'):
+                                existing_tc.function.name = tc_name
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_tc['function']['name'] = tc_name
+                        if tc_args is not None:
+                            if hasattr(existing_tc, 'function') and hasattr(existing_tc.function, 'arguments'):
+                                existing_args = existing_tc.function.arguments or ''
+                                existing_tc.function.arguments = existing_args + tc_args
+                            elif isinstance(existing_tc.get('function'), dict):
+                                existing_args = existing_tc['function'].get('arguments') or ''
+                                existing_tc['function']['arguments'] = existing_args + tc_args
+                    else:
+                        # 添加新的 tool_call
+                        existing_message.tool_calls.append(new_tc)
+        else:
             old_messages.append(new_message)
             # logger.debug(f"MessageManager: 创建新消息 {new_message.message_id[:8]}... ")
         return old_messages
@@ -321,7 +498,7 @@ class MessageManager:
                 messages_str_list.append(f"Tool: {msg.content}")
         
         result = "\n".join(messages_str_list) or "None"
-        logger.info(f"AgentBase: 转换后字符串长度: {MessageManager.calculate_str_token_length(result)}")
+        logger.info(f"AgentBase: 转换后字符串长度: {MessageManager._calculate_str_token_length_static(result)}")
         return result
 
     def filter_messages(self,context_length_limited:int=10000,
@@ -382,7 +559,6 @@ class MessageManager:
         Returns:
             提取后的消息列表
         """
-        logger.info(f"MessageManager: 提取所有上下文消息，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}")
         all_context_messages = []
         chat_list = []
 
@@ -432,7 +608,7 @@ class MessageManager:
         result_messages = all_context_messages[::-1]
         # 打印提取结果的统计信息
         total_tokens = MessageManager.calculate_messages_token_length(result_messages)
-        logger.info(f"MessageManager: 提取完成，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
+        logger.info(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
         return result_messages
     
     # def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
@@ -696,8 +872,10 @@ class MessageManager:
         # 辅助函数：计算当前 Token
         def current_usage():
             return MessageManager.calculate_messages_token_length(working_messages)
-            
-        if current_usage() <= budget_limit:
+
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 初始token长度为{current_tokens}")
+        if current_tokens <= budget_limit:
             return working_messages
             
         # --- 1. 分组与保护区识别 ---
@@ -779,15 +957,21 @@ class MessageManager:
         
         # 应用 Level 0.5 (老化)
         apply_levels(0.5)
-        if current_usage() <= budget_limit: return working_messages
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
+        if current_tokens <= budget_limit: return working_messages
         
         # 应用 Level 1 (轻度)
         apply_levels(1)
-        if current_usage() <= budget_limit: return working_messages
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
+        if current_tokens <= budget_limit: return working_messages
         
         # 应用 Level 2 (强力)
         apply_levels(2)
-        if current_usage() <= budget_limit: return working_messages
+        current_tokens = current_usage() 
+        logger.info(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
+        if current_tokens <= budget_limit: return working_messages
 
         # --- Level 3: 历史丢弃 (基于组) ---
         # 目标: 未在 protected_group_indices 中的组
@@ -825,7 +1009,10 @@ class MessageManager:
                 working_messages[followers[0]].content = None
                 working_messages[followers[0]].tool_calls = None
                 
-            if current_usage() <= budget_limit: break
+            current_tokens = current_usage() 
+            if current_tokens <= budget_limit:
+                logger.info(f"MessageManager: compress_messages 应用Level 3后的token长度为{current_tokens}")
+                break
 
         # 清理已标记为删除的消息 (Content 为 None 的)
         final_messages = [
@@ -854,8 +1041,8 @@ class MessageManager:
         max_new_tokens = budget_info.get('max_new_tokens', 20000)
         max_model_len = budget_info.get('max_model_len', 40000)
 
-        # 计算当前消息长度
-        current_tokens = MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], messages))
+        # 使用动态比例计算当前消息长度
+        current_tokens = MessageManager._calculate_messages_token_length_dynamic(messages)
         
         # 阈值判断
         remaining_tokens = max_model_len - current_tokens
@@ -865,6 +1052,7 @@ class MessageManager:
         
         if remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens:
             logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}), 触发压缩...")
+            logger.info(f"MessageManager: 使用动态token比例={MessageManager.get_dynamic_token_ratio():.4f}, 样本数={len(_global_token_ratio_samples)}")
             
             # 执行压缩
             compressed_messages = MessageManager.compress_messages(
@@ -872,8 +1060,8 @@ class MessageManager:
                 int(max_new_tokens * 0.3)
             )
             
-            # 记录压缩效果
-            new_tokens = MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], compressed_messages))
+            # 记录压缩效果（使用动态比例）
+            new_tokens = MessageManager._calculate_messages_token_length_dynamic(compressed_messages)
             logger.info(f"MessageManager: 临时压缩完成，Token从 {current_tokens} 降至 {new_tokens}")
             return compressed_messages
             
@@ -901,11 +1089,32 @@ class MessageManager:
             if msg.type == MessageType.EMPTY.value:
                 logger.debug(f"DirectExecutorAgent: 过滤空消息: {msg}")
                 continue
+            
+            # 转换 tool_calls 为字典列表
+            tool_calls_dict = None
+            if msg.tool_calls is not None:
+                tool_calls_dict = []
+                for tc in msg.tool_calls:
+                    if hasattr(tc, 'id'):
+                        # ChoiceDeltaToolCall 对象形式
+                        tc_dict = {
+                            'id': tc.id,
+                            'type': tc.type if hasattr(tc, 'type') else 'function',
+                            'function': {
+                                'name': tc.function.name if hasattr(tc, 'function') and hasattr(tc.function, 'name') else None,
+                                'arguments': tc.function.arguments if hasattr(tc, 'function') and hasattr(tc.function, 'arguments') else None
+                            }
+                        }
+                        tool_calls_dict.append(tc_dict)
+                    else:
+                        # 已经是字典形式
+                        tool_calls_dict.append(tc)
+            
             clean_msg = {
                 'role': msg.role,
                 'content': msg.content,
                 'tool_call_id': msg.tool_call_id,
-                'tool_calls': msg.tool_calls
+                'tool_calls': tool_calls_dict
             }
             
             # 去掉None值的键

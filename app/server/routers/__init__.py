@@ -11,7 +11,6 @@ from .oss import oss_router
 from .skill import skill_router
 from .system import system_router
 from .tool import tool_router
-from .trace import trace_router
 from .user import user_router
 from .llm_provider import router as llm_provider_router
 
@@ -31,6 +30,5 @@ def register_routes(app):
     app.include_router(system_router)
     app.include_router(oss_router)
     app.include_router(chat_router)
-    app.include_router(trace_router)
     app.include_router(skill_router)
     app.include_router(llm_provider_router)

@@ -28,8 +28,9 @@ export const loginAPI = async (username, password) => {
     try {
       const me = await userAPI.checkLogin()
       if (me) {
-        localStorage.setItem('userInfo', JSON.stringify(me.user || {}))
-        setCookie('username', (me.user?.username) || username)
+        const userInfo = { ...me.user, has_provider: me.has_provider, has_agent: me.has_agent }
+        localStorage.setItem('userInfo', JSON.stringify(userInfo))
+        setCookie('username', (userInfo.username) || username)
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('user-updated'))
         }
@@ -63,7 +64,8 @@ export const checkLoginAPI = async () => {
     
     // 如果服务器返回了用户信息，更新本地用户信息
     if (result && result.user) {
-      localStorage.setItem('userInfo', JSON.stringify(result.user))
+      const userInfo = { ...result.user, has_provider: result.has_provider, has_agent: result.has_agent }
+      localStorage.setItem('userInfo', JSON.stringify(userInfo))
     }
     
     return { success: true, data: result }

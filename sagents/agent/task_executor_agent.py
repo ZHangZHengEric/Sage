@@ -6,7 +6,6 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
 from sagents.utils.prompt_manager import PromptManager
-
 from sagents.utils.content_saver import save_agent_response_content
 import uuid
 
@@ -22,8 +21,11 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 """
         logger.debug("TaskExecutorAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
-        # 重新获取模板和系统前缀，使用正确的语言
+    async def run_stream(self, session_context: SessionContext) -> AsyncGenerator[List[MessageChunk], None]:
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
+        tool_manager = session_context.tool_manager
         self.TASK_EXECUTION_PROMPT_TEMPLATE = PromptManager().get_agent_prompt_auto('task_execution_template', language=session_context.get_language())
         self.agent_custom_system_prefix = PromptManager().get_agent_prompt_auto('task_executor_system_prefix', language=session_context.get_language())
 
@@ -99,7 +101,7 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         content_response_message_id = str(uuid.uuid4())
         last_tool_call_id: Optional[str] = None
         full_content_accumulator = ""
-
+        tool_calls_messages_id = str(uuid.uuid4())
         # 处理流式响应块
         async for chunk in response:
             # print(chunk)
@@ -111,6 +113,16 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
                 for tool_call in chunk.choices[0].delta.tool_calls:
                     if tool_call.id is not None and len(tool_call.id) > 0:
                         last_tool_call_id = tool_call.id
+                
+                # # 流式返回工具调用消息
+                # output_messages = [MessageChunk(
+                #     role=MessageRole.ASSISTANT.value,
+                #     tool_calls=chunk.choices[0].delta.tool_calls,
+                #     message_id=tool_calls_messages_id,
+                #     message_type=MessageType.TOOL_CALL.value
+                # )]
+                # yield (output_messages, False)
+                
                 # yield 一个空的消息块以避免生成器卡住
                 output_messages = [MessageChunk(
                     role=MessageRole.ASSISTANT.value,
@@ -155,13 +167,14 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
 
         # 处理工具调用
         if len(tool_calls) > 0:
-            async for chunk in self._handle_tool_calls(
+            async for messages, is_complete in self._handle_tool_calls(
                 tool_calls=tool_calls,
                 tool_manager=tool_manager,
                 messages_input=cast(List[Dict[str, Any]], messages_input),
                 session_id=session_id,
+                handle_complete_task=True
             ):
-                yield chunk
+                yield messages
         else:
             # 发送换行消息（也包含usage信息）
             output_messages = [MessageChunk(
@@ -231,52 +244,3 @@ TaskExecutorAgent: 任务执行智能体，负责根据任务描述和要求，�
         logger.info(f"ExecutorAgent: 准备了 {len(tools_json)} 个工具: {tool_names}")
 
         return tools_json
-
-    async def _handle_tool_calls(self,
-                                 tool_calls: Dict[str, Any],
-                                 tool_manager: Optional[ToolManager],
-                                 messages_input: List[Dict[str, Any]],
-                                 session_id: str) -> AsyncGenerator[List[MessageChunk], None]:
-        """
-        处理工具调用
-
-        Args:
-            tool_calls: 工具调用字典
-            tool_manager: 工具管理器
-            messages_input: 输入消息列表
-            session_id: 会话ID
-
-        Yields:
-            tuple[List[MessageChunk], bool]: (消息块列表, 是否完成任务)
-        """
-        logger.info(f"TaskExecutorAgent: LLM响应包含 {len(tool_calls)} 个工具调用")
-        logger.info(f"TaskExecutorAgent: 工具调用: {tool_calls}")
-
-        for tool_call_id, tool_call in tool_calls.items():
-            tool_name = tool_call['function']['name']
-            logger.info(f"TaskExecutorAgent: 执行工具 {tool_name}")
-            logger.info(f"TaskExecutorAgent: 参数 {tool_call['function']['arguments']}")
-
-            # 检查是否为complete_task
-            if tool_name == 'complete_task':
-                logger.info("TaskExecutorAgent: complete_task，停止执行")
-                yield [MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content='已经完成了满足用户的所有要求',
-                    message_id=str(uuid.uuid4()),
-                    message_type=MessageType.DO_SUBTASK_RESULT.value
-                )]
-                return
-
-            # 发送工具调用消息
-            output_messages = self._create_tool_call_message(tool_call)
-            yield output_messages
-
-            # 执行工具
-            async for message_chunk_list in self._execute_tool(
-                tool_call=tool_call,
-                tool_manager=tool_manager,
-                messages_input=messages_input,
-                session_id=session_id
-            ):
-                yield message_chunk_list

@@ -31,7 +31,7 @@ class ServerBuilder:
         "mcp", "fastmcp", "docstring_parser", "chardet", "httpx",
         "pdfplumber", "html2text", "openpyxl", "pypandoc",
         "python-docx", "markdown", "python-pptx", "PyMuPDF",
-        "tqdm", "unstructured", "numpy", "pandas", "pyarrow",
+        "tqdm", "unstructured", "numpy", "pandas",
         "loguru", "asyncio_mqtt", "websockets"
        
     ]
@@ -44,13 +44,14 @@ class ServerBuilder:
         "yaml", "openai", "httpx", "loguru", "pypandoc", "pdfplumber",
         "html2text", "openpyxl", "python-docx", "markdown",
         "python-pptx", "PyMuPDF", "tqdm", "unstructured", "numpy",
-        "pandas", "pyarrow", "chardet", "asyncio", "aiofiles",
+        "pandas", "chardet", "asyncio", "aiofiles",
         "websockets", "python-multipart", "jinja2", "itsdangerous",
         "click", "h11", "anyio", "idna", "sniffio",
         "typing_extensions", "starlette", "pydantic_core",
         "annotated_types", "email_validator", "python-dateutil",
         "six", "urllib3", "certifi", "charset_normalizer",
-        "requests", "pyyaml", "markupsafe", "blinker",
+        "requests", "markupsafe", "blinker",
+        "charset_normalizer", "chardet",
         "greenlet", "sqlalchemy", "alembic", "psycopg2", "redis",
         "celery", "kombu", "billiard", "amqp", "vine",
         "importlib_metadata", "zipp", "packaging", "pyparsing",
@@ -58,6 +59,7 @@ class ServerBuilder:
         "platformdirs", "tomli", "pep517", "pyproject_hooks",
         "build", "hatchling", "hatch_vcs", "hatch_fancy_pypi_readme",
         "editables", "pathspec", "pluggy",
+        "opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp",
     ]
 
     def __init__(self):

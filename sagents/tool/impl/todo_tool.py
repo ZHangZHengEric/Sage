@@ -5,57 +5,138 @@ from typing import List, Dict, Any, Optional
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
-from sagents.context.session_context import get_session_context
+from sagents.context.session_context import SessionContext
 import datetime
 
 class ToDoTool:
     """任务清单管理工具"""
 
-    def _get_todo_path(self, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> str:
+    def _get_todo_path(self, session_id: Optional[str] = None, session_context: Optional[SessionContext] = None) -> str:
         """获取任务清单文件路径"""
+        # 确定文件名
+        if session_id:
+            filename = f"TODO_LIST_{session_id}.md"
+        else:
+            filename = "TODO_LIST_default.md"
+        
         # 优先使用传入的 session_context
         if session_context:
             try:
-                ws = session_context.agent_workspace
+                ws = session_context.agent_workspace_sandbox.file_system
                 if isinstance(ws, str):
-                    return os.path.join(ws, "todo_list.md")
+                    return os.path.join(ws, filename)
                 elif hasattr(ws, 'host_path'): # SandboxFileSystem
-                    return os.path.join(ws.host_path, "todo_list.md")
+                    return os.path.join(ws.host_path, filename)
             except Exception as e:
                 logger.warning(f"通过 session_context 获取路径失败: {e}")
 
         # 尝试通过 session_id 获取上下文
         if session_id:
             try:
-                session_context = get_session_context(session_id)
-                if session_context:
-                    ws = session_context.agent_workspace
+                from sagents.session_runtime import get_global_session_manager
+                session_manager = get_global_session_manager()
+                session = session_manager.get(session_id)
+                if session and session.session_context:
+                    session_context = session.session_context
+                    ws = session_context.agent_workspace_sandbox.file_system
                     if isinstance(ws, str):
-                        return os.path.join(ws, "todo_list.md")
+                        return os.path.join(ws, filename)
                     elif hasattr(ws, 'host_path'): # SandboxFileSystem
-                        return os.path.join(ws.host_path, "todo_list.md")
+                        return os.path.join(ws.host_path, filename)
             except Exception as e:
                 logger.warning(f"通过 session_id 获取路径失败: {e}")
         
         # 退化为当前工作目录
-        return os.path.join(os.getcwd(), "todo_list.md")
+        return os.path.join(os.getcwd(), filename)
+
+    def _clean_other_session_todo_files(self, session_id: Optional[str] = None, session_context: Optional[Any] = None, time_threshold: int = 300):
+        """
+        清理 workspace 下其他 session 的过期 todo 文件
+        支持沙箱文件系统
+        """
+        try:
+            # 获取 workspace 和文件系统对象
+            fs = None
+            workspace_dir = None
+
+            if session_context:
+                ws = session_context.agent_workspace_sandbox.file_system
+                if hasattr(ws, 'host_path'):  # SandboxFileSystem
+                    fs = ws
+                    workspace_dir = ws.host_path
+                elif isinstance(ws, str):
+                    workspace_dir = ws
+            elif session_id:
+                try:
+                    from sagents.session_runtime import get_global_session_manager
+                    session_manager = get_global_session_manager()
+                    session = session_manager.get(session_id)
+                    if session and session.session_context:
+                        sc = session.session_context
+                        ws = sc.agent_workspace_sandbox.file_system
+                        if hasattr(ws, 'host_path'):  # SandboxFileSystem
+                            fs = ws
+                            workspace_dir = ws.host_path
+                        elif isinstance(ws, str):
+                            workspace_dir = ws
+                except Exception:
+                    pass
+
+            if not workspace_dir or not os.path.exists(workspace_dir):
+                return
+
+            now = datetime.datetime.now()
+            pattern = re.compile(r'TODO_LIST_(.+?)\.md$')
+
+            for filename in os.listdir(workspace_dir):
+                match = pattern.match(filename)
+                if match:
+                    other_session_id = match.group(1)
+                    # 跳过当前 session
+                    if other_session_id == session_id:
+                        continue
+
+                    try:
+                        if fs:  # 使用沙箱文件系统
+                            # 检查文件是否存在
+                            if fs.exists(filename):
+                                # 获取文件状态
+                                stat = fs.stat(filename)
+                                if stat:
+                                    file_mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                                    if (now - file_mtime).total_seconds() > time_threshold:
+                                        # 文件过期，删除
+                                        fs.remove(filename)
+                                        logger.info(f"已删除过期 todo 文件 (沙箱): {filename} (session: {other_session_id})")
+                        else:  # 使用普通文件系统
+                            other_file_path = os.path.join(workspace_dir, filename)
+                            if os.path.exists(other_file_path):
+                                stat = os.stat(other_file_path)
+                                file_mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                                if (now - file_mtime).total_seconds() > time_threshold:
+                                    os.remove(other_file_path)
+                                    logger.info(f"已删除过期 todo 文件: {filename} (session: {other_session_id})")
+                    except Exception as e:
+                        logger.warning(f"清理 todo 文件失败 {filename}: {e}")
+        except Exception as e:
+            logger.error(f"清理其他 session todo 文件失败: {e}")
 
     @staticmethod
     def parse_todo_list(content: str) -> List[Dict[str, Any]]:
         """
         静态方法：解析任务清单内容字符串
-        
+
         Args:
             content: 任务清单文件内容
-            
+
         Returns:
             List[Dict[str, Any]]: 解析后的任务列表
         """
         tasks = []
         lines = content.splitlines()
-        
-        # Regex for "- [ ] content (ID: id) (Updated: timestamp)"
-        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Updated: (.*?)\))?$')
+
+        # Regex for "- [ ] content (ID: id) (Created: timestamp) (Updated: timestamp)"
+        pattern = re.compile(r'- \[(x| )\] (.*?) \(ID: (.*?)\)(?: \(Created: (.*?)\))?(?: \(Updated: (.*?)\))?(?: \(Conclusion: (.*?)\))?$')
 
         for line in lines:
             line = line.strip()
@@ -64,13 +145,21 @@ class ToDoTool:
                 is_completed = match.group(1) == 'x'
                 content_text = match.group(2).strip()
                 task_id = match.group(3).strip()
-                updated_at = match.group(4)
-                
+                created_at = match.group(4)
+                updated_at = match.group(5)
+                conclusion = match.group(6)
+
+                # 兼容旧文件：如果没有 created_at，使用 updated_at 代替
+                if not created_at and updated_at:
+                    created_at = updated_at
+
                 tasks.append({
                     'id': task_id,
                     'content': content_text,
                     'completed': is_completed,
-                    'updated_at': updated_at if updated_at else None
+                    'created_at': created_at if created_at else None,
+                    'updated_at': updated_at if updated_at else None,
+                    'conclusion': conclusion if conclusion else None
                 })
         return tasks
 
@@ -92,30 +181,36 @@ class ToDoTool:
         try:
             # 生成 Markdown 内容
             md_content = "# ToDo List\n\n"
-            
+
             pending_tasks = [t for t in tasks if not t.get('completed', False)]
             completed_tasks = [t for t in tasks if t.get('completed', False)]
-            
+
             if not tasks:
                 md_content += "(No tasks yet)\n"
             else:
                 md_content += "## Pending\n"
                 for t in pending_tasks:
                     line = f"- [ ] {t.get('content', '')} (ID: {t.get('id')})"
+                    if t.get('created_at'):
+                        line += f" (Created: {t.get('created_at')})"
                     if t.get('updated_at'):
                         line += f" (Updated: {t.get('updated_at')})"
                     md_content += line + "\n"
-                
+
                 md_content += "\n## Completed\n"
                 for t in completed_tasks:
                     line = f"- [x] {t.get('content', '')} (ID: {t.get('id')})"
+                    if t.get('created_at'):
+                        line += f" (Created: {t.get('created_at')})"
                     if t.get('updated_at'):
                         line += f" (Updated: {t.get('updated_at')})"
+                    if t.get('conclusion'):
+                        line += f" (Conclusion: {t.get('conclusion')})"
                     md_content += line + "\n"
-            
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(md_content)
-                
+
             return True
         except Exception as e:
             logger.error(f"保存任务清单失败: {e}")
@@ -155,6 +250,10 @@ class ToDoTool:
                         "completed": {
                             "type": "boolean",
                             "description": "Whether the task is completed. Default is false (pending)."
+                        },
+                        "conclusion": {
+                            "type": "string",
+                            "description": "Execution conclusion or comment about the task. Added when task is completed, used for summary and guidance."
                         }
                     },
                     "required": ["id"]
@@ -179,8 +278,14 @@ class ToDoTool:
             raise ValueError("ToDoTool: session_id is required")
         
         logger.debug(f"ToDoTool: todo_write called. session_id={session_id}")
+
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or not session.session_context:
+            raise ValueError(f"ToDoTool: Invalid session_id={session_id}")
         
-        session_context = get_session_context(session_id)
+        session_context = session.session_context
         file_path = self._get_todo_path(session_id, session_context)
         current_tasks = self._read_todo_file(file_path)
         
@@ -196,53 +301,109 @@ class ToDoTool:
             task_id = str(new_task.get('id'))
             if not task_id:
                 continue
-            
-            # 兼容旧的 status 字段，优先使用 completed 字段
+
+            # 兼容旧的 status 字段，转换为 completed 字段
             if 'status' in new_task:
-                 new_task.pop('status')
+                status = new_task.pop('status')
+                # 如果 status 是 "completed"，设置 completed 为 True
+                if status == 'completed' and 'completed' not in new_task:
+                    new_task['completed'] = True
 
             # Set updated_at
             new_task['updated_at'] = now_str
 
             if task_id in task_map:
-                # 更新
+                # 更新 - 保留原有的 created_at
+                existing_task = task_map[task_id]
+                new_task['created_at'] = existing_task.get('created_at', now_str)
                 task_map[task_id].update(new_task)
                 updated_count += 1
             else:
-                # 新增
+                # 新增 - 设置 created_at 为当前时间
+                # 使用微秒级时间戳确保唯一性
+                created_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                new_task['created_at'] = created_at
+
+                # 如果没有 content 但有 conclusion，使用 conclusion 作为 content
+                if ('content' not in new_task or not new_task['content']) and 'conclusion' in new_task:
+                    new_task['content'] = new_task['conclusion']
+
                 if 'content' not in new_task or not new_task['content']:
                      logger.warning(f"ToDoTool: New task {task_id} missing content. Skipping.", session_id=session_id)
                      continue
 
                 task_map[task_id] = new_task
                 added_count += 1
-        
+
         # 转换回列表
         final_tasks = list(task_map.values())
+
+        # 检查是否所有任务都已完成
+        pending_tasks = [t for t in final_tasks if not t.get('completed', False)]
+
+        # 构建任务列表（用于返回）- 按 created_at 排序（如果没有 created_at 则使用 updated_at）
+        def get_sort_key(task):
+            # 优先使用 created_at，如果没有则使用 updated_at，如果都没有则返回空字符串
+            return task.get('created_at') or task.get('updated_at') or ''
+
+        sorted_tasks = sorted(final_tasks, key=get_sort_key)
+        task_list = [
+            {
+                "index": idx,
+                "id": str(t.get('id', '')),
+                "name": t.get('content', ''),
+                "status": "completed" if t.get('completed', False) else "pending"
+            }
+            for idx, t in enumerate(sorted_tasks, start=1)
+        ]
+
+        logger.debug(f"ToDoTool: Checking deletion condition - pending_tasks: {len(pending_tasks)}, final_tasks: {len(final_tasks)}, file_path: {file_path}", session_id=session_id)
         
+        if not pending_tasks and final_tasks:
+            # 所有任务都已完成，删除 todo 文件
+            try:
+                logger.debug(f"ToDoTool: Attempting to delete file: {file_path}, exists: {os.path.exists(file_path)}", session_id=session_id)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"ToDoTool: All tasks completed. Deleted todo file: {file_path}", session_id=session_id)
+                    # 返回完整的任务列表（虽然文件已删除）
+                    result = {
+                        "summary": f"所有任务已完成！任务清单已清理。\n新增: {added_count}, 更新: {updated_count}",
+                        "tasks": task_list
+                    }
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                else:
+                    logger.warning(f"ToDoTool: File does not exist, cannot delete: {file_path}", session_id=session_id)
+            except Exception as e:
+                logger.error(f"ToDoTool: Failed to delete todo file: {e}", session_id=session_id)
+
         if self._save_todo_file(file_path, final_tasks):
             logger.info(f"ToDoTool: Tasks saved. Added: {added_count}, Updated: {updated_count}", session_id=session_id)
-            
-            # 获取未完成任务用于显示
-            pending = [t for t in final_tasks if not t.get('completed', False)]
-            summary = f"成功更新任务清单。新增: {added_count}, 更新: {updated_count}。\n"
-            summary += f"当前未完成任务数: {len(pending)}"
-            return summary
+
+            # 构建 JSON 返回结果（task_list 已在上面的代码中构建）
+            result = {
+                "summary": f"成功更新任务清单。新增: {added_count}, 更新: {updated_count}。当前未完成任务数: {len(pending_tasks)}",
+                "tasks": task_list
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
         else:
             logger.error(f"ToDoTool: Failed to save tasks to {file_path}", session_id=session_id)
-            return "保存任务清单失败。"
+            return json.dumps({"summary": "保存任务清单失败。", "tasks": []}, ensure_ascii=False)
 
     def clean_old_tasks(self, session_id: Optional[str] = None, session_context: Optional[Any] = None, time_threshold: int = 300):
         """
         清理过期的任务（超过5分钟未更新的任务）
+        如果清理后任务为空，删除 todo 文件
+        同时清理 workspace 下其他 session 的过期 todo 文件
         """
+        # 1. 清理当前 session 的 todo 文件
         file_path = self._get_todo_path(session_id, session_context)
         tasks = self._read_todo_file(file_path)
-        
+
         now = datetime.datetime.now()
         filtered_tasks = []
         has_changes = False
-        
+
         for t in tasks:
             updated_at_str = t.get('updated_at')
             if updated_at_str:
@@ -254,16 +415,28 @@ class ToDoTool:
                         # 超过5分钟的任务，直接丢弃
                         has_changes = True
                 except ValueError:
-                    # 解析失败，保留或丢弃？这里保留
+                    # 解析失败，保留
                     filtered_tasks.append(t)
             else:
                 # 没有时间戳，视为过期，丢弃
                 has_changes = True
 
         if has_changes:
-                # 保存过滤后的任务列表回文件（永久删除旧任务）
+            if not filtered_tasks:
+                # 清理后为空，删除文件
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        logger.info(f"已清理所有过期任务，删除空 todo 文件: {file_path}", session_id=session_id)
+                except Exception as e:
+                    logger.error(f"删除空 todo 文件失败: {e}", session_id=session_id)
+            else:
+                # 保存过滤后的任务列表回文件
                 self._save_todo_file(file_path, filtered_tasks)
-                logger.debug(f"已清理过期任务，剩余 {len(filtered_tasks)} 个任务",session_id=session_id)
+                logger.debug(f"已清理过期任务，剩余 {len(filtered_tasks)} 个任务", session_id=session_id)
+
+        # 2. 清理 workspace 下其他 session 的过期 todo 文件
+        self._clean_other_session_todo_files(session_id, session_context, time_threshold)
 
     @tool(
         description_i18n={
@@ -294,6 +467,9 @@ class ToDoTool:
             
         result = "当前未完成任务清单:\n"
         for t in pending:
-            result += f"- {t.get('content')} (ID: {t.get('id')})\n"
-            
+            result += f"- {t.get('content')} (ID: {t.get('id')})"
+            if t.get('conclusion'):
+                result += f" [结论: {t.get('conclusion')}]"
+            result += "\n"
+
         return result

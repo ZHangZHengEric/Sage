@@ -1,21 +1,20 @@
 import asyncio
-import hashlib
 import json
 import os
-from re import S
 import time
 import traceback
 import uuid
+import random
+import string
 
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
-    delete_session_run_lock,
-    get_session_context,
     get_session_run_lock,
 )
+from sagents.utils.lock_manager import safe_release
 from sagents.sagents import SAgent
-from sagents.tool import ToolManager, get_tool_manager
+from sagents.tool import get_tool_manager
 from ... import models
 from ...core.exceptions import SageHTTPException
 from ...schemas.chat import StreamRequest, CustomSubAgentConfig
@@ -27,15 +26,12 @@ from .utils import (
     create_model_client,
     create_skill_proxy,
     create_tool_proxy,
-    send_chunked_json,
 )
 
 _SAGENT_CACHE = {}
 
 
-async def populate_request_from_agent_config(
-    request: StreamRequest, *, require_agent_id: bool = False
-) -> None:
+async def populate_request_from_agent_config(request: StreamRequest, *, require_agent_id: bool = False) -> None:
     agent = None
     if request.agent_id is None:
         # 如果要求必须有 Agent ID，则抛出异常
@@ -58,6 +54,20 @@ async def populate_request_from_agent_config(
 
     agent_config = agent.config if agent and agent.config else None
 
+    def _fill_if_none(field, value):
+        if getattr(request, field) is None:
+            setattr(request, field, value)
+
+    def _merge_dict(field, value):
+        current = getattr(request, field)
+        if current is None:
+            setattr(request, field, value)
+        elif isinstance(current, dict) and isinstance(value, dict):
+            # Request 优先，所以 Agent 配置作为 base
+            merged = value.copy()
+            merged.update(current)
+            setattr(request, field, merged)
+
     if agent_config:
         if agent_config.get("name") is not None:
             request.agent_name = agent_config.get("name")
@@ -76,7 +86,7 @@ async def populate_request_from_agent_config(
         if agent_config.get("moreSuggest") is not None and request.more_suggest is None:
             request.more_suggest = agent_config.get("moreSuggest")
         if agent_config.get("systemContext") is not None:
-            request.system_context = agent_config.get("systemContext")
+            _merge_dict("system_context", agent_config.get("systemContext"))
         if agent_config.get("systemPrefix") is not None:
             request.system_prefix = agent_config.get("systemPrefix")
         if agent_config.get("memoryType") is not None:
@@ -88,20 +98,6 @@ async def populate_request_from_agent_config(
 
     if request.agent_name is None:
         request.agent_name = "Sage Assistant"
-
-    def _fill_if_none(field, value):
-        if getattr(request, field) is None:
-            setattr(request, field, value)
-
-    def _merge_dict(field, value):
-        current = getattr(request, field)
-        if current is None:
-            setattr(request, field, value)
-        elif isinstance(current, dict) and isinstance(value, dict):
-            # Request 优先，所以 Agent 配置作为 base
-            merged = value.copy()
-            merged.update(current)
-            setattr(request, field, merged)
     # 注入 llm_config 配置
     if request.llm_model_config is None:
         request.llm_model_config = {}
@@ -144,7 +140,6 @@ async def populate_request_from_agent_config(
     _fill_if_none("deep_thinking", False)
     _fill_if_none("multi_agent", False)
     _fill_if_none("more_suggest", False)
-    _merge_dict("system_context", {})
     _fill_if_none("system_prefix", "")
     _fill_if_none("memory_type", "session")
     _fill_if_none("available_knowledge_bases", [])
@@ -184,12 +179,12 @@ async def populate_request_from_agent_config(
     # 处理可用技能
     available_skills = request.available_skills
     if available_skills:
-        # file_read execute_python_code execute_shell_command file_write update_file 五种工具注入
+        # file_read execute_python_code execute_shell_command file_write file_update 五种工具注入
         current_skills = getattr(request, "available_skills", [])
         if current_skills is None:
             current_skills = []
             setattr(request, "available_skills", current_skills)
-        need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "update_file"]
+        need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "file_update"]
         current_tools = request.available_tools
         for tool in need_tools:
             if tool not in current_tools:
@@ -231,11 +226,13 @@ async def populate_request_from_agent_config(
     request.context_budget_config = context_budget_config
 
     # 处理可用覆盖mcp配置，注册到tool_manager
-    if request.extra_mcp_config:
+    if request.extra_mcp_config or request.system_context.get("extra_mcp_config",None):
+        extra_mcp_config = request.extra_mcp_config or request.system_context.get("extra_mcp_config",None)
+        
         tm = get_tool_manager()
         if tm:
-            logger.info(f"Registering {len(request.extra_mcp_config)} extra MCP servers")
-            for key, value in request.extra_mcp_config.items():
+            logger.info(f"Registering {len(extra_mcp_config)} extra MCP servers")
+            for key, value in extra_mcp_config.items():
                 if not isinstance(value, dict):
                     logger.warning(f"Invalid MCP config for {key}: expected dict, got {type(value)}")
                     continue
@@ -261,12 +258,11 @@ async def populate_request_from_agent_config(
                         
                         if tool_name:
                             new_tool_names.append(tool_name)
-                    
-                    # if new_tool_names:
-                        # request.available_tools.extend(new_tool_names)
-                        # logger.info(f"Added {len(new_tool_names)} tools from MCP server {key} to request")
+
                 else:
                     logger.warning(f"Failed to register MCP server {key} with tools")
+            if 'extra_mcp_config' in request.system_context:
+                del request.system_context['extra_mcp_config']
         else:
             logger.warning("ToolManager not available, cannot register MCP servers")
             
@@ -282,22 +278,19 @@ class SageStreamService:
         skill_proxy = create_skill_proxy(request.available_skills)
         self.skill_manager = skill_proxy
         # 4. 路径处理
-        config = get_startup_config()
-        workspace = config.workspace
-        if workspace:
-            workspace = os.path.abspath(workspace)
-            if not workspace.endswith('/'):
-                workspace += '/'
-
+        cfg = get_startup_config()
+        # agent工作空间由 agent_dir + user_id + agent_id来。 如果user_id 为空。用 default_user 如果agent_id 为空，用 随机8位英文字母
+        user_id = self.request.user_id or "default_user"
+        agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
+        self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
-                model=model_client,
-                model_config=request.llm_model_config,
-                system_prefix=request.system_prefix,
-                workspace=workspace,
-                memory_type=request.memory_type,
+                session_root_space=cfg.session_dir,
+                enable_obs=cfg.trace_jaeger_endpoint is not None,
+                use_sandbox=True # Server 默认开启沙箱
             )
+        self.model_client = model_client
 
     async def process_stream(self):
         """处理流式聊天请求"""
@@ -312,22 +305,23 @@ class SageStreamService:
                 message_dict["content"] = str(message_dict["content"])
             messages.append(message_dict)
         await _ensure_conversation(self.request)
-        logger.bind(session_id=session_id).info("🚀 SageStreamService.process_stream 开始")
         try:
             stream_result = self.sage_engine.run_stream(
+                session_id=session_id,
                 input_messages=messages,
                 tool_manager=self.tool_manager,
                 skill_manager=self.skill_manager,
-                session_id=session_id,
+                model=self.model_client,
+                model_config=self.request.llm_model_config,
+                system_prefix=self.request.system_prefix,
+                agent_workspace=self.agent_workspace,
+                default_memory_type=self.request.memory_type,
                 user_id=self.request.user_id,
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
-                multi_agent=self.request.multi_agent,
                 agent_mode=self.request.agent_mode,
-                more_suggest=self.request.more_suggest,
                 system_context=self.request.system_context,
                 available_workflows=self.request.available_workflows,
-                force_summary=self.request.force_summary,
                 context_budget_config=self.request.context_budget_config,
                 custom_sub_agents=[agent.model_dump() for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
             )
@@ -361,32 +355,38 @@ async def prepare_session(request: StreamRequest):
     lock = get_session_run_lock(session_id)
     acquired = False
     if lock.locked():
-        ctx = get_session_context(session_id)
-        if not ctx or ctx.status != SessionStatus.INTERRUPTED:
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or session.session_context.status != SessionStatus.INTERRUPTED:
              raise SageHTTPException(status_code=500, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
+        lock_wait_start = time.perf_counter()
         await asyncio.wait_for(lock.acquire(), timeout=10)
         acquired = True
+        lock_wait_cost = time.perf_counter() - lock_wait_start
+        if lock_wait_cost > 0.2:
+            logger.bind(session_id=session_id).warning(f"Session lock wait slow: {lock_wait_cost:.3f}s")
     except asyncio.TimeoutError:
          raise SageHTTPException(status_code=500, detail="会话正在清理中，请稍后重试")
 
     try:
         stream_service = SageStreamService(request)
         return  stream_service, lock
-    except Exception:
-        if acquired and lock.locked():
-            await lock.release()
+    except Exception as e:
+        if acquired:
+            await safe_release(lock, session_id, f"prepare_session 构造失败，保留原始异常: {type(e).__name__}")
         raise
 
 
 async def execute_chat_session(
-    mode: str,
     stream_service: SageStreamService,
+    **kwargs,
 ):
     """
     执行聊天会话逻辑（仅生成流，不处理锁释放）
     """
+
     session_id = stream_service.request.session_id
     stream_counter = 0
     last_activity_time = time.time()
@@ -399,20 +399,13 @@ async def execute_chat_session(
             logger.bind(session_id=session_id).info(
                 f"📊 流处理状态 - 计数: {stream_counter}, 间隔: {time_since_last:.3f}s"
             )
-        if mode == "chat":
-            yield_result = result.copy()
-            yield_result.pop("message_type", None)
-            yield_result.pop("is_final", None)
-            yield_result.pop("is_chunk", None)
-            if yield_result.get("type") == "token_usage":
-                continue
-            yield json.dumps(yield_result, ensure_ascii=False) + "\n"
-        elif mode == "stream":
-            async for chunk in send_chunked_json(result):
-                yield chunk
-        else:
-            yield json.dumps(result, ensure_ascii=False) + "\n"
-
+        yield_result = result.copy()
+        yield_result.pop("message_type", None)
+        yield_result.pop("is_final", None)
+        yield_result.pop("is_chunk", None)
+        yield_result.pop("chunk_id", None)
+        yield json.dumps(yield_result, ensure_ascii=False) + "\n"
+        await asyncio.sleep(0)
 
     end_data = {
         "type": "stream_end",
@@ -420,42 +413,7 @@ async def execute_chat_session(
         "timestamp": time.time(),
         "total_stream_count": stream_counter,
     }
-    total_duration = time.time() - (
-        last_activity_time - time_since_last
-        if "time_since_last" in locals()
-        else last_activity_time
-    )
-    logger.bind(session_id=session_id).info(
-        f"✅ 完成流式处理: 总计 {stream_counter} 个流结果, 耗时 {total_duration:.3f}s"
-    )
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
-
-
-async def run_chat_session(
-    request: StreamRequest,
-    mode: str,
-):
-    """
-    运行聊天会话，封装了准备、执行和资源清理的完整生命周期
-    """
-    # 1. 准备会话（获取锁、初始化服务）
-    session_id, stream_service, lock = await prepare_session(request)
-    
-    try:
-        async for line in execute_chat_session(
-            request=request,
-            mode=mode,
-            session_id=session_id,
-            stream_service=stream_service,
-        ):
-            yield line
-    finally:
-        # 3. 清理资源
-        logger.bind(session_id=session_id).info("流处理结束，清理会话资源")
-        if lock.locked():
-            await lock.release()
-        delete_session_run_lock(session_id)
-        logger.bind(session_id=session_id).info("资源已清理")
 
 async def _ensure_conversation(request: StreamRequest) -> None:
     conversation_dao = models.ConversationDao()

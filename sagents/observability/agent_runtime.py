@@ -1,10 +1,14 @@
 from typing import Any, Dict, List, Optional, Union
-import contextvars
 from sagents.observability.manager import ObservabilityManager
+from sagents.tool import tool_manager
 from sagents.tool.tool_manager import ToolManager
+from sagents.context.session_context import SessionContext
+from sagents.utils.logger import logger
 
-# ContextVar to hold the current session_id for the ObservableModel
-session_id_var = contextvars.ContextVar("session_id", default=None)
+
+def _get_current_observability_session_id() -> Optional[str]:
+    from sagents.session_runtime import get_current_session_id
+    return get_current_session_id()
 
 class ObservableToolManager:
     """
@@ -81,10 +85,15 @@ class ObservableCompletions:
         """
         Intercepts LLM creation.
         """
-        session_id = session_id_var.get()
+        session_id = _get_current_observability_session_id()
         model_name = kwargs.get('model', 'unknown')
         messages = kwargs.get('messages', [])
         
+        # Extract step_name from extra_body if present to avoid sending it to API
+        step_name = None
+        if 'extra_body' in kwargs and isinstance(kwargs['extra_body'], dict):
+            step_name = kwargs['extra_body'].pop('_step_name', None)
+
         # We try to get base_url if possible, otherwise default
         try:
             llm_system = str(self._completions._client.base_url)
@@ -92,7 +101,7 @@ class ObservableCompletions:
             llm_system = "default_endpoint"
         
         if session_id:
-            self.observability_manager.on_llm_start(session_id, model_name, messages, llm_system=llm_system)
+            self.observability_manager.on_llm_start(session_id, model_name, messages, llm_system=llm_system, step_name=step_name)
         
         try:
             response = await self._completions.create(**kwargs)
@@ -112,16 +121,22 @@ class ObservableCompletions:
             raise e
 
     async def _wrap_stream(self, stream, session_id):
+        collected_content = []
         try:
             async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        collected_content.append(delta.content)
                 yield chunk
         finally:
             # When stream ends (or error occurs during iteration which raises out)
             # If successful completion:
             # We construct a minimal response object or just log a marker
             # Since we can't easily reconstruct the full ChatCompletion object without duplicating AgentBase logic,
-            # we will log a special marker. The content is less important for trace timing/success status.
-            self.observability_manager.on_llm_end("<stream_finished>", session_id=session_id)
+            # we will log the accumulated content.
+            full_content = "".join(collected_content)
+            self.observability_manager.on_llm_end(full_content, session_id=session_id)
 
 class AgentRuntime:
     """
@@ -136,34 +151,16 @@ class AgentRuntime:
         return getattr(self.agent, name)
 
     async def run_stream(self, 
-                         input_messages: Optional[Union[List[Dict[str, Any]], Any]] = None, 
-                         tool_manager: Optional[ToolManager] = None, 
-                         session_id: str = None, 
-                         **kwargs):
-        # 1. Set ContextVar for Model Observability
-        token = session_id_var.set(session_id)
-        
+                         session_context: SessionContext):
+        session_id = session_context.session_id
+        input_messages = session_context.message_manager.messages
+        tool_manager = session_context.tool_manager
         # 2. Start Chain Span
         # We use agent name as the chain name
         agent_name = getattr(self.agent, 'agent_name', self.agent.__class__.__name__)
 
         # Extract input info for logging
         log_input = input_messages
-        if log_input is None and 'session_context' in kwargs:
-             # Try to extract something meaningful from session_context
-             try:
-                 sc = kwargs['session_context']
-                 if hasattr(sc, 'message_manager') and hasattr(sc.message_manager, 'messages'):
-                     msgs = sc.message_manager.messages
-                     if msgs:
-                         # Log the last message or a summary
-                         log_input = f"SessionContext (last msg: {str(msgs[-1])[:200]})"
-                     else:
-                         log_input = "SessionContext (empty messages)"
-                 else:
-                     log_input = "SessionContext (opaque)"
-             except Exception:
-                 log_input = "SessionContext (extraction failed)"
         
         self.observability_manager.on_agent_start(session_id, agent_name, input=log_input)
         
@@ -174,19 +171,8 @@ class AgentRuntime:
                 wrapped_tm = ObservableToolManager(tool_manager, self.observability_manager, session_id)
             
             # 4. Execute Agent
-            # We call the original run_stream
-            # Note: We pass 'input_messages' if it was passed, otherwise it might be in kwargs or different sig
-            
-            # Construct args
-            call_kwargs = kwargs.copy()
-            if input_messages is not None:
-                call_kwargs['input_messages'] = input_messages
-                
-            async for chunk in self.agent.run_stream(
-                tool_manager=wrapped_tm,
-                session_id=session_id,
-                **call_kwargs
-            ):
+            logger.info(f"Starting agent {agent_name} for session_id: {session_id}")
+            async for chunk in self.agent.run_stream(session_context):
                 yield chunk
                 
         except Exception as e:
@@ -194,4 +180,3 @@ class AgentRuntime:
             raise e
         finally:
             self.observability_manager.on_agent_end({"status": "finished"}, session_id=session_id)
-            session_id_var.reset(token)
