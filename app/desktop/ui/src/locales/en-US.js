@@ -36,6 +36,7 @@ export default {
   'system.foundUpdate': 'Found v{version}',
   'system.downloading': 'Downloading...',
   'system.restarting': 'Restarting...',
+  'system.installing': 'Installing...',
   'system.updateCancelled': 'Update cancelled',
   'system.latestVersion': 'Latest version',
   'system.checkUpdateError': 'Error: {message}',
