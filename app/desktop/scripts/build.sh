@@ -307,26 +307,22 @@ build_frontend() {
     npm run build
 }
 
-# 启动并行构建
-echo ">>> 开始并行构建任务..."
-(build_python_sidecar) &
-PID_BACKEND=$!
+# 启动构建任务 (串行以避免 CI 内存溢出)
+echo ">>> 开始构建任务..."
 
-(build_frontend) &
-PID_FRONTEND=$!
-
-wait $PID_BACKEND
-STATUS_BACKEND=$?
-
-wait $PID_FRONTEND
-STATUS_FRONTEND=$?
-
-if [ $STATUS_BACKEND -ne 0 ] || [ $STATUS_FRONTEND -ne 0 ]; then
-    echo "构建失败！ Backend: $STATUS_BACKEND, Frontend: $STATUS_FRONTEND"
+build_python_sidecar
+if [ $? -ne 0 ]; then
+    echo "构建失败！ Backend failed."
     exit 1
 fi
 
-echo ">>> 并行构建完成。"
+build_frontend
+if [ $? -ne 0 ]; then
+    echo "构建失败！ Frontend failed."
+    exit 1
+fi
+
+echo ">>> 构建完成。"
 
 cd "$ROOT_DIR"
 
