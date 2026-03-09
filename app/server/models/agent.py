@@ -68,7 +68,7 @@ class AgentConfigDao(BaseDao):
 
     async def get_by_ids(self, agent_ids: List[str]) -> List["Agent"]:
         return await BaseDao.get_list(
-            self, Agent, where=Agent.agent_id.in_(agent_ids), order_by=Agent.created_at
+            self, Agent, where=[Agent.agent_id.in_(agent_ids)], order_by=Agent.created_at
         )
 
     async def get_list(self, user_id: Optional[str] = None) -> List["Agent"]:
