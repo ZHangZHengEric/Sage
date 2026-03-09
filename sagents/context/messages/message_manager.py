@@ -64,11 +64,11 @@ class MessageManager:
             context_budget_config = {}
         
         self.context_budget_manager = ContextBudgetManager(
-            max_model_len=context_budget_config.get('max_model_len', 40000),
-            history_ratio=context_budget_config.get('history_ratio', 0.2),     
-            active_ratio=context_budget_config.get('active_ratio', 0.3),       
-            max_new_message_ratio=context_budget_config.get('max_new_message_ratio', 0.5), 
-            recent_turns=context_budget_config.get('recent_turns', 0)        
+            max_model_len=context_budget_config.get('max_model_len') or 40000,
+            history_ratio=context_budget_config.get('history_ratio') or 0.2,
+            active_ratio=context_budget_config.get('active_ratio') or 0.3,
+            max_new_message_ratio=context_budget_config.get('max_new_message_ratio') or 0.5,
+            recent_turns=context_budget_config.get('recent_turns') or 0
         )
         
         # 消息存储（只存储非system消息）

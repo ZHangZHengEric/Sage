@@ -809,6 +809,10 @@ class FibreOrchestrator:
             # Remove fields that should be set for child session
             parent_ctx.pop('session_id', None)
             parent_ctx.pop('parent_session_id', None)
+            # Remove internal/agent-specific fields that should not be passed to child
+            parent_ctx.pop('当前AgentId', None)
+            parent_ctx.pop('private_workspace', None)
+            parent_ctx.pop('file_permission', None)
             system_context.update(parent_ctx)
 
         # Set external_paths (current task's workspace)
