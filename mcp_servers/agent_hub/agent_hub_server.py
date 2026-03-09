@@ -118,7 +118,7 @@ class AgentHubDB:
             return cursor.lastrowid
 
     def get_pending_messages(self) -> List[Dict[str, Any]]:
-        now = datetime.now().isoformat()
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -244,7 +244,7 @@ def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
         logger.info(f"Notification sent to User {to_agent_id}: {content}")
         
         # Mark as sent immediately for user messages
-        sent_at = datetime.utcnow().isoformat()
+        sent_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         db.update_message_status(msg_id, 'sent', sent_at)
         return None
 
@@ -301,7 +301,7 @@ def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
         has_replied_via_tool = False
         reply_content = None
         # Use UTC to match SQLite CURRENT_TIMESTAMP
-        current_time_ts = datetime.utcnow().timestamp()
+        current_time_ts = datetime.now().astimezone().timestamp()
         
         for reply in recent_replies:
             # Filter only messages FROM the recipient agent
@@ -310,9 +310,17 @@ def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
                 
             # Parse created_at
             try:
-                # SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS"
+                # SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" (UTC naive)
                 created_at_str = reply['created_at'].replace(" ", "T")
-                reply_time = datetime.fromisoformat(created_at_str).timestamp()
+                reply_dt = datetime.fromisoformat(created_at_str)
+                
+                # Robust timezone handling
+                if reply_dt.tzinfo is None:
+                    # If naive, assume UTC (standard for SQLite CURRENT_TIMESTAMP)
+                    reply_dt = reply_dt.replace(tzinfo=datetime.timezone.utc)
+                
+                reply_time = reply_dt.timestamp()
+                
                 # If reply was created after we started (approx), it's a response
                 # We allow a small buffer or just check if it's very recent
                 if reply_time > (current_time_ts - 300): # Within last 5 mins (execution time)
@@ -342,7 +350,7 @@ def _deliver_message(message: Dict[str, Any]) -> Optional[str]:
             reply_content = summary_content
 
         # Mark original message as sent (processed)
-        sent_at = datetime.utcnow().isoformat()
+        sent_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         db.update_message_status(msg_id, 'sent', sent_at)
         
         return reply_content

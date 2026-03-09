@@ -4,11 +4,17 @@ SQLAlchemy 基础设施
 """
 
 from typing import Any, Optional, Sequence, Type
+from datetime import datetime
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase
 
 from ..core.client.db import db_retry
+
+
+def get_local_now() -> datetime:
+    """Returns the current local time as a naive datetime object (Clean String compatible)."""
+    return datetime.now().astimezone().replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
