@@ -290,17 +290,32 @@ const handleFileUpload = async (event, index, field) => {
     return
   }
 
+  const platform = form.value.artifacts[index].platform
+  if (!platform) {
+    toast.error(t('system.version.selectPlatform'))
+    event.target.value = ''
+    return
+  }
+
   const uploadKey = `${index}_${field}`
   uploading.value[uploadKey] = true
   try {
     const version = form.value.version
     let filename = file.name
-
-    if (filename.endsWith('.dmg')) {
-      filename = `sage-${version}.dmg`
-    } else if (filename.endsWith('.app.tar.gz') || filename.endsWith('.tar.gz')) {
-      filename = `sage-${version}.app.tar.gz`
+    
+    let ext = ''
+    if (filename.endsWith('.app.tar.gz')) {
+      ext = '.app.tar.gz'
+    } else if (filename.endsWith('.tar.gz')) {
+      ext = '.tar.gz'
+    } else {
+      const dotIndex = filename.lastIndexOf('.')
+      if (dotIndex !== -1) {
+        ext = filename.substring(dotIndex)
+      }
     }
+
+    filename = `SageAI-${version}-${platform}${ext}`
 
     const path = `bundle/${version}/${filename}`
     const res = await ossAPI.upload(file, path)
