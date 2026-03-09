@@ -183,7 +183,7 @@ class TaskSchedulerDB:
         """Add a recurring task template"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            now = datetime.now().isoformat()
+            now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
                 INSERT INTO recurring_tasks (name, description, agent_id, session_id, cron_expression, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -228,11 +228,12 @@ class TaskSchedulerDB:
         """Update the last_executed_at timestamp for a recurring task"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
+            now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
                 UPDATE recurring_tasks 
                 SET last_executed_at = ?, updated_at = ?
                 WHERE id = ?
-            """, (datetime.now().isoformat(), datetime.now().isoformat(), task_id))
+            """, (now, now, task_id))
             conn.commit()
 
     def delete_recurring_task(self, task_id: int) -> bool:
@@ -257,7 +258,7 @@ class TaskSchedulerDB:
                 UPDATE recurring_tasks 
                 SET enabled = ?, updated_at = ?
                 WHERE id = ?
-            """, (1 if enabled else 0, datetime.now().isoformat(), task_id))
+            """, (1 if enabled else 0, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"), task_id))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -275,7 +276,7 @@ class TaskSchedulerDB:
         """Add a one-time task (can be linked to a recurring task template)"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            now = datetime.now().isoformat()
+            now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
                 INSERT INTO tasks (name, description, agent_id, session_id, execute_at, status, recurring_task_id, created_at, updated_at, retry_count, max_retries)
                 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, 0, 3)    
@@ -340,7 +341,7 @@ class TaskSchedulerDB:
         """Mark a task as completed"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            completed_at = datetime.now().isoformat()
+            completed_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
                 UPDATE tasks
                 SET status = 'completed', completed_at = ?, updated_at = ?
@@ -351,14 +352,14 @@ class TaskSchedulerDB:
 
     def get_pending_tasks(self) -> List[Dict[str, Any]]:
         """Get all pending tasks that are due for execution"""
-        now = datetime.now().isoformat()
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM tasks
                 WHERE status = 'pending'
-                  AND execute_at <= ?
+                AND execute_at <= ?
                 ORDER BY execute_at ASC
             """, (now,))
             return [dict(row) for row in cursor.fetchall()]
@@ -382,7 +383,7 @@ class TaskSchedulerDB:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE tasks SET status = 'processing', updated_at = ? WHERE id = ? AND status = 'pending'",
-                (datetime.now().isoformat(), task_id)
+                (datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"), task_id)
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -391,7 +392,7 @@ class TaskSchedulerDB:
         """Update task status"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            updated_at = datetime.now().isoformat()
+            updated_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             if error_message:
                 cursor.execute("""
                     UPDATE tasks
@@ -413,7 +414,7 @@ class TaskSchedulerDB:
             cursor.execute("""
                 INSERT INTO task_history (task_id, status, response, error_message, executed_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (task_id, status, response, error_message, datetime.now().isoformat()))
+            """, (task_id, status, response, error_message, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")))
             conn.commit()
 
     def get_task_history(self, task_id: int, limit: int = 10) -> List[Dict[str, Any]]:
@@ -454,7 +455,7 @@ class TaskSchedulerDB:
             set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys()])
             set_clause += ", updated_at = ?"
             values = list(update_fields.values())
-            values.append(datetime.now().isoformat())
+            values.append(datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
             values.append(task_id)
             
             cursor.execute(f"""
@@ -490,7 +491,7 @@ class TaskSchedulerDB:
             set_clause = ", ".join([f"{k} = ?" for k in update_fields.keys()])
             set_clause += ", updated_at = ?"
             values = list(update_fields.values())
-            values.append(datetime.now().isoformat())
+            values.append(datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
             values.append(task_id)
             
             cursor.execute(f"""

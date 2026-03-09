@@ -95,7 +95,7 @@ class SystemPromptOptimizer:
                 "optimized_prompt": optimized_prompt,
                 "analysis": analysis,
                 "sections": sections,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
             logger.info("系统指令优化完成")
@@ -108,7 +108,7 @@ class SystemPromptOptimizer:
                 "success": False,
                 "error": str(e),
                 "message": "系统指令优化失败",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
     async def _analyze_current_prompt(self, prompt: str, client, model: str, optimization_goal: Optional[str] = None) -> Dict[str, Any]:
@@ -786,7 +786,7 @@ class SystemPromptOptimizer:
             "optimized_prompt": original_prompt,
             "analysis": {"error": "分析失败，返回原始内容"},
             "sections": {"error": "生成失败"},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "status": "fallback"
         }
 

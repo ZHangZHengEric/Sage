@@ -68,3 +68,16 @@ class AgentConfigDao(BaseDao):
 
     async def delete_by_id(self, agent_id: str) -> bool:
         return await BaseDao.delete_by_id(self, Agent, agent_id)
+
+    async def update_config(self, agent_id: str, name: str = None, config: Dict[str, Any] = None, **kwargs) -> Optional["Agent"]:
+        config_obj = await self.get_by_id(agent_id)
+        if config_obj:
+            if name:
+                config_obj.name = name
+            if config:
+                config_obj.config = config
+            
+            config_obj.updated_at = datetime.now()
+            await BaseDao.save(self, config_obj)
+            return config_obj
+        return None

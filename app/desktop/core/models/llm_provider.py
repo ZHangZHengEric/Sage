@@ -71,8 +71,8 @@ class LLMProvider(Base):
             "presence_penalty": self.presence_penalty,
             "max_model_len": self.max_model_len,
             "is_default": self.is_default,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
 class LLMProviderDao(BaseDao):
@@ -90,6 +90,10 @@ class LLMProviderDao(BaseDao):
     async def get_list(self) -> List["LLMProvider"]:
         limit = 100
         return await BaseDao.get_list(self, LLMProvider, order_by=LLMProvider.created_at.desc(), limit=limit)
+
+    async def get_by_config(self, base_url: str, model: str) -> List["LLMProvider"]:
+        where = [LLMProvider.base_url == base_url, LLMProvider.model == model]
+        return await BaseDao.get_list(self, LLMProvider, where=where)
 
     async def delete_by_id(self, provider_id: str) -> bool:
         return await BaseDao.delete_by_id(self, LLMProvider, provider_id)
