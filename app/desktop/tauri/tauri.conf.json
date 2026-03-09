@@ -98,7 +98,7 @@
     },
     "updater": {
       "endpoints": [
-        "http://localhost:30050/api/system/version/check"
+        "https://api.zavixai.com/api/system/version/check"
       ],
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGQzk1MzUxMUMwNkI4ODUKUldTRnVBWWNVVlBKNzVSOEFrQWhlcDBySkZHRUVzL1pvaldpWXc5OGU1SytxbC9MWnd1YVhDSG4K"

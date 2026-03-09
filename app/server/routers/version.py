@@ -66,7 +66,7 @@ async def check_update(dao: VersionDao = Depends(get_version_dao)):
     return TauriUpdateResponse(
         version=latest.version,
         notes=latest.release_notes,
-        pub_date=latest.pub_date.isoformat(),
+        pub_date=latest.pub_date.isoformat() + "Z",
         platforms=platforms
     )
 
