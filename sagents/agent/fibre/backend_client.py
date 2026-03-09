@@ -137,8 +137,10 @@ class FibreBackendClient:
                     resp_text = await resp.text()
                     logger.info(f"[Backend API] Get agent response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
+                        data = json.loads(resp_text)
+                        # Check success by "success" field or "code" field
+                        is_success = data.get("success") or data.get("code") == 200
+                        if is_success:
                             return data.get("data")
                     return None
         except Exception as e:
@@ -217,13 +219,17 @@ class FibreBackendClient:
                     resp_text = await resp.text()
                     logger.info(f"[Backend API] Create LLM provider response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
-                            # 从响应中获取 provider_id
-                            # 注意：后端返回的是 StandardResponse，data 中可能包含 provider 信息
-                            # 需要查看实际的返回结构
-                            return data.get("data", {}).get("provider_id")
-                    logger.warning(f"Failed to create LLM provider: {await resp.text()}")
+                        data = json.loads(resp_text)
+                        # Check success by "success" field or "code" field
+                        is_success = data.get("success") or data.get("code") == 200
+                        if is_success:
+                            # 后端返回的 data 可能是对象或字符串
+                            resp_data = data.get("data")
+                            if isinstance(resp_data, dict):
+                                return resp_data.get("provider_id")
+                            elif isinstance(resp_data, str):
+                                return resp_data
+                    logger.warning(f"Failed to create LLM provider: {resp_text}")
                     return None
         except Exception as e:
             logger.warning(f"Error creating LLM provider: {e}")
@@ -291,6 +297,10 @@ class FibreBackendClient:
 
                     # 获取 message_id，如果没有则生成一个临时 ID
                     message_id = data.get('message_id') or data.get('chunk_id') or str(uuid.uuid4())
+
+                    # 跳过没有 role 字段的消息（如 stream_end 元数据消息）
+                    if 'role' not in data:
+                        continue
 
                     # 检查是否是新消息
                     if message_id not in pending_messages:

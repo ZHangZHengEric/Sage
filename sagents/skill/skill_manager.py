@@ -233,7 +233,27 @@ class SkillManager:
         self._skills_cache_valid = True
 
 
-    def _generate_file_list(self, path: str, root_path: str, skill_name: str) -> str:
+    def _generate_file_list(self, path: str, root_path: str, skill_name: str, indent: str = "") -> str:
+        """
+        Generate a compact tree representation of skill files using indentation.
+        Similar to get_file_tree_compact in filesystem.py.
+
+        Args:
+            path: Current directory path being traversed
+            root_path: Root path of the skill (for calculating relative paths)
+            skill_name: Name of the skill (for display)
+            indent: Current indentation level (2 spaces per level)
+
+        Returns:
+            String with indented file tree structure
+
+        Example output:
+        my_skill/
+          README.md
+          src/
+            main.py
+          config.json
+        """
         lines = []
         try:
             items = sorted(os.listdir(path))
@@ -253,21 +273,14 @@ class SkillManager:
 
         for item in items:
             full_path = os.path.join(path, item)
-            rel_path = os.path.relpath(full_path, root_path)
-            rel_path = rel_path.replace(os.sep, '/')
-            
-            # Construct workspace path
-            # Use os.path.join for construction, then normalize to posix path
-            # But SANDBOX_WORKSPACE_ROOT is usually unix-style. 
-            # We assume SANDBOX_WORKSPACE_ROOT is like "/workspace"
-            
-            display_path = f"{SANDBOX_WORKSPACE_ROOT}/skills/{skill_name}/{rel_path}".replace('//', '/')
 
             if os.path.isdir(full_path):
-                lines.append(f"{display_path}/")
-                lines.append(self._generate_file_list(full_path, root_path, skill_name))
+                # Directory: add with / suffix and recurse
+                lines.append(f"{indent}  {item}/")
+                lines.append(self._generate_file_list(full_path, root_path, skill_name, indent + "  "))
             else:
-                lines.append(display_path)
+                # File: add without suffix
+                lines.append(f"{indent}  {item}")
 
         return "\n".join(filter(None, lines))
 
@@ -309,7 +322,8 @@ class SkillManager:
                     if skip_if_loaded and name in self.skills:
                         return name
 
-                    file_list = self._generate_file_list(skill_path, skill_path, name)
+                    # Generate compact file tree with skill name as root
+                    file_list = f"{name}/\n" + self._generate_file_list(skill_path, skill_path, name)
                     schema = SkillSchema(
                         name=name,
                         description=description,
