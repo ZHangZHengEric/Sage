@@ -5,7 +5,7 @@ from sqlalchemy import String, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from typing import Optional, Dict, Any
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class UserConfig(Base):

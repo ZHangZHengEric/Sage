@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class File(Base):
