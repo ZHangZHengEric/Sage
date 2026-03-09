@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class MCPServer(Base):
@@ -29,8 +29,8 @@ class MCPServer(Base):
     ):
         self.name = name
         self.config = config
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
 
 class MCPServerDao(BaseDao):
@@ -54,7 +54,7 @@ class MCPServerDao(BaseDao):
         db = await self._get_db()
         async with db.get_session() as session:
             existing = await session.get(MCPServer, name)
-            now = datetime.now()
+            now = get_local_now()
             if existing:
                 existing.config = config
                 existing.updated_at = now
