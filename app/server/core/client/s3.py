@@ -176,10 +176,8 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     if not client or not bucket or not public_base:
         raise SageHTTPException(status_code=500, detail="RustFS 未配置或未初始化")
 
-    from ...utils.file import split_file_name
 
-    origin, ext = split_file_name(base_name)
-    object_name = f"{origin}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    object_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{base_name}"
     client.put_object(
         bucket, object_name, io.BytesIO(data), len(data), content_type=content_type
     )
