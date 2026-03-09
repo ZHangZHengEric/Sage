@@ -55,8 +55,8 @@ class VectorMemoryDriver(IMemoryDriver):
                 "memory_key": memory_key,
                 "memory_type": memory_type,
                 "tags": tag_list,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                 "session_id": session_id or ""
             }
 
@@ -158,13 +158,35 @@ class VectorMemoryDriver(IMemoryDriver):
                 mem_type = MemoryType(mem_type_str)
             except ValueError:
                 mem_type = MemoryType.EXPERIENCE
-                
+            
+            # 健壮的时间解析函数
+            def parse_time(time_str):
+                if not time_str:
+                    return datetime.now()
+                try:
+                    # 尝试解析带T的格式
+                    if "T" in str(time_str):
+                        dt = datetime.fromisoformat(str(time_str))
+                    else:
+                        # 尝试解析空格分隔格式
+                        try:
+                            dt = datetime.strptime(str(time_str), "%Y-%m-%d %H:%M:%S")
+                        except ValueError:
+                             # Fallback to replace logic if strptime fails (e.g. microseconds)
+                             dt = datetime.fromisoformat(str(time_str).replace(" ", "T"))
+
+                    if dt.tzinfo is not None:
+                        dt = dt.replace(tzinfo=None) # Aware -> Naive Local
+                    return dt
+                except Exception:
+                    return datetime.now()
+
             return MemoryEntry(
                 key=meta.get("memory_key", chunk.id),
                 content=chunk.content,
                 memory_type=mem_type,
-                created_at=datetime.fromisoformat(meta.get("created_at", datetime.now().isoformat())),
-                updated_at=datetime.fromisoformat(meta.get("updated_at", datetime.now().isoformat())),
+                created_at=parse_time(meta.get("created_at")),
+                updated_at=parse_time(meta.get("updated_at")),
                 tags=meta.get("tags", []),
                 importance=meta.get("importance", 0.5)
             )

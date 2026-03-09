@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import JSON, Integer, String, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class KdbDoc(Base):
@@ -24,8 +24,8 @@ class KdbDoc(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     meta_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=get_local_now)
+    updated_at: Mapped[datetime] = mapped_column(default=get_local_now)
 
 
 class KdbDocStatus:
@@ -112,8 +112,12 @@ class KdbDocDao(BaseDao):
             self, KdbDoc, where=where, order_by=KdbDoc.created_at.asc(), limit=limit
         )
 
-    async def get_by_id(self, data_id: int | str) -> Optional[KdbDoc]:
-        return await BaseDao.get_by_id(self, KdbDoc, str(data_id))
+    async def save(self, doc: "KdbDoc") -> bool:
+        doc.updated_at = get_local_now()
+        return await BaseDao.save(self, doc)
+
+    async def get_by_id(self, doc_id: str) -> Optional["KdbDoc"]:
+        return await BaseDao.get_by_id(self, KdbDoc, doc_id)
 
     async def delete_by_ids(self, ids: List[str]) -> None:
         if not ids:

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import JSON, String, Integer, select, or_, delete
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class Agent(Base):
@@ -31,8 +31,8 @@ class Agent(Base):
         self.agent_id = agent_id
         self.name = name
         self.config = config
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
 
 class AgentConfigDao(BaseDao):
@@ -47,7 +47,7 @@ class AgentConfigDao(BaseDao):
         )
 
     async def save(self, config: "Agent") -> bool:
-        config.updated_at = datetime.now()
+        config.updated_at = get_local_now()
         return await BaseDao.save(self, config)
 
     async def get_by_id(self, agent_id: str) -> Optional["Agent"]:
@@ -68,3 +68,16 @@ class AgentConfigDao(BaseDao):
 
     async def delete_by_id(self, agent_id: str) -> bool:
         return await BaseDao.delete_by_id(self, Agent, agent_id)
+
+    async def update_config(self, agent_id: str, name: str = None, config: Dict[str, Any] = None, **kwargs) -> Optional["Agent"]:
+        config_obj = await self.get_by_id(agent_id)
+        if config_obj:
+            if name:
+                config_obj.name = name
+            if config:
+                config_obj.config = config
+            
+            config_obj.updated_at = get_local_now()
+            await BaseDao.save(self, config_obj)
+            return config_obj
+        return None

@@ -177,7 +177,7 @@ class iMessageManager:
             "session_id": session_id,
             "sender": sender,
             "content": content,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         })
         
     def get_pending_messages(self) -> list:
