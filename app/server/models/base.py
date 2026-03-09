@@ -74,11 +74,19 @@ class BaseDao:
             return False
 
     @db_retry()
-    async def get_all(self, model: Type[Any], order_by: Any | None = None) -> list[Any]:
+    async def get_all(
+        self, 
+        model: Type[Any], 
+        order_by: Any | None = None,
+        options: Sequence[Any] | None = None
+    ) -> list[Any]:
         """查询所有对象"""
         db = await self._get_db()
         async with db.get_session() as session:
             stmt = select(model)
+            if options:
+                for opt in options:
+                    stmt = stmt.options(opt)
             if order_by is not None:
                 stmt = stmt.order_by(order_by)
             res = await session.execute(stmt)
@@ -91,11 +99,15 @@ class BaseDao:
         where: Sequence[Any] | None = None,
         order_by: Any | None = None,
         limit: int | None = None,
+        options: Sequence[Any] | None = None,
     ) -> list[Any]:
         """查询对象列表"""
         db = await self._get_db()
         async with db.get_session() as session:
             stmt = select(model)
+            if options:
+                for opt in options:
+                    stmt = stmt.options(opt)
             if where:
                 for cond in where:
                     stmt = stmt.where(cond)
@@ -112,11 +124,15 @@ class BaseDao:
         model: Type[Any],
         where: Sequence[Any] | None = None,
         order_by: Any | None = None,
+        options: Sequence[Any] | None = None,
     ) -> Optional[Any]:
         """查询第一个对象"""
         db = await self._get_db()
         async with db.get_session() as session:
             stmt = select(model)
+            if options:
+                for opt in options:
+                    stmt = stmt.options(opt)
             if where:
                 for cond in where:
                     stmt = stmt.where(cond)

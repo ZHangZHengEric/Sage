@@ -3,6 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from datetime import datetime
 
 from .base import Base, BaseDao
+from ..utils.id import generate_short_id
 
 class SystemInfo(Base):
     __tablename__ = "system_info"
@@ -17,7 +18,7 @@ class SystemInfo(Base):
 class Version(Base):
     __tablename__ = "version"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_short_id())
     version: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     release_notes: Mapped[str] = mapped_column(Text, nullable=True)
     pub_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -27,8 +28,8 @@ class Version(Base):
 class VersionArtifact(Base):
     __tablename__ = "version_artifact"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    version_id: Mapped[int] = mapped_column(ForeignKey("version.id"))
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_short_id())
+    version_id: Mapped[str] = mapped_column(ForeignKey("version.id"))
     platform: Mapped[str] = mapped_column(String(32)) # e.g., darwin-aarch64, darwin-x86_64, windows-x86_64, linux-x86_64
     url: Mapped[str] = mapped_column(String(512))
     signature: Mapped[str] = mapped_column(Text, nullable=True)
@@ -37,51 +38,49 @@ class VersionArtifact(Base):
 
 class SystemInfoDao(BaseDao):
     async def get_by_key(self, key: str) -> str | None:
-        info = await BaseDao.get_by_id(self, SystemInfo, key)
+        info = await self.get_by_id(SystemInfo, key)
         return info.value if info else None
 
     async def set_value(self, key: str, value: str) -> bool:
-        info = await BaseDao.get_by_id(self, SystemInfo, key)
+        info = await self.get_by_id(SystemInfo, key)
         if info:
             info.value = value
-            return await BaseDao.save(self, info)
+            return await self.save(info)
         else:
             info = SystemInfo(key=key, value=value)
-            await BaseDao.insert(self, info)
+            await self.insert(info)
             return True
 
 class VersionDao(BaseDao):
     async def get_latest_version(self) -> Version | None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            result = await session.execute(
-                self.select(Version).options(selectinload(Version.artifacts)).order_by(Version.id.desc()).limit(1)
-            )
-            return result.scalars().first()
+        return await self.get_first(
+            Version,
+            order_by=Version.pub_date.desc(),
+            options=[selectinload(Version.artifacts)]
+        )
 
     async def get_version_by_tag(self, tag: str) -> Version | None:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            result = await session.execute(
-                self.select(Version).options(selectinload(Version.artifacts)).where(Version.version == tag)
-            )
-            return result.scalars().first()
+        return await self.get_first(
+            Version,
+            where=[Version.version == tag],
+            options=[selectinload(Version.artifacts)]
+        )
             
     async def list_versions(self) -> list[Version]:
-        db = await self._get_db()
-        async with db.get_session() as session:
-            result = await session.execute(
-                self.select(Version).options(selectinload(Version.artifacts)).order_by(Version.id.desc())
-            )
-            return result.scalars().all()
+        return await self.get_all(
+            Version,
+            order_by=Version.pub_date.desc(),
+            options=[selectinload(Version.artifacts)]
+        )
 
-    async def create_version(self, version_str: str, release_notes: str, artifacts: list[dict]) -> Version:
+    async def create_version(self, version_str: str, release_notes: str, artifacts: list[dict]) -> Version | None:
         """Create a new version with artifacts"""
+        v = Version(version=version_str, release_notes=release_notes, pub_date=datetime.utcnow())
+        
         db = await self._get_db()
         async with db.get_session() as session:
-            v = Version(version=version_str, release_notes=release_notes)
             session.add(v)
-            await session.flush() # Ensure ID is generated
+            await session.flush() # Ensure ID is generated (via default function)
             
             for art in artifacts:
                 a = VersionArtifact(
@@ -92,4 +91,13 @@ class VersionDao(BaseDao):
                 )
                 session.add(a)
             # Session commit happens automatically on exit if configured, or we trust the framework
-            return v
+        
+        # Re-fetch to return fully loaded object with artifacts
+        return await self.get_version_by_tag(version_str)
+
+    async def delete_by_tag(self, tag: str) -> bool:
+        """Delete a version by tag"""
+        version = await self.get_version_by_tag(tag)
+        if version:
+            return await self.delete_by_id(Version, version.id)
+        return False

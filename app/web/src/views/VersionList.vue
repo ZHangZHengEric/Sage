@@ -241,11 +241,11 @@ const handleFileUpload = async (event, index) => {
   uploading.value[index] = true
   try {
     const res = await ossAPI.upload(file)
-    if (res.success) {
-      form.value.artifacts[index].url = res.data.url
+    if (res && res.url) {
+      form.value.artifacts[index].url = res.url
       toast.success('File uploaded successfully')
     } else {
-      toast.error(res.message || 'Upload failed')
+      toast.error('Upload failed')
     }
   } catch (error) {
     console.error(error)
@@ -271,14 +271,10 @@ const handleSubmit = async () => {
 
   submitting.value = true
   try {
-    const res = await systemAPI.createVersion(form.value)
-    if (res.success) {
-      toast.success('Version created successfully')
-      showCreateDialog.value = false
-      fetchVersions()
-    } else {
-      toast.error(res.message || 'Failed to create version')
-    }
+     await systemAPI.createVersion(form.value)
+     showCreateDialog.value = false
+     toast.success('Version created successfully')
+     fetchVersions()
   } catch (error) {
     console.error(error)
     toast.error(error.response?.data?.detail || 'Failed to create version')
@@ -291,13 +287,9 @@ const handleDelete = async (version) => {
   if (!confirm(`Are you sure you want to delete version ${version.version}?`)) return
   
   try {
-    const res = await systemAPI.deleteVersion(version.version)
-    if (res.success) {
-      toast.success('Version deleted')
-      fetchVersions()
-    } else {
-      toast.error(res.message || 'Delete failed')
-    }
+    await systemAPI.deleteVersion(version.version)
+    toast.success('Version deleted')
+    fetchVersions()
   } catch (error) {
     console.error(error)
     toast.error('Delete failed')
@@ -308,15 +300,7 @@ const fetchVersions = async () => {
   loading.value = true
   try {
     const res = await systemAPI.getVersions()
-    // Backend returns [] which is wrapped in { success: true, data: [] }
-    // If backend returns null or 204, it might be handled differently, 
-    // but based on list_versions implementation, it returns [] always.
-    if (res.success) {
-      versions.value = res.data || []
-    } else {
-      // Some API wrappers might treat empty as error? Not standard.
-      toast.error(res.message || 'Failed to load versions')
-    }
+    versions.value = res || []
   } catch (error) {
     console.error(error)
     // If backend 404s, suppress error if it means "no route" vs "no data"
