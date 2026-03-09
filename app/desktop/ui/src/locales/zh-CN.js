@@ -36,6 +36,7 @@ export default {
   'system.foundUpdate': '发现新版本 v{version}',
   'system.downloading': '正在下载...',
   'system.restarting': '正在重启...',
+  'system.installing': '正在安装...',
   'system.updateCancelled': '更新已取消',
   'system.latestVersion': '已是最新版本',
   'system.checkUpdateError': '检查更新失败: {message}',
