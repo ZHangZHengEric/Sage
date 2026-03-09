@@ -196,6 +196,7 @@ async def populate_request_from_agent_config(
         # 转成CustomSubAgentConfig
         custom_sub_agents = [
             CustomSubAgentConfig(
+               agent_id=sub_agent.agent_id,
                name=sub_agent.name,
                description=sub_agent.config.get("description", ""),
                available_workflows=sub_agent.config.get("availableWorkflows", {}),
@@ -338,7 +339,7 @@ class SageStreamService:
                 available_workflows=self.request.available_workflows,
                 force_summary=self.request.force_summary,
                 context_budget_config=self.request.context_budget_config,
-                custom_sub_agents=[agent.model_dump() for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
+                custom_sub_agents=[{"agent_id": agent.agent_id, "name": agent.name, "description": agent.description} for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
             )
 
             async for chunk in stream_result:
