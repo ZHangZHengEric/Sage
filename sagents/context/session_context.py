@@ -277,7 +277,7 @@ class SessionContext:
         if len(self.external_paths) > 0:
             self.external_paths = [os.path.abspath(path) for path in self.external_paths]
             self.system_context['external_paths'] = self.external_paths
-        current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        current_time_str = datetime.datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')
         if self.system_context.get('current_time') is None:
             self.system_context['current_time'] = current_time_str
 
@@ -573,7 +573,7 @@ class SessionContext:
             agent_id: Agent ID (Fibre用)
         """
         # 生成与preset_running_agent_config.json格式一致的配置
-        current_time = datetime.datetime.now()
+        current_time = datetime.datetime.now().astimezone()
 
         # 从model_config中提取llmConfig信息
         llm_config = {}
@@ -599,7 +599,7 @@ class SessionContext:
             "available_skills": available_skills or [],
             "system_context": system_context or {},
             "available_workflows": available_workflows or {},
-            "exportTime": current_time.isoformat(),
+            "exportTime": current_time.strftime('%Y-%m-%d %H:%M:%S'),
             "version": "1.0"
         }
         logger.debug("SessionContext: 设置agent配置信息完成")
@@ -956,7 +956,7 @@ class SessionContext:
             content = msg.get_content()
             utc_time = datetime.datetime.fromtimestamp(msg.timestamp or time.time(), tz=datetime.timezone.utc)
             local_time = utc_time.astimezone()
-            time_str = local_time.strftime('%Y-%m-%d %H:%M:%S %z')
+            time_str = local_time.strftime('%Y-%m-%d %H:%M:%S')
             messages_str_list.append(message_format_template.format(index=idx + 1, time=time_str, content=content))
 
         messages_content = "\n".join(messages_str_list)

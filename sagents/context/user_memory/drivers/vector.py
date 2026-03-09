@@ -55,8 +55,8 @@ class VectorMemoryDriver(IMemoryDriver):
                 "memory_key": memory_key,
                 "memory_type": memory_type,
                 "tags": tag_list,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "created_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                 "session_id": session_id or ""
             }
 
