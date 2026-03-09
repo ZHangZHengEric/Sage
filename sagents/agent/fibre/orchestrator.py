@@ -7,17 +7,17 @@ Separates Agent Definition from Session Runtime:
 """
 from __future__ import annotations
 import asyncio
+import json
 import logging
 import os
 import traceback
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, TYPE_CHECKING
-import uuid
 import copy
 
 if TYPE_CHECKING:
-    from sagents.session_runtime import Session, SessionManager
+    from sagents.session_runtime import Session
 
-from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.context.messages.message import MessageChunk, MessageRole
 from sagents.context.messages.message_manager import MessageManager
 from sagents.utils.prompt_manager import PromptManager
 from sagents.context.session_context import SessionContext, SessionStatus
@@ -25,6 +25,7 @@ from sagents.tool import ToolManager, ToolProxy
 from sagents.skill import SkillManager, SkillProxy
 from sagents.agent.fibre.tools import FibreTools
 from sagents.agent.fibre.agent_definition import AgentDefinition
+from sagents.agent.fibre.backend_client import FibreBackendClient
 from sagents.agent.simple_agent import SimpleAgent
 
 logger = logging.getLogger(__name__)
@@ -43,20 +44,23 @@ class FibreOrchestrator:
         self.agent = agent
         self.observability_manager = observability_manager
         self.sub_agents: Dict[str, AgentDefinition] = {}  # Agent definitions only
-        
+
         # Use global session manager instance if available, or create one with default path
         # Actually, SessionManager is designed to be a singleton or shared instance per process usually
         # But here we might want to attach to the same session space as the main agent
         # The main agent's session manager is what we should use.
         # However, Orchestrator doesn't hold reference to the main session's manager directly.
         # But we can get it via get_global_session_manager
-        
+
         from sagents.session_runtime import get_global_session_manager
         # We don't initialize with specific path here, assuming it's already initialized by main process
         # If not, it will use default.
         self.session_manager = get_global_session_manager()
         self.sub_session_manager = self.session_manager
-        
+
+        # Initialize backend client for API-based agent management
+        self.backend_client = FibreBackendClient()
+
         self.output_queue: Optional[asyncio.Queue] = None
 
     async def run_loop(
@@ -318,6 +322,10 @@ class FibreOrchestrator:
         """
         Create a new agent definition.
 
+        Priority:
+        1. Try to store in backend via API (if available)
+        2. Fallback to memory storage
+
         Args:
             parent_session_id: The session ID that is creating this agent
             agent_id: Agent ID
@@ -356,7 +364,70 @@ class FibreOrchestrator:
         else:
             complete_system_prompt = system_prompt
 
-        # 3. Create Agent Definition (configuration only)
+        # 3. Try to store in backend (if available)
+        backend_stored = False
+        llm_provider_id = None
+        if self.backend_client and await self.backend_client.check_health():
+            # Get available sub-agent IDs from parent session's custom_sub_agents
+            available_sub_agent_ids = []
+            if parent_session and parent_session.session_context:
+                custom_sub_agents = getattr(parent_session.session_context, 'custom_sub_agents', []) or \
+                                   parent_session.session_context.agent_config.get('custom_sub_agents', [])
+                # Extract agent IDs from custom_sub_agents
+                for agent_cfg in custom_sub_agents:
+                    if isinstance(agent_cfg, dict):
+                        agent_sub_id = agent_cfg.get('agent_id')  or agent_cfg.get('id')
+                        if agent_sub_id:
+                            available_sub_agent_ids.append(agent_sub_id)
+                    else:
+                        agent_sub_id = getattr(agent_cfg, 'agent_id', None) or getattr(agent_cfg, 'id', None)
+                        if agent_sub_id:
+                            available_sub_agent_ids.append(agent_sub_id)
+
+            # Create LLM provider from current agent's model configuration
+            if self.agent and self.agent.model:
+                try:
+                    # Extract model configuration from the agent's model
+                    model_base_url = getattr(self.agent.model, 'base_url', None)
+                    model_api_key = getattr(self.agent.model, 'api_key', None)
+                    model_name = self.agent.model_config.get('model') if self.agent.model_config else None
+
+                    if model_base_url and model_api_key and model_name:
+                        llm_provider_id = await self.backend_client.create_llm_provider(
+                            name=f"provider_for_{agent_id}",
+                            base_url=str(model_base_url),
+                            api_keys=[str(model_api_key)],
+                            model=model_name
+                        )
+                        if llm_provider_id:
+                            logger.info(f"Created LLM provider '{llm_provider_id}' for agent '{agent_id}'")
+                        else:
+                            logger.warning(f"Failed to create LLM provider for agent '{agent_id}'")
+                    else:
+                        logger.warning(f"Missing model configuration for agent '{agent_id}': base_url={model_base_url is not None}, api_key={model_api_key is not None}, model={model_name is not None}")
+                except Exception as e:
+                    logger.warning(f"Error creating LLM provider: {e}")
+
+            backend_agent_id = await self.backend_client.create_agent(
+                agent_id=agent_id,
+                name=name or agent_id,
+                system_prompt=complete_system_prompt,
+                description=description,
+                available_tools=available_tools,
+                available_skills=available_skills,
+                available_workflows=available_workflows,
+                system_context=system_context,
+                available_sub_agent_ids=available_sub_agent_ids if available_sub_agent_ids else None,
+                llm_provider_id=llm_provider_id
+            )
+            if backend_agent_id:
+                backend_stored = True
+                agent_id = backend_agent_id
+                logger.info(f"Agent '{agent_id}' stored in backend successfully")
+            else:
+                logger.warning("Failed to store agent in backend, falling back to memory storage")
+
+        # 4. Create Agent Definition (memory storage as fallback or supplement)
         agent_def = AgentDefinition(
             agent_id=agent_id,
             name=name or agent_id,
@@ -365,12 +436,13 @@ class FibreOrchestrator:
             available_tools=available_tools,
             available_skills=available_skills,
             available_workflows=available_workflows,
-            system_context=system_context
+            system_context=system_context,
+            backend_stored=backend_stored
         )
 
         self.sub_agents[agent_id] = agent_def
 
-        # 4. Update parent session's available_sub_agents
+        # 5. Update parent session's available_sub_agents
         parent_session = self.sub_session_manager.get(parent_session_id)
         if parent_session:
             if 'available_sub_agents' not in parent_session.session_context.system_context:
@@ -530,56 +602,56 @@ class FibreOrchestrator:
             sanitized = sanitized[:50]
         return sanitized.strip() or "unnamed_task"
 
-    def _get_task_path(self, base_path: str, task_name: str, session_id: str) -> str:
-        """获取任务路径，复用已存在的文件夹"""
-        import os
-        task_path = os.path.join(base_path, task_name)
+    def _create_task_workspace(
+        self,
+        session_id: str,
+        task_name: str,
+        parent_session_id: Optional[str],
+        session_context: SessionContext
+    ) -> str:
+        """
+        创建任务工作目录（使用真实 host 路径）
 
-        # 如果路径已存在，检查是否是同一个 session
-        if os.path.exists(task_path):
-            # 复用已存在的文件夹
-            logger.info(f"Reusing existing task workspace: {task_path} for session {session_id}")
-            return task_path
+        Args:
+            session_id: 会话 ID
+            task_name: 任务名称
+            parent_session_id: 父会话 ID（可选）
+            session_context: 会话上下文
 
-        return task_path
-
-    def _create_task_workspace(self, session_id: str, task_name: str, parent_session_id: Optional[str], session_context: SessionContext) -> str:
-        """创建任务工作目录（使用沙箱文件系统）"""
-        import os
-
+        Returns:
+            任务工作目录的真实 host 路径
+        """
         # 1. 清理任务名
         task_name = self._sanitize_task_name(task_name)
 
-        # 2. 确定父目录（使用虚拟路径）
+        # 2. 确定父目录
         if parent_session_id:
             # 子任务：在父任务的 sub_tasks 下创建
+            # 从 parent session 的 system_context 中获取 task_workspace
             parent_session = self.sub_session_manager.get(parent_session_id)
-            parent_workspace = getattr(parent_session, 'task_workspace', None) if parent_session else None
+            parent_workspace = None
+            if parent_session and parent_session.session_context:
+                parent_workspace = parent_session.session_context.system_context.get('task_workspace')
 
             if parent_workspace:
-                # parent_workspace 是虚拟路径，直接使用
-                base_path = f"{parent_workspace}/sub_tasks"
+                base_path = os.path.join(parent_workspace, "sub_tasks")
             else:
-                # 回退到 session_context 的 virtual_workspace
-                base_path = f"{session_context.virtual_workspace}/tasks"
+                # 回退到 session_context 的 agent_workspace
+                base_path = os.path.join(session_context.agent_workspace, "tasks")
         else:
-            # 根任务：直接在 tasks 下创建
-            base_path = f"{session_context.virtual_workspace}/tasks"
+            # 根任务：直接在 agent_workspace/tasks 下创建
+            base_path = os.path.join(session_context.agent_workspace, "tasks")
 
         # 3. 获取任务路径（复用已存在的文件夹）
-        task_path = self._get_task_path(base_path, task_name, session_id)
+        task_path = os.path.join(base_path, task_name)
+        if os.path.exists(task_path):
+            logger.info(f"Reusing existing task workspace: {task_path} for session {session_id}")
 
-        # 4. 使用沙箱文件系统创建文件夹
-        fs = session_context.agent_workspace_sandbox.file_system  # SandboxFileSystem
-        fs.ensure_directory(task_path)
-        fs.ensure_directory(f"{task_path}/execution")
-        fs.ensure_directory(f"{task_path}/results")
-        fs.ensure_directory(f"{task_path}/sub_tasks")
-
-        # 5. 记录到 SubSession（方便后续查找）
-        sub_session = self.sub_session_manager.get(session_id)
-        if sub_session:
-            sub_session.task_workspace = task_path
+        # 4. 创建真实目录
+        os.makedirs(task_path, exist_ok=True)
+        os.makedirs(os.path.join(task_path, "execution"), exist_ok=True)
+        os.makedirs(os.path.join(task_path, "results"), exist_ok=True)
+        os.makedirs(os.path.join(task_path, "sub_tasks"), exist_ok=True)
 
         logger.info(f"Created task workspace: {task_path}")
         return task_path
@@ -596,6 +668,10 @@ class FibreOrchestrator:
         """
         Delegate a single task to a sub-agent.
 
+        Priority:
+        1. If agent is backend_stored and backend is available, use API call
+        2. Fallback to internal session execution
+
         Args:
             agent_id: The agent definition ID
             content: Task content
@@ -607,36 +683,71 @@ class FibreOrchestrator:
         Returns:
             Task result string
         """
+        effective_task_name = task_name if task_name else agent_id
+
+        # ========== Strategy 1: Use Backend API (priority) ==========
+        # Check if agent is stored in backend (system agents or previously created agents)
+        agent_def = self.sub_agents.get(agent_id)
+        if agent_def and agent_def.backend_stored and self.backend_client and await self.backend_client.check_health():
+            logger.info(f"Using backend API for agent '{agent_id}' task execution")
+            return await self._delegate_task_via_backend(
+                agent_id=agent_id,
+                content=content,
+                session_id=session_id,
+                caller_session_id=caller_session_id,
+                task_name=effective_task_name,
+                original_task=original_task
+            )
+
+        # ========== Strategy 2: Internal Session Execution (fallback) ==========
+        # Only check sub_agents for internal execution
         if agent_id not in self.sub_agents:
             return f"Error: Agent '{agent_id}' not found"
 
-        # Use task_name if provided, otherwise fallback to agent_id
-        effective_task_name = task_name if task_name else agent_id
-
-        # Get or create SubSession
-        sub_session = await self._get_or_create_sub_session(
-            session_id=session_id,
+        agent_def = self.sub_agents[agent_id]
+        logger.info(f"Using internal execution for agent '{agent_id}'")
+        return await self._delegate_task_internal(
             agent_id=agent_id,
-            parent_session_id=caller_session_id
-        )
-
-        if isinstance(sub_session, str):  # Error message
-            return sub_session
-
-        # Create task workspace using task_name
-        # Note: _create_task_workspace relies on sub_session_manager.get(session_id)
-        # But we replaced it with session_manager.get_session(session_id)
-        # We need to check if _create_task_workspace is compatible.
-        
-        # Also, sub_session is now a Session object, not SubSession wrapper.
-        # Session object has session_context.
-        
-        task_workspace = self._create_task_workspace(
+            content=content,
             session_id=session_id,
+            caller_session_id=caller_session_id,
             task_name=effective_task_name,
-            parent_session_id=caller_session_id,
-            session_context=sub_session.session_context
+            original_task=original_task
         )
+
+    async def _delegate_task_via_backend(
+        self,
+        agent_id: str,
+        content: str,
+        session_id: str,
+        caller_session_id: str,
+        task_name: str,
+        original_task: str
+    ) -> str:
+        """
+        Delegate task via backend API call.
+        Does not manage sub-session state (simplified approach).
+        """
+        # Get parent session for workspace context
+        parent_session = self.sub_session_manager.get(caller_session_id)
+        parent_session_context = None
+        if parent_session and parent_session.session_context:
+            parent_session_context = parent_session.session_context
+
+        # Create task workspace using the same logic as internal execution
+        # For backend calls, we also create the directory and use real host path
+        if parent_session_context:
+            task_workspace = self._create_task_workspace(
+                session_id=session_id,
+                task_name=task_name,
+                parent_session_id=caller_session_id,
+                session_context=parent_session_context
+            )
+            # Record task_workspace to parent session's system_context for sub-agents to access
+            parent_session_context.system_context['task_workspace'] = task_workspace
+        else:
+            # Fallback: use a default path
+            task_workspace = os.path.join("/tmp", "sage_tasks", f"{task_name}_{session_id}")
 
         # Build enhanced content with workspace info
         original_task_section = f"【用户最初任务需求】\n{original_task}\n\n" if original_task else ""
@@ -648,44 +759,176 @@ class FibreOrchestrator:
 工作目录：{task_workspace}
 执行过程文件请放在：{task_workspace}/execution/
 """
-        
+
+        # Prepare messages for API
+        messages = [{"role": "user", "content": enhanced_content}]
+
+        # Prepare system_context with external_paths
+        # Get parent's external_paths and add current task workspace
+        external_paths = []
+        if parent_session_context and hasattr(parent_session_context, 'system_context'):
+            parent_external_paths = parent_session_context.system_context.get('external_paths', [])
+            external_paths.extend(parent_external_paths)
+        # Add current task workspace to external_paths
+        external_paths.append(task_workspace)
+
+        system_context = {
+            "external_paths": external_paths
+        }
+
+        # Collect response and process like internal execution
+        task_result = None
+        all_content_chunks = []
+        all_tool_calls = []
+
+        try:
+            async for data in self.backend_client.stream_chat(
+                agent_id=agent_id,
+                messages=messages,
+                session_id=session_id,
+                system_context=system_context,
+                max_loop_count=10,
+                agent_mode="simple"
+            ):
+                msg_type = data.get("type")
+
+                if msg_type == "content":
+                    content_text = data.get("content", "")
+                    if content_text:
+                        all_content_chunks.append(content_text)
+
+                elif msg_type == "tool_call":
+                    tool_calls = data.get("tool_calls", [])
+                    all_tool_calls.extend(tool_calls)
+
+                    # Check for sys_finish_task
+                    for tc in tool_calls:
+                        func_name = tc.get("function", {}).get("name") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", None)
+                        if func_name == "sys_finish_task":
+                            args_str = tc.get("function", {}).get("arguments", "{}") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "arguments", "{}")
+                            try:
+                                args = json.loads(args_str)
+                                task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
+                            except Exception as e:
+                                logger.error(f"Error parsing sys_finish_task arguments: {e}")
+
+                elif msg_type == "stream_end":
+                    break
+
+            # If sys_finish_task was called, return its result
+            if task_result:
+                return f"SubSessionID: {session_id}\n{task_result}"
+
+            # If no sys_finish_task, generate summary from accumulated content
+            history_str = "\n".join(all_content_chunks)
+
+            if not history_str.strip():
+                return f"SubSessionID: {session_id}\nNo response from sub-agent"
+
+            # Get prompt from PromptManager
+            language = "zh"  # Default to Chinese, could be improved
+            if parent_session and parent_session.session_context:
+                language = parent_session.session_context.get_language() if hasattr(parent_session.session_context, 'get_language') else "zh"
+
+            summary_prompt_template = PromptManager().get_agent_prompt(
+                agent='FibreAgent',
+                key='sub_agent_fallback_summary_prompt',
+                language=language
+            )
+            prompt = summary_prompt_template.format(history_str=history_str)
+
+            # Use main agent to generate summary (since we don't have sub_session)
+            messages_input = [{'role': 'user', 'content': prompt}]
+
+            # Try to use the main agent's LLM for summary
+            try:
+                from sagents.core.llm import LLMClient
+                llm_client = LLMClient()
+                response = await llm_client.acomplete(
+                    messages=messages_input,
+                    model="default"  # Use default model
+                )
+                summary_content = response.content if hasattr(response, 'content') else str(response)
+                return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
+            except Exception as e:
+                logger.warning(f"Failed to generate summary via LLM: {e}")
+                # Fallback: return accumulated content directly
+                return f"SubSessionID: {session_id}\nSub-agent response:\n{history_str}"
+
+        except Exception as e:
+            logger.error(f"Backend API call failed: {e}, falling back to internal execution")
+            # Fallback to internal execution
+            return await self._delegate_task_internal(
+                agent_id=agent_id,
+                content=content,
+                session_id=session_id,
+                caller_session_id=caller_session_id,
+                task_name=task_name,
+                original_task=original_task
+            )
+
+    async def _delegate_task_internal(
+        self,
+        agent_id: str,
+        content: str,
+        session_id: str,
+        caller_session_id: str,
+        task_name: str,
+        original_task: str
+    ) -> str:
+        """
+        Delegate task via internal session execution (original implementation).
+        """
+        # Get or create SubSession
+        sub_session = await self._get_or_create_sub_session(
+            session_id=session_id,
+            agent_id=agent_id,
+            parent_session_id=caller_session_id
+        )
+
+        if isinstance(sub_session, str):  # Error message
+            return sub_session
+
+        # Create task workspace using task_name
+        task_workspace = self._create_task_workspace(
+            session_id=session_id,
+            task_name=task_name,
+            parent_session_id=caller_session_id,
+            session_context=sub_session.session_context
+        )
+        # Record task_workspace to sub-session's system_context for sub-agents to access
+        sub_session.session_context.system_context['task_workspace'] = task_workspace
+
+        # Build enhanced content with workspace info
+        original_task_section = f"【用户最初任务需求】\n{original_task}\n\n" if original_task else ""
+        enhanced_content = f"""{original_task_section}【你本次需要完成的子任务】
+{content}
+
+【子任务工作目录】
+请在以下目录中执行任务，并将最终执行结果汇报整理保存到 {task_workspace}/results/：
+工作目录：{task_workspace}
+执行过程文件请放在：{task_workspace}/execution/
+"""
+
         # Prepare input messages
-        from sagents.context.messages.message import MessageChunk, MessageRole
         input_messages = [MessageChunk(role=MessageRole.USER.value, content=enhanced_content, session_id=session_id)]
 
         # Update status to running
         from sagents.context.session_context import SessionStatus
-        sub_session.session_context.set_status(SessionStatus.RUNNING) # Use session_context status
+        sub_session.session_context.set_status(SessionStatus.RUNNING)
 
         try:
             task_result = None
             all_filtered_chunks = []
-            
-            # Use run_stream_with_flow or run_stream (which delegates to run_stream_with_flow)
-            # Since we want to use AgentFlow for simple agent execution
-            # We need to construct a flow or rely on default flow.
-            # But here we are delegating to a specific agent definition (SimpleAgent usually).
-            
-            # The agent logic is encapsulated in the SessionRuntime.
-            # SessionRuntime uses _get_agent to retrieve agent implementation.
-            # But sub_session is just a Session instance.
-            # We need to call sub_session.run_stream(...)
-            
-            # However, sub_session.run_stream expects standard params.
-            # We need to pass agent_mode="simple" (or whatever the sub agent definition implies)
-            # Actually, Fibre sub-agents are usually SimpleAgents.
-            
-            # We can use a custom flow for this sub-session to just run a SimpleAgent.
+
+            # Use custom flow for sub-session
             from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode
-            
-            # If the sub-agent is defined as a specific type, we might need to adjust.
-            # But typically they are SimpleAgents.
-            
+
             simple_flow = AgentFlow(
                 name=f"SubAgent Flow - {agent_id}",
                 root=SequenceNode(steps=[AgentNode(agent_key="simple")])
             )
-            
+
             logger.info(f"Starting sub-agent flow for {agent_id} session_id: {session_id}")
             # Stream the response
             async for chunks in sub_session.run_stream_with_flow(
@@ -699,7 +942,7 @@ class FibreOrchestrator:
                 agent_mode=sub_session.session_context.agent_config.get("agent_mode", "simple")
             ):
                 filtered_chunks = [
-                        c for c in chunks 
+                        c for c in chunks
                         if c.session_id == session_id and c.role == MessageRole.ASSISTANT.value
                     ]
                 if filtered_chunks:
@@ -707,7 +950,7 @@ class FibreOrchestrator:
                 # Push to output queue if available (for producer/consumer pattern)
                 if self.output_queue:
                     await self.output_queue.put(chunks)
-                
+
                 # Check for sys_finish_task (if tools are used)
                 for chunk in chunks:
                     if chunk.tool_calls:
@@ -721,7 +964,7 @@ class FibreOrchestrator:
                                     task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
                                 except Exception as e:
                                     logger.error(f"Error parsing sys_finish_task arguments: {e}")
-            
+
             # If sys_finish_task was called, return its result
             if task_result:
                 if sub_session.session_context:
@@ -853,7 +1096,6 @@ class FibreOrchestrator:
 
         else:
              # Handle orphaned sub-sessions (no parent)
-             workspace_root = os.path.join(self.session_manager.session_root_space, "orphaned_sub_sessions")
              # For now we leave agent_workspace as None or we could initialize a new one if needed
              # agent_workspace = ...
              pass
@@ -962,10 +1204,9 @@ class FibreOrchestrator:
         
         # Scan all sessions in manager to find children
         # This is inefficient but works for now
-        all_sessions = self.session_manager.list_active_sessions()
         # list_active_sessions returns dicts, not objects.
         # We need access to objects.
-        
+
         # Let's rely on child_session_ids if it's maintained.
         # If not, we iterate self.session_manager._sessions (internal access)
         
