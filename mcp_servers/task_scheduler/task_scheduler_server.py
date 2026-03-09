@@ -523,17 +523,29 @@ async def add_task(
             encoded_id = _encode_task_id(task_id, is_recurring=True)
             return f"Recurring task '{name}' (ID: {encoded_id}) added successfully. Cron: {schedule}"
         else:
-            # Validate timestamp format
-            # Support both ISO and space-separated format
+            # Validate timestamp format and normalize to local time clean string
             try:
-                if "T" not in schedule:
-                     datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+                dt = None
+                if "T" in schedule:
+                    dt = datetime.fromisoformat(schedule)
                 else:
-                     datetime.fromisoformat(schedule)
+                    dt = datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+                
+                # If aware, convert to local time first
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone()
+                
+                # Format as clean string (YYYY-MM-DD HH:MM:SS) without timezone info
+                # The DB expects local time in this format
+                execute_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+                
             except ValueError:
-                 # Try the other way if first attempt failed or for robust handling
+                 # Try fallback
                  try:
-                     datetime.fromisoformat(schedule.replace(" ", "T"))
+                     dt = datetime.fromisoformat(schedule.replace(" ", "T"))
+                     if dt.tzinfo is not None:
+                         dt = dt.astimezone()
+                     execute_at = dt.strftime("%Y-%m-%d %H:%M:%S")
                  except ValueError:
                      raise ValueError("Invalid format")
 
@@ -542,7 +554,7 @@ async def add_task(
                 description=description,
                 agent_id=agent_id,
                 session_id=session_id,
-                execute_at=schedule
+                execute_at=execute_at
             )
             encoded_id = _encode_task_id(task_id, is_recurring=False)
             return f"Task '{name}' (ID: {encoded_id}) added successfully. Execute at: {schedule}"
@@ -826,11 +838,24 @@ async def update_task(
                 return f"Error: Failed to update recurring task {task_id}."
         else:
             # Validate execute_at timestamp if provided
+            normalized_schedule = None
             if schedule is not None:
                 try:
-                    datetime.fromisoformat(schedule)
+                    dt = None
+                    if "T" in schedule:
+                        dt = datetime.fromisoformat(schedule)
+                    else:
+                        dt = datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+                    
+                    # If aware, convert to local time first
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone()
+                    
+                    # Format as clean string
+                    normalized_schedule = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    
                 except ValueError:
-                    return f"Error: Invalid schedule format '{schedule}'. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
+                    return f"Error: Invalid schedule format '{schedule}'. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS) or 'YYYY-MM-DD HH:MM:SS'."
             
             # Build update kwargs
             update_kwargs = {}
@@ -842,8 +867,8 @@ async def update_task(
                 update_kwargs['agent_id'] = agent_id
             if session_id is not None:
                 update_kwargs['session_id'] = session_id
-            if schedule is not None:
-                update_kwargs['execute_at'] = schedule
+            if normalized_schedule is not None:
+                update_kwargs['execute_at'] = normalized_schedule
             if max_retries is not None:
                 update_kwargs['max_retries'] = max_retries
             
