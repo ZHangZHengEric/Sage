@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import JSON, String, Boolean, or_, select, Integer, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class LLMProvider(Base):
@@ -58,8 +58,8 @@ class LLMProvider(Base):
         self.max_model_len = max_model_len
         self.is_default = is_default
         self.user_id = user_id
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -85,7 +85,7 @@ class LLMProviderDao(BaseDao):
     """
 
     async def save(self, provider: "LLMProvider") -> bool:
-        provider.updated_at = datetime.now()
+        provider.updated_at = get_local_now()
         return await BaseDao.save(self, provider)
 
     async def get_by_id(self, provider_id: str) -> Optional["LLMProvider"]:

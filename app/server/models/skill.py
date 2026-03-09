@@ -12,12 +12,12 @@ class SkillOwnership(Base):
 
     skill_name: Mapped[str] = mapped_column(String(255), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=get_local_now)
 
     def __init__(self, skill_name: str, user_id: str):
         self.skill_name = skill_name
         self.user_id = user_id
-        self.created_at = datetime.now()
+        self.created_at = get_local_now()
 
 
 class SkillOwnershipDao(BaseDao):
