@@ -50,23 +50,35 @@ async def list_providers(request: Request):
 async def create_provider(data: LLMProviderCreate, request: Request):
     dao = LLMProviderDao()
 
+    # Normalize base_url: remove trailing slash for consistent comparison
+    normalized_base_url = data.base_url.rstrip('/') if data.base_url else data.base_url
+
     # Check if provider already exists (match by base_url, model, and api_keys)
-    existing_providers = await dao.get_by_config(base_url=data.base_url, model=data.model)
+    existing_providers = await dao.get_by_config(base_url=normalized_base_url, model=data.model)
+    logger.info(f"[LLMProvider] Checking existing providers for base_url={normalized_base_url}, model={data.model}, found {len(existing_providers)} candidates")
+    logger.info(f"[LLMProvider] Request api_keys: {data.api_keys}")
+    
     for provider in existing_providers:
-        if provider.api_keys == data.api_keys:
+        logger.info(f"[LLMProvider] Comparing with provider {provider.id}: api_keys={provider.api_keys}")
+        # Compare api_keys - handle both single and multiple keys
+        # Sort both lists to ensure consistent comparison
+        if sorted(provider.api_keys) == sorted(data.api_keys):
+            logger.info(f"[LLMProvider] Found matching provider: {provider.id}")
             return await Response.succ(data={"provider_id": provider.id})
+    
+    logger.info("[LLMProvider] No matching provider found, creating new one")
 
     # Auto-generate name if not provided
     provider_name = data.name
     if not provider_name:
-        # Generate name from model and base_url
-        provider_name = f"{data.model}@{data.base_url.replace('https://', '').replace('http://', '').split('/')[0]}"
+        # Generate name from model and base_url (use normalized base_url)
+        provider_name = f"{data.model}@{normalized_base_url.replace('https://', '').replace('http://', '').split('/')[0]}"
 
     provider_id = str(uuid.uuid4())
     provider = LLMProvider(
         id=provider_id,
         name=provider_name,
-        base_url=data.base_url,
+        base_url=normalized_base_url,  # Use normalized base_url
         api_keys=data.api_keys,
         model=data.model,
         max_tokens=data.max_tokens,

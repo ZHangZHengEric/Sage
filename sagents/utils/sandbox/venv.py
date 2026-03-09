@@ -27,12 +27,52 @@ class VenvManager:
         if not os.path.exists(self.venv_dir):
             logger.info(f"[VenvManager] 创建虚拟环境: {self.venv_dir}")
             os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
-            
+
             # 创建虚拟环境
             venv.create(self.venv_dir, with_pip=True)
-            logger.info(f"[VenvManager] 虚拟环境创建完成")
+
+            # 配置阿里云 pip 源
+            self._configure_pip_mirror()
+
+            logger.info("[VenvManager] 虚拟环境创建完成")
         else:
             logger.info(f"[VenvManager] 虚拟环境已存在: {self.venv_dir}")
+
+    def _configure_pip_mirror(self):
+        """配置阿里云 pip 镜像源"""
+        import subprocess
+
+        pip_bin = self.get_pip_bin()
+
+        # 阿里云 pip 镜像源
+        aliyun_index_url = "https://mirrors.aliyun.com/pypi/simple/"
+        trusted_host = "mirrors.aliyun.com"
+
+        logger.info(f"[VenvManager] 配置阿里云 pip 镜像源: {aliyun_index_url}")
+
+        try:
+            # 升级 pip 并配置镜像源
+            result = subprocess.run(
+                [pip_bin, "config", "set", "global.index-url", aliyun_index_url],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            if result.returncode == 0:
+                # 配置信任主机
+                subprocess.run(
+                    [pip_bin, "config", "set", "global.trusted-host", trusted_host],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                logger.info("[VenvManager] 阿里云 pip 镜像源配置成功")
+            else:
+                logger.warning(f"[VenvManager] 配置 pip 镜像源失败: {result.stderr}")
+
+        except Exception as e:
+            logger.warning(f"[VenvManager] 配置 pip 镜像源时出错: {e}")
             
     def get_python_bin(self) -> str:
         """获取 Python 解释器路径"""
@@ -105,7 +145,7 @@ class VenvManager:
             )
             
             if result.returncode == 0:
-                logger.info(f"[VenvManager] requirements 安装成功")
+                logger.info("[VenvManager] requirements 安装成功")
                 return True
             else:
                 logger.error(f"[VenvManager] requirements 安装失败: {result.stderr}")

@@ -25,6 +25,7 @@ class BaseChatRequest(BaseModel):
                 elif not hasattr(msg, "role") or not hasattr(msg, "content"):
                     raise ValueError(f"消息 {i} 缺少必要的 'role' 或 'content' 字段")
 class CustomSubAgentConfig(BaseModel):
+    agent_id: str
     name: str
     system_prompt: Optional[str] = None
     description: Optional[str] = None
