@@ -118,7 +118,7 @@ class AgentHubDB:
             return cursor.lastrowid
 
     def get_pending_messages(self) -> List[Dict[str, Any]]:
-        now = datetime.now().isoformat()
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()

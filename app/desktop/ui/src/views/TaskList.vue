@@ -53,7 +53,7 @@
                   />
                 </TableCell>
                 <TableCell>
-                  {{ task.last_executed_at ? new Date(task.last_executed_at).toLocaleString() : '-' }}
+                  {{ formatDate(task.last_executed_at) }}
                 </TableCell>
                 <TableCell>
                   <div class="flex items-center gap-2">
@@ -448,7 +448,8 @@ const handleEditOneTime = (task) => {
   oneTimeForm.name = task.name
   oneTimeForm.description = task.description
   oneTimeForm.agent_id = task.agent_id
-  oneTimeForm.execute_at = toLocalISO(new Date(task.execute_at))
+  const safeDate = typeof task.execute_at === 'string' ? task.execute_at.replace(' ', 'T') : task.execute_at
+  oneTimeForm.execute_at = toLocalISO(new Date(safeDate))
   minDateTime.value = toLocalISO(new Date())
   oneTimeDialogOpen.value = true
 }
