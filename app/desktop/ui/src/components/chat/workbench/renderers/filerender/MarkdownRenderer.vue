@@ -10,7 +10,7 @@
         打开文件
       </Button>
     </div>
-    <div v-else class="prose prose-sm max-w-none dark:prose-invert" v-html="renderedContent"></div>
+    <div v-else class="prose prose-sm max-w-none dark:prose-invert markdown-workbench" v-html="renderedContent"></div>
   </div>
 </template>
 
@@ -59,3 +59,18 @@ const openFile = () => {
   }
 }
 </script>
+
+<style scoped>
+/* Workbench Markdown Code Block Styles */
+.markdown-workbench :deep(pre) {
+  @apply bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg p-4 my-4 overflow-auto;
+}
+
+.markdown-workbench :deep(code) {
+  @apply text-slate-800 dark:text-slate-200;
+}
+
+.markdown-workbench :deep(pre code) {
+  @apply bg-transparent p-0 text-sm font-mono leading-relaxed;
+}
+</style>

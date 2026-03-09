@@ -10,6 +10,8 @@ from typing import Optional, Dict, Any, AsyncGenerator, List
 
 from loguru import logger
 
+from sagents.context.messages.message import MessageChunk
+
 
 class FibreBackendClient:
     """后端 API 客户端"""
@@ -235,14 +237,14 @@ class FibreBackendClient:
         messages: List[Dict[str, str]],
         session_id: Optional[str] = None,
         system_context: Optional[Dict[str, Any]] = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
 
         后端返回的是 MessageChunk 的流，我们需要将同一 message_id 的 chunks 合并成完整消息
 
         Yields:
-            合并后的完整消息字典
+            MessageChunk 对象列表（与 run_stream_with_flow 返回格式一致）
         """
         if not self.available:
             raise RuntimeError("Backend not available")
@@ -294,7 +296,8 @@ class FibreBackendClient:
                     if message_id not in pending_messages:
                         # 如果是完整消息（不是 chunk），直接 yield
                         if not data.get('is_chunk', False):
-                            yield data
+                            chunk = MessageChunk.from_dict(data)
+                            yield [chunk]
                             continue
 
                         # 初始化 pending message
@@ -331,8 +334,11 @@ class FibreBackendClient:
                     # 检查是否是最终消息
                     if data.get('is_final', False) or not data.get('is_chunk', False):
                         if message_id in pending_messages:
-                            yield pending_messages.pop(message_id)
+                            msg_data = pending_messages.pop(message_id)
+                            chunk = MessageChunk.from_dict(msg_data)
+                            yield [chunk]
 
                 # 流结束，yield 所有剩余的 pending messages
                 for message in pending_messages.values():
-                    yield message
+                    chunk = MessageChunk.from_dict(message)
+                    yield [chunk]
