@@ -521,11 +521,11 @@ class AgentBase(ABC):
                         'workspace_files_label',
                         agent='common',
                         language=language,
-                        default=f"当前工作空间 {workspace_name} 的文件情况（最大深度3层）：\n"
+                        default=f"当前工作空间 {workspace_name} 的文件情况（最大深度2层）：\n"
                     )
                     system_prefix += workspace_files.format(workspace=workspace_name)
 
-                    file_tree = file_system.get_file_tree(include_hidden=True,max_depth=3)
+                    file_tree = file_system.get_file_tree_compact(include_hidden=True, max_depth=2)
                     if not file_tree:
                         no_files = prompt_manager.get_prompt(
                             'no_files_message',
@@ -566,7 +566,7 @@ class AgentBase(ABC):
                             fs_obj = SandboxFileSystem(host_path=current_agent_workspace, virtual_path="/workspace")
 
                         if fs_obj:
-                            file_tree = fs_obj.get_file_tree(include_hidden=True,max_depth=2)
+                            file_tree = fs_obj.get_file_tree_compact(include_hidden=True,max_depth=2)
 
                             if not file_tree:
                                 no_files = prompt_manager.get_prompt(
@@ -626,7 +626,7 @@ class AgentBase(ABC):
                                     system_prefix += f"Path: {ext_path}\n"
                                     try:
                                         # Limit depth to 1 to avoid context overflow
-                                        ext_tree = fs_for_external.get_file_tree(include_hidden=True, root_path=ext_path, max_depth=2)
+                                        ext_tree = fs_for_external.get_file_tree_compact(include_hidden=True, root_path=ext_path, max_depth=2)
                                         if ext_tree:
                                             system_prefix += ext_tree
                                         else:

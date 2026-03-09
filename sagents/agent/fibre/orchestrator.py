@@ -124,11 +124,30 @@ class FibreOrchestrator:
         custom_sub_agents = getattr(session_context, 'custom_sub_agents', None) or \
                            session_context.agent_config.get("custom_sub_agents") or \
                            session_context.system_context.get("custom_sub_agents")
+        logger.info(f"run_loop: custom_sub_agents={custom_sub_agents}")
+
+        # If no custom_sub_agents, fetch from backend
+        if not custom_sub_agents and self.backend_client and await self.backend_client.check_health():
+            logger.info("FibreOrchestrator: No custom_sub_agents configured, fetching from backend...")
+            try:
+                backend_agents = await self.backend_client.list_agents()
+                # Filter out the current agent itself
+                current_agent_id = session_context.agent_config.get("agent_id") if session_context.agent_config else None
+                custom_sub_agents = [
+                    {"agent_id": aid}
+                    for aid in backend_agents
+                    if aid != current_agent_id
+                ]
+                logger.info(f"FibreOrchestrator: Fetched {len(custom_sub_agents)} agents from backend (excluding self)")
+            except Exception as e:
+                logger.warning(f"FibreOrchestrator: Failed to fetch agents from backend: {e}")
+                custom_sub_agents = []
+
         if custom_sub_agents and isinstance(custom_sub_agents, list):
             logger.info(f"FibreOrchestrator: Found {len(custom_sub_agents)} custom agents to initialize.")
             for agent_cfg in custom_sub_agents:
                 if isinstance(agent_cfg, dict):
-                    agent_id = agent_cfg.get("agent_id") or agent_cfg.get("name")
+                    agent_id = agent_cfg.get("agent_id")
                     agent_system_prompt = agent_cfg.get("system_prompt", "")
                     agent_description = agent_cfg.get("description", "")
                     agent_tools = agent_cfg.get("available_tools")
@@ -143,19 +162,52 @@ class FibreOrchestrator:
                     agent_skills = getattr(agent_cfg, "available_skills", None)
                     agent_workflows = getattr(agent_cfg, "available_workflows", None)
                     agent_system_context = getattr(agent_cfg, "system_context", None)
-                
-                if agent_id:
-                    await self.spawn_agent(
-                        parent_session_id=session_id,
-                        agent_id=agent_id,
-                        system_prompt=agent_system_prompt,
-                        description=agent_description,
-                        available_tools=agent_tools,
-                        available_skills=agent_skills,
-                        available_workflows=agent_workflows,
-                        system_context=agent_system_context
-                    )
-                    logger.info(f"FibreOrchestrator: Initialized custom sub-agent '{agent_id}'")
+
+                # Skip if agent_id is empty or agent already exists
+                if not agent_id:
+                    logger.warning("FibreOrchestrator: Skipping custom agent with empty agent_id")
+                    continue
+
+                # Check if agent already exists in backend or local memory
+                agent_exists = False
+                if self.backend_client and await self.backend_client.check_health():
+                    # Check backend
+                    backend_agent = await self.backend_client.get_agent(agent_id)
+                    if backend_agent:
+                        agent_exists = True
+                        logger.info(f"FibreOrchestrator: Agent '{agent_id}' already exists in backend, skipping creation")
+                if not agent_exists and agent_id in self.sub_agents:
+                    # Check local memory
+                    agent_exists = True
+                    logger.info(f"FibreOrchestrator: Agent '{agent_id}' already exists in local memory, skipping creation")
+
+                if agent_exists:
+                    # 将agent_id name 和 description 添加到当前session_context 的system_context 变量中的available_sub_agents
+                    if session_context.system_context.get("available_sub_agents"):
+                        session_context.system_context["available_sub_agents"].append({
+                            "agent_id": agent_id,
+                            "name": agent_cfg.get("name", agent_id),
+                            "description": agent_description
+                        })
+                    else:
+                        session_context.system_context["available_sub_agents"] = [{
+                            "agent_id": agent_id,
+                            "name": agent_cfg.get("name", agent_id),
+                            "description": agent_description
+                        }]
+                    continue
+
+                await self.spawn_agent(
+                    parent_session_id=session_id,
+                    agent_id=agent_id,
+                    system_prompt=agent_system_prompt,
+                    description=agent_description,
+                    available_tools=agent_tools,
+                    available_skills=agent_skills,
+                    available_workflows=agent_workflows,
+                    system_context=agent_system_context
+                )
+                logger.info(f"FibreOrchestrator: Initialized custom sub-agent '{agent_id}'")
         
         # 2. Setup and run main agent loop
         try:
@@ -204,13 +256,13 @@ class FibreOrchestrator:
             #             session_context.add_messages(msg)
             
             # 2.5 Run container agent
-            if tool_manager:
-                # Exclude sys_finish_task for main agent
-                all_tools = tool_manager.list_all_tools_name()
-                if 'sys_finish_task' in all_tools:
-                    allowed_tools = [t for t in all_tools if t != 'sys_finish_task']
-                    tool_manager = ToolProxy(tool_manager, allowed_tools)
-                    logger.info("FibreOrchestrator: Using ToolProxy to exclude sys_finish_task for Main Agent")
+            # if tool_manager:
+            #     # Exclude sys_finish_task for main agent
+            #     all_tools = tool_manager.list_all_tools_name()
+            #     if 'sys_finish_task' in all_tools:
+            #         allowed_tools = [t for t in all_tools if t != 'sys_finish_task']
+            #         tool_manager = ToolProxy(tool_manager, allowed_tools)
+            #         logger.info("FibreOrchestrator: Using ToolProxy to exclude sys_finish_task for Main Agent")
             
             # Set max_loop_count
             if session_context.agent_config is None:
@@ -288,7 +340,7 @@ class FibreOrchestrator:
         pm = PromptManager()
 
         # 1. Base Description (custom_system_prompt)
-        base_desc = custom_system_prompt
+        base_desc = custom_system_prompt or ""
 
         # 2. System Mechanics (Shared)
         system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
@@ -297,7 +349,10 @@ class FibreOrchestrator:
         common_rules = pm.get_prompt('common_agent_rules', agent='FibreAgent', language=lang)
 
         # Combine for all agents
-        return f"{base_desc}\n\n{system_mechanics}\n\n{common_rules}"
+        if base_desc:
+            return f"{base_desc}\n\n{system_mechanics}\n\n{common_rules}"
+        else:
+            return f"{system_mechanics}\n\n{common_rules}"
 
     async def spawn_agent(
         self,
@@ -469,9 +524,9 @@ class FibreOrchestrator:
             if 'available_sub_agents' not in parent_session.session_context.system_context:
                 parent_session.session_context.system_context['available_sub_agents'] = []
 
-            agent_info = {"id": final_agent_id, "name": name or final_agent_id, "description": description or system_prompt[:100]}
-            existing_ids = [a.get("id") for a in parent_session.session_context.system_context['available_sub_agents']]
-            if final_agent_id not in existing_ids:
+            agent_info = {"agent_id": final_agent_id, "name": name or final_agent_id, "description": description or system_prompt[:100]}
+            existing_ids = [a.get("agent_id") for a in parent_session.session_context.system_context['available_sub_agents']]
+            if agent_info["agent_id"] not in existing_ids:
                 parent_session.session_context.system_context['available_sub_agents'].append(agent_info)
 
         return final_agent_id
@@ -843,9 +898,12 @@ class FibreOrchestrator:
                 system_context=system_context
             ):
                 # Filter chunks for current session and assistant role
+                # Skip non-content types like 'token_usage', 'stream_end'
                 filtered_chunks = [
                     c for c in chunks
-                    if c.session_id == session_id and c.role == MessageRole.ASSISTANT.value
+                    if c.session_id == session_id 
+                    and c.role == MessageRole.ASSISTANT.value
+                    and c.type not in ('token_usage', 'stream_end')
                 ]
                 if filtered_chunks:
                     all_content_chunks.extend(filtered_chunks)
@@ -860,12 +918,13 @@ class FibreOrchestrator:
                                 try:
                                     args = json.loads(args_str)
                                     task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
+                                    logger.info(f"[Orchestrator] sys_finish_task called with status={args.get('status')}, result={args.get('result')}")
                                 except Exception as e:
                                     logger.error(f"Error parsing sys_finish_task arguments: {e}")
 
             # If sys_finish_task was called, return its result
             if task_result:
-                return f"SubSessionID: {session_id}\n{task_result}"
+                return f"SubSessionID: {session_id} , if you need to continue the task, please use this SubSessionID.\n{task_result}"
 
             # If no sys_finish_task, generate summary from accumulated content
             # Extract content from MessageChunk objects
@@ -902,18 +961,29 @@ class FibreOrchestrator:
 
             # Try to use the main agent's LLM for summary
             try:
-                from sagents.core.llm import LLMClient
-                llm_client = LLMClient()
-                response = await llm_client.acomplete(
-                    messages=messages_input,
-                    model="default"  # Use default model
-                )
-                summary_content = response.content if hasattr(response, 'content') else str(response)
-                return f"SubSessionID: {session_id}\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
+                # Get agent from main session (self.agent)
+                if self.agent and hasattr(self.agent, '_call_llm_streaming'):
+                    from sagents.session_runtime import session_scope
+                    with session_scope(caller_session_id):
+                        response_stream = self.agent._call_llm_streaming(
+                            messages=messages_input,
+                            session_id=caller_session_id,
+                            step_name="sub_agent_fallback_summary"
+                        )
+
+                        summary_content = ""
+                        async for chunk in response_stream:
+                            if chunk.choices and chunk.choices[0].delta.content:
+                                summary_content += chunk.choices[0].delta.content
+
+                    return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent finished without calling 'sys_finish_task'. AI Summary:\n{summary_content}"
+                else:
+                    # Fallback: return accumulated content directly
+                    return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
             except Exception as e:
                 logger.warning(f"Failed to generate summary via LLM: {e}")
                 # Fallback: return accumulated content directly
-                return f"SubSessionID: {session_id}\nSub-agent response:\n{history_str}"
+                return f"SubSessionID: {session_id}, if you need to continue the task, please use this SubSessionID.\nSub-agent response:\n{history_str}"
 
         except Exception as e:
             logger.error(f"Backend API call failed: {e}, falling back to internal execution")

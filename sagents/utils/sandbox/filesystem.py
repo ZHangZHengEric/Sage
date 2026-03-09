@@ -109,8 +109,99 @@ class SandboxFileSystem:
             rel_root = os.path.relpath(root, self.host_path)
             if rel_root == 'skills':
                 dirs[:] = []
-        
+
         return system_prefix
+
+    def get_file_tree_compact(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 5) -> str:
+        """
+        Returns a compact tree representation using simple indentation.
+        Uses 2-space indentation to show hierarchy - easy for LLMs to understand.
+
+        Args:
+            include_hidden: Whether to include hidden files (starting with .) in the tree.
+                            Note: Sensitive directories like .sandbox, .git are always excluded.
+            root_path: The root path to start the traversal from. If None, uses self.host_path.
+            max_depth: The maximum depth to traverse. None means no limit.
+            max_items_per_dir: Maximum number of items (files + dirs) to show per directory
+                              for subdirectories. Root directory is not limited. Default is 5.
+
+        Example output:
+        workspace/
+          file1.txt
+          file2.txt
+          dir1/
+            subfile1.txt
+            subfile2.txt
+          dir2/
+            ... (and 3 more items)
+        """
+        target_root = root_path if root_path else self.host_path
+
+        if not os.path.exists(target_root):
+            return ""
+
+        # Directories that are always hidden regardless of include_hidden
+        ALWAYS_HIDDEN_DIRS = {'.sandbox', '.git', '.idea', '.vscode', '__pycache__', 'node_modules', 'venv', '.DS_Store'}
+
+        target_root = os.path.abspath(target_root)
+        base_depth = target_root.rstrip(os.sep).count(os.sep)
+
+        result = []
+
+        # Get root directory name
+        root_name = os.path.basename(target_root) or "workspace"
+        result.append(f"{root_name}/")
+
+        for root, dirs, files in os.walk(target_root):
+            # Calculate current depth
+            current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
+
+            # Check depth limit
+            if max_depth is not None and current_depth >= max_depth:
+                dirs[:] = []
+
+            # Filter directories
+            dirs[:] = [d for d in dirs if d not in ALWAYS_HIDDEN_DIRS and (include_hidden or not d.startswith('.'))]
+
+            # Filter files
+            filtered_files = [f for f in files if f not in ALWAYS_HIDDEN_DIRS and (include_hidden or not f.startswith('.'))]
+
+            rel_root = os.path.relpath(root, target_root)
+            if rel_root == '.':
+                rel_root = ''
+
+            # Get relative path components for indentation
+            path_parts = rel_root.split(os.sep) if rel_root else []
+            indent = "  " * len(path_parts)  # 2 spaces per level
+
+            # Collect items for this directory
+            items = []
+            for d in sorted(dirs):
+                items.append(('dir', d))
+            for f in sorted(filtered_files):
+                items.append(('file', f))
+
+            # Apply max_items_per_dir limit for subdirectories
+            shown_items = items
+            hidden_count = 0
+            if current_depth > 0 and len(items) > max_items_per_dir:
+                shown_items = items[:max_items_per_dir]
+                hidden_count = len(items) - max_items_per_dir
+
+            # Add items with indentation
+            for item_type, item_name in shown_items:
+                suffix = "/" if item_type == 'dir' else ""
+                result.append(f"{indent}  {item_name}{suffix}")
+
+            # Add ellipsis if truncated
+            if hidden_count > 0:
+                result.append(f"{indent}  ... (and {hidden_count} more items)")
+
+            # Special handling for 'skills' directory
+            if rel_root == 'skills':
+                dirs[:] = []
+
+        return "\n".join(result)
 
     def to_host_path(self, virtual_path: str) -> str:
         """
