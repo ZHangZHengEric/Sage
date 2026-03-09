@@ -31,8 +31,10 @@ class VersionArtifact(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: generate_short_id())
     version_id: Mapped[str] = mapped_column(ForeignKey("version.id"))
     platform: Mapped[str] = mapped_column(String(32)) # e.g., darwin-aarch64, darwin-x86_64, windows-x86_64, linux-x86_64
-    url: Mapped[str] = mapped_column(String(512))
-    signature: Mapped[str] = mapped_column(Text, nullable=True)
+    
+    installer_url: Mapped[str] = mapped_column(String(512), nullable=True)
+    updater_url: Mapped[str] = mapped_column(String(512), nullable=True)
+    updater_signature: Mapped[str] = mapped_column(Text, nullable=True)
     
     version: Mapped["Version"] = relationship(back_populates="artifacts")
 
@@ -86,8 +88,9 @@ class VersionDao(BaseDao):
                 a = VersionArtifact(
                     version_id=v.id,
                     platform=art['platform'],
-                    url=art['url'],
-                    signature=art.get('signature')
+                    installer_url=art.get('installer_url'),
+                    updater_url=art.get('updater_url'),
+                    updater_signature=art.get('updater_signature')
                 )
                 session.add(a)
             # Session commit happens automatically on exit if configured, or we trust the framework

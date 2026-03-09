@@ -7,9 +7,8 @@ from .kdb_doc import KdbDoc, KdbDocDao, KdbDocStatus
 from .mcp_server import MCPServer, MCPServerDao
 from .skill import SkillOwnership, SkillOwnershipDao
 from .user import User, UserDao
-from .system import SystemInfo, SystemInfoDao
+from .system import SystemInfo, SystemInfoDao, Version, VersionDao, VersionArtifact
 from .llm_provider import LLMProvider, LLMProviderDao
-
 __all__ = [
     "Agent",
     "AgentConfigDao",
@@ -35,4 +34,8 @@ __all__ = [
     "SkillOwnershipDao",
     "LLMProvider",
     "LLMProviderDao",
+    "Version",
+    "VersionDao",
+    "VersionArtifact",
+    "VersionArtifactDao",
 ]

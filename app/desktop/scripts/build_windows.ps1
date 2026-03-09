@@ -316,6 +316,9 @@ if (Test-Path $LocalTauriCmd) {
 Write-Host "Tauri CLI: $TauriCmd" -ForegroundColor Cyan
 $env:CI = "true"
 $env:CARGO_TERM_COLOR = "never"
+# Skip signature for updater artifacts as keys are not provided
+# $env:TAURI_SKIP_SIGNATURE = "true"
+
 Write-Host "Building Tauri application (this may take a while)..." -ForegroundColor Cyan
 
 $Process = Start-Process -FilePath $TauriCmd -ArgumentList $TauriArgs -NoNewWindow -Wait -PassThru -WorkingDirectory $TauriDir

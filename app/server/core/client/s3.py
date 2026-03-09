@@ -90,6 +90,80 @@ async def init_s3_client(
     return client
 
 
+async def upload_file_with_path(
+    file_data: bytes, 
+    path: str, 
+    content_type: str = "application/octet-stream"
+) -> str:
+    """
+    上传文件到指定路径 (bucket/path)
+    """
+    client = S3_CLIENT
+    cfg = config.get_startup_config()
+    bucket = "sage" # Force bucket name as requested
+    
+    # Get public base URL
+    if cfg and cfg.s3_public_base_url:
+        public_base = cfg.s3_public_base_url
+    elif cfg and cfg.s3_endpoint:
+        protocol = "https://" if cfg.s3_secure else "http://"
+        # Strip protocol if present in endpoint
+        ep = cfg.s3_endpoint
+        if ep.startswith("http://"): ep = ep[7:]
+        elif ep.startswith("https://"): ep = ep[8:]
+        public_base = f"{protocol}{ep}/{bucket}"
+    else:
+        # Fallback if config is missing (should be caught by client check)
+        raise SageHTTPException(status_code=500, detail="S3 configuration missing")
+
+    if not client:
+        raise SageHTTPException(status_code=500, detail="S3 client not initialized")
+
+    # Ensure bucket exists
+    try:
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+            # Set public policy
+            policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": ["*"]},
+                        "Action": ["s3:GetBucketLocation", "s3:ListBucket"],
+                        "Resource": [f"arn:aws:s3:::{bucket}"],
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": ["*"]},
+                        "Action": ["s3:GetObject"],
+                        "Resource": [f"arn:aws:s3:::{bucket}/*"],
+                    },
+                ],
+            }
+            client.set_bucket_policy(bucket, json.dumps(policy))
+    except Exception as e:
+        logger.error(f"Failed to ensure bucket {bucket}: {e}")
+        # Continue anyway, maybe it exists or we don't have permission to check/create
+
+    # Upload
+    try:
+        client.put_object(
+            bucket, 
+            path, 
+            io.BytesIO(file_data), 
+            len(file_data), 
+            content_type=content_type
+        )
+    except Exception as e:
+        logger.error(f"S3 upload failed: {e}")
+        raise SageHTTPException(status_code=500, detail=f"S3 upload failed: {str(e)}")
+
+    url = f"{public_base}/{path}"
+    logger.info(f"File uploaded to {bucket}/{path}: {url}")
+    return url
+
+
 async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str:
     """
     上传文件到 RustFS 并返回公共 URL

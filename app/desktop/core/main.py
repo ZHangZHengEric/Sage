@@ -101,7 +101,7 @@ def create_fastapi_app() -> FastAPI:
     return app
 
 
-def start_server(port: int = 8080):
+def start_server(port: int = 8000):
     """
     启动 Uvicorn Server
 
