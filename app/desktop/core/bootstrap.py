@@ -195,6 +195,99 @@ async def copy_default_skills():
         logger.error(f"同步内置 skills 失败: {e}")
 
 
+async def copy_wiki_docs():
+    """复制 wiki 文档到用户目录（每次启动都检查并同步）"""
+    try:
+        import shutil
+        from pathlib import Path
+        
+        # 用户 sage 使用说明文档目录
+        user_home = Path.home()
+        user_docs_dir = user_home / ".sage" / "sage-usage-docs"
+        user_docs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 获取打包的 wiki 文档目录
+        wiki_docs_dir = None
+        
+        # 尝试从 tauri 资源目录获取
+        try:
+            import os
+            import sys
+            
+            # 检查是否在 tauri 环境中
+            if 'TAURI_RESOURCES_DIR' in os.environ:
+                wiki_docs_dir = Path(os.environ['TAURI_RESOURCES_DIR']) / "docs"
+            elif getattr(sys, 'frozen', False):
+                # 打包环境：使用 _MEIPASS 临时目录
+                if hasattr(sys, '_MEIPASS'):
+                    wiki_docs_dir = Path(sys._MEIPASS) / "docs"
+                else:
+                    # 备用方案：向上查找
+                    current_file = Path(__file__).resolve()
+                    wiki_docs_dir = current_file.parent.parent.parent.parent / "docs"
+                
+                # 如果找不到，尝试相对于可执行文件的位置
+                if not wiki_docs_dir.exists():
+                    wiki_docs_dir = Path(sys.executable).parent / "_internal" / "docs"
+            else:
+                # 开发环境：使用相对路径
+                current_file = Path(__file__).resolve()
+                # wiki 在 app/wiki 目录下
+                # bootstrap.py 在 app/desktop/core/bootstrap.py
+                # 向上三级到 app/ 目录
+                wiki_docs_dir = current_file.parent.parent.parent / "wiki"
+        except Exception as e:
+            logger.warning(f"无法确定 wiki 文档目录: {e}")
+            return
+        
+        if not wiki_docs_dir or not wiki_docs_dir.exists():
+            logger.warning(f"Wiki 文档目录不存在: {wiki_docs_dir}")
+            return
+        
+        logger.info(f"同步 wiki 文档从 {wiki_docs_dir} 到 {user_docs_dir}")
+        
+        # 复制所有 markdown 文件（覆盖已存在的）
+        copied_count = 0
+        updated_count = 0
+        
+        for md_file in wiki_docs_dir.rglob("*.md"):
+            try:
+                # 计算相对路径
+                rel_path = md_file.relative_to(wiki_docs_dir)
+                target_path = user_docs_dir / rel_path
+                
+                # 创建目标目录
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # 检查文件是否需要更新
+                if target_path.exists():
+                    # 比较文件修改时间或内容
+                    import hashlib
+                    
+                    def file_hash(path):
+                        with open(path, 'rb') as f:
+                            return hashlib.md5(f.read()).hexdigest()
+                    
+                    if file_hash(md_file) != file_hash(target_path):
+                        shutil.copy2(md_file, target_path)
+                        logger.info(f"已更新 wiki 文档: {rel_path}")
+                        updated_count += 1
+                    else:
+                        logger.debug(f"Wiki 文档未变化: {rel_path}")
+                else:
+                    shutil.copy2(md_file, target_path)
+                    logger.info(f"已复制 wiki 文档: {rel_path}")
+                    copied_count += 1
+                    
+            except Exception as e:
+                logger.error(f"复制 wiki 文档 {md_file.name} 失败: {e}")
+        
+        logger.info(f"Wiki 文档同步完成，新增 {copied_count} 个，更新 {updated_count} 个")
+        
+    except Exception as e:
+        logger.error(f"同步 wiki 文档失败: {e}")
+
+
 async def close_skill_manager():
     """关闭技能管理器"""
     set_skill_manager(None)

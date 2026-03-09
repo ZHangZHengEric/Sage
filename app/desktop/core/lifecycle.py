@@ -3,6 +3,7 @@ from loguru import logger
 from .bootstrap import (
     close_skill_manager,
     close_tool_manager,
+    copy_wiki_docs,
     initialize_db_connection,
     initialize_im_service,
     initialize_skill_manager,
@@ -19,6 +20,7 @@ async def initialize_system():
     await initialize_db_connection()
     await initialize_tool_manager()
     await initialize_skill_manager()
+    await copy_wiki_docs()  # 复制 wiki 文档到用户目录
     await initialize_session_manager()
     await initialize_im_service()
     StreamManager.get_instance()

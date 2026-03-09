@@ -64,7 +64,8 @@
     "resources": [
       "../../skills",
       "../../../mcp_servers",
-      "sidecar"
+      "sidecar",
+      "../../wiki"
     ],
     "shortDescription": "",
     "targets": [
