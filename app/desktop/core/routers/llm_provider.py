@@ -50,16 +50,22 @@ async def list_providers(request: Request):
 async def create_provider(data: LLMProviderCreate, request: Request):
     dao = LLMProviderDao()
 
-    # Check if provider already exists
+    # Check if provider already exists (match by base_url, model, and api_keys)
     existing_providers = await dao.get_by_config(base_url=data.base_url, model=data.model)
     for provider in existing_providers:
         if provider.api_keys == data.api_keys:
             return await Response.succ(data=provider.id)
 
+    # Auto-generate name if not provided
+    provider_name = data.name
+    if not provider_name:
+        # Generate name from model and base_url
+        provider_name = f"{data.model}@{data.base_url.replace('https://', '').replace('http://', '').split('/')[0]}"
+
     provider_id = str(uuid.uuid4())
     provider = LLMProvider(
         id=provider_id,
-        name=data.name,
+        name=provider_name,
         base_url=data.base_url,
         api_keys=data.api_keys,
         model=data.model,
