@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-点击查看-orange?style=for-the-badge)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/📄_License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
-[![Version](https://img.shields.io/badge/🚀_Version-0.9.9-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/🚀_Version-1.0.0-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage Multi-Agent Framework**
 
@@ -20,16 +20,47 @@
 
 ---
 
+## 📸 **Product Screenshots**
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/workbench.png" width="100%" alt="Workbench"/>
+      <br/><strong>Visual Workbench</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/chat.png" width="100%" alt="Chat"/>
+      <br/><strong>Real-time Collaboration</strong>
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/screenshots/preview.png" width="100%" alt="Preview"/>
+      <br/><strong>Multi-format Support</strong>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+> 📖 **Detailed Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
+
+---
+
 ## ✨ **Key Features**
 
-- 🧠 **Multi-Agent Orchestration**: Support for both **TaskExecutor** (Sequential) and **FibreAgent** (Parallel) orchestration modes.
-- 🏗️ **Enterprise Architecture**: Robust storage layer powered by **Elasticsearch** (Vector), **RustFS** (Object), and **SQLAlchemy** (Relational).
-- � **RAG Engine 2.0**: Advanced Retrieval-Augmented Generation with **RRF** (Reciprocal Rank Fusion) and hybrid search.
+- 🧠 **Multi-Agent Orchestration**: Support for **TaskExecutor** (Sequential), **FibreAgent** (Parallel), and **AgentFlow** (Declarative) orchestration modes.
+- 🎯 **Maximized Model Capability**: Stable execution of complex tasks even on smaller models like **Qwen3.5 35B-A3B**, with framework-level optimizations unlocking model potential.
+- 🧩 **Built-in High-Stability Skills**: Pre-installed production-ready Skills that work out of the box, ensuring reliable execution for critical tasks.
 - 🛡️ **Secure Sandbox**: Isolated execution environment (`sagents.utils.sandbox`) for safe agent code execution.
 - 👁️ **Full Observability**: Integrated **OpenTelemetry** tracing to visualize agent thought processes and execution paths.
 - 🧩 **Modular Components**: Plug-and-play architecture for **Skills**, **Tools**, and **MCP Servers**.
 - 📊 **Context Management**: Advanced **Context Budget** controls for precise token optimization.
-- 🐍 **Python 3.11+ Optimized**: Fully typed and linted codebase for enterprise-grade reliability.
+- 💻 **Cross-Platform Desktop**: Native desktop apps for **macOS** (Intel/Apple Silicon), **Windows**, and **Linux**.
+- 🛠️ **Visual Workbench**: Unified workspace for file preview, tool results, and code execution with 15+ format support.
+- 🔌 **MCP Protocol**: Model Context Protocol support for standardized tool integration.
+
+---
 
 ## 🚀 **Quick Start**
 
@@ -39,21 +70,24 @@
 git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 pip install -r requirements.txt
-# For Web UI
-pip install -r app/server/requirements.txt
 ```
 
 ### Running Sage
 
-**Interactive Web Demo (Streamlit)**:
-```bash
-streamlit run app/sage_demo.py -- \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_model deepseek-chat \
-  --default_llm_api_base_url https://api.deepseek.com
-```
+**Desktop Application (Recommended)**:
 
-> If you get "ModuleNotFoundError: No module named 'sagents'", set PYTHONPATH: `export PYTHONPATH=/path/to/your/Sage:$PYTHONPATH`
+Download the latest release for your platform:
+- **macOS**: `.dmg` (Intel & Apple Silicon)
+- **Windows**: `.exe` (NSIS Installer)
+- **Linux**: Build from source
+
+```bash
+# macOS/Linux
+app/desktop/scripts/build.sh release
+
+# Windows
+./app/desktop/scripts/build_windows.ps1 release
+```
 
 **Command Line Interface (CLI)**:
 ```bash
@@ -63,28 +97,38 @@ python app/sage_cli.py \
   --default_llm_base_url https://api.deepseek.com
 ```
 
-**Modern Web App (FastAPI + Vue3)**:
+**Web Application (FastAPI + Vue3)**:
 
-The modern web application is now structured as `app/server` (Backend) and `app/web` (Frontend).
-
-**Deploy with Docker Compose (Recommended)**:
 ```bash
-docker-compose up -d
+# Start backend
+cd app/desktop/core
+python main.py
+
+# Start frontend (in another terminal)
+cd app/desktop/ui
+npm install
+npm run dev
 ```
-Access the application at `http://localhost:30051` (Web) / `http://localhost:30050/docs` (API).
+
+---
 
 ## 🏗️ **System Architecture**
 
 ```mermaid
 graph TD
-    User[User/Client] --> API[Sage Server API]
-    API --> Orch[🧠 Agent Orchestrator]
+    User[User/Client] --> Desktop[💻 Desktop App]
+    User --> Web[🌐 Web UI]
+    Desktop --> API[Sage Server API]
+    Web --> API
     
     subgraph Core[Core Engine]
-        Orch -- "Dispatches" --> Agents["🤖 Agents (Fibre/Standard)"]
-        Agents -- "Uses" --> RAG[📚 RAG Engine]
-        Agents -- "Uses" --> Tools[🛠️ Tools & Skills]
-        Agents -- "Runs in" --> Box[📦 Security Sandbox]
+        API --> Orch[🧠 Agent Orchestrator]
+        Orch -- "Dispatch" --> Flow[📋 AgentFlow]
+        Flow -- "Execute" --> Agents["🤖 Agents<br/>Fibre / Simple / Multi"]
+        Agents -- "Use" --> RAG[📚 RAG Engine]
+        Agents -- "Use" --> Tools[🛠️ Tools & Skills]
+        Agents -- "Use" --> MCP[🔌 MCP Servers]
+        Agents -- "Run in" --> Box[📦 Security Sandbox]
     end
 
     subgraph Infra[Enterprise Infrastructure]
@@ -93,33 +137,93 @@ graph TD
         Orch <--> DB[(SQL Database)]
     end
     
-    Core -.-> Obs["👁️ Observability (OpenTelemetry)"]
+    Core -.-> Obs["👁️ Observability<br/>OpenTelemetry"]
+    Core -.-> Workbench["🛠️ Visual Workbench"]
 ```
 
-## 📅 **What's New in v0.9.9**
+---
 
-- **Smart Tool Selection**: Tool ID-based recommendation system for improved accuracy and unified Agent logic.
-- **Task Scheduler MCP**: Built-in task scheduling service with SQLite persistence and cron job support.
-- **Agent Hub MCP**: Inter-agent messaging center enabling multi-agent collaboration and delegation.
-- **Brave Search MCP**: Web search integration for real-time information retrieval.
-- **Dark Theme**: Full dark mode support with system preference detection.
-- **Model Provider Management**: Dynamic LLM provider configuration with multi-source support.
-- **Sub-task Visualization**: Real-time sub-agent execution tracking and message streaming.
-- **Context Budget**: Intelligent context compression for long conversations.
-- **[View Full Release Notes](release_notes/v0.9.9.md)**
+## 📅 **What's New in v1.0.0**
+
+### 🤖 **SAgents Kernel Updates**
+
+- **Session Management Refactor**: Global `SessionManager` with parent-child session tracking
+- **AgentFlow Engine**: Declarative workflow orchestration with Router → DeepThink → Mode Switch → Suggest flow
+- **Fibre Mode Optimization**: 
+  - Dynamic sub-agent spawning with `sys_spawn_agent`
+  - Parallel task delegation with `sys_delegate_task`
+  - Hour-level long-running task support
+  - 4-level hierarchy depth control
+  - Recursive orchestration capabilities
+- **Lock Management**: Global `LockManager` for session-level isolation
+- **Observability**: OpenTelemetry integration with performance monitoring
+
+### 💻 **App Layer Updates**
+
+- **Visual Workbench**: 
+  - 20+ rendering components
+  - 15+ file format support (PDF, DOCX, PPTX, XLSX, etc.)
+  - List/Single view dual mode
+  - Timeline navigation
+  - Session-isolated state management
+- **Cross-Platform Desktop**: 
+  - macOS (Intel/Apple Silicon) - DMG
+  - Windows - NSIS Installer
+  - Linux - DEB support
+- **Real-time Collaboration**: 
+  - Message stream optimization
+  - File reference extraction
+  - Code block highlighting
+  - Disconnect detection & resume
+- **MCP Support**: Model Context Protocol for external tool integration
+
+### 🔧 **Infrastructure**
+
+- **Tauri 2.0**: Upgraded to stable version with new permission system
+- **Build Optimization**: Rust caching, parallel builds, auto-signing
+- **State Management**: Pinia store with session isolation
+
+**[View Full Release Notes](release_notes/v1.0.0.md)**
+
+---
 
 ## 📚 **Documentation**
 
-- [**Full Documentation Home**](docs/README.md)
-- [**Server Deployment Guide**](docs/SERVER_DEPLOYMENT.md) - Docker & Source deployment
-- [**Examples Usage Guide**](docs/EXAMPLES_USAGE.md) - CLI, Web, & API Server
-- [**Changelog**](docs/CHANGELOG.md) - Latest updates & history
-- [**Agent Framework Architecture**](docs/ARCHITECTURE.md)
-- [**API Reference**](docs/API_REFERENCE.md)
-- [**Configuration Guide**](docs/CONFIGURATION.md)
-- [**Tool Development**](docs/TOOL_DEVELOPMENT.md)
+- 📖 **Full Documentation**: [https://wiki.sage.zavixai.com/](https://wiki.sage.zavixai.com/)
+- 📝 **Release Notes**: [release_notes/](release_notes/)
+- 🏗️ **Architecture**: See `sagents/` directory for core framework
+- 🔧 **Configuration**: Environment variables and config files in `app/desktop/`
 
 ---
+
+## 🛠️ **Development**
+
+### Project Structure
+
+```
+Sage/
+├── sagents/                    # Core Agent Framework
+│   ├── agent/                  # Agent implementations
+│   │   ├── fibre/              # Fibre multi-agent orchestration
+│   │   ├── simple_agent.py     # Simple mode agent
+│   │   └── ...
+│   ├── flow/                   # AgentFlow engine
+│   ├── context/                # Session & message management
+│   ├── tool/                   # Tool system
+│   └── session_runtime.py      # Session manager
+├── app/desktop/                # Desktop Application
+│   ├── core/                   # Python backend (FastAPI)
+│   ├── ui/                     # Vue3 frontend
+│   └── tauri/                  # Tauri 2.0 desktop shell
+└── skills/                     # Built-in skills
+```
+
+### Contributing
+
+We welcome contributions! Please see our [GitHub Issues](https://github.com/ZHangZHengEric/Sage/issues) for tasks and discussions.
+
+---
+
 <div align="center">
 Built with ❤️ by the Sage Team
 </div>

@@ -1,0 +1,183 @@
+/* ============================================
+   Retro - 复古怀旧风格
+   温暖的米色调和复古排版
+   适配小红书卡片渲染
+   ============================================ */
+
+/* 配色定义
+   背景色: #FDF6E3 (复古米黄)
+   前景色: #5C4033 (棕褐色)
+   主色: #D35400 (复古橙)
+   浅橙: #F39C12 (暖黄)
+   深棕: #8B4513 (马鞍棕)
+   米色: #F5DEB3 (小麦色)
+*/
+
+.card-inner {
+  background-color: #fdf6e3;
+}
+
+.card-content {
+  color: #5c4033;
+  font-size: 42px;
+  line-height: 1.8;
+}
+
+/* 标题样式 */
+.card-content h1 {
+  font-size: 72px;
+  font-weight: 700;
+  color: #d35400;
+  margin-bottom: 40px;
+  line-height: 1.3;
+  border-bottom: 4px double #d35400;
+  padding-bottom: 15px;
+}
+
+.card-content h2 {
+  font-size: 56px;
+  font-weight: 600;
+  color: #8b4513;
+  margin: 50px 0 25px 0;
+  line-height: 1.4;
+}
+
+.card-content h3 {
+  font-size: 48px;
+  font-weight: 600;
+  color: #a0522d;
+  margin: 40px 0 20px 0;
+  font-style: italic;
+}
+
+/* 段落 */
+.card-content p {
+  margin-bottom: 35px;
+}
+
+/* 粗体 */
+.card-content strong,
+.card-content b {
+  font-weight: 700;
+  color: #8b4513;
+}
+
+/* 斜体 */
+.card-content em,
+.card-content i {
+  font-style: italic;
+  color: #d35400;
+}
+
+/* 链接 */
+.card-content a {
+  color: #d35400;
+  text-decoration: underline;
+  text-decoration-style: wavy;
+  text-underline-offset: 4px;
+}
+
+/* 列表 */
+.card-content ul,
+.card-content ol {
+  margin: 30px 0;
+  padding-left: 60px;
+}
+
+.card-content li {
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.card-content li::marker {
+  color: #d35400;
+}
+
+/* 引用块 */
+.card-content blockquote {
+  margin: 35px 0;
+  padding: 30px 40px;
+  background-color: #f5deb3;
+  color: #5c4033;
+  border-left: 6px solid #d35400;
+  font-style: italic;
+}
+
+.card-content blockquote p {
+  margin: 0;
+}
+
+/* 行内代码 */
+.card-content code {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 38px;
+  background-color: #f5deb3;
+  color: #8b4513;
+  padding: 6px 16px;
+  border-radius: 4px;
+}
+
+/* 代码块 */
+.card-content pre {
+  margin: 35px 0;
+  padding: 40px;
+  background-color: #5c4033;
+  color: #fdf6e3;
+  border: 3px solid #8b4513;
+  overflow-x: visible;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.card-content pre code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 36px;
+  line-height: 1.5;
+}
+
+/* 分割线 */
+.card-content hr {
+  margin: 50px 0;
+  border: none;
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    #d35400,
+    #d35400 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+/* 图片 */
+.card-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 35px auto;
+  border: 4px solid #8b4513;
+  box-shadow: 4px 4px 0 #d35400;
+}
+
+/* Tags 标签样式 */
+.tags-container {
+  margin-top: 50px;
+  padding-top: 30px;
+  border-top: 3px double #d35400;
+}
+
+.tag {
+  display: inline-block;
+  background-color: #d35400;
+  color: #fdf6e3;
+  padding: 12px 28px;
+  border-radius: 4px;
+  font-size: 34px;
+  margin: 10px 15px 10px 0;
+  font-weight: 600;
+  border: 2px solid #8b4513;
+}

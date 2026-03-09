@@ -1,10 +1,43 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String
+from sqlalchemy import String, JSON
 from sqlalchemy.orm import Mapped, mapped_column
+from typing import Optional, Dict, Any
 
 from .base import Base, BaseDao
+
+
+class UserConfig(Base):
+    __tablename__ = "user_configs"
+
+    user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default={})
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.now, onupdate=datetime.now)
+
+    def __init__(self, user_id: str, config: Dict[str, Any] = None):
+        self.user_id = user_id
+        self.config = config or {}
+        self.updated_at = datetime.now()
+
+
+class UserConfigDao(BaseDao):
+    async def get_config(self, user_id: str) -> Dict[str, Any]:
+        obj = await BaseDao.get_by_id(self, UserConfig, user_id)
+        return obj.config if obj else {}
+
+    async def update_config(self, user_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        obj = await BaseDao.get_by_id(self, UserConfig, user_id)
+        if not obj:
+            obj = UserConfig(user_id=user_id, config=updates)
+            await BaseDao.insert(self, obj)
+        else:
+            # Deep merge or shallow merge? Shallow for now.
+            new_config = obj.config.copy()
+            new_config.update(updates)
+            obj.config = new_config
+            await BaseDao.save(self, obj)
+        return obj.config
 
 
 class User(Base):

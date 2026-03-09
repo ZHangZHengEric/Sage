@@ -40,7 +40,7 @@
             <Info class="w-3.5 h-3.5" />
             {{ t('chat.taskContent') }}
           </div>
-          <div class="text-foreground/80 leading-relaxed whitespace-pre-wrap">{{ task.content || '-' }}</div>
+          <div class="text-foreground/80 leading-6 whitespace-pre-wrap h-[10lh] overflow-y-auto pr-1">{{ task.content || '-' }}</div>
         </div>
 
         <!-- Session ID / Action Button -->

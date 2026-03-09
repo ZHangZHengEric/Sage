@@ -1,35 +1,68 @@
 import os
 import json
-import sqlite3
 import time
 import threading
 import logging
 import httpx
+import uuid
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
+
+# Initialize logger first (before any imports that might use it)
+logger = logging.getLogger("TaskScheduler")
+
+# Try to import croniter, fallback to simple implementation if not available
+try:
+    from croniter import croniter
+    CRONITER_AVAILABLE = True
+except ImportError:
+    CRONITER_AVAILABLE = False
+    logger.warning("croniter not available, using simple cron validation")
+    
+    class SimpleCroniter:
+        """Simple cron parser fallback"""
+        @staticmethod
+        def is_valid(cron_string: str) -> bool:
+            """Basic cron validation (5 fields: min hour day month dow)"""
+            parts = cron_string.split()
+            if len(parts) != 5:
+                return False
+            return True
+        
+        def __init__(self, cron_string: str, start_time=None):
+            self.cron_string = cron_string
+            self.start_time = start_time or datetime.now()
+        
+        def get_next(self, ret_type=None):
+            """Return next run time (simplified - just returns current time + 1 minute)"""
+            return self.start_time + timedelta(minutes=1)
+    
+    croniter = SimpleCroniter
 
 from mcp.server.fastmcp import FastMCP
 from sagents.tool.mcp_tool_base import sage_mcp_tool
 
-from .db import TaskSchedulerDB, TaskType
+from .db import TaskSchedulerDB
 
 # Initialize FastMCP server
 mcp = FastMCP("Task Scheduler Service")
 
-# Constants
-logger = logging.getLogger("TaskScheduler")
+# Base storage path - use SAGE_ROOT if available, otherwise use current directory
+SAGE_ROOT = os.getenv("SAGE_ROOT", os.getcwd())
+DB_PATH = Path(SAGE_ROOT) / "sage.db"
 
-# Base storage path - relative to execution directory
-BASE_DIR = Path("./data/mcp/task_scheduler")
-DB_PATH = BASE_DIR / "tasks.db"
-
-# Ensure data directory exists
-BASE_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure directory exists
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+logger.debug(f"Task scheduler database: {DB_PATH}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("TaskScheduler")
+
+# Task ID prefixes
+ONCE_TASK_PREFIX = "once_"
+RECURRING_TASK_PREFIX = "rec_"
 
 
 def _get_api_base_url() -> str:
@@ -38,16 +71,43 @@ def _get_api_base_url() -> str:
     Since this MCP server runs in the same container as the main server,
     we use localhost with the port from environment or default.
     """
-    # Try to get port from environment variable or use default 8001
-    port = os.getenv("SAGE_PORT", "8001")
+    # Try to get port from environment variable or use default 8080 (desktop app port)
+    port = os.getenv("SAGE_PORT", "8080")
     return f"http://localhost:{port}"
 
 
 # Initialize DB
 db = TaskSchedulerDB(DB_PATH)
 
+# Track processing sessions to ensure sequential execution
+_processing_sessions: Dict[str, threading.Lock] = {}
+_session_lock = threading.Lock()
 
-# --- Scheduler for Task Execution ---
+
+def _get_session_lock(session_id: str) -> threading.Lock:
+    """Get or create a lock for a specific session"""
+    with _session_lock:
+        if session_id not in _processing_sessions:
+            _processing_sessions[session_id] = threading.Lock()
+        return _processing_sessions[session_id]
+
+
+def _encode_task_id(task_id: int, is_recurring: bool = False) -> str:
+    """Encode task ID with prefix"""
+    prefix = RECURRING_TASK_PREFIX if is_recurring else ONCE_TASK_PREFIX
+    return f"{prefix}{task_id}"
+
+
+def _decode_task_id(encoded_id: str) -> tuple[int, bool]:
+    """Decode task ID, returns (task_id, is_recurring)"""
+    if encoded_id.startswith(RECURRING_TASK_PREFIX):
+        return int(encoded_id[len(RECURRING_TASK_PREFIX):]), True
+    elif encoded_id.startswith(ONCE_TASK_PREFIX):
+        return int(encoded_id[len(ONCE_TASK_PREFIX):]), False
+    else:
+        # Fallback: treat as once task without prefix
+        return int(encoded_id), False
+
 
 def _parse_stream_response(response: httpx.Response) -> str:
     """
@@ -112,9 +172,14 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
     """
     task_id = task['id']
     agent_id = task['agent_id']
-    session_id = task['session_id']
+    session_id = task.get('session_id')
     name = task['name']
     description = task['description']
+
+    # Generate a random session_id if not provided (for tasks from other channels)
+    if not session_id:
+        session_id = f"task_{uuid.uuid4().hex[:12]}"
+        logger.info(f"Task {task_id} has no session_id, generated random one: {session_id}")
 
     logger.info(f"Executing task {task_id} for agent {agent_id} (Session: {session_id})")
 
@@ -145,15 +210,9 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
 
         # Add to history
         db.add_task_history(task_id, 'completed', full_response_text)
-
-        # Handle recurring tasks
-        task_type = task.get('task_type', 'once')
-        if task_type != TaskType.ONCE:
-            db.reschedule_recurring_task(task_id, task_type)
-            logger.info(f"Task {task_id} rescheduled for next {task_type} execution")
-        else:
-            # Mark as completed for one-time tasks
-            db.complete_task(task_id)
+        
+        # Mark as completed
+        db.complete_task(task_id)
 
     except Exception as e:
         error_msg = str(e)
@@ -174,43 +233,157 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
             logger.info(f"Task {task_id} failed after {max_retries} retries")
 
 
-def _execute_task(task: Dict[str, Any]) -> bool:
+def _execute_task_with_session_lock(task: Dict[str, Any]) -> None:
     """
-    Execute a task by starting it in a separate thread.
-    Returns True if task was claimed and started successfully.
+    Execute a task with session-level locking to ensure sequential execution
+    for tasks in the same session.
     """
+    session_id = task.get('session_id')
     task_id = task['id']
 
-    # Try to claim the task (change status from pending to processing)
+    # Generate a random session_id if not provided (for tasks from other channels)
+    if not session_id:
+        session_id = f"task_{uuid.uuid4().hex[:12]}"
+        logger.info(f"Task {task_id} has no session_id for locking, generated random one: {session_id}")
+
+    # Get the lock for this session
+    lock = _get_session_lock(session_id)
+    
+    # Try to claim the task first (atomic operation)
     if not db.claim_task(task_id):
         logger.info(f"Task {task_id} already being processed or not pending. Skipping.")
-        return False
+        return
+    
+    # Acquire the session lock to ensure sequential execution
+    logger.info(f"Acquiring session lock for {session_id} to execute task {task_id}")
+    with lock:
+        logger.info(f"Session lock acquired for {session_id}, executing task {task_id}")
+        _execute_task_sync(task)
+        logger.info(f"Task {task_id} execution completed, releasing session lock")
 
-    # Start task execution in a separate thread
-    task_thread = threading.Thread(
-        target=_execute_task_sync,
-        args=(task,),
-        daemon=True,
-        name=f"TaskExecutor-{task_id}"
-    )
-    task_thread.start()
-    logger.info(f"Task {task_id} started in thread {task_thread.name}")
-    return True
+
+def _check_and_spawn_recurring_tasks():
+    """
+    Check recurring tasks and spawn one-time task instances if needed.
+    This should be called before processing pending tasks.
+    """
+    now = datetime.now()
+    
+    # Get all enabled recurring tasks
+    recurring_tasks = db.list_recurring_tasks(enabled_only=True)
+    
+    spawned_count = 0
+    for recurring_task in recurring_tasks:
+        try:
+            task_id = recurring_task['id']
+            cron_expr = recurring_task['cron_expression']
+            last_executed = recurring_task.get('last_executed_at')
+            
+            # Parse cron expression
+            if not croniter.is_valid(cron_expr):
+                logger.warning(f"Invalid cron expression for recurring task {task_id}: {cron_expr}")
+                continue
+            
+            # Check if task should run now
+            last_executed_dt = last_executed
+            if isinstance(last_executed_dt, str):
+                try:
+                    last_executed_dt = datetime.fromisoformat(last_executed_dt)
+                except ValueError:
+                    last_executed_dt = datetime.min
+            
+            itr = croniter(cron_expr, last_executed_dt or datetime.min)
+            next_run = itr.get_next(datetime)
+            
+            # If next run time is in the past or very close (within last minute), spawn a task
+            if next_run <= now:
+                # Check if we already have a pending task for this recurring task
+                existing_tasks = db.list_tasks(
+                    session_id=recurring_task['session_id'],
+                    status='pending',
+                    limit=100
+                )
+                
+                # Check if there's already a pending instance of this recurring task
+                # Note: recurring_task_id from DB might be int or str, so convert both to str for comparison
+                has_pending_instance = any(
+                    str(t.get('recurring_task_id')) == str(task_id) for t in existing_tasks
+                )
+                
+                if not has_pending_instance:
+                    # Create a one-time task instance
+                    execute_at = now.isoformat()
+                    new_task_id = db.add_task(
+                        name=recurring_task['name'],
+                        description=recurring_task['description'],
+                        agent_id=recurring_task['agent_id'],
+                        session_id=recurring_task['session_id'],
+                        execute_at=execute_at,
+                        recurring_task_id=task_id
+                    )
+                    logger.info(f"Spawned one-time task {new_task_id} from recurring task {task_id}")
+                    spawned_count += 1
+                
+                # Update last_executed_at
+                db.update_recurring_task_last_executed(task_id)
+                
+        except Exception as e:
+            logger.error(f"Error processing recurring task {recurring_task.get('id')}: {e}")
+    
+    if spawned_count > 0:
+        logger.info(f"Spawned {spawned_count} tasks from recurring tasks")
 
 
 def scheduler_loop():
-    """Background loop to check for pending tasks."""
+    """
+    Background loop to check for pending tasks.
+    
+    Logic:
+    1. First, check recurring tasks and spawn one-time instances if needed
+    2. Then, process pending tasks grouped by session_id (sequential execution per session)
+    """
     logger.info("Task scheduler started.")
-    logger.info(f"API Base URL: {_get_api_base_url()}")
+    logger.debug(f"API Base URL: {_get_api_base_url()}")
+    
     while True:
         try:
+            # Step 1: Check recurring tasks and spawn instances
+            _check_and_spawn_recurring_tasks()
+            
+            # Step 2: Get all pending tasks that are due
             pending_tasks = db.get_pending_tasks()
-            for task in pending_tasks:
-                try:
-                    # Start task in separate thread, don't wait for completion
-                    _execute_task(task)
-                except Exception as e:
-                    logger.error(f"Failed to start task {task['id']}: {e}")
+            
+            if pending_tasks:
+                logger.info(f"Found {len(pending_tasks)} pending tasks to execute")
+                
+                # Group tasks by session_id
+                tasks_by_session: Dict[str, List[Dict]] = {}
+                for task in pending_tasks:
+                    session_id = task['session_id']
+                    if session_id not in tasks_by_session:
+                        tasks_by_session[session_id] = []
+                    tasks_by_session[session_id].append(task)
+                
+                # Process tasks for each session
+                for session_id, tasks in tasks_by_session.items():
+                    logger.info(f"Processing {len(tasks)} tasks for session {session_id}")
+                    
+                    # For each session, only the first task will be executed immediately
+                    # (acquiring the lock), others will wait for the lock
+                    for task in tasks:
+                        try:
+                            # Start task in separate thread with session lock
+                            task_thread = threading.Thread(
+                                target=_execute_task_with_session_lock,
+                                args=(task,),
+                                daemon=True,
+                                name=f"TaskExecutor-{task['id']}"
+                            )
+                            task_thread.start()
+                            logger.info(f"Task {task['id']} started in thread {task_thread.name}")
+                        except Exception as e:
+                            logger.error(f"Failed to start task {task['id']}: {e}")
+                            
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
 
@@ -226,15 +399,16 @@ scheduler_thread.start()
 
 @mcp.tool()
 @sage_mcp_tool(server_name="task_scheduler")
-async def list_tasks(agent_id: Optional[str] = None, status: Optional[str] = None, limit: int = 50) -> str:
+async def list_tasks(agent_id: Optional[str] = None, status: Optional[str] = None, include_recurring: bool = True, limit: int = 50) -> str:
     """
-    List tasks for a specific agent or all tasks.
+    List tasks (both one-time and recurring) for a specific agent or all tasks.
 
     [Effect]
     - Retrieves a list of tasks from the task scheduler database.
     - Can be filtered by agent_id and/or status.
     - Returns task details including name, description, execution time, and status.
-    - Does NOT include full execution content to keep response concise.
+    - One-time tasks have IDs starting with 'once_'
+    - Recurring tasks have IDs starting with 'rec_'
 
     [When to Use]
     - Use this to check what tasks are scheduled for an agent.
@@ -242,18 +416,36 @@ async def list_tasks(agent_id: Optional[str] = None, status: Optional[str] = Non
 
     Args:
         agent_id: Optional filter by agent ID. If not provided, returns tasks for all agents.
-        status: Optional filter by status ('pending', 'processing', 'completed', 'failed').
+        status: Optional filter by status ('pending', 'processing', 'completed', 'failed'). Only applies to one-time tasks.
+        include_recurring: Whether to include recurring task templates. Default True.
         limit: Maximum number of tasks to return (default 50).
 
     Returns:
-        JSON string containing list of tasks (without full execution content).
+        JSON string containing list of tasks with task_type field ('once' or 'recurring').
     """
     try:
-        tasks = db.list_tasks(agent_id=agent_id, status=status, limit=limit)
-        # Remove description field to keep response concise
-        for task in tasks:
-            task.pop('description', None)
-        return json.dumps(tasks, indent=2, ensure_ascii=False)
+        result = []
+        
+        # Get one-time tasks
+        once_tasks = db.list_tasks(agent_id=agent_id, status=status, limit=limit)
+        for task in once_tasks:
+            task['task_id'] = _encode_task_id(task['id'], is_recurring=False)
+            task['task_type'] = 'once'
+            task.pop('id', None)  # Remove raw id
+            task.pop('description', None)  # Keep response concise
+            result.append(task)
+        
+        # Get recurring tasks if requested
+        if include_recurring:
+            recurring_tasks = db.list_recurring_tasks(agent_id=agent_id)
+            for task in recurring_tasks:
+                task['task_id'] = _encode_task_id(task['id'], is_recurring=True)
+                task['task_type'] = 'recurring'
+                task.pop('id', None)  # Remove raw id
+                task.pop('description', None)  # Keep response concise
+                result.append(task)
+        
+        return json.dumps(result[:limit], indent=2, ensure_ascii=False)
     except Exception as e:
         return f"Error listing tasks: {str(e)}"
 
@@ -265,66 +457,78 @@ async def add_task(
     description: str,
     agent_id: str,
     session_id: str,
-    execute_at: str,
-    task_type: str = "once"
+    schedule: str,
+    is_recurring: bool = False
 ) -> str:
     """
     Add a new task to the scheduler.
 
     [Effect]
     - Creates a new task in the database with the specified parameters.
-    - The task will be executed at the specified time.
-    - Supports recurring tasks (daily, weekly, monthly).
+    - For one-time tasks: schedule is execute time in ISO format
+    - For recurring tasks: schedule is a cron expression
 
     [When to Use]
-    - Use this to schedule a one-time task for an agent.
-    - Use this to set up recurring tasks (e.g., daily reports, weekly summaries).
+    - Use this to schedule a one-time task for an agent (set is_recurring=False).
+    - Use this to set up recurring tasks like daily reports (set is_recurring=True).
 
     Args:
         name: The name/title of the task.
         description: Detailed description of what the task should do.
         agent_id: The ID of the agent that will execute this task.
         session_id: The session ID to use when sending the task to the agent.
-        execute_at: Execution time in ISO 8601 format (YYYY-MM-DDTHH:MM:SS).
-        task_type: Type of task - 'once' (default), 'daily', 'weekly', or 'monthly'.
+        schedule: For one-time: execution time in ISO 8601 format (YYYY-MM-DDTHH:MM:SS).
+                 For recurring: cron expression (e.g., "0 9 * * *" for daily at 9 AM).
+        is_recurring: Whether this is a recurring task. Default False.
 
     Returns:
-        Confirmation message with Task ID.
+        Confirmation message with Task ID (prefixed with 'once_' or 'rec_').
     """
     try:
-        # Validate timestamp format
-        datetime.fromisoformat(execute_at)
 
-        # Validate task type
-        if task_type not in [t.value for t in TaskType]:
-            return "Error: Invalid task_type. Must be one of: once, daily, weekly, monthly"
+        if is_recurring:
+            # Validate cron expression
+            if not croniter.is_valid(schedule):
+                return "Error: Invalid schedule for recurring task. Use standard cron format (e.g., '0 9 * * *')."
 
-        task_id = db.add_task(
-            name=name,
-            description=description,
-            agent_id=agent_id,
-            session_id=session_id,
-            execute_at=execute_at,
-            task_type=task_type
-        )
+            task_id = db.add_recurring_task(
+                name=name,
+                description=description,
+                agent_id=agent_id,
+                session_id=session_id,
+                cron_expression=schedule
+            )
+            encoded_id = _encode_task_id(task_id, is_recurring=True)
+            return f"Recurring task '{name}' (ID: {encoded_id}) added successfully. Cron: {schedule}"
+        else:
+            # Validate timestamp format
+            datetime.fromisoformat(schedule)
 
-        task_type_desc = "recurring" if task_type != "once" else "one-time"
-        return f"Task '{name}' (ID: {task_id}) added successfully. Type: {task_type_desc}, Execute at: {execute_at}"
+            task_id = db.add_task(
+                name=name,
+                description=description,
+                agent_id=agent_id,
+                session_id=session_id,
+                execute_at=schedule
+            )
+            encoded_id = _encode_task_id(task_id, is_recurring=False)
+            return f"Task '{name}' (ID: {encoded_id}) added successfully. Execute at: {schedule}"
 
     except ValueError:
-        return "Error: Invalid execute_at format. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
+        return "Error: Invalid schedule format. For one-time tasks use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
     except Exception as e:
         return f"Error adding task: {str(e)}"
 
 
 @mcp.tool()
 @sage_mcp_tool(server_name="task_scheduler")
-async def delete_task(task_id: int) -> str:
+async def delete_task(task_id: str) -> str:
     """
     Delete a task from the scheduler.
 
     [Effect]
-    - Permanently removes the task and its execution history from the database.
+    - For one-time tasks (once_*): Permanently removes the task and its execution history.
+    - For recurring tasks (rec_*): Removes the template and all pending instances.
     - This action cannot be undone.
 
     [When to Use]
@@ -332,70 +536,133 @@ async def delete_task(task_id: int) -> str:
     - Use this to remove completed or failed tasks that are no longer needed.
 
     Args:
-        task_id: The ID of the task to delete.
+        task_id: The ID of the task to delete (e.g., 'once_123' or 'rec_456').
 
     Returns:
         Confirmation message.
     """
     try:
-        task = db.get_task(task_id)
-        if not task:
-            return f"Error: Task {task_id} not found."
+        raw_id, is_recurring = _decode_task_id(task_id)
+        
+        if is_recurring:
+            task = db.get_recurring_task(raw_id)
+            if not task:
+                return f"Error: Recurring task {task_id} not found."
 
-        if db.delete_task(task_id):
-            return f"Task {task_id} ('{task['name']}') deleted successfully."
+            if db.delete_recurring_task(raw_id):
+                return f"Recurring task {task_id} ('{task['name']}') and pending instances deleted successfully."
+            else:
+                return f"Error: Failed to delete recurring task {task_id}."
         else:
-            return f"Error: Failed to delete task {task_id}."
+            task = db.get_task(raw_id)
+            if not task:
+                return f"Error: Task {task_id} not found."
+
+            if db.delete_task(raw_id):
+                return f"Task {task_id} ('{task['name']}') deleted successfully."
+            else:
+                return f"Error: Failed to delete task {task_id}."
     except Exception as e:
         return f"Error deleting task: {str(e)}"
 
 
 @mcp.tool()
 @sage_mcp_tool(server_name="task_scheduler")
-async def complete_task(task_id: int) -> str:
+async def complete_task(task_id: str) -> str:
     """
     Mark a task as completed manually.
 
     [Effect]
-    - Updates the task status to 'completed'.
-    - Sets the completed_at timestamp.
-    - For recurring tasks, this does NOT reschedule them.
+    - For one-time tasks (once_*): Updates status to 'completed' and sets completed_at timestamp.
+    - For recurring tasks (rec_*): Updates the last_executed_at timestamp.
 
     [When to Use]
     - Use this to manually complete a pending task without executing it.
     - Use this to mark a task as done if it was handled outside the scheduler.
 
     Args:
-        task_id: The ID of the task to complete.
+        task_id: The ID of the task to complete (e.g., 'once_123' or 'rec_456').
 
     Returns:
         Confirmation message.
     """
     try:
-        task = db.get_task(task_id)
-        if not task:
-            return f"Error: Task {task_id} not found."
+        raw_id, is_recurring = _decode_task_id(task_id)
+        
+        if is_recurring:
+            task = db.get_recurring_task(raw_id)
+            if not task:
+                return f"Error: Recurring task {task_id} not found."
 
-        if task['status'] == 'completed':
-            return f"Task {task_id} is already completed."
-
-        if db.complete_task(task_id):
-            db.add_task_history(task_id, 'completed_manually')
-            return f"Task {task_id} ('{task['name']}') marked as completed."
+            db.update_recurring_task_last_executed(raw_id)
+            return f"Recurring task {task_id} ('{task['name']}') marked as executed."
         else:
-            return f"Error: Failed to complete task {task_id}."
+            task = db.get_task(raw_id)
+            if not task:
+                return f"Error: Task {task_id} not found."
+
+            if task['status'] == 'completed':
+                return f"Task {task_id} is already completed."
+
+            if db.complete_task(raw_id):
+                db.add_task_history(raw_id, 'completed_manually')
+                return f"Task {task_id} ('{task['name']}') marked as completed."
+            else:
+                return f"Error: Failed to complete task {task_id}."
     except Exception as e:
         return f"Error completing task: {str(e)}"
 
 
 @mcp.tool()
 @sage_mcp_tool(server_name="task_scheduler")
-async def get_task_details(task_id: int) -> str:
+async def enable_task(task_id: str, enabled: bool = True) -> str:
     """
-    Get detailed information about a specific task including execution history.
+    Enable or disable a recurring task.
 
     [Effect]
-    - Retrieves task details and execution history from the database.
+    - Only applies to recurring tasks (rec_*).
+    - Enables or disables the recurring task template.
+    - Disabled recurring tasks will not spawn new one-time task instances.
+
+    [When to Use]
+    - Use this to temporarily pause a recurring task.
+    - Use this to resume a paused recurring task.
+
+    Args:
+        task_id: The ID of the recurring task (e.g., 'rec_456').
+        enabled: True to enable, False to disable.
+
+    Returns:
+        Confirmation message.
+    """
+    try:
+        raw_id, is_recurring = _decode_task_id(task_id)
+        
+        if not is_recurring:
+            return f"Error: Task {task_id} is not a recurring task. Only recurring tasks can be enabled/disabled."
+        
+        task = db.get_recurring_task(raw_id)
+        if not task:
+            return f"Error: Recurring task {task_id} not found."
+
+        if db.enable_recurring_task(raw_id, enabled):
+            status = "enabled" if enabled else "disabled"
+            return f"Recurring task {task_id} ('{task['name']}') {status} successfully."
+        else:
+            return f"Error: Failed to update recurring task {task_id}."
+    except Exception as e:
+        return f"Error updating recurring task: {str(e)}"
+
+
+@mcp.tool()
+@sage_mcp_tool(server_name="task_scheduler")
+async def get_task_details(task_id: str) -> str:
+    """
+    Get detailed information about a specific task.
+
+    [Effect]
+    - For one-time tasks (once_*): Retrieves task details and execution history.
+    - For recurring tasks (rec_*): Retrieves recurring task template details.
     - For execution history, only returns the last 1000 characters of response content.
 
     [When to Use]
@@ -403,41 +670,171 @@ async def get_task_details(task_id: int) -> str:
     - Use this to review execution history and responses.
 
     Args:
-        task_id: The ID of the task to retrieve.
+        task_id: The ID of the task to retrieve (e.g., 'once_123' or 'rec_456').
 
     Returns:
-        JSON string containing task details and history (with truncated response content).
+        JSON string containing task details and history.
     """
     try:
-        task = db.get_task(task_id)
-        if not task:
-            return f"Error: Task {task_id} not found."
+        raw_id, is_recurring = _decode_task_id(task_id)
+        
+        if is_recurring:
+            task = db.get_recurring_task(raw_id)
+            if not task:
+                return f"Error: Recurring task {task_id} not found."
 
-        # Get execution history
-        with db._get_conn() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM task_history WHERE task_id = ? ORDER BY executed_at DESC",
-                (task_id,)
-            )
-            history = [dict(row) for row in cursor.fetchall()]
+            task['task_id'] = task_id
+            task['task_type'] = 'recurring'
+            task.pop('id', None)
+            return json.dumps(task, indent=2, ensure_ascii=False)
+        else:
+            task = db.get_task(raw_id)
+            if not task:
+                return f"Error: Task {task_id} not found."
 
-        # Truncate response content to last 1000 characters
-        for entry in history:
-            if entry.get('response'):
-                response = entry['response']
-                if len(response) > 1000:
-                    entry['response'] = "...[truncated]" + response[-1000:]
+            # Get execution history
+            history = db.get_task_history(raw_id, limit=10)
 
-        result = {
-            "task": task,
-            "history": history
-        }
+            # Truncate response content to last 1000 characters
+            for entry in history:
+                if entry.get('response'):
+                    response = entry['response']
+                    if len(response) > 1000:
+                        entry['response'] = "...[truncated]" + response[-1000:]
 
-        return json.dumps(result, indent=2, ensure_ascii=False)
+            task['task_id'] = task_id
+            task['task_type'] = 'once'
+            task.pop('id', None)
+            
+            result = {
+                "task": task,
+                "history": history
+            }
+
+            return json.dumps(result, indent=2, ensure_ascii=False)
     except Exception as e:
         return f"Error getting task details: {str(e)}"
+
+
+@mcp.tool()
+@sage_mcp_tool(server_name="task_scheduler")
+async def update_task(
+    task_id: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    schedule: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    max_retries: Optional[int] = None
+) -> str:
+    """
+    Update an existing task in the scheduler.
+
+    [Effect]
+    - For one-time tasks (once_*): Updates name, description, agent_id, session_id, execute_at, or max_retries.
+    - For recurring tasks (rec_*): Updates name, description, agent_id, session_id, cron_expression, or enabled.
+    - Only provided fields will be updated; fields not provided remain unchanged.
+
+    [When to Use]
+    - Use this to modify a scheduled task's details.
+    - Use this to change the execution time of a one-time task.
+    - Use this to change the cron schedule of a recurring task.
+    - Use this to enable/disable a recurring task.
+
+    Args:
+        task_id: The ID of the task to update (e.g., 'once_123' or 'rec_456').
+        name: New task name/title (optional).
+        description: New task description (optional).
+        agent_id: New agent ID to execute the task (optional).
+        session_id: New session ID to use (optional).
+        schedule: New schedule - ISO 8601 for one-time, cron expression for recurring (optional).
+        enabled: Enable/disable recurring task (True/False, only for recurring tasks).
+        max_retries: New max retry count (only for one-time tasks).
+
+    Returns:
+        Confirmation message with updated fields.
+    """
+    try:
+        raw_id, is_recurring = _decode_task_id(task_id)
+        
+        if is_recurring:
+            # Validate cron expression if provided
+            if schedule is not None:
+                if not croniter.is_valid(schedule):
+                    return f"Error: Invalid cron expression '{schedule}'. Use format like '0 9 * * *'."
+            
+            # Build update kwargs
+            update_kwargs = {}
+            if name is not None:
+                update_kwargs['name'] = name
+            if description is not None:
+                update_kwargs['description'] = description
+            if agent_id is not None:
+                update_kwargs['agent_id'] = agent_id
+            if session_id is not None:
+                update_kwargs['session_id'] = session_id
+            if schedule is not None:
+                update_kwargs['cron_expression'] = schedule
+            if enabled is not None:
+                update_kwargs['enabled'] = enabled
+            
+            if not update_kwargs:
+                return "Error: No fields to update."
+            
+            task = db.get_recurring_task(raw_id)
+            if not task:
+                return f"Error: Recurring task {task_id} not found."
+            
+            if db.update_recurring_task(raw_id, **update_kwargs):
+                updated_fields = ", ".join(update_kwargs.keys())
+                return f"Recurring task {task_id} updated successfully. Fields updated: {updated_fields}."
+            else:
+                return f"Error: Failed to update recurring task {task_id}."
+        else:
+            # Validate execute_at timestamp if provided
+            if schedule is not None:
+                try:
+                    datetime.fromisoformat(schedule)
+                except ValueError:
+                    return f"Error: Invalid schedule format '{schedule}'. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
+            
+            # Build update kwargs
+            update_kwargs = {}
+            if name is not None:
+                update_kwargs['name'] = name
+            if description is not None:
+                update_kwargs['description'] = description
+            if agent_id is not None:
+                update_kwargs['agent_id'] = agent_id
+            if session_id is not None:
+                update_kwargs['session_id'] = session_id
+            if schedule is not None:
+                update_kwargs['execute_at'] = schedule
+            if max_retries is not None:
+                update_kwargs['max_retries'] = max_retries
+            
+            if not update_kwargs:
+                return "Error: No fields to update."
+            
+            task = db.get_task(raw_id)
+            if not task:
+                return f"Error: Task {task_id} not found."
+            
+            # Check if task can be updated (not processing or completed)
+            if task['status'] in ['processing', 'completed']:
+                return f"Error: Cannot update task {task_id} with status '{task['status']}'. Only pending or failed tasks can be updated."
+            
+            if db.update_task(raw_id, **update_kwargs):
+                updated_fields = ", ".join(update_kwargs.keys())
+                return f"Task {task_id} updated successfully. Fields updated: {updated_fields}."
+            else:
+                return f"Error: Failed to update task {task_id}."
+                
+    except ValueError as e:
+        return f"Error: Invalid value - {str(e)}"
+    except Exception as e:
+        return f"Error updating task: {str(e)}"
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+from app.server.models import agent
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
 from sagents.utils.prompt_manager import PromptManager
@@ -21,7 +22,29 @@ class TaskRouterAgent(AgentBase):
         self.agent_description = "任务路由智能体，专门负责根据用户的任务描述路由到合适的智能体"
         logger.debug("TaskRouterAgent 初始化完成")
 
-    async def run_stream(self, session_context: SessionContext, tool_manager: Optional[ToolManager] = None, session_id: Optional[str] = None) -> AsyncGenerator[List[MessageChunk], None]:
+    async def run_stream(
+        self,
+        session_context: SessionContext,
+    ) -> AsyncGenerator[List[MessageChunk], None]:    
+        # 看看是否对于agent_mode 以及deep think是否开启了自动模式
+        if session_context.agent_config['agent_mode'] == "auto" or session_context.agent_config['agent_mode'] is None or session_context.agent_config['deep_thinking'] =="auto" or session_context.agent_config['deep_thinking'] is None:
+            # 开启了自动模式，需要路由到合适的智能体
+            logger.info(f"开启了自动模式，需要路由到合适的智能体，agent_mode: {session_context.agent_config['agent_mode']}, deep_thinking: {session_context.agent_config['deep_thinking']}")
+            pass
+        else:
+            # 未开启自动模式，直接返回，但是要设置audit_status
+            logger.info(f"未开启自动模式，直接返回，agent_mode: {session_context.agent_config['agent_mode']}, deep_thinking: {session_context.agent_config['deep_thinking']}")
+            session_context.audit_status['agent_mode'] = session_context.agent_config['agent_mode']
+            session_context.audit_status['deep_thinking'] = session_context.agent_config['deep_thinking']
+            yield []
+            return
+
+        if not session_context.tool_manager:
+            raise ValueError("ToolManager is not initialized in SessionContext")
+        session_id = session_context.session_id
+        if self._should_abort_due_to_session(session_context):
+            return
+        tool_manager = session_context.tool_manager
         message_manager = session_context.message_manager
         history_messages = message_manager.extract_all_context_messages(recent_turns=3)
         # 根据 active_budget 压缩消息
@@ -74,7 +97,7 @@ class TaskRouterAgent(AgentBase):
         except Exception:
             logger.warning("TaskRouterAgent: 路由结果解析失败，使用默认值")
             logger.warning(f"TaskRouterAgent: 路由结果解析失败，原始内容：{all_task_router_chunks_content}")
-            task_router_result = {"agent_name": "单智能体", "deep_think": False}
+            task_router_result = {"agent_name": "fibre", "deep_think": False}
         session_context.audit_status['router_agent'] = task_router_result["agent_name"]
         session_context.audit_status['deep_thinking'] = task_router_result["deep_think"]
         logger.info(f"TaskRouterAgent: 路由结果: {task_router_result}")

@@ -10,6 +10,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from streamlit import form
 from sagents.skill import SkillManager, set_skill_manager
 from sagents.tool.tool_manager import ToolManager, set_tool_manager
+from sagents.session_runtime import initialize_global_session_manager
 
 from .core.client.chat import close_chat_client, init_chat_client
 from .core.client.db import close_db_client, init_db_client
@@ -107,65 +108,20 @@ async def close_skill_manager():
     set_skill_manager(None)
 
 
-async def _should_initialize_data(cfg: StartupConfig) -> bool:
-    if cfg and cfg.db_type == "memory":
-        return True
-    from . import models
-
-    mcp_server_dao = models.MCPServerDao()
-    mcp_servers = await mcp_server_dao.get_list()
-    agent_config_dao = models.AgentConfigDao()
-    agent_configs = await agent_config_dao.get_list()
-    return len(mcp_servers) == 0 and len(agent_configs) == 0
-
-
-async def _load_preset_mcp_config(config_path: str):
-    if not config_path or not os.path.exists(config_path):
-        logger.warning(f"预设MCP配置文件不存在: {config_path} , 跳过加载预设MCP")
-        return
-    with open(config_path, "r", encoding="utf-8") as f:
-        config_data = json.load(f)
-    mcp_servers = config_data.get("mcpServers", {})
-    from . import models
-
-    mcp_server_dao = models.MCPServerDao()
-    for name, server_config in mcp_servers.items():
-        await mcp_server_dao.save_mcp_server(name, server_config)
-    logger.info(f"已加载 {len(mcp_servers)} 个MCP服务器配置")
-
-
-async def _load_preset_agent_config(config_path: str):
-    if not config_path or not os.path.exists(config_path):
-        logger.warning(f"预设Agent配置文件不存在: {config_path} , 跳过加载预设Agent")
-        return
-    with open(config_path, "r", encoding="utf-8") as f:
-        config_data = json.load(f)
-    from . import models
-
-    agent_config_dao = models.AgentConfigDao()
-    if "systemPrefix" in config_data or "systemContext" in config_data:
-        obj = models.Agent(agent_id="default", name="Default Agent", config=config_data)
-        await agent_config_dao.save(obj)
-        logger.info("已加载默认Agent配置（旧格式）")
-    else:
-        count = 0
-        for agent_id, agent_config in config_data.items():
-            if isinstance(agent_config, dict):
-                name = agent_config.get("name", f"Agent {agent_id}")
-                obj = models.Agent(agent_id=agent_id, name=name, config=agent_config)
-                await agent_config_dao.save(obj)
-                count += 1
-        logger.info(f"已加载 {count} 个Agent配置")
-
-
-async def initialize_preset_data(cfg: StartupConfig):
-    """初始化数据库预设数据"""
-    if not await _should_initialize_data(cfg):
-        logger.debug("数据库已存在数据，跳过预加载")
-        return
-    await _load_preset_mcp_config(cfg.preset_mcp_config)
-    await _load_preset_agent_config(cfg.preset_running_config)
-    logger.debug("数据库预加载完成")
+async def initialize_session_manager(cfg: StartupConfig):
+    """初始化全局 SessionManager"""
+    try:
+        from sagents.session_runtime import initialize_global_session_manager
+        # 使用 session_dir 作为会话根目录
+        session_manager = initialize_global_session_manager(
+            session_root_space=cfg.session_dir,
+            enable_obs=cfg.trace_jaeger_endpoint is not None
+        )
+        logger.info(f"全局 SessionManager 已初始化，会话根目录: {cfg.session_dir}")
+        return session_manager
+    except Exception as e:
+        logger.error(f"全局 SessionManager 初始化失败: {e}")
+        return None
 
 
 async def validate_and_disable_mcp_servers():
@@ -209,14 +165,8 @@ async def initialize_observability(cfg: StartupConfig):
         logger.info("观测链路上报已初始化")
     else:
         try:
-            from .services.trace import SageSpanExporter, TraceService
-
             resource = Resource(attributes={SERVICE_NAME: "sage-server"})
             provider = TracerProvider(resource=resource)
-
-            # 1. Internal Exporter (for Workflow Panel) - Optional
-            processor = BatchSpanProcessor(SageSpanExporter())
-            provider.add_span_processor(processor)
 
             # 2. OTLP Exporter (for Jaeger/external)
             if cfg and cfg.trace_jaeger_endpoint:
@@ -227,8 +177,6 @@ async def initialize_observability(cfg: StartupConfig):
             # Set global provider
             trace.set_tracer_provider(provider)
 
-            # Start TraceService worker
-            await TraceService.get_instance().start()
             logger.info("观测链路上报已初始化")
         except Exception as e:
             logger.error(f"观测链路上报初始化失败: {e}")
@@ -244,13 +192,7 @@ async def close_observability():
         except Exception as e:
             logger.error(f"观测链路上报关闭失败: {e}")
 
-    from .services.trace import TraceService
-
-    # 2. Stop Trace Service (Drain queue to DB)
-    try:
-        await TraceService.get_instance().stop()
-    finally:
-        logger.info("观测链路上报服务已关闭")
+    logger.info("观测链路上报服务已关闭")
 
 
 async def initialize_scheduler(cfg: StartupConfig):
