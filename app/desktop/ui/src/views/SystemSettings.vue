@@ -13,17 +13,32 @@
                     </p>
                 </div>
                 <div class="flex flex-col items-end gap-2">
-                    <Button 
-                        variant="outline" 
-                        size="sm"
-                        @click="checkForUpdates"
-                        :disabled="checking"
-                    >
-                        <Loader2 v-if="checking" class="w-4 h-4 mr-2 animate-spin" />
-                        <DownloadCloud v-else class="w-4 h-4 mr-2" />
-                        {{ checking ? t('system.checking') : t('system.checkNow') }}
-                    </Button>
-                    <p v-if="updateStatus" class="text-xs text-muted-foreground">{{ updateStatus }}</p>
+                    <template v-if="downloading">
+                      <div class="w-[180px] flex flex-col items-end gap-1">
+                          <Progress 
+                            :model-value="totalBytes > 0 ? downloadProgress : 100" 
+                            class="h-2" 
+                            :class="{'animate-pulse': totalBytes === 0}"
+                          />
+                          <div class="flex justify-between w-full text-xs text-muted-foreground">
+                              <span>{{ formatBytes(downloadedBytes) }}</span>
+                              <span v-if="totalBytes > 0">{{ downloadProgress }}%</span>
+                          </div>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <Button 
+                          variant="outline" 
+                          size="sm"
+                          @click="checkForUpdates"
+                          :disabled="checking"
+                      >
+                          <Loader2 v-if="checking" class="w-4 h-4 mr-2 animate-spin" />
+                          <DownloadCloud v-else class="w-4 h-4 mr-2" />
+                          {{ checking ? t('system.checking') : t('system.checkNow') }}
+                      </Button>
+                      <p v-if="updateStatus" class="text-xs text-muted-foreground">{{ updateStatus }}</p>
+                    </template>
                 </div>
             </div>
             
@@ -101,13 +116,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useLanguage } from '../utils/i18n'
 import { useThemeStore } from '../stores/theme'
 import { useUserStore } from '../stores/user'
+import { useUpdaterStore } from '../stores/updater'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { RefreshCw, Loader2, DownloadCloud } from 'lucide-vue-next'
-import { check } from '@tauri-apps/plugin-updater'
-import { getVersion } from '@tauri-apps/api/app'
-import { relaunch } from '@tauri-apps/plugin-process'
 import {
   Select,
   SelectContent,
@@ -115,56 +129,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { storeToRefs } from 'pinia'
 
 const { t, language, setLanguage } = useLanguage()
 const themeStore = useThemeStore()
 const userStore = useUserStore()
+const updaterStore = useUpdaterStore()
 
-const currentVersion = ref('0.1.0')
-const checking = ref(false)
-const updateStatus = ref('')
+const {
+  currentVersion,
+  checking,
+  downloading,
+  downloadProgress,
+  downloadedBytes,
+  totalBytes,
+  updateStatus
+} = storeToRefs(updaterStore)
 
-const checkForUpdates = async () => {
-  checking.value = true
-  updateStatus.value = ''
-  try {
-    const update = await check()
-    if (update) {
-      console.log(`found update ${update.version} from ${update.date} with notes ${update.body}`)
-      updateStatus.value = t('system.foundUpdate', { version: update.version })
-      // Use standard confirm for now, can be replaced with custom dialog
-      const yes = confirm(t('system.confirmUpdate', { version: update.version, notes: update.body || t('system.noReleaseNotes') }))
-      if (yes) {
-        updateStatus.value = t('system.downloading')
-        let downloaded = 0
-        let contentLength = 0
-        await update.downloadAndInstall((event) => {
-          switch (event.event) {
-            case 'Started':
-              contentLength = event.data.contentLength
-              break
-            case 'Progress':
-              downloaded += event.data.chunkLength
-              break
-            case 'Finished':
-              break
-          }
-        })
-        updateStatus.value = t('system.restarting')
-        await relaunch()
-      } else {
-          updateStatus.value = t('system.updateCancelled')
-      }
-    } else {
-      updateStatus.value = t('system.latestVersion')
-    }
-  } catch (error) {
-    console.error(error)
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    updateStatus.value = t('system.checkUpdateError', { message: errorMessage })
-  } finally {
-    checking.value = false
-  }
+const formatBytes = (bytes, decimals = 2) => {
+  if (!+bytes) return '0 B'
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+}
+
+const checkForUpdates = () => {
+  updaterStore.checkForUpdates()
 }
 
 // 用户头像 URL
@@ -179,9 +171,7 @@ const randomizeAvatar = () => {
 }
 
 onMounted(async () => {
-  try {
-    currentVersion.value = await getVersion()
-  } catch(e) { console.error(e) }
+  updaterStore.init()
 
   // 如果用户没有头像种子，生成一个随机的
   if (!userStore.avatarSeed) {
