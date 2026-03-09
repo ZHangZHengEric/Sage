@@ -129,3 +129,88 @@
 .driver-popover.driver-popover-theme .driver-popover-navigation-btns {
   @apply flex items-center gap-2 !important;
 }
+
+/* Prism Code Highlighting - Light Theme */
+pre[class*="language-"] {
+  @apply bg-slate-100 text-slate-800;
+}
+
+code[class*="language-"] {
+  @apply text-slate-800;
+}
+
+/* Ensure good contrast for syntax highlighting in light mode */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  @apply text-slate-500;
+}
+
+.token.punctuation {
+  @apply text-slate-700;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  @apply text-rose-600;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  @apply text-emerald-600;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  @apply text-amber-600;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  @apply text-blue-600;
+}
+
+.token.function,
+.token.class-name {
+  @apply text-purple-600;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  @apply text-orange-600;
+}
+
+/* Dark mode overrides */
+.dark pre[class*="language-"] {
+  @apply bg-slate-800 text-slate-200;
+}
+
+.dark code[class*="language-"] {
+  @apply text-slate-200;
+}
+
+.dark .token.comment,
+.dark .token.prolog,
+.dark .token.doctype,
+.dark .token.cdata {
+  @apply text-slate-400;
+}
+
+.dark .token.punctuation {
+  @apply text-slate-300;
+}

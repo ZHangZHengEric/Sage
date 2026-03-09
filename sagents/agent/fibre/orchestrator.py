@@ -830,48 +830,55 @@ class FibreOrchestrator:
         # Collect response and process like internal execution
         task_result = None
         all_content_chunks = []
-        all_tool_calls = []
 
         try:
-            async for data in self.backend_client.stream_chat(
+            async for chunks in self.backend_client.stream_chat(
                 agent_id=agent_id,
                 messages=messages,
                 session_id=session_id,
                 system_context=system_context
             ):
-                msg_type = data.get("type")
+                # Filter chunks for current session and assistant role
+                filtered_chunks = [
+                    c for c in chunks
+                    if c.session_id == session_id and c.role == MessageRole.ASSISTANT.value
+                ]
+                if filtered_chunks:
+                    all_content_chunks.extend(filtered_chunks)
 
-                if msg_type == "content":
-                    content_text = data.get("content", "")
-                    if content_text:
-                        all_content_chunks.append(content_text)
-
-                elif msg_type == "tool_call":
-                    tool_calls = data.get("tool_calls", [])
-                    all_tool_calls.extend(tool_calls)
-
-                    # Check for sys_finish_task
-                    for tc in tool_calls:
-                        func_name = tc.get("function", {}).get("name") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", None)
-                        if func_name == "sys_finish_task":
-                            args_str = tc.get("function", {}).get("arguments", "{}") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "arguments", "{}")
-                            try:
-                                args = json.loads(args_str)
-                                task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
-                            except Exception as e:
-                                logger.error(f"Error parsing sys_finish_task arguments: {e}")
-
-                elif msg_type == "stream_end":
-                    break
+                # Check for sys_finish_task in tool_calls
+                for chunk in chunks:
+                    if chunk.tool_calls:
+                        for tc in chunk.tool_calls:
+                            func_name = tc.get("function", {}).get("name") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", None)
+                            if func_name == "sys_finish_task":
+                                args_str = tc.get("function", {}).get("arguments", "{}") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "arguments", "{}")
+                                try:
+                                    args = json.loads(args_str)
+                                    task_result = f"Task finished: {args.get('status')}. Result: {args.get('result')}"
+                                except Exception as e:
+                                    logger.error(f"Error parsing sys_finish_task arguments: {e}")
 
             # If sys_finish_task was called, return its result
             if task_result:
                 return f"SubSessionID: {session_id}\n{task_result}"
 
             # If no sys_finish_task, generate summary from accumulated content
-            history_str = "\n".join(all_content_chunks)
+            # Extract content from MessageChunk objects
+            content_texts = [chunk.content for chunk in all_content_chunks if chunk.content]
+            history_str = "\n".join(content_texts)
+
+            # Debug logging
+            logger.info(f"[DelegateTask Backend] Session: {session_id}, Agent: {agent_id}")
+            logger.info(f"[DelegateTask Backend] Total chunks collected: {len(all_content_chunks)}")
+            logger.info(f"[DelegateTask Backend] Chunks with content: {len(content_texts)}")
+            logger.info(f"[DelegateTask Backend] Total content length: {len(history_str)} chars")
+            if content_texts:
+                logger.info(f"[DelegateTask Backend] First chunk preview: {content_texts[0][:100]}...")
+                logger.info(f"[DelegateTask Backend] Last chunk preview: {content_texts[-1][:100]}...")
 
             if not history_str.strip():
+                logger.warning(f"[DelegateTask Backend] No content received from sub-agent {agent_id}")
                 return f"SubSessionID: {session_id}\nNo response from sub-agent"
 
             # Get prompt from PromptManager
