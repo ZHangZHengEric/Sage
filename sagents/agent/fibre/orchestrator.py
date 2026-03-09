@@ -568,7 +568,8 @@ class FibreOrchestrator:
                 validation_errors.append(f"Task {i}: Agent '{agent_id}' not found")
                 continue
             
-            # Check if session is already running
+            # Check if session is already running (only for internal sessions)
+            # Note: Backend-managed sessions are not tracked in sub_session_manager
             existing_session = self.sub_session_manager.get(session_id)
             if existing_session and existing_session.session_context:
                 # Check if session is active via session_context status
@@ -587,6 +588,9 @@ class FibreOrchestrator:
                         f"cannot be reused for agent '{agent_id}'."
                     )
                     continue
+            # Note: If existing_session is None, it could be:
+            # 1. A new session (OK)
+            # 2. A backend-managed session (OK - backend handles its own lifecycle)
         
         if validation_errors:
             error_msg = "Task validation failed:\n" + "\n".join(f"  - {err}" for err in validation_errors)
