@@ -19,6 +19,8 @@
     "fs:allow-write-text-file",
     "shell:default",
     "updater:default",
+    "process:default",
+    "process:allow-restart",
     {
       "identifier": "fs:scope",
       "allow": [

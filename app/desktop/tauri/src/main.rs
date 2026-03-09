@@ -31,6 +31,56 @@ fn get_server_port() -> Option<u16> {
     std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
 }
 
+#[tauri::command]
+fn get_system_proxy() -> Option<String> {
+    // 1. Try environment variables first
+    if let Ok(proxy) = std::env::var("HTTP_PROXY")
+        .or_else(|_| std::env::var("http_proxy"))
+        .or_else(|_| std::env::var("HTTPS_PROXY"))
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("ALL_PROXY"))
+        .or_else(|_| std::env::var("all_proxy")) 
+    {
+        return Some(proxy);
+    }
+
+    // 2. macOS specific check using scutil
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("scutil").arg("--proxy").output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            
+            let mut host = String::new();
+            let mut port = String::new();
+            let mut enabled = false;
+            
+            for line in output_str.lines() {
+                let line = line.trim();
+                if line.starts_with("HTTPEnable") && line.contains("1") {
+                    enabled = true;
+                }
+                if line.starts_with("HTTPProxy") {
+                    if let Some(val) = line.split(':').nth(1) {
+                        host = val.trim().to_string();
+                    }
+                }
+                if line.starts_with("HTTPPort") {
+                     if let Some(val) = line.split(':').nth(1) {
+                        port = val.trim().to_string();
+                    }
+                }
+            }
+            
+            if enabled && !host.is_empty() && !port.is_empty() {
+                return Some(format!("http://{}:{}", host, port));
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(target_os = "macos")]
 fn set_activation_policy_accessory() {
     unsafe {
@@ -407,7 +457,7 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_port])
+        .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
