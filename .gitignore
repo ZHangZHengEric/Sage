@@ -216,3 +216,4 @@ app/desktop/scripts/certs
 
 # Build Cache
 .build_cache/
+package-lock.json
