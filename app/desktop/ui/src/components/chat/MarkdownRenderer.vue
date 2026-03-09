@@ -247,9 +247,13 @@ const rehypeCodeBlockWrapper = () => {
               'text-sm',
               'font-mono',
               'leading-relaxed',
-              'bg-muted/50',
+              'bg-slate-100',
+              'dark:bg-slate-800',
+              'text-slate-800',
+              'dark:text-slate-200',
               'border',
-              'border-border/50'
+              'border-slate-200',
+              'dark:border-slate-700'
             ]
           }
 
