@@ -119,12 +119,7 @@ const formatDate = (dateStr) => {
 onMounted(async () => {
   try {
     const res = await systemAPI.getLatestVersion()
-    // The request utility wraps the response in { success: true, data: ... }
-    if (res.success) {
-      version.value = res.data
-    } else {
-      error.value = res.message || t('download.loadError')
-    }
+    version.value = res
   } catch (err) {
     console.error(err)
     // If 404, it might mean no version published yet
