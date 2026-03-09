@@ -173,7 +173,16 @@ async def populate_request_from_agent_config(
         user_home = Path.home()
         sage_home = os.path.join(user_home, ".sage")
         agent_workspace = os.path.join(sage_home, "agents")
-        _merge_dict("system_context", {"agent_host_workspace_path": os.path.join(agent_workspace, request.agent_id)})
+        # _merge_dict("system_context", {"agent_host_workspace_path": os.path.join(agent_workspace, request.agent_id)})
+        
+        # 添加 sage-usage-docs 到 external_paths
+        sage_usage_docs = os.path.join(sage_home, "sage-usage-docs")
+        if os.path.exists(sage_usage_docs):
+            current_external_paths = request.system_context.get("external_paths", []) if request.system_context else []
+            if sage_usage_docs not in current_external_paths:
+                current_external_paths.append(sage_usage_docs)
+                _merge_dict("system_context", {"external_paths": current_external_paths})
+                logger.info(f"[Chat] Added sage-usage-docs to external_paths: {sage_usage_docs}")
     # 处理可用技能
     available_skills = request.available_skills
     if available_skills:

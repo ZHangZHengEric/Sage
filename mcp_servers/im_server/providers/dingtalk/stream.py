@@ -8,6 +8,7 @@ import json
 import logging
 import asyncio
 import threading
+import time
 from typing import Callable, Optional, Dict, Any
 
 logger = logging.getLogger("DingTalkStream")
@@ -46,7 +47,8 @@ class DingTalkStreamClient:
         self,
         client_id: str,
         client_secret: str,
-        message_handler: Callable[[Dict[str, Any]], None]
+        message_handler: Callable[[Dict[str, Any]], None],
+        heartbeat_interval: int = 60
     ):
         """Initialize DingTalk Stream client.
         
@@ -54,6 +56,7 @@ class DingTalkStreamClient:
             client_id: Client ID (App Key)
             client_secret: Client Secret (App Secret)
             message_handler: Callback function for received messages
+            heartbeat_interval: Heartbeat check interval in seconds (default: 60)
         """
         if not DINGTALK_SDK_AVAILABLE:
             raise ImportError("dingtalk-stream SDK not installed. Run: pip install dingtalk-stream")
@@ -65,15 +68,38 @@ class DingTalkStreamClient:
         self.client: Optional[Any] = None
         self.ws_thread: Optional[threading.Thread] = None
         
+        # Heartbeat tracking - track if _run_client thread is alive
+        self.heartbeat_interval = heartbeat_interval
+        self._last_message_time: float = 0
+        self._heartbeat_lock = threading.Lock()
+        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._ws_thread_lock = threading.Lock()
+        
     def start(self):
         """Start Stream client in background thread."""
         if self.running:
             return
         
         self.running = True
-        self.ws_thread = threading.Thread(target=self._run_client, daemon=True)
-        self.ws_thread.start()
-        logger.info("DingTalk Stream client started")
+        self._last_message_time = time.time()
+        self._start_ws_thread()
+        
+        # Start heartbeat monitor
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_monitor, daemon=True)
+        self._heartbeat_thread.start()
+        
+        logger.info("DingTalk Stream client started with heartbeat monitoring")
+    
+    def _start_ws_thread(self):
+        """Start the WebSocket client thread."""
+        with self._ws_thread_lock:
+            if self.ws_thread and self.ws_thread.is_alive():
+                logger.debug("[DingTalk] WS thread already running")
+                return
+            
+            self.ws_thread = threading.Thread(target=self._run_client, daemon=True)
+            self.ws_thread.start()
+            logger.info("[DingTalk] WS thread started")
     
     def stop(self):
         """Stop Stream client."""
@@ -87,7 +113,49 @@ class DingTalkStreamClient:
                 pass
         if self.ws_thread:
             self.ws_thread.join(timeout=5)
+        if self._heartbeat_thread:
+            self._heartbeat_thread.join(timeout=2)
         logger.info("DingTalk Stream client stopped")
+    
+    def update_last_message_time(self):
+        """Update the last message received time - called when message is received."""
+        with self._heartbeat_lock:
+            self._last_message_time = time.time()
+    
+    def get_last_message_time(self) -> float:
+        """Get the last message received time."""
+        with self._heartbeat_lock:
+            return self._last_message_time
+    
+    def _heartbeat_monitor(self):
+        """Monitor connection health and restart if thread is dead."""
+        logger.info(f"[DingTalk Heartbeat] Monitor started (interval={self.heartbeat_interval}s)")
+        
+        while self.running:
+            try:
+                time.sleep(self.heartbeat_interval)
+                
+                if not self.running:
+                    break
+                
+                # Check if the WS thread is still alive
+                with self._ws_thread_lock:
+                    is_alive = self.ws_thread and self.ws_thread.is_alive()
+                
+                if not is_alive:
+                    logger.warning("[DingTalk Heartbeat] WS thread is dead, restarting...")
+                    self._start_ws_thread()
+                else:
+                    # Also check last message time for logging purposes
+                    last_time = self.get_last_message_time()
+                    elapsed = time.time() - last_time
+                    logger.debug(f"[DingTalk Heartbeat] WS thread alive, last message {elapsed:.0f}s ago")
+                    
+            except Exception as e:
+                logger.error(f"[DingTalk Heartbeat] Monitor error: {e}")
+                time.sleep(5)
+        
+        logger.info("[DingTalk Heartbeat] Monitor stopped")
     
     def _run_client(self):
         """Run DingTalk Stream client in separate thread with reconnection."""
@@ -152,8 +220,8 @@ class DingTalkStreamClient:
         # Create client
         self.client = _DingTalkStreamClient(credential)
         
-        # Register message handler
-        handler = _DingTalkMessageHandler(self.message_handler)
+        # Register message handler - pass client reference for heartbeat updates
+        handler = _DingTalkMessageHandler(self.message_handler, self)
         self.client.register_callback_handler(
             ChatbotMessage.TOPIC,
             handler
@@ -172,11 +240,17 @@ class DingTalkStreamClient:
 class _DingTalkMessageHandler(ChatbotHandler):
     """Internal handler for DingTalk messages."""
     
-    def __init__(self, message_handler: Callable[[Dict[str, Any]], None]):
+    def __init__(self, message_handler: Callable[[Dict[str, Any]], None], client: Optional['DingTalkStreamClient'] = None):
         self.message_handler = message_handler
+        self._client = client
     
     async def process(self, callback: CallbackMessage):
         """Process incoming message."""
+        # Update heartbeat time when message is received
+        if self._client:
+            self._client.update_last_message_time()
+            logger.debug("[DingTalk Heartbeat] Message received, heartbeat time updated")
+        
         # ===== 最开始的调试日志 =====
         logger.info(f"[DingTalk] ========== process() CALLED ==========")
         logger.info(f"[DingTalk] callback.data: {callback.data}")
