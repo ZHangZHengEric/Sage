@@ -29,12 +29,18 @@ class TaskService:
 
     async def create_one_time_task(self, data: OneTimeTaskCreate) -> Task:
         session_id = "one-time-" + datetime.now().strftime("%Y%m%d%H%M%S")
+        
+        # Ensure execute_at is timezone-aware (using system local time if naive)
+        execute_at = data.execute_at
+        if execute_at.tzinfo is None:
+            execute_at = execute_at.astimezone()
+            
         task = Task(
             name=data.name,
             session_id=session_id,
             description=data.description,
             agent_id=data.agent_id,
-            execute_at=data.execute_at,
+            execute_at=execute_at,
             recurring_task_id=0,
             status="pending"
         )
@@ -52,7 +58,10 @@ class TaskService:
         if data.agent_id is not None:
             task.agent_id = data.agent_id
         if data.execute_at is not None:
-            task.execute_at = data.execute_at
+            execute_at = data.execute_at
+            if execute_at.tzinfo is None:
+                execute_at = execute_at.astimezone()
+            task.execute_at = execute_at
 
         return await self.dao.update_one_time_task(task)
 

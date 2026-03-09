@@ -53,7 +53,7 @@ class SessionManager:
                 json.dump({
                     "bindings": self._bindings,
                     "user_index": self._user_index,
-                    "updated_at": datetime.now().isoformat()
+                    "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
                 }, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Failed to save bindings: {e}")
@@ -92,8 +92,8 @@ class SessionManager:
                 "chat_id": chat_id,
                 "user_name": user_name,
                 "agent_id": agent_id,
-                "bound_at": datetime.now().isoformat(),
-                "last_active": datetime.now().isoformat(),
+                "bound_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                "last_active": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                 "extra": extra or {}
             }
             
@@ -134,7 +134,7 @@ class SessionManager:
             binding = self._bindings.get(session_id)
             if binding:
                 # Update last active
-                binding["last_active"] = datetime.now().isoformat()
+                binding["last_active"] = datetime.now().astimezone().isoformat()
             return binding.copy() if binding else None
     
     def find_session_by_user(self, provider: str, user_id: str) -> Optional[str]:
@@ -197,8 +197,39 @@ class SessionManager:
         """Update last active timestamp."""
         with self._lock:
             if session_id in self._bindings:
-                self._bindings[session_id]["last_active"] = datetime.now().isoformat()
+                self._bindings[session_id]["last_active"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self._save_bindings()
+
+    def _cleanup_expired_sessions(self):
+        """Clean up expired sessions"""
+        now = datetime.now().astimezone()
+        expired_sessions = []
+        
+        with self._lock:
+            for session_id, binding in self._bindings.items():
+                last_active_str = binding.get("last_active")
+                if not last_active_str:
+                    continue
+                    
+                try:
+                    # Robust parsing for both ISO formats (T or space)
+                    last_active_str = last_active_str.replace(" ", "T")
+                    last_active = datetime.fromisoformat(last_active_str)
+                    
+                    # Handle naive datetime (assume local if naive, as it was likely datetime.now())
+                    if last_active.tzinfo is None:
+                        last_active = last_active.replace(tzinfo=now.tzinfo)
+                    
+                    # Check expiration (e.g. 24 hours)
+                    # TODO: Configurable timeout
+                    if (now - last_active).total_seconds() > 24 * 3600:
+                        expired_sessions.append(session_id)
+                except Exception as e:
+                    logger.warning(f"Error checking session expiration for {session_id}: {e}")
+            
+            # Remove expired sessions
+            for session_id in expired_sessions:
+                self.unbind_session(session_id)
 
 
 # Global session manager instance

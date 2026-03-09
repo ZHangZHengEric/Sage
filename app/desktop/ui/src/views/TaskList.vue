@@ -228,6 +228,7 @@
                  <TableHead>{{ t('scheduledTask.status') }}</TableHead>
                  <TableHead>{{ t('scheduledTask.retryCount') }}</TableHead>
                  <TableHead>{{ t('scheduledTask.completedAt') }}</TableHead>
+                 <TableHead class="w-[80px]">{{ t('common.actions') }}</TableHead>
                </TableRow>
              </TableHeader>
              <TableBody>
@@ -238,6 +239,17 @@
                  </TableCell>
                  <TableCell>{{ item.retry_count }}</TableCell>
                  <TableCell>{{ formatDate(item.completed_at) }}</TableCell>
+                 <TableCell>
+                    <Button 
+                      v-if="item.session_id" 
+                      variant="ghost" 
+                      size="icon" 
+                      @click="handleViewSession(item.session_id)"
+                      :title="t('scheduledTask.viewSession') || 'View Session'"
+                    >
+                      <MessageSquare class="h-4 w-4" />
+                    </Button>
+                 </TableCell>
                </TableRow>
                <TableRow v-if="historyList.length === 0">
                  <TableCell colspan="4" class="text-center h-24">{{ t('common.noData') }}</TableCell>
@@ -253,7 +265,8 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
-import { Plus, Edit, Trash2, History } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, History, MessageSquare } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -291,6 +304,7 @@ import cronstrue from 'cronstrue/i18n'
 import CronEditor from '@/components/CronEditor.vue'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
+const router = useRouter()
 const { t, isZhCN } = useLanguage()
 const tasks = ref([])
 const oneTimeTasks = ref([])
@@ -413,7 +427,7 @@ const submitOneTimeForm = async () => {
   try {
     const payload = {
       ...oneTimeForm,
-      execute_at: new Date(oneTimeForm.execute_at).toISOString()
+      execute_at: oneTimeForm.execute_at
     }
     if (oneTimeIsEdit.value) {
       await taskAPI.updateOneTimeTask(currentOneTimeId.value, payload)
@@ -494,6 +508,13 @@ const handleHistory = async (task) => {
   }
 }
 
+const handleViewSession = (sessionId) => {
+  router.push({
+    path: '/agent/chat',
+    query: { session_id: sessionId }
+  })
+}
+
 const submitForm = async () => {
   if (!form.name || !form.agent_id || !form.cron_expression) {
     toast.error(t('common.fillRequired'))
@@ -525,12 +546,10 @@ const getStatusVariant = (status) => {
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
-  // If no timezone info, assume UTC by appending 'Z'
-  if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(dateStr)) {
-    dateStr += 'Z'
-  }
   try {
-    return new Date(dateStr).toLocaleString()
+    // Compatibility for SQLite timestamps (replace space with T for ISO format)
+    const isoStr = typeof dateStr === 'string' ? dateStr.replace(' ', 'T') : dateStr
+    return new Date(isoStr).toLocaleString()
   } catch (e) {
     return dateStr
   }

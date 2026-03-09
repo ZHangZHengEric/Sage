@@ -7,10 +7,12 @@ Date: 2024-12-21
 """
 
 import time
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from pydantic import BaseModel, Field
 
 
 class MemoryType(Enum):
@@ -211,3 +213,24 @@ def get_auxiliary_memory_types() -> List[MemoryType]:
         辅助记忆类型列表
     """
     return [MemoryType.NOTE, MemoryType.BOOKMARK, MemoryType.PATTERN]
+
+
+class UserMemory(BaseModel):
+    """用户记忆模型"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    content: str
+    memory_type: str = "user_preference"  # user_preference, user_profile, system_memory
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # 向量检索相关
+    embedding: Optional[List[float]] = None
+
+
+class MemorySearchResult(BaseModel):
+    """记忆检索结果"""
+    memory: UserMemory
+    score: float
+    timestamp: datetime = Field(default_factory=datetime.now)
