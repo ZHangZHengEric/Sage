@@ -107,7 +107,10 @@
       <div v-else class="h-full flex flex-col items-center justify-center p-4 text-muted-foreground bg-muted/20">
         <File class="w-16 h-16 mb-3 opacity-50" />
         <p class="text-sm mb-1">此文件类型暂不支持预览</p>
-        <p class="text-xs text-muted-foreground/60 mb-4">{{ displayFileName }}</p>
+        <p class="text-xs text-muted-foreground/60 mb-4">displayFileName: {{ displayFileName }}</p>
+        <p class="text-xs text-muted-foreground/40">type: {{ fileType }}, ext: '{{ fileExtension }}'</p>
+        <p class="text-xs text-muted-foreground/40">path: {{ filePath?.substring(0, 50) }}</p>
+        <p class="text-xs text-muted-foreground/40">name prop: '{{ fileName }}'</p>
         <Button 
           variant="outline" 
           size="sm"
@@ -263,7 +266,13 @@ const formatTime = (timestamp) => {
 
 // 文件信息
 const displayFileName = computed(() => {
-  return props.fileName || props.filePath.split('/').pop() || 'file'
+  // 优先从 filePath 提取文件名，因为 fileName 可能是链接文本
+  const pathName = props.filePath.split('/').pop()
+  // 如果 pathName 有扩展名，使用它；否则使用 fileName
+  if (pathName && pathName.includes('.')) {
+    return pathName
+  }
+  return props.fileName || pathName || 'file'
 })
 
 const fileExtension = computed(() => {

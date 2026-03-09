@@ -1,0 +1,194 @@
+/* ============================================
+   Terminal - 终端/命令行风格
+   黑客美学，极简科技感
+   适配小红书卡片渲染
+   ============================================ */
+
+/* 配色定义
+   背景色: #0D1117 (深黑)
+   前景色: #C9D1D9 (淡灰白)
+   主绿: #39D353 (终端绿)
+   黄色: #F0E68C (警告黄)
+   青色: #58A6FF (链接蓝)
+   紫色: #A371F7 (高亮紫)
+*/
+
+.card-inner {
+  background-color: #0d1117;
+}
+
+.card-content {
+  color: #c9d1d9;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+  font-size: 40px;
+  line-height: 1.6;
+}
+
+/* 标题样式 */
+.card-content h1 {
+  font-size: 68px;
+  font-weight: 700;
+  color: #39d353;
+  margin-bottom: 40px;
+  line-height: 1.3;
+}
+
+.card-content h1::before {
+  content: '# ';
+  color: #58a6ff;
+}
+
+.card-content h2 {
+  font-size: 54px;
+  font-weight: 600;
+  color: #58a6ff;
+  margin: 50px 0 25px 0;
+  line-height: 1.4;
+}
+
+.card-content h2::before {
+  content: '## ';
+  color: #a371f7;
+}
+
+.card-content h3 {
+  font-size: 46px;
+  font-weight: 600;
+  color: #a371f7;
+  margin: 40px 0 20px 0;
+}
+
+.card-content h3::before {
+  content: '### ';
+  color: #39d353;
+}
+
+/* 段落 */
+.card-content p {
+  margin-bottom: 35px;
+}
+
+/* 粗体 */
+.card-content strong,
+.card-content b {
+  font-weight: 700;
+  color: #39d353;
+}
+
+/* 斜体 */
+.card-content em,
+.card-content i {
+  font-style: italic;
+  color: #f0e68c;
+}
+
+/* 链接 */
+.card-content a {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* 列表 */
+.card-content ul,
+.card-content ol {
+  margin: 30px 0;
+  padding-left: 60px;
+}
+
+.card-content li {
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.card-content li::marker {
+  color: #39d353;
+}
+
+/* 引用块 */
+.card-content blockquote {
+  margin: 35px 0;
+  padding: 30px 40px;
+  background-color: #161b22;
+  color: #8b949e;
+  border-left: 4px solid #39d353;
+}
+
+.card-content blockquote::before {
+  content: '> ';
+  color: #39d353;
+}
+
+.card-content blockquote p {
+  margin: 0;
+}
+
+/* 行内代码 */
+.card-content code {
+  font-family: inherit;
+  font-size: 38px;
+  background-color: #21262d;
+  color: #f0e68c;
+  padding: 6px 16px;
+  border-radius: 6px;
+}
+
+/* 代码块 */
+.card-content pre {
+  margin: 35px 0;
+  padding: 40px;
+  background-color: #161b22;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow-x: visible;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.card-content pre code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 36px;
+  line-height: 1.5;
+}
+
+/* 分割线 */
+.card-content hr {
+  margin: 50px 0;
+  border: none;
+  height: 2px;
+  background-color: #30363d;
+}
+
+/* 图片 */
+.card-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 35px auto;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+}
+
+/* Tags 标签样式 */
+.tags-container {
+  margin-top: 50px;
+  padding-top: 30px;
+  border-top: 1px solid #30363d;
+}
+
+.tag {
+  display: inline-block;
+  background-color: #21262d;
+  color: #39d353;
+  padding: 12px 28px;
+  border-radius: 30px;
+  font-size: 32px;
+  margin: 10px 15px 10px 0;
+  font-weight: 500;
+  border: 1px solid #39d353;
+}
