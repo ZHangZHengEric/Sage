@@ -198,7 +198,7 @@ async def populate_request_from_agent_config(
             CustomSubAgentConfig(
                name=sub_agent.name,
                description=sub_agent.config.get("description", ""),
-               available_workflows=sub_agent.config.get("availableWorkflows", []),
+               available_workflows=sub_agent.config.get("availableWorkflows", {}),
                system_context=sub_agent.config.get("systemContext", {}),
                available_tools=sub_agent.config.get("availableTools", []),
                available_skills=sub_agent.config.get("availableSkills", []),
