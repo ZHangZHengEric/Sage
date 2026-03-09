@@ -947,9 +947,6 @@ class FibreOrchestrator:
                     ]
                 if filtered_chunks:
                     all_filtered_chunks.extend(filtered_chunks)
-                # Push to output queue if available (for producer/consumer pattern)
-                if self.output_queue:
-                    await self.output_queue.put(chunks)
 
                 # Check for sys_finish_task (if tools are used)
                 for chunk in chunks:
