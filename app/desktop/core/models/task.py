@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import JSON, String, Integer, Boolean, DateTime, ForeignKey, Text, select, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class RecurringTask(Base):
@@ -17,8 +17,8 @@ class RecurringTask(Base):
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     cron_expression: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_local_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=get_local_now, onupdate=get_local_now)
     last_executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationship to tasks
@@ -35,8 +35,8 @@ class Task(Base):
     session_id: Mapped[str] = mapped_column(String(255), nullable=True)
     execute_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, processing, completed, failed
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_local_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=get_local_now, onupdate=get_local_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     max_retries: Mapped[Optional[int]] = mapped_column(Integer, default=3)
@@ -54,7 +54,7 @@ class TaskHistory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[int] = mapped_column(Integer, ForeignKey("tasks.id"), nullable=False)
-    executed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    executed_at: Mapped[datetime] = mapped_column(DateTime, default=get_local_now)
     status: Mapped[str] = mapped_column(String(50), nullable=True)
     response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -97,7 +97,7 @@ class TaskDao(BaseDao):
 
     async def update_recurring_task(self, task: RecurringTask) -> RecurringTask:
         """更新循环任务"""
-        task.updated_at = datetime.now()
+        task.updated_at = get_local_now()
         await self.save(task)
         return task
 
@@ -153,7 +153,7 @@ class TaskDao(BaseDao):
 
     async def update_one_time_task(self, task: Task) -> Task:
         """更新一次性任务"""
-        task.updated_at = datetime.now()
+        task.updated_at = get_local_now()
         await self.save(task)
         return task
 

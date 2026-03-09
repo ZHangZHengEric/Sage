@@ -134,7 +134,7 @@ class SessionManager:
             binding = self._bindings.get(session_id)
             if binding:
                 # Update last active
-                binding["last_active"] = datetime.now().astimezone().isoformat()
+                binding["last_active"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             return binding.copy() if binding else None
     
     def find_session_by_user(self, provider: str, user_id: str) -> Optional[str]:
@@ -197,7 +197,7 @@ class SessionManager:
         """Update last active timestamp."""
         with self._lock:
             if session_id in self._bindings:
-                self._bindings[session_id]["last_active"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._bindings[session_id]["last_active"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
                 self._save_bindings()
 
     def _cleanup_expired_sessions(self):
