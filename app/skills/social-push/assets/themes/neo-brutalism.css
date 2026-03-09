@@ -1,0 +1,217 @@
+/* ============================================
+   Neo-Brutalism - 新粗野主义风格
+   RAW. LOUD. UNAPOLOGETIC.
+   厚重黑色边框 + 硬阴影 + 高饱和色块
+   适配小红书卡片渲染
+   ============================================ */
+
+/* 配色定义
+   背景色: #FFFDF5 (奶油白)
+   主黑色: #000000 (纯黑)
+   强调红: #FF4757 (热辣红)
+   强调黄: #FECA57 (荧光黄)
+   强调青: #00D2D3 (电光青)
+   强调紫: #A29BFE (柔和紫)
+*/
+
+.card-inner {
+  background-color: #fffdf5;
+  /* 纸张纹理感 */
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.008) 1px,
+    rgba(0, 0, 0, 0.008) 2px
+  );
+}
+
+.card-content {
+  color: #000000;
+  font-size: 42px;
+  line-height: 1.7;
+}
+
+/* 标题样式 */
+.card-content h1 {
+  font-size: 72px;
+  font-weight: 900;
+  padding: 0.4em 0.6em;
+  background-color: #feca57;
+  color: #000000;
+  border: 5px solid #000000;
+  box-shadow: 8px 8px 0 #000000;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+  line-height: 1.15;
+}
+
+.card-content h2 {
+  font-size: 56px;
+  font-weight: 900;
+  padding: 0.35em 0.6em;
+  background-color: #ffffff;
+  color: #000000;
+  border: 4px solid #000000;
+  border-left: 10px solid #ff4757;
+  box-shadow: 6px 6px 0 #000000;
+  margin: 50px 0 25px 0;
+  line-height: 1.15;
+}
+
+.card-content h3 {
+  font-size: 48px;
+  font-weight: 900;
+  padding: 0.25em 0.5em;
+  color: #000000;
+  background-color: #00d2d3;
+  border: 4px solid #000000;
+  box-shadow: 4px 4px 0 #000000;
+  display: inline-block;
+  margin: 40px 0 20px 0;
+  line-height: 1.15;
+}
+
+/* 段落 */
+.card-content p {
+  margin-bottom: 35px;
+}
+
+/* 加粗 - 黄色高亮块 */
+.card-content strong,
+.card-content b {
+  font-weight: 900;
+  color: #000000;
+  background-color: #feca57;
+  padding: 0.08em 0.25em;
+  border: 2px solid #000000;
+}
+
+/* 斜体 - 红色下划线 */
+.card-content em,
+.card-content i {
+  font-style: italic;
+  color: #000000;
+  border-bottom: 3px solid #ff4757;
+}
+
+/* 链接 - 青色底纹+粗下划线 */
+.card-content a {
+  color: #000000;
+  text-decoration: none;
+  background-color: #00d2d3;
+  padding: 0.08em 0.2em;
+  border-bottom: 4px solid #000000;
+  font-weight: 600;
+}
+
+/* 列表 */
+.card-content ul,
+.card-content ol {
+  margin: 30px 0;
+  padding-left: 60px;
+}
+
+.card-content ul {
+  list-style-type: square;
+}
+
+.card-content li {
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.card-content li::marker {
+  color: #ff4757;
+  font-weight: 900;
+}
+
+/* 引用块 - 紫色色块+硬阴影 */
+.card-content blockquote {
+  margin: 35px 0;
+  padding: 0.85em 1.1em;
+  background-color: #a29bfe;
+  color: #000000;
+  border: 5px solid #000000;
+  border-left: 12px solid #ff4757;
+  box-shadow: 8px 8px 0 #000000;
+}
+
+.card-content blockquote p {
+  margin: 0;
+  font-style: normal;
+}
+
+/* 行内代码 - 黄色背景 */
+.card-content code {
+  font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 38px;
+  background-color: #feca57;
+  color: #000000;
+  padding: 0.18em 0.45em;
+  border: 3px solid #000000;
+  font-weight: 600;
+}
+
+/* 代码块 - 黑色背景+红色阴影 */
+.card-content pre {
+  margin: 35px 0;
+  padding: 40px;
+  background-color: #000000;
+  border: 5px solid #000000;
+  box-shadow: 10px 10px 0 #ff4757;
+  overflow-x: visible;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.card-content pre code {
+  background-color: transparent;
+  color: #ffffff;
+  padding: 0;
+  border: none;
+  font-size: 36px;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+/* 分割线 - 粗犷几何 */
+.card-content hr {
+  margin: 50px 0;
+  border: none;
+  height: 8px;
+  background-color: #000000;
+  box-shadow: 5px 5px 0 #ff4757;
+}
+
+/* 图片 - 厚边框框架 */
+.card-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 5px solid #000000;
+  box-shadow: 8px 8px 0 #000000;
+  margin: 35px auto;
+}
+
+/* Tags 标签样式 */
+.tags-container {
+  margin-top: 50px;
+  padding-top: 30px;
+  border-top: 5px solid #000000;
+}
+
+.tag {
+  display: inline-block;
+  background-color: #ff4757;
+  color: white;
+  padding: 12px 28px;
+  font-size: 34px;
+  margin: 10px 15px 10px 0;
+  font-weight: 800;
+  border: 3px solid #000000;
+  box-shadow: 4px 4px 0 #000000;
+  text-transform: uppercase;
+}

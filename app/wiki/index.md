@@ -2,7 +2,7 @@
 
 欢迎使用 Sage 文档！Sage 是一个强大的 AI 智能体协作平台。
 
-![Sage Logo](/images/sage_logo.png)
+![Sage 工作台](/images/sage_preview.png)
 
 ## 什么是 Sage？
 
