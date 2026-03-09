@@ -89,6 +89,7 @@ class FibreBackendClient:
             "agentMode": "fibre",
         }
 
+        logger.info(f"[Backend API] Creating agent: POST {self.base_url}/api/agent/create, payload: {json.dumps(payload, ensure_ascii=False)}")
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
@@ -97,11 +98,22 @@ class FibreBackendClient:
                     json=payload,
                     timeout=30
                 ) as resp:
+                    resp_text = await resp.text()
+                    logger.info(f"[Backend API] Create agent response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
-                            return data.get("data", {}).get("agent_id", agent_id)
-                    logger.warning(f"Failed to create agent via backend: {await resp.text()}")
+                        data = json.loads(resp_text)
+                        # Check success by "success" field or "code" field
+                        is_success = data.get("success") or data.get("code") == 200
+                        if is_success:
+                            # 后端返回的 data 可能是对象或包含 agent_id 的字符串
+                            resp_data = data.get("data")
+                            if isinstance(resp_data, dict):
+                                return resp_data.get("agent_id", agent_id)
+                            elif isinstance(resp_data, str):
+                                return resp_data
+                            else:
+                                return agent_id
+                    logger.warning(f"Failed to create agent via backend: {resp_text}")
                     return None
         except Exception as e:
             logger.warning(f"Error creating agent via backend: {e}")
@@ -112,6 +124,7 @@ class FibreBackendClient:
         if not self.available:
             return None
 
+        logger.info(f"[Backend API] Getting agent: GET {self.base_url}/api/agent/{agent_id}")
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
@@ -119,6 +132,8 @@ class FibreBackendClient:
                     f"{self.base_url}/api/agent/{agent_id}",
                     timeout=10
                 ) as resp:
+                    resp_text = await resp.text()
+                    logger.info(f"[Backend API] Get agent response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get("success"):
@@ -138,6 +153,7 @@ class FibreBackendClient:
         if not self.available:
             return []
 
+        logger.info(f"[Backend API] Listing agents: GET {self.base_url}/api/agent/list")
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
@@ -145,6 +161,8 @@ class FibreBackendClient:
                     f"{self.base_url}/api/agent/list",
                     timeout=10
                 ) as resp:
+                    resp_text = await resp.text()
+                    logger.info(f"[Backend API] List agents response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get("success"):
@@ -157,19 +175,19 @@ class FibreBackendClient:
 
     async def create_llm_provider(
         self,
-        name: str,
         base_url: str,
         api_keys: List[str],
         model: str,
+        name: Optional[str] = None,
     ) -> Optional[str]:
         """
         创建 LLM Provider 并返回 provider ID
 
         Args:
-            name: Provider 名称
             base_url: API base URL
             api_keys: API keys 列表
             model: 模型名称
+            name: Provider 名称（可选）
 
         Returns:
             provider_id 如果成功，None 如果失败
@@ -178,12 +196,14 @@ class FibreBackendClient:
             return None
 
         payload = {
-            "name": name,
             "base_url": base_url,
             "api_keys": api_keys,
             "model": model,
         }
+        if name:
+            payload["name"] = name
 
+        logger.info(f"[Backend API] Creating LLM provider: POST {self.base_url}/api/llm-provider/create, payload: {json.dumps(payload, ensure_ascii=False)}")
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
@@ -192,14 +212,18 @@ class FibreBackendClient:
                     json=payload,
                     timeout=30
                 ) as resp:
+                    resp_text = await resp.text()
+                    logger.info(f"[Backend API] Create LLM provider response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("success"):
-                            # 从响应中获取 provider_id
-                            # 注意：后端返回的是 StandardResponse，data 中可能包含 provider 信息
-                            # 需要查看实际的返回结构
-                            return data.get("data", {}).get("id")
-                    logger.warning(f"Failed to create LLM provider: {await resp.text()}")
+                        data = json.loads(resp_text)
+                        # Check success by "success" field or "code" field
+                        is_success = data.get("success") or data.get("code") == 200
+                        if is_success:
+                            # 后端返回的 data 直接是 provider_id 字符串
+                            provider_id = data.get("data")
+                            if isinstance(provider_id, str):
+                                return provider_id
+                    logger.warning(f"Failed to create LLM provider: {resp_text}")
                     return None
         except Exception as e:
             logger.warning(f"Error creating LLM provider: {e}")
@@ -237,6 +261,7 @@ class FibreBackendClient:
             "agent_mode": agent_mode,
             "deep_thinking": deep_thinking,
         }
+        logger.info(f"[Backend API] Stream chat: POST {self.base_url}/api/chat, payload: {json.dumps(payload, ensure_ascii=False)}")
 
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -245,6 +270,7 @@ class FibreBackendClient:
                 json=payload,
                 timeout=None
             ) as resp:
+                logger.info(f"[Backend API] Stream chat response: status={resp.status}")
                 # 用于缓存和合并 chunks
                 pending_messages: Dict[str, Dict[str, Any]] = {}
 
