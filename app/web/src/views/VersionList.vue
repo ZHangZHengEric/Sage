@@ -4,7 +4,7 @@
     <div class="flex items-center justify-between p-6 border-b">
       <div>
         <h2 class="text-lg font-medium">{{ t('system.versionManagement') }}</h2>
-        <p class="text-sm text-muted-foreground mt-1">Manage application versions and release notes</p>
+        <p class="text-sm text-muted-foreground mt-1">{{ t('system.version.description') }}</p>
       </div>
       <Button @click="openCreateDialog">
         <Plus class="w-4 h-4 mr-2" />
@@ -20,7 +20,7 @@
       
       <div v-else-if="versions.length === 0" class="flex flex-col items-center justify-center py-12 text-muted-foreground">
         <PackageX class="w-12 h-12 mb-4 opacity-50" />
-        <p>No versions found</p>
+        <p>{{ t('system.version.noVersions') }}</p>
       </div>
 
       <div v-else class="space-y-6">
@@ -45,7 +45,7 @@
                   {{ t('system.version.releaseNotes') }}
                 </h4>
                 <ScrollArea class="h-[200px] w-full rounded-md border p-4">
-                  <MarkdownRenderer :content="version.release_notes || 'No release notes.'" />
+                  <MarkdownRenderer :content="version.release_notes || t('system.version.noReleaseNotes')" />
                 </ScrollArea>
               </div>
 
@@ -59,16 +59,22 @@
                   <div v-for="artifact in version.artifacts" :key="artifact.platform" class="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
                     <div class="flex items-center gap-3">
                       <component :is="getPlatformIcon(artifact.platform)" class="w-5 h-5 text-muted-foreground" />
-                      <div>
+                      <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium">{{ getPlatformName(artifact.platform) }}</p>
-                        <p class="text-xs text-muted-foreground truncate max-w-[200px]" :title="artifact.url">{{ artifact.url }}</p>
+                        <div v-if="artifact.installer_url" class="flex items-center gap-2 mt-1">
+                          <span class="text-[10px] uppercase font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{{ t('system.version.installer') }}</span>
+                          <a :href="artifact.installer_url" target="_blank" class="text-xs text-primary hover:underline truncate" :title="artifact.installer_url">
+                            {{ artifact.installer_url.split('/').pop() }}
+                          </a>
+                        </div>
+                        <div v-if="artifact.updater_url" class="flex items-center gap-2 mt-1">
+                          <span class="text-[10px] uppercase font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{{ t('system.version.updater') }}</span>
+                          <a :href="artifact.updater_url" target="_blank" class="text-xs text-primary hover:underline truncate" :title="artifact.updater_url">
+                            {{ artifact.updater_url.split('/').pop() }}
+                          </a>
+                        </div>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" as-child>
-                      <a :href="artifact.url" target="_blank">
-                        <Download class="w-4 h-4" />
-                      </a>
-                    </Button>
                   </div>
                 </div>
               </div>
@@ -84,34 +90,34 @@
         <DialogHeader>
           <DialogTitle>{{ t('system.version.create') }}</DialogTitle>
           <DialogDescription>
-            Publish a new version with artifacts for different platforms.
+            {{ t('system.version.createDesc') }}
           </DialogDescription>
         </DialogHeader>
         
         <div class="grid gap-4 py-4">
           <div class="grid grid-cols-4 items-center gap-4">
-            <Label class="text-right">Version</Label>
+            <Label class="text-right">{{ t('system.version.version') }}</Label>
             <Input v-model="form.version" placeholder="1.0.0" class="col-span-3" />
           </div>
           
           <div class="grid grid-cols-4 gap-4">
-            <Label class="text-right pt-2">Release Notes</Label>
-            <Textarea v-model="form.release_notes" placeholder="Markdown supported..." class="col-span-3 h-[150px]" />
+            <Label class="text-right pt-2">{{ t('system.version.releaseNotes') }}</Label>
+            <Textarea v-model="form.release_notes" :placeholder="t('system.version.markdownSupported')" class="col-span-3 h-[150px]" />
           </div>
 
           <Separator class="my-2" />
           
           <div class="space-y-4">
             <div class="flex items-center justify-between">
-              <Label class="text-base font-medium">Artifacts</Label>
+              <Label class="text-base font-medium">{{ t('system.version.artifacts') }}</Label>
               <Button size="sm" variant="outline" @click="addArtifact">
-                <Plus class="w-3 h-3 mr-1" /> Add
+                <Plus class="w-3 h-3 mr-1" /> {{ t('system.version.add') }}
               </Button>
             </div>
 
             <div v-for="(artifact, index) in form.artifacts" :key="index" class="p-4 border rounded-lg space-y-3 bg-muted/30">
               <div class="flex justify-between items-center">
-                <span class="text-sm font-medium">Artifact #{{ index + 1 }}</span>
+                <span class="text-sm font-medium">{{ t('system.version.artifactNum', { n: index + 1 }) }}</span>
                 <Button variant="ghost" size="icon" @click="removeArtifact(index)" class="h-6 w-6">
                   <X class="w-3 h-3" />
                 </Button>
@@ -119,25 +125,26 @@
               
               <div class="grid grid-cols-2 gap-3">
                 <div class="space-y-1">
-                  <Label class="text-xs">Platform</Label>
+                  <Label class="text-xs">{{ t('system.version.platform') }}</Label>
                   <Select v-model="artifact.platform">
                     <SelectTrigger>
-                      <SelectValue placeholder="Select platform" />
+                      <SelectValue :placeholder="t('system.version.selectPlatform')" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="darwin-aarch64">macOS (Apple Silicon)</SelectItem>
-                      <SelectItem value="darwin-x86_64">macOS (Intel)</SelectItem>
-                      <SelectItem value="windows-x86_64">Windows (x64)</SelectItem>
-                      <SelectItem value="linux-x86_64">Linux (x64)</SelectItem>
+                      <SelectItem value="darwin-aarch64">{{ t('system.version.platformDarwinArm64') }}</SelectItem>
+                      <SelectItem value="darwin-x86_64">{{ t('system.version.platformDarwinX64') }}</SelectItem>
+                      <SelectItem value="windows-x86_64">{{ t('system.version.platformWindowsX64') }}</SelectItem>
+                      <SelectItem value="linux-x86_64">{{ t('system.version.platformLinuxX64') }}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 
+                <!-- Installer -->
                 <div class="space-y-1">
-                  <Label class="text-xs">File Upload</Label>
+                  <Label class="text-xs">{{ t('system.version.installerFile') }}</Label>
                   <div class="flex gap-2">
                     <Input 
-                      v-model="artifact.url" 
+                      v-model="artifact.installer_url" 
                       placeholder="https://..." 
                       class="flex-1"
                     />
@@ -145,30 +152,66 @@
                       <input
                         type="file"
                         class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        @change="(e) => handleFileUpload(e, index)"
+                        @change="(e) => handleFileUpload(e, index, 'installer_url')"
                       />
-                      <Button variant="secondary" size="icon" :disabled="uploading[index]">
-                        <Loader2 v-if="uploading[index]" class="w-4 h-4 animate-spin" />
+                      <Button variant="secondary" size="icon" :disabled="uploading[`${index}_installer_url`]">
+                        <Loader2 v-if="uploading[`${index}_installer_url`]" class="w-4 h-4 animate-spin" />
                         <Upload v-else class="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div class="space-y-1">
-                <Label class="text-xs">Signature (Optional)</Label>
-                <Textarea v-model="artifact.signature" placeholder="Paste .sig content here..." class="h-[60px] font-mono text-xs" />
+                <!-- Updater -->
+                <div class="space-y-1">
+                  <Label class="text-xs">{{ t('system.version.updaterFile') }}</Label>
+                  <div class="flex gap-2">
+                    <Input 
+                      v-model="artifact.updater_url" 
+                      placeholder="https://..." 
+                      class="flex-1"
+                    />
+                    <div class="relative">
+                      <input
+                        type="file"
+                        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        @change="(e) => handleFileUpload(e, index, 'updater_url')"
+                      />
+                      <Button variant="secondary" size="icon" :disabled="uploading[`${index}_updater_url`]">
+                        <Loader2 v-if="uploading[`${index}_updater_url`]" class="w-4 h-4 animate-spin" />
+                        <Upload v-else class="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Signature -->
+                <div class="space-y-1">
+                  <Label class="text-xs">{{ t('system.version.updaterSignature') }}</Label>
+                  <div class="flex gap-2">
+                    <Textarea v-model="artifact.updater_signature" :placeholder="t('system.version.signaturePlaceholder')" class="h-[38px] min-h-[38px] font-mono text-xs flex-1 resize-none py-2" />
+                     <div class="relative">
+                      <input
+                        type="file"
+                        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        @change="(e) => handleSignatureUpload(e, index)"
+                      />
+                      <Button variant="secondary" size="icon">
+                        <Upload class="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="showCreateDialog = false">Cancel</Button>
+          <Button variant="outline" @click="showCreateDialog = false">{{ t('common.cancel') }}</Button>
           <Button @click="handleSubmit" :disabled="submitting">
             <Loader2 v-if="submitting" class="w-4 h-4 mr-2 animate-spin" />
-            {{ submitting ? 'Creating...' : 'Create Version' }}
+            {{ submitting ? t('common.creating') : t('system.version.create') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -215,7 +258,7 @@ const resetForm = () => {
   form.value = {
     version: '',
     release_notes: '',
-    artifacts: [{ platform: '', url: '', signature: '' }]
+    artifacts: [{ platform: '', installer_url: '', updater_url: '', updater_signature: '' }]
   }
   uploading.value = {}
 }
@@ -226,46 +269,67 @@ const openCreateDialog = () => {
 }
 
 const addArtifact = () => {
-  form.value.artifacts.push({ platform: '', url: '', signature: '' })
+  form.value.artifacts.push({ platform: '', installer_url: '', updater_url: '', updater_signature: '' })
 }
 
 const removeArtifact = (index) => {
   form.value.artifacts.splice(index, 1)
-  delete uploading.value[index]
+  // clean up uploading keys if any
+  Object.keys(uploading.value).forEach(k => {
+    if (k.startsWith(`${index}_`)) delete uploading.value[k]
+  })
 }
 
-const handleFileUpload = async (event, index) => {
+const handleFileUpload = async (event, index, field) => {
   const file = event.target.files[0]
   if (!file) return
 
-  uploading.value[index] = true
+  const uploadKey = `${index}_${field}`
+  uploading.value[uploadKey] = true
   try {
-    const res = await ossAPI.upload(file)
+    const version = form.value.version || 'unknown'
+    const path = `bundle/${version}/${file.name}`
+    const res = await ossAPI.upload(file, path)
     if (res && res.url) {
-      form.value.artifacts[index].url = res.url
-      toast.success('File uploaded successfully')
+      form.value.artifacts[index][field] = res.url
+      toast.success(t('system.version.uploadSuccess'))
     } else {
-      toast.error('Upload failed')
+      toast.error(t('system.version.uploadError'))
     }
   } catch (error) {
     console.error(error)
-    toast.error('Upload failed')
+    toast.error(t('system.version.uploadError'))
   } finally {
-    uploading.value[index] = false
+    uploading.value[uploadKey] = false
   }
+}
+
+const handleSignatureUpload = async (event, index) => {
+  const file = event.target.files[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    form.value.artifacts[index].updater_signature = e.target.result
+    toast.success(t('system.version.signatureLoaded'))
+  }
+  reader.onerror = () => {
+    toast.error(t('system.version.signatureReadError'))
+  }
+  reader.readAsText(file)
 }
 
 const handleSubmit = async () => {
   if (!form.value.version) {
-    toast.error('Version is required')
+    toast.error(t('system.version.versionRequired'))
     return
   }
   if (form.value.artifacts.length === 0) {
-    toast.error('At least one artifact is required')
+    toast.error(t('system.version.artifactRequired'))
     return
   }
-  if (form.value.artifacts.some(a => !a.platform || !a.url)) {
-    toast.error('Platform and URL are required for all artifacts')
+  if (form.value.artifacts.some(a => !a.platform || (!a.installer_url && !a.updater_url))) {
+    toast.error(t('system.version.platformAndUrlRequired'))
     return
   }
 
@@ -273,26 +337,26 @@ const handleSubmit = async () => {
   try {
      await systemAPI.createVersion(form.value)
      showCreateDialog.value = false
-     toast.success('Version created successfully')
+     toast.success(t('system.version.createSuccess'))
      fetchVersions()
   } catch (error) {
     console.error(error)
-    toast.error(error.response?.data?.detail || 'Failed to create version')
+    toast.error(error.response?.data?.detail || t('system.version.createError'))
   } finally {
     submitting.value = false
   }
 }
 
 const handleDelete = async (version) => {
-  if (!confirm(`Are you sure you want to delete version ${version.version}?`)) return
+  if (!confirm(t('system.version.deleteConfirm', { version: version.version }))) return
   
   try {
     await systemAPI.deleteVersion(version.version)
-    toast.success('Version deleted')
+    toast.success(t('system.version.deleteSuccess'))
     fetchVersions()
   } catch (error) {
     console.error(error)
-    toast.error('Delete failed')
+    toast.error(t('system.version.deleteError'))
   }
 }
 
@@ -307,7 +371,7 @@ const fetchVersions = async () => {
     // But list_versions route exists.
     // If user means "latest" endpoint returning 404, that was fixed.
     // For list endpoint, it returns [].
-    toast.error('Failed to load versions')
+    toast.error(t('system.version.loadError'))
   } finally {
     loading.value = false
   }
@@ -326,10 +390,10 @@ const getPlatformIcon = (platform) => {
 
 const getPlatformName = (platform) => {
   const map = {
-    'darwin-aarch64': 'macOS (Apple Silicon)',
-    'darwin-x86_64': 'macOS (Intel)',
-    'windows-x86_64': 'Windows (x64)',
-    'linux-x86_64': 'Linux (x64)'
+    'darwin-aarch64': t('system.version.platformDarwinArm64'),
+    'darwin-x86_64': t('system.version.platformDarwinX64'),
+    'windows-x86_64': t('system.version.platformWindowsX64'),
+    'linux-x86_64': t('system.version.platformLinuxX64')
   }
   return map[platform] || platform
 }
