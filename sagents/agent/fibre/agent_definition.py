@@ -12,6 +12,8 @@ class AgentDefinition:
 
     This class represents the "blueprint" for an agent that can be instantiated
     multiple times across different sessions.
+
+    支持后端持久化存储或内存存储
     """
 
     def __init__(
@@ -23,7 +25,8 @@ class AgentDefinition:
         available_tools: Optional[List[str]] = None,
         available_skills: Optional[List[str]] = None,
         available_workflows: Optional[List[str]] = None,
-        system_context: Optional[Dict[str, Any]] = None
+        system_context: Optional[Dict[str, Any]] = None,
+        backend_stored: bool = False
     ):
         """
         Initialize agent definition.
@@ -37,6 +40,7 @@ class AgentDefinition:
             available_skills: List of skill names available to this agent
             available_workflows: List of workflow names available to this agent
             system_context: Additional system context/configuration
+            backend_stored: Whether this agent is stored in backend (persisted)
         """
         self.agent_id = agent_id
         self.name = name or agent_id
@@ -46,6 +50,7 @@ class AgentDefinition:
         self.available_skills = available_skills or []
         self.available_workflows = available_workflows or []
         self.system_context = system_context or {}
+        self.backend_stored = backend_stored
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
@@ -57,7 +62,8 @@ class AgentDefinition:
             "available_tools": self.available_tools,
             "available_skills": self.available_skills,
             "available_workflows": self.available_workflows,
-            "system_context": self.system_context
+            "system_context": self.system_context,
+            "backend_stored": self.backend_stored
         }
 
     
@@ -72,5 +78,6 @@ class AgentDefinition:
             available_tools=data.get("available_tools"),
             available_skills=data.get("available_skills"),
             available_workflows=data.get("available_workflows"),
-            system_context=data.get("system_context")
+            system_context=data.get("system_context"),
+            backend_stored=data.get("backend_stored", False)
         )
