@@ -12,6 +12,7 @@ from .skill import skill_router
 from .system import system_router
 from .tool import tool_router
 from .user import user_router
+from .version import version_router as version_router
 from .llm_provider import router as llm_provider_router
 
 # Export all routers for easy import
@@ -28,6 +29,7 @@ def register_routes(app):
     app.include_router(kdb_router)
     app.include_router(user_router)
     app.include_router(system_router)
+    app.include_router(version_router)
     app.include_router(oss_router)
     app.include_router(chat_router)
     app.include_router(skill_router)

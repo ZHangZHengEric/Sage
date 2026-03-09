@@ -95,6 +95,13 @@
   "plugins": {
     "shell": {
       "open": "^((mailto:\\w+)|(tel:\\w+)|(https?://\\S+)|(file://\\S+)|(/[^\\s]+)|([a-zA-Z]:[\\\\/][^\\s]+)).*$"
+    },
+    "updater": {
+      "endpoints": [
+        "http://localhost:8000/api/system/version/check"
+      ],
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3NUM0NDdBQTgzNTY5MkMKUldRc2FUV29la1JjUjVLL0RWdnJBWmpaQnh0ZGVpKzJ3czRmZGxWbTJuRVNNb2pzNE1vemxoelUK"
     }
   }
 }

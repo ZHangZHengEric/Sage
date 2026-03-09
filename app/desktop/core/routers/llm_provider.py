@@ -54,7 +54,7 @@ async def create_provider(data: LLMProviderCreate, request: Request):
     existing_providers = await dao.get_by_config(base_url=data.base_url, model=data.model)
     for provider in existing_providers:
         if provider.api_keys == data.api_keys:
-            return await Response.succ(data=provider.id)
+            return await Response.succ(data={"provider_id": provider.id})
 
     # Auto-generate name if not provided
     provider_name = data.name
@@ -88,7 +88,7 @@ async def create_provider(data: LLMProviderCreate, request: Request):
         if chat_client is not None:
             logger.info("LLM Chat 客户端已初始化")
     await dao.save(provider)
-    return await Response.succ(data=provider_id)
+    return await Response.succ(data={"provider_id": provider_id})
 
 @router.put("/update/{provider_id}")
 async def update_provider(provider_id: str, data: LLMProviderUpdate, request: Request):

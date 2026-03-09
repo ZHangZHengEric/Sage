@@ -33,6 +33,12 @@ export default defineConfig({
           'vendor': ['vue', 'vue-router', 'pinia'],
           'ui-libs': ['lucide-vue-next', 'clsx', 'tailwind-merge']
         }
+      },
+      onwarn(warning, warn) {
+        if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {
+          return
+        }
+        warn(warning)
       }
     },
     sourcemap: false
