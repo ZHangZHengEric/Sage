@@ -7,7 +7,7 @@ RUN npm config set registry https://registry.npmmirror.com && npm config set fet
 # Install dependencies
 COPY ./app/web .
 
-RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
+RUN rm -f package-lock.json && npm install --no-fund --no-audit --registry=https://registry.npmmirror.com --no-progress
 
 ARG VITE_SAGE_API_BASE_URL
 ARG VITE_SAGE_TRACE_WEB_URL
