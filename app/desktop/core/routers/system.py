@@ -2,13 +2,65 @@ import time
 
 from fastapi import APIRouter, Request
 
+import os
+import httpx
 from ..core.render import Response
 from ..models import SystemInfoDao, LLMProviderDao, AgentConfigDao
 from ..schemas.base import BaseResponse
-from ..schemas.system import SystemSettingsRequest
+from ..schemas.system import SystemSettingsRequest, TauriUpdateResponse
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
+
+
+@system_router.get("/system/version/check", response_model=TauriUpdateResponse)
+async def check_version():
+    """
+    检查更新接口
+    Tauri Updater 会调用此接口。
+    此处作为 Proxy，请求远程服务器获取最新版本信息，并转换为 Tauri 需要的格式。
+    """
+    remote_url = os.getenv("SAGE_UPDATE_URL", "https://api.sage.com/version/check")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(remote_url, timeout=10.0)
+            response.raise_for_status()
+            user_data = response.json()
+    except Exception as e:
+        # Fallback or error handling
+        # In a real scenario, you might want to return an empty response or log the error
+        # Here we return a default/empty response to avoid crashing the client
+        return TauriUpdateResponse(
+            version="0.0.0",
+            notes=f"Check failed: {str(e)}",
+            pub_date="",
+            platforms={}
+        )
+    
+    data = user_data.get("data", {})
+    artifacts = data.get("artifacts", [])
+    
+    platforms = {}
+    for artifact in artifacts:
+        platform_key = artifact.get("platform")
+        if platform_key:
+            platforms[platform_key] = {
+                "url": artifact.get("url"),
+                "signature": artifact.get("signature", "")
+            }
+            
+    # Tauri prefers UTC ISO format with Z
+    pub_date = data.get("pub_date", "")
+    if pub_date and not pub_date.endswith("Z") and "+" not in pub_date:
+        pub_date += "Z"
+        
+    return TauriUpdateResponse(
+        version=data.get("version", "0.0.0"),
+        notes=data.get("release_notes", ""),
+        pub_date=pub_date,
+        platforms=platforms
+    )
 
 
 @system_router.get("/system/info")

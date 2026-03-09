@@ -27,8 +27,8 @@
             <p class="text-sm text-muted-foreground">{{ t('download.macOSReq') }}</p>
           </div>
           <div class="p-6 pt-0 space-y-4">
-            <div v-if="getArtifact('darwin-aarch64')" class="space-y-2">
-              <Button class="w-full" @click="download(getArtifact('darwin-aarch64').url)">
+            <div v-if="getArtifact('darwin-aarch64') && getArtifact('darwin-aarch64').installer_url" class="space-y-2">
+              <Button class="w-full" @click="download(getArtifact('darwin-aarch64').installer_url)">
                 <DownloadIcon class="mr-2 h-4 w-4" />
                 {{ t('download.macOSArm') }}
               </Button>
@@ -36,13 +36,13 @@
                 {{ t('download.macOSArmDesc') }}
               </p>
             </div>
-            <div v-if="getArtifact('darwin-x86_64')" class="pt-2">
-              <Button variant="outline" class="w-full" @click="download(getArtifact('darwin-x86_64').url)">
+            <div v-if="getArtifact('darwin-x86_64') && getArtifact('darwin-x86_64').installer_url" class="pt-2">
+              <Button variant="outline" class="w-full" @click="download(getArtifact('darwin-x86_64').installer_url)">
                 <DownloadIcon class="mr-2 h-4 w-4" />
                 {{ t('download.macOSIntel') }}
               </Button>
             </div>
-            <div v-if="!getArtifact('darwin-aarch64') && !getArtifact('darwin-x86_64')" class="text-center text-muted-foreground py-4">
+            <div v-if="(!getArtifact('darwin-aarch64') || !getArtifact('darwin-aarch64').installer_url) && (!getArtifact('darwin-x86_64') || !getArtifact('darwin-x86_64').installer_url)" class="text-center text-muted-foreground py-4">
               {{ t('download.comingSoon') }}
             </div>
           </div>
@@ -58,8 +58,8 @@
             <p class="text-sm text-muted-foreground">{{ t('download.windowsReq') }}</p>
           </div>
           <div class="p-6 pt-0">
-            <div v-if="getArtifact('windows-x86_64')" class="space-y-2">
-              <Button class="w-full" @click="download(getArtifact('windows-x86_64').url)">
+            <div v-if="getArtifact('windows-x86_64') && getArtifact('windows-x86_64').installer_url" class="space-y-2">
+              <Button class="w-full" @click="download(getArtifact('windows-x86_64').installer_url)">
                 <DownloadIcon class="mr-2 h-4 w-4" />
                 {{ t('download.windowsDownload') }}
               </Button>
