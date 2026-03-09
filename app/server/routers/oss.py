@@ -7,6 +7,6 @@ oss_router = APIRouter(prefix="/api/oss", tags=["OSS"])
 
 
 @oss_router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    url = await upload_file_to_oss(file)
+async def upload_file(file: UploadFile = File(...), path: str = None):
+    url = await upload_file_to_oss(file, path)
     return await Response.succ(data={"url": url})

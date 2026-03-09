@@ -15,8 +15,9 @@ async def get_version_dao() -> VersionDao:
 # Pydantic models
 class ArtifactSchema(BaseModel):
     platform: str
-    url: str
-    signature: Optional[str] = None
+    installer_url: Optional[str] = None
+    updater_url: Optional[str] = None
+    updater_signature: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class CreateVersionRequest(BaseModel):
@@ -55,10 +56,12 @@ async def check_update(dao: VersionDao = Depends(get_version_dao)):
     
     platforms = {}
     for artifact in latest.artifacts:
-        platforms[artifact.platform] = TauriPlatform(
-            url=artifact.url,
-            signature=artifact.signature or ""
-        )
+        # Only include platforms that have an updater URL
+        if artifact.updater_url:
+            platforms[artifact.platform] = TauriPlatform(
+                url=artifact.updater_url,
+                signature=artifact.updater_signature or ""
+            )
 
     return TauriUpdateResponse(
         version=latest.version,
