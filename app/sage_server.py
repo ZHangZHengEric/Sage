@@ -592,7 +592,7 @@ class CustomSubAgentConfig(BaseModel):
     description: Optional[str] = None
     available_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
-    available_workflows: Optional[List[str]] = None
+    available_workflows: Optional[Dict[str, List[str]]] = None
     system_context: Optional[Dict[str, Any]] = None
 
 class StreamRequest(BaseModel):
