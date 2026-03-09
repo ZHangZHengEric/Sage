@@ -237,9 +237,6 @@ class FibreBackendClient:
         messages: List[Dict[str, str]],
         session_id: Optional[str] = None,
         system_context: Optional[Dict[str, Any]] = None,
-        max_loop_count: int = 10,
-        agent_mode: str = "simple",
-        deep_thinking: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
@@ -257,9 +254,6 @@ class FibreBackendClient:
             "messages": messages,
             "session_id": session_id,
             "system_context": system_context or {},
-            "max_loop_count": max_loop_count,
-            "agent_mode": agent_mode,
-            "deep_thinking": deep_thinking,
         }
         logger.info(f"[Backend API] Stream chat: POST {self.base_url}/api/chat, payload: {json.dumps(payload, ensure_ascii=False)}")
 
