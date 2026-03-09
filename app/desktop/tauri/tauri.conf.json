@@ -27,6 +27,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "category": "Productivity",
     "copyright": "",
@@ -46,7 +47,6 @@
       "providerShortName": null,
       "signingIdentity": null,
       "dmg": {
-        "background": "./icons/dmg-background.png",
         "windowSize": {
           "width": 600,
           "height": 400
@@ -98,10 +98,10 @@
     },
     "updater": {
       "endpoints": [
-        "http://localhost:8000/api/system/version/check"
+        "http://localhost:30050/api/system/version/check"
       ],
       "dialog": false,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3NUM0NDdBQTgzNTY5MkMKUldRc2FUV29la1JjUjVLL0RWdnJBWmpaQnh0ZGVpKzJ3czRmZGxWbTJuRVNNb2pzNE1vemxoelUK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGQzk1MzUxMUMwNkI4ODUKUldTRnVBWWNVVlBKNzVSOEFrQWhlcDBySkZHRUVzL1pvaldpWXc5OGU1SytxbC9MWnd1YVhDSG4K"
     }
   }
 }
