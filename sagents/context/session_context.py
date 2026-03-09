@@ -277,7 +277,7 @@ class SessionContext:
         if len(self.external_paths) > 0:
             self.external_paths = [os.path.abspath(path) for path in self.external_paths]
             self.system_context['external_paths'] = self.external_paths
-        current_time_str = datetime.datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S%z %A')
+        current_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         if self.system_context.get('current_time') is None:
             self.system_context['current_time'] = current_time_str
 
@@ -573,7 +573,7 @@ class SessionContext:
             agent_id: Agent ID (Fibre用)
         """
         # 生成与preset_running_agent_config.json格式一致的配置
-        current_time = datetime.datetime.now(pytz.timezone('Asia/Shanghai'))
+        current_time = datetime.datetime.now()
 
         # 从model_config中提取llmConfig信息
         llm_config = {}
