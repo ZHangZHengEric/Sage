@@ -32,7 +32,7 @@ except ImportError:
         
         def __init__(self, cron_string: str, start_time=None):
             self.cron_string = cron_string
-            self.start_time = start_time or datetime.now()
+            self.start_time = start_time or datetime.now().astimezone().replace(tzinfo=None)
         
         def get_next(self, ret_type=None):
             """Return next run time (simplified - just returns current time + 1 minute)"""
@@ -267,7 +267,7 @@ def _check_and_spawn_recurring_tasks():
     Check recurring tasks and spawn one-time task instances if needed.
     This should be called before processing pending tasks.
     """
-    now = datetime.now()
+    now = datetime.now().astimezone().replace(tzinfo=None)
     
     # Get all enabled recurring tasks
     recurring_tasks = db.list_recurring_tasks(enabled_only=True)
@@ -288,15 +288,37 @@ def _check_and_spawn_recurring_tasks():
             last_executed_dt = last_executed
             if isinstance(last_executed_dt, str):
                 try:
-                    last_executed_dt = datetime.fromisoformat(last_executed_dt)
+                    # Fix for SQLite default timestamp format (space instead of T)
+                    # And user preference for space separated format
+                    if "T" not in last_executed_dt:
+                        last_executed_dt = datetime.strptime(last_executed_dt, "%Y-%m-%d %H:%M:%S")
+                    else:
+                        last_executed_dt = datetime.fromisoformat(last_executed_dt)
                 except ValueError:
-                    last_executed_dt = datetime.min
+                    # Fallback
+                    try:
+                        last_executed_dt = datetime.fromisoformat(last_executed_dt.replace(' ', 'T'))
+                    except:
+                        last_executed_dt = datetime.min
+            else:
+                 last_executed_dt = datetime.min
+
+            # Ensure last_executed_dt is naive (since we use naive now)
+            if last_executed_dt.tzinfo is not None:
+                 last_executed_dt = last_executed_dt.replace(tzinfo=None)
             
-            itr = croniter(cron_expr, last_executed_dt or datetime.min)
+            # We use naive local time for comparison now
+            now_naive = datetime.now().astimezone().replace(tzinfo=None)
+            
+            # croniter expects naive datetime if we provide naive start_time
+            # or aware if we provide aware.
+            # Our now is naive local.
+            
+            itr = croniter(cron_expr, last_executed_dt)
             next_run = itr.get_next(datetime)
             
             # If next run time is in the past or very close (within last minute), spawn a task
-            if next_run <= now:
+            if next_run <= now_naive:
                 # Check if we already have a pending task for this recurring task
                 existing_tasks = db.list_tasks(
                     session_id=recurring_task['session_id'],
@@ -312,7 +334,7 @@ def _check_and_spawn_recurring_tasks():
                 
                 if not has_pending_instance:
                     # Create a one-time task instance
-                    execute_at = now.isoformat()
+                    execute_at = next_run.isoformat()
                     new_task_id = db.add_task(
                         name=recurring_task['name'],
                         description=recurring_task['description'],
@@ -477,7 +499,7 @@ async def add_task(
         description: Detailed description of what the task should do.
         agent_id: The ID of the agent that will execute this task.
         session_id: The session ID to use when sending the task to the agent.
-        schedule: For one-time: execution time in ISO 8601 format (YYYY-MM-DDTHH:MM:SS).
+        schedule: For one-time: execution time in format "YYYY-MM-DD HH:MM:SS" (preferred) or ISO 8601.
                  For recurring: cron expression (e.g., "0 9 * * *" for daily at 9 AM).
         is_recurring: Whether this is a recurring task. Default False.
 
@@ -501,15 +523,38 @@ async def add_task(
             encoded_id = _encode_task_id(task_id, is_recurring=True)
             return f"Recurring task '{name}' (ID: {encoded_id}) added successfully. Cron: {schedule}"
         else:
-            # Validate timestamp format
-            datetime.fromisoformat(schedule)
+            # Validate timestamp format and normalize to local time clean string
+            try:
+                dt = None
+                if "T" in schedule:
+                    dt = datetime.fromisoformat(schedule)
+                else:
+                    dt = datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+                
+                # If aware, convert to local time first
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone()
+                
+                # Format as clean string (YYYY-MM-DD HH:MM:SS) without timezone info
+                # The DB expects local time in this format
+                execute_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+                
+            except ValueError:
+                 # Try fallback
+                 try:
+                     dt = datetime.fromisoformat(schedule.replace(" ", "T"))
+                     if dt.tzinfo is not None:
+                         dt = dt.astimezone()
+                     execute_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+                 except ValueError:
+                     raise ValueError("Invalid format")
 
             task_id = db.add_task(
                 name=name,
                 description=description,
                 agent_id=agent_id,
                 session_id=session_id,
-                execute_at=schedule
+                execute_at=execute_at
             )
             encoded_id = _encode_task_id(task_id, is_recurring=False)
             return f"Task '{name}' (ID: {encoded_id}) added successfully. Execute at: {schedule}"
@@ -793,11 +838,24 @@ async def update_task(
                 return f"Error: Failed to update recurring task {task_id}."
         else:
             # Validate execute_at timestamp if provided
+            normalized_schedule = None
             if schedule is not None:
                 try:
-                    datetime.fromisoformat(schedule)
+                    dt = None
+                    if "T" in schedule:
+                        dt = datetime.fromisoformat(schedule)
+                    else:
+                        dt = datetime.strptime(schedule, "%Y-%m-%d %H:%M:%S")
+                    
+                    # If aware, convert to local time first
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone()
+                    
+                    # Format as clean string
+                    normalized_schedule = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    
                 except ValueError:
-                    return f"Error: Invalid schedule format '{schedule}'. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS)."
+                    return f"Error: Invalid schedule format '{schedule}'. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS) or 'YYYY-MM-DD HH:MM:SS'."
             
             # Build update kwargs
             update_kwargs = {}
@@ -809,8 +867,8 @@ async def update_task(
                 update_kwargs['agent_id'] = agent_id
             if session_id is not None:
                 update_kwargs['session_id'] = session_id
-            if schedule is not None:
-                update_kwargs['execute_at'] = schedule
+            if normalized_schedule is not None:
+                update_kwargs['execute_at'] = normalized_schedule
             if max_retries is not None:
                 update_kwargs['max_retries'] = max_retries
             

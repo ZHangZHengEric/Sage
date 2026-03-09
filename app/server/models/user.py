@@ -13,12 +13,12 @@ class UserConfig(Base):
 
     user_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default={})
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.now, onupdate=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(default=get_local_now, onupdate=get_local_now)
 
     def __init__(self, user_id: str, config: Dict[str, Any] = None):
         self.user_id = user_id
         self.config = config or {}
-        self.updated_at = datetime.now()
+        self.updated_at = get_local_now()
 
 
 class UserConfigDao(BaseDao):
@@ -69,8 +69,8 @@ class User(Base):
         self.email = email
         self.phonenum = phonenum
         self.role = role
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
 
 class UserDao(BaseDao):
@@ -90,7 +90,7 @@ class UserDao(BaseDao):
 
     async def save(self, user: User) -> bool:
         """保存用户"""
-        user.updated_at = datetime.now()
+        user.updated_at = get_local_now()
         return await BaseDao.save(self, user)
     
     async def get_list(self, limit: int = 100) -> list[User]:
