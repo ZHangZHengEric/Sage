@@ -4,7 +4,28 @@
     
     <div class="p-6">
         <Card class="p-6 max-w-2xl">
-            <h3 class="text-lg font-medium mb-4">{{ t('system.generalSettings') }}</h3>
+            <!-- Update Setting -->
+            <div class="flex items-center justify-between py-4 border-b">
+                <div class="space-y-0.5">
+                    <Label class="text-base">{{ t('system.update') || 'Check for Updates' }}</Label>
+                    <p class="text-sm text-muted-foreground">
+                        Current Version: {{ currentVersion }}
+                    </p>
+                </div>
+                <div class="flex flex-col items-end gap-2">
+                    <Button 
+                        variant="outline" 
+                        size="sm"
+                        @click="checkForUpdates"
+                        :disabled="checking"
+                    >
+                        <Loader2 v-if="checking" class="w-4 h-4 mr-2 animate-spin" />
+                        <DownloadCloud v-else class="w-4 h-4 mr-2" />
+                        {{ checking ? 'Checking...' : 'Check Now' }}
+                    </Button>
+                    <p v-if="updateStatus" class="text-xs text-muted-foreground">{{ updateStatus }}</p>
+                </div>
+            </div>
             
             <!-- User Avatar Setting -->
             <div class="flex items-center justify-between py-4 border-b">
@@ -83,7 +104,10 @@ import { useUserStore } from '../stores/user'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { RefreshCw } from 'lucide-vue-next'
+import { RefreshCw, Loader2, DownloadCloud } from 'lucide-vue-next'
+import { check } from '@tauri-apps/plugin-updater'
+import { getVersion } from '@tauri-apps/api/app'
+import { relaunch } from '@tauri-apps/plugin-process'
 import {
   Select,
   SelectContent,
@@ -96,6 +120,52 @@ const { t, language, setLanguage } = useLanguage()
 const themeStore = useThemeStore()
 const userStore = useUserStore()
 
+const currentVersion = ref('0.1.0')
+const checking = ref(false)
+const updateStatus = ref('')
+
+const checkForUpdates = async () => {
+  checking.value = true
+  updateStatus.value = ''
+  try {
+    const update = await check()
+    if (update) {
+      console.log(`found update ${update.version} from ${update.date} with notes ${update.body}`)
+      updateStatus.value = `Found v${update.version}`
+      // Use standard confirm for now, can be replaced with custom dialog
+      const yes = confirm(`Update to ${update.version}?\n\n${update.body || 'No release notes.'}`)
+      if (yes) {
+        updateStatus.value = 'Downloading...'
+        let downloaded = 0
+        let contentLength = 0
+        await update.downloadAndInstall((event) => {
+          switch (event.event) {
+            case 'Started':
+              contentLength = event.data.contentLength
+              break
+            case 'Progress':
+              downloaded += event.data.chunkLength
+              break
+            case 'Finished':
+              break
+          }
+        })
+        updateStatus.value = 'Restarting...'
+        await relaunch()
+      } else {
+          updateStatus.value = 'Update cancelled.'
+      }
+    } else {
+      updateStatus.value = 'Latest version.'
+    }
+  } catch (error) {
+    console.error(error)
+    updateStatus.value = `Error: ${error.message}`
+  } finally {
+    checking.value = false
+  }
+}
+
 // 用户头像 URL
 const userAvatarUrl = computed(() => {
   return userStore.avatarUrl
@@ -107,7 +177,11 @@ const randomizeAvatar = () => {
   userStore.setAvatarSeed(newSeed)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    currentVersion.value = await getVersion()
+  } catch(e) { console.error(e) }
+
   // 如果用户没有头像种子，生成一个随机的
   if (!userStore.avatarSeed) {
     randomizeAvatar()

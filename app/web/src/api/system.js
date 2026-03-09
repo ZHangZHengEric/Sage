@@ -6,6 +6,18 @@ export const systemAPI = {
   },
   updateSettings: (settings) => {
     return baseAPI.post('/api/system/update_settings', settings)
+  },
+  getLatestVersion: () => {
+    return baseAPI.get('/api/system/version/latest')
+  },
+  getVersions: () => {
+    return baseAPI.get('/api/system/version')
+  },
+  createVersion: (data) => {
+    return baseAPI.post('/api/system/version', data)
+  },
+  deleteVersion: (version) => {
+    return baseAPI.delete(`/api/system/version/${version}`)
   }
 }
 

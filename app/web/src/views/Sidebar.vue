@@ -242,6 +242,36 @@
       </div>
     </ScrollArea>
 
+    <!-- Download Client -->
+    <div class="px-3 py-2">
+      <div v-if="isCollapsed" class="flex justify-center group/item relative">
+        <Button
+           variant="ghost"
+           size="icon"
+           :title="t('sidebar.downloadClient')"
+           :class="[
+             'transition-all duration-200',
+             isCurrentService('Download', true) ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+           ]"
+           @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
+        >
+           <Download class="h-4 w-4" />
+        </Button>
+      </div>
+      <Button
+        v-else
+        variant="ghost"
+        class="w-full justify-start h-10 px-3 font-medium text-muted-foreground hover:text-foreground hover:bg-background hover:shadow-sm transition-all duration-200"
+        :class="cn(
+          isCurrentService('Download', true) && 'bg-background shadow text-primary font-bold'
+        )"
+        @click="handleMenuClick('Download', t('sidebar.downloadClient'), true)"
+      >
+        <Download class="mr-2 h-4 w-4" />
+        <span class="flex-1 text-left truncate">{{ t('sidebar.downloadClient') }}</span>
+      </Button>
+    </div>
+
     <!-- Footer User Profile -->
     <div class="p-4 mt-auto" v-if="currentUser">
       <DropdownMenu v-model:open="isDropdownOpen">
@@ -348,7 +378,8 @@ import {
   Check,
   LoaderCircle,
   CircleCheckBig,
-  Activity
+  Activity,
+  Download
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { useThemeStore } from '../stores/theme.js'
@@ -509,7 +540,8 @@ const predefinedServices = computed(() => {
       nameKey: 'sidebar.systemManagement',
       children: [
         { id: 'svc_user_list', nameKey: 'sidebar.userList', url: 'UserList', isInternal: true },
-        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true }
+        { id: 'svc_sys_settings', nameKey: 'sidebar.systemSettings', url: 'SystemSettings', isInternal: true },
+        { id: 'svc_version_list', nameKey: 'system.versionManagement', url: 'VersionList', isInternal: true }
       ]
     })
     
@@ -553,7 +585,8 @@ const getCategoryIcon = (key) => {
     history: Clock,
     api_reference: Code,
     system_management: Settings,
-    operation_management: Activity
+    operation_management: Activity,
+    download_client: Download
   }
   return map[key] || LayoutGrid
 }

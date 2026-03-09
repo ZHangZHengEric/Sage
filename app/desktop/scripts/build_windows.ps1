@@ -110,6 +110,10 @@ function Install-PythonDeps {
         Write-Host "Installing deps..." -ForegroundColor Cyan
         pip install -r $ReqFile --index-url $PipIndexUrl
 
+        Write-Host "Replacing python-magic with python-magic-bin for Windows..." -ForegroundColor Cyan
+        pip uninstall -y python-magic
+        pip install python-magic-bin --index-url $PipIndexUrl
+
         Write-Host "Force reinstalling pure Python chardet..." -ForegroundColor Cyan
         pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url $PipIndexUrl 
         if ($LASTEXITCODE -ne 0) {

@@ -215,15 +215,13 @@ class FibreBackendClient:
                     resp_text = await resp.text()
                     logger.info(f"[Backend API] Create LLM provider response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
-                        data = json.loads(resp_text)
-                        # Check success by "success" field or "code" field
-                        is_success = data.get("success") or data.get("code") == 200
-                        if is_success:
-                            # 后端返回的 data 直接是 provider_id 字符串
-                            provider_id = data.get("data")
-                            if isinstance(provider_id, str):
-                                return provider_id
-                    logger.warning(f"Failed to create LLM provider: {resp_text}")
+                        data = await resp.json()
+                        if data.get("success"):
+                            # 从响应中获取 provider_id
+                            # 注意：后端返回的是 StandardResponse，data 中可能包含 provider 信息
+                            # 需要查看实际的返回结构
+                            return data.get("data", {}).get("provider_id")
+                    logger.warning(f"Failed to create LLM provider: {await resp.text()}")
                     return None
         except Exception as e:
             logger.warning(f"Error creating LLM provider: {e}")
