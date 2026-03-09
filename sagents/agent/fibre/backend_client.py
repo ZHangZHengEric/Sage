@@ -5,6 +5,7 @@ Fibre Backend API Client
 """
 import os
 import json
+import uuid
 from typing import Optional, Dict, Any, AsyncGenerator, List
 
 from loguru import logger
@@ -217,16 +218,12 @@ class FibreBackendClient:
         deep_thinking: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        流式执行 Agent 任务，解析 SSE 返回结构化数据
+        流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
+
+        后端返回的是 MessageChunk 的流，我们需要将同一 message_id 的 chunks 合并成完整消息
 
         Yields:
-            {
-                "type": "content"|"tool_call"|"stream_end"|"error",
-                "content": str,
-                "tool_calls": List[Dict],
-                "session_id": str,
-                ...
-            }
+            合并后的完整消息字典
         """
         if not self.available:
             raise RuntimeError("Backend not available")
@@ -248,18 +245,76 @@ class FibreBackendClient:
                 json=payload,
                 timeout=None
             ) as resp:
+                # 用于缓存和合并 chunks
+                pending_messages: Dict[str, Dict[str, Any]] = {}
+
                 async for line in resp.content:
                     line = line.decode('utf-8').strip()
+                    if not line:
+                        continue
+
+                    # 解析 SSE 数据
+                    data = None
                     if line.startswith('data:'):
                         try:
                             data = json.loads(line[5:])  # 去掉 "data:" 前缀
-                            yield data
                         except json.JSONDecodeError:
                             continue
-                    elif line:
-                        # 尝试直接解析（非标准 SSE 格式）
+                    else:
                         try:
                             data = json.loads(line)
-                            yield data
                         except json.JSONDecodeError:
                             continue
+
+                    if not data:
+                        continue
+
+                    # 获取 message_id，如果没有则生成一个临时 ID
+                    message_id = data.get('message_id') or data.get('chunk_id') or str(uuid.uuid4())
+
+                    # 检查是否是新消息
+                    if message_id not in pending_messages:
+                        # 如果是完整消息（不是 chunk），直接 yield
+                        if not data.get('is_chunk', False):
+                            yield data
+                            continue
+
+                        # 初始化 pending message
+                        pending_messages[message_id] = {
+                            'message_id': message_id,
+                            'role': data.get('role', 'assistant'),
+                            'content': data.get('content', '') or '',
+                            'tool_calls': data.get('tool_calls', []),
+                            'type': data.get('type'),
+                            'session_id': data.get('session_id', session_id),
+                            'agent_name': data.get('agent_name'),
+                            'timestamp': data.get('timestamp'),
+                            'metadata': data.get('metadata', {}),
+                            'is_final': data.get('is_final', False),
+                        }
+                    else:
+                        # 合并到已有消息
+                        pending = pending_messages[message_id]
+
+                        # 合并 content
+                        if data.get('content'):
+                            pending['content'] = (pending['content'] or '') + data['content']
+
+                        # 合并 tool_calls（通常 tool_calls 是一次性的，不需要合并）
+                        if data.get('tool_calls'):
+                            pending['tool_calls'] = data['tool_calls']
+
+                        # 更新其他字段
+                        if data.get('type'):
+                            pending['type'] = data['type']
+                        if data.get('is_final'):
+                            pending['is_final'] = True
+
+                    # 检查是否是最终消息
+                    if data.get('is_final', False) or not data.get('is_chunk', False):
+                        if message_id in pending_messages:
+                            yield pending_messages.pop(message_id)
+
+                # 流结束，yield 所有剩余的 pending messages
+                for message in pending_messages.values():
+                    yield message
