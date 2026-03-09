@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import traceback
+import uuid
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator, TYPE_CHECKING
 import copy
 
@@ -266,7 +267,6 @@ class FibreOrchestrator:
         self,
         session_context: SessionContext,
         is_main_agent: bool = True,
-        agent_id: str = "",
         custom_system_prompt: str = ""
     ) -> str:
         """
@@ -275,7 +275,6 @@ class FibreOrchestrator:
         Args:
             session_context: The session context
             is_main_agent: True for main agent (orchestrator), False for sub-agent (strand)
-            agent_id: ID of the agent (for sub-agents)
             custom_system_prompt: Custom system prompt (for both main and sub-agents)
 
         Returns:
@@ -294,24 +293,17 @@ class FibreOrchestrator:
         # 2. System Mechanics (Shared)
         system_mechanics = pm.get_prompt('fibre_system_prompt', agent='FibreAgent', language=lang)
 
-        if is_main_agent:
-            # 3. Main Agent Specifics (Orchestrator Role)
-            main_agent_rules = pm.get_prompt('main_agent_extra_prompt', agent='FibreAgent', language=lang)
+        # 3. Common rules for both main and sub agents
+        common_rules = pm.get_prompt('common_agent_rules', agent='FibreAgent', language=lang)
 
-            # Combine for main agent
-            return f"{base_desc}\n\n{system_mechanics}\n\n{main_agent_rules}"
-        else:
-            # 3. Sub Agent Specifics (Strand Role)
-            sub_agent_rules = pm.get_prompt('sub_agent_extra_prompt', agent='FibreAgent', language=lang)
-
-            # Combine for sub-agent
-            return f"## Sub-Agent Identity\nYou are a Sub-Agent with ID '{agent_id}', working as part of the Fibre Agent System.\n\n## Specific Role & Task\n{base_desc}\n\n{system_mechanics}\n\n{sub_agent_rules}"
+        # Combine for all agents
+        return f"{base_desc}\n\n{system_mechanics}\n\n{common_rules}"
 
     async def spawn_agent(
         self,
         parent_session_id: str,
-        agent_id: str,
-        system_prompt: str,
+        agent_id: Optional[str] = None,
+        system_prompt: str = "",
         name: str = "",
         description: str = "",
         available_tools=None,
@@ -328,7 +320,7 @@ class FibreOrchestrator:
 
         Args:
             parent_session_id: The session ID that is creating this agent
-            agent_id: Agent ID
+            agent_id: Agent ID (optional, will be auto-generated if not provided)
             system_prompt: System prompt
             name: Human-readable nickname for display (defaults to agent_id)
             description: Description
@@ -340,33 +332,36 @@ class FibreOrchestrator:
         Returns:
             agent_id: The created agent's ID
         """
-        # 1. Ensure unique agent_id
-        base_agent_id = agent_id
-        counter = 1
-        while agent_id in self.sub_agents:
-            agent_id = f"{base_agent_id}_{counter}"
-            counter += 1
+        # 1. Generate or ensure unique agent_id
+        if agent_id is None:
+            # Auto-generate agent_id based on whether backend is available
+            if self.backend_client and await self.backend_client.check_health():
+                # For backend: use simple format, backend will assign final ID
+                agent_id = f"agent_{uuid.uuid4().hex[:8]}"
+            else:
+                # For internal: use uuid
+                agent_id = f"agent_{uuid.uuid4().hex[:8]}"
+        else:
+            # Ensure unique agent_id
+            base_agent_id = agent_id
+            counter = 1
+            while agent_id in self.sub_agents:
+                agent_id = f"{base_agent_id}_{counter}"
+                counter += 1
 
-        if agent_id != base_agent_id:
-            logger.info(f"FibreOrchestrator: Agent ID '{base_agent_id}' collision, renamed to '{agent_id}'")
+            if agent_id != base_agent_id:
+                logger.info(f"FibreOrchestrator: Agent ID '{base_agent_id}' collision, renamed to '{agent_id}'")
 
         logger.info(f"Registering agent definition: {agent_id}")
 
-        # 2. Generate complete system prompt for sub-agent
+        # 2. Get parent session for configuration
         parent_session = self.sub_session_manager.get(parent_session_id)
-        if parent_session:
-            complete_system_prompt = self._get_fibre_system_prompt_content(
-                session_context=parent_session.session_context,
-                is_main_agent=False,
-                agent_id=agent_id,
-                custom_system_prompt=system_prompt
-            )
-        else:
-            complete_system_prompt = system_prompt
 
-        # 3. Try to store in backend (if available)
+        # 3. Try to store in backend first (if available) to get final agent_id
         backend_stored = False
         llm_provider_id = None
+        final_agent_id = agent_id  # Will be updated if backend returns different ID
+
         if self.backend_client and await self.backend_client.check_health():
             # Get available sub-agent IDs from parent session's custom_sub_agents
             available_sub_agent_ids = []
@@ -384,6 +379,14 @@ class FibreOrchestrator:
                         if agent_sub_id:
                             available_sub_agent_ids.append(agent_sub_id)
 
+            # If available_tools/skills/workflows not provided, get from parent session
+            if available_tools is None and parent_session and parent_session.session_context:
+                available_tools = parent_session.session_context.agent_config.get('available_tools', [])
+            if available_skills is None and parent_session and parent_session.session_context:
+                available_skills = parent_session.session_context.agent_config.get('available_skills', [])
+            if available_workflows is None and parent_session and parent_session.session_context:
+                available_workflows = parent_session.session_context.agent_config.get('available_workflows', {})
+
             # Create LLM provider from current agent's model configuration
             if self.agent and self.agent.model:
                 try:
@@ -394,7 +397,6 @@ class FibreOrchestrator:
 
                     if model_base_url and model_api_key and model_name:
                         llm_provider_id = await self.backend_client.create_llm_provider(
-                            name=f"provider_for_{agent_id}",
                             base_url=str(model_base_url),
                             api_keys=[str(model_api_key)],
                             model=model_name
@@ -408,29 +410,49 @@ class FibreOrchestrator:
                 except Exception as e:
                     logger.warning(f"Error creating LLM provider: {e}")
 
+            # Create agent in backend (without system_prompt first, we'll update later if needed)
+            # Use a temporary system prompt
+            temp_system_prompt = system_prompt
+            if parent_session:
+                temp_system_prompt = self._get_fibre_system_prompt_content(
+                    session_context=parent_session.session_context,
+                    is_main_agent=False,
+                    custom_system_prompt=system_prompt
+                )
+
             backend_agent_id = await self.backend_client.create_agent(
                 agent_id=agent_id,
                 name=name or agent_id,
-                system_prompt=complete_system_prompt,
+                system_prompt=temp_system_prompt,
                 description=description,
-                available_tools=available_tools,
-                available_skills=available_skills,
-                available_workflows=available_workflows,
+                available_tools=available_tools or [],
+                available_skills=available_skills or [],
+                available_workflows=available_workflows or {},
                 system_context=system_context,
                 available_sub_agent_ids=available_sub_agent_ids if available_sub_agent_ids else None,
                 llm_provider_id=llm_provider_id
             )
             if backend_agent_id:
                 backend_stored = True
-                agent_id = backend_agent_id
-                logger.info(f"Agent '{agent_id}' stored in backend successfully")
+                final_agent_id = backend_agent_id
+                logger.info(f"Agent '{final_agent_id}' stored in backend successfully")
             else:
                 logger.warning("Failed to store agent in backend, falling back to memory storage")
 
-        # 4. Create Agent Definition (memory storage as fallback or supplement)
+        # 4. Generate final system prompt
+        if parent_session:
+            complete_system_prompt = self._get_fibre_system_prompt_content(
+                session_context=parent_session.session_context,
+                is_main_agent=False,
+                custom_system_prompt=system_prompt
+            )
+        else:
+            complete_system_prompt = system_prompt
+
+        # 5. Create Agent Definition (memory storage as fallback or supplement)
         agent_def = AgentDefinition(
-            agent_id=agent_id,
-            name=name or agent_id,
+            agent_id=final_agent_id,
+            name=name or final_agent_id,
             system_prompt=complete_system_prompt,
             description=description,
             available_tools=available_tools,
@@ -440,20 +462,19 @@ class FibreOrchestrator:
             backend_stored=backend_stored
         )
 
-        self.sub_agents[agent_id] = agent_def
+        self.sub_agents[final_agent_id] = agent_def
 
-        # 5. Update parent session's available_sub_agents
-        parent_session = self.sub_session_manager.get(parent_session_id)
+        # 6. Update parent session's available_sub_agents
         if parent_session:
             if 'available_sub_agents' not in parent_session.session_context.system_context:
                 parent_session.session_context.system_context['available_sub_agents'] = []
 
-            agent_info = {"id": agent_id, "name": name or agent_id, "description": description or system_prompt[:100]}
+            agent_info = {"id": final_agent_id, "name": name or final_agent_id, "description": description or system_prompt[:100]}
             existing_ids = [a.get("id") for a in parent_session.session_context.system_context['available_sub_agents']]
-            if agent_id not in existing_ids:
+            if final_agent_id not in existing_ids:
                 parent_session.session_context.system_context['available_sub_agents'].append(agent_info)
 
-        return agent_id
+        return final_agent_id
 
     def _get_session_depth(self, session_id: str) -> int:
         """
@@ -751,7 +772,10 @@ class FibreOrchestrator:
 
         # Build enhanced content with workspace info
         original_task_section = f"【用户最初任务需求】\n{original_task}\n\n" if original_task else ""
-        enhanced_content = f"""{original_task_section}【你本次需要完成的子任务】
+        enhanced_content = f"""【消息发送方】
+此任务由其他 Agent 发送给你。
+
+{original_task_section}【你本次需要完成的子任务】
 {content}
 
 【子任务工作目录】
@@ -763,7 +787,7 @@ class FibreOrchestrator:
         # Prepare messages for API
         messages = [{"role": "user", "content": enhanced_content}]
 
-        # Prepare system_context with external_paths
+        # Prepare system_context with external_paths and parent session context
         # Get parent's external_paths and add current task workspace
         external_paths = []
         if parent_session_context and hasattr(parent_session_context, 'system_context'):
@@ -772,9 +796,32 @@ class FibreOrchestrator:
         # Add current task workspace to external_paths
         external_paths.append(task_workspace)
 
-        system_context = {
-            "external_paths": external_paths
-        }
+        # Start with parent session's system_context if available
+        system_context = {}
+        if parent_session_context and hasattr(parent_session_context, 'system_context'):
+            parent_ctx = parent_session_context.system_context.copy()
+            # Remove task_workspace (will be set to current task's workspace)
+            parent_ctx.pop('task_workspace', None)
+            # Remove time-related fields
+            parent_ctx.pop('timestamp', None)
+            parent_ctx.pop('start_time', None)
+            parent_ctx.pop('created_at', None)
+            # Remove fields that should be set for child session
+            parent_ctx.pop('session_id', None)
+            parent_ctx.pop('parent_session_id', None)
+            system_context.update(parent_ctx)
+
+        # Set external_paths (current task's workspace)
+        system_context['external_paths'] = external_paths
+        # Set child session specific fields
+        system_context['session_id'] = session_id
+        system_context['parent_session_id'] = caller_session_id
+        # Copy user_id and response_language from parent if available
+        if parent_session_context and hasattr(parent_session_context, 'system_context'):
+            if 'user_id' in parent_session_context.system_context:
+                system_context['user_id'] = parent_session_context.system_context['user_id']
+            if 'response_language' in parent_session_context.system_context:
+                system_context['response_language'] = parent_session_context.system_context['response_language']
 
         # Collect response and process like internal execution
         task_result = None
@@ -786,9 +833,7 @@ class FibreOrchestrator:
                 agent_id=agent_id,
                 messages=messages,
                 session_id=session_id,
-                system_context=system_context,
-                max_loop_count=10,
-                agent_mode="simple"
+                system_context=system_context
             ):
                 msg_type = data.get("type")
 

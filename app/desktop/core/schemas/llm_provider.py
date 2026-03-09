@@ -14,8 +14,17 @@ class LLMProviderBase(BaseModel):
     max_model_len: Optional[int] = None
     is_default: bool = False
 
-class LLMProviderCreate(LLMProviderBase):
-    pass
+class LLMProviderCreate(BaseModel):
+    name: Optional[str] = None
+    base_url: str
+    api_keys: List[str]
+    model: str
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    presence_penalty: Optional[float] = None
+    max_model_len: Optional[int] = None
+    is_default: bool = False
 
 class LLMProviderUpdate(BaseModel):
     name: Optional[str] = None
