@@ -304,6 +304,8 @@ build_frontend() {
         echo "$NEW_HASH" > "$HASH_FILE"
     fi
 
+    # Increase Node.js memory limit for build
+    export NODE_OPTIONS="--max-old-space-size=4096"
     npm run build
 }
 
