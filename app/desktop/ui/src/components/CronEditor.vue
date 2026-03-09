@@ -60,7 +60,7 @@
                 <SelectTrigger class="w-[70px]">
                   <SelectValue placeholder="HH" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent class="max-h-[200px] overflow-y-auto">
                   <SelectItem v-for="h in 24" :key="h-1" :value="(h-1).toString()">
                     {{ (h-1).toString().padStart(2, '0') }}
                   </SelectItem>
@@ -71,7 +71,7 @@
                 <SelectTrigger class="w-[70px]">
                   <SelectValue placeholder="MM" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent class="max-h-[200px] overflow-y-auto">
                   <SelectItem v-for="m in 60" :key="m-1" :value="(m-1).toString()">
                     {{ (m-1).toString().padStart(2, '0') }}
                   </SelectItem>
@@ -91,7 +91,7 @@
                   <SelectTrigger class="w-[70px]">
                     <SelectValue placeholder="HH" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent class="max-h-[200px] overflow-y-auto">
                     <SelectItem v-for="h in 24" :key="h-1" :value="(h-1).toString()">
                       {{ (h-1).toString().padStart(2, '0') }}
                     </SelectItem>
@@ -102,7 +102,7 @@
                   <SelectTrigger class="w-[70px]">
                     <SelectValue placeholder="MM" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent class="max-h-[200px] overflow-y-auto">
                     <SelectItem v-for="m in 60" :key="m-1" :value="(m-1).toString()">
                       {{ (m-1).toString().padStart(2, '0') }}
                     </SelectItem>
@@ -145,7 +145,7 @@
                 <SelectTrigger class="w-[70px]">
                   <SelectValue placeholder="HH" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent class="max-h-[200px] overflow-y-auto">
                   <SelectItem v-for="h in 24" :key="h-1" :value="(h-1).toString()">
                     {{ (h-1).toString().padStart(2, '0') }}
                   </SelectItem>
@@ -156,7 +156,7 @@
                 <SelectTrigger class="w-[70px]">
                   <SelectValue placeholder="MM" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent class="max-h-[200px] overflow-y-auto">
                   <SelectItem v-for="m in 60" :key="m-1" :value="(m-1).toString()">
                     {{ (m-1).toString().padStart(2, '0') }}
                   </SelectItem>
@@ -226,7 +226,7 @@ const daysOfWeek = computed(() => [
 
 const formattedCron = computed(() => {
   try {
-    return cronstrue.toString(props.modelValue, { locale: isZhCN.value ? 'zh_CN' : 'en' })
+    return cronstrue.toString(props.modelValue, { locale: isZhCN.value ? 'zh_CN' : 'en', use24HourTimeFormat: true })
   } catch (e) {
     return ''
   }

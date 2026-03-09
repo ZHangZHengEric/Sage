@@ -6,10 +6,10 @@ import hashlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, String, Boolean, or_, select, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class Kdb(Base):
@@ -21,8 +21,8 @@ class Kdb(Base):
     setting: Mapped[dict] = mapped_column(JSON, default=dict)
     data_type: Mapped[str] = mapped_column(String(52), default="file")
     user_id: Mapped[str] = mapped_column(String(128), default="")
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=get_local_now)
+    updated_at: Mapped[datetime] = mapped_column(default=get_local_now)
 
     def __init__(
         self,
@@ -41,8 +41,8 @@ class Kdb(Base):
         self.setting = setting
         self.data_type = data_type
         self.user_id = user_id
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
     def get_index_name(self) -> str:
         """获取KDB索引名称"""
@@ -52,10 +52,11 @@ class Kdb(Base):
 
 class KdbDao(BaseDao):
 
-    async def insert(self, obj: Kdb) -> None:
-        await BaseDao.insert(self, obj)
+    async def save(self, kdb: "Kdb") -> bool:
+        kdb.updated_at = get_local_now()
+        return await BaseDao.save(self, kdb)
 
-    async def get_by_id(self, kdb_id: str) -> Optional[Kdb]:
+    async def get_by_id(self, kdb_id: str) -> Optional["Kdb"]:
         return await BaseDao.get_by_id(self, Kdb, kdb_id)
 
     async def delete_by_id(self, kdb_id: str) -> None:
