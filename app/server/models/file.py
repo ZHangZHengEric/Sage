@@ -17,11 +17,15 @@ class File(Base):
     name: Mapped[str] = mapped_column(String(512), default="")
     path: Mapped[str] = mapped_column(String(4096), default="")
     size: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=get_local_now)
+    updated_at: Mapped[datetime] = mapped_column(default=get_local_now)
 
 
 class FileDao(BaseDao):
+    async def save(self, file: "File") -> bool:
+        file.updated_at = get_local_now()
+        return await BaseDao.save(self, file)
+
     async def get_by_id(self, id: str) -> Optional[File]:
         return await BaseDao.get_by_id(self, File, id)
 

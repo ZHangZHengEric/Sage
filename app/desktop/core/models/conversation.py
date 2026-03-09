@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import JSON, String, Text, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
+
 
 
 class Conversation(Base):
@@ -38,8 +39,8 @@ class Conversation(Base):
         self.agent_name = agent_name
         self.title = title
         self.messages = messages or []
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
     def get_message_count(self) -> Dict[str, int]:
         """统计消息数量，区分用户与代理（assistant/agent）"""
@@ -98,7 +99,7 @@ class ConversationDao(BaseDao):
             title=title,
             messages=messages or [],
         )
-        conversation.updated_at = datetime.now()
+        conversation.updated_at = get_local_now()
         return await BaseDao.save(self, conversation)
 
     async def get_by_session_id(self, session_id: str) -> Optional[Conversation]:
@@ -168,6 +169,6 @@ class ConversationDao(BaseDao):
             if not conversation:
                 return False
             conversation.messages = messages or []
-            conversation.updated_at = datetime.now()
+            conversation.updated_at = get_local_now()
             await session.merge(conversation)
             return True

@@ -112,7 +112,7 @@ class iMessageNotificationListener:
             self.message_handler({
                 "sender": sender,
                 "content": content,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                 "provider": "imessage"
             })
 
@@ -230,7 +230,7 @@ class iMessageDatabasePoller:
                                     "sender": sender_id,  # Phone number or email
                                     "sender_name": None,  # Not available in iMessage database
                                     "content": content,
-                                    "timestamp": datetime.now().isoformat(),
+                                    "timestamp": datetime.now().astimezone().isoformat(),
                                     "provider": "imessage",
                                     "row_id": row_id
                                 })

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import JSON, String, Integer, select, or_, delete
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BaseDao
+from .base import Base, BaseDao, get_local_now
 
 
 class AgentAuthorization(Base):
@@ -17,7 +17,7 @@ class AgentAuthorization(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
     user_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=get_local_now)
 
 
 class Agent(Base):
@@ -41,8 +41,8 @@ class Agent(Base):
         self.agent_id = agent_id
         self.name = name
         self.config = config
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or get_local_now()
+        self.updated_at = updated_at or get_local_now()
 
 
 class AgentConfigDao(BaseDao):
@@ -57,7 +57,7 @@ class AgentConfigDao(BaseDao):
         )
 
     async def save(self, config: "Agent") -> bool:
-        config.updated_at = datetime.now()
+        config.updated_at = get_local_now()
         return await BaseDao.save(self, config)
 
     async def get_by_id(self, agent_id: str) -> Optional["Agent"]:
