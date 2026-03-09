@@ -7,9 +7,9 @@
             <!-- Update Setting -->
             <div class="flex items-center justify-between py-4 border-b">
                 <div class="space-y-0.5">
-                    <Label class="text-base">{{ t('system.update') || 'Check for Updates' }}</Label>
+                    <Label class="text-base">{{ t('system.update') }}</Label>
                     <p class="text-sm text-muted-foreground">
-                        Current Version: {{ currentVersion }}
+                        {{ t('system.currentVersion') }}: {{ currentVersion }}
                     </p>
                 </div>
                 <div class="flex flex-col items-end gap-2">
@@ -21,7 +21,7 @@
                     >
                         <Loader2 v-if="checking" class="w-4 h-4 mr-2 animate-spin" />
                         <DownloadCloud v-else class="w-4 h-4 mr-2" />
-                        {{ checking ? 'Checking...' : 'Check Now' }}
+                        {{ checking ? t('system.checking') : t('system.checkNow') }}
                     </Button>
                     <p v-if="updateStatus" class="text-xs text-muted-foreground">{{ updateStatus }}</p>
                 </div>
@@ -131,11 +131,11 @@ const checkForUpdates = async () => {
     const update = await check()
     if (update) {
       console.log(`found update ${update.version} from ${update.date} with notes ${update.body}`)
-      updateStatus.value = `Found v${update.version}`
+      updateStatus.value = t('system.foundUpdate', { version: update.version })
       // Use standard confirm for now, can be replaced with custom dialog
-      const yes = confirm(`Update to ${update.version}?\n\n${update.body || 'No release notes.'}`)
+      const yes = confirm(t('system.confirmUpdate', { version: update.version, notes: update.body || t('system.noReleaseNotes') }))
       if (yes) {
-        updateStatus.value = 'Downloading...'
+        updateStatus.value = t('system.downloading')
         let downloaded = 0
         let contentLength = 0
         await update.downloadAndInstall((event) => {
@@ -150,17 +150,18 @@ const checkForUpdates = async () => {
               break
           }
         })
-        updateStatus.value = 'Restarting...'
+        updateStatus.value = t('system.restarting')
         await relaunch()
       } else {
-          updateStatus.value = 'Update cancelled.'
+          updateStatus.value = t('system.updateCancelled')
       }
     } else {
-      updateStatus.value = 'Latest version.'
+      updateStatus.value = t('system.latestVersion')
     }
   } catch (error) {
     console.error(error)
-    updateStatus.value = `Error: ${error.message}`
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    updateStatus.value = t('system.checkUpdateError', { message: errorMessage })
   } finally {
     checking.value = false
   }
