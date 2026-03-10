@@ -202,7 +202,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
 
         # Use synchronous client inside the thread
         with httpx.Client(timeout=300.0) as client:
-            with client.stream("POST", f"{api_base_url}/api/chat", json=payload) as response:
+            with client.stream("POST", f"{api_base_url}/api/chat", json=payload, headers={"X-Sage-Internal-UserId": "task_scheduler"}) as response:
                 response.raise_for_status()
                 full_response_text = _parse_stream_response(response)
 

@@ -276,7 +276,8 @@ class AgentClient:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/api/chat",
-                    json=payload
+                    json=payload,
+                    headers={"X-Sage-Internal-UserId": "im_client"}
                 ) as response:
                     response.raise_for_status()
                     
@@ -338,7 +339,7 @@ class AgentClient:
         """
         try:
             with httpx.Client(timeout=10.0) as client:
-                response = client.get(f"{self.base_url}/health")
+                response = client.get(f"{self.base_url}/health", headers={"X-Sage-Internal-UserId": "im_client"})
                 response.raise_for_status()
                 return {"success": True, "status": "healthy"}
         except Exception as e:
