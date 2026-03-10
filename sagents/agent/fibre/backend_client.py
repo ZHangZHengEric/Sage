@@ -98,6 +98,7 @@ class FibreBackendClient:
                 async with session.post(
                     f"{self.base_url}/api/agent/create",
                     json=payload,
+                    headers={"X-Sage-Internal-UserId": "fibre_client"},
                     timeout=30
                 ) as resp:
                     resp_text = await resp.text()
@@ -132,6 +133,7 @@ class FibreBackendClient:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/agent/{agent_id}",
+                    headers={"X-Sage-Internal-UserId": "fibre_client"},
                     timeout=10
                 ) as resp:
                     resp_text = await resp.text()
@@ -163,6 +165,7 @@ class FibreBackendClient:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/agent/list",
+                    headers={"X-Sage-Internal-UserId": "fibre_client"},
                     timeout=10
                 ) as resp:
                     resp_text = await resp.text()
@@ -214,6 +217,7 @@ class FibreBackendClient:
                 async with session.post(
                     f"{self.base_url}/api/llm-provider/create",
                     json=payload,
+                    headers={"X-Sage-Internal-UserId": "fibre_client"},
                     timeout=30
                 ) as resp:
                     resp_text = await resp.text()
@@ -268,6 +272,7 @@ class FibreBackendClient:
             async with session.post(
                 f"{self.base_url}/api/chat",
                 json=payload,
+                headers={"X-Sage-Internal-UserId": "fibre_client"},
                 timeout=None
             ) as resp:
                 logger.info(f"[Backend API] Stream chat response: status={resp.status}")

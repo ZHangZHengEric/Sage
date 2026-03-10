@@ -63,7 +63,9 @@ class UpdateTitleRequest(BaseModel):
 @conversation_router.post("/api/conversations/{session_id}/title")
 async def update_title(session_id: str, request: Request, body: UpdateTitleRequest):
     """更新会话标题"""
-    data = await update_conversation_title(session_id, body.title)
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid")
+    data = await update_conversation_title(session_id, body.title, user_id=user_id)
     return await Response.succ(message=f"会话 {session_id} 标题已更新", data=data)
 
 
@@ -145,8 +147,9 @@ async def list_conversations(
 @conversation_router.get("/api/conversations/{session_id}/messages")
 async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
-
-    data = await get_conversation_messages(session_id)
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid")
+    data = await get_conversation_messages(session_id, user_id=user_id)
     return await Response.succ(data=data, message="获取消息成功")
 
 
@@ -160,7 +163,9 @@ async def get_shared_messages(session_id: str):
 @conversation_router.delete("/api/conversations/{session_id}")
 async def delete(session_id: str, request: Request):
     """删除指定对话"""
-    session_id_res = await delete_conversation(session_id)
+    claims = getattr(request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid")
+    session_id_res = await delete_conversation(session_id, user_id=user_id)
     logger.bind(session_id=session_id).info("会话删除成功")
     return await Response.succ(
         message=f"会话 {session_id} 已删除",
