@@ -417,7 +417,6 @@ class ToolManager:
                 self.register_tool(tool_spec)
                 registered_tools.append(tool_spec.name)
                     
-        logger.info(f"Registered {len(registered_tools)} tools from object {obj}")
         return registered_tools
 
     def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]):

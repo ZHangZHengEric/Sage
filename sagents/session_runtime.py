@@ -322,8 +322,7 @@ class Session:
             logger.info(
                 f"SAgent: 初始消息数量:{merge_before_num} 合并后数量：{len(session_context.message_manager.messages)} 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}"
             )
-            logger.info(f"SAgent: 新增消息数量：{add_new_messages_num} 更新消息数量：{update_messages_num}")
-
+    
             load_recent_skill_start = time.perf_counter()
 
             # 加载最近使用的技能到上下文
@@ -439,7 +438,7 @@ class Session:
         override_config: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         session_id = session_context.session_id
-        logger.info(f"SAgent: 使用 {agent.agent_description} 智能体")
+        logger.info(f"SAgent: 使用 {agent.agent_description} 智能体，{phase_name}阶段")
         # 检查中断
         if session_context.status == SessionStatus.INTERRUPTED:
             logger.info(f"SAgent: {phase_name} 阶段被中断，会话ID: {session_id}")
