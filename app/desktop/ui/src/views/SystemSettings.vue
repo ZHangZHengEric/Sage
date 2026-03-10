@@ -24,6 +24,9 @@
                               <span>{{ formatBytes(downloadedBytes) }}</span>
                               <span v-if="totalBytes > 0">{{ downloadProgress }}%</span>
                           </div>
+                          <p v-if="updateStatus" class="text-xs text-muted-foreground w-full text-right truncate" :title="updateStatus">
+                            {{ updateStatus }}
+                          </p>
                       </div>
                     </template>
                     <template v-else>
