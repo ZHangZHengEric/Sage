@@ -319,6 +319,9 @@ $env:CARGO_TERM_COLOR = "never"
 # Skip signature for updater artifacts as keys are not provided
 # $env:TAURI_SKIP_SIGNATURE = "true"
 
+$env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+
 Write-Host "Building Tauri application (this may take a while)..." -ForegroundColor Cyan
 
 $Process = Start-Process -FilePath $TauriCmd -ArgumentList $TauriArgs -NoNewWindow -Wait -PassThru -WorkingDirectory $TauriDir
