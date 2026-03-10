@@ -22,25 +22,13 @@ WHITELIST_API_PATHS = frozenset(
     {
         "/api/health",
         "/api/system/info",
-        "/api/stream/task_messages",
         "/api/user/login",
         "/api/user/register",
         "/api/stream",
         "/api/chat",
-        "/api/files/workspace",
-        "/api/files/workspace/download",
-        "/api/files/workspace/preview",
-        "/api/files/logs",
-        "/api/files/logs/download",
-        "/api/files/logs/preview",
-        "/api/conversations",
-        "/api/conversations/{conversation_id}",
-        "/api/conversations/{conversation_id}/title",
-        "/api/conversations/{conversation_id}/messages",
         "/api/system/version/check",
         "/api/system/version/latest",
         "/api/share/conversations/{conversation_id}/messages",
-        "/api/sessions/{session_id}/interrupt",
     }
 )
 
@@ -101,6 +89,18 @@ def register_middlewares(app):
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
         if path.startswith("/api"):
+            # Internal request bypass
+            internal_user_id = request.headers.get("X-Sage-Internal-UserId")
+            if internal_user_id:
+                client_host = request.client.host
+                # Allow localhost/127.0.0.1 or same network calls
+                if client_host in ("127.0.0.1", "localhost", "::1"):
+                    userid = internal_user_id
+                    request.state.user_claims = {"userid": userid, "role": "admin", "username": "Internal System"}
+                    return await call_next(request)
+                else:
+                    logger.warning(f"Blocked internal request from external IP: {client_host}")
+
             is_whitelisted = _is_whitelisted(path)
             auth = request.headers.get("Authorization", "")
 

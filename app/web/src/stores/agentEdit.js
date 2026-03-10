@@ -47,7 +47,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
 
   // Computed
   const isStep1Valid = computed(() => {
-    return !!formData.value.name
+    return !!formData.value.name && !!formData.value.llm_provider_id
   })
 
   const isCurrentStepValid = computed(() => {
@@ -160,6 +160,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
   const validateStep1 = () => {
     const newErrors = {}
     if (!formData.value.name) newErrors.name = '名称不能为空'
+    if (!formData.value.llm_provider_id) newErrors.llm_provider_id = '请选择模型提供商'
     
     // Character limits
     if (formData.value.description && formData.value.description.length > 500) {

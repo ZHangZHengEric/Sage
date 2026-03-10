@@ -70,7 +70,7 @@ async def get_conversations_paginated(
     return conversations, total_count
 
 
-async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
+async def get_conversation_messages(session_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
     dao = models.ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
@@ -79,6 +79,13 @@ async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
             status_code=500,
             detail=f"会话 {session_id} 不存在",
             error_detail=f"Conversation '{session_id}' not found",
+        )
+    
+    if user_id and conversation.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权访问该会话",
+            error_detail=f"User {user_id} does not own session {session_id}",
         )
 
     messages = []
@@ -128,7 +135,7 @@ async def get_conversation_messages(session_id: str) -> Dict[str, Any]:
     }
 
 
-async def delete_conversation(conversation_id: str) -> str:
+async def delete_conversation(conversation_id: str, user_id: Optional[str] = None) -> str:
     """删除指定对话，返回 conversation_id"""
     dao = models.ConversationDao()
     conversation = await dao.get_by_session_id(conversation_id)
@@ -137,6 +144,13 @@ async def delete_conversation(conversation_id: str) -> str:
             status_code=500,
             detail=f"会话 {conversation_id} 不存在",
             error_detail=f"Conversation '{conversation_id}' not found",
+        )
+    
+    if user_id and conversation.user_id != user_id:
+        raise SageHTTPException(
+            status_code=403,
+            detail="无权删除该会话",
+            error_detail=f"User {user_id} does not own session {conversation_id}",
         )
 
     success = await dao.delete_conversation(conversation_id)
@@ -150,9 +164,25 @@ async def delete_conversation(conversation_id: str) -> str:
     return conversation_id
 
 
-async def update_conversation_title(session_id: str, title: str) -> Dict[str, Any]:
+async def update_conversation_title(session_id: str, title: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """更新会话标题"""
     dao = models.ConversationDao()
+    
+    if user_id:
+        conversation = await dao.get_by_session_id(session_id)
+        if not conversation:
+             raise SageHTTPException(
+                status_code=500,
+                detail=f"会话 {session_id} 不存在",
+                error_detail=f"Conversation '{session_id}' not found",
+            )
+        if conversation.user_id != user_id:
+            raise SageHTTPException(
+                status_code=403,
+                detail="无权修改该会话",
+                error_detail=f"User {user_id} does not own session {session_id}",
+            )
+            
     success = await dao.update_title(session_id, title)
     if not success:
         raise SageHTTPException(
