@@ -1317,8 +1317,17 @@ class AgentBase(ABC):
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
 
-            # 调用LLM获取建议
-            suggested_tool_ids = await self._get_tool_suggestions(prompt, session_id)
+            # 调用LLM获取建议,一定要有返回list的结果，如果没有则最大重试3次，依旧没有，使用全量的工具列表
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                suggested_tool_ids = await self._get_tool_suggestions(prompt, session_id)
+                if suggested_tool_ids:
+                    break
+                retry_count += 1
+            if not suggested_tool_ids:
+                logger.warning(f"AgentBase: 最大重试{max_retries}次后仍未获取到建议工具，使用全量工具列表")
+                suggested_tool_ids = [str(i+1) for i in range(len(available_tools))]
 
             # 将工具ID转换为工具名称
             suggested_tool_names = []
@@ -1338,7 +1347,7 @@ class AgentBase(ABC):
                     if tool_name not in suggested_tool_names:
                         suggested_tool_names.append(tool_name)
 
-            # 添加系统工具
+            # 添加系统工具'add_task','todo_write','delete_task','complete_task','enable_task','get_task_details','update_task'
             system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task','send_message_through_im']
             for tool_name in system_tools:
                 if tool_name not in suggested_tool_names:

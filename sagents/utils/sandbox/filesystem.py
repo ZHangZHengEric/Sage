@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Optional
+from typing import Optional
 
 SANDBOX_WORKSPACE_ROOT = "/sage-workspace"
 
@@ -174,28 +174,46 @@ class SandboxFileSystem:
             path_parts = rel_root.split(os.sep) if rel_root else []
             indent = "  " * len(path_parts)  # 2 spaces per level
 
-            # Collect items for this directory
-            items = []
-            for d in sorted(dirs):
-                items.append(('dir', d))
-            for f in sorted(filtered_files):
-                items.append(('file', f))
+            # For subdirectories (depth > 0), only show directories, not files
+            # This prevents overwhelming output when there are many subdirectories
+            if current_depth > 0:
+                # Only show directories in subdirectories
+                items = []
+                for d in sorted(dirs):
+                    items.append(('dir', d))
+                
+                # Apply max_items_per_dir limit
+                shown_items = items
+                hidden_count = 0
+                if len(items) > max_items_per_dir:
+                    shown_items = items[:max_items_per_dir]
+                    hidden_count = len(items) - max_items_per_dir
+                
+                # Add directory items with indentation
+                for item_type, item_name in shown_items:
+                    result.append(f"{indent}  {item_name}/")
+                
+                # Add ellipsis if truncated
+                if hidden_count > 0:
+                    result.append(f"{indent}  ... (and {hidden_count} more dirs)")
+                
+                # Don't traverse deeper into subdirectories beyond depth 1
+                # This prevents showing all files in each subdirectory
+                if current_depth >= 1:
+                    dirs[:] = []
+            else:
+                # For root directory, show both files and directories
+                items = []
+                for d in sorted(dirs):
+                    items.append(('dir', d))
+                for f in sorted(filtered_files):
+                    items.append(('file', f))
 
-            # Apply max_items_per_dir limit for subdirectories
-            shown_items = items
-            hidden_count = 0
-            if current_depth > 0 and len(items) > max_items_per_dir:
-                shown_items = items[:max_items_per_dir]
-                hidden_count = len(items) - max_items_per_dir
-
-            # Add items with indentation
-            for item_type, item_name in shown_items:
-                suffix = "/" if item_type == 'dir' else ""
-                result.append(f"{indent}  {item_name}{suffix}")
-
-            # Add ellipsis if truncated
-            if hidden_count > 0:
-                result.append(f"{indent}  ... (and {hidden_count} more items)")
+                # Root directory is not limited by max_items_per_dir
+                # Add items with indentation
+                for item_type, item_name in items:
+                    suffix = "/" if item_type == 'dir' else ""
+                    result.append(f"{indent}  {item_name}{suffix}")
 
             # Special handling for 'skills' directory
             if rel_root == 'skills':
