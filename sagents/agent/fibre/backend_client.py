@@ -63,9 +63,13 @@ class FibreBackendClient:
         system_context: Optional[Dict[str, Any]] = None,
         available_sub_agent_ids: Optional[List[str]] = None,
         llm_provider_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         创建 Agent 到后端
+
+        Args:
+            user_id: User ID for the request (required)
 
         Returns:
             agent_id 如果成功，None 如果失败
@@ -91,6 +95,9 @@ class FibreBackendClient:
             "agentMode": "fibre",
         }
 
+        # Use provided user_id or fallback to a default
+        headers_user_id = user_id if user_id else "unknown"
+        
         logger.info(f"[Backend API] Creating agent: POST {self.base_url}/api/agent/create, payload: {json.dumps(payload, ensure_ascii=False)}")
         try:
             import aiohttp
@@ -98,7 +105,7 @@ class FibreBackendClient:
                 async with session.post(
                     f"{self.base_url}/api/agent/create",
                     json=payload,
-                    headers={"X-Sage-Internal-UserId": "fibre_client"},
+                    headers={"X-Sage-Internal-UserId": headers_user_id},
                     timeout=30
                 ) as resp:
                     resp_text = await resp.text()
@@ -122,18 +129,25 @@ class FibreBackendClient:
             logger.warning(f"Error creating agent via backend: {e}")
             return None
 
-    async def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
-        """获取 Agent 配置"""
+    async def get_agent(self, agent_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """获取 Agent 配置
+
+        Args:
+            agent_id: Agent ID
+            user_id: User ID for the request (required)
+        """
         if not self.available:
             return None
 
+        headers_user_id = user_id if user_id else "unknown"
+        
         logger.info(f"[Backend API] Getting agent: GET {self.base_url}/api/agent/{agent_id}")
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/agent/{agent_id}",
-                    headers={"X-Sage-Internal-UserId": "fibre_client"},
+                    headers={"X-Sage-Internal-UserId": headers_user_id},
                     timeout=10
                 ) as resp:
                     resp_text = await resp.text()
@@ -149,9 +163,12 @@ class FibreBackendClient:
             logger.debug(f"Error getting agent: {e}")
             return None
 
-    async def list_agents(self) -> List[str]:
+    async def list_agents(self, user_id: Optional[str] = None) -> List[str]:
         """
         获取所有 Agent ID 列表
+
+        Args:
+            user_id: User ID for the request (required)
 
         Returns:
             List of agent IDs
@@ -159,13 +176,15 @@ class FibreBackendClient:
         if not self.available:
             return []
 
+        headers_user_id = user_id if user_id else "unknown"
+
         logger.info(f"[Backend API] Listing agents: GET {self.base_url}/api/agent/list")
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/agent/list",
-                    headers={"X-Sage-Internal-UserId": "fibre_client"},
+                    headers={"X-Sage-Internal-UserId": headers_user_id},
                     timeout=10
                 ) as resp:
                     resp_text = await resp.text()
@@ -186,6 +205,7 @@ class FibreBackendClient:
         api_keys: List[str],
         model: str,
         name: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         创建 LLM Provider 并返回 provider ID
@@ -195,6 +215,7 @@ class FibreBackendClient:
             api_keys: API keys 列表
             model: 模型名称
             name: Provider 名称（可选）
+            user_id: User ID for the request (required)
 
         Returns:
             provider_id 如果成功，None 如果失败
@@ -210,6 +231,8 @@ class FibreBackendClient:
         if name:
             payload["name"] = name
 
+        headers_user_id = user_id if user_id else "unknown"
+
         logger.info(f"[Backend API] Creating LLM provider: POST {self.base_url}/api/llm-provider/create, payload: {json.dumps(payload, ensure_ascii=False)}")
         try:
             import aiohttp
@@ -217,7 +240,7 @@ class FibreBackendClient:
                 async with session.post(
                     f"{self.base_url}/api/llm-provider/create",
                     json=payload,
-                    headers={"X-Sage-Internal-UserId": "fibre_client"},
+                    headers={"X-Sage-Internal-UserId": headers_user_id},
                     timeout=30
                 ) as resp:
                     resp_text = await resp.text()
@@ -247,11 +270,15 @@ class FibreBackendClient:
         messages: List[Dict[str, str]],
         session_id: Optional[str] = None,
         system_context: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         流式执行 Agent 任务，解析 SSE 返回结构化数据并合并 chunks
 
         后端返回的是 MessageChunk 的流，我们需要将同一 message_id 的 chunks 合并成完整消息
+
+        Args:
+            user_id: User ID for the request (required)
 
         Yields:
             MessageChunk 对象列表（与 run_stream_with_flow 返回格式一致）
@@ -265,6 +292,9 @@ class FibreBackendClient:
             "session_id": session_id,
             "system_context": system_context or {},
         }
+        
+        headers_user_id = user_id if user_id else "unknown"
+        
         logger.info(f"[Backend API] Stream chat: POST {self.base_url}/api/chat, payload: {json.dumps(payload, ensure_ascii=False)}")
 
         import aiohttp
@@ -272,7 +302,7 @@ class FibreBackendClient:
             async with session.post(
                 f"{self.base_url}/api/chat",
                 json=payload,
-                headers={"X-Sage-Internal-UserId": "fibre_client"},
+                headers={"X-Sage-Internal-UserId": headers_user_id},
                 timeout=None
             ) as resp:
                 logger.info(f"[Backend API] Stream chat response: status={resp.status}")
