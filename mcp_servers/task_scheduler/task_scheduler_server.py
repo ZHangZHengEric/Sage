@@ -457,27 +457,32 @@ async def add_task(
     is_recurring: bool = False
 ) -> str:
     """
-    Add a new task to the scheduler.
+    添加新任务到调度器。
 
-    [Effect]
-    - Creates a new task in the database with the specified parameters.
-    - For one-time tasks: schedule is execute time in ISO format
-    - For recurring tasks: schedule is a cron expression
+    [功能]
+    - 创建一次性任务或循环任务到数据库。
+    - 一次性任务：在指定时间执行一次。
+    - 循环任务：按照 cron 表达式定期执行。
 
-    [When to Use]
-    - Use this to schedule a one-time task for an agent (set is_recurring=False).
-    - Use this to set up recurring tasks like daily reports (set is_recurring=True).
+    [使用场景]
+    - 创建一次性任务：设置 is_recurring=False，提供具体的执行时间。
+    - 创建循环任务：设置 is_recurring=True，提供 cron 表达式（如每天9点执行）。
+
+    [重要说明]
+    - 对于循环任务，description 应该是单次执行的具体任务描述。
+    - 不要将循环任务本身的描述（如"每天执行"）写入 description。
+    - 例如：循环任务是"每日报告"，description 应该是"生成今日销售数据报告"，而不是"每天生成报告"。
 
     Args:
-        name: The name/title of the task.
-        description: Detailed description of what the task should do.
-        agent_id: The ID of the agent that will execute this task.
-        schedule: For one-time: execution time in format "YYYY-MM-DD HH:MM:SS" (preferred) or ISO 8601.
-                 For recurring: cron expression (e.g., "0 9 * * *" for daily at 9 AM).
-        is_recurring: Whether this is a recurring task. Default False.
+        name: 任务名称/标题。
+        description: 单次任务的具体描述（说明这次要做什么，不要包含循环信息）。
+        agent_id: 执行此任务的 Agent ID。
+        schedule: 一次性任务：执行时间，格式 "YYYY-MM-DD HH:MM:SS" 或 ISO 8601。
+                 循环任务：cron 表达式（如 "0 9 * * *" 表示每天上午9点）。
+        is_recurring: 是否为循环任务。默认 False。
 
     Returns:
-        Confirmation message with Task ID (prefixed with 'once_' or 'rec_').
+        包含任务 ID 的确认消息（一次性任务前缀为 'once_'，循环任务前缀为 'rec_'）。
     """
     try:
 
