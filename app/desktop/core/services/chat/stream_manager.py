@@ -56,9 +56,10 @@ class StreamManager:
             return
 
         session.history.append(chunk)
+        chunk_index = len(session.history) - 1
         session.last_activity = time.time()
         for q in list(session.subscribers):
-            await q.put(chunk)
+            await q.put((chunk_index, chunk))
 
     async def finish_publisher(self, session_id: str):
         """
@@ -107,18 +108,20 @@ class StreamManager:
         try:
             async for chunk in generator:
                 session.history.append(chunk)
+                chunk_index = len(session.history) - 1
                 session.last_activity = time.time()
                 # 广播给所有订阅者
                 for q in list(session.subscribers):
-                    await q.put(chunk)
+                    await q.put((chunk_index, chunk))
                 await asyncio.sleep(0)
         except Exception as e:
             logger.error(f"Background worker error for {session.session_id}: {e}")
             # 可以在这里构造一个 Error Chunk 发送给订阅者
             error_json = '{"type":"error","content":"Internal Server Error during stream processing"}\n'
             session.history.append(error_json)
+            error_index = len(session.history) - 1
             for q in list(session.subscribers):
-                await q.put(error_json)
+                await q.put((error_index, error_json))
         finally:
             session.is_completed = True
             logger.debug(f"Session {session.session_id} completed. Total chunks: {len(session.history)}")
@@ -188,10 +191,12 @@ class StreamManager:
 
         try:
             # 1. 先发送历史消息 (Catch up)
+            catchup_start = max(0, last_index)
             history_len = len(session.history)
-            if last_index < history_len:
-                for i in range(last_index, history_len):
+            if catchup_start < history_len:
+                for i in range(catchup_start, history_len):
                     yield session.history[i]
+            next_index = max(catchup_start, history_len)
 
             # 2. 如果任务已完成，直接结束
             if session.is_completed:
@@ -199,9 +204,13 @@ class StreamManager:
 
             # 3. 监听实时消息
             while True:
-                chunk = await queue.get()
-                if chunk is None:  # 结束信号
+                payload = await queue.get()
+                if payload is None:  # 结束信号
                     break
+                idx, chunk = payload
+                if idx < next_index:
+                    continue
+                next_index = idx + 1
                 yield chunk
         except asyncio.CancelledError:
             logger.info(f"Client disconnected from session {session_id}")

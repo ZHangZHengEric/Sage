@@ -171,7 +171,6 @@ class AgentRuntime:
                 wrapped_tm = ObservableToolManager(tool_manager, self.observability_manager, session_id)
             
             # 4. Execute Agent
-            logger.info(f"Starting agent {agent_name} for session_id: {session_id}")
             async for chunk in self.agent.run_stream(session_context):
                 yield chunk
                 
