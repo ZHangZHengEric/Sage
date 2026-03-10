@@ -5,7 +5,8 @@ import { usePanelStore } from '@/stores/panel.js'
 export const useChatWorkspace = ({
   t,
   toast,
-  agentId
+  agentId,
+  sessionId
 }) => {
   const panelStore = usePanelStore()
   // const showWorkspace = ref(false) // Use panelStore instead
@@ -17,7 +18,8 @@ export const useChatWorkspace = ({
   const fetchWorkspaceFiles = async (id) => {
     if (!id) return
     try {
-      const data = await agentAPI.getWorkspaceFiles(id)
+      const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
+      const data = await agentAPI.getWorkspaceFiles(id, sid)
       workspaceFiles.value = data.files || []
     } catch (error) {
       console.error('获取工作空间文件出错:', error)
