@@ -71,8 +71,9 @@
     "targets": [
       "app",
       "dmg",
-      "nsis"
-    ],
+      "nsis",
+      "msi"
+      ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
