@@ -94,10 +94,13 @@ export const agentAPI = {
   /**
    * 获取工作空间文件
    * @param {string} agentId - 会话ID
+   * @param {string} sessionId - 会话ID (可选)
    * @returns {Promise<Object>}
    */
-  getWorkspaceFiles: (agentId) => {
-    return baseAPI.post(`/api/agent/${agentId}/file_workspace`, {})
+  getWorkspaceFiles: (agentId, sessionId) => {
+    return baseAPI.post(`/api/agent/${agentId}/file_workspace`, {}, {
+      params: { session_id: sessionId }
+    })
   },
 
   /**

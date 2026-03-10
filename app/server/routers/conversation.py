@@ -81,7 +81,6 @@ async def get_status(session_id: str, request: Request):
     return await Response.succ(message=f"会话 {session_id} 状态获取成功", data={**result, "user_id": user_id})
 
 
-
 @conversation_router.get("/api/conversations")
 async def list_conversations(
     request: Request,
@@ -149,7 +148,8 @@ async def get_messages(session_id: str, request: Request):
     """获取指定对话的所有消息"""
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid")
-    data = await get_conversation_messages(session_id, user_id=user_id)
+    user_role = claims.get("role") or "user"
+    data = await get_conversation_messages(session_id, user_id=user_id, user_role=user_role)
     return await Response.succ(data=data, message="获取消息成功")
 
 

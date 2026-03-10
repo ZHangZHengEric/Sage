@@ -613,7 +613,7 @@ class SessionContext:
         """
         old_status = self.status
         self.status = status
-        logger.info(f"SessionContext: Session {self.session_id} status changed from {old_status.value} to {status.value}")
+        logger.debug(f"SessionContext: Session {self.session_id} status changed from {old_status.value} to {status.value}")
 
         # 级联传播到子会话（当状态为 INTERRUPTED 或 ERROR 时）
         if cascade and status in [SessionStatus.INTERRUPTED, SessionStatus.ERROR]:

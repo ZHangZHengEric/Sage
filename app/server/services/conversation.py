@@ -14,14 +14,12 @@ from sagents.context.session_context import SessionStatus
 from sagents.session_runtime import get_global_session_manager
 
 
-
 from .. import models
 from ..core.exceptions import SageHTTPException
 from .chat.processor import ContentProcessor
 
-async def interrupt_session(
-    session_id: str, message: str = "用户请求中断"
-) -> Dict[str, Any]:
+
+async def interrupt_session(session_id: str, message: str = "用户请求中断") -> Dict[str, Any]:
     """中断指定会话，返回数据字典"""
     session_manager = get_global_session_manager()
     session = session_manager.get(session_id)
@@ -49,6 +47,7 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
     logger.bind(session_id=session_id).info(f"获取任务数量：{len(tasks_status.get('tasks', []))}")
     return {"session_id": session_id, "tasks_status": tasks_status}
 
+
 async def get_conversations_paginated(
     page: int = 1,
     page_size: int = 10,
@@ -70,7 +69,7 @@ async def get_conversations_paginated(
     return conversations, total_count
 
 
-async def get_conversation_messages(session_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def get_conversation_messages(session_id: str, user_id: Optional[str] = None, user_role: Optional[str] = None) -> Dict[str, Any]:
     """获取指定对话的所有消息并返回响应字典"""
     dao = models.ConversationDao()
     conversation = await dao.get_by_session_id(session_id)
@@ -80,8 +79,10 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
             detail=f"会话 {session_id} 不存在",
             error_detail=f"Conversation '{session_id}' not found",
         )
-    
-    if user_id and conversation.user_id != user_id:
+
+    if user_role == "admin":
+        pass
+    elif user_id and conversation.user_id != user_id:
         raise SageHTTPException(
             status_code=403,
             detail="无权访问该会话",
@@ -96,21 +97,21 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
         messages.append(result)
 
         # 处理 sys_delegate_task，将子任务的对话记录拼接在后面
-        if result.get('role') == 'assistant' and result.get('tool_calls'):
-            for tool_call in result['tool_calls']:
-                if tool_call.get('function', {}).get('name') == 'sys_delegate_task':
+        if result.get("role") == "assistant" and result.get("tool_calls"):
+            for tool_call in result["tool_calls"]:
+                if tool_call.get("function", {}).get("name") == "sys_delegate_task":
                     try:
-                        arguments = tool_call['function']['arguments']
+                        arguments = tool_call["function"]["arguments"]
                         if isinstance(arguments, str):
                             args = json.loads(arguments)
                         else:
                             args = arguments
-                        
-                        tasks = args.get('tasks', [])
+
+                        tasks = args.get("tasks", [])
                         if isinstance(tasks, list):
                             for task in tasks:
                                 if isinstance(task, dict):
-                                    sub_session_id = task.get('session_id')
+                                    sub_session_id = task.get("session_id")
                                     if sub_session_id:
                                         sub_msgs = session_manager.get_session_messages(sub_session_id)
                                         for sub_msg in sub_msgs:
@@ -119,7 +120,7 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
                                             messages.append(sub_result)
                     except Exception as e:
                         logger.warning(f"处理子任务消息失败: {e}")
-                        
+
     return {
         "conversation_id": session_id,
         "messages": messages,
@@ -145,7 +146,7 @@ async def delete_conversation(conversation_id: str, user_id: Optional[str] = Non
             detail=f"会话 {conversation_id} 不存在",
             error_detail=f"Conversation '{conversation_id}' not found",
         )
-    
+
     if user_id and conversation.user_id != user_id:
         raise SageHTTPException(
             status_code=403,
@@ -167,11 +168,11 @@ async def delete_conversation(conversation_id: str, user_id: Optional[str] = Non
 async def update_conversation_title(session_id: str, title: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """更新会话标题"""
     dao = models.ConversationDao()
-    
+
     if user_id:
         conversation = await dao.get_by_session_id(session_id)
         if not conversation:
-             raise SageHTTPException(
+            raise SageHTTPException(
                 status_code=500,
                 detail=f"会话 {session_id} 不存在",
                 error_detail=f"Conversation '{session_id}' not found",
@@ -182,7 +183,7 @@ async def update_conversation_title(session_id: str, title: str, user_id: Option
                 detail="无权修改该会话",
                 error_detail=f"User {user_id} does not own session {session_id}",
             )
-            
+
     success = await dao.update_title(session_id, title)
     if not success:
         raise SageHTTPException(
