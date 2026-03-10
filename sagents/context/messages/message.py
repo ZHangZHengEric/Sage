@@ -1,6 +1,6 @@
 import uuid
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, asdict
 from enum import Enum
 import json
@@ -70,7 +70,9 @@ class MessageChunk:
     role: str  # 消息角色 (user, assistant, system, tool)
     
     # 内容字段（content和tool_calls至少有一个）
-    content: Optional[str] = None  # 消息内容
+    # content 可以是字符串或列表（支持多模态，如图片+文本）
+    # 列表格式: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
+    content: Optional[Union[str, List[Dict[str, Any]]]] = None  # 消息内容
     tool_calls: Optional[List[Dict[str, Any]]] = None  # 工具调用列表（OpenAI格式）
     
     # 消息标识

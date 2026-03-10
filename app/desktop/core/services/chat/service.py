@@ -11,6 +11,7 @@ from sagents.context.session_context import (
     SessionStatus,
     get_session_run_lock,
 )
+from sagents.session_runtime import get_global_session_manager
 from sagents.sagents import SAgent
 from sagents.tool import ToolManager, get_tool_manager
 from ... import models
