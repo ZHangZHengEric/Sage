@@ -18,7 +18,7 @@ from ... import models
 from ...core.exceptions import SageHTTPException
 from ...models import IMChannelConfigDao
 from ...schemas.chat import StreamRequest, CustomSubAgentConfig
-from ...core.config import get_startup_config
+from sagents.session_runtime import get_global_session_manager
 from .processor import (
     ContentProcessor,
 )
