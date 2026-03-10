@@ -39,7 +39,6 @@ class TaskSchedulerDB:
                     name TEXT NOT NULL,
                     description TEXT,
                     agent_id TEXT NOT NULL,
-                    session_id TEXT,
                     cron_expression TEXT NOT NULL,
                     enabled BOOLEAN DEFAULT 1,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -55,7 +54,6 @@ class TaskSchedulerDB:
                     name TEXT NOT NULL,
                     description TEXT,
                     agent_id TEXT NOT NULL,
-                    session_id TEXT,
                     execute_at DATETIME NOT NULL,
                     status TEXT DEFAULT 'pending',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -83,8 +81,8 @@ class TaskSchedulerDB:
             
             # Create indexes for performance
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_tasks_session_status 
-                ON tasks (session_id, status)
+                CREATE INDEX IF NOT EXISTS idx_tasks_agent_status 
+                ON tasks (agent_id, status)
             """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_tasks_execute_at 
@@ -95,80 +93,7 @@ class TaskSchedulerDB:
                 ON recurring_tasks (enabled)
             """)
             
-            # Migration: Allow NULL session_id in existing tables
-            self._migrate_allow_null_session_id(cursor)
-            
             conn.commit()
-    
-    def _migrate_allow_null_session_id(self, cursor):
-        """Migrate existing tables to allow NULL session_id"""
-        try:
-            # Check and alter recurring_tasks table
-            cursor.execute("PRAGMA table_info(recurring_tasks)")
-            columns = cursor.fetchall()
-            session_id_col = next((col for col in columns if col[1] == 'session_id'), None)
-            
-            if session_id_col and session_id_col[3] == 1:  # notnull = 1
-                # Need to recreate table to remove NOT NULL constraint
-                cursor.execute("""
-                    CREATE TABLE recurring_tasks_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        description TEXT,
-                        agent_id TEXT NOT NULL,
-                        session_id TEXT,
-                        cron_expression TEXT NOT NULL,
-                        enabled BOOLEAN DEFAULT 1,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        last_executed_at DATETIME
-                    )
-                """)
-                cursor.execute("""
-                    INSERT INTO recurring_tasks_new 
-                    SELECT * FROM recurring_tasks
-                """)
-                cursor.execute("DROP TABLE recurring_tasks")
-                cursor.execute("ALTER TABLE recurring_tasks_new RENAME TO recurring_tasks")
-                print("Migrated recurring_tasks: session_id can now be NULL")
-        except Exception as e:
-            print(f"Migration warning for recurring_tasks: {e}")
-        
-        try:
-            # Check and alter tasks table
-            cursor.execute("PRAGMA table_info(tasks)")
-            columns = cursor.fetchall()
-            session_id_col = next((col for col in columns if col[1] == 'session_id'), None)
-            
-            if session_id_col and session_id_col[3] == 1:  # notnull = 1
-                # Need to recreate table to remove NOT NULL constraint
-                cursor.execute("""
-                    CREATE TABLE tasks_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        description TEXT,
-                        agent_id TEXT NOT NULL,
-                        session_id TEXT,
-                        execute_at DATETIME NOT NULL,
-                        status TEXT DEFAULT 'pending',
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        completed_at DATETIME,
-                        retry_count INTEGER DEFAULT 0,
-                        max_retries INTEGER DEFAULT 3,
-                        recurring_task_id INTEGER,
-                        FOREIGN KEY (recurring_task_id) REFERENCES recurring_tasks (id)
-                    )
-                """)
-                cursor.execute("""
-                    INSERT INTO tasks_new 
-                    SELECT * FROM tasks
-                """)
-                cursor.execute("DROP TABLE tasks")
-                cursor.execute("ALTER TABLE tasks_new RENAME TO tasks")
-                print("Migrated tasks: session_id can now be NULL")
-        except Exception as e:
-            print(f"Migration warning for tasks: {e}")
 
     # === Recurring Tasks Management ===
     
@@ -177,7 +102,6 @@ class TaskSchedulerDB:
         name: str,
         description: str,
         agent_id: str,
-        session_id: str,
         cron_expression: str
     ) -> int:
         """Add a recurring task template"""
@@ -185,9 +109,9 @@ class TaskSchedulerDB:
             cursor = conn.cursor()
             now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
-                INSERT INTO recurring_tasks (name, description, agent_id, session_id, cron_expression, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, description, agent_id, session_id, cron_expression, now, now))
+                INSERT INTO recurring_tasks (name, description, agent_id, cron_expression, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, description, agent_id, cron_expression, now, now))
             conn.commit()
             return cursor.lastrowid
 
@@ -224,11 +148,16 @@ class TaskSchedulerDB:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def update_recurring_task_last_executed(self, task_id: int):
-        """Update the last_executed_at timestamp for a recurring task"""
+    def update_recurring_task_last_executed(self, task_id: int, executed_at: Optional[str] = None):
+        """Update the last_executed_at timestamp for a recurring task
+        
+        Args:
+            task_id: The recurring task ID
+            executed_at: Optional timestamp string (YYYY-MM-DD HH:MM:SS format). If not provided, uses current time.
+        """
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            now = executed_at or datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
                 UPDATE recurring_tasks 
                 SET last_executed_at = ?, updated_at = ?
@@ -269,7 +198,6 @@ class TaskSchedulerDB:
         name: str,
         description: str,
         agent_id: str,
-        session_id: str,
         execute_at: str,
         recurring_task_id: Optional[int] = None
     ) -> int:
@@ -278,9 +206,9 @@ class TaskSchedulerDB:
             cursor = conn.cursor()
             now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
-                INSERT INTO tasks (name, description, agent_id, session_id, execute_at, status, recurring_task_id, created_at, updated_at, retry_count, max_retries)
-                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, 0, 3)    
-            """, (name, description, agent_id, session_id, execute_at, recurring_task_id, now, now))
+                INSERT INTO tasks (name, description, agent_id, execute_at, status, recurring_task_id, created_at, updated_at, retry_count, max_retries)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, 3)    
+            """, (name, description, agent_id, execute_at, recurring_task_id, now, now))
             conn.commit()
             return cursor.lastrowid
 
@@ -288,7 +216,6 @@ class TaskSchedulerDB:
         self,
         agent_id: Optional[str] = None,
         status: Optional[str] = None,
-        session_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
@@ -306,9 +233,6 @@ class TaskSchedulerDB:
             if status:
                 query += " AND status = ?"
                 params.append(status)
-            if session_id:
-                query += " AND session_id = ?"
-                params.append(session_id)
 
             query += " ORDER BY execute_at ASC LIMIT ? OFFSET ?"
             params.append(limit)
@@ -362,19 +286,6 @@ class TaskSchedulerDB:
                 AND execute_at <= ?
                 ORDER BY execute_at ASC
             """, (now,))
-            return [dict(row) for row in cursor.fetchall()]
-
-    def get_pending_tasks_by_session(self, session_id: str) -> List[Dict[str, Any]]:
-        """Get pending tasks for a specific session, ordered by creation time"""
-        with self._get_conn() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM tasks
-                WHERE status = 'pending'
-                  AND session_id = ?
-                ORDER BY created_at ASC
-            """, (session_id,))
             return [dict(row) for row in cursor.fetchall()]
 
     def claim_task(self, task_id: int) -> bool:
@@ -436,7 +347,7 @@ class TaskSchedulerDB:
         
         Args:
             task_id: The ID of the recurring task to update.
-            **kwargs: Fields to update (name, description, agent_id, session_id, cron_expression, enabled).
+            **kwargs: Fields to update (name, description, agent_id, cron_expression, enabled).
             
         Returns:
             True if update was successful, False otherwise.
@@ -444,7 +355,7 @@ class TaskSchedulerDB:
         if not kwargs:
             return False
             
-        allowed_fields = {'name', 'description', 'agent_id', 'session_id', 'cron_expression', 'enabled'}
+        allowed_fields = {'name', 'description', 'agent_id', 'cron_expression', 'enabled'}
         update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
         
         if not update_fields:
@@ -472,7 +383,7 @@ class TaskSchedulerDB:
         
         Args:
             task_id: The ID of the task to update.
-            **kwargs: Fields to update (name, description, agent_id, session_id, execute_at, status, max_retries).
+            **kwargs: Fields to update (name, description, agent_id, execute_at, status, max_retries).
             
         Returns:
             True if update was successful, False otherwise.
@@ -480,7 +391,7 @@ class TaskSchedulerDB:
         if not kwargs:
             return False
             
-        allowed_fields = {'name', 'description', 'agent_id', 'session_id', 'execute_at', 'status', 'max_retries'}
+        allowed_fields = {'name', 'description', 'agent_id', 'execute_at', 'status', 'max_retries'}
         update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
         
         if not update_fields:
