@@ -117,10 +117,10 @@ jobs:
           # Rename Updater Bundles (tar.gz & sig) if exist
           cd ../macos/
           for file in *.tar.gz; do
-            mv "$file" "SageAI-${VERSION}-${{ matrix.arch }}.tar.gz"
+            mv "$file" "SageAI-${VERSION}-${{ matrix.arch }}.app.tar.gz"
           done
           for file in *.tar.gz.sig; do
-            mv "$file" "SageAI-${VERSION}-${{ matrix.arch }}.tar.gz.sig"
+            mv "$file" "SageAI-${VERSION}-${{ matrix.arch }}.app.tar.gz.sig"
           done
 
       - name: Rename Artifacts (Windows)
@@ -167,8 +167,8 @@ jobs:
         with:
           files: |
             app/desktop/tauri/target/release/bundle/dmg/*.dmg
-            app/desktop/tauri/target/release/bundle/macos/*.tar.gz
-            app/desktop/tauri/target/release/bundle/macos/*.tar.gz.sig
+            app/desktop/tauri/target/release/bundle/macos/*.app.tar.gz
+            app/desktop/tauri/target/release/bundle/macos/*.app.tar.gz.sig
 
       - name: Release (Windows)
         uses: softprops/action-gh-release@v1

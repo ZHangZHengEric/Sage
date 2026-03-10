@@ -242,6 +242,10 @@ export default {
   'system.version.platformDarwinX64': 'macOS (Intel)',
   'system.version.platformWindowsX64': 'Windows (x64)',
   'system.version.platformLinuxX64': 'Linux (x64)',
+  'system.version.importGithub': '从 GitHub 导入',
+  'system.version.importing': '正在导入...',
+  'system.version.importSuccess': '导入成功',
+  'system.version.importError': '导入失败',
 
   // 通用
   'common.actions': '操作',

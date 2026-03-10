@@ -2,7 +2,6 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { check } from '@tauri-apps/plugin-updater'
 import { getVersion } from '@tauri-apps/api/app'
-import { invoke } from '@tauri-apps/api/core'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useLanguage } from '../utils/i18n'
@@ -35,15 +34,9 @@ export const useUpdaterStore = defineStore('updater', () => {
     updateStatus.value = ''
     
     try {
-      // 1. Check for system proxy
-      let proxy = undefined
-      try {
-        proxy = await invoke('get_system_proxy')
-      } catch (e) {
-        // ignore
-      }
 
-      const update = await check({ proxy })
+      // Check for updates
+      const update = await check()
       
       if (update) {
         updateStatus.value = t('system.foundUpdate', { version: update.version })
@@ -51,6 +44,11 @@ export const useUpdaterStore = defineStore('updater', () => {
         const confirmed = await confirm(t('system.confirmUpdate', { version: update.version, notes: update.body || t('system.noReleaseNotes') }))
         
         if (confirmed) {
+          // Note: In Tauri v2, we cannot modify the download URL from the JS side.
+          // The 'update' object does not expose the URL, and modifying it does not affect the Rust backend.
+          // To support proxying, the server endpoint must return the proxied URL, 
+          // or the user must use a system proxy.
+          
           await startDownload(update)
         } else {
           updateStatus.value = t('system.updateCancelled')
@@ -79,9 +77,12 @@ export const useUpdaterStore = defineStore('updater', () => {
       let contentLength = 0
       
       await update.download((event) => {
+        console.log('[Updater] Download event:', event)
         switch (event.event) {
           case 'Started':
             contentLength = event.data.contentLength
+            console.log('[Updater] Download started. Content length:', contentLength)
+            updateStatus.value = `Download started. Size: ${contentLength || 'unknown'}`
             if (contentLength) {
               totalBytes.value = contentLength
             }
@@ -89,16 +90,29 @@ export const useUpdaterStore = defineStore('updater', () => {
           case 'Progress':
             downloaded += event.data.chunkLength
             downloadedBytes.value = downloaded
+            console.log(`[Updater] Download progress: ${downloaded}/${totalBytes.value}`)
             if (totalBytes.value > 0) {
               downloadProgress.value = Math.round((downloaded / totalBytes.value) * 100)
             }
+            
+            // Show detailed status
+            if (downloaded === 0) {
+                 updateStatus.value = 'Connected, waiting for data...'
+            } else if (downloaded < 1024 * 1024) { 
+                 updateStatus.value = `Downloading: ${Math.round(downloaded/1024)}KB / ${Math.round(totalBytes.value/1024)}KB`
+            } else {
+                 updateStatus.value = `Downloading: ${(downloaded/1024/1024).toFixed(1)}MB / ${(totalBytes.value/1024/1024).toFixed(1)}MB`
+            }
             break
           case 'Finished':
+            console.log('[Updater] Download finished')
+            updateStatus.value = 'Download finished, verifying...'
             // 下载完成
             break
         }
       })
 
+      console.log('[Updater] Download complete, installing...')
       updateStatus.value = t('system.installing')
       await update.install()
       

@@ -6,10 +6,17 @@
         <h2 class="text-lg font-medium">{{ t('system.versionManagement') }}</h2>
         <p class="text-sm text-muted-foreground mt-1">{{ t('system.version.description') }}</p>
       </div>
-      <Button @click="openCreateDialog">
-        <Plus class="w-4 h-4 mr-2" />
-        {{ t('system.version.create') }}
-      </Button>
+      <div class="flex gap-2">
+        <Button variant="outline" @click="handleImportGithub" :disabled="importing">
+          <Github v-if="!importing" class="w-4 h-4 mr-2" />
+          <Loader2 v-else class="w-4 h-4 mr-2 animate-spin" />
+          {{ importing ? t('system.version.importing') : t('system.version.importGithub') }}
+        </Button>
+        <Button @click="openCreateDialog">
+          <Plus class="w-4 h-4 mr-2" />
+          {{ t('system.version.create') }}
+        </Button>
+      </div>
     </div>
 
     <!-- Content -->
@@ -238,11 +245,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import MarkdownRenderer from '@/components/chat/MarkdownRenderer.vue'
 import { 
   Plus, Loader2, Package, FileText, Download, Trash2, 
-  Apple, Monitor, X, Upload, PackageX 
+  Apple, Monitor, X, Upload, PackageX, Github
 } from 'lucide-vue-next'
 
 const { t } = useLanguage()
 const loading = ref(true)
+const importing = ref(false)
 const versions = ref([])
 const showCreateDialog = ref(false)
 const submitting = ref(false)
@@ -278,6 +286,20 @@ const removeArtifact = (index) => {
   Object.keys(uploading.value).forEach(k => {
     if (k.startsWith(`${index}_`)) delete uploading.value[k]
   })
+}
+
+const handleImportGithub = async () => {
+  importing.value = true
+  try {
+    await systemAPI.importGithubVersion()
+    toast.success(t('system.version.importSuccess'))
+    fetchVersions()
+  } catch (error) {
+    console.error(error)
+    toast.error(error.response?.data?.message || t('system.version.importError'))
+  } finally {
+    importing.value = false
+  }
 }
 
 const handleFileUpload = async (event, index, field) => {

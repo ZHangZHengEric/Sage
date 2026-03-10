@@ -16,6 +16,9 @@ export const systemAPI = {
   createVersion: (data) => {
     return baseAPI.post('/api/system/version', data)
   },
+  importGithubVersion: () => {
+    return baseAPI.post('/api/system/version/import_github')
+  },
   deleteVersion: (version) => {
     return baseAPI.delete(`/api/system/version/${version}`)
   }
