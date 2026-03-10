@@ -1,13 +1,26 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict
-from typing import Dict, Optional, List
-from datetime import datetime
+from typing import Dict, Optional, List, Any
+from datetime import datetime, timedelta
+import httpx
+import asyncio
+import logging
 
 from app.server.models.system import VersionDao, Version
 from app.server.core.render import Response
 from app.server.schemas.base import BaseResponse
 
+logger = logging.getLogger(__name__)
+
 version_router = APIRouter(prefix="/api/system/version", tags=["Version"])
+
+# GitHub Release Cache
+_github_cache = {
+    "data": None,
+    "last_updated": None
+}
+CACHE_TTL = timedelta(minutes=15)
+GITHUB_REPO = "ZHangZHengEric/Sage"
 
 async def get_version_dao() -> VersionDao:
     return VersionDao()
@@ -41,6 +54,175 @@ class WebVersionResponse(BaseModel):
     pub_date: datetime
     artifacts: List[ArtifactSchema]
     model_config = ConfigDict(from_attributes=True)
+
+async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
+    """
+    Fetch release info from GitHub.
+    Returns parsed data suitable for creating a version in DB.
+    """
+    global _github_cache
+    now = datetime.now()
+
+    if _github_cache["data"] and _github_cache["last_updated"]:
+        if now - _github_cache["last_updated"] < CACHE_TTL:
+            return _github_cache["data"]
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=10.0, follow_redirects=True)
+            resp.raise_for_status()
+            release_data = resp.json()
+            
+            tag_name = release_data.get("tag_name", "")
+            # Clean version string: remove 'desktop-v' and leading 'v'
+            version = tag_name.replace("desktop-v", "").lstrip("v")
+            notes = release_data.get("body", "")
+            pub_date = release_data.get("published_at", "")
+            
+            assets = release_data.get("assets", [])
+            
+            # Helper to fetch signature content
+            async def get_sig_content(asset_url):
+                try:
+                    r = await client.get(asset_url, timeout=10.0, follow_redirects=True)
+                    r.raise_for_status()
+                    return r.text
+                except Exception as e:
+                    logger.error(f"Failed to fetch signature from {asset_url}: {e}")
+                    return ""
+
+            # Intermediate storage to group assets by platform
+            # key: platform, value: { installer: url, updater: url, sig_url: url }
+            platform_assets = {}
+
+            def get_platform(name):
+                name_lower = name.lower()
+                # Mac detection
+                if any(k in name_lower for k in ["darwin", "macos", "apple", ".dmg", ".app.tar.gz"]):
+                    if any(k in name_lower for k in ["aarch64", "arm64"]):
+                        return "darwin-aarch64"
+                    if any(k in name_lower for k in ["x86_64", "x64", "intel"]):
+                         return "darwin-x86_64"
+                
+                # Windows detection
+                if any(k in name_lower for k in ["windows", "win", ".exe", ".msi", ".nsis.zip"]):
+                    if any(k in name_lower for k in ["x64", "x86_64"]):
+                        return "windows-x86_64"
+                
+                # Linux detection
+                if any(k in name_lower for k in ["linux", "appimage", ".deb"]):
+                    if any(k in name_lower for k in ["x86_64", "amd64"]):
+                        return "linux-x86_64"
+                return None
+
+            for asset in assets:
+                name = asset["name"]
+                url = asset["browser_download_url"]
+                
+                if name.endswith(".sig"):
+                    continue
+
+                platform = get_platform(name)
+                # If platform not detected but it is a .tar.gz and has 'aarch64' or 'x86_64', try to infer
+                if not platform and name.endswith(".tar.gz"):
+                    if "aarch64" in name.lower() or "arm64" in name.lower():
+                         # Likely Mac ARM or Linux ARM
+                         # Assuming Mac if not specified
+                         platform = "darwin-aarch64"
+                    elif "x86_64" in name.lower():
+                         # Ambiguous: could be Mac Intel, Linux, or Windows (unlikely for tar.gz updater)
+                         # Let's check if we can differentiate
+                         # If no other clues, maybe skip or default?
+                         # The provided asset `SageAI-1.0.0-aarch64.tar.gz` was missed.
+                         pass
+
+                if not platform:
+                    continue
+                
+                if platform not in platform_assets:
+                    platform_assets[platform] = {"installer": None, "updater": None, "sig_url": None}
+
+                # Determine type
+                # Updater packages
+                # Mac updater: .tar.gz (but not .app.tar.gz in this case, the provided assets show SageAI-1.0.0-aarch64.tar.gz)
+                # We need to be careful not to confuse with source code tar.gz if any
+                # The assets provided show:
+                # SageAI-1.0.0-aarch64.tar.gz (updater)
+                # SageAI-1.0.0-aarch64.tar.gz.sig (signature)
+                # SageAI-1.0.0-aarch64.dmg (installer)
+                
+                is_updater = False
+                if name.endswith(".nsis.zip") or name.endswith(".AppImage.tar.gz"):
+                    is_updater = True
+                elif platform.startswith("darwin") and name.endswith(".tar.gz") and not name.endswith(".app.tar.gz"):
+                     # It seems for mac it is just .tar.gz in the provided example
+                     is_updater = True
+                elif platform.startswith("darwin") and name.endswith(".app.tar.gz"):
+                     is_updater = True
+
+                if is_updater:
+                    platform_assets[platform]["updater"] = url
+                    # Check if signature exists in assets
+                    sig_name = name + ".sig"
+                    for a in assets:
+                        if a["name"] == sig_name:
+                            platform_assets[platform]["sig_url"] = a["browser_download_url"]
+                            break
+                # Installer packages
+                elif name.endswith(".dmg") or name.endswith(".exe") or name.endswith(".msi") or name.endswith(".AppImage") or name.endswith(".deb"):
+                     # Avoid treating updater as installer if extensions overlap (e.g. .tar.gz could be source)
+                     # But here we explicitly check known installer extensions
+                    platform_assets[platform]["installer"] = url
+
+            # Build artifacts list
+            artifacts = []
+            sig_tasks = []
+            temp_artifacts = []
+            
+            # Debug log
+            logger.info(f"Found platform assets: {platform_assets}")
+
+            for platform, files in platform_assets.items():
+                if files["updater"] and files["sig_url"]:
+                    sig_tasks.append(get_sig_content(files["sig_url"]))
+                    temp_artifacts.append({
+                        "platform": platform,
+                        "installer_url": files["installer"] or files["updater"], # Fallback to updater if no installer found
+                        "updater_url": files["updater"],
+                        "updater_signature": None # Will be filled later
+                    })
+                elif files["installer"]:
+                     # Only installer, no updater
+                     artifacts.append({
+                        "platform": platform,
+                        "installer_url": files["installer"],
+                        "updater_url": None,
+                        "updater_signature": None
+                     })
+
+            # Fetch signatures
+            if sig_tasks:
+                signatures = await asyncio.gather(*sig_tasks)
+                for i, sig in enumerate(signatures):
+                    temp_artifacts[i]["updater_signature"] = sig
+                    artifacts.append(temp_artifacts[i])
+
+            result = {
+                "version": version,
+                "notes": notes,
+                "pub_date": pub_date,
+                "artifacts": artifacts
+            }
+            
+            _github_cache["data"] = result
+            _github_cache["last_updated"] = now
+            return result
+
+    except Exception as e:
+        logger.error(f"Error fetching GitHub release: {e}")
+        return None
 
 @version_router.get("/check", response_model=TauriUpdateResponse)
 async def check_update(dao: VersionDao = Depends(get_version_dao)):
@@ -77,6 +259,33 @@ async def get_latest_version(dao: VersionDao = Depends(get_version_dao)):
     """
     latest = await dao.get_latest_version()
     return await Response.succ(data=latest)
+
+@version_router.post("/import_github", response_model=BaseResponse[WebVersionResponse])
+async def import_github_version(dao: VersionDao = Depends(get_version_dao)):
+    """
+    Import latest version from GitHub Release.
+    """
+    data = await fetch_github_release_info()
+    if not data:
+        return await Response.error(code=500, message="Failed to fetch from GitHub")
+    print(data)
+    # Check if version exists
+    existing = await dao.get_version_by_tag(data["version"])
+    if existing:
+        # If exists, delete it first (overwrite)
+        await dao.delete_by_tag(data["version"])
+    
+    # Create version
+    created = await dao.create_version(
+        version_str=data["version"],
+        release_notes=data["notes"],
+        artifacts=data["artifacts"]
+    )
+    
+    if not created:
+        return await Response.error(code=500, message="Failed to create version")
+        
+    return await Response.succ(data=created, message=f"Version {data['version']} imported successfully")
 
 @version_router.post("", response_model=BaseResponse[WebVersionResponse])
 async def create_version(request: CreateVersionRequest, dao: VersionDao = Depends(get_version_dao)):
