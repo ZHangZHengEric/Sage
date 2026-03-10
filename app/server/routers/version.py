@@ -146,15 +146,12 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
 
                 # Determine type
                 # Updater packages
-                # Mac updater: .tar.gz (but not .app.tar.gz in this case, the provided assets show SageAI-1.0.0-aarch64.tar.gz)
-                # We need to be careful not to confuse with source code tar.gz if any
-                # The assets provided show:
-                # SageAI-1.0.0-aarch64.tar.gz (updater)
-                # SageAI-1.0.0-aarch64.tar.gz.sig (signature)
-                # SageAI-1.0.0-aarch64.dmg (installer)
-                
+                # Windows
+                # NSIS: SageAI-x.x.x-x86_64-setup.zip
                 is_updater = False
-                if name.endswith(".nsis.zip") or name.endswith(".AppImage.tar.gz"):
+                if name.endswith("-setup.zip") or name.endswith(".nsis.zip"):
+                    is_updater = True
+                elif name.endswith(".AppImage.tar.gz"):
                     is_updater = True
                 elif platform.startswith("darwin") and name.endswith(".tar.gz") and not name.endswith(".app.tar.gz"):
                      # It seems for mac it is just .tar.gz in the provided example
@@ -171,9 +168,7 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
                             platform_assets[platform]["sig_url"] = a["browser_download_url"]
                             break
                 # Installer packages
-                elif name.endswith(".dmg") or name.endswith(".exe") or name.endswith(".msi") or name.endswith(".AppImage") or name.endswith(".deb"):
-                     # Avoid treating updater as installer if extensions overlap (e.g. .tar.gz could be source)
-                     # But here we explicitly check known installer extensions
+                elif name.endswith(".dmg") or name.endswith(".exe") or name.endswith(".AppImage") or name.endswith(".deb"):
                     platform_assets[platform]["installer"] = url
 
             # Build artifacts list
@@ -187,9 +182,27 @@ async def fetch_github_release_info() -> Optional[Dict[str, Any]]:
             for platform, files in platform_assets.items():
                 if files["updater"] and files["sig_url"]:
                     sig_tasks.append(get_sig_content(files["sig_url"]))
+                    
+                    # For Windows NSIS, installer is .exe, updater is .zip
+                    # For Windows MSI, installer is .msi, updater is .msi.zip
+                    # For macOS, installer is .dmg, updater is .tar.gz
+                    # For Linux, installer is .AppImage, updater is .AppImage.tar.gz
+
+                    # If installer_url is missing, fallback logic:
+                    # - Windows: prefer updater url (zip) ? No, updater zip cannot be installed directly usually.
+                    #   But if we missed the .exe asset, we might not have a choice or should leave it None.
+                    #   However, in previous logic: `files["installer"] or files["updater"]`
+                    #   If we have NSIS updater (.zip), we likely have NSIS installer (.exe).
+                    
+                    installer_url = files["installer"]
+                    # If no installer found but we have updater, check if we can/should use updater as installer?
+                    # Generally NO for NSIS (zip is not installer).
+                    # For AppImage, maybe?
+                    # Let's keep existing logic but be aware.
+                    
                     temp_artifacts.append({
                         "platform": platform,
-                        "installer_url": files["installer"] or files["updater"], # Fallback to updater if no installer found
+                        "installer_url": installer_url, 
                         "updater_url": files["updater"],
                         "updater_signature": None # Will be filled later
                     })
