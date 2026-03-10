@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 
+from app.server.models.conversation import ConversationDao
 from ..core.render import Response
 from ..services.agent import (
     auto_generate_agent,
@@ -26,7 +27,6 @@ from ..services.agent import (
 from sagents.utils.prompt_manager import PromptManager
 from loguru import logger
 # ============= Agent相关模型 =============
-
 
 class AuthorizationRequest(BaseModel):
     user_ids: List[str]
@@ -326,10 +326,17 @@ async def update_auth(agent_id: str, req: AuthorizationRequest, http_request: Re
     return await Response.succ(data={}, message="更新授权成功")
 
 @agent_router.post("/{agent_id}/file_workspace")
-async def get_workspace(agent_id: str, request: Request):
+async def get_workspace(agent_id: str, request: Request, session_id: Optional[str] = None):
     """获取指定会话的文件工作空间"""
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
 
     result = await get_file_workspace(agent_id, user_id)
     files = result.get("files", [])
