@@ -139,6 +139,104 @@ class AgentBase(ABC):
                 msg.pop('content', None)
         return messages
 
+    async def _process_multimodal_content(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        处理多模态消息内容，将本地图片路径转换为 base64
+        保持远程图片 URL 不变
+
+        Args:
+            msg: 消息字典
+
+        Returns:
+            Dict[str, Any]: 处理后的消息字典
+        """
+        import base64
+        from pathlib import Path
+
+        content = msg.get('content')
+        if not isinstance(content, list):
+            return msg
+
+        new_content = []
+        for item in content:
+            if not isinstance(item, dict):
+                new_content.append(item)
+                continue
+
+            item_type = item.get('type')
+
+            if item_type == 'text':
+                # 文本内容保持不变
+                new_content.append(item)
+
+            elif item_type == 'image_url':
+                image_url_data = item.get('image_url', {})
+                url = image_url_data.get('url', '') if isinstance(image_url_data, dict) else str(image_url_data)
+
+                if not url:
+                    new_content.append(item)
+                    continue
+
+                # 检查是否是本地文件路径
+                if url.startswith('file://'):
+                    # 移除 file:// 前缀
+                    file_path = url[7:]
+                elif url.startswith('http://') or url.startswith('https://'):
+                    # 远程 URL，保持不变
+                    new_content.append(item)
+                    continue
+                else:
+                    file_path = url
+
+                # 检查文件是否存在
+                path_obj = Path(file_path)
+                if not path_obj.exists():
+                    logger.warning(f"Image file not found: {file_path}")
+                    new_content.append(item)
+                    continue
+
+                try:
+                    # 读取文件并转换为 base64
+                    with open(path_obj, 'rb') as f:
+                        image_data = f.read()
+                    base64_data = base64.b64encode(image_data).decode('utf-8')
+
+                    # 获取 MIME 类型
+                    mime_type = self._get_mime_type(path_obj.suffix.lower())
+
+                    # 构建 data URL
+                    data_url = f"data:{mime_type};base64,{base64_data}"
+
+                    new_content.append({
+                        'type': 'image_url',
+                        'image_url': {'url': data_url}
+                    })
+                    logger.debug(f"Converted local image to base64: {file_path}")
+
+                except Exception as e:
+                    logger.error(f"Failed to convert image to base64: {file_path}, error: {e}")
+                    new_content.append(item)
+
+            else:
+                # 其他类型保持不变
+                new_content.append(item)
+
+        msg['content'] = new_content
+        return msg
+
+    def _get_mime_type(self, file_extension: str) -> str:
+        """根据文件扩展名获取 MIME 类型"""
+        mime_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.bmp': 'image/bmp',
+            '.svg': 'image/svg+xml',
+        }
+        return mime_types.get(file_extension, 'image/jpeg')
+
     async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
         """
         通用的流式模型调用方法，有这个封装，主要是为了将
@@ -194,9 +292,15 @@ class AgentBase(ABC):
                 serializable_messages = []
                 for msg in messages:
                     if isinstance(msg, MessageChunk):
-                        serializable_messages.append(msg.to_dict())
+                        msg_dict = msg.to_dict()
+                        # 处理多模态消息：将图片URL转换为base64
+                        msg_dict = await self._process_multimodal_content(msg_dict)
+                        serializable_messages.append(msg_dict)
                     else:
-                        serializable_messages.append(msg)
+                        # 处理字典形式的消息
+                        msg_copy = msg.copy()
+                        msg_copy = await self._process_multimodal_content(msg_copy)
+                        serializable_messages.append(msg_copy)
                 # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
                 serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
                 # print("serializable_messages:",serializable_messages)

@@ -581,6 +581,16 @@ class SessionManager:
         Returns:
             工作区路径，找不到则返回 None
         """
+        # 1. 首先尝试从内存缓存获取
+        if session_id in self._all_session_paths:
+            return self._all_session_paths[session_id]
+        
+        # 2. 如果内存中没有，重新扫描会话目录
+        # 这处理了会话在其他进程中创建的情况
+        logger.debug(f"SessionManager: Session {session_id} not in cache, rescanning...")
+        self._scan_all_sessions()
+        
+        # 3. 再次尝试获取
         return self._all_session_paths.get(session_id)
 
     def cache_session_workspace(self, session_id: str, session_workspace: Optional[str]):
