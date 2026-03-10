@@ -141,13 +141,12 @@
           </div>
         </div>
         <div v-show="!sections.llm" class="px-5 pb-5 pt-4 space-y-4">
-          <FormItem :label="t('agent.modelProvider')">
-            <Select v-model="llmProviderSelectValue">
+          <FormItem :label="t('agent.modelProvider')" :error="store.errors.llm_provider_id" required>
+            <Select v-model="store.formData.llm_provider_id">
               <SelectTrigger>
                 <SelectValue :placeholder="t('agent.selectModelProvider')" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem :value="defaultProviderOption">{{ t('agent.useSystemDefault') }}</SelectItem>
                 <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
                   {{ provider.name }} ({{ provider.model }})
                 </SelectItem>
@@ -443,13 +442,6 @@ onBeforeUnmount(() => {
 
 // Step 3 Logic (Merged)
 const providers = ref([])
-const defaultProviderOption = '__default__'
-const llmProviderSelectValue = computed({
-  get: () => store.formData.llm_provider_id ?? defaultProviderOption,
-  set: (val) => {
-    store.formData.llm_provider_id = val === defaultProviderOption ? null : val
-  }
-})
 const allAgents = ref([])
 
 
