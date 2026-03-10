@@ -35,6 +35,48 @@ class StreamManager:
             cls._instance = cls()
         return cls._instance
 
+    async def create_publisher(self, session_id: str, query: str = ""):
+        """
+        创建一个由外部驱动的会话发布者
+        """
+        if session_id in self._sessions:
+            await self.cleanup_session(session_id)
+
+        session = SessionState(session_id=session_id)
+        session.query = query
+        self._sessions[session_id] = session
+        return session
+
+    async def publish(self, session_id: str, chunk: str):
+        """
+        向指定会话发布消息块
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+
+        session.history.append(chunk)
+        session.last_activity = time.time()
+        for q in list(session.subscribers):
+            await q.put(chunk)
+
+    async def finish_publisher(self, session_id: str):
+        """
+        结束外部驱动的会话
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+
+        session.is_completed = True
+        # 发送结束信号给订阅者
+        for q in list(session.subscribers):
+            await q.put(None)
+
+        # 清理会话
+        if self._sessions.get(session_id) is session:
+            del self._sessions[session_id]
+
     async def start_session(self, session_id: str, query: str, generator, lock: asyncio.Lock):
         """
         启动一个新的会话任务，如果会话已存在且正在运行，则复用
