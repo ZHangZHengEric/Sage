@@ -315,10 +315,9 @@ class AgentBase(ABC):
                 serializable_messages = self._remove_tool_call_without_id(serializable_messages)
                 # 如果针对带有 tool_calls 的assistant 的消息，要删除content 这个字段
                 serializable_messages = self._remove_content_if_tool_calls(serializable_messages)
-                logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries})")
                 # 提取tools 的value
                 logger_final_config = {k: v for k, v in final_config.items() if k != 'tools'}
-                logger.info(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}")
+                logger.debug(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}")
                 stream = await self.model.chat.completions.create(
                     model=model_name,
                     messages=cast(List[Any], serializable_messages),
