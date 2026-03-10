@@ -130,7 +130,9 @@ class FibreOrchestrator:
         if not custom_sub_agents and self.backend_client and await self.backend_client.check_health():
             logger.info("FibreOrchestrator: No custom_sub_agents configured, fetching from backend...")
             try:
-                backend_agents = await self.backend_client.list_agents()
+                # Get user_id from session context
+                user_id = getattr(session_context, 'user_id', None)
+                backend_agents = await self.backend_client.list_agents(user_id=user_id)
                 # Filter out the current agent itself
                 current_agent_id = session_context.agent_config.get("agent_id") if session_context.agent_config else None
                 custom_sub_agents = [
@@ -172,7 +174,8 @@ class FibreOrchestrator:
                 agent_exists = False
                 if self.backend_client and await self.backend_client.check_health():
                     # Check backend
-                    backend_agent = await self.backend_client.get_agent(agent_id)
+                    user_id = getattr(session_context, 'user_id', None)
+                    backend_agent = await self.backend_client.get_agent(agent_id, user_id=user_id)
                     if backend_agent:
                         agent_exists = True
                         logger.info(f"FibreOrchestrator: Agent '{agent_id}' already exists in backend, skipping creation")
@@ -451,10 +454,15 @@ class FibreOrchestrator:
                     model_name = self.agent.model_config.get('model') if self.agent.model_config else None
 
                     if model_base_url and model_api_key and model_name:
+                        # Get user_id from parent session context
+                        user_id = None
+                        if parent_session and parent_session.session_context:
+                            user_id = getattr(parent_session.session_context, 'user_id', None)
                         llm_provider_id = await self.backend_client.create_llm_provider(
                             base_url=str(model_base_url),
                             api_keys=[str(model_api_key)],
-                            model=model_name
+                            model=model_name,
+                            user_id=user_id
                         )
                         if llm_provider_id:
                             logger.info(f"Created LLM provider '{llm_provider_id}' for agent '{agent_id}'")
@@ -475,6 +483,10 @@ class FibreOrchestrator:
                     custom_system_prompt=system_prompt
                 )
 
+            # Get user_id from parent session context
+            user_id = None
+            if parent_session and parent_session.session_context:
+                user_id = getattr(parent_session.session_context, 'user_id', None)
             backend_agent_id = await self.backend_client.create_agent(
                 agent_id=agent_id,
                 name=name or agent_id,
@@ -485,7 +497,8 @@ class FibreOrchestrator:
                 available_workflows=available_workflows or {},
                 system_context=system_context,
                 available_sub_agent_ids=available_sub_agent_ids if available_sub_agent_ids else None,
-                llm_provider_id=llm_provider_id
+                llm_provider_id=llm_provider_id,
+                user_id=user_id
             )
             if backend_agent_id:
                 backend_stored = True
@@ -880,11 +893,13 @@ class FibreOrchestrator:
         system_context['session_id'] = session_id
         system_context['parent_session_id'] = caller_session_id
         # Copy user_id and response_language from parent if available
-        if parent_session_context and hasattr(parent_session_context, 'system_context'):
-            if 'user_id' in parent_session_context.system_context:
-                system_context['user_id'] = parent_session_context.system_context['user_id']
-            if 'response_language' in parent_session_context.system_context:
-                system_context['response_language'] = parent_session_context.system_context['response_language']
+        user_id = None
+        if parent_session_context:
+            user_id = getattr(parent_session_context, 'user_id', None)
+            system_context['user_id'] = user_id if user_id else "unknown"
+            if hasattr(parent_session_context, 'system_context'):
+                if 'response_language' in parent_session_context.system_context:
+                    system_context['response_language'] = parent_session_context.system_context['response_language']
 
         # Collect response and process like internal execution
         task_result = None
@@ -895,7 +910,8 @@ class FibreOrchestrator:
                 agent_id=agent_id,
                 messages=messages,
                 session_id=session_id,
-                system_context=system_context
+                system_context=system_context,
+                user_id=user_id
             ):
                 # Filter chunks for current session and assistant role
                 # Skip non-content types like 'token_usage', 'stream_end'
