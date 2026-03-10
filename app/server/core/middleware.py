@@ -96,7 +96,7 @@ def register_middlewares(app):
                 # Allow localhost/127.0.0.1 or same network calls
                 if client_host in ("127.0.0.1", "localhost", "::1"):
                     userid = internal_user_id
-                    request.state.user_claims = {"userid": userid, "role": "admin", "username": "Internal System"}
+                    request.state.user_claims = {"userid": userid, "username": "Internal System"}
                     return await call_next(request)
                 else:
                     logger.warning(f"Blocked internal request from external IP: {client_host}")
