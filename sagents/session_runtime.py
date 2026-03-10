@@ -148,7 +148,7 @@ class Session:
         try:
             manager = get_global_session_manager()
             if manager:
-                session_workspace = manager.get_session_workspace(session_id)
+                session_workspace = manager.get_session_workspace(session_id, only_all_session_paths=True)
                 if session_workspace:
                     context_path = os.path.join(session_workspace, "session_context.json")
                     if os.path.exists(context_path):
@@ -571,7 +571,7 @@ class SessionManager:
         path = self._all_session_paths[session_id]
         return "sub_sessions" in path
 
-    def get_session_workspace(self, session_id: str) -> Optional[str]:
+    def get_session_workspace(self, session_id: str, only_all_session_paths: bool = False) -> Optional[str]:
         """
         获取指定 session 的工作区路径
         
@@ -584,7 +584,8 @@ class SessionManager:
         # 1. 首先尝试从内存缓存获取
         if session_id in self._all_session_paths:
             return self._all_session_paths[session_id]
-        
+        if only_all_session_paths:
+            return None
         # 2. 如果内存中没有，重新扫描会话目录
         # 这处理了会话在其他进程中创建的情况
         logger.debug(f"SessionManager: Session {session_id} not in cache, rescanning...")
