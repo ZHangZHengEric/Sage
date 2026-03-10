@@ -113,8 +113,7 @@ COPY . .
 
 
 # 创建工作空间目录 & 日志目录
-RUN mkdir -p /app/agent_workspace /app/logs /app/skills \
-    && if [ -d /app/app/skills ]; then cp -a /app/app/skills/. /app/skills/; fi
+RUN mkdir -p /app/agent_workspace /app/logs
 
 
 # 设置环境变量
