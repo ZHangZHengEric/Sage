@@ -33,11 +33,7 @@ from ..services.conversation import interrupt_session, get_conversation_messages
 chat_router = APIRouter()
 
 
-async def stream_with_manager(
-    session_id: str,
-    last_index: int = 0,
-    resume: bool = False
-):
+async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool = False):
     """
     通过 StreamManager 订阅会话流
     """
@@ -107,6 +103,20 @@ async def stream_api_with_disconnect_check(generator, request: Request, lock: as
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
 
 
+async def broadcast_generator(generator, session_id: str, query: str = ""):
+    """
+    Wraps a generator to broadcast chunks to StreamManager
+    """
+    manager = StreamManager.get_instance()
+    await manager.create_publisher(session_id, query)
+    try:
+        async for chunk in generator:
+            await manager.publish(session_id, chunk)
+            yield chunk
+    finally:
+        await manager.finish_publisher(session_id)
+
+
 @chat_router.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """流式聊天接口"""
@@ -123,11 +133,21 @@ async def chat(request: ChatRequest, http_request: Request):
 
     stream_service, lock = await prepare_session(inner_request)
     session_id = inner_request.session_id
+
+    # 获取查询内容用于记录（尝试获取最后一条消息的内容）
+    query = ""
+    if inner_request.messages:
+        query = inner_request.messages[-1].content if hasattr(inner_request.messages[-1], "content") else str(inner_request.messages[-1])
+
     return StreamingResponse(
         stream_api_with_disconnect_check(
-            execute_chat_session(
-                mode="chat",
-                stream_service=stream_service,
+            broadcast_generator(
+                execute_chat_session(
+                    mode="chat",
+                    stream_service=stream_service,
+                ),
+                session_id,
+                query,
             ),
             http_request,
             lock,
@@ -170,12 +190,7 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     stream_service, lock = await prepare_session(request)
     session_id = request.session_id
     query = request.messages[0].content
-    await manager.start_session(
-        session_id, 
-        query,
-        execute_chat_session(mode="web-stream", stream_service=stream_service), 
-        lock
-    )
+    await manager.start_session(session_id, query, execute_chat_session(mode="web-stream", stream_service=stream_service), lock)
 
     return StreamingResponse(
         stream_with_manager(session_id, last_index=0, resume=False),
