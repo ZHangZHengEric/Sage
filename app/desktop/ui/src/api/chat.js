@@ -94,6 +94,11 @@ export const chatAPI = {
   },
 
   getActiveSessions: async (timeout = 800) => {
+    // 兼容普通 GET
     return await baseAPI.get('/api/stream/active_sessions', {}, { timeout })
+  },
+  
+  subscribeActiveSessions: async () => {
+    return await baseAPI.sse('/api/stream/active_sessions')
   }
 }

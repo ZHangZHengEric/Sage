@@ -164,6 +164,8 @@ export const useChatStream = ({
         agent_id: selectedAgent.id
       }
       const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value)
+      // 后端已创建会话，触发同步以在侧边栏显示
+      updateActiveSession(sessionId, true)
       let streamLastIndex = 0
       await readStreamResponse(
         response,
@@ -205,7 +207,6 @@ export const useChatStream = ({
       sessionId = await createSession(selectedAgent.value.id)
     }
     await syncSessionIdToRoute(sessionId)
-    updateActiveSession(sessionId, true, deriveSessionTitle(content), content.trim(), false)
     addUserMessage(content, sessionId)
     try {
       isLoading.value = true
