@@ -1119,7 +1119,8 @@ class ToolManager:
                 if asyncio.iscoroutinefunction(tool.func):
                     result = await tool.func(**kwargs)
                 else:
-                    result = tool.func(**kwargs)
+                    # 在单独的线程中执行同步方法，避免阻塞事件循环
+                    result = await asyncio.to_thread(tool.func, **kwargs)
             else:
                 # Unbound method - need to create instance
                 tool_class = getattr(tool.func, "__objclass__", None)
@@ -1136,12 +1137,14 @@ class ToolManager:
                     if asyncio.iscoroutinefunction(bound_method):
                         result = await bound_method(**kwargs)
                     else:
-                        result = bound_method(**kwargs)
+                        # 在单独的线程中执行同步方法
+                        result = await asyncio.to_thread(bound_method, **kwargs)
                 else:
                     if asyncio.iscoroutinefunction(tool.func):
                         result = await tool.func(**kwargs)
                     else:
-                        result = tool.func(**kwargs)
+                        # 在单独的线程中执行同步函数
+                        result = await asyncio.to_thread(tool.func, **kwargs)
 
             # Format result - 避免双重JSON序列化
             execute_cost = time.perf_counter() - execute_start

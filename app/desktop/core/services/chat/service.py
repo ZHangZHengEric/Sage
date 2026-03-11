@@ -414,6 +414,9 @@ async def execute_chat_session(
     stream_counter = 0
     last_activity_time = time.time()
     async for result in stream_service.process_stream():
+        # 显式让出控制权，确保事件循环可以处理其他任务（如心跳、请求中断检查等）
+        await asyncio.sleep(0)
+        
         stream_counter += 1
         current_time = time.time()
         time_since_last = current_time - last_activity_time
