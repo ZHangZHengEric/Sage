@@ -5,6 +5,8 @@ RUN sed -i s@/deb.debian.org/@/mirrors.aliyun.com/@g /etc/apt/sources.list.d/deb
 WORKDIR /app
 
 ENV TZ=Asia/Shanghai
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com/
+ENV npm_config_registry=https://registry.npmmirror.com/
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -99,13 +101,21 @@ RUN npm config set registry https://registry.npmmirror.com \
 # 复制 requirements.txt 文件
 COPY requirements.txt .
 
+RUN mkdir -p /etc/pip \
+    && printf "[global]\nindex-url = https://mirrors.aliyun.com/pypi/simple\ntrusted-host = mirrors.aliyun.com\n" > /etc/pip.conf
+
 # 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+# 保留 pip 缓存以供 agent 运行时使用
+ENV PIP_CACHE_DIR=/root/.cache/pip
+RUN pip install -r requirements.txt
 
 COPY . .
 
+
 # 创建工作空间目录 & 日志目录
-RUN mkdir -p /app/agent_workspace /app/logs /app/skills
+RUN mkdir -p /app/agent_workspace /app/logs /app/skills \
+    && if [ -d /app/app/skills ]; then cp -a /app/app/skills/. /app/skills/; fi
+
 
 # 设置环境变量
 ENV PYTHONPATH=/app
