@@ -531,13 +531,18 @@ onMounted(() => {
   // 发送文件引用事件
   const fileMatches = extractFileReferences(props.message.content)
   fileMatches.forEach((file) => {
+    // 图片文件使用 type: 'image'，其他文件使用 type: 'file'
     workbenchStore.addItem({
-      type: 'file',
+      type: file.isImage ? 'image' : 'file',
       role: 'assistant',
       timestamp: timestamp,
       sessionId: sessionId,
       messageId: messageId,
-      data: file
+      data: file.isImage ? {
+        src: file.filePath,
+        alt: file.fileName,
+        name: file.fileName
+      } : file
     })
   })
 
@@ -583,13 +588,18 @@ watch(() => props.message, (newMessage, oldMessage) => {
     console.log('[MessageRenderer] Watch found file references:', fileMatches.length)
     fileMatches.forEach((file) => {
       // addItem 内部会去重
+      // 图片文件使用 type: 'image'，其他文件使用 type: 'file'
       workbenchStore.addItem({
-        type: 'file',
+        type: file.isImage ? 'image' : 'file',
         role: 'assistant',
         timestamp: timestamp,
         sessionId: sessionId,
         messageId: messageId,
-        data: file
+        data: file.isImage ? {
+          src: file.filePath,
+          alt: file.fileName,
+          name: file.fileName
+        } : file
       })
     })
   }
@@ -629,9 +639,14 @@ function extractFileReferences(content) {
 
     // 过滤掉文件夹路径（以 / 结尾的路径）
     if (path.startsWith('/') && !path.endsWith('/')) {
+      // 判断是否为图片文件
+      const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i
+      const isImage = imageExtensions.test(path)
+
       files.push({
         filePath: path,
-        fileName: fileName || path.split('/').pop()
+        fileName: fileName || path.split('/').pop(),
+        isImage: isImage
       })
     }
   }

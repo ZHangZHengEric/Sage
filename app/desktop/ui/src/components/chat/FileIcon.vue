@@ -4,8 +4,7 @@
     @click="handleClick"
     :title="`查看文件: ${displayFileName}`"
   >
-    <img v-if="iconType === 'image'" :src="iconSrc" class="w-5 h-5 object-contain" />
-    <span v-else class="text-lg">{{ iconSrc }}</span>
+    <span class="text-lg">{{ iconSrc }}</span>
     <span class="text-sm font-medium truncate max-w-[150px]">{{ displayFileName }}</span>
     <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
   </div>
@@ -66,12 +65,7 @@ const iconSrc = computed(() => {
 
   const ext = fileExtension.value
 
-  // 图片文件 - 使用文件路径作为图标
-  if (iconType.value === 'image') {
-    return props.filePath
-  }
-
-  // 使用更真实的文件图标
+  // 使用 emoji 图标（所有文件类型都使用 emoji）
   const iconMap = {
     // Microsoft Office
     'doc': '📘', 'docx': '📘',

@@ -45,7 +45,7 @@ class DingTalkProvider(IMProviderBase):
 
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.post(
+                resp = await client.get(
                     f"{self.BASE_URL}/gettoken",
                     params={"appkey": app_key, "appsecret": app_secret},
                 )
@@ -146,9 +146,13 @@ class DingTalkProvider(IMProviderBase):
                 json=payload
             )
             data = resp.json()
-            if data.get("code") == "0" or data.get("success"):
-                return {"success": True, "message_id": data.get("data", {}).get("processQueryKey")}
-            return {"success": False, "error": data.get("message", "Unknown error")}
+            logger.info(f"[DingTalk] API response: {data}")
+            # Check for success: either code is "0", success is True, or processQueryKey exists
+            if data.get("code") == "0" or data.get("success") or data.get("processQueryKey"):
+                return {"success": True, "message_id": data.get("processQueryKey")}
+            error_msg = data.get("message") or data.get("errmsg") or data.get("error") or str(data)
+            logger.error(f"[DingTalk] API error: {error_msg}")
+            return {"success": False, "error": error_msg}
 
     async def _send_via_session_webhook(
         self, 
