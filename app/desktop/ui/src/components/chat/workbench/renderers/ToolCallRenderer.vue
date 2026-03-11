@@ -21,7 +21,7 @@
         @click="showRawDataDialog = true"
       >
         <Code class="w-3 h-3 mr-1" />
-        原始数据
+        {{ t('workbench.tool.rawData') }}
       </Button>
     </div>
 
@@ -31,10 +31,10 @@
         <DialogHeader>
           <DialogTitle class="flex items-center gap-2">
             <Code class="w-4 h-4" />
-            原始数据 - {{ displayToolName }}
+            {{ t('workbench.tool.rawData') }} - {{ displayToolName }}
           </DialogTitle>
           <DialogDescription>
-            工具的输入参数和输出结果
+            {{ t('workbench.tool.arguments') }} & {{ t('workbench.tool.result') }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid grid-cols-2 gap-4 flex-1 overflow-hidden">
@@ -42,7 +42,7 @@
           <div class="flex flex-col overflow-hidden">
             <div class="text-sm font-medium mb-2 flex items-center gap-2">
               <Settings class="w-4 h-4" />
-              输入参数
+              {{ t('workbench.tool.arguments') }}
             </div>
             <div class="flex-1 overflow-auto bg-muted rounded-lg p-4">
               <pre class="text-xs font-mono whitespace-pre-wrap">{{ formattedArguments }}</pre>
@@ -52,7 +52,7 @@
           <div class="flex flex-col overflow-hidden">
             <div class="text-sm font-medium mb-2 flex items-center gap-2">
               <CheckCircle class="w-4 h-4" />
-              输出结果
+              {{ t('workbench.tool.result') }}
             </div>
             <div class="flex-1 overflow-auto bg-muted rounded-lg p-4">
               <pre class="text-xs font-mono whitespace-pre-wrap">{{ formattedResult }}</pre>
@@ -60,7 +60,7 @@
           </div>
         </div>
         <DialogFooter>
-          <Button @click="showRawDataDialog = false">关闭</Button>
+          <Button @click="showRawDataDialog = false">{{ t('workbench.tool.close') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -84,7 +84,7 @@
             <div class="animate-spin mr-2">
               <Settings class="w-5 h-5" />
             </div>
-            加载 Skill 信息...
+            {{ t('workbench.tool.loadingSkill') }}
           </div>
           <!-- 错误状态 -->
           <div v-else-if="skillError" class="text-red-500">
@@ -100,7 +100,7 @@
           </div>
           <!-- 备用显示 -->
           <div v-else>
-            <div class="text-sm text-muted-foreground">正在加载 Skill: {{ skillName }}</div>
+            <div class="text-sm text-muted-foreground">{{ t('workbench.tool.loadingSkillWait', { name: skillName }) }}</div>
           </div>
         </div>
       </template>
@@ -146,7 +146,7 @@
             <Badge variant="secondary" class="text-xs">{{ writeFileType }}</Badge>
           </div>
           <div class="write-info px-4 py-2 text-sm text-muted-foreground flex-none border-b border-border">
-            写入 {{ writeContentLength }} 字节
+            {{ t('workbench.tool.writtenBytes', { bytes: writeContentLength }) }}
           </div>
           <div class="file-content flex-1 overflow-auto p-4">
             <SyntaxHighlighter
@@ -233,7 +233,7 @@
           <div v-if="executionResult" class="result-section flex-1 min-h-[80px] max-h-[150px] flex flex-col border-t border-border/30 bg-black/20 overflow-hidden">
             <div class="section-header px-3 py-1.5 bg-muted/30 text-[10px] text-muted-foreground flex items-center gap-1.5 flex-none">
               <Terminal class="w-3 h-3" />
-              运行结果
+              {{ t('workbench.tool.result') }}
             </div>
             <div class="result-content flex-1 overflow-auto px-3 py-2 font-mono text-xs">
               <div v-if="executionError" class="text-red-400">{{ executionError }}</div>
@@ -250,21 +250,21 @@
           <div v-if="hasArguments" class="mb-4">
             <div class="text-xs text-muted-foreground mb-2 flex items-center gap-1">
               <Settings class="w-3 h-3" />
-              参数
+              {{ t('workbench.tool.arguments') }}
             </div>
-            <pre class="bg-muted p-3 rounded text-xs overflow-x-auto">{{ formattedArguments }}</pre>
+            <pre class="bg-muted p-3 rounded text-xs whitespace-pre-wrap break-all">{{ formattedArguments }}</pre>
           </div>
 
           <!-- 结果 -->
           <div v-if="hasResult">
             <div class="text-xs text-muted-foreground mb-2 flex items-center gap-1">
               <CheckCircle class="w-3 h-3" />
-              结果
+              {{ t('workbench.tool.result') }}
             </div>
             <div v-if="isErrorResult" class="bg-destructive/10 text-destructive p-3 rounded text-sm">
               {{ errorMessage }}
             </div>
-            <pre v-else class="bg-muted p-3 rounded text-xs overflow-x-auto">{{ formattedResult }}</pre>
+            <pre v-else class="bg-muted p-3 rounded text-xs whitespace-pre-wrap break-all">{{ formattedResult }}</pre>
           </div>
         </div>
       </template>
@@ -304,6 +304,9 @@ import {
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
 import { skillAPI } from '@/api/skill.js'
+import { useLanguage } from '@/utils/i18n'
+
+const { t } = useLanguage()
 
 const props = defineProps({
   item: {
@@ -374,12 +377,12 @@ const isTodoWrite = computed(() => toolName.value === 'todo_write')
 // 显示名称映射
 const displayToolName = computed(() => {
   const nameMap = {
-    'execute_shell_command': 'Shell 命令',
-    'load_skill': '加载 Skill',
-    'file_read': '读取文件',
-    'file_write': '写入文件',
-    'execute_python_code': 'Python 代码',
-    'execute_javascript_code': 'JavaScript 代码'
+    'execute_shell_command': t('workbench.tool.shellCommand'),
+    'load_skill': t('workbench.tool.loadSkill'),
+    'file_read': t('workbench.tool.readFile'),
+    'file_write': t('workbench.tool.writeFile'),
+    'execute_python_code': t('workbench.tool.pythonCode'),
+    'execute_javascript_code': t('workbench.tool.jsCode')
   }
   return nameMap[toolName.value] || toolName.value
 })
@@ -484,7 +487,7 @@ const fetchSkillInfo = async () => {
     }
   } catch (error) {
     console.error('[ToolCallRenderer] Failed to fetch skill info:', error)
-    skillError.value = '加载 Skill 信息失败: ' + (error.message || '未知错误')
+    skillError.value = t('workbench.tool.loadingSkillError') + ': ' + (error.message || 'Unknown Error')
   } finally {
     skillLoading.value = false
     console.log('[ToolCallRenderer] fetchSkillInfo completed, skillLoading:', skillLoading.value)
@@ -644,9 +647,9 @@ const errorMessage = computed(() => {
 const toolResultStatus = computed(() => {
   if (!toolResult.value) return null
   if (toolResult.value.is_error) {
-    return { text: '错误', variant: 'destructive' }
+    return { text: t('workbench.tool.statusError'), variant: 'destructive' }
   }
-  return { text: '完成', variant: 'outline' }
+  return { text: t('workbench.tool.statusCompleted'), variant: 'outline' }
 })
 
 const toolIcon = computed(() => {
@@ -674,12 +677,12 @@ const isImageFile = (type) => {
 // ItemHeader 相关信息
 const roleLabel = computed(() => {
   const roleMap = {
-    'assistant': 'AI',
-    'user': '用户',
-    'system': '系统',
-    'tool': '工具'
+    'assistant': t('workbench.tool.role.ai'),
+    'user': t('workbench.tool.role.user'),
+    'system': t('workbench.tool.role.system'),
+    'tool': t('workbench.tool.role.tool')
   }
-  return roleMap[props.item?.role] || 'AI'
+  return roleMap[props.item?.role] || t('workbench.tool.role.ai')
 })
 
 const roleColor = computed(() => {
@@ -770,10 +773,10 @@ const getTodoStatusVariant = (status) => {
 
 const getTodoStatusLabel = (status) => {
   const labelMap = {
-    'completed': '已完成',
-    'pending': '待处理',
-    'in_progress': '进行中',
-    'failed': '失败'
+    'completed': t('workbench.tool.statusCompleted'),
+    'pending': 'Pending',
+    'in_progress': 'In Progress',
+    'failed': 'Failed'
   }
   return labelMap[status] || status
 }

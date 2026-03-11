@@ -1061,7 +1061,7 @@ class AgentBase(ABC):
             session_manager = get_global_session_manager()
             session = session_manager.get(session_id)
             session_context = session.session_context if session else None
-            
+
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=session_context,
