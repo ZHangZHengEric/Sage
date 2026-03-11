@@ -277,7 +277,7 @@ const handlePageSizeChange = (size) => {
 // Methods
 const canDelete = (conversation) => {
   if (!currentUser.value) return false
-  return currentUser.value.role === 'admin' || currentUser.value.id === conversation.user_id
+  return currentUser.value.id === conversation.user_id
 }
 
 const handleDeleteConversation = async (conversation) => {

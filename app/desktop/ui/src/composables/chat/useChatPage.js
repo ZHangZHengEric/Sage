@@ -1,4 +1,4 @@
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import SparkMD5 from 'spark-md5'
@@ -24,10 +24,15 @@ export const useChatPage = (props) => {
     getSessionLastIndex,
     updateActiveSessionLastIndex,
     updateActiveSession,
-    persistRunningSessionToCache,
     removeSessionFromCache,
-    deriveSessionTitle
+    deriveSessionTitle,
+    startSSESync,
+    stopSSESync
   } = useChatActiveSessionCache()
+  
+  onMounted(() => {
+    startSSESync()
+  })
 
   const {
     messagesListRef,
@@ -334,7 +339,6 @@ export const useChatPage = (props) => {
   const showLoadingBubble = computed(() => !!isLoading.value)
 
   const resetChat = () => {
-    persistRunningSessionOnLeaveChat()
     clearCurrentStreamViewState()
     clearMessages()
     clearTaskAndWorkspace()
@@ -406,35 +410,6 @@ export const useChatPage = (props) => {
     })
   }
 
-  const persistRunningSessionOnLeaveChat = (includeInSidebar = true) => {
-    if (isLoading.value && abortControllerRef.value) {
-      abortControllerRef.value.abort()
-      abortControllerRef.value = null
-    }
-
-    const sessionId = currentSessionId.value
-    if (!sessionId) return
-    const meta = activeSessions.value?.[sessionId]
-    if (meta?.status === 'running') {
-      const firstUserMessage = (messages.value || []).find(item =>
-        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
-      )
-      if (firstUserMessage) {
-        const firstUserInput = String(firstUserMessage.content || '')
-          .replace(/^<skill>.*?<\/skill>\s*/, '')
-          .trim()
-        if (firstUserInput) {
-          updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
-        }
-      }
-      persistRunningSessionToCache(sessionId, includeInSidebar)
-      return
-    }
-    if (meta?.status === 'completed') {
-      removeSessionFromCache(sessionId)
-    }
-  }
-
   useChatLifecycle({
     props,
     route,
@@ -461,8 +436,7 @@ export const useChatPage = (props) => {
     scrollToBottom,
     activeSubSessionId,
     isLoading,
-    isHistoryLoading,
-    onLeaveChatPage: persistRunningSessionOnLeaveChat
+    isHistoryLoading
   })
 
   // 监听工作台 items 变化，当有新 item 且处于实时模式时，自动打开工作台
@@ -488,6 +462,10 @@ export const useChatPage = (props) => {
         console.log('[ChatPage] Session ID is null, closed workbench')
       }
     }
+  })
+
+  onUnmounted(() => {
+    stopSSESync()
   })
 
   return {
