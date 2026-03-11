@@ -113,6 +113,7 @@ def start_server(port: int = 8000):
         log_config=None,
         reload=False,
         factory=True,
+        timeout_keep_alive=65, # Keep-alive timeout slightly longer than heartbeat interval (20s)
     )
     server = uvicorn.Server(config=un_cfg)
     server.run()
