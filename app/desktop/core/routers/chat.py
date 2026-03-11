@@ -209,8 +209,32 @@ async def resume_stream(session_id: str, last_index: int = 0):
 
 
 @chat_router.get("/api/stream/active_sessions")
-async def get_active_sessions():
-    """获取当前正在生成流的会话列表"""
+async def get_active_sessions(request: Request):
+    """
+    SSE 接口：获取当前正在生成流的会话列表的实时更新
+    """
     manager = StreamManager.get_instance()
+    client_host = request.client.host if request.client else "unknown"
+    logger.info(f"SSE Connection request from {client_host}")
 
-    return manager.get_active_sessions()
+    async def event_generator():
+        try:
+            async for sessions in manager.subscribe_active_sessions():
+                if await request.is_disconnected():
+                    logger.info(f"Client {client_host} disconnected active_sessions stream")
+                    break
+                
+                # 手动构建 SSE 格式
+                json_str = json.dumps(sessions, default=str, ensure_ascii=False)
+                # logger.debug(f"Yielding SSE data to {client_host}: {json_str[:100]}...")
+                yield f"data: {json_str}\n\n"
+        except asyncio.CancelledError:
+            logger.info(f"SSE task cancelled for {client_host}")
+            pass
+        except Exception as e:
+            logger.error(f"Error in SSE generator for {client_host}: {e}")
+            raise
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
