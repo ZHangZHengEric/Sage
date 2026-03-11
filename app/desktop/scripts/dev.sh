@@ -103,8 +103,19 @@ conda activate "$ENV_NAME"
 
 # Export Python path for Tauri
 # Use 'which python' to get the path from the active environment
-export SAGE_PYTHON="$(which python)"
+# Ensure we get the python from the activated conda environment
+export SAGE_PYTHON="$CONDA_PREFIX/bin/python"
+if [ ! -f "$SAGE_PYTHON" ]; then
+    # Fallback: try to find python in PATH
+    export SAGE_PYTHON="$(which python)"
+fi
 echo "设置 SAGE_PYTHON: $SAGE_PYTHON"
+
+# Verify python exists
+if [ ! -f "$SAGE_PYTHON" ]; then
+    echo "错误: 找不到 Python 解释器: $SAGE_PYTHON"
+    exit 1
+fi
 
 if [[ "$CONDA_EXE" == *"anaconda3"* ]]; then
     conda install -n "$ENV_NAME" numba -y
