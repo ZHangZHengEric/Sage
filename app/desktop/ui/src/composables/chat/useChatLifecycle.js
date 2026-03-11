@@ -22,18 +22,8 @@ export const useChatLifecycle = ({
   scrollToBottom,
   activeSubSessionId,
   isLoading,
-  isHistoryLoading,
-  onLeaveChatPage
+  isHistoryLoading
 }) => {
-  const handleBeforeUnload = () => {
-    if (typeof onLeaveChatPage === 'function') {
-      // 页面刷新时保存状态，但不显示在侧边栏（除非之前已经显示）
-      // 这里我们传递 false，意味着如果是仅因为刷新而触发的保存，
-      // 该会话不会被强制加入侧边栏列表。
-      onLeaveChatPage(false)
-    }
-  }
-
   watch(currentSessionId, (newVal) => {
     if (newVal) {
       currentTraceId.value = makeTraceId(newVal)
@@ -50,7 +40,6 @@ export const useChatLifecycle = ({
     if (typeof window !== 'undefined') {
       window.addEventListener('user-updated', loadAgents)
       window.addEventListener('active-sessions-updated', handleActiveSessionsUpdated)
-      window.addEventListener('beforeunload', handleBeforeUnload)
     }
     await loadAgents()
     const routeSessionId = route.query.session_id
@@ -68,13 +57,9 @@ export const useChatLifecycle = ({
   })
 
   onUnmounted(() => {
-    if (typeof onLeaveChatPage === 'function') {
-      onLeaveChatPage(true)
-    }
     if (typeof window !== 'undefined') {
       window.removeEventListener('user-updated', loadAgents)
       window.removeEventListener('active-sessions-updated', handleActiveSessionsUpdated)
-      window.removeEventListener('beforeunload', handleBeforeUnload)
     }
     clearScrollTimer()
   })
@@ -103,10 +88,9 @@ export const useChatLifecycle = ({
   })
 
   watch(() => route.name, (newName, oldName) => {
+    // 路由变化时清理工作台
     if (oldName === 'Chat' && newName !== 'Chat') {
-      if (typeof onLeaveChatPage === 'function') {
-        onLeaveChatPage(true)
-      }
+       // do nothing
     }
   })
 

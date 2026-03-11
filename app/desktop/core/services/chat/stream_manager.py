@@ -23,6 +23,7 @@ class SessionState:
 class StreamManager:
     _instance = None
     _sessions: Dict[str, SessionState] = {}
+    _session_list_subscribers: Set[asyncio.Queue] = set()
 
     def __new__(cls):
         if cls._instance is None:
@@ -35,6 +36,36 @@ class StreamManager:
             cls._instance = cls()
         return cls._instance
 
+    async def _notify_session_list_changed(self):
+        """通知所有订阅者会话列表发生变化"""
+        if not self._session_list_subscribers:
+            return
+        
+        # 获取当前会话列表
+        sessions = self.get_active_sessions()
+        
+        # 推送给所有订阅者
+        for q in list(self._session_list_subscribers):
+            await q.put(sessions)
+
+    async def subscribe_active_sessions(self):
+        """订阅活跃会话列表变化"""
+        queue = asyncio.Queue()
+        self._session_list_subscribers.add(queue)
+        try:
+            # 立即发送当前状态
+            yield self.get_active_sessions()
+            
+            while True:
+                sessions = await queue.get()
+                if sessions is None:
+                    break
+                yield sessions
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._session_list_subscribers.discard(queue)
+
     async def create_publisher(self, session_id: str, query: str = ""):
         """
         创建一个由外部驱动的会话发布者
@@ -45,6 +76,7 @@ class StreamManager:
         session = SessionState(session_id=session_id)
         session.query = query
         self._sessions[session_id] = session
+        await self._notify_session_list_changed()
         return session
 
     async def publish(self, session_id: str, chunk: str):
@@ -77,6 +109,8 @@ class StreamManager:
         # 清理会话
         if self._sessions.get(session_id) is session:
             del self._sessions[session_id]
+        
+        await self._notify_session_list_changed()
 
     async def start_session(self, session_id: str, query: str, generator, lock: asyncio.Lock):
         """
@@ -99,6 +133,7 @@ class StreamManager:
         session = SessionState(session_id=session_id, lock=lock)
         session.query = query
         self._sessions[session_id] = session
+        await self._notify_session_list_changed()
 
         # 启动后台任务
         session.task = asyncio.create_task(self._background_worker(session, generator))
@@ -141,10 +176,12 @@ class StreamManager:
 
             if self._sessions.get(session.session_id) is session:
                 del self._sessions[session.session_id]
+                await self._notify_session_list_changed()
 
     async def cleanup_session(self, session_id: str):
         if session_id in self._sessions:
             del self._sessions[session_id]
+            await self._notify_session_list_changed()
 
     def has_running_session(self, session_id: Optional[str]) -> bool:
         if not session_id:
@@ -222,4 +259,14 @@ class StreamManager:
         if not self._sessions:
             return []
         """获取所有活跃会话列表（可选，用于侧边栏展示）"""
-        return [{"session_id": s.session_id, "created_at": s.created_at, "is_completed": s.is_completed, "last_activity": s.last_activity} for s in self._sessions.values() if not s.is_completed]
+        return [
+            {
+                "session_id": s.session_id, 
+                "created_at": s.created_at, 
+                "is_completed": s.is_completed, 
+                "last_activity": s.last_activity,
+                "query": s.query
+            } 
+            for s in self._sessions.values() 
+            if not s.is_completed
+        ]
