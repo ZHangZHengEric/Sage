@@ -214,7 +214,6 @@ class ToolProxy:
                 except Exception as e:
                     logger.warning(f"ToolProxy: Failed to update available_tools after registration: {e}")
 
-            logger.info(f"ToolProxy: Registered {count} tools from {obj} into highest priority manager")
             
         return count
 
