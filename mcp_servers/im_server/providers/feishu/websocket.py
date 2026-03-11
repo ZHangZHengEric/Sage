@@ -1,7 +1,7 @@
 """Feishu WebSocket client using official lark-oapi SDK."""
 
-import logging
 import asyncio
+import logging
 import threading
 from typing import Optional, Callable, Dict, Any
 
@@ -37,7 +37,7 @@ class FeishuWebSocketClient:
     def _handle_message(self, data: P2ImMessageReceiveV1) -> None:
         """Handle incoming message event."""
         # ===== 最开始的调试日志 =====
-        logger.info(f"[Feishu] ========== _handle_message CALLED ==========")
+        logger.info("[Feishu] ========== _handle_message CALLED ==========")
         logger.info(f"[Feishu] data type: {type(data)}")
         logger.info(f"[Feishu] data dir: {dir(data)}")
         logger.info(f"[Feishu] data: {data}")
@@ -55,14 +55,15 @@ class FeishuWebSocketClient:
             if isinstance(content, str):
                 try:
                     content = json.loads(content)
-                except:
+                except Exception:
                     content = {"text": content}
 
             # Get user_id from sender
             user_id = None
             if sender.sender_id:
                 # UserId object has 'union_id', 'user_id', 'open_id' attributes
-                user_id = sender.sender_id.union_id or sender.sender_id.user_id or sender.sender_id.open_id
+                # For sending messages, we need open_id (app-specific), not union_id (cross-app)
+                user_id = sender.sender_id.open_id or sender.sender_id.user_id or sender.sender_id.union_id
 
             # Try to get user_name from raw data if available
             user_name = None
@@ -85,8 +86,24 @@ class FeishuWebSocketClient:
 
             logger.info(f"[Feishu] Received message from user_id={user_id}, user_name={user_name}: {parsed_message['content']}")
 
-            # Call handler
-            self.message_handler(parsed_message)
+            # Call handler - handle async message handler
+            try:
+                result = self.message_handler(parsed_message)
+                if asyncio.iscoroutine(result):
+                    # Create event loop if needed
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            loop.create_task(result)
+                        else:
+                            loop.run_until_complete(result)
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(result)
+                        loop.close()
+            except Exception as e:
+                logger.error(f"[Feishu] Error in message_handler: {e}", exc_info=True)
 
         except Exception as e:
             logger.error(f"[Feishu] Error handling message: {e}", exc_info=True)

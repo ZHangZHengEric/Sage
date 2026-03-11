@@ -9,6 +9,7 @@ import DOMPurify from 'dompurify'
 import * as echarts from 'echarts'
 import mermaid from 'mermaid'
 import { open } from '@tauri-apps/plugin-shell'
+import { readFile } from '@tauri-apps/plugin-fs'
 import { unified } from 'unified'
 import rehypeParse from 'rehype-parse'
 import rehypePrism from 'rehype-prism-plus'
@@ -316,6 +317,9 @@ const addImageDownloadButton = (html) => {
 const getFileIcon = (filename) => {
   const ext = filename.split('.').pop().toLowerCase()
   const iconMap = {
+    // 图片
+    'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️',
+    'webp': '🖼️', 'svg': '🎨', 'bmp': '🖼️', 'ico': '🎨',
     // 文档
     'pdf': '📄',
     'doc': '📝', 'docx': '📝',
@@ -437,15 +441,24 @@ const normalizeLocalPath = (path) => {
 
 const isLocalAbsolutePath = (path) => {
   if (!path) return false
+  // 如果已经是 file:// 协议，直接认为是本地路径
+  if (fileProtocolPattern.test(path)) {
+    return true
+  }
   const normalized = normalizeLocalPath(path)
   return unixAbsolutePathPattern.test(normalized) || windowsAbsolutePathPattern.test(normalized)
 }
 
 const toFileUrl = (localPath) => {
-  if (windowsAbsolutePathPattern.test(localPath)) {
-    return `file:///${encodeURI(localPath.replace(/\\/g, '/'))}`
+  // 使用 Tauri 的 convertFileSrc 转换本地路径
+  let cleanPath = localPath
+  // 如果已经是 file:// 协议，去掉协议头
+  if (/^file:\/\//i.test(localPath)) {
+    cleanPath = localPath.replace(/^file:\/\//i, '')
   }
-  return `file://${encodeURI(localPath)}`
+  // 去掉开头的 /，因为 convertFileSrc 会将其编码为 %2F
+  cleanPath = cleanPath.replace(/^\//, '')
+  return convertFileSrc(cleanPath)
 }
 
 const convertLocalPathLinksToSystemOpen = (html) => {
@@ -493,13 +506,39 @@ const preprocessContent = (content) => {
     }
   )
   
-  // 处理本地文件链接 - 将 Markdown 格式的本地文件链接转换为 HTML，避免 marked 解析问题
-  // 匹配 [text](/path/to/file) 格式，路径可以包含括号
+  // 处理 Markdown 图片 - 将本地图片路径标记为 data-local-image，稍后异步加载
+  // 匹配 ![alt](/path/to/image.png) 或 ![alt](file:///path/to/image.png) 格式
   processed = processed.replace(
-    /\[([^\]]*)\]\((\/(?:[^()]*|\([^)]*\))*)\)/g,
+    /!\[([^\]]*)\]\((file:\/\/[^)]+|\/(?:[^()]*|\([^)]*\))*)\)/g,
+    (match, alt, path) => {
+      // 检查是否是本地绝对路径且是图片
+      if (isLocalAbsolutePath(path) && imageExtensions.test(path)) {
+        // 标记为本地图片，稍后异步加载，限制最大高度为 400px
+        return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[300px] h-auto block border my-2 object-contain" src="">`
+      }
+      return match
+    }
+  )
+
+  // 处理本地文件链接 - 将 Markdown 格式的本地文件链接转换为 HTML，避免 marked 解析问题
+  // 匹配 [text](/path/to/file) 或 [text](file:///path/to/file) 格式，路径可以包含括号
+  console.log('[MarkdownRenderer] Before file link processing:', processed.substring(0, 500))
+  // 匹配 Markdown 链接 [text](url)，支持 file:// 协议和本地路径
+  // 使用非贪婪匹配，避免跨链接匹配
+  processed = processed.replace(
+    /\[([^\]]*)\]\((file:\/\/[^\s)]+|\/[^\s)]*)\)/g,
     (match, text, path) => {
+      console.log('[MarkdownRenderer] Found file link:', { text, path, isLocal: isLocalAbsolutePath(path), isImage: imageExtensions.test(path) })
       // 检查是否是本地绝对路径
       if (isLocalAbsolutePath(path)) {
+        // 检查是否为图片文件
+        if (imageExtensions.test(path)) {
+          // 图片文件标记为 data-local-image，稍后异步加载，限制最大高度为 400px
+          const alt = text.trim() || path.split('/').pop() || 'image'
+          console.log('[MarkdownRenderer] Marking as local image:', path)
+          return `<img data-local-image="${escapeHtml(normalizeLocalPath(path))}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full max-h-[200px] h-auto block border my-2 object-contain" src="">`
+        }
+        // 非图片文件显示为文件链接
         const icon = getFileIcon(path.split('/').pop() || 'file')
         // 如果 [] 中的文字为空，使用路径中的文件名
         let displayText = text.trim()
@@ -513,11 +552,27 @@ const preprocessContent = (content) => {
       return match
     }
   )
+  console.log('[MarkdownRenderer] After file link processing:', processed.substring(0, 500))
 
   // 处理 HTTP 文件链接
   processed = processed.replace(
     /(https?:\/\/[^\n\r"<>]+?\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|7z|tar|gz|bz2|txt|csv|json|xml|md|jpg|jpeg|png|gif|svg|webp|mp4|webm|mp3|wav))/gi,
     (match) => match.replace(/\s/g, '%20')
+  )
+
+  // 处理纯文本的本地图片路径（不在链接中的图片路径）
+  // 匹配 file:///path/to/image.png 或 /path/to/image.png
+  processed = processed.replace(
+    /(^|\s)(file:\/\/[^\n\r"<>]+|\/[^\n\r"<>]+)\.(jpg|jpeg|png|gif|svg|webp|bmp|ico)($|\s)/gi,
+    (match, prefix, path, ext, suffix) => {
+      const fullPath = path + '.' + ext
+      if (isLocalAbsolutePath(fullPath)) {
+        const fileUrl = toFileUrl(normalizeLocalPath(fullPath))
+        const alt = fullPath.split('/').pop() || 'image'
+        return `${prefix}<img src="${fileUrl}" alt="${escapeHtml(alt)}" class="rounded-lg max-w-full h-auto block border my-2">${suffix}`
+      }
+      return match
+    }
   )
 
   return processed
@@ -527,11 +582,14 @@ const renderedContent = computed(() => {
   if (!props.content) return ''
 
   try {
+    console.log('[MarkdownRenderer] Original content:', props.content.substring(0, 1000))
     chartList.length = 0
     mermaidList.length = 0
     excalidrawList.length = 0
     const preprocessed = preprocessContent(props.content)
+    console.log('[MarkdownRenderer] Preprocessed content:', preprocessed.substring(0, 1000))
     let html = marked(preprocessed)
+    console.log('[MarkdownRenderer] Marked HTML:', html.substring(0, 1000))
 
     // Unified Pipeline: Parse -> Highlight -> Stringify
     const processed = unified()
@@ -611,6 +669,43 @@ const renderMermaid = async () => {
     } catch (err) {
       console.error(`✗ Mermaid 图表 ${id} 渲染失败:`, err)
       el.innerHTML = `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">Mermaid 渲染错误: ${err.message}</pre>`
+    }
+  }
+}
+
+// 异步加载本地图片
+const loadLocalImages = async () => {
+  await nextTick()
+  await new Promise(resolve => setTimeout(resolve, 100))
+
+  // 查找所有带有 data-local-image 属性的 img 标签
+  const images = document.querySelectorAll('img[data-local-image]')
+  console.log('[MarkdownRenderer] Found local images:', images.length)
+
+  for (const img of images) {
+    const localPath = img.getAttribute('data-local-image')
+    if (!localPath) continue
+
+    try {
+      console.log('[MarkdownRenderer] Loading image:', localPath)
+      // 读取文件内容为 Uint8Array
+      const fileData = await readFile(localPath)
+      console.log('[MarkdownRenderer] File loaded, size:', fileData.length)
+
+      // 转换为 Blob
+      const blob = new Blob([fileData])
+
+      // 创建 Object URL
+      const objectUrl = URL.createObjectURL(blob)
+      console.log('[MarkdownRenderer] Created object URL:', objectUrl)
+
+      // 设置 img 的 src
+      img.src = objectUrl
+      img.removeAttribute('data-local-image')
+    } catch (error) {
+      console.error('[MarkdownRenderer] Failed to load image:', localPath, error)
+      // 显示错误占位符
+      img.alt = `加载失败: ${localPath.split('/').pop()}`
     }
   }
 }
@@ -760,10 +855,12 @@ onMounted(() => {
   
   renderCharts()
   renderMermaid()
+  loadLocalImages()
 })
 
 watch(() => props.content, async () => {
   await renderCharts()
   await renderMermaid()
+  await loadLocalImages()
 }, {flush: 'post'})
 </script>

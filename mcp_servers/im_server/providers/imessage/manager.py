@@ -3,7 +3,6 @@
 Manages session binding, message routing, and conversation state for iMessage.
 """
 
-import json
 import logging
 import threading
 from typing import Dict, Any, Optional

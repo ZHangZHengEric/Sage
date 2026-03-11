@@ -300,20 +300,31 @@ async def initialize_im_service():
         import asyncio
         
         dao = IMChannelConfigDao()
+        
+        # 先打印所有用户的所有配置（调试用）
+        all_users_configs = await dao.get_all_configs_all_users()
+        logger.info(f"[IM] 数据库中所有配置 (共 {len(all_users_configs)} 条):")
+        for config in all_users_configs:
+            logger.info(f"[IM]   - user={config.sage_user_id}, provider={config.provider}, enabled={config.enabled}")
+        
         all_configs = await dao.get_all_configs()
+        
+        logger.info(f"[IM] 当前用户配置: {all_configs}")
         
         if not all_configs:
             logger.info("[IM] 未找到 IM 配置，跳过 IM 服务启动")
             return
         
         # 检查是否有启用的 provider
-        enabled_providers = [
-            provider_type for provider_type, config in all_configs.items()
-            if config.get("enabled", False)
-        ]
+        enabled_providers = []
+        for provider_type, config in all_configs.items():
+            is_enabled = config.get("enabled", False)
+            logger.info(f"[IM] Provider {provider_type}: enabled={is_enabled}, config={config}")
+            if is_enabled:
+                enabled_providers.append(provider_type)
         
         if not enabled_providers:
-            logger.info("[IM] 没有启用的 IM provider，跳过服务启动")
+            logger.info(f"[IM] 没有启用的 IM provider，跳过服务启动。所有配置: {all_configs}")
             return
         
         logger.info(f"[IM] 正在启动 IM 服务，启用的 provider: {enabled_providers}")

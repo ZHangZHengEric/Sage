@@ -235,32 +235,43 @@ class AgentClient:
         content: str,
         user_id: str = "im_user",
         user_name: Optional[str] = None,
+        chat_id: Optional[str] = None,
         provider: str = "unknown",
         force_summary: bool = True
     ) -> Dict[str, Any]:
         """
         Async version of send_message.
-        
+
         Args:
             session_id: Sage session ID
             agent_id: Agent ID to send to
             content: Message content
             user_id: User identifier
             user_name: Display name of the user
+            chat_id: Chat/Group ID (optional)
             provider: IM provider name (for context)
             force_summary: Whether to force summary generation
-            
+
         Returns:
             Dict with 'success', 'has_im_tool', 'response' (optional), or 'error'
         """
         try:
-            # Add platform context to content
-            platform_info = f"【来自IM: {provider}"
+            # Add platform context to content with comprehensive information
+            platform_info = f"【IM消息 - 平台: {provider}"
             if user_name:
-                platform_info += f" - {user_name}"
+                platform_info += f", 用户: {user_name}"
+            else:
+                platform_info += ", 用户：未知"
+
+            if user_id:
+                platform_info += f", 用户ID: {user_id}"
+            if chat_id:
+                platform_info += f", 群聊ID: {chat_id}"
+            # if session_id:
+            #     platform_info += f", 会话ID: {session_id}"
             platform_info += "】\n\n"
-            
-            full_content = platform_info + content +"\n(P.S. 过程中使用 send_message_through_im 工具与用户进行IM互动)"
+
+            full_content = platform_info + content + "\n\n(P.S. 如需回复该用户，请使用 send_message_through_im 工具，参数: provider='" + provider + "', user_id='" + (user_id or "") + "', chat_id='" + (chat_id or "") + "')"
             
             payload = {
                 "agent_id": agent_id,

@@ -33,9 +33,10 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { readFile } from '@tauri-apps/plugin-fs'
 
 const props = defineProps({
   item: {
@@ -45,11 +46,79 @@ const props = defineProps({
 })
 
 const isPreviewOpen = ref(false)
+const imageSrc = ref('')
+
+// 检查是否为本地绝对路径
+const isLocalAbsolutePath = (path) => {
+  if (!path) return false
+  const unixPattern = /^\/((Users|home|Volumes|private|tmp|var|opt|Applications|System|Library)\/.+|\.sage\/.+)/
+  const windowsPattern = /^[a-zA-Z]:[\\/]/
+  const fileProtocolPattern = /^file:\/\//i
+  return unixPattern.test(path) || windowsPattern.test(path) || fileProtocolPattern.test(path)
+}
+
+// 读取本地图片文件并转换为 Data URL
+const loadLocalImage = async (localPath) => {
+  try {
+    // 去掉 file:// 协议头
+    let cleanPath = localPath
+    if (/^file:\/\//i.test(localPath)) {
+      cleanPath = localPath.replace(/^file:\/\//i, '')
+    }
+    console.log('[ImageRenderer] Loading image from:', cleanPath)
+    
+    // 读取文件内容为 Uint8Array
+    const fileData = await readFile(cleanPath)
+    console.log('[ImageRenderer] File loaded, size:', fileData.length)
+    
+    // 转换为 Blob
+    const blob = new Blob([fileData])
+    
+    // 创建 Object URL
+    const objectUrl = URL.createObjectURL(blob)
+    console.log('[ImageRenderer] Created object URL:', objectUrl)
+    
+    return objectUrl
+  } catch (error) {
+    console.error('[ImageRenderer] Failed to load image:', error)
+    return ''
+  }
+}
 
 // 从 item 中提取图片信息
-const src = computed(() => {
-  return props.item.data?.src || props.item.data?.imageUrl || ''
+const rawSrc = computed(() => {
+  return props.item.data?.src || props.item.data?.imageUrl || props.item.data?.filePath || ''
 })
+
+// 加载图片的函数
+const loadImage = async () => {
+  console.log('[ImageRenderer] item:', props.item)
+  console.log('[ImageRenderer] item.data:', props.item?.data)
+  console.log('[ImageRenderer] rawSrc:', rawSrc.value)
+
+  if (isLocalAbsolutePath(rawSrc.value)) {
+    imageSrc.value = await loadLocalImage(rawSrc.value)
+  } else {
+    imageSrc.value = rawSrc.value
+  }
+}
+
+// 组件挂载时加载图片
+onMounted(loadImage)
+
+// 监听 item 变化，切换图片时重新加载
+watch(() => props.item?.id, async (newId, oldId) => {
+  if (newId !== oldId) {
+    console.log('[ImageRenderer] Item changed, reloading image:', newId)
+    // 释放之前的 Object URL
+    if (imageSrc.value && imageSrc.value.startsWith('blob:')) {
+      URL.revokeObjectURL(imageSrc.value)
+    }
+    await loadImage()
+  }
+}, { immediate: false })
+
+const src = computed(() => imageSrc.value)
 
 const alt = computed(() => {
   return props.item.data?.alt || props.item.data?.name || ''

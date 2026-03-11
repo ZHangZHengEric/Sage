@@ -4,8 +4,8 @@ This module listens to macOS notifications to receive incoming iMessage messages
 Requires macOS 10.14+ and notification access permission.
 """
 
+import asyncio
 import subprocess
-import json
 import re
 import time
 import threading
@@ -82,7 +82,7 @@ class iMessageNotificationListener:
                 if result.returncode == 0 and result.stdout.strip():
                     self._parse_notifications(result.stdout)
                     
-            except Exception as e:
+            except Exception:
                 # Silent fail - notifications might not be accessible
                 pass
                 
@@ -120,8 +120,13 @@ class iMessageNotificationListener:
 class iMessageDatabasePoller:
     """Poll iMessage database for new messages (alternative method)."""
 
-    def __init__(self, message_handler: Callable[[Dict[str, Any]], None]):
+    def __init__(
+        self,
+        message_handler: Callable[[Dict[str, Any]], None],
+        allowed_senders: Optional[list] = None
+    ):
         self.message_handler = message_handler
+        self.allowed_senders = allowed_senders or []
         self.running = False
         self.poller_thread: Optional[threading.Thread] = None
         # 初始化为当前最大 ROWID，避免获取历史消息
@@ -158,6 +163,35 @@ class iMessageDatabasePoller:
             logger.warning(f"[iMessage] Failed to get max ROWID: {e}")
 
         return 0
+
+    def _is_sender_allowed(self, sender: str) -> bool:
+        """Check if sender is in allowed list."""
+        if not self.allowed_senders:
+            return True
+
+        def normalize(value: str) -> str:
+            value = value.strip().lower()
+            if '@' in value:
+                return value
+            # For phone numbers: remove all non-digit characters
+            digits = ''.join(c for c in value if c.isdigit())
+            # Remove leading country code
+            if digits.startswith('86') and len(digits) > 10:
+                digits = digits[2:]
+            return digits
+
+        normalized_sender = normalize(sender)
+
+        for allowed in self.allowed_senders:
+            normalized_allowed = normalize(allowed)
+            if normalized_sender == normalized_allowed:
+                return True
+            # For phone numbers: also check partial match
+            if '@' not in normalized_sender and '@' not in normalized_allowed:
+                if normalized_sender in normalized_allowed or normalized_allowed in normalized_sender:
+                    return True
+
+        return False
         
     def start(self):
         """Start polling database."""
@@ -180,12 +214,33 @@ class iMessageDatabasePoller:
         db_path = Path.home() / "Library" / "Messages" / "chat.db"
         
         logger.info(f"[iMessage] Starting database poller, checking path: {db_path}")
+        logger.info(f"[iMessage] Allowed senders: {self.allowed_senders}")
+        logger.info(f"[iMessage] Last row ID: {self._last_row_id}")
         
         if not db_path.exists():
             logger.error(f"[iMessage] Database not found at {db_path}")
             return
         
-        logger.info(f"[iMessage] Database found, starting poll loop")
+        # Check if we can read the database (Full Disk Access permission)
+        try:
+            test_script = f'do shell script "ls -la {db_path}"'
+            result = subprocess.run(
+                ["osascript", "-e", test_script],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                logger.error("[iMessage] Cannot access database. Please grant Full Disk Access permission in System Settings > Privacy & Security > Full Disk Access.")
+                logger.error(f"[iMessage] Error: {result.stderr}")
+                return
+            else:
+                logger.info("[iMessage] Database access OK")
+        except Exception as e:
+            logger.error(f"[iMessage] Error checking database access: {e}")
+            return
+        
+        logger.info("[iMessage] Database found and accessible, starting poll loop")
             
         while self.running:
             try:
@@ -223,22 +278,45 @@ class iMessageDatabasePoller:
                                 if row_id > self._last_row_id:
                                     self._last_row_id = row_id
                                 
+                                # Check if sender is allowed
+                                if self.allowed_senders and not self._is_sender_allowed(sender_id):
+                                    logger.info(f"[iMessage] Ignoring message from non-allowed sender: {sender_id}")
+                                    continue
+                                
                                 # Note: iMessage database only stores phone/email, not contact names
                                 # Contact names are stored in macOS Contacts app, which requires separate access
                                 logger.info(f"[iMessage] New message from {sender_id}: {content[:50]}...")
-                                self.message_handler({
+                                msg_data = {
                                     "sender": sender_id,  # Phone number or email
                                     "sender_name": None,  # Not available in iMessage database
                                     "content": content,
                                     "timestamp": datetime.now().astimezone().isoformat(),
                                     "provider": "imessage",
                                     "row_id": row_id
-                                })
+                                }
+                                # Handle async message handler
+                                try:
+                                    result = self.message_handler(msg_data)
+                                    if asyncio.iscoroutine(result):
+                                        # Create event loop if needed
+                                        try:
+                                            loop = asyncio.get_event_loop()
+                                            if loop.is_running():
+                                                loop.create_task(result)
+                                            else:
+                                                loop.run_until_complete(result)
+                                        except RuntimeError:
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+                                            loop.run_until_complete(result)
+                                            loop.close()
+                                except Exception as e:
+                                    logger.error(f"[iMessage] Error in message_handler: {e}", exc_info=True)
                 else:
                     if "authorization" in result.stderr.lower() or "permission" in result.stderr.lower():
                         logger.error(f"[iMessage] Permission denied accessing {db_path}. Please grant Full Disk Access to your Terminal/IDE in System Settings > Privacy & Security > Full Disk Access.")
                         # Stop the loop to avoid flooding logs and CPU
-                        logger.info(f"[iMessage] Stopping poller due to permission denied. Please restart the application after granting permission.")
+                        logger.info("[iMessage] Stopping poller due to permission denied. Please restart the application after granting permission.")
                         self.running = False
                         break
                     else:

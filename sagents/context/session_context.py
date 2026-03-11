@@ -924,7 +924,20 @@ class SessionContext:
         except Exception as e:
             logger.error(f"SessionContext: Failed to save session_context.json: {e}")
 
-        # 移除旧的保存逻辑 (session_status_*.json 和 agent_config.json)
+        # 基于messages.json 提取里面不同的工具调用的数量统计，并保存到tools_usage.json
+        try:
+            tools_usage = {}
+            for msg in self.message_manager.messages:
+                if msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        tool_name = tool_call.get('function', {}).get('name')
+                        if tool_name:
+                            tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
+            
+            with open(os.path.join(self.session_workspace, "tools_usage.json"), "w", encoding="utf-8") as f:
+                json.dump(tools_usage, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
 
     def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
         """序列化消息列表为系统上下文格式的字符串（私有方法）"""
