@@ -19,9 +19,32 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import hljs from 'highlight.js'
-import 'highlight.js/styles/atom-one-light.css'
+
+// 动态导入主题样式
+const loadTheme = async (isDark) => {
+  if (isDark) {
+    await import('highlight.js/styles/atom-one-dark.css')
+  } else {
+    await import('highlight.js/styles/atom-one-light.css')
+  }
+}
+
+// 检测当前主题
+const isDarkMode = () => {
+  return document.documentElement.classList.contains('dark')
+}
+
+// 初始加载
+onMounted(() => {
+  loadTheme(isDarkMode())
+})
+
+// 监听主题变化
+watch(() => document.documentElement.classList.contains('dark'), (isDark) => {
+  loadTheme(isDark)
+})
 
 const props = defineProps({
   code: {
