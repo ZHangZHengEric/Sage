@@ -88,7 +88,7 @@ $env:SAGE_PYTHON = $SagePython
 Write-Host "Set SAGE_PYTHON: $SagePython" -ForegroundColor Green
 
 Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
-pip install -r "$AppDir\core\requirements.txt" --index-url https://pypi.org/simple
+pip install -r "$RootDir\requirements.txt" --index-url https://pypi.org/simple
 
 if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
     Write-Host "Installing PyInstaller..." -ForegroundColor Cyan

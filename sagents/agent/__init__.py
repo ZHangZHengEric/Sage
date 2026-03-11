@@ -10,6 +10,7 @@ from .workflow_select_agent import WorkflowSelectAgent
 from .task_completion_judge_agent import TaskCompletionJudgeAgent
 from .query_suggest_agent import QuerySuggestAgent
 from .task_router_agent import TaskRouterAgent
+from .tool_suggestion_agent import ToolSuggestionAgent
 from .fibre.fibre_agent import FibreAgent
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "TaskCompletionJudgeAgent",
     "QuerySuggestAgent",
     "TaskRouterAgent",
+    "ToolSuggestionAgent",
     "FibreAgent",
 ]

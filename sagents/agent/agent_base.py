@@ -459,7 +459,21 @@ class AgentBase(ABC):
                             # 更新动态 token 比例
                             if llm_response and llm_response.usage:
                                 # 计算总字符数（输入+输出）
-                                input_chars = sum(len(str(m.get('content', ''))) for m in messages)
+                                # 处理 MessageChunk 对象和字典两种类型
+                                def get_content_length(m):
+                                    if isinstance(m, MessageChunk):
+                                        content = m.content
+                                        if isinstance(content, str):
+                                            return len(content)
+                                        elif isinstance(content, list):
+                                            return len(str(content))
+                                        return 0
+                                    else:
+                                        # 字典类型
+                                        content = m.get('content', '')
+                                        return len(str(content))
+                                
+                                input_chars = sum(get_content_length(m) for m in messages)
                                 output_content = llm_response.choices[0].message.content or ''
                                 output_chars = len(output_content)
                                 total_chars = input_chars + output_chars
@@ -757,7 +771,7 @@ class AgentBase(ABC):
                     if skill_infos:
                         system_prefix += "<available_skills>\n"
                         for skill in skill_infos:
-                            system_prefix += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description}</skill_description>\n</skill>\n"
+                            system_prefix += f"<skill>\n<skill_name>{skill.name}</skill_name>\n<skill_description>{skill.description[:50]+'...' if len(skill.description) > 50 else skill.description}</skill_description>\n</skill>\n"
                         system_prefix += "</available_skills>\n"
 
                         # 获取技能使用说明

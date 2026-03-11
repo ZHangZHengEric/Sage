@@ -127,7 +127,7 @@ install_python_deps() {
       return
     fi
 
-    local REQ_FILE="$APP_DIR/core/requirements.txt"
+    local REQ_FILE="$ROOT_DIR/requirements.txt"
     local HASH_FILE="$CACHE_DIR/.requirements.hash"
     local NEW_HASH=$(calc_hash "$REQ_FILE")
     local OLD_HASH=""
