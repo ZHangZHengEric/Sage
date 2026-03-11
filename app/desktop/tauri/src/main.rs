@@ -17,6 +17,9 @@ use tokio::process::Command;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
+use sysinfo::{System, Pid};
+
+const MAX_MEMORY_MB: u64 = 2048;
 
 struct SidecarPid(Mutex<Option<u32>>);
 struct Tray(Mutex<Option<TrayIcon>>);
@@ -396,6 +399,10 @@ fn main() {
                 let mut cmd = Command::new(command);
                 cmd.args(args)
                     .env("SAGE_PORT", port.to_string())
+                    .env("OMP_NUM_THREADS", "4")
+                    .env("MKL_NUM_THREADS", "4")
+                    .env("TOKENIZERS_PARALLELISM", "false")
+                    .env("RAYON_NUM_THREADS", "4")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
 
@@ -403,7 +410,9 @@ fn main() {
                 {
                     #[allow(unused_imports)]
                     use std::os::windows::process::CommandExt;
-                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
+                    cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
                 }
 
                 let mut child = cmd.spawn()
@@ -412,6 +421,24 @@ fn main() {
                 if let Some(id) = child.id() {
                     let state = app_handle.state::<SidecarPid>();
                     *state.0.lock().unwrap() = Some(id);
+                    
+                    let sidecar_pid = Pid::from_u32(id);
+                    tauri::async_runtime::spawn(async move {
+                        let mut sys = System::new_all();
+                        loop {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                            sys.refresh_all();
+                            
+                            if let Some(process) = sys.process(sidecar_pid) {
+                                let memory_mb = process.memory() / 1024 / 1024;
+                                if memory_mb > MAX_MEMORY_MB {
+                                    eprintln!("WARNING: Sidecar memory usage exceeded {}MB (current: {}MB)", MAX_MEMORY_MB, memory_mb);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    });
                 }
                 
                 println!("Python sidecar spawned");
@@ -453,8 +480,10 @@ fn main() {
                 // Wait for child to exit
                 let status = child.wait().await;
                 println!("Sidecar exited with status: {:?}", status);
+                
+                eprintln!("Sidecar process exited, application will need to be restarted");
+                app_handle.emit("sage-sidecar-exited", ()).ok();
             });
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy])
