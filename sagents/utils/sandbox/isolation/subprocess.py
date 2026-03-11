@@ -6,6 +6,8 @@ Python 依赖通过 venv 隔离。
 """
 import subprocess
 import os
+import sys
+import platform
 from typing import Dict, Any, Optional
 from sagents.utils.logger import logger
 
@@ -21,10 +23,15 @@ import importlib.util
 import asyncio
 import subprocess
 import io
-import resource
 import builtins
 import time
 from contextlib import redirect_stdout, redirect_stderr
+
+# Windows compatibility: resource module is not available
+try:
+    import resource
+except ImportError:
+    resource = None
 
 sys.path.insert(0, os.getcwd())
 
@@ -38,15 +45,16 @@ def log_timing(msg):
 
 def _apply_limits_internal(limits, restrict_files=True):
     log_timing("Applying limits...")
-    if 'cpu_time' in limits:
-        target = int(limits['cpu_time'])
-        try:
-            soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
-            if hard != resource.RLIM_INFINITY:
-                target = min(target, hard)
-            resource.setrlimit(resource.RLIMIT_CPU, (target, hard))
-        except Exception:
-            pass
+    if resource:
+        if 'cpu_time' in limits:
+            target = int(limits['cpu_time'])
+            try:
+                soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
+                if hard != resource.RLIM_INFINITY:
+                    target = min(target, hard)
+                resource.setrlimit(resource.RLIMIT_CPU, (target, hard))
+            except Exception:
+                pass
 
     if restrict_files and 'allowed_paths' in limits:
         allowed_paths = limits.get('allowed_paths', [])
@@ -61,8 +69,20 @@ def _apply_limits_internal(limits, restrict_files=True):
                     raise PermissionError(f"Access to file {file} is denied (Invalid Path).")
 
                 allowed = False
+                # Normalize paths for comparison (handles case sensitivity on Windows)
+                abs_path_norm = os.path.normcase(abs_path)
+                
                 for path in allowed_paths:
-                    if abs_path.startswith(os.path.abspath(path)):
+                    path_norm = os.path.normcase(os.path.abspath(path))
+                    # Ensure directory paths end with separator to avoid partial matches
+                    # e.g. /tmp/foo should not match /tmp/foobar
+                    if os.path.isdir(path):
+                         if not path_norm.endswith(os.sep):
+                             path_norm += os.sep
+                         if not abs_path_norm.endswith(os.sep) and os.path.isdir(abs_path):
+                             abs_path_norm += os.sep
+                    
+                    if abs_path_norm.startswith(path_norm):
                         allowed = True
                         break
                 
@@ -262,6 +282,9 @@ class SubprocessIsolation:
         
         # 使用沙箱的 venv Python
         python_bin = os.path.join(self.venv_dir, "bin", "python")
+        if platform.system() == "Windows":
+             python_bin = os.path.join(self.venv_dir, "Scripts", "python.exe")
+        
         # 创建 launcher.py 如果不存在
         launcher_path = os.path.join(sandbox_dir, "launcher.py")
         if not os.path.exists(launcher_path):
@@ -275,14 +298,17 @@ class SubprocessIsolation:
         
         # 设置 PATH，优先使用 venv
         venv_bin = os.path.join(self.venv_dir, "bin")
+        if platform.system() == "Windows":
+            venv_bin = os.path.join(self.venv_dir, "Scripts")
+            
         current_path = env.get("PATH", "")
-        env["PATH"] = f"{venv_bin}:{current_path}"
+        env["PATH"] = f"{venv_bin}{os.pathsep}{current_path}"
         
         # 设置 PYTHONPATH
         pylibs_dir = os.path.join(self.host_workspace, ".sandbox", ".pylibs")
         env["PIP_TARGET"] = pylibs_dir
         current_pythonpath = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = f"{pylibs_dir}:{self.host_workspace}:{current_pythonpath}"
+        env["PYTHONPATH"] = f"{pylibs_dir}{os.pathsep}{self.host_workspace}{os.pathsep}{current_pythonpath}"
         
         # 保留原来的 HOME 目录
         env["HOME"] = os.environ.get("HOME", "")
@@ -351,26 +377,63 @@ class SubprocessIsolation:
         # 保留原来的 HOME 目录
         original_home = os.environ.get("HOME", "")
         
-        # 使用 nohup 包装命令
-        nohup_command = f"nohup env HOME=\"{original_home}\" {command} > /dev/null 2>&1 &"
+        if platform.system() == "Windows":
+             log_dir = os.path.join(actual_cwd, ".sandbox_logs")
+             os.makedirs(log_dir, exist_ok=True)
+             log_file = os.path.join(log_dir, f"bg_{uuid.uuid4()}.log")
+             
+             # Windows doesn't support nohup, use start /B or just Popen with proper flags
+             # But here we want to run inside Popen so we can get PID.
+             # Using shell=True and DETACHED_PROCESS might be better.
+             
+             # We simply run the command with stdout redirected.
+             # Note: 'start' is internal to cmd.exe, so we use cmd /c start ...
+             # But subprocess.Popen can launch detached process directly.
+             
+             # Option 1: Direct Popen with DETACHED flags
+             # creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+             
+             with open(log_file, "w") as f_log:
+                 process = subprocess.Popen(
+                    command,
+                    cwd=actual_cwd,
+                    shell=True,
+                    env=env,
+                    stdout=f_log,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                 )
+             
+             logger.info(f"[SubprocessIsolation.execute_background] Windows 进程已启动, PID: {process.pid}")
+             
+             return {
+                "success": True,
+                "process_id": f"bg_{process.pid}",
+                "pid": process.pid,
+                "log_file": log_file
+            }
         
-        logger.info(f"[SubprocessIsolation.execute_background] nohup 命令: {nohup_command[:100]}...")
-        
-        # 执行
-        process = subprocess.Popen(
-            nohup_command,
-            cwd=actual_cwd,
-            shell=True,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        
-        logger.info(f"[SubprocessIsolation.execute_background] 进程已启动, PID: {process.pid}")
-        
-        return {
-            "success": True,
-            "process_id": f"bg_{process.pid}",
-            "pid": process.pid
-        }
+        else:
+            # 使用 nohup 包装命令
+            nohup_command = f"nohup env HOME=\"{original_home}\" {command} > /dev/null 2>&1 &"
+            
+            logger.info(f"[SubprocessIsolation.execute_background] nohup 命令: {nohup_command[:100]}...")
+            
+            # 执行
+            process = subprocess.Popen(
+                nohup_command,
+                cwd=actual_cwd,
+                shell=True,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            
+            logger.info(f"[SubprocessIsolation.execute_background] 进程已启动, PID: {process.pid}")
+            
+            return {
+                "success": True,
+                "process_id": f"bg_{process.pid}",
+                "pid": process.pid
+            }

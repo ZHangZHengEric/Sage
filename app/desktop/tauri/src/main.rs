@@ -29,12 +29,12 @@ struct Payload {
     port: u16,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_server_port() -> Option<u16> {
     std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_system_proxy() -> Option<String> {
     // 1. Try environment variables first
     if let Ok(proxy) = std::env::var("HTTP_PROXY")
