@@ -568,6 +568,12 @@ class AgentBase(ABC):
                         user_content = user_content[:300]+"……"  
                     system_prefix += f"<user>\n{user_content}\n</user>\n"
 
+                memory_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'MEMORY.md'))
+                if memory_content:
+                    if len(memory_content) > 500:
+                        memory_content = memory_content[:500]+"……"
+                    system_prefix += f"<memory>\n{memory_content}\n</memory>\n"
+
                 if use_identity==False:
                     identity_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
                     if identity_content:

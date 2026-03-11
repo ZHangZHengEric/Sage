@@ -214,3 +214,48 @@ code[class*="language-"] {
 .dark .token.punctuation {
   @apply text-slate-300;
 }
+
+/* Enhanced Dark mode syntax highlighting for better contrast */
+.dark .token.property,
+.dark .token.tag,
+.dark .token.boolean,
+.dark .token.number,
+.dark .token.constant,
+.dark .token.symbol,
+.dark .token.deleted {
+  @apply text-rose-400;
+}
+
+.dark .token.selector,
+.dark .token.attr-name,
+.dark .token.string,
+.dark .token.char,
+.dark .token.builtin,
+.dark .token.inserted {
+  @apply text-emerald-400;
+}
+
+.dark .token.operator,
+.dark .token.entity,
+.dark .token.url,
+.dark .language-css .token.string,
+.dark .style .token.string {
+  @apply text-amber-400;
+}
+
+.dark .token.atrule,
+.dark .token.attr-value,
+.dark .token.keyword {
+  @apply text-blue-400;
+}
+
+.dark .token.function,
+.dark .token.class-name {
+  @apply text-purple-400;
+}
+
+.dark .token.regex,
+.dark .token.important,
+.dark .token.variable {
+  @apply text-orange-400;
+}
