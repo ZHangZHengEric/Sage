@@ -48,9 +48,11 @@ export const useChatStream = ({
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
-          if (line.trim() === '') continue
+          const trimmedLine = line.trim()
+          // 忽略空行、心跳行或以冒号开头的 SSE 注释
+          if (!trimmedLine || trimmedLine.startsWith(':')) continue
           try {
-            const messageData = JSON.parse(line)
+            const messageData = JSON.parse(trimmedLine)
             if (onMessage) onMessage(messageData)
           } catch (e) {
             console.error('JSON Parse Error', e)
