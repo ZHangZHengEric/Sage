@@ -34,7 +34,20 @@
               :key="column.key"
               class="text-sm"
             >
-              {{ formatCellValue(row[column.key]) }}
+              <template v-if="isImagePath(row[column.key])">
+                <div class="flex items-center gap-2">
+                  <img
+                    :src="toFileUrl(row[column.key])"
+                    :alt="formatCellValue(row[column.key])"
+                    class="w-16 h-16 object-cover rounded border cursor-pointer hover:opacity-80"
+                    @click="openImage(toFileUrl(row[column.key]))"
+                  />
+                  <span class="text-xs text-muted-foreground truncate max-w-[150px]">{{ formatCellValue(row[column.key]).split('/').pop() }}</span>
+                </div>
+              </template>
+              <template v-else>
+                {{ formatCellValue(row[column.key]) }}
+              </template>
             </TableCell>
           </TableRow>
         </TableBody>
@@ -118,6 +131,26 @@ const formatTime = (timestamp) => {
   const seconds = String(date.getSeconds()).padStart(2, '0')
 
   return `${hours}:${minutes}:${seconds}`
+}
+
+// 打开图片预览
+const openImage = (url) => {
+  window.open(url, '_blank')
+}
+
+// 检查是否为图片路径
+const isImagePath = (value) => {
+  if (typeof value !== 'string') return false
+  const imageExtensions = /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i
+  const isPath = value.startsWith('/') || value.startsWith('file://')
+  return isPath && imageExtensions.test(value)
+}
+
+// 将本地路径转换为 file:// URL
+const toFileUrl = (localPath) => {
+  if (!localPath) return ''
+  if (localPath.startsWith('file://')) return localPath
+  return `file://${encodeURI(localPath)}`
 }
 
 const formatCellValue = (value) => {

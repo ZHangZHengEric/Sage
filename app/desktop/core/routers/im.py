@@ -11,6 +11,9 @@ from ..models import IMChannelConfigDao
 
 logger = logging.getLogger(__name__)
 
+# Default Sage user ID for desktop app
+DEFAULT_SAGE_USER_ID = "desktop_default_user"
+
 
 # Pydantic Models
 class FeishuConfig(BaseModel):
@@ -59,8 +62,8 @@ async def get_im_config():
         dao = IMChannelConfigDao()
         logger.info("[IM] DAO created")
         
-        # Get all configs
-        all_configs = await dao.get_all_configs()
+        # Get all configs for default user
+        all_configs = await dao.get_all_configs(sage_user_id=DEFAULT_SAGE_USER_ID)
         logger.info(f"[IM] Retrieved {len(all_configs)} provider configs")
         
         # Build response
@@ -71,7 +74,7 @@ async def get_im_config():
             "service": {"running": False}  # TODO: get actual service status
         }
         
-        logger.info(f"[IM] Returning config from database:")
+        logger.info("[IM] Returning config from database:")
         logger.info(f"[IM]   feishu: {result['feishu']}")
         logger.info(f"[IM]   dingtalk: {result['dingtalk']}")
         logger.info(f"[IM]   imessage: {result['imessage']}")
@@ -80,7 +83,7 @@ async def get_im_config():
         return await Response.succ(data=result, message="获取配置成功")
         
     except Exception as e:
-        logger.error(f"[IM] ========== ERROR GET /api/im/config ==========")
+        logger.error("[IM] ========== ERROR GET /api/im/config ==========")
         logger.error(f"[IM] Failed to get config: {e}", exc_info=True)
         logger.error("[IM] ========== END ERROR ==========")
         return await Response.error(code=500, message=f"获取配置失败: {str(e)}")
@@ -106,35 +109,67 @@ async def save_im_config(config: IMConfig):
         enabled_providers = []
         for provider_type, provider_config in providers:
             logger.info(f"[IM] Saving {provider_type} config: {provider_config}")
-            await dao.save_config(provider_type, provider_config)
+            await dao.save_config(provider_type, provider_config, sage_user_id=DEFAULT_SAGE_USER_ID)
             logger.info(f"[IM] {provider_type} config saved to database")
             if provider_config.get('enabled', False):
                 enabled_providers.append(provider_type)
 
         logger.info("[IM] All configs saved successfully")
 
-        # Start IM service if any provider is enabled
-        if enabled_providers:
-            logger.info(f"[IM] Providers enabled: {enabled_providers}, starting IM service...")
-            try:
-                import asyncio
-                from mcp_servers.im_server.im_server import initialize_im_server
-                # Clear config cache first to ensure fresh config is loaded
-                from mcp_servers.im_server.config import clear_config_cache
-                clear_config_cache()
-                logger.info("[IM] Config cache cleared")
-                asyncio.create_task(initialize_im_server())
-                logger.info("[IM] IM service start task created")
-            except Exception as e:
-                logger.error(f"[IM] Failed to start IM service: {e}")
-                # Don't fail the save if service start fails
+        # Also save to IM Server DB for multi-tenant support
+        try:
+            from mcp_servers.im_server.db import get_im_db
+            im_db = get_im_db()
+            
+            for provider_type, provider_config in providers:
+                # Save to IM server DB with default user ID
+                im_db.save_user_config(
+                    sage_user_id=DEFAULT_SAGE_USER_ID,
+                    provider=provider_type,
+                    config=provider_config,
+                    enabled=provider_config.get('enabled', False)
+                )
+                logger.info(f"[IM] {provider_type} config saved to IM server DB")
+        except Exception as e:
+            logger.warning(f"[IM] Failed to save to IM server DB: {e}")
+            # Don't fail if IM server DB save fails
+
+        # Manage IM service channels - start enabled, stop disabled
+        try:
+            import asyncio
+            from mcp_servers.im_server.service_manager import get_service_manager
+            
+            manager = get_service_manager()
+            
+            # Start service manager if not running
+            await manager.start()
+            
+            # Process each provider: start if enabled, stop if disabled
+            for provider_type, provider_config in providers:
+                is_enabled = provider_config.get('enabled', False)
+                
+                if is_enabled:
+                    # Start enabled channel
+                    logger.info(f"[IM] Starting {provider_type} channel...")
+                    asyncio.create_task(manager.start_channel(DEFAULT_SAGE_USER_ID, provider_type))
+                    logger.info(f"[IM] {provider_type} channel started")
+                else:
+                    # Stop disabled channel
+                    logger.info(f"[IM] Stopping {provider_type} channel (disabled)...")
+                    await manager.stop_channel(DEFAULT_SAGE_USER_ID, provider_type)
+                    logger.info(f"[IM] {provider_type} channel stopped")
+            
+            logger.info("[IM] IM service channels managed successfully")
+        except Exception as e:
+            logger.error(f"[IM] Failed to manage IM service channels: {e}")
+            # Don't fail the save if service management fails
 
         logger.info("[IM] ========== END POST /api/im/config ==========")
 
         return await Response.succ(data=config.dict(), message="保存配置成功")
 
     except Exception as e:
-        logger.error(f"[IM] ========== ERROR POST /api/im/config ==========")
+        logger.error("[IM] ========== ERROR POST /api/im/config ==========")
         logger.error(f"[IM] Failed to save config: {e}", exc_info=True)
         logger.error("[IM] ========== END ERROR ==========")
         return await Response.error(code=500, message=f"保存配置失败: {str(e)}")
@@ -144,14 +179,108 @@ async def save_im_config(config: IMConfig):
 async def get_im_service_status():
     """Get IM service status."""
     logger.info("[IM] GET /api/im/service/status")
-    return await Response.succ(
-        data={
-            "running": False,
-            "providers": {
-                "feishu": {"enabled": False, "connected": False},
-                "dingtalk": {"enabled": False, "connected": False},
-                "imessage": {"enabled": False, "connected": False},
-            }
-        },
-        message="获取服务状态成功"
-    )
+    
+    try:
+        from mcp_servers.im_server.service_manager import get_service_manager
+        
+        manager = get_service_manager()
+        channels = manager.list_user_channels(DEFAULT_SAGE_USER_ID)
+        
+        # Build status response
+        providers_status = {
+            "feishu": {"enabled": False, "connected": False, "status": "inactive"},
+            "dingtalk": {"enabled": False, "connected": False, "status": "inactive"},
+            "imessage": {"enabled": False, "connected": False, "status": "inactive"},
+        }
+        
+        any_running = False
+        for channel in channels:
+            provider = channel.get('provider_type')
+            if provider in providers_status:
+                providers_status[provider] = {
+                    "enabled": channel.get('is_enabled', False),
+                    "connected": channel.get('status') == 'connected',
+                    "status": channel.get('status', 'inactive'),
+                    "error": channel.get('error_message')
+                }
+                if channel.get('status') in ['connected', 'connecting']:
+                    any_running = True
+        
+        return await Response.succ(
+            data={
+                "running": any_running,
+                "providers": providers_status
+            },
+            message="获取服务状态成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"[IM] Failed to get service status: {e}")
+        return await Response.succ(
+            data={
+                "running": False,
+                "providers": {
+                    "feishu": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
+                    "dingtalk": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
+                    "imessage": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
+                }
+            },
+            message="获取服务状态失败"
+        )
+
+
+@im_router.post("/service/start")
+async def start_im_service():
+    """Start IM service."""
+    logger.info("[IM] POST /api/im/service/start")
+    
+    try:
+        from mcp_servers.im_server.service_manager import get_service_manager
+        
+        manager = get_service_manager()
+        await manager.start()
+        
+        return await Response.succ(message="IM服务已启动")
+        
+    except Exception as e:
+        logger.error(f"[IM] Failed to start service: {e}")
+        return await Response.error(code=500, message=f"启动IM服务失败: {str(e)}")
+
+
+@im_router.post("/service/stop")
+async def stop_im_service():
+    """Stop IM service."""
+    logger.info("[IM] POST /api/im/service/stop")
+    
+    try:
+        from mcp_servers.im_server.service_manager import get_service_manager
+        
+        manager = get_service_manager()
+        await manager.stop()
+        
+        return await Response.succ(message="IM服务已停止")
+        
+    except Exception as e:
+        logger.error(f"[IM] Failed to stop service: {e}")
+        return await Response.error(code=500, message=f"停止IM服务失败: {str(e)}")
+
+
+@im_router.post("/channels/{provider_type}/restart")
+async def restart_im_channel(provider_type: str):
+    """Restart specific IM channel."""
+    logger.info(f"[IM] POST /api/im/channels/{provider_type}/restart")
+    
+    try:
+        from mcp_servers.im_server.service_manager import get_service_manager
+        
+        manager = get_service_manager()
+        result = await manager.restart_channel(DEFAULT_SAGE_USER_ID, provider_type)
+        
+        if result:
+            return await Response.succ(message=f"{provider_type}渠道已重启")
+        else:
+            return await Response.error(code=500, message=f"重启{provider_type}渠道失败")
+        
+    except Exception as e:
+        logger.error(f"[IM] Failed to restart channel: {e}")
+        return await Response.error(code=500, message=f"重启渠道失败: {str(e)}")

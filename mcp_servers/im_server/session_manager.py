@@ -1,63 +1,34 @@
 """Unified Session Manager for all IM providers.
 
-Manages bidirectional conversation state and session bindings.
+Manages bidirectional conversation state and session bindings using SQLite database.
 """
 
-import json
 import logging
 import threading
 from typing import Dict, Any, Optional, List
-from datetime import datetime
-from pathlib import Path
+
+from .db import get_im_db, IMServerDB
 
 logger = logging.getLogger("IMSessionManager")
 
 
 class SessionManager:
-    """Unified session manager for all IM providers."""
+    """Unified session manager for all IM providers using database storage."""
     
-    def __init__(self, storage_path: Optional[str] = None):
+    def __init__(self, db: Optional[IMServerDB] = None):
         """
         Initialize session manager.
         
         Args:
-            storage_path: Path to store session bindings persistently
+            db: IMServerDB instance (optional, will use global instance if not provided)
         """
-        self._bindings: Dict[str, Dict[str, Any]] = {}  # session_id -> binding
-        self._user_index: Dict[str, str] = {}  # provider:user_id -> session_id
         self._lock = threading.Lock()
         
-        # Storage for persistence
-        self._storage_path = storage_path or str(Path.home() / ".sage" / "im_session_bindings.json")
-        self._load_bindings()
+        # Use provided db or get global instance
+        self._db = db or get_im_db()
         
-    def _load_bindings(self):
-        """Load bindings from storage."""
-        try:
-            path = Path(self._storage_path)
-            if path.exists():
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self._bindings = data.get("bindings", {})
-                    self._user_index = data.get("user_index", {})
-                logger.info(f"Loaded {len(self._bindings)} session bindings")
-        except Exception as e:
-            logger.warning(f"Failed to load bindings: {e}")
-            
-    def _save_bindings(self):
-        """Save bindings to storage."""
-        try:
-            path = Path(self._storage_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "bindings": self._bindings,
-                    "user_index": self._user_index,
-                    "updated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                }, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed to save bindings: {e}")
-    
+        logger.info("SessionManager initialized with database storage")
+        
     def bind_session(
         self,
         session_id: str,
@@ -84,63 +55,59 @@ class SessionManager:
             True if binding successful
         """
         with self._lock:
-            # Create binding
-            binding = {
-                "session_id": session_id,
-                "provider": provider,
-                "user_id": user_id,
-                "chat_id": chat_id,
-                "user_name": user_name,
-                "agent_id": agent_id,
-                "bound_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
-                "last_active": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
-                "extra": extra or {}
-            }
+            result = self._db.create_or_update_binding(
+                session_id=session_id,
+                provider=provider,
+                user_id=user_id,
+                user_name=user_name,
+                chat_id=chat_id,
+                agent_id=agent_id,
+                metadata=extra
+            )
             
-            # Update bindings
-            self._bindings[session_id] = binding
-            
-            # Update user index for quick lookup
-            user_key = f"{provider}:{user_id}"
-            self._user_index[user_key] = session_id
-            
-            # Save to storage
-            self._save_bindings()
-            
-        logger.info(f"Bound session {session_id} to {provider}:{user_id}")
-        return True
+        if result:
+            logger.info(f"Bound session {session_id} to {provider}:{user_id}")
+        else:
+            logger.error(f"Failed to bind session {session_id} to {provider}:{user_id}")
+        
+        return result
     
     def unbind_session(self, session_id: str) -> bool:
         """Unbind a session."""
         with self._lock:
-            if session_id not in self._bindings:
-                return False
-                
-            binding = self._bindings[session_id]
-            user_key = f"{binding['provider']}:{binding['user_id']}"
+            result = self._db.delete_binding(session_id)
             
-            del self._bindings[session_id]
-            if user_key in self._user_index:
-                del self._user_index[user_key]
-                
-            self._save_bindings()
-            
-        logger.info(f"Unbound session {session_id}")
-        return True
+        if result:
+            logger.info(f"Unbound session {session_id}")
+        else:
+            logger.warning(f"Failed to unbind session {session_id} (not found)")
+        
+        return result
     
     def get_binding(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get binding by session ID."""
-        with self._lock:
-            binding = self._bindings.get(session_id)
-            if binding:
-                # Update last active
-                binding["last_active"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-            return binding.copy() if binding else None
+        binding = self._db.get_binding(session_id)
+        
+        if binding:
+            # Update last active time
+            self._db.create_or_update_binding(
+                session_id=session_id,
+                provider=binding["provider"],
+                user_id=binding["user_id"],
+                user_name=binding.get("user_name"),
+                chat_id=binding.get("chat_id"),
+                agent_id=binding.get("agent_id"),
+                metadata=binding.get("metadata")
+            )
+        
+        return binding
     
-    def find_session_by_user(self, provider: str, user_id: str) -> Optional[str]:
+    def find_session_by_user(self, provider: str, user_id: str, chat_id: Optional[str] = None) -> Optional[str]:
         """Find session ID by provider and user ID."""
-        user_key = f"{provider}:{user_id}"
-        return self._user_index.get(user_key)
+        binding = self._db.find_binding_by_user(provider, user_id, chat_id)
+        if binding:
+            return binding.get("session_id")
+        return None
     
     def find_or_create_session(
         self,
@@ -157,7 +124,7 @@ class SessionManager:
             session_id
         """
         # Try to find existing session
-        existing_session = self.find_session_by_user(provider, user_id)
+        existing_session = self.find_session_by_user(provider, user_id, chat_id)
         if existing_session:
             logger.info(f"Found existing session {existing_session} for {provider}:{user_id}")
             return existing_session
@@ -180,56 +147,31 @@ class SessionManager:
     def list_bindings(
         self,
         provider: Optional[str] = None,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        limit: int = 100
     ) -> List[Dict[str, Any]]:
         """List all bindings with optional filtering."""
-        with self._lock:
-            bindings = list(self._bindings.values())
-            
-        if provider:
-            bindings = [b for b in bindings if b["provider"] == provider]
-        if agent_id:
-            bindings = [b for b in bindings if b.get("agent_id") == agent_id]
-            
-        return bindings
+        return self._db.list_bindings(provider, agent_id, limit)
     
     def update_last_active(self, session_id: str):
         """Update last active timestamp."""
-        with self._lock:
-            if session_id in self._bindings:
-                self._bindings[session_id]["last_active"] = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                self._save_bindings()
+        binding = self._db.get_binding(session_id)
+        if binding:
+            self._db.create_or_update_binding(
+                session_id=session_id,
+                provider=binding["provider"],
+                user_id=binding["user_id"],
+                user_name=binding.get("user_name"),
+                chat_id=binding.get("chat_id"),
+                agent_id=binding.get("agent_id"),
+                metadata=binding.get("metadata")
+            )
 
-    def _cleanup_expired_sessions(self):
-        """Clean up expired sessions"""
-        now = datetime.now().astimezone()
-        expired_sessions = []
-        
-        with self._lock:
-            for session_id, binding in self._bindings.items():
-                last_active_str = binding.get("last_active")
-                if not last_active_str:
-                    continue
-                    
-                try:
-                    # Robust parsing for both ISO formats (T or space)
-                    last_active_str = last_active_str.replace(" ", "T")
-                    last_active = datetime.fromisoformat(last_active_str)
-                    
-                    # Handle naive datetime (assume local if naive, as it was likely datetime.now())
-                    if last_active.tzinfo is None:
-                        last_active = last_active.replace(tzinfo=now.tzinfo)
-                    
-                    # Check expiration (e.g. 24 hours)
-                    # TODO: Configurable timeout
-                    if (now - last_active).total_seconds() > 24 * 3600:
-                        expired_sessions.append(session_id)
-                except Exception as e:
-                    logger.warning(f"Error checking session expiration for {session_id}: {e}")
-            
-            # Remove expired sessions
-            for session_id in expired_sessions:
-                self.unbind_session(session_id)
+    def cleanup_expired_sessions(self, max_age_hours: int = 24):
+        """Clean up expired sessions (not implemented for DB version - use SQL query if needed)."""
+        # For database version, we could use a SQL query to delete old sessions
+        # But for now, we'll leave them in the database for history
+        logger.debug(f"Cleanup not implemented for DB version (max_age={max_age_hours}h)")
 
 
 # Global session manager instance

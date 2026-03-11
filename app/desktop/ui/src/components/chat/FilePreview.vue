@@ -75,7 +75,7 @@
       <!-- 图片预览 -->
       <div v-else-if="fileType === 'image'" class="image-preview p-2">
         <div class="p-4 text-center text-muted-foreground bg-muted/30">
-          <ImageIcon class="w-12 h-12 mx-auto mb-2 opacity-50" />
+          <span class="text-5xl block mb-2">🖼️</span>
           <p class="text-sm mb-2">图片文件</p>
           <p class="text-xs text-muted-foreground/60 mb-3">由于浏览器安全限制，无法直接预览本地图片</p>
           <Button 

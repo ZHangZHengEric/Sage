@@ -43,7 +43,15 @@ const props = defineProps({
 
 const imageUrl = computed(() => {
   if (!props.filePath) return ''
-  return convertFileSrc(props.filePath)
+  let cleanPath = props.filePath
+  // 如果已经是 file:// URL，去掉协议头
+  if (props.filePath.startsWith('file://')) {
+    cleanPath = props.filePath.replace(/^file:\/\//i, '')
+  }
+  // 去掉开头的 /，因为 convertFileSrc 会将其编码为 %2F
+  cleanPath = cleanPath.replace(/^\//, '')
+  // 使用 Tauri 的 convertFileSrc 转换本地路径
+  return convertFileSrc(cleanPath)
 })
 
 const openFile = () => {

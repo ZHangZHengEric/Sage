@@ -4,7 +4,6 @@ This uses DingTalk's Stream Mode, which doesn't require public IP.
 Reference: https://github.com/open-dingtalk/dingtalk-stream-sdk-python
 """
 
-import json
 import logging
 import asyncio
 import threading
@@ -106,10 +105,10 @@ class DingTalkStreamClient:
         self.running = False
         if self.client:
             try:
-                # The SDK doesn't have a direct stop method, 
+                # The SDK doesn't have a direct stop method,
                 # but we can stop the thread
                 pass
-            except:
+            except Exception:
                 pass
         if self.ws_thread:
             self.ws_thread.join(timeout=5)
@@ -203,7 +202,7 @@ class DingTalkStreamClient:
                 if loop:
                     try:
                         loop.close()
-                    except:
+                    except Exception:
                         pass
         
         if not self.running:
@@ -252,7 +251,7 @@ class _DingTalkMessageHandler(ChatbotHandler):
             logger.debug("[DingTalk Heartbeat] Message received, heartbeat time updated")
         
         # ===== 最开始的调试日志 =====
-        logger.info(f"[DingTalk] ========== process() CALLED ==========")
+        logger.info("[DingTalk] ========== process() CALLED ==========")
         logger.info(f"[DingTalk] callback.data: {callback.data}")
         # =============================
         
@@ -276,10 +275,29 @@ class _DingTalkMessageHandler(ChatbotHandler):
             }
             
             logger.info(f"[DingTalk] Calling message_handler with: {msg_data}")
-            
-            # Call handler
-            self.message_handler(msg_data)
-            
+
+            # Call handler - it may be async, so we need to handle both cases
+            try:
+                result = self.message_handler(msg_data)
+                # If result is a coroutine, we need to run it
+                if asyncio.iscoroutine(result):
+                    # Create a new event loop for this thread if needed
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # If loop is running, create a task
+                            loop.create_task(result)
+                        else:
+                            loop.run_until_complete(result)
+                    except RuntimeError:
+                        # No event loop in this thread, create one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(result)
+                        loop.close()
+            except Exception as handler_error:
+                logger.error(f"[DingTalk] Error in message_handler: {handler_error}", exc_info=True)
+
             return AckMessage.STATUS_OK, 'OK'
             
         except Exception as e:
