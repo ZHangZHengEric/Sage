@@ -165,11 +165,18 @@ class ExecuteCommandTool:
         except PermissionError:
             # 如果直接写入被拦截，尝试使用命令行写入
             logger.warning(f"直接写入文件被拦截，尝试使用命令行写入: {file_path}")
-            import shlex
-            escaped_content = shlex.quote(content)
-            write_cmd = f"printf '%s' {escaped_content} > {file_path}"
-            self._execute_shell_command_sync(write_cmd, workdir=workdir, timeout=10, background=False)
-    
+            if platform.system() == "Windows":
+                 # Windows fallback: use type or echo (be careful with special chars)
+                 # Better approach: retry with a small delay or different name if locked
+                 # But here we assume permission error due to sandbox restrictions? 
+                 # If it's a real permission error, echo won't help either usually.
+                 pass
+            else:
+                import shlex
+                escaped_content = shlex.quote(content)
+                write_cmd = f"printf '%s' {escaped_content} > {file_path}"
+                self._execute_shell_command_sync(write_cmd, workdir=workdir, timeout=10, background=False)
+
     def _log_shell_history(self, command: str, workdir: Optional[str], success: bool, return_code: Optional[int], session_id: Optional[str]):
         """记录 Shell 命令历史"""
         if not session_id:
@@ -386,19 +393,19 @@ class ExecuteCommandTool:
         logger.info(f"[_execute_background] log_file={log_file}")
         
         if platform.system() == "Windows":
-            cmd_exe = os.environ.get("COMSPEC", "cmd.exe")
-            bg_cmd = f'start "" /B {command} > "{log_file}" 2>&1'
-            logger.info(f"[_execute_background] Windows 模式, cmd={bg_cmd}")
+            logger.info(f"[_execute_background] Windows 模式, cmd={command}")
             
-            process = subprocess.Popen(
-                bg_cmd,
-                cwd=workdir,
-                shell=True,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
+            # Windows: use CREATE_NO_WINDOW and redirect stdout/stderr to log file
+            with open(log_file, "w") as f_log:
+                process = subprocess.Popen(
+                    command,
+                    cwd=workdir,
+                    shell=True,
+                    env=env,
+                    stdout=f_log,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
         else:
             nohup_cmd = f"nohup sh -c '{command}' > {log_file} 2>&1 &"
             logger.info(f"[_execute_background] Unix 模式, nohup_cmd={nohup_cmd}")

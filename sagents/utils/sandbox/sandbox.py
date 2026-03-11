@@ -42,6 +42,15 @@ class Sandbox:
         "/usr/local/lib/node_modules",
     ]
     
+    if sys.platform == 'win32':
+        DEFAULT_ALLOWED_PATHS.extend([
+            os.environ.get('SystemRoot', 'C:\\Windows'),
+            os.environ.get('ProgramFiles', 'C:\\Program Files'),
+            os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'),
+            os.environ.get('USERPROFILE', 'C:\\Users\\Default'),
+            os.path.join(os.environ.get('USERPROFILE', ''), '.sage'),
+        ])
+
     def __init__(self, cpu_time_limit: int = 60, memory_limit_mb: int = 1024, 
                  allowed_paths: Optional[List[str]] = None, 
                  host_workspace: Optional[str] = None, 
@@ -112,6 +121,8 @@ class Sandbox:
         logger.debug(f"沙箱初始化完成")
 
     def _resolve_linux_mode(self, mode: str) -> str:
+        if sys.platform == 'win32':
+             return 'subprocess'
         if mode != 'auto':
             return mode
         result = os.system('which bwrap > /dev/null 2>&1')
@@ -183,7 +194,11 @@ class Sandbox:
         """获取沙箱 venv 的 Python 路径"""
         import sys
         if self.venv_dir:
-            venv_python = os.path.join(self.venv_dir, 'bin', 'python')
+            if sys.platform == 'win32':
+                venv_python = os.path.join(self.venv_dir, 'Scripts', 'python.exe')
+            else:
+                venv_python = os.path.join(self.venv_dir, 'bin', 'python')
+                
             if os.path.exists(venv_python):
                 return venv_python
         # 没有沙箱时，返回系统 Python
@@ -284,6 +299,7 @@ class Sandbox:
         """在沙箱 venv 环境中执行工具函数（异步版本）"""
         import asyncio
         import os as _os
+        import sys as _sys
         
         # 保存原始环境变量
         original_path = _os.environ.get('PATH', '')
@@ -291,10 +307,16 @@ class Sandbox:
         
         try:
             # 设置环境变量使用沙箱 venv
-            venv_bin = _os.path.join(self.venv_dir, 'bin')
-            _os.environ['PATH'] = venv_bin + ':' + original_path
+            if _sys.platform == 'win32':
+                venv_bin = _os.path.join(self.venv_dir, 'Scripts')
+                python_exe = _os.path.join(venv_bin, 'python.exe')
+            else:
+                venv_bin = _os.path.join(self.venv_dir, 'bin')
+                python_exe = _os.path.join(venv_bin, 'python')
+                
+            _os.environ['PATH'] = venv_bin + _os.pathsep + original_path
             _os.environ['VIRTUAL_ENV'] = self.venv_dir
-            _os.environ['SANDBOX_PYTHON_PATH'] = _os.path.join(venv_bin, 'python')
+            _os.environ['SANDBOX_PYTHON_PATH'] = python_exe
             
             logger.info(f"[_run_with_venv] 使用 venv: {self.venv_dir}")
             
