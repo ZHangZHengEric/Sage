@@ -455,11 +455,20 @@ class AgentBase(ABC):
                             llm_response = None
                         if session_context:
                             session_context.add_llm_request(llm_request, llm_response)
-
+                            
                             # 更新动态 token 比例
                             if llm_response and llm_response.usage:
                                 # 计算总字符数（输入+输出）
-                                input_chars = sum(len(str(m.get('content', ''))) for m in messages)
+                                input_chars = 0
+                                for m in messages:
+                                    if isinstance(m, dict):
+                                        content = m.get("content", "")
+                                    else:
+                                        content = getattr(m, "content", "")
+                                    input_chars += len(str(content)) if content else 0
+                                output_content = llm_response.choices[0].message.content or ""
+                                output_chars = len(output_content)
+                                total_chars = input_chars + output_chars
                                 output_content = llm_response.choices[0].message.content or ''
                                 output_chars = len(output_content)
                                 total_chars = input_chars + output_chars
@@ -1047,7 +1056,7 @@ class AgentBase(ABC):
             session_manager = get_global_session_manager()
             session = session_manager.get(session_id)
             session_context = session.session_context if session else None
-            
+
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=session_context,

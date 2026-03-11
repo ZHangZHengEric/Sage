@@ -2,7 +2,7 @@
   <div class="h-full flex items-center justify-center bg-muted/20 overflow-hidden relative group">
     <div v-if="!fileUrl" class="text-muted-foreground flex flex-col items-center">
       <ImageIcon class="w-16 h-16 mb-3 opacity-50" />
-      <p class="text-sm">无法加载图片</p>
+      <p class="text-sm">{{ t('workbench.image.loadError') }}</p>
     </div>
     <img 
       v-else 
@@ -14,7 +14,7 @@
     <div class="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
       <Button variant="secondary" size="sm" @click="downloadFile">
         <ExternalLink class="w-4 h-4 mr-1" />
-        下载
+        {{ t('workbench.image.download') }}
       </Button>
     </div>
   </div>
@@ -23,6 +23,9 @@
 <script setup>
 import { ImageIcon, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { useLanguage } from '@/utils/i18n'
+
+const { t } = useLanguage()
 
 const props = defineProps({
   fileUrl: {
