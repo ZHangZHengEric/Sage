@@ -59,20 +59,8 @@
 
           <div class="space-y-6 bg-card/50 p-8 rounded-xl border shadow-sm backdrop-blur-sm">
             <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.providerLabel') }} <span class="text-destructive">*</span></Label>
-              <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
-                <SelectTrigger class="h-11">
-                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>{{ t('modelProvider.providerLabel') }}</SelectLabel>
-                    <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
-                      {{ provider.name }}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <Label class="text-base">{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
+              <Input v-model="modelForm.name" :placeholder="t('modelProvider.customNamePlaceholder')" class="h-11" />
             </div>
             
             <div class="grid gap-2">
@@ -81,58 +69,13 @@
             </div>
             
             <div class="grid gap-2">
-              <div class="flex items-center justify-between">
-                <Label class="text-base">{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
-                <Button 
-                  v-if="currentProvider?.website" 
-                  variant="link" 
-                  size="sm" 
-                  class="h-auto p-0 text-primary" 
-                  @click="openProviderWebsite"
-                >
-                  获取 API Key
-                  <ArrowRight class="ml-1 w-3 h-3" />
-                </Button>
-              </div>
+              <Label class="text-base">{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
               <Input v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="h-11" />
             </div>
             
             <div class="grid gap-2">
-               <div class="flex items-center justify-between">
-                 <Label class="text-base">{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-                 <Button 
-                   v-if="currentProvider?.model_list_url" 
-                   variant="link" 
-                   size="sm" 
-                   class="h-auto p-0 text-primary" 
-                   @click="openProviderModelList"
-                 >
-                   查看模型列表
-                   <ArrowRight class="ml-1 w-3 h-3" />
-                 </Button>
-               </div>
-               <div v-if="currentProvider?.models?.length" class="flex gap-2">
-                 <div class="flex-1 relative">
-                   <Input 
-                     v-model="modelForm.model" 
-                     :placeholder="t('modelProvider.modelPlaceholder')" 
-                     class="h-11 pr-10" 
-                   />
-                   <div v-if="currentProvider?.models?.length" class="absolute right-0 top-0 h-full">
-                     <Select :model-value="''" @update:model-value="(val) => modelForm.model = val">
-                        <SelectTrigger class="h-full w-8 px-0 border-l-0 rounded-l-none focus:ring-0">
-                          <span class="sr-only">Select model</span>
-                        </SelectTrigger>
-                        <SelectContent align="end" class="min-w-[200px]">
-                          <SelectItem v-for="m in currentProvider.models" :key="m" :value="m">
-                            {{ m }}
-                          </SelectItem>
-                        </SelectContent>
-                     </Select>
-                   </div>
-                 </div>
-               </div>
-               <Input v-else v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" />
+               <Label class="text-base">{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
+               <Input v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" />
                <p class="text-sm text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
             </div>
             
@@ -190,16 +133,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { MODEL_PROVIDERS } from '@/utils/modelProviders'
 
 const router = useRouter()
 const { t } = useLanguage()
@@ -226,45 +159,6 @@ const modelForm = reactive({
   presencePenalty: 0,
   maxModelLen: 32000
 })
-
-const selectedProvider = ref('')
-const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
-
-const isCustomModel = ref(false)
-
-const handleProviderChange = (val) => {
-  selectedProvider.value = val
-  const provider = MODEL_PROVIDERS.find(p => p.name === val)
-  if (provider) {
-    // modelForm.name = provider.name // Don't override name for setup
-    modelForm.base_url = provider.base_url
-    // modelForm.model = provider.models[0] || '' // Don't auto-select first model
-    isCustomModel.value = false
-  }
-}
-
-const openProviderWebsite = async () => {
-  if (currentProvider.value?.website) {
-    try {
-      await open(currentProvider.value.website)
-    } catch (error) {
-      console.error('Failed to open external link:', error)
-      // Fallback to window.open if Tauri open fails (e.g. in browser mode)
-      window.open(currentProvider.value.website, '_blank')
-    }
-  }
-}
-
-const openProviderModelList = async () => {
-  if (currentProvider.value?.model_list_url) {
-    try {
-      await open(currentProvider.value.model_list_url)
-    } catch (error) {
-      console.error('Failed to open external link:', error)
-      window.open(currentProvider.value.model_list_url, '_blank')
-    }
-  }
-}
 
 const currentStepTitle = computed(() => {
   if (step.value === 'model') return '连接模型提供商'
@@ -340,7 +234,7 @@ const handleVerify = async () => {
     const data = {
       name: modelForm.name,
       base_url: modelForm.base_url,
-      api_keys: modelForm.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+      api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
       model: modelForm.model,
       max_tokens: modelForm.maxTokens,
       temperature: modelForm.temperature,
@@ -451,7 +345,7 @@ const handleModelSubmit = async () => {
     const data = {
       name: modelForm.name,
       base_url: modelForm.base_url,
-      api_keys: modelForm.api_keys_str.split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+      api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
       model: modelForm.model,
       max_tokens: modelForm.maxTokens,
       temperature: modelForm.temperature,
