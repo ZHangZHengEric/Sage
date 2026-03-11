@@ -123,6 +123,14 @@ def main():
         # Force stdout to be unbuffered
         sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
         
+        # Windows specific event loop policy
+        if sys.platform == 'win32':
+            import asyncio
+            try:
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            except AttributeError:
+                pass
+
         user_home = Path.home()
         sage_home = user_home / ".sage"
         sage_home.mkdir(parents=True, exist_ok=True)
