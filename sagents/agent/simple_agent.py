@@ -83,7 +83,10 @@ class SimpleAgent(AgentBase):
              logger.info(f'SimpleAgent: 压缩历史消息的条数:{len(history_messages)}，压缩后历史消息的content长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages))}')
         # 获取后续可能使用到的工具建议
         if tool_manager:
-            suggested_tools = await self._get_suggested_tools(history_messages, tool_manager, session_id or "", session_context)
+            if session_context.audit_status.get('suggested_tools', []):
+                suggested_tools = session_context.audit_status['suggested_tools']
+            else:
+                suggested_tools = await self._get_suggested_tools(history_messages, tool_manager, session_id or "", session_context)
         else:
             suggested_tools = []
         # 准备工具列表

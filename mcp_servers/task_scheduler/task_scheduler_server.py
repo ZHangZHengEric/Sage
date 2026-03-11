@@ -11,6 +11,16 @@ from typing import Optional, Dict, Any
 # Initialize logger first (before any imports that might use it)
 logger = logging.getLogger("TaskScheduler")
 
+# Configure logging if not already configured
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.info("TaskScheduler logger initialized")
+
 # Try to import croniter, fallback to simple implementation if not available
 try:
     from croniter import croniter
@@ -54,10 +64,6 @@ DB_PATH = Path(SAGE_ROOT) / "sage.db"
 # Ensure directory exists
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 logger.debug(f"Task scheduler database: {DB_PATH}")
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("TaskScheduler")
 
 # Task ID prefixes
 ONCE_TASK_PREFIX = "once_"
@@ -164,7 +170,9 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
     name = task['name']
     description = task['description']
 
-    logger.info(f"Executing task {task_id} for agent {agent_id}")
+    logger.info(f"[TASK EXECUTION] Starting task {task_id} for agent {agent_id} with task name: {name} and description: {description}")
+    logger.debug(f"[TASK EXECUTION] Task name: {name}")
+    logger.debug(f"[TASK EXECUTION] Task description: {description}")
 
     try:
         # Prepare the message content
@@ -179,17 +187,22 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
         }
 
         api_base_url = _get_api_base_url()
-        logger.info(f"Sending task {task_id} to agent {agent_id} via API at {api_base_url}...")
+        logger.info(f"[TASK EXECUTION] Sending task {task_id} to agent {agent_id}")
+        logger.debug(f"[TASK EXECUTION] API URL: {api_base_url}/api/chat")
+        logger.debug(f"[TASK EXECUTION] Payload: {json.dumps(payload, ensure_ascii=False)}")
 
         full_response_text = ""
 
         # Use synchronous client inside the thread
         with httpx.Client(timeout=300.0) as client:
+            logger.debug(f"[TASK EXECUTION] HTTP client created, sending POST request...")
             with client.stream("POST", f"{api_base_url}/api/chat", json=payload, headers={"X-Sage-Internal-UserId": "task_scheduler"}) as response:
+                logger.debug(f"[TASK EXECUTION] Response received, status: {response.status_code}")
                 response.raise_for_status()
                 full_response_text = _parse_stream_response(response)
 
-        logger.info(f"Task {task_id} completed. Response length: {len(full_response_text)}")
+        logger.info(f"[TASK EXECUTION] Task {task_id} completed successfully. Response length: {len(full_response_text)}")
+        logger.debug(f"[TASK EXECUTION] Response preview: {full_response_text[:200]}...")
 
         # Add to history
         db.add_task_history(task_id, 'completed', full_response_text)
@@ -223,15 +236,21 @@ def _execute_task(task: Dict[str, Any]) -> None:
     """
     task_id = task['id']
     
+    logger.debug(f"[TASK EXECUTION] Attempting to claim task {task_id}")
+    
     # Try to claim the task first (atomic operation)
     if not db.claim_task(task_id):
-        logger.info(f"Task {task_id} already being processed or not pending. Skipping.")
+        logger.info(f"[TASK EXECUTION] Task {task_id} already being processed or not pending. Skipping.")
         return
     
     # Execute the task
-    logger.info(f"Executing task {task_id}")
-    _execute_task_sync(task)
-    logger.info(f"Task {task_id} execution completed")
+    logger.info(f"[TASK EXECUTION] Task {task_id} claimed successfully, starting execution")
+    try:
+        _execute_task_sync(task)
+        logger.info(f"[TASK EXECUTION] Task {task_id} execution completed successfully")
+    except Exception as e:
+        logger.error(f"[TASK EXECUTION] Task {task_id} execution failed: {e}", exc_info=True)
+        raise
 
 
 def _check_and_spawn_recurring_tasks():
@@ -257,7 +276,11 @@ def _check_and_spawn_recurring_tasks():
                 continue
             
             # Check if task should run now
+            # All times should be timezone-aware for consistency
+            local_tz = datetime.now().astimezone().tzinfo
+            
             last_executed_dt = last_executed
+            is_new_task = False
             if isinstance(last_executed_dt, str):
                 try:
                     # Fix for SQLite default timestamp format (space instead of T)
@@ -270,71 +293,91 @@ def _check_and_spawn_recurring_tasks():
                     # Fallback
                     try:
                         last_executed_dt = datetime.fromisoformat(last_executed_dt.replace(' ', 'T'))
-                    except:
-                        last_executed_dt = datetime.min
+                    except Exception:
+                        last_executed_dt = None
             else:
-                 last_executed_dt = datetime.min
-
-            # Ensure last_executed_dt is naive (since we use naive now)
-            if last_executed_dt.tzinfo is not None:
-                 last_executed_dt = last_executed_dt.replace(tzinfo=None)
+                 last_executed_dt = None
+                 is_new_task = True
             
-            # We use naive local time for comparison now
-            now_naive = datetime.now().astimezone().replace(tzinfo=None)
+            # We use timezone-aware time for comparison
+            now_aware = datetime.now().astimezone()
+            
+            # If last_executed_dt is None (new task), create an instance immediately
+            if is_new_task:
+                logger.info(f"Recurring task {task_id}: last_executed_at is null, creating first instance immediately")
+                # Create task with current time as execute_at
+                execute_at = now_aware.strftime("%Y-%m-%d %H:%M:%S")
+                new_task_id = db.add_task(
+                    name=recurring_task['name'],
+                    description=recurring_task['description'],
+                    agent_id=recurring_task['agent_id'],
+                    execute_at=execute_at,
+                    recurring_task_id=task_id
+                )
+                logger.info(f"Spawned first one-time task {new_task_id} from recurring task {task_id}, will execute immediately")
+                spawned_count += 1
+                
+                # Update last_executed_at to current time
+                db.update_recurring_task_last_executed(task_id, now_aware.strftime("%Y-%m-%d %H:%M:%S"))
+                continue
+
+            # Ensure last_executed_dt is timezone-aware (add local timezone if naive)
+            if last_executed_dt.tzinfo is None:
+                 last_executed_dt = last_executed_dt.replace(tzinfo=local_tz)
             
             # croniter expects naive datetime if we provide naive start_time
             # or aware if we provide aware.
-            # Our now is naive local.
+            # We provide aware start_time to get aware next_run
             
             itr = croniter(cron_expr, last_executed_dt)
             next_run = itr.get_next(datetime)
             
-            # If next run time is in the past or very close (within last minute), we need to handle it
-            if next_run <= now_naive:
-                # Find the next run time that is in the future (skip historical missed runs)
-                # This prevents spawning multiple tasks if system was down for a long time
-                while next_run <= now_naive:
-                    next_run = itr.get_next(datetime)
+            # Skip historical missed runs (system was down for a long time)
+            # Find the next run time that is in the future
+            while next_run <= now_aware:
+                next_run = itr.get_next(datetime)
+            
+            # Now next_run is in the future
+            # Check if we should spawn it (if it's within the next minute)
+            # This ensures tasks are spawned just-in-time for execution
+            if next_run <= now_aware + timedelta(minutes=1):
+                # Check if we already have a pending task for this recurring task
+                existing_tasks = db.list_tasks(
+                    agent_id=recurring_task['agent_id'],
+                    status='pending',
+                    limit=100
+                )
                 
-                # Now next_run is in the future, check if we should spawn it
-                # Only spawn if it's within the next minute (to avoid spawning far future tasks)
-                if next_run <= now_naive + timedelta(minutes=1):
-                    # Check if we already have a pending task for this recurring task
-                    existing_tasks = db.list_tasks(
+                # Check if there's already a pending instance of this recurring task
+                has_pending_instance = any(
+                    str(t.get('recurring_task_id')) == str(task_id) for t in existing_tasks
+                )
+                
+                if not has_pending_instance:
+                    # Create a one-time task instance
+                    # Use current time as execute_at to ensure it runs immediately
+                    # (within the next scheduler loop iteration)
+                    execute_at = now_aware.strftime("%Y-%m-%d %H:%M:%S")
+                    new_task_id = db.add_task(
+                        name=recurring_task['name'],
+                        description=recurring_task['description'],
                         agent_id=recurring_task['agent_id'],
-                        status='pending',
-                        limit=100
+                        execute_at=execute_at,
+                        recurring_task_id=task_id
                     )
+                    logger.info(f"Spawned one-time task {new_task_id} from recurring task {task_id}, will execute immediately")
+                    spawned_count += 1
                     
-                    # Check if there's already a pending instance of this recurring task
-                    has_pending_instance = any(
-                        str(t.get('recurring_task_id')) == str(task_id) for t in existing_tasks
-                    )
-                    
-                    if not has_pending_instance:
-                        # Create a one-time task instance
-                        execute_at = next_run.strftime("%Y-%m-%d %H:%M:%S")
-                        new_task_id = db.add_task(
-                            name=recurring_task['name'],
-                            description=recurring_task['description'],
-                            agent_id=recurring_task['agent_id'],
-                            execute_at=execute_at,
-                            recurring_task_id=task_id
-                        )
-                        logger.info(f"Spawned one-time task {new_task_id} from recurring task {task_id}, scheduled at {execute_at}")
-                        spawned_count += 1
-                        
-                        # Update last_executed_at to the current time (not the future execute_at)
-                        # This ensures we don't skip the next scheduled run
-                        db.update_recurring_task_last_executed(task_id, now_naive.strftime("%Y-%m-%d %H:%M:%S"))
-                    else:
-                        # Already has pending, just update last_executed to avoid re-processing
-                        db.update_recurring_task_last_executed(task_id, now_naive.strftime("%Y-%m-%d %H:%M:%S"))
+                    # Update last_executed_at to the scheduled run time (next_run)
+                    # This ensures we don't re-process this scheduled time
+                    db.update_recurring_task_last_executed(task_id, next_run.strftime("%Y-%m-%d %H:%M:%S"))
                 else:
-                    # Next run is too far in the future, just update last_executed
-                    # This handles the case where we skipped historical runs
-                    logger.debug(f"Recurring task {task_id}: next run at {next_run} is too far in the future, skipping")
-                    db.update_recurring_task_last_executed(task_id, now_naive.strftime("%Y-%m-%d %H:%M:%S"))
+                    # Already has pending, just update last_executed to avoid re-processing
+                    db.update_recurring_task_last_executed(task_id, next_run.strftime("%Y-%m-%d %H:%M:%S"))
+            else:
+                # Next run is too far in the future, skip for now
+                # Don't update last_executed_at, we'll check again in the next loop
+                logger.debug(f"Recurring task {task_id}: next run at {next_run} is more than 1 minute away, skipping for now")
                 
         except Exception as e:
             logger.error(f"Error processing recurring task {recurring_task.get('id')}: {e}")
@@ -351,39 +394,53 @@ def scheduler_loop():
     1. First, check recurring tasks and spawn one-time instances if needed
     2. Then, process pending tasks grouped by session_id (sequential execution per session)
     """
-    logger.info("Task scheduler started.")
-    logger.debug(f"API Base URL: {_get_api_base_url()}")
+    logger.info("[SCHEDULER] Task scheduler started.")
+    logger.info(f"[SCHEDULER] API Base URL: {_get_api_base_url()}")
+    logger.info(f"[SCHEDULER] Database path: {db.db_path}")
+    
+    loop_count = 0
     
     while True:
+        loop_count += 1
         try:
+            logger.debug(f"[SCHEDULER] === Loop iteration {loop_count} ===")
+            
             # Step 1: Check recurring tasks and spawn instances
+            logger.debug("[SCHEDULER] Checking recurring tasks...")
             _check_and_spawn_recurring_tasks()
             
             # Step 2: Get all pending tasks that are due
+            logger.debug("[SCHEDULER] Getting pending tasks...")
             pending_tasks = db.get_pending_tasks()
             
             if pending_tasks:
-                logger.info(f"Found {len(pending_tasks)} pending tasks to execute")
+                logger.info(f"[SCHEDULER] Found {len(pending_tasks)} pending tasks to execute")
                 
                 # Process all pending tasks concurrently
                 # (no session-level locking needed since backend auto-generates session_id)
                 for task in pending_tasks:
                     try:
+                        task_id = task['id']
+                        logger.info(f"[SCHEDULER] Starting task {task_id} in new thread")
+                        
                         # Start task in separate thread
                         task_thread = threading.Thread(
                             target=_execute_task,
                             args=(task,),
                             daemon=True,
-                            name=f"TaskExecutor-{task['id']}"
+                            name=f"TaskExecutor-{task_id}"
                         )
                         task_thread.start()
-                        logger.info(f"Task {task['id']} started in thread {task_thread.name}")
+                        logger.info(f"[SCHEDULER] Task {task_id} started in thread {task_thread.name}")
                     except Exception as e:
-                        logger.error(f"Failed to start task {task['id']}: {e}")
+                        logger.error(f"[SCHEDULER] Failed to start task {task['id']}: {e}", exc_info=True)
+            else:
+                logger.debug("[SCHEDULER] No pending tasks found")
                             
         except Exception as e:
-            logger.error(f"Scheduler error: {e}")
+            logger.error(f"[SCHEDULER] Scheduler error in loop {loop_count}: {e}", exc_info=True)
 
+        logger.debug(f"[SCHEDULER] Sleeping for 5 seconds...")
         time.sleep(5)  # Check every 5 seconds
 
 

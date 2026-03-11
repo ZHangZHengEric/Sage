@@ -81,9 +81,9 @@ Write-Host "Python: $(python --version)" -ForegroundColor Cyan
 Write-Host "Pip: $(pip --version)" -ForegroundColor Cyan
 
 function Install-PythonDeps {
-    param($CoreDirParam, $CacheDirParam, $EnvNameParam)
+    param($RootDirParam, $CacheDirParam, $EnvNameParam)
 
-    $ReqFile = Join-Path $CoreDirParam "requirements.txt"
+    $ReqFile = Join-Path $RootDirParam "requirements.txt"
     $HashFile = Join-Path $CacheDirParam ".requirements.hash"
     $NewHash = Get-FileHash256 -FilePath $ReqFile
     if (Test-Path $HashFile) {
@@ -129,7 +129,7 @@ function Install-PythonDeps {
     }
 }
 
-Install-PythonDeps -CoreDirParam $CoreDir -CacheDirParam $CacheDir -EnvNameParam $EnvName
+Install-PythonDeps -RootDirParam $RootDir -CacheDirParam $CacheDir -EnvNameParam $EnvName
 
 function Build-PythonSidecar {
     param($DistDirParam, $TauriSidecarDirParam, $AppDirParam, $RootDirParam, $ModeParam)
