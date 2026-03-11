@@ -21,6 +21,7 @@ from sagents.agent import (
     TaskRouterAgent,
     TaskSummaryAgent,
     WorkflowSelectAgent,
+    ToolSuggestionAgent,
 )
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import (
@@ -89,6 +90,7 @@ class Session:
             "task_summary": TaskSummaryAgent,
             "workflow_select": WorkflowSelectAgent,
             "query_suggest": QuerySuggestAgent,
+            "tool_suggestion": ToolSuggestionAgent,
             "task_router": TaskRouterAgent,
             "fibre": FibreAgent,
         }

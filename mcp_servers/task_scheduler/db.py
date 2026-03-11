@@ -276,6 +276,7 @@ class TaskSchedulerDB:
 
     def get_pending_tasks(self) -> List[Dict[str, Any]]:
         """Get all pending tasks that are due for execution"""
+        # Use timezone-aware time for consistent comparison with task_scheduler_server
         now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
