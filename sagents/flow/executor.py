@@ -18,9 +18,9 @@ class FlowExecutor:
         self.session_id = session_id
         
         # 注册 ToDoTool 用于多智能体任务检查
-        self._todo_tool = ToDoTool()
-        if self.tool_manager:
-            self.tool_manager.register_tools_from_object(self._todo_tool)
+        # self._todo_tool = ToDoTool()
+        # if self.tool_manager:
+        #     self.tool_manager.register_tools_from_object(self._todo_tool)
             
     async def execute(self, node: FlowNode) -> AsyncGenerator[List[MessageChunk], None]:
         """递归执行流程节点"""
