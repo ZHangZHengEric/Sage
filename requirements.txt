@@ -15,6 +15,7 @@ beautifulsoup4>=4.12.0
 ##############################
 # 数据处理 / 文档解析
 ##############################
+lxml>=4.9.0
 pdfplumber>=0.10.0
 PyMuPDF>=1.23.0
 markdown>=3.5.0
@@ -43,12 +44,15 @@ docstring_parser>=0.16
 ##############################
 httpx>=0.24.0
 aiohttp>=3.9.0
+websockets
+nest-asyncio
 
 ##############################
 # IM 平台 SDK
 ##############################
 lark-oapi
 dingtalk-stream
+python-socks>=2.0.0  # Required for Lark WebSocket connections through proxy
 
 ##############################
 # ORM / 数据库
@@ -65,15 +69,17 @@ PyJWT>=2.9.0
 argon2-cffi>=23.1.0
 
 ##############################
-# 搜索 / 文件存储
+# 搜索 / 文件存储 / 向量数据库
 ##############################
 elasticsearch==8.19.0
 minio>=7.2.0
+chromadb>=0.4.22
 
 ##############################
 # 任务 / 调度
 ##############################
 apscheduler>=3.10.4
+croniter>=2.0.0
 
 ##############################
 # 应用类工具
@@ -83,6 +89,7 @@ ijson
 loguru>=0.7.0
 rank-bm25
 weasyprint
+pyinstaller>=6.0.0
 
 ##############################
 # 链路追踪

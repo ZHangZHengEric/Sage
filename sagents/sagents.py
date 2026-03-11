@@ -138,6 +138,7 @@ class SAgent:
         # 预定义多智能体循环体
         multi_agent_body = SequenceNode(steps=[
              AgentNode(agent_key="task_planning"),
+             AgentNode(agent_key="tool_suggestion"),
              AgentNode(agent_key="task_executor"),
              AgentNode(agent_key="task_observation"),
              AgentNode(agent_key="task_completion_judge")
@@ -155,6 +156,7 @@ class SAgent:
 
         # 预定义简单模式
         simple_agent_body = SequenceNode(steps=[
+            AgentNode(agent_key="tool_suggestion"),
             AgentNode(agent_key="simple"),
             IfNode(condition="need_summary", true_body=AgentNode(agent_key="task_summary"))
         ])

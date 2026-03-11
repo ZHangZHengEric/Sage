@@ -234,7 +234,7 @@ class DingTalkStreamClient:
             await self.client.start()
             logger.info("DingTalk client.start() returned normally")
         except Exception as e:
-            logger.error(f"DingTalk client.start() exception: {e}", exc_info=True)
+            logger.error(f"DingTalk client.start() exception: {e}")
 
 
 class _DingTalkMessageHandler(ChatbotHandler):
