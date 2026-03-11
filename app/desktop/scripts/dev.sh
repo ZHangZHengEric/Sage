@@ -86,12 +86,16 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 
 ENV_NAME="sage-desktop-env"
 
-# Check if environment exists
-if conda info --envs | grep -q "$ENV_NAME"; then
-  echo "Conda 环境 '$ENV_NAME' 已存在。"
+# Check if environment exists (more robust check)
+if conda env list | grep -E "^$ENV_NAME\s" > /dev/null 2>&1; then
+  echo "Conda 环境 '$ENV_NAME' 已存在，跳过创建。"
+elif [ -d "$CONDA_BASE/envs/$ENV_NAME" ]; then
+  echo "Conda 环境 '$ENV_NAME' 目录已存在，跳过创建。"
 else
   echo "正在创建 Conda 环境 '$ENV_NAME' (Python 3.11)..."
-  conda create -n "$ENV_NAME" python=3.11 -y
+  conda create -n "$ENV_NAME" python=3.11 -y || {
+    echo "警告: 创建环境失败，可能已存在，尝试继续..."
+  }
 fi
 
 echo "正在激活 Conda 环境 '$ENV_NAME'..."
