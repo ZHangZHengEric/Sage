@@ -355,6 +355,10 @@ class SimpleAgent(AgentBase):
                 continue
             if len(chunk.choices) == 0:
                 continue
+            
+            # 由于 AgentBase._call_llm_streaming 已经处理了 asyncio.sleep(0) 的让权
+            # 这里不需要重复让权，减少不必要的调度开销
+
             if chunk.choices[0].delta.tool_calls:
                 self._handle_tool_calls_chunk(chunk, tool_calls, last_tool_call_id or "")
                 # 更新last_tool_call_id
