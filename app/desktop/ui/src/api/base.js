@@ -291,6 +291,33 @@ export class BaseAPI {
   }
   
   /**
+   * SSE请求
+   * @param {string} url - 请求URL
+   * @param {Object} config - 请求配置
+   * @returns {Promise<EventSource>}
+   */
+  async sse(url, config = {}) {
+    // 直接复用 request.js 的拦截器逻辑构建 URL
+    const finalConfig = await this.request.executeRequestInterceptors({
+      baseURL: this.request.baseURL,
+      timeout: this.request.timeout,
+      credentials: this.request.withCredentials ? 'include' : 'omit',
+      method: 'GET',
+      url,
+      ...config
+    })
+
+    const fullUrl = finalConfig.url.startsWith('http')
+      ? finalConfig.url
+      : `${finalConfig.baseURL}${finalConfig.url}`
+
+    // 使用 EventSource
+    return new EventSource(fullUrl, {
+      withCredentials: finalConfig.credentials === 'include'
+    })
+  }
+
+  /**
    * 处理错误
    * @param {Error} error - 错误对象
    * @param {string} method - 请求方法
