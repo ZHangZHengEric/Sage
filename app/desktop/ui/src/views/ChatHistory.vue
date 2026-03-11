@@ -92,6 +92,16 @@
               >
                 <Share class="h-4 w-4" />
               </Button>
+              <Button
+                v-if="canDelete(conversation)"
+                variant="ghost"
+                size="icon"
+                class="h-8 w-8 text-muted-foreground hover:text-red-500"
+                @click.stop="handleDeleteConversation(conversation)"
+                :title="t('common.delete')"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>
@@ -163,12 +173,13 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy, Loader } from 'lucide-vue-next'
+import { MessageCircle, Search, Calendar, User, Bot, Clock, Filter, Share, Copy, Loader, Trash2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useLanguage } from '@/utils/i18n.js'
 import { exportToHTML, exportToMarkdown } from '@/utils/exporter.js'
 import { agentAPI } from '@/api/agent.js'
 import { chatAPI } from '@/api/chat.js'
+import { getCurrentUser } from '@/utils/auth.js'
 
 // UI Components
 import { Input } from '@/components/ui/input'
@@ -206,6 +217,7 @@ const sortBy = ref(route.query.sort_by || 'date')
 const selectedConversations = ref(new Set())
 const showShareModal = ref(false)
 const shareConversation = ref(null)
+const currentUser = ref(null)
 
 // 分页相关状态
 const currentPage = ref(parseInt(route.query.page) || 1)
@@ -263,6 +275,25 @@ const handlePageSizeChange = (size) => {
 }
 
 // Methods
+const canDelete = (conversation) => {
+  if (!currentUser.value) return false
+  return currentUser.value.role === 'admin' || currentUser.value.id === conversation.user_id
+}
+
+const handleDeleteConversation = async (conversation) => {
+  if (!confirm(t('history.deleteConfirm'))) return
+  
+  try {
+    await chatAPI.deleteConversation(conversation.session_id)
+    toast.success(t('history.deleteSuccess'))
+    // 重新加载列表
+    loadConversationsPaginated()
+  } catch (error) {
+    console.error('Failed to delete conversation:', error)
+    toast.error(t('history.deleteError'))
+  }
+}
+
 const handleSelectConversation = (conversation) => {
   router.push({
     path: '/agent/chat',
@@ -416,6 +447,7 @@ watch(currentPage, () => {
 
 // 生命周期钩子
 onMounted(async () => {
+  currentUser.value = getCurrentUser()
   await loadAgents()
   await loadConversationsPaginated()
 })
