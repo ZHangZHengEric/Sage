@@ -8,6 +8,7 @@ from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
 from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode, IfNode, SwitchNode, LoopNode
+from sagents.session_runtime import get_global_session_manager
 
 
 class SAgent:
@@ -15,7 +16,6 @@ class SAgent:
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
         self.use_sandbox = use_sandbox
-        from sagents.session_runtime import get_global_session_manager
         self.session_manager = get_global_session_manager(session_root_space=self.session_root_space, enable_obs=enable_obs)
 
     async def run_stream(

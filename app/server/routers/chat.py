@@ -1,6 +1,7 @@
 """
 流式聊天接口路由模块
 """
+
 import asyncio
 import json
 import time
@@ -31,11 +32,8 @@ from ..services.conversation import interrupt_session, get_conversation_messages
 # 创建路由器
 chat_router = APIRouter()
 
-async def stream_with_manager(
-    session_id: str,
-    last_index: int = 0,
-    resume: bool = False
-):
+
+async def stream_with_manager(session_id: str, last_index: int = 0, resume: bool = False):
     """
     通过 StreamManager 订阅会话流
     """
@@ -47,7 +45,7 @@ async def stream_with_manager(
     if has_stream_data:
         return
     try:
-        await get_conversation_messages(session_id)
+        await get_conversation_messages(session_id, user_id=None, user_role="admin")
     except Exception:
         return
     yield json.dumps(
@@ -60,12 +58,8 @@ async def stream_with_manager(
         ensure_ascii=False,
     ) + "\n"
 
-async def stream_api_with_disconnect_check(
-    generator, 
-    request: Request,
-    lock: asyncio.Lock,
-    session_id: str
-):
+
+async def stream_api_with_disconnect_check(generator, request: Request, lock: asyncio.Lock, session_id: str):
     """
     Wrap the generator to monitor client disconnection.
     If client disconnects, stop the generator (which triggers its finally block).
@@ -77,13 +71,13 @@ async def stream_api_with_disconnect_check(
                 # 抛出 GeneratorExit 模拟客户端断开，统一由异常处理逻辑处理
                 raise GeneratorExit
             yield chunk
-    except (asyncio.CancelledError, GeneratorExit) as e:        
+    except (asyncio.CancelledError, GeneratorExit) as e:
         # 标记会话中断，让内部逻辑有机会感知并处理
         try:
             await interrupt_session(session_id, "客户端断开连接")
         except Exception as ex:
             logger.bind(session_id=session_id).error(f"Error interrupting session: {ex}")
-            
+
         # 重新抛出异常，确保生成器正确关闭
         raise e
     except Exception as e:
@@ -93,7 +87,7 @@ async def stream_api_with_disconnect_check(
         # 确保 generator 关闭，触发内部清理逻辑 (sagents cleanup)
         # 这必须在释放锁之前执行，因为 sagents 清理逻辑需要获取锁
         try:
-            if hasattr(generator, 'aclose'):
+            if hasattr(generator, "aclose"):
                 await generator.aclose()
         except Exception as e:
             logger.bind(session_id=session_id).warning(f"Error closing generator: {e}")
@@ -108,9 +102,8 @@ async def stream_api_with_disconnect_check(
         except Exception as e:
             logger.bind(session_id=session_id).error(f"清理资源时发生错误: {e}")
 
-def validate_and_prepare_request(
-    request: ChatRequest | StreamRequest, http_request: Request
-) -> None:
+
+def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_request: Request) -> None:
     """验证并准备请求参数"""
     if not get_chat_client():
         raise SageHTTPException(
@@ -155,9 +148,9 @@ async def chat(request: ChatRequest, http_request: Request):
             ),
             http_request,
             lock,
-            session_id
+            session_id,
         ),
-        media_type="text/plain"
+        media_type="text/plain",
     )
 
 
@@ -176,9 +169,9 @@ async def stream_chat(request: StreamRequest, http_request: Request):
             ),
             http_request,
             lock,
-            session_id
+            session_id,
         ),
-        media_type="text/plain"
+        media_type="text/plain",
     )
 
 
@@ -186,7 +179,7 @@ async def stream_chat(request: StreamRequest, http_request: Request):
 async def stream_chat_web(request: StreamRequest, http_request: Request):
     """这个接口有用户鉴权"""
     validate_and_prepare_request(request, http_request)
-    
+
     session_id = request.session_id
     manager = StreamManager.get_instance()
 
@@ -201,17 +194,13 @@ async def stream_chat_web(request: StreamRequest, http_request: Request):
     stream_service, lock = await prepare_session(request)
     session_id = request.session_id
     query = request.messages[0].content
-    await manager.start_session(
-        session_id, 
-        query,
-        execute_chat_session(stream_service=stream_service),
-        lock
-    )
+    await manager.start_session(session_id, query, execute_chat_session(stream_service=stream_service), lock)
 
     return StreamingResponse(
         stream_with_manager(session_id, last_index=0, resume=False),
         media_type="text/plain",
     )
+
 
 @chat_router.get("/api/stream/resume/{session_id}")
 async def resume_stream(session_id: str, last_index: int = 0):
@@ -221,10 +210,8 @@ async def resume_stream(session_id: str, last_index: int = 0):
     :param last_index: 已收到的最后一条消息索引
     """
 
-    return StreamingResponse(
-        stream_with_manager(session_id, last_index, resume=True),
-        media_type="text/plain"
-    )
+    return StreamingResponse(stream_with_manager(session_id, last_index, resume=True), media_type="text/plain")
+
 
 @chat_router.get("/api/stream/active_sessions")
 async def get_active_sessions():
