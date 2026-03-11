@@ -97,6 +97,8 @@ async def initialize_skill_manager():
     """初始化技能管理器"""
     try:
         skill_manager_instance = SkillManager.get_instance()
+        # 系统系统目录下的skills文件夹
+        skill_manager_instance.add_skill_dir("app/skills")
         return skill_manager_instance
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")
