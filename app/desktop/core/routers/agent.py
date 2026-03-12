@@ -282,11 +282,12 @@ async def auto_generate(request: AutoGenAgentRequest):
 async def get_agent_abilities(payload: AgentAbilitiesRequest):
     """Desktop 端：生成指定 Agent 的能力卡片列表"""
     try:
+        logger.info(f"生成 Agent 语言: {payload.language}")
         items = await generate_agent_abilities_service(
             agent_id=payload.agent_id,
             session_id=payload.session_id,
             context=payload.context,
-            language="zh",
+            language=payload.language or "zh",
         )
         data = AgentAbilitiesData(items=items)
         return await Response.succ(

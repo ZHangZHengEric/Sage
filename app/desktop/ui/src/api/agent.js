@@ -105,13 +105,17 @@ export const agentAPI = {
    * @param {string} params.agentId - Agent ID
    * @param {string} [params.sessionId] - 会话 ID
    * @param {Object} [params.context] - 额外上下文
+   * @param {string} [params.language] - 语言代码（'zh' | 'en'），默认取本地语言设置
    * @returns {Promise<AbilityItem[]>}
    */
-  getAgentAbilities: async ({ agentId, sessionId, context = {} }) => {
+  getAgentAbilities: async ({ agentId, sessionId, context = {}, language }) => {
+    const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
+    const normalizedLanguage = ['enUS', 'en', 'en-US'].includes(savedLanguage) ? 'en' : 'zh'
     const data = await baseAPI.post('/api/agent/abilities', {
       agent_id: agentId,
       session_id: sessionId,
-      context
+      context,
+      language: normalizedLanguage
     })
     // 后端标准响应的 data 部分应为 { items: AbilityItem[] }
     return data?.items || []
