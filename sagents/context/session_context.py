@@ -241,6 +241,7 @@ class SessionContext:
 
     def _prepare_workspace_bootstrap_files(self):
         use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
+        use_claw_mode = self.system_context.get("use_claw_mode", use_claw_mode)
         logger.debug(f"SessionContext: use_claw_mode: {use_claw_mode}")
         if use_claw_mode:
             agent_md_path = os.path.join(self.agent_workspace, "AGENT.md")
