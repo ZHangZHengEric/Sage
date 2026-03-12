@@ -259,13 +259,12 @@ class WebFetcherTool:
             })
 
         try:
-            async with aiohttp.ClientSession(timeout=timeout_obj) as session:
+            async with aiohttp.ClientSession(timeout=timeout_obj, trust_env=True) as session:
                 async with session.get(
                     url,
                     headers=headers,
                     allow_redirects=True,
-                    ssl=ssl_context,
-                    trust_env=True  # 信任环境变量中的代理设置
+                    ssl=ssl_context
                 ) as response:
 
                     if response.status == 403:
