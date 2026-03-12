@@ -62,6 +62,37 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const addItem = (item) => {
+    // 预处理文件路径
+    if (item.type === 'file' && (item.data?.filePath || item.data?.path)) {
+      let path = item.data.filePath || item.data.path
+      
+      // 1. 解码
+      try {
+        path = decodeURIComponent(path).trim()
+      } catch (e) {
+        console.warn('[Workbench] Failed to decode path:', path)
+      }
+
+      // 2. 去除反引号
+      if (path.startsWith('`') && path.endsWith('`')) {
+        path = path.slice(1, -1)
+      }
+
+      // 3. 处理 /sage-workspace/ 前缀
+      if (path.startsWith('/sage-workspace/')) {
+        path = path.replace('/sage-workspace/', '/')
+      }
+
+      // 4. 处理 file://
+      if (path.startsWith('file://')) {
+        path = path.replace(/^file:\/\/\/?/i, '/')
+      }
+
+      // 更新 item 数据
+      if (item.data.filePath) item.data.filePath = path
+      if (item.data.path) item.data.path = path
+    }
+
     // 检查是否已存在相同的项（根据 type 和唯一标识）
     const existingItem = items.value.find(i => {
       if (i.type !== item.type) return false
