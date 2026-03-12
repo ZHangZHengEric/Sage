@@ -46,6 +46,15 @@ const fileIcons = computed(() => {
   // 辅助函数：规范化路径
   const normalizePath = (path) => {
     let normalizedPath = path
+    // 去除两边的反引号
+    if (normalizedPath.startsWith('`') && normalizedPath.endsWith('`')) {
+      normalizedPath = normalizedPath.slice(1, -1)
+    }
+    // 去除 /sage-workspace/ 前缀，但保留根路径 /
+    if (normalizedPath.startsWith('/sage-workspace/')) {
+      normalizedPath = normalizedPath.replace('/sage-workspace/', '/')
+    }
+
     // 支持 file:// 协议的路径
     if (normalizedPath.startsWith('file://')) {
       normalizedPath = normalizedPath.replace(/^file:\/\/\/?/i, '/')
