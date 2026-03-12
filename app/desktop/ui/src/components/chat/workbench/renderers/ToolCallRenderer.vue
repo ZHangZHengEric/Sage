@@ -275,44 +275,44 @@
           <!-- 成功状态 -->
           <div v-else class="flex flex-col h-full overflow-hidden">
             <!-- 任务委派可视化 -->
-            <div class="flex items-center justify-center gap-6 py-4 border-b border-border/30 bg-muted/20">
+            <div class="flex items-center justify-center gap-6 py-4 border-b border-border/30 bg-muted/20 flex-shrink-0">
               <!-- Source Agent -->
-              <div class="flex flex-col items-center gap-2">
+              <div class="flex flex-col items-center gap-2 w-[100px]">
                 <div class="relative">
                   <img 
                     :src="currentAgentAvatar" 
                     :alt="currentAgentName"
-                    class="w-14 h-14 rounded-xl bg-muted object-cover border-2 border-primary/30"
+                    class="w-12 h-12 rounded-xl bg-muted object-cover border-2 border-primary/30"
                   />
-                  <div class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
-                    <User class="w-3.5 h-3.5 text-primary-foreground" />
+                  <div class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                    <User class="w-3 h-3 text-primary-foreground" />
                   </div>
                 </div>
-                <span class="text-sm font-medium">{{ currentAgentName }}</span>
+                <!-- <span class="text-sm font-medium truncate w-full text-center">{{ currentAgentName }}</span> -->
                 <span class="text-xs text-muted-foreground">{{ t('workbench.tool.delegator') }}</span>
               </div>
 
               <!-- Arrow -->
               <div class="flex flex-col items-center gap-1">
-                <ArrowRight class="w-6 h-6 text-muted-foreground" />
+                <ArrowRight class="w-5 h-5 text-muted-foreground" />
                 <span class="text-xs text-muted-foreground">{{ delegateTasks.length }} {{ t('workbench.tool.tasks') }}</span>
               </div>
 
               <!-- Target Agents -->
-              <div class="flex flex-col items-center gap-2">
-                <div class="flex -space-x-3">
+              <div class="flex flex-col items-center gap-2 w-[100px]">
+                <div class="flex -space-x-2">
                   <img 
-                    v-for="(task, idx) in delegateTasks.slice(0, 4)" 
+                    v-for="(task, idx) in delegateTasks.slice(0, 3)" 
                     :key="idx"
                     :src="getAgentAvatar(task.agent_id)" 
                     :alt="task.agent_id"
-                    class="w-12 h-12 rounded-xl bg-muted object-cover border-2 border-background"
+                    class="w-10 h-10 rounded-xl bg-muted object-cover border-2 border-background"
                   />
-                  <div v-if="delegateTasks.length > 4" class="w-12 h-12 rounded-xl bg-muted flex items-center justify-center border-2 border-background text-sm font-medium">
-                    +{{ delegateTasks.length - 4 }}
+                  <div v-if="delegateTasks.length > 3" class="w-10 h-10 rounded-xl bg-muted flex items-center justify-center border-2 border-background text-xs font-medium">
+                    +{{ delegateTasks.length - 3 }}
                   </div>
                 </div>
-                <span class="text-sm font-medium">{{ delegateTasks.length }} {{ t('workbench.tool.targetAgents') }}</span>
+                <span class="text-sm font-medium truncate w-full text-center">{{ delegateTasks.length }} {{ t('workbench.tool.targetAgents') }}</span>
               </div>
             </div>
 
@@ -949,14 +949,23 @@ const getTodoStatusLabel = (status) => {
 const delegateTasks = computed(() => toolArgs.value.tasks || [])
 const showDelegationResult = ref(false)
 
+// Get current agent info from item
+const currentAgentId = computed(() => {
+  // Try to get agent_id from item metadata or data
+  return props.item?.agent_id || props.item?.data?.agent_id || ''
+})
+
 const currentAgentName = computed(() => {
-  // Try to get from parent component or use default
-  return 'Current Agent'
+  // Try to get from item metadata or use default
+  return props.item?.agent_name || props.item?.data?.agent_name || t('workbench.tool.delegator')
 })
 
 const currentAgentAvatar = computed(() => {
-  // Generate consistent avatar
-  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=current`
+  const agentId = currentAgentId.value
+  if (!agentId) {
+    return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=current`
+  }
+  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agentId)}`
 })
 
 const getAgentAvatar = (agentId) => {
