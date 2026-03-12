@@ -575,6 +575,10 @@ export const useChatPage = (props) => {
     showAbilityPanel.value = false
   })
 
+  onUnmounted(() => {
+    stopSSESync()
+  })
+
   return {
     t,
     agents,
