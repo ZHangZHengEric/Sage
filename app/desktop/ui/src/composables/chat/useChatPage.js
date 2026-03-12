@@ -18,7 +18,7 @@ import { usePanelStore } from '@/stores/panel.js'
 const abilityCacheByAgentGlobal = ref({})
 
 export const useChatPage = (props) => {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const route = useRoute()
   const router = useRouter()
 
@@ -486,7 +486,8 @@ export const useChatPage = (props) => {
       const items = await agentAPI.getAgentAbilities({
         agentId,
         sessionId,
-        context: {}
+        context: {},
+        language: language?.value
       })
       abilityItems.value = items || []
       abilityCacheByAgentGlobal.value = {
