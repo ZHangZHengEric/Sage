@@ -414,6 +414,7 @@ async def execute_chat_session(
     stream_counter = 0
     last_activity_time = time.time()
     async for result in stream_service.process_stream():
+
         stream_counter += 1
         current_time = time.time()
         time_since_last = current_time - last_activity_time
