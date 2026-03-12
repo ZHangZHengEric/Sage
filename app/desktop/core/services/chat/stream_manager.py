@@ -148,6 +148,9 @@ class StreamManager:
                 # 广播给所有订阅者
                 for q in list(session.subscribers):
                     await q.put((chunk_index, chunk))
+                
+                # 在这里保留一个微小的调度点是好的，确保高频消息分发时不会完全占满事件循环
+                # 特别是当有多个订阅者时，这给了其他协程（如新连接请求）插入的机会
                 await asyncio.sleep(0)
         except Exception as e:
             logger.error(f"Background worker error for {session.session_id}: {e}")

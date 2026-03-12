@@ -405,7 +405,6 @@ async def execute_chat_session(
         yield_result.pop("is_chunk", None)
         yield_result.pop("chunk_id", None)
         yield json.dumps(yield_result, ensure_ascii=False) + "\n"
-        await asyncio.sleep(0)
 
     end_data = {
         "type": "stream_end",
