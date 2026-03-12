@@ -148,6 +148,9 @@ class StreamManager:
                 # 广播给所有订阅者
                 for q in list(session.subscribers):
                     await q.put((chunk_index, chunk))
+                
+                # 在这里保留一个微小的调度点是好的，确保高频消息分发时不会完全占满事件循环
+                # 特别是当有多个订阅者时，这给了其他协程（如新连接请求）插入的机会
                 await asyncio.sleep(0)
         except Exception as e:
             logger.error(f"Background worker error for {session.session_id}: {e}")
@@ -225,28 +228,52 @@ class StreamManager:
         queue = asyncio.Queue()
         session.subscribers.add(queue)
         logger.info(f"Client subscribed to session {session_id}, offset={last_index}")
-
+        
         try:
             # 1. 先发送历史消息 (Catch up)
-            catchup_start = max(0, last_index)
+            # 注意：last_index 是客户端已经收到的最后一条消息的索引 + 1（即期望的下一条）
+            # 或者如果是 0，表示从头开始
+            
             history_len = len(session.history)
-            if catchup_start < history_len:
-                for i in range(catchup_start, history_len):
+            
+            # 客户端传来的 last_index 通常是它期望的下一个 index
+            # 如果客户端传来 0，表示它没有数据，我们从 0 开始发
+            # 如果客户端传来 5，表示它已经有 0-4，我们从 5 开始发
+            start_index = max(0, last_index)
+            
+            # 使用 next_index 跟踪当前已发送的索引，避免重复发送
+            next_index = start_index
+            
+            if start_index < history_len:
+                for i in range(start_index, history_len):
                     yield session.history[i]
-            next_index = max(catchup_start, history_len)
-
-            # 2. 如果任务已完成，直接结束
+                    next_index = i + 1
+            
+            # 2. 如果任务已完成，且历史消息已全部发送，直接结束
             if session.is_completed:
                 return
 
             # 3. 监听实时消息
             while True:
-                payload = await queue.get()
+                try:
+                    # 增加超时处理，实现心跳机制 (每20秒发送一次心跳)
+                    payload = await asyncio.wait_for(queue.get(), timeout=20.0)
+                except asyncio.TimeoutError:
+                    # 发送SSE注释作为心跳，保持连接活跃
+                    yield ": heartbeat\n\n"
+                    continue
+
                 if payload is None:  # 结束信号
                     break
+                    
                 idx, chunk = payload
+                
+                # 防止重复发送历史消息
+                # 如果 queue 中的消息索引小于我们已经发送的 next_index，说明我们在 catch up 阶段已经发过了
                 if idx < next_index:
                     continue
+                
+                # 更新 next_index
                 next_index = idx + 1
                 yield chunk
         except asyncio.CancelledError:

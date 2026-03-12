@@ -47,15 +47,29 @@ export const useChatStream = ({
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
+        
+        // 简单的时间片管理，避免长时间阻塞 UI
+        const processStartTime = performance.now()
+        
         for (const line of lines) {
-          if (line.trim() === '') continue
+          const trimmedLine = line.trim()
+          // 忽略空行、心跳行或以冒号开头的 SSE 注释
+          if (!trimmedLine || trimmedLine.startsWith(':')) continue
           try {
-            const messageData = JSON.parse(line)
+            const messageData = JSON.parse(trimmedLine)
             if (onMessage) onMessage(messageData)
+            
+            // 如果单次处理超过 16ms (1帧)，让出主线程
+            if (performance.now() - processStartTime > 16) {
+              await new Promise(resolve => setTimeout(resolve, 0))
+            }
           } catch (e) {
             console.error('JSON Parse Error', e)
           }
         }
+        
+        // 在每一批数据读取后，也强制让出主线程，确保 WebView2 IPC 能够处理消息
+        await new Promise(resolve => setTimeout(resolve, 0))
       }
       if (onComplete) onComplete()
     } catch (e) {
