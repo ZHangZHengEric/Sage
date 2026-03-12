@@ -68,14 +68,42 @@
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
             <Label>{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
+            <div class="space-y-3">
+              <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
+                <SelectTrigger>
+                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
+                      {{ provider.name }}
+                    </SelectItem>
+                    <SelectItem value="Custom">{{ t('modelProvider.custom') }}</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              
+              <Input v-if="selectedProvider === 'Custom'" v-model="form.name" :placeholder="t('modelProvider.customNamePlaceholder')" />
+            </div>
           </div>
           <div class="grid gap-2">
             <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
             <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" />
           </div>
           <div class="grid gap-2">
-            <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
+            <div class="flex items-center justify-between">
+              <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
+              <Button 
+                v-if="currentProvider?.website" 
+                variant="link" 
+                size="sm" 
+                class="h-auto p-0 text-primary" 
+                @click="openProviderWebsite"
+              >
+                Get API Key
+                <ArrowRight class="ml-1 w-3 h-3" />
+              </Button>
+            </div>
             <Input v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" />
           </div>
           <div class="grid gap-2">
@@ -126,13 +154,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { Plus, Edit, Trash2, Bot, Loader } from 'lucide-vue-next'
+import { ref, reactive, onMounted, computed } from 'vue'
+import { Plus, Edit, Trash2, Bot, ArrowRight, Loader } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { open } from '@tauri-apps/plugin-shell'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -150,6 +188,7 @@ import {
 } from '@/components/ui/dialog'
 import { useLanguage } from '@/utils/i18n'
 import { modelProviderAPI } from '@/api/modelProvider'
+import { MODEL_PROVIDERS } from '@/utils/modelProviders'
 import { toast } from 'vue-sonner'
 
 const { listModelProviders, createModelProvider, updateModelProvider, deleteModelProvider } = modelProviderAPI
@@ -175,6 +214,36 @@ const form = reactive({
   maxModelLen: 64000
 })
 
+const selectedProvider = ref('')
+const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+
+const handleProviderChange = (val) => {
+  selectedProvider.value = val
+  if (val === 'Custom') {
+    form.name = ''
+    form.base_url = ''
+    form.model = ''
+    return
+  }
+  const provider = MODEL_PROVIDERS.find(p => p.name === val)
+  if (provider) {
+    form.name = provider.name
+    form.base_url = provider.base_url
+    // form.model = provider.models[0] || ''
+  }
+}
+
+const openProviderWebsite = async () => {
+  if (currentProvider.value?.website) {
+    try {
+      await open(currentProvider.value.website)
+    } catch (error) {
+      console.error('Failed to open external link:', error)
+      window.open(currentProvider.value.website, '_blank')
+    }
+  }
+}
+
 const fetchProviders = async () => {
   try {
     const res = await listModelProviders()
@@ -189,6 +258,7 @@ const handleCreate = () => {
   isEdit.value = false
   currentId.value = null
   form.name = ''
+  selectedProvider.value = ''
   form.base_url = ''
   form.api_keys_str = ''
   form.model = ''
@@ -205,6 +275,11 @@ const handleEdit = (provider) => {
     isEdit.value = true
     currentId.value = provider.id
     form.name = provider.name
+    
+    // Try to match provider
+    const known = MODEL_PROVIDERS.find(p => p.base_url === provider.base_url)
+    selectedProvider.value = known ? known.name : 'Custom'
+
     form.base_url = provider.base_url
     
     // Handle API keys safely
