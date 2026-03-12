@@ -48,12 +48,70 @@ def _set_permissions_recursive(path, dir_mode=0o755, file_mode=0o644):
         logger.warning(f"Failed to set permissions for {path}: {e}")
 
 
+def _sync_agent_skills():
+    """
+    同步 agent 创建的 skills 到 skill manager 管理的目录。
+    检查 ~/.sage/agents/{agent_id}/skills 下的新 skill，复制到 ~/.sage/skills
+    """
+    from pathlib import Path
+    
+    try:
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        agents_dir = sage_home / "agents"
+        sage_skills_dir = sage_home / "skills"
+        
+        if not agents_dir.exists():
+            return
+            
+        sage_skills_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 遍历所有 agent 目录
+        for agent_dir in agents_dir.iterdir():
+            if not agent_dir.is_dir():
+                continue
+                
+            agent_skills_dir = agent_dir / "skills"
+            if not agent_skills_dir.exists():
+                continue
+            
+            # 遍历 agent 的 skills 目录
+            for skill_path in agent_skills_dir.iterdir():
+                if not skill_path.is_dir():
+                    continue
+                
+                # 检查是否有 SKILL.md
+                if not any(f.lower() == 'skill.md' for f in skill_path.iterdir() if f.is_file()):
+                    continue
+                
+                skill_name = skill_path.name
+                target_path = sage_skills_dir / skill_name
+                
+                # 如果 skill 名称已存在，跳过
+                if target_path.exists():
+                    logger.debug(f"Skill '{skill_name}' already exists, skipping")
+                    continue
+                
+                # 复制 skill 到 sage skills 目录
+                try:
+                    shutil.copytree(skill_path, target_path)
+                    logger.info(f"Synced agent skill: {skill_name} from {agent_dir.name}")
+                except Exception as e:
+                    logger.error(f"Failed to sync skill '{skill_name}': {e}")
+                    
+    except Exception as e:
+        logger.error(f"Error syncing agent skills: {e}")
+
+
 async def list_skills() -> List[Dict[str, Any]]:
     """获取可用技能列表"""
     tm = get_skill_manager()
     if not tm:
         return []
 
+    # 先同步 agent 创建的 skills
+    _sync_agent_skills()
+    
     # 重新加载技能目录
     tm.reload()
     
