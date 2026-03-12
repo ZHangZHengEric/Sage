@@ -16,11 +16,16 @@ from sagents.tool.tool_manager import get_tool_manager
 from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.auto_gen_agent import AutoGenAgentFunc
 from sagents.utils.system_prompt_optimizer import SystemPromptOptimizer
+from sagents.utils.agent_abilities import (
+    AgentAbilitiesGenerationError,
+    generate_agent_abilities_from_config,
+)
 
 from .. import models
 from ..core import config
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
+from app.server.schemas.agent import AgentAbilityItem
 
 # ================= 工具函数 =================
 
@@ -238,6 +243,37 @@ async def optimize_system_prompt(
     logger.info("系统提示词优化成功")
     return result
 
+
+async def generate_agent_abilities(
+    agent_id: str,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None,
+    language: str = "zh",
+) -> List[AgentAbilityItem]:
+    """基于 Agent 配置生成能力卡片列表"""
+    logger.info(f"开始为 Agent 生成能力列表: {agent_id}")
+
+    # 1. 获取 Agent 配置（带鉴权）
+    agent = await get_agent(agent_id, user_id)
+    agent_config: Dict[str, Any] = agent.config or {}
+
+    # 2. 获取 LLM 客户端和默认模型
+    startup_cfg = config.get_startup_config()
+    model_name = startup_cfg.default_llm_model_name
+    client = get_chat_client()
+
+    # 3. 调用通用能力生成工具
+    raw_items: List[Dict[str, str]] = await generate_agent_abilities_from_config(
+        agent_config=agent_config,
+        context=context or {},
+        client=client,
+        model=model_name,
+        language=language,
+    )
+
+    # 4. 转成 Pydantic 模型
+    return [AgentAbilityItem(**item) for item in raw_items]
 
 
 async def get_file_workspace(agent_id: str, user_id: str) -> Dict[str, Any]:
