@@ -495,7 +495,15 @@ const loadContent = async () => {
       return
     }
     
-    fileContent.value = await readTextFile(props.filePath)
+    // Office 文件使用二进制读取，其他使用文本读取
+    if (fileType.value === 'office') {
+      // 读取二进制文件并转换为 base64
+      const fileData = await readFile(props.filePath)
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(fileData)))
+      fileContent.value = base64
+    } else {
+      fileContent.value = await readTextFile(props.filePath)
+    }
 
     if (fileType.value === 'excalidraw') {
       try {

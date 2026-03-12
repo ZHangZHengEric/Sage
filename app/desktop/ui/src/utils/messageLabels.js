@@ -49,6 +49,8 @@ export const toolLabelKeys = {
   'execute_javascript_code': 'tools.executeJavascriptCode',
   // 网页抓取工具
   'fetch_webpages': 'tools.fetchWebpages',
+  // 图片理解工具
+  'analyze_image': 'tools.analyzeImage',
   // 任务清单工具
   'todo_write': 'tools.todoWrite',
   'todo_read': 'tools.todoRead',
@@ -112,6 +114,8 @@ export const toolLabels = {
   'execute_javascript_code': '执行JS',
   // 网页抓取工具
   'fetch_webpages': '抓取网页',
+  // 图片理解工具
+  'analyze_image': '图片理解',
   // 任务清单工具
   'todo_write': '待办任务',
   'todo_read': '读取待办',

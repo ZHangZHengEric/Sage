@@ -406,6 +406,8 @@ export default {
   'tools.executeJavascriptCode': 'Execute JS',
   // Web Fetcher Tools
   'tools.fetchWebpages': 'Fetch Webpages',
+  // Image Understanding Tools
+  'tools.analyzeImage': 'Analyze Image',
   // Todo Tools
   'tools.todoWrite': 'Todo Write',
   'tools.todoRead': 'Todo Read',
