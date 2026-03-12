@@ -429,6 +429,8 @@ export default {
   'tools.playwrightHover': 'Hover',
   'tools.playwrightEvaluate': 'Execute JS',
   'tools.sysSpawnAgent': 'Create Agent',
+  'tools.sysDelegateTask': 'Delegate Task',
+  'tools.sysFinishTask': 'Finish Task',
   'tools.generateImage': 'Generate Image',
   'tools.fetchWebpage': 'Fetch Webpage',
   'tools.webFetcher': 'Web Fetcher',
@@ -931,6 +933,10 @@ export default {
   'workbench.tool.delegationCompleted': 'Delegation Completed',
   'workbench.tool.viewResult': 'View Result',
   'workbench.tool.hideResult': 'Hide Result',
+  // Sys Finish Task
+  'workbench.tool.finishingTask': 'Finishing Task...',
+  'workbench.tool.finishFailed': 'Task Finish Failed',
+  'workbench.tool.taskCompleted': 'Task Completed',
 
   // Image Renderer
   'workbench.image.open': 'Open Image',

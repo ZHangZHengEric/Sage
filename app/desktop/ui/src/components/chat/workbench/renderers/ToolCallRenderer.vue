@@ -372,7 +372,45 @@
         </div>
       </template>
 
-      <!-- 8. execute_python_code / execute_javascript_code - IDE 样式 -->
+      <!-- 8. sys_finish_task - 任务完成结果展示 -->
+      <template v-else-if="isSysFinishTask">
+        <div class="sys-finish-task-container h-full flex flex-col">
+          <!-- 加载中状态 -->
+          <div v-if="!toolResult" class="flex items-center justify-center h-full text-muted-foreground p-4">
+            <Loader2 class="w-5 h-5 animate-spin mr-2" />
+            <span>{{ t('workbench.tool.finishingTask') }}</span>
+          </div>
+          <!-- 错误状态 -->
+          <div v-else-if="toolResult?.is_error" class="flex items-start gap-3 p-4 text-destructive">
+            <XCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p class="font-medium">{{ t('workbench.tool.finishFailed') }}</p>
+              <p class="text-sm opacity-80 mt-1">{{ finishTaskError }}</p>
+            </div>
+          </div>
+          <!-- 成功状态 -->
+          <div v-else class="flex flex-col h-full overflow-hidden">
+            <!-- 状态头部 -->
+            <div class="flex items-center gap-3 p-4 border-b border-border/30 bg-green-500/5 flex-shrink-0">
+              <div class="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                <CheckCircle class="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p class="font-medium text-sm">{{ t('workbench.tool.taskCompleted') }}</p>
+                <p class="text-xs text-muted-foreground">{{ finishTaskStatus }}</p>
+              </div>
+            </div>
+            <!-- 结果内容 - Markdown 渲染 -->
+            <div class="flex-1 overflow-hidden">
+              <div class="h-full overflow-auto custom-scrollbar p-4">
+                <MarkdownRenderer :content="finishTaskResult" class="text-sm" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 9. execute_python_code / execute_javascript_code - IDE 样式 -->
       <template v-else-if="isCodeExecution">
         <div class="ide-container h-full flex flex-col bg-[#1e1e1e] overflow-hidden">
           <!-- 代码区域 - 占主要空间，直接显示高亮代码 -->
@@ -537,6 +575,7 @@ const isCodeExecution = computed(() =>
 const isTodoWrite = computed(() => toolName.value === 'todo_write')
 const isSysSpawnAgent = computed(() => toolName.value === 'sys_spawn_agent')
 const isSysDelegateTask = computed(() => toolName.value === 'sys_delegate_task')
+const isSysFinishTask = computed(() => toolName.value === 'sys_finish_task')
 
 // 显示名称映射
 const displayToolName = computed(() => {
@@ -1029,6 +1068,31 @@ const openSpawnedAgentChat = () => {
   // 使用 window.location.href 强制刷新页面，确保 onMounted 执行
   window.location.href = `/chat?agent=${spawnAgentId.value}`
 }
+
+// ============ 10. Sys Finish Task ============
+const finishTaskStatus = computed(() => {
+  return toolArgs.value.status || 'success'
+})
+
+const finishTaskResult = computed(() => {
+  // 优先从参数中获取 result
+  const resultFromArgs = toolArgs.value.result
+  if (resultFromArgs) {
+    return typeof resultFromArgs === 'string' ? resultFromArgs : JSON.stringify(resultFromArgs, null, 2)
+  }
+  // 否则从结果中获取
+  if (!toolResult.value) return ''
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  return JSON.stringify(content, null, 2)
+})
+
+const finishTaskError = computed(() => {
+  if (!toolResult.value?.is_error) return ''
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  return JSON.stringify(content)
+})
 </script>
 
 <style scoped>

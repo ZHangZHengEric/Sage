@@ -118,10 +118,19 @@ class FibreTools:
         return response
 
     @tool(
-        description_i18n={"zh": "向父节点报告最终结果。"},
+        description_i18n={
+            "zh": "向父节点报告任务执行的最终结果。当子智能体完成所有任务后，使用此工具提交详细的执行结果和总结。",
+            "en": "Report the final result of task execution to the parent agent. Use this tool when the sub-agent has completed all tasks to submit detailed execution results and summary."
+        },
         param_description_i18n={
-            "status": {"zh": "任务状态 (success/failed)"},
-            "result": {"zh": "最终结果的详细总结。必须包含父 Agent 所需的所有信息，包括执行过程的关键步骤、生成的资源路径、以及具体的分析结论。不要只返回简单的'完成'。"}
+            "status": {
+                "zh": "任务执行状态，可选值：'success'（成功）或 'failed'（失败）",
+                "en": "Task execution status, options: 'success' or 'failed'"
+            },
+            "result": {
+                "zh": "任务执行的详细结果总结。必须包含：1) 执行过程的关键步骤；2) 生成的资源文件路径；3) 数据分析结论；4) 建议或后续行动。支持 Markdown 格式，可以包含表格、列表等结构化内容。",
+                "en": "Detailed summary of task execution results. Must include: 1) Key execution steps; 2) Generated resource file paths; 3) Data analysis conclusions; 4) Recommendations or follow-up actions. Supports Markdown format with tables, lists, etc."
+            }
         }
     )
     async def sys_finish_task(self, status: str, result: str) -> str:
