@@ -13,6 +13,7 @@ class AgentAbilitiesRequest(BaseModel):
     agent_id: str
     session_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
+    language: Optional[str] = "zh"
 
 
 class AgentAbilityItem(BaseModel):
