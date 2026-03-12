@@ -571,7 +571,11 @@ class AgentBase(ABC):
             system_context_info = session_context.system_context.copy()
             logger.debug(f"{self.__class__.__name__}: 添加运行时system_context到系统消息")
             use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
-            use_claw_mode = system_context_info.get("use_claw_mode", use_claw_mode)
+            if 'use_claw_mode' in system_context_info:
+                use_claw_mode = system_context_info.get("use_claw_mode", use_claw_mode)
+                if isinstance(use_claw_mode, str):
+                    use_claw_mode = use_claw_mode.lower() == "true"
+            logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
             if "AGENT.MD" in include_sections and use_claw_mode:
                 # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
                 agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))

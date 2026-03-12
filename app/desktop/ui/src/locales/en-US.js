@@ -117,6 +117,29 @@ export default {
   'chat.targetAgent': 'Target Agent',
   'chat.taskContent': 'Task Content',
   'chat.viewSubSession': 'View Sub-Session',
+  'chat.delegating': 'Delegating',
+  'chat.currentAgent': 'Current Agent',
+  'chat.unknownAgent': 'Unknown Agent',
+  'chat.taskName': 'Task Name',
+  'chat.viewContent': 'View Content',
+  'chat.hideContent': 'Hide Content',
+  'chat.taskCompleted': 'Task Completed',
+  'chat.viewResult': 'View Result',
+  'chat.hideResult': 'Hide Result',
+  'chat.viewDetail': 'View Detail',
+  'chat.task': 'Task',
+  'chat.tasks': 'Tasks',
+  'chat.agents': 'Agents',
+  'chat.multipleTasks': '{count} Tasks',
+  'chat.viewAllTasks': 'View All',
+  'chat.allTasksCompleted': 'All Tasks Completed',
+  'chat.taskDetail': 'Task Detail',
+  'chat.taskList': 'Task List',
+  'chat.taskListDescription': '{count} Delegated Tasks',
+  'chat.delegator': 'Delegator',
+  'chat.executor': 'Executor',
+  'chat.untitledTask': 'Untitled Task',
+  'chat.view': 'View',
   'chat.subSessionTitle': 'Sub-Session Details',
   'chat.loadingMessages': 'Loading messages...',
   'chat.todoList': 'Task List',
@@ -350,6 +373,69 @@ export default {
   'toolCall.completed': 'Completed',
   'toolCall.executing': 'Executing',
   'toolCall.executionError': 'Error',
+
+  // Tool Name Mappings
+  // File System Tools
+  'tools.fileRead': 'Read File',
+  'tools.fileWrite': 'Write File',
+  'tools.fileUpdate': 'Update File',
+  'tools.downloadFileFromUrl': 'Download File',
+  // File Parser Tools
+  'tools.extractTextFromNonTextFile': 'Extract File Text',
+  // Command Execution Tools
+  'tools.executeShellCommand': 'Execute Command',
+  'tools.executePythonCode': 'Execute Python',
+  'tools.executeJavascriptCode': 'Execute JS',
+  // Web Fetcher Tools
+  'tools.fetchWebpages': 'Fetch Webpages',
+  // Todo Tools
+  'tools.todoWrite': 'Todo Write',
+  'tools.todoRead': 'Todo Read',
+  // Task Interruption Tools
+  'tools.askFollowupQuestion': 'Ask Question',
+  // Memory Tools
+  'tools.rememberUserMemory': 'Remember Memory',
+  'tools.recallUserMemory': 'Recall Memory',
+  'tools.recallUserMemoryByType': 'Recall by Type',
+  'tools.forgetUserMemory': 'Forget Memory',
+  // Skill Tools
+  'tools.loadSkill': 'Load Skill',
+  // Task Scheduler Tools
+  'tools.listTasks': 'List Tasks',
+  'tools.addTask': 'Add Task',
+  'tools.deleteTask': 'Delete Task',
+  'tools.completeTask': 'Complete Task',
+  'tools.enableTask': 'Enable Task',
+  'tools.getTaskDetails': 'Get Task Details',
+  'tools.updateTask': 'Update Task',
+  // IM Service Tools
+  'tools.sendMessageThroughIm': 'Send IM Message',
+  // Existing Tools
+  'tools.searchCodebase': 'Search Codebase',
+  'tools.viewFiles': 'View Files',
+  'tools.writeToFile': 'Write to File',
+  'tools.runCommand': 'Run Command',
+  'tools.listDir': 'List Directory',
+  'tools.searchByRegex': 'Search by Regex',
+  'tools.deleteFile': 'Delete File',
+  'tools.renameFile': 'Rename File',
+  'tools.webSearch': 'Web Search',
+  'tools.playwrightNavigate': 'Browser Navigate',
+  'tools.playwrightClick': 'Click',
+  'tools.playwrightScreenshot': 'Screenshot',
+  'tools.playwrightFill': 'Fill Form',
+  'tools.playwrightHover': 'Hover',
+  'tools.playwrightEvaluate': 'Execute JS',
+  'tools.sysSpawnAgent': 'Create Agent',
+  'tools.generateImage': 'Generate Image',
+  'tools.fetchWebpage': 'Fetch Webpage',
+  'tools.webFetcher': 'Web Fetcher',
+  'tools.default': 'Tool Execution',
+
+  // Role Labels
+  'roles.user': 'User',
+  'roles.assistant': 'AI Assistant',
+  'roles.system': 'System',
 
   // Tools Page
   'tools.title': 'Tools',
@@ -832,6 +918,17 @@ export default {
   'workbench.tool.role.user': 'User',
   'workbench.tool.role.system': 'System',
   'workbench.tool.role.tool': 'Tool',
+  // Sys Delegate Task
+  'workbench.tool.delegatingTasks': 'Delegating Tasks...',
+  'workbench.tool.delegationFailed': 'Delegation Failed',
+  'workbench.tool.delegator': 'Delegator',
+  'workbench.tool.tasks': 'Tasks',
+  'workbench.tool.targetAgents': 'Target Agents',
+  'workbench.tool.untitledTask': 'Untitled Task',
+  'workbench.tool.hasSession': 'Has Session',
+  'workbench.tool.delegationCompleted': 'Delegation Completed',
+  'workbench.tool.viewResult': 'View Result',
+  'workbench.tool.hideResult': 'Hide Result',
 
   // Image Renderer
   'workbench.image.open': 'Open Image',

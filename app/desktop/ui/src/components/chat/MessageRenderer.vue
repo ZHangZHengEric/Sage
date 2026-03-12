@@ -97,7 +97,7 @@
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
          <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
-            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: '工具调用  ' + getToolName(message) }) }}
+            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
             <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
@@ -113,6 +113,7 @@
                :toolCall="toolCall"
                :toolResult="getParsedToolResult(toolCall)"
                :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
+               :currentAgent="{ id: props.agentId, name: currentAgentName }"
                @sendMessage="handleSendMessage"
               @openSubSession="emit('openSubSession', $event)"
               @click="handleToolClick"
@@ -195,6 +196,12 @@ const emit = defineEmits(['downloadFile', 'toolClick', 'sendMessage', 'openSubSe
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
+
+// 当前 Agent 名称
+const currentAgentName = computed(() => {
+  // Try to get from message metadata or use default
+  return props.message.agent_name || t('chat.currentAgent')
+})
 
 // 计算属性
 const shouldRenderMessage = computed(() => {
@@ -319,7 +326,8 @@ const getLabel = ({ role, type, messageType, toolName }) => {
   return getMessageLabel({
     role,
     type: messageType || type, // 优先使用 messageType
-    toolName
+    toolName,
+    t
   })
 }
 

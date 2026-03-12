@@ -5,6 +5,7 @@ import { usePanelStore } from '@/stores/panel.js'
 export const useChatLifecycle = ({
   props,
   route,
+  router,
   currentSessionId,
   currentTraceId,
   makeTraceId,
@@ -14,6 +15,7 @@ export const useChatLifecycle = ({
   createSession,
   clearScrollTimer,
   agents,
+  selectAgent,
   restoreSelectedAgent,
   loadConversationData,
   resetChat,
@@ -43,6 +45,41 @@ export const useChatLifecycle = ({
     }
     await loadAgents()
     const routeSessionId = route.query.session_id
+
+    // 优先从 URL 参数获取 agent
+    const urlAgentId = route.query.agent
+    // 从 localStorage 获取，但只使用一次（用于从 AgentCard 跳转的场景）
+    const storageAgentId = localStorage.getItem('selectedAgentId')
+    const targetAgentId = urlAgentId || storageAgentId
+
+    console.log('[ChatLifecycle] onMounted - urlAgentId:', urlAgentId)
+    console.log('[ChatLifecycle] onMounted - storageAgentId:', storageAgentId)
+    console.log('[ChatLifecycle] onMounted - targetAgentId:', targetAgentId)
+    console.log('[ChatLifecycle] onMounted - agents count:', agents.value?.length)
+
+    // 如果 URL 或 localStorage 中有 agent 且 agents 已加载，立即选择
+    if (targetAgentId && agents.value.length > 0) {
+      const targetAgent = agents.value.find(a => a.id === targetAgentId)
+      console.log('[ChatLifecycle] onMounted - found targetAgent:', !!targetAgent)
+      if (targetAgent) {
+        // 使用 forceConfigUpdate=true 确保配置被更新
+        selectAgent(targetAgent, true)
+        console.log('[ChatLifecycle] onMounted - Auto-selected agent:', targetAgentId)
+      }
+    }
+
+    // 清除 URL 中的 agent 参数和 localStorage（只使用一次）
+    if (router && urlAgentId) {
+      router.replace({
+        query: { ...route.query, agent: undefined }
+      })
+    }
+    // 清除 localStorage 中的 selectedAgentId，避免影响后续的"新对话"操作
+    if (storageAgentId) {
+      localStorage.removeItem('selectedAgentId')
+      console.log('[ChatLifecycle] Cleared selectedAgentId from localStorage')
+    }
+
     if (routeSessionId) {
       await handleSessionLoad(routeSessionId)
     } else {
@@ -65,7 +102,31 @@ export const useChatLifecycle = ({
   })
 
   watch(() => agents.value, (newAgents) => {
+    console.log('[ChatLifecycle] agents.value changed, count:', newAgents?.length)
     if (newAgents && newAgents.length > 0) {
+      const routeAgentId = route.query.agent
+      console.log('[ChatLifecycle] routeAgentId from URL:', routeAgentId)
+      console.log('[ChatLifecycle] localStorage selectedAgentId:', localStorage.getItem('selectedAgentId'))
+      // 如果 URL 中有 agent 参数，优先选择该 Agent
+      if (routeAgentId) {
+        const targetAgent = newAgents.find(a => a.id === routeAgentId)
+        console.log('[ChatLifecycle] Found targetAgent in agents:', !!targetAgent)
+        if (targetAgent) {
+          console.log('[ChatLifecycle] Calling selectAgent for:', routeAgentId)
+          selectAgent(targetAgent)
+          console.log('[ChatLifecycle] Auto-selected agent from URL:', routeAgentId)
+          // 清除 URL 中的 agent 参数，避免刷新时重复选择
+          if (router) {
+            router.replace({
+              query: { ...route.query, agent: undefined }
+            })
+          }
+          return
+        } else {
+          console.log('[ChatLifecycle] Target agent not found in agents list, available IDs:', newAgents.map(a => a.id))
+        }
+      }
+      console.log('[ChatLifecycle] No routeAgentId, calling restoreSelectedAgent')
       restoreSelectedAgent(newAgents)
     }
   })

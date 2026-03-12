@@ -216,7 +216,163 @@
         </div>
       </template>
 
-      <!-- 6. execute_python_code / execute_javascript_code - IDE 样式 -->
+      <!-- 6. sys_spawn_agent - Agent 创建结果展示 -->
+      <template v-else-if="isSysSpawnAgent">
+        <div class="sys-spawn-agent-container h-full flex flex-col">
+          <!-- 加载中状态 -->
+          <div v-if="!toolResult" class="flex items-center justify-center h-full text-muted-foreground p-4">
+            <Loader2 class="w-5 h-5 animate-spin mr-2" />
+            <span>正在创建智能体...</span>
+          </div>
+          <!-- 错误状态 -->
+          <div v-else-if="toolResult?.is_error" class="flex items-start gap-3 p-4 text-destructive">
+            <XCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p class="font-medium">创建失败</p>
+              <p class="text-sm opacity-80 mt-1">{{ spawnAgentError }}</p>
+            </div>
+          </div>
+          <!-- 成功状态 - 与工作台融为一体 -->
+          <div v-else class="flex flex-col h-full">
+            <!-- Agent 信息 -->
+            <div class="flex items-start gap-3 p-4 pb-3 border-b border-border/30">
+              <img :src="spawnAgentAvatarUrl" :alt="spawnAgentName" class="w-10 h-10 rounded-lg bg-muted object-cover flex-shrink-0" />
+              <div class="flex-1 min-w-0">
+                <h4 class="font-medium text-sm text-foreground">{{ spawnAgentName || '未命名智能体' }}</h4>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ spawnAgentDescription || '暂无描述' }}</p>
+              </div>
+              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openSpawnedAgentChat">
+                <MessageSquare class="w-3.5 h-3.5 mr-1" />
+                开始对话
+              </Button>
+            </div>
+            <!-- 系统提示词 - 使用 Markdown 渲染，占满剩余空间 -->
+            <div v-if="spawnAgentSystemPrompt" class="flex-1 min-h-0 overflow-hidden">
+              <div class="h-full overflow-auto custom-scrollbar p-4">
+                <MarkdownRenderer :content="spawnAgentSystemPrompt" class="text-xs" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 7. sys_delegate_task - 任务委派展示 -->
+      <template v-else-if="isSysDelegateTask">
+        <div class="sys-delegate-task-container h-full flex flex-col">
+          <!-- 加载中状态 -->
+          <div v-if="!toolResult" class="flex items-center justify-center h-full text-muted-foreground p-4">
+            <Loader2 class="w-5 h-5 animate-spin mr-2" />
+            <span>{{ t('workbench.tool.delegatingTasks') }}</span>
+          </div>
+          <!-- 错误状态 -->
+          <div v-else-if="toolResult?.is_error" class="flex items-start gap-3 p-4 text-destructive">
+            <XCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p class="font-medium">{{ t('workbench.tool.delegationFailed') }}</p>
+              <p class="text-sm opacity-80 mt-1">{{ delegationError }}</p>
+            </div>
+          </div>
+          <!-- 成功状态 -->
+          <div v-else class="flex flex-col h-full overflow-hidden">
+            <!-- 任务委派可视化 -->
+            <div class="flex items-center justify-center gap-6 py-4 border-b border-border/30 bg-muted/20">
+              <!-- Source Agent -->
+              <div class="flex flex-col items-center gap-2">
+                <div class="relative">
+                  <img 
+                    :src="currentAgentAvatar" 
+                    :alt="currentAgentName"
+                    class="w-14 h-14 rounded-xl bg-muted object-cover border-2 border-primary/30"
+                  />
+                  <div class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                    <User class="w-3.5 h-3.5 text-primary-foreground" />
+                  </div>
+                </div>
+                <span class="text-sm font-medium">{{ currentAgentName }}</span>
+                <span class="text-xs text-muted-foreground">{{ t('workbench.tool.delegator') }}</span>
+              </div>
+
+              <!-- Arrow -->
+              <div class="flex flex-col items-center gap-1">
+                <ArrowRight class="w-6 h-6 text-muted-foreground" />
+                <span class="text-xs text-muted-foreground">{{ delegateTasks.length }} {{ t('workbench.tool.tasks') }}</span>
+              </div>
+
+              <!-- Target Agents -->
+              <div class="flex flex-col items-center gap-2">
+                <div class="flex -space-x-3">
+                  <img 
+                    v-for="(task, idx) in delegateTasks.slice(0, 4)" 
+                    :key="idx"
+                    :src="getAgentAvatar(task.agent_id)" 
+                    :alt="task.agent_id"
+                    class="w-12 h-12 rounded-xl bg-muted object-cover border-2 border-background"
+                  />
+                  <div v-if="delegateTasks.length > 4" class="w-12 h-12 rounded-xl bg-muted flex items-center justify-center border-2 border-background text-sm font-medium">
+                    +{{ delegateTasks.length - 4 }}
+                  </div>
+                </div>
+                <span class="text-sm font-medium">{{ delegateTasks.length }} {{ t('workbench.tool.targetAgents') }}</span>
+              </div>
+            </div>
+
+            <!-- 任务列表 - 可滚动，显示完整描述 -->
+            <div class="flex-1 overflow-auto p-4 space-y-3 custom-scrollbar">
+              <div 
+                v-for="(task, index) in delegateTasks" 
+                :key="index"
+                class="border rounded-lg p-3 hover:bg-muted/30 transition-colors"
+              >
+                <div class="flex items-start gap-3">
+                  <img 
+                    :src="getAgentAvatar(task.agent_id)" 
+                    :alt="task.agent_id"
+                    class="w-10 h-10 rounded-lg bg-muted object-cover flex-shrink-0"
+                  />
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between mb-1">
+                      <p class="text-sm font-medium truncate">{{ task.task_name || task.original_task || t('workbench.tool.untitledTask') }}</p>
+                      <Badge v-if="task.session_id" variant="outline" class="text-xs flex-shrink-0 ml-2">
+                        {{ t('workbench.tool.hasSession') }}
+                      </Badge>
+                    </div>
+                    <p class="text-xs text-muted-foreground truncate mb-2">{{ getAgentName(task.agent_id) }}</p>
+                    <!-- 完整任务描述 -->
+                    <div class="bg-muted/30 rounded p-2 max-h-[150px] overflow-y-auto custom-scrollbar">
+                      <pre class="text-xs whitespace-pre-wrap font-mono">{{ task.content }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 结果展示 -->
+            <div v-if="delegationResult" class="border-t border-border/30 p-4 bg-green-500/5">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <CheckCircle class="w-4 h-4 text-green-600" />
+                  <span class="text-sm font-medium text-green-700">{{ t('workbench.tool.delegationCompleted') }}</span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  class="h-6 text-xs gap-1"
+                  @click="showDelegationResult = !showDelegationResult"
+                >
+                  <Eye v-if="!showDelegationResult" class="w-3.5 h-3.5" />
+                  <EyeOff v-else class="w-3.5 h-3.5" />
+                  {{ showDelegationResult ? t('workbench.tool.hideResult') : t('workbench.tool.viewResult') }}
+                </Button>
+              </div>
+              <div v-if="showDelegationResult" class="max-h-[200px] overflow-auto custom-scrollbar bg-background rounded p-2">
+                <MarkdownRenderer :content="delegationResult" class="text-xs" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 8. execute_python_code / execute_javascript_code - IDE 样式 -->
       <template v-else-if="isCodeExecution">
         <div class="ide-container h-full flex flex-col bg-[#1e1e1e] overflow-hidden">
           <!-- 代码区域 - 占主要空间，直接显示高亮代码 -->
@@ -243,7 +399,7 @@
         </div>
       </template>
 
-      <!-- 6. 其他工具 - 统一显示 -->
+      <!-- 9. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -274,6 +430,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -299,7 +456,12 @@ import {
   Circle,
   Loader2,
   XCircle,
-  HelpCircle
+  HelpCircle,
+  MessageSquare,
+  ArrowRight,
+  User,
+  Eye,
+  EyeOff
 } from 'lucide-vue-next'
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
@@ -373,6 +535,8 @@ const isCodeExecution = computed(() =>
   toolName.value === 'execute_javascript_code'
 )
 const isTodoWrite = computed(() => toolName.value === 'todo_write')
+const isSysSpawnAgent = computed(() => toolName.value === 'sys_spawn_agent')
+const isSysDelegateTask = computed(() => toolName.value === 'sys_delegate_task')
 
 // 显示名称映射
 const displayToolName = computed(() => {
@@ -779,6 +943,82 @@ const getTodoStatusLabel = (status) => {
     'failed': 'Failed'
   }
   return labelMap[status] || status
+}
+
+// ============ 8. Sys Delegate Task ============
+const delegateTasks = computed(() => toolArgs.value.tasks || [])
+const showDelegationResult = ref(false)
+
+const currentAgentName = computed(() => {
+  // Try to get from parent component or use default
+  return 'Current Agent'
+})
+
+const currentAgentAvatar = computed(() => {
+  // Generate consistent avatar
+  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=current`
+})
+
+const getAgentAvatar = (agentId) => {
+  if (!agentId) return ''
+  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agentId)}`
+}
+
+const getAgentName = (agentId) => {
+  if (!agentId) return 'Unknown'
+  return agentId.length > 15 ? agentId.slice(0, 12) + '...' : agentId
+}
+
+const delegationError = computed(() => {
+  if (!toolResult.value?.is_error) return ''
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  return JSON.stringify(content)
+})
+
+const delegationResult = computed(() => {
+  if (!toolResult.value || toolResult.value.is_error) return null
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  return JSON.stringify(content, null, 2)
+})
+
+// ============ 9. Sys Spawn Agent ============
+const spawnAgentName = computed(() => toolArgs.value.name || '')
+const spawnAgentDescription = computed(() => toolArgs.value.description || '')
+const spawnAgentSystemPrompt = computed(() => toolArgs.value.system_prompt || '')
+
+// Extract agent ID from result message
+const spawnAgentId = computed(() => {
+  if (!toolResult.value) return null
+  const message = typeof toolResult.value.content === 'string'
+    ? toolResult.value.content
+    : JSON.stringify(toolResult.value.content)
+  // Match pattern like "agent_360ab10e" from "Agent spawned successfully. ID: agent_360ab10e."
+  const match = message.match(/agent_[a-f0-9]+/)
+  return match ? match[0] : null
+})
+
+const spawnAgentError = computed(() => {
+  if (!toolResult.value?.is_error) return ''
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  return JSON.stringify(content)
+})
+
+// Generate avatar URL using dicebear API
+const spawnAgentAvatarUrl = computed(() => {
+  const seed = spawnAgentId.value || spawnAgentName.value || 'default'
+  return `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9`
+})
+
+const openSpawnedAgentChat = () => {
+  if (!spawnAgentId.value) return
+  // 先更新 localStorage，确保跳转后能被正确选中
+  localStorage.setItem('selectedAgentId', spawnAgentId.value)
+  console.log('[ToolCallRenderer] Saved agent to localStorage:', spawnAgentId.value)
+  // 使用 window.location.href 强制刷新页面，确保 onMounted 执行
+  window.location.href = `/chat?agent=${spawnAgentId.value}`
 }
 </script>
 
