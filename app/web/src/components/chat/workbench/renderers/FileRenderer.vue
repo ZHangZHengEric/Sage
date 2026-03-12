@@ -153,6 +153,16 @@ import XlsxRenderer from './filerender/XlsxRenderer.vue'
 import PptxRenderer from './filerender/PptxRenderer.vue'
 import { agentAPI } from '@/api/agent'
 
+import { 
+  getFileExtension, 
+  getFileType, 
+  getFileTypeLabel, 
+  getFileIcon, 
+  getFileLanguage, 
+  getOfficeFileType,
+  getDisplayFileName
+} from '@/utils/fileIcons.js'
+
 const props = defineProps({
   filePath: {
     type: String,
@@ -227,98 +237,35 @@ const formatTime = (timestamp) => {
 
 // 文件信息
 const displayFileName = computed(() => {
-  return props.fileName || props.filePath.split('/').pop() || 'file'
+  return getDisplayFileName(props.filePath, props.fileName)
 })
 
 const fileExtension = computed(() => {
-  const name = displayFileName.value
-  const match = name.match(/\.([^.]+)$/)
-  return match ? match[1].toLowerCase() : ''
+  return getFileExtension(props.filePath, displayFileName.value)
 })
 
 // 文件类型检测
 const fileType = computed(() => {
-  const ext = fileExtension.value
-  const typeMap = {
-    'pdf': 'pdf',
-    'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'gif': 'image', 'webp': 'image', 'svg': 'image',
-    'html': 'html', 'htm': 'html',
-    'md': 'markdown', 'markdown': 'markdown',
-    'excalidraw': 'excalidraw',
-    'js': 'code', 'ts': 'code', 'jsx': 'code', 'tsx': 'code',
-    'py': 'code', 'java': 'code', 'cpp': 'code', 'c': 'code', 'go': 'code', 'rs': 'code',
-    'json': 'code', 'xml': 'code', 'yaml': 'code', 'yml': 'code',
-    'css': 'code', 'scss': 'code', 'less': 'code',
-    'vue': 'code', 'svelte': 'code',
-    'php': 'code', 'rb': 'code', 'swift': 'code', 'kt': 'code',
-    'sql': 'code', 'sh': 'code', 'bash': 'code', 'zsh': 'code',
-    'txt': 'text', 'log': 'text', 'csv': 'text',
-    'pptx': 'office', 'ppt': 'office',
-    'docx': 'office', 'doc': 'office',
-    'xlsx': 'office', 'xls': 'office'
-  }
-  return typeMap[ext] || 'other'
+  return getFileType(fileExtension.value)
 })
 
 const fileTypeLabel = computed(() => {
-  const labels = {
-    'pdf': 'PDF',
-    'image': '图片',
-    'html': 'HTML',
-    'markdown': 'Markdown',
-    'excalidraw': 'Excalidraw',
-    'code': '代码',
-    'text': '文本',
-    'office': officeFileType.value,
-    'other': '文件'
-  }
-  return labels[fileType.value] || '文件'
+  return getFileTypeLabel(fileExtension.value, officeFileType.value)
 })
 
 // 文件图标
 const fileIcon = computed(() => {
-  const icons = {
-    'pdf': '📕',
-    'image': '🖼️',
-    'html': '🌐',
-    'markdown': '📝',
-    'excalidraw': '✏️',
-    'code': '📜',
-    'text': '📃',
-    'office': '📊',
-    'other': '📎'
-  }
-  return icons[fileType.value] || '📎'
+  return getFileIcon(fileExtension.value)
 })
 
 // 编程语言
 const language = computed(() => {
-  const langMap = {
-    'js': 'JavaScript', 'ts': 'TypeScript', 
-    'jsx': 'JSX', 'tsx': 'TSX',
-    'py': 'Python', 'java': 'Java',
-    'cpp': 'C++', 'c': 'C',
-    'go': 'Go', 'rs': 'Rust',
-    'json': 'JSON', 'xml': 'XML',
-    'yaml': 'YAML', 'yml': 'YAML',
-    'css': 'CSS', 'scss': 'SCSS', 'less': 'Less',
-    'vue': 'Vue', 'svelte': 'Svelte',
-    'php': 'PHP', 'rb': 'Ruby',
-    'swift': 'Swift', 'kt': 'Kotlin',
-    'sql': 'SQL', 'sh': 'Shell',
-    'bash': 'Bash', 'zsh': 'Zsh'
-  }
-  return langMap[fileExtension.value] || fileExtension.value.toUpperCase()
+  return getFileLanguage(fileExtension.value)
 })
 
 // Office 文件类型名称
 const officeFileType = computed(() => {
-  const officeMap = {
-    'pptx': 'PowerPoint', 'ppt': 'PowerPoint',
-    'docx': 'Word', 'doc': 'Word',
-    'xlsx': 'Excel', 'xls': 'Excel'
-  }
-  return officeMap[fileExtension.value] || 'Office'
+  return getOfficeFileType(fileExtension.value)
 })
 
 // 是否可以复制
