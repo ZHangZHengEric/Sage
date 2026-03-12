@@ -406,6 +406,8 @@ export default {
   'tools.executeJavascriptCode': '执行JS',
   // 网页抓取工具
   'tools.fetchWebpages': '抓取网页',
+  // 图片理解工具
+  'tools.analyzeImage': '图片理解',
   // 任务清单工具
   'tools.todoWrite': '待办任务',
   'tools.todoRead': '读取待办',
