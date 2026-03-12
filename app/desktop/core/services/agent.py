@@ -23,6 +23,7 @@ from ..core import config
 from ..core.client.chat import get_chat_client
 from ..core.exceptions import SageHTTPException
 from ..schemas.agent import AgentAbilityItem
+from ..models.llm_provider import LLMProviderDao
 
 from .skill import list_skills_for_agent
 # ================= 工具函数 =================
@@ -195,10 +196,17 @@ async def generate_agent_abilities(
     agent = await get_agent(agent_id)
     agent_config: Dict[str, Any] = agent.config or {}
 
-    # 2. 获取 LLM 客户端和默认模型
     startup_cfg = config.get_startup_config()
     model_name = startup_cfg.default_llm_model_name
-    client = get_chat_client()
+
+    llm_provider_id = agent_config.get("llm_provider_id")
+    llm_provider_dao = LLMProviderDao()
+    if llm_provider_id:
+        provider = await llm_provider_dao.get_by_id(llm_provider_id)
+        if provider:
+            model_name = provider.model
+
+    client = get_chat_client(model_name or None)
 
     skills = await list_skills_for_agent(agent_config)
 
