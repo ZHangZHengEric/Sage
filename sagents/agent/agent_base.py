@@ -15,6 +15,7 @@ import traceback
 import time
 import os
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError
+import httpx
 from openai.types.chat import chat_completion_chunk
 from openai.types.chat import (
     ChatCompletion,
@@ -343,7 +344,7 @@ class AgentBase(ABC):
                 # 成功完成，跳出重试循环
                 break
 
-            except (RateLimitError, APIError, APIConnectionError) as e:
+            except (RateLimitError, APIError, APIConnectionError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError) as e:
                 retry_count += 1
                 last_exception = e
                 error_message = str(e).lower()
@@ -352,12 +353,22 @@ class AgentBase(ABC):
                 is_rate_limit = isinstance(e, RateLimitError) or "rate limit" in error_message or "too many requests" in error_message
                 # 检查是否是网络连接错误（包括连接中断、超时等）
                 is_connection_error = isinstance(e, APIConnectionError) or "connection" in error_message or "incomplete chunked read" in error_message
+                # 检查是否是超时错误
+                is_timeout = isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout)) or "timeout" in error_message or "read timeout" in error_message
+                # 检查是否是读取错误
+                is_read_error = isinstance(e, httpx.ReadError) or "read error" in error_message
                 # 检查是否是 token 超限错误
                 is_token_limit_error = "range of input length" in error_message or "token" in error_message and "exceed" in error_message
 
-                if retry_count < max_retries and (is_rate_limit or is_connection_error):
+                if retry_count < max_retries and (is_rate_limit or is_connection_error or is_timeout or is_read_error):
                     wait_time = 2 ** retry_count  # 指数退避: 2, 4, 8 秒
-                    error_type = "限流" if is_rate_limit else "网络连接"
+                    if is_rate_limit:
+                        error_type = "限流"
+                    elif is_timeout:
+                        error_type = "超时"
+                        wait_time = min(wait_time, 10)  # 超时错误最多等待10秒
+                    else:
+                        error_type = "网络连接"
                     logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                 elif is_token_limit_error:
@@ -394,14 +405,20 @@ class AgentBase(ABC):
                 last_exception = e
                 error_message = str(e).lower()
 
-                # 检查是否是网络相关错误（如 httpx.RemoteProtocolError）
-                is_network_error = any(keyword in error_message for keyword in ["connection", "incomplete chunked read", "peer closed", "remoteprotocolerror"])
+                # 检查是否是网络相关错误（如 httpx.RemoteProtocolError, httpx.ReadTimeout 等）
+                is_network_error = any(keyword in error_message for keyword in [
+                    "connection", "incomplete chunked read", "peer closed", "remoteprotocolerror",
+                    "timeout", "read timeout", "connect timeout", "read error"
+                ])
+                # 检查是否是 httpx 特定的超时或读取错误
+                is_httpx_error = isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ReadError, httpx.ConnectError))
 
-                if is_network_error and retry_count < max_retries:
+                if (is_network_error or is_httpx_error) and retry_count < max_retries:
                     # 使用指数退避 + 随机抖动，避免同时重试
                     import random
                     wait_time = min(2 ** retry_count + random.uniform(0, 1), 30)  # 最大30秒
-                    logger.warning(f"{self.__class__.__name__}: 遇到网络错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
+                    error_type = "HTTP超时" if is_httpx_error else "网络"
+                    logger.warning(f"{self.__class__.__name__}: 遇到{error_type}错误，等待 {wait_time:.1f} 秒后重试 ({retry_count}/{max_retries}): {e}")
                     await asyncio.sleep(wait_time)
                     continue  # 继续重试循环
                 else:
