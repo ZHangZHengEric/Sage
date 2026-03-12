@@ -118,8 +118,53 @@ def start_server(port: int = 8000):
     server.run()
 
 
+def check_single_instance():
+    """Check if another instance is already running using PID file."""
+    import atexit
+    import fcntl
+    
+    pid_file = Path("/tmp/sage_desktop.pid")
+    
+    try:
+        # Try to open PID file
+        fd = os.open(str(pid_file), os.O_RDWR | os.O_CREAT)
+        
+        # Try to acquire exclusive lock (non-blocking)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (IOError, OSError):
+            # Another instance is running
+            print("Error: Another Sage Desktop instance is already running.", flush=True)
+            print(f"If you're sure no other instance is running, delete: {pid_file}", flush=True)
+            sys.exit(1)
+        
+        # Write current PID
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+        os.fsync(fd)
+        
+        # Register cleanup on exit
+        def cleanup():
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+                pid_file.unlink(missing_ok=True)
+            except:
+                pass
+        
+        atexit.register(cleanup)
+        return True
+        
+    except Exception as e:
+        print(f"Warning: Could not create PID file lock: {e}", flush=True)
+        return True
+
+
 def main():
     try:
+        # Check single instance before anything else
+        check_single_instance()
+        
         # Force stdout to be unbuffered
         sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
         
