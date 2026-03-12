@@ -83,7 +83,7 @@ async def generate_agent_abilities_from_config(
         client: 兼容 OpenAI Async 客户端的实例, 需要支持
             `await client.chat.completions.create(...)` 接口.
         model: 使用的模型名称.
-        language: 界面语言, 当前版本仍固定生成中文文案, 预留扩展.
+        language: 生成语言
         skills: 可选技能列表, 来自 Agent 配置.
     Returns:
         List[Dict[str, str]]: 每个元素包含 id/title/description/promptText.
@@ -169,9 +169,9 @@ async def generate_agent_abilities_from_config(
     "items": [
       {{
         "id": "kebab-case-id",
-        "title": "短标题（中文）",
-        "description": "1-2 句中文说明",
-        "promptText": "用户可直接发送的完整、可执行的提问（中文）"
+        "title": "短标题",
+        "description": "1-2 句说明",
+        "promptText": "用户可直接发送的完整、可执行的提问"
       }}
     ]
   }}
@@ -186,7 +186,7 @@ async def generate_agent_abilities_from_config(
 - 严格依据给定的描述与技能信息，不要虚构技能。
 - 覆盖不同技能/场景，避免同义重复；总数 6-8 条。
 
-语言：优先使用界面语言 "{language}"，否则用简体中文。
+语言：生成语言为 "{language}"。
 
 仅输出 JSON，不要在 JSON 外输出任何内容。
 
