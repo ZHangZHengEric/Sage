@@ -339,6 +339,10 @@ class AgentBase(ABC):
                     if first_token_time is None:
                         first_token_time = time.time()
                     all_chunks.append(chunk)
+                    
+                    # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
+                    await asyncio.sleep(0)
+                    
                     yield chunk
 
                 # 成功完成，跳出重试循环
@@ -1469,26 +1473,25 @@ class AgentBase(ABC):
         logger.info(f"{self.agent_name}: LLM响应包含 {len(tool_calls)} 个工具调用")
 
         for tool_call_id, tool_call in tool_calls.items():
+            # 增加让出主线程逻辑，防止工具循环处理导致卡死
+            await asyncio.sleep(0)
+            
             tool_name = tool_call['function']['name']
             raw_arguments = tool_call['function']['arguments']
             logger.info(f"{self.agent_name}: 执行工具 {tool_name}")
             logger.info(f"{self.agent_name}: 参数 {raw_arguments}")
 
             # 验证工具参数是否为有效的JSON
+            # 将复杂的解析逻辑放到线程池中执行
             is_valid_json = False
             parsed_arguments = None
+            
             try:
-                parsed_arguments = json.loads(raw_arguments)
-                is_valid_json = True
-            except json.JSONDecodeError:
-                # 尝试使用 eval 解析
-                try:
-                    parsed_arguments = eval(raw_arguments, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
-                    # 验证解析结果是否可以序列化为JSON
-                    json.dumps(parsed_arguments)
-                    is_valid_json = True
-                except Exception:
-                    is_valid_json = False
+                # 使用线程池执行同步的解析逻辑
+                parsed_arguments, is_valid_json = await asyncio.to_thread(self._parse_and_validate_json, raw_arguments)
+            except Exception as e:
+                logger.error(f"{self.agent_name}: JSON解析异常: {e}")
+                is_valid_json = False
 
             # 如果JSON解析失败，将工具调用转换为普通消息返回
             if not is_valid_json:
@@ -1527,6 +1530,23 @@ class AgentBase(ABC):
                 session_id=session_id
             ):
                 yield (message_chunk_list, False)
+    def _parse_and_validate_json(self, raw_arguments: str) -> tuple[Any, bool]:
+        """
+        在线程池中运行的同步JSON解析逻辑
+        """
+        try:
+            parsed = json.loads(raw_arguments)
+            return parsed, True
+        except json.JSONDecodeError:
+            # 尝试使用 eval 解析
+            try:
+                parsed = eval(raw_arguments, {"__builtins__": None}, {'true': True, 'false': False, 'null': None})
+                # 验证解析结果是否可以序列化为JSON
+                json.dumps(parsed)
+                return parsed, True
+            except Exception:
+                return None, False
+
     def _should_abort_due_to_session(self, session_context: SessionContext,session_id: Optional[str] = None) -> bool:
         session_id = session_context.session_id
         from sagents.session_runtime import get_global_session_manager

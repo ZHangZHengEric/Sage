@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 
+import { normalizeFilePath } from '@/utils/fileIcons.js'
+
 export const useWorkbenchStore = defineStore('workbench', () => {
   // State
   const items = ref([])
@@ -271,7 +273,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       console.log('[Workbench] Found files:', fileMatches.length)
     }
     fileMatches.forEach((file, idx) => {
-      console.log('[Workbench] Adding file:', idx, file.fileName)
+      console.log('[Workbench] Adding file:', idx, file.fileName, file.filePath)
       addItem({
         type: 'file',
         role: role,
@@ -349,35 +351,40 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 })
 
-// 辅助函数
-function extractFileReferences(content) {
+// 提取 markdown 中的文件引用
+export function extractFileReferences(content) {
   if (!content) return []
+
   const files = []
-  const markdownRegex = /\[([^\]]+)\]\(([^)]+)\)/g
+  const seen = new Set()
+
+  // 匹配 [text](path)
+  const markdownRegex = /\[([^\]]*?)\]\s*\(([^)]+?)\)/g
   let match
 
   while ((match = markdownRegex.exec(content)) !== null) {
-    let path = match[2]
-    const fileName = match[1]
 
-    // 处理路径中的编码和空白字符
-    try {
-      path = decodeURIComponent(path).trim()
-    } catch (e) {
-      console.warn('[Workbench] Failed to decode path:', path)
+    let fileName = match[1] || ''
+    let path = match[2] || ''
+
+    path = normalizeFilePath(path)
+
+    // 清理 fileName
+    fileName = fileName.trim().replace(/^`|`$/g, '')
+
+    // fallback 文件名
+    if (!fileName) {
+      fileName = path.split('/').pop()
     }
 
-    if (path.startsWith('file://')) {
-      path = path.replace(/^file:\/\/\/?/i, '/')
-    }
+    // 去重
+    if (seen.has(path)) continue
+    seen.add(path)
 
-    // 过滤掉文件夹路径（以 / 结尾的路径）
-    if (path.startsWith('/') && !path.endsWith('/')) {
-      files.push({
-        filePath: path,
-        fileName: fileName || path.split('/').pop()
-      })
-    }
+    files.push({
+      filePath: path,
+      fileName
+    })
   }
 
   return files
