@@ -81,7 +81,7 @@ def _sync_agent_skills():
                     continue
                 
                 # 检查是否有 SKILL.md
-                if not any(f.lower() == 'skill.md' for f in skill_path.iterdir() if f.is_file()):
+                if not any(f.name.lower() == 'skill.md' for f in skill_path.iterdir() if f.is_file()):
                     continue
                 
                 skill_name = skill_path.name
