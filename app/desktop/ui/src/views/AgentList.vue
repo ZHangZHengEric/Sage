@@ -22,10 +22,11 @@
           class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader class="pb-3 md:pb-4">
             <div class="flex items-start gap-3 md:gap-4">
-              <div
-                class="h-10 w-10 md:h-12 md:w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary">
-                <Bot class="h-5 w-5 md:h-6 md:w-6" />
-              </div>
+              <img
+                :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`"
+                :alt="agent.name"
+                class="h-10 w-10 md:h-12 md:w-12 rounded-lg bg-primary/10 shrink-0 object-cover"
+              />
               <div class="space-y-1 overflow-hidden flex-1">
                 <CardTitle class="text-base md:text-lg leading-tight truncate" :title="agent.name">
                   {{ agent.name }}
