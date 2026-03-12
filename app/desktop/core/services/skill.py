@@ -123,6 +123,26 @@ async def list_skills() -> List[Dict[str, Any]]:
     return skills
 
 
+async def list_skills_for_agent(agent_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    allowed_names = (
+        agent_config.get("availableSkills")
+        or agent_config.get("available_skills")
+        or []
+    )
+    allowed_set = {str(name).strip() for name in allowed_names if str(name).strip()}
+    if not allowed_set:
+        return []
+
+    all_skills = await list_skills()
+
+    result: List[Dict[str, Any]] = []
+    for s in all_skills:
+        name = s.get("name")
+        if name in allowed_set:
+            result.append(s)
+    return result
+
+
 async def import_skill_by_file(file: UploadFile) -> str:
     """通过上传 ZIP 文件导入技能"""
     if not file.filename.endswith('.zip'):
