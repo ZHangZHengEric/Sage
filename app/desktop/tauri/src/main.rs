@@ -24,6 +24,50 @@ const MAX_MEMORY_MB: u64 = 2048;
 struct SidecarPid(Mutex<Option<u32>>);
 struct Tray(Mutex<Option<TrayIcon>>);
 
+const SAGE_ENV_FILE: &str = ".sage_env";
+
+fn get_sage_root_dir() -> PathBuf {
+    let home_dir = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    PathBuf::from(home_dir).join(".sage")
+}
+
+fn load_sage_env_file() {
+    let sage_root = get_sage_root_dir();
+    let env_file_path = sage_root.join(SAGE_ENV_FILE);
+    
+    if !env_file_path.exists() {
+        println!(".sage_env file not found at {:?}", env_file_path);
+        return;
+    }
+    
+    match std::fs::read_to_string(&env_file_path) {
+        Ok(content) => {
+            println!("Loading .sage_env from {:?}", env_file_path);
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                
+                if let Some((key, value)) = line.split_once('=') {
+                    let key = key.trim();
+                    let value = value.trim();
+                    if !key.is_empty() && !value.is_empty() {
+                        std::env::set_var(key, value);
+                        println!("Set from .sage_env: {}={}", key, value);
+                    }
+                }
+            }
+            println!("Loaded .sage_env successfully");
+        }
+        Err(e) => {
+            eprintln!("Failed to read .sage_env file: {}", e);
+        }
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 struct Payload {
     port: u16,
@@ -81,7 +125,63 @@ fn get_system_proxy() -> Option<String> {
         }
     }
 
+    // 3. Windows specific check using netsh
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("netsh").args(["winhttp", "show", "proxy"]).output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            // Check if proxy is enabled (not "Direct access")
+            if !output_str.contains("Direct access") {
+                // Try to extract proxy server address
+                for line in output_str.lines() {
+                    let line = line.trim();
+                    if line.starts_with("Proxy Server(s)") || line.starts_with("Proxy Server") {
+                        if let Some(proxy_part) = line.split(':').nth(1) {
+                            let proxy = proxy_part.trim().to_string();
+                            if !proxy.is_empty() {
+                                // Add http:// prefix if not present
+                                if !proxy.starts_with("http://") && !proxy.starts_with("https://") {
+                                    return Some(format!("http://{}", proxy));
+                                }
+                                return Some(proxy);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     None
+}
+
+#[tauri::command]
+fn get_sage_env_content() -> Result<String, String> {
+    let sage_root = get_sage_root_dir();
+    let env_file_path = sage_root.join(SAGE_ENV_FILE);
+    
+    if !env_file_path.exists() {
+        return Ok(String::new());
+    }
+    
+    std::fs::read_to_string(&env_file_path)
+        .map_err(|e| format!("Failed to read .sage_env file: {}", e))
+}
+
+#[tauri::command]
+fn save_sage_env_content(content: String) -> Result<(), String> {
+    let sage_root = get_sage_root_dir();
+    
+    if !sage_root.exists() {
+        std::fs::create_dir_all(&sage_root)
+            .map_err(|e| format!("Failed to create .sage directory: {}", e))?;
+    }
+    
+    let env_file_path = sage_root.join(SAGE_ENV_FILE);
+    
+    std::fs::write(&env_file_path, content)
+        .map_err(|e| format!("Failed to write .sage_env file: {}", e))
 }
 
 #[cfg(target_os = "macos")]
@@ -142,6 +242,9 @@ fn show_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    // Load .sage_env file first before setting other environment variables
+    load_sage_env_file();
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -486,7 +589,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy])
+        .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy, get_sage_env_content, save_sage_env_content])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
