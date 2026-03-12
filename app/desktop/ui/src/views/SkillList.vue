@@ -219,7 +219,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Box, Search, Folder, Plus, Upload, Loader, Trash2, Layers, User, Shield, Edit } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { skillAPI } from '../api/skill.js'
@@ -237,6 +238,7 @@ import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 // Composables
 const { t } = useLanguage()
+const route = useRoute()
 
 // State
 const skills = ref([])
@@ -459,4 +461,15 @@ onMounted(async () => {
   }
   loadSkills()
 })
+
+// 监听路由变化，当进入技能页面时刷新列表
+watch(
+  () => route.path,
+  (newPath) => {
+    if (newPath === '/agent/skills') {
+      console.log('[SkillList] Route changed to /agent/skills, reloading skills...')
+      loadSkills()
+    }
+  }
+)
 </script>
