@@ -950,6 +950,13 @@ export default {
   'workbench.tool.finishingTask': '正在完成任务...',
   'workbench.tool.finishFailed': '任务完成失败',
   'workbench.tool.taskCompleted': '任务执行完成',
+  'chat.executionResult': '执行结果',
+  'chat.collapse': '收起',
+  'chat.expand': '展开',
+  'chat.showMore': '显示更多',
+  'chat.executionFailed': '执行失败',
+  'chat.showRawData': '显示原始数据',
+  'chat.hideRawData': '隐藏原始数据',
 
   // Image Renderer
   'workbench.image.open': '打开图片',
