@@ -148,24 +148,6 @@ export default {
   'status.completed': '完成',
   'status.inProgress': '进行中',
   'error.unknown': '未知错误',
-
-  // 能力面板
-  'chat.abilities.buttonLabel': '我能做什么',
-  'chat.abilities.panelTitle': '我可以帮你做这些事情',
-  'chat.abilities.loading': '正在获取可用能力...',
-  'chat.abilities.error': '获取能力列表失败',
-  'chat.abilities.empty': '当前没有可用建议',
-  'chat.abilities.retry': '重试',
-  'chat.abilities.close': '关闭',
-
-  // Quick help
-  'quickHelp.title': '不知道怎么问？',
-  'quickHelp.desc': '点一下，让助手先自我介绍，并给你几条可直接点的示例问题。',
-  'quickHelp.cta': '你能做什么',
-  'quickHelp.tooltip': '一键查看当前助手的能力与示例',
-  'quickHelp.copy': '复制提示词',
-  'quickHelp.loading': '生成中…',
-  'quickHelp.empty': '点击下方按钮获取助手自述',
   
   // Agent配置页面
   'agent.title': 'Agent配置',
