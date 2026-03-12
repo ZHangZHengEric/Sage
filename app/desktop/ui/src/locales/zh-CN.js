@@ -117,6 +117,29 @@ export default {
   'chat.targetAgent': '目标智能体',
   'chat.taskContent': '任务内容',
   'chat.viewSubSession': '查看子会话',
+  'chat.delegating': '委派中',
+  'chat.currentAgent': '当前智能体',
+  'chat.unknownAgent': '未知智能体',
+  'chat.taskName': '任务名称',
+  'chat.viewContent': '查看内容',
+  'chat.hideContent': '隐藏内容',
+  'chat.taskCompleted': '任务完成',
+  'chat.viewResult': '查看结果',
+  'chat.hideResult': '隐藏结果',
+  'chat.viewDetail': '查看详情',
+  'chat.task': '任务',
+  'chat.tasks': '个任务',
+  'chat.agents': '个智能体',
+  'chat.multipleTasks': '共 {count} 个任务',
+  'chat.viewAllTasks': '查看全部',
+  'chat.allTasksCompleted': '全部任务已完成',
+  'chat.taskDetail': '任务详情',
+  'chat.taskList': '任务列表',
+  'chat.taskListDescription': '共 {count} 个委派任务',
+  'chat.delegator': '委派者',
+  'chat.executor': '执行者',
+  'chat.untitledTask': '未命名任务',
+  'chat.view': '查看',
   'chat.subSessionTitle': '子会话详情',
   'chat.loadingMessages': '加载消息中...',
   'chat.todoList': '任务清单',
@@ -350,6 +373,69 @@ export default {
   'toolCall.completed': '已完成',
   'toolCall.executing': '执行中',
   'toolCall.executionError': '执行错误',
+
+  // 工具名称映射
+  // 文件系统工具
+  'tools.fileRead': '读取文件',
+  'tools.fileWrite': '写入文件',
+  'tools.fileUpdate': '更新文件',
+  'tools.downloadFileFromUrl': '下载文件',
+  // 文件解析工具
+  'tools.extractTextFromNonTextFile': '提取文件文本',
+  // 命令执行工具
+  'tools.executeShellCommand': '执行命令',
+  'tools.executePythonCode': '执行Python',
+  'tools.executeJavascriptCode': '执行JS',
+  // 网页抓取工具
+  'tools.fetchWebpages': '抓取网页',
+  // 任务清单工具
+  'tools.todoWrite': '待办任务',
+  'tools.todoRead': '读取待办',
+  // 任务中断工具
+  'tools.askFollowupQuestion': '追问问题',
+  // 记忆工具
+  'tools.rememberUserMemory': '记住记忆',
+  'tools.recallUserMemory': '回忆记忆',
+  'tools.recallUserMemoryByType': '按类型回忆',
+  'tools.forgetUserMemory': '遗忘记忆',
+  // 技能工具
+  'tools.loadSkill': '加载技能',
+  // 任务调度工具
+  'tools.listTasks': '列出任务',
+  'tools.addTask': '添加任务',
+  'tools.deleteTask': '删除任务',
+  'tools.completeTask': '完成任务',
+  'tools.enableTask': '启用任务',
+  'tools.getTaskDetails': '获取任务详情',
+  'tools.updateTask': '更新任务',
+  // IM服务工具
+  'tools.sendMessageThroughIm': '发送IM消息',
+  // 已有工具
+  'tools.searchCodebase': '代码搜索',
+  'tools.viewFiles': '查看文件',
+  'tools.writeToFile': '写入文件',
+  'tools.runCommand': '执行命令',
+  'tools.listDir': '目录列表',
+  'tools.searchByRegex': '正则搜索',
+  'tools.deleteFile': '删除文件',
+  'tools.renameFile': '重命名文件',
+  'tools.webSearch': '网络搜索',
+  'tools.playwrightNavigate': '浏览器导航',
+  'tools.playwrightClick': '点击操作',
+  'tools.playwrightScreenshot': '截图',
+  'tools.playwrightFill': '填写表单',
+  'tools.playwrightHover': '悬停操作',
+  'tools.playwrightEvaluate': 'JS执行',
+  'tools.sysSpawnAgent': '创建智能体',
+  'tools.generateImage': '生成图片',
+  'tools.fetchWebpage': '抓取网页',
+  'tools.webFetcher': '网页抓取',
+  'tools.default': '工具执行',
+
+  // 角色标签
+  'roles.user': '用户',
+  'roles.assistant': 'AI助手',
+  'roles.system': '系统',
 
   // 工具页面
   'tools.title': '工具集',
@@ -834,6 +920,17 @@ export default {
   'workbench.tool.role.user': '用户',
   'workbench.tool.role.system': '系统',
   'workbench.tool.role.tool': '工具',
+  // Sys Delegate Task
+  'workbench.tool.delegatingTasks': '正在委派任务...',
+  'workbench.tool.delegationFailed': '委派失败',
+  'workbench.tool.delegator': '委派者',
+  'workbench.tool.tasks': '个任务',
+  'workbench.tool.targetAgents': '个目标智能体',
+  'workbench.tool.untitledTask': '未命名任务',
+  'workbench.tool.hasSession': '有会话',
+  'workbench.tool.delegationCompleted': '委派完成',
+  'workbench.tool.viewResult': '查看结果',
+  'workbench.tool.hideResult': '隐藏结果',
 
   // Image Renderer
   'workbench.image.open': '打开图片',
