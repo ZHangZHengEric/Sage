@@ -37,8 +37,8 @@
           未找到相关技能
         </div>
         <div v-else>
-          <div 
-            v-for="(skill, index) in filteredSkills" 
+          <div
+            v-for="(skill, index) in filteredSkills"
             :key="skill.name"
             class="px-4 py-2 cursor-pointer hover:bg-accent hover:text-accent-foreground flex items-center justify-between transition-colors text-sm"
             :class="{'bg-accent text-accent-foreground': index === selectedSkillIndex}"
@@ -53,12 +53,12 @@
       </div>
 
       <!-- 文件上传按钮 -->
-      <Button 
-        type="button" 
-        variant="ghost" 
-        size="icon" 
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
         class="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-background"
-        @click="triggerFileInput" 
+        @click="triggerFileInput"
         :disabled="isLoading"
         :title="t('messageInput.uploadFile')"
       >
@@ -72,8 +72,8 @@
       <!-- 选中的技能展示 -->
       <div v-if="currentSkill" class="flex items-center gap-1 h-9 px-3 bg-primary/10 text-primary rounded-full text-sm font-medium whitespace-nowrap border border-primary/20">
         <span class="max-w-[120px] truncate">@{{ currentSkill }}</span>
-        <button 
-          type="button" 
+        <button
+          type="button"
           @click="currentSkill = null"
           class="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20"
         >
@@ -84,35 +84,35 @@
         </button>
       </div>
 
-      <Textarea 
-        ref="textareaRef" 
-        v-model="inputValue" 
+      <Textarea
+        ref="textareaRef"
+        v-model="inputValue"
         @keydown="handleKeyDown"
         @compositionstart="handleCompositionStart"
         @compositionend="handleCompositionEnd"
-        :placeholder="t('messageInput.placeholder')" 
+        :placeholder="t('messageInput.placeholder')"
         class="flex-1 min-h-[24px] max-h-[200px] py-2 px-0 bg-transparent border-0 focus-visible:ring-0 resize-none shadow-none text-base"
-        :disabled="isLoading" 
-        rows="1" 
+        :disabled="isLoading"
+        rows="1"
       />
 
       <div class="flex items-center gap-2 pb-0.5">
-        <Button 
-          v-if="isLoading" 
-          type="button" 
+        <Button
+          v-if="isLoading"
+          type="button"
           variant="destructive"
           size="sm"
-          @click="handleStop" 
+          @click="handleStop"
           class="h-8 rounded-full px-3"
           :title="t('messageInput.stopTitle')"
         >
           <span class="mr-1">⏹️</span> {{ t('messageInput.stop') }}
         </Button>
-        <Button 
-          v-else 
-          type="submit" 
+        <Button
+          v-else
+          type="submit"
           size="icon"
-          :disabled="!inputValue.trim() && uploadedFiles.length === 0" 
+          :disabled="!inputValue.trim() && uploadedFiles.length === 0"
           class="h-9 w-9 rounded-full transition-all duration-200"
           :class="{ 'opacity-50 cursor-not-allowed': !inputValue.trim() && uploadedFiles.length === 0 }"
           :title="t('messageInput.sendTitle')"
@@ -142,6 +142,10 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  presetText: {
+    type: String,
+    default: ''
   }
 })
 
@@ -164,9 +168,29 @@ const currentSkill = ref(null)
 const filteredSkills = computed(() => {
   if (!skillKeyword.value) return skills.value
   const lowerKeyword = skillKeyword.value.toLowerCase()
-  return skills.value.filter(skill => 
+  return skills.value.filter(skill =>
     (skill.name || '').toLowerCase().startsWith(lowerKeyword)
   )
+})
+
+// 监听 presetText 变化，预填输入框
+watch(() => props.presetText, async (newVal) => {
+  if (typeof newVal !== 'string' || !newVal) return
+  if (newVal === inputValue.value) return
+  inputValue.value = newVal
+  await nextTick()
+  const el = textareaRef.value?.$el || textareaRef.value
+  if (el && el.focus) {
+    el.focus()
+    // 将光标移动到末尾
+    const length = el.value?.length ?? 0
+    try {
+      el.setSelectionRange(length, length)
+    } catch {
+      // ignore
+    }
+  }
+  adjustTextareaHeight()
 })
 
 // 选中技能
@@ -207,11 +231,11 @@ watch(inputValue, async (newVal) => {
   }
 
   adjustTextareaHeight()
-  
+
   if (newVal.startsWith('/')) {
     const keyword = newVal.slice(1)
     skillKeyword.value = keyword
-    
+
     // 如果技能列表为空，则获取
     if (skills.value.length === 0 && !loadingSkills.value) {
       try {
@@ -228,7 +252,7 @@ watch(inputValue, async (newVal) => {
         loadingSkills.value = false
       }
     }
-    
+
     showSkillList.value = true
     selectedSkillIndex.value = 0
   } else {
@@ -241,7 +265,7 @@ const handleSubmit = (e) => {
   e.preventDefault()
   if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) && !props.isLoading) {
     let messageContent = inputValue.value.trim()
-    
+
     // 如果有选中的技能，添加到消息头部
     if (currentSkill.value) {
       messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
@@ -370,7 +394,7 @@ const triggerFileInput = async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
       const { readFile } = await import('@tauri-apps/plugin-fs')
-      
+
       const selected = await open({
         multiple: true
       })
