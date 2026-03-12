@@ -138,6 +138,12 @@ const handleNewChat = () => {
   selectedConversation.value = null
   // 触发重置 token，强制 Chat 组件清理状态
   chatResetToken.value = Date.now()
+  // 清除 URL 中的 session_id，确保创建新会话
+  if (route.query.session_id) {
+    router.replace({
+      query: { ...route.query, session_id: undefined }
+    })
+  }
 }
 
 const chatResetToken = ref(0)

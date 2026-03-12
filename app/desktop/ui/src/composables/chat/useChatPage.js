@@ -413,6 +413,7 @@ export const useChatPage = (props) => {
   useChatLifecycle({
     props,
     route,
+    router,
     currentSessionId,
     currentTraceId,
     makeTraceId: (sessionId) => SparkMD5.hash(sessionId),
@@ -428,6 +429,7 @@ export const useChatPage = (props) => {
     createSession,
     clearScrollTimer,
     agents,
+    selectAgent,
     restoreSelectedAgent,
     loadConversationData,
     resetChat,
