@@ -17,6 +17,8 @@ import { ExternalLink } from 'lucide-vue-next'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { usePanelStore } from '../../stores/panel.js'
 
+import { getFileExtension, isImageFile, getFileIcon, getDisplayFileName } from '../../utils/fileIcons.js'
+
 const props = defineProps({
   filePath: {
     type: String,
@@ -42,20 +44,15 @@ const workbenchStore = useWorkbenchStore()
 const panelStore = usePanelStore()
 
 const displayFileName = computed(() => {
-  return props.fileName || props.filePath.split('/').pop() || 'file'
+  return getDisplayFileName(props.filePath, props.fileName)
 })
 
 const fileExtension = computed(() => {
-  const name = displayFileName.value
-  const match = name.match(/\.([^.]+)$/)
-  return match ? match[1].toLowerCase() : ''
+  return getFileExtension(props.filePath, displayFileName.value)
 })
 
 const iconType = computed(() => {
-  const ext = fileExtension.value
-  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico']
-  if (imageExts.includes(ext)) return 'image'
-  return 'emoji'
+  return isImageFile(fileExtension.value) ? 'image' : 'emoji'
 })
 
 const iconSrc = computed(() => {
@@ -64,65 +61,12 @@ const iconSrc = computed(() => {
     return '📁'
   }
 
-  const ext = fileExtension.value
-
   // 图片文件 - 使用文件路径作为图标
   if (iconType.value === 'image') {
     return props.filePath
   }
 
-  // 使用更真实的文件图标
-  const iconMap = {
-    // Microsoft Office
-    'doc': '📘', 'docx': '📘',
-    'xls': '📗', 'xlsx': '📗', 'csv': '📗',
-    'ppt': '📙', 'pptx': '📙',
-
-    // PDF
-    'pdf': '📕',
-
-    // 图片
-    'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️',
-    'webp': '🖼️', 'svg': '🎨', 'ico': '🎨',
-
-    // 代码文件
-    'html': '🌐', 'htm': '🌐',
-    'css': '🎨', 'scss': '🎨', 'less': '🎨',
-    'js': '📜', 'ts': '📜', 'jsx': '📜', 'tsx': '📜',
-    'vue': '💚', 'svelte': '🧡',
-    'py': '🐍', 'ipynb': '🐍',
-    'java': '☕', 'class': '☕',
-    'cpp': '⚙️', 'c': '⚙️', 'h': '⚙️',
-    'go': '🐹', 'rs': '🦀',
-    'rb': '💎', 'php': '🐘',
-    'swift': '🐦', 'kt': '🎯',
-    'sql': '🗄️',
-
-    // 数据格式
-    'json': '📋', 'xml': '📋', 'yaml': '📋', 'yml': '📋',
-
-    // 文本
-    'md': '📝', 'markdown': '📝',
-    'txt': '📃', 'log': '📃',
-
-    // 脚本
-    'sh': '🔧', 'bash': '🔧', 'zsh': '🔧', 'ps1': '🔧',
-
-    // 特殊
-    'excalidraw': '✏️',
-    'drawio': '📊',
-
-    // 压缩包
-    'zip': '📦', 'rar': '📦', '7z': '📦', 'tar': '📦', 'gz': '📦',
-
-    // 可执行
-    'exe': '⚡', 'dmg': '🍎', 'app': '🍎',
-
-    // 音频视频
-    'mp3': '🎵', 'mp4': '🎬', 'wav': '🎵', 'avi': '🎬', 'mov': '🎬'
-  }
-
-  return iconMap[ext] || '📎'
+  return getFileIcon(fileExtension.value)
 })
 
 const handleClick = () => {
