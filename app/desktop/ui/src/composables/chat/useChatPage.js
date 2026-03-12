@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import SparkMD5 from 'spark-md5'
 import { useLanguage } from '@/utils/i18n.js'
 import { chatAPI } from '@/api/chat.js'
+import { agentAPI } from '@/api/agent.js'
 import { useChatActiveSessionCache } from '@/composables/chat/useChatActiveSessionCache.js'
 import { useChatScroll } from '@/composables/chat/useChatScroll.js'
 import { useChatStream } from '@/composables/chat/useChatStream.js'
@@ -12,6 +13,9 @@ import { useChatAgentConfig } from '@/composables/chat/useChatAgentConfig.js'
 import { useChatWorkspace } from '@/composables/chat/useChatWorkspace.js'
 import { useWorkbenchStore } from '@/stores/workbench.js'
 import { usePanelStore } from '@/stores/panel.js'
+
+// 全局按 Agent 缓存能力结果，在整个应用生命周期内共享
+const abilityCacheByAgentGlobal = ref({})
 
 export const useChatPage = (props) => {
   const { t } = useLanguage()
@@ -50,6 +54,15 @@ export const useChatPage = (props) => {
   const showSettings = ref(false)
   const currentTraceId = ref(null)
 
+  // 能力面板相关状态
+  const abilityItems = ref([])
+  const abilityLoading = ref(false)
+  const abilityError = ref(null)
+  const showAbilityPanel = ref(false)
+  const abilityPresetInput = ref('')
+  const showAbilityButton = ref(true)
+  const hasUsedAbilityEntryInSession = ref(false)
+
   // 打开工作台（统一方法）
   const openWorkbench = (options = {}) => {
     const { toolCallId = null, realtime = true } = options
@@ -87,12 +100,16 @@ export const useChatPage = (props) => {
         panelStore.openWorkspace()
         refreshWorkspace()
       }
+      // 打开/切换其它面板时关闭能力面板
+      showAbilityPanel.value = false
     } else if (panel === 'settings') {
       if (panelStore.activePanel === 'settings') {
         panelStore.closeAll()
       } else {
         panelStore.openSettings()
       }
+      // 打开/切换其它面板时关闭能力面板
+      showAbilityPanel.value = false
     }
   }
 
@@ -348,6 +365,12 @@ export const useChatPage = (props) => {
     // 关闭工作台 panel
     panelStore.closeAll()
     console.log('[ChatPage] Closed panel for new session')
+    // 新会话：重置能力入口状态
+    showAbilityPanel.value = false
+    abilityPresetInput.value = ''
+    abilityError.value = null
+    hasUsedAbilityEntryInSession.value = false
+    showAbilityButton.value = true
     createSession()
   }
 
@@ -365,6 +388,10 @@ export const useChatPage = (props) => {
         rebuildMessageIdIndexMap()
       }
       currentSessionId.value = conversation.session_id || null
+      // 加载历史会话时，不展示新手引导入口
+      showAbilityPanel.value = false
+      showAbilityButton.value = false
+      hasUsedAbilityEntryInSession.value = true
       nextTick(() => {
         shouldAutoScroll.value = true
         scrollToBottom(true)
@@ -408,6 +435,83 @@ export const useChatPage = (props) => {
     }).catch(() => {
       toast.error(t('chat.shareFailed') || 'Failed to copy link')
     })
+  }
+
+  const persistRunningSessionOnLeaveChat = (includeInSidebar = true) => {
+    if (isLoading.value && abortControllerRef.value) {
+      abortControllerRef.value.abort()
+      abortControllerRef.value = null
+    }
+
+    const sessionId = currentSessionId.value
+    if (!sessionId) return
+    const meta = activeSessions.value?.[sessionId]
+    if (meta?.status === 'running') {
+      const firstUserMessage = (messages.value || []).find(item =>
+        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
+      )
+      if (firstUserMessage) {
+        const firstUserInput = String(firstUserMessage.content || '')
+          .replace(/^<skill>.*?<\/skill>\s*/, '')
+          .trim()
+        if (firstUserInput) {
+          updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
+        }
+      }
+      persistRunningSessionToCache(sessionId, includeInSidebar)
+      return
+    }
+    if (meta?.status === 'completed') {
+      removeSessionFromCache(sessionId)
+    }
+  }
+
+  // 能力面板：打开 / 关闭 / 重试 / 选择卡片
+  const openAbilityPanel = async ({ forceRefresh = false } = {}) => {
+    if (!selectedAgent.value) return
+    const agentId = selectedAgent.value.id
+    const sessionId = currentSessionId.value
+
+    showAbilityPanel.value = true
+    abilityError.value = null
+
+    const cache = abilityCacheByAgentGlobal.value[agentId]
+    if (!forceRefresh && cache && Array.isArray(cache)) {
+      abilityItems.value = cache
+      return
+    }
+
+    abilityLoading.value = true
+    try {
+      const items = await agentAPI.getAgentAbilities({
+        agentId,
+        sessionId,
+        context: {}
+      })
+      abilityItems.value = items || []
+      abilityCacheByAgentGlobal.value = {
+        ...abilityCacheByAgentGlobal.value,
+        [agentId]: abilityItems.value
+      }
+    } catch (err) {
+      console.error('加载 Agent 能力失败:', err)
+      abilityError.value = err?.message || t('chat.abilities.error') || '获取能力列表失败'
+    } finally {
+      abilityLoading.value = false
+    }
+  }
+
+  const closeAbilityPanel = () => {
+    showAbilityPanel.value = false
+  }
+
+  const retryAbilityFetch = () => {
+    openAbilityPanel({ forceRefresh: true })
+  }
+
+  const onAbilityCardClick = (item) => {
+    if (!item || !item.promptText) return
+    abilityPresetInput.value = item.promptText
   }
 
   useChatLifecycle({
@@ -465,9 +569,10 @@ export const useChatPage = (props) => {
       }
     }
   })
-
-  onUnmounted(() => {
-    stopSSESync()
+  
+  // 监听 Agent 变更时关闭能力面板，但保留缓存
+  watch(() => selectedAgentId.value, () => {
+    showAbilityPanel.value = false
   })
 
   return {
@@ -500,6 +605,18 @@ export const useChatPage = (props) => {
     workspaceFiles,
     downloadFile,
     deleteFile,
-    updateConfig
+    updateConfig,
+    // 能力面板相关
+    abilityItems,
+    abilityLoading,
+    abilityError,
+    showAbilityPanel,
+    abilityPresetInput,
+    showAbilityButton,
+    hasUsedAbilityEntryInSession,
+    openAbilityPanel,
+    closeAbilityPanel,
+    retryAbilityFetch,
+    onAbilityCardClick
   }
 }

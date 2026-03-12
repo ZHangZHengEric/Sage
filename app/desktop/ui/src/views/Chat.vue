@@ -13,7 +13,7 @@
             </SelectItem>
           </SelectContent>
         </Select>
-        
+
         <div class="h-4 w-[1px] bg-border mx-1"></div>
 
         <TooltipProvider>
@@ -56,69 +56,127 @@
     </div>
     <div class="flex-1 overflow-hidden flex flex-row pb-6">
       <!-- 主聊天区域 -->
-      <div 
+      <div
         class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200"
         :class="{ 'mr-0': !anyPanelOpen }"
       >
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
-          <div v-if="!filteredMessages || filteredMessages.length === 0" class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500">
-            <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden">
-               <img
-                 v-if="selectedAgent"
-                 :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
-                 :alt="selectedAgent.name"
-                 class="w-full h-full object-cover"
-               />
-               <Bot v-else :size="32" class="opacity-80 text-primary" />
-            </div>
-            <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
-            <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">{{ t('chat.emptyDesc') }}</p>
-          </div>
-          <div v-else class="pb-8 max-w-4xl mx-auto w-full">
-            <MessageRenderer
-              v-for="(message, index) in filteredMessages"
-              :key="message.id || index"
-              :message="message"
-              :messages="filteredMessages"
-              :message-index="index"
-              :agent-id="selectedAgentId"
-              :is-loading="isLoading && index === filteredMessages.length - 1"
-              :open-workbench="openWorkbench"
-              @download-file="downloadWorkspaceFile"
-              @sendMessage="handleSendMessage"
-              @openSubSession="handleOpenSubSession"
+          <!-- 覆盖模式：当无消息且能力结果已加载好时，用能力面板直接占据原聊天空态区域 -->
+          <div
+            v-if="overlayAbilityPanel"
+            class="flex flex-col items-start text-left p-4 sm:p-6 text-muted-foreground animate-in fade-in zoom-in duration-500"
+          >
+            <AbilityPanel
+              :items="abilityItems"
+              :loading="abilityLoading"
+              :error="abilityError"
+              @close="closeAbilityPanel"
+              @retry="retryAbilityFetch"
+              @select="onAbilityCardClick"
             />
-            
-            <!-- Global loading indicator when no messages or waiting for first chunk of response -->
-            <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
-               <LoadingBubble />
-            </div>
           </div>
+
+          <!-- 非覆盖模式：能力面板在对话区域上方，下面是空态或消息列表 -->
+          <template v-else>
+            <!-- 能力面板：始终作为对话区域上方的模块（加载中 / 无结果时使用这种模式） -->
+            <AbilityPanel
+              v-if="showAbilityPanel"
+              :items="abilityItems"
+              :loading="abilityLoading"
+              :error="abilityError"
+              @close="closeAbilityPanel"
+              @retry="retryAbilityFetch"
+              @select="onAbilityCardClick"
+            />
+
+            <!-- 无消息时：默认显示空态 -->
+            <div
+              v-if="!filteredMessages || filteredMessages.length === 0"
+              class="flex flex-col items-center justify-center text-center p-8 h-full text-muted-foreground animate-in fade-in zoom-in duration-500"
+            >
+              <div class="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 shadow-sm overflow-hidden">
+                <img
+                  v-if="selectedAgent"
+                  :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
+                  :alt="selectedAgent.name"
+                  class="w-full h-full object-cover"
+                />
+                <Bot v-else :size="32" class="opacity-80 text-primary" />
+              </div>
+              <h3 class="mb-3 text-xl font-semibold text-foreground">{{ t('chat.emptyTitle') }}</h3>
+              <p class="mb-8 text-sm max-w-md mx-auto leading-relaxed text-muted-foreground/80">
+                {{ t('chat.emptyDesc') }}
+              </p>
+            </div>
+
+            <!-- 有消息时：正常显示消息列表 -->
+            <div v-else class="pb-8 max-w-4xl mx-auto w-full">
+              <MessageRenderer
+                v-for="(message, index) in filteredMessages"
+                :key="message.id || index"
+                :message="message"
+                :messages="filteredMessages"
+                :message-index="index"
+                :agent-id="selectedAgentId"
+                :is-loading="isLoading && index === filteredMessages.length - 1"
+                :open-workbench="openWorkbench"
+                @download-file="downloadWorkspaceFile"
+                @sendMessage="handleSendMessage"
+                @openSubSession="handleOpenSubSession"
+              />
+
+              <!-- Global loading indicator when等待首个响应块 -->
+              <div v-if="showLoadingBubble" class="flex justify-start py-6 px-4 animate-in fade-in duration-300">
+                <LoadingBubble />
+              </div>
+            </div>
+          </template>
           <div ref="messagesEndRef" />
         </div>
-        
-        <div class="flex-none p-4  bg-background" v-if="selectedAgent">
-            <MessageInput :is-loading="isCurrentSessionLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+
+        <div class="flex-none p-4 bg-background" v-if="selectedAgent">
+          <div class="w-full max-w-[800px] mx-auto">
+            <div class="flex justify-start items-start pb-2 pr-1">
+              <Button
+                v-if="showAbilityButton"
+                variant="ghost"
+                size="sm"
+                class="h-8 px-3 gap-2 text-primary hover:bg-primary/10"
+                :disabled="isCurrentSessionLoading || abilityLoading"
+                :title="t('quickHelp.tooltip')"
+                @click="handleClickAbilityButton"
+              >
+                <Sparkles class="h-4 w-4" />
+                {{ t('quickHelp.cta') }}
+              </Button>
+            </div>
+            <MessageInput
+              :is-loading="isCurrentSessionLoading"
+              :preset-text="abilityPresetInput"
+              @send-message="handleSendMessageWithAbilityClear"
+              @stop-generation="stopGeneration"
+            />
+          </div>
         </div>
       </div>
 
       <!-- 右侧面板区域 -->
       <TransitionGroup name="panel">
-        <WorkspacePanel 
-          v-if="showWorkspace" 
+        <WorkspacePanel
+          v-if="showWorkspace"
           :workspace-files="workspaceFiles"
-          @download-file="downloadFile" 
-          @delete-file="deleteFile" 
-          @close="showWorkspace = false" 
+          @download-file="downloadFile"
+          @delete-file="deleteFile"
+          @close="showWorkspace = false"
         />
 
-        <ConfigPanel 
-          v-else-if="showSettings" 
-          :agents="agents" 
-          :selected-agent="selectedAgent" 
+        <ConfigPanel
+          v-else-if="showSettings"
+          :agents="agents"
+          :selected-agent="selectedAgent"
           :config="config"
-          @config-change="updateConfig" 
-          @close="showSettings = false" 
+          @config-change="updateConfig"
+          @close="showSettings = false"
         />
 
         <WorkbenchPreview
@@ -129,7 +187,7 @@
         />
       </TransitionGroup>
 
-      <SubSessionPanel 
+      <SubSessionPanel
         :is-open="!!activeSubSessionId"
         :session-id="activeSubSessionId"
         :messages="subSessionMessages"
@@ -144,7 +202,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Bot, Settings, FolderOpen, Monitor } from 'lucide-vue-next'
+import { Bot, Settings, FolderOpen, Monitor, Sparkles } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
 import MessageInput from '@/components/chat/MessageInput.vue'
@@ -153,6 +211,7 @@ import WorkspacePanel from '@/components/chat/WorkspacePanel.vue'
 import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
+import AbilityPanel from '@/components/chat/AbilityPanel.vue'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -164,6 +223,7 @@ import {
 import { useChatPage } from '@/composables/chat/useChatPage.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { storeToRefs } from 'pinia'
+import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({
   selectedConversation: {
@@ -176,11 +236,12 @@ const props = defineProps({
   }
 })
 
+const { t } = useLanguage()
+
 const panelStore = usePanelStore()
 const { showWorkbench, showWorkspace, showSettings } = storeToRefs(panelStore)
 
 const {
-  t,
   agents,
   selectedAgent,
   selectedAgentId,
@@ -207,11 +268,45 @@ const {
   workspaceFiles,
   downloadFile,
   deleteFile,
-  updateConfig
+  updateConfig,
+  // 能力面板相关
+  abilityItems,
+  abilityLoading,
+  abilityError,
+  showAbilityPanel,
+  abilityPresetInput,
+  showAbilityButton,
+  hasUsedAbilityEntryInSession,
+  openAbilityPanel,
+  closeAbilityPanel,
+  retryAbilityFetch,
+  onAbilityCardClick
 } = useChatPage(props)
+
+// 能力按钮点击：仅在本会话首次点击时打开能力面板，并隐藏入口按钮
+const handleClickAbilityButton = () => {
+  if (!showAbilityPanel.value) {
+    openAbilityPanel()
+  }
+  showAbilityButton.value = false
+  hasUsedAbilityEntryInSession.value = true
+}
+
+// 发送消息后清空能力预置输入
+const handleSendMessageWithAbilityClear = (content, options) => {
+  handleSendMessage(content, options)
+  abilityPresetInput.value = ''
+}
 
 // 计算是否有面板打开
 const anyPanelOpen = computed(() => showWorkspace.value || showSettings.value || showWorkbench.value)
+
+// 是否进入“覆盖聊天空态”的能力面板模式：
+// 只要：显示能力面板 + 当前会话无消息，即覆盖掉“开始新的对话”空态区域
+const overlayAbilityPanel = computed(() => {
+  const noMessages = !filteredMessages.value || filteredMessages.value.length === 0
+  return showAbilityPanel.value && noMessages
+})
 </script>
 
 <style scoped>
