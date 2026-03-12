@@ -406,4 +406,3 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
             error_detail=f"File not found: {file_path}",
         )
     return full_file_path
-
