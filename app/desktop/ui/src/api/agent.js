@@ -4,6 +4,14 @@
 
 import { baseAPI } from './base.js'
 
+/**
+ * @typedef {Object} AbilityItem
+ * @property {string} id - 能力项唯一 ID（kebab-case）
+ * @property {string} title - 短标题（中文）
+ * @property {string} description - 能力说明（中文）
+ * @property {string} promptText - 可直接复制使用的提示语（中文）
+ */
+
 export const agentAPI = {
   /**
    * 获取所有Agent列表
@@ -12,7 +20,6 @@ export const agentAPI = {
   getAgents: async () => {
     return await baseAPI.get('/api/agent/list')
   },
-
 
   /**
    * 创建新的Agent
@@ -54,6 +61,7 @@ export const agentAPI = {
       available_tools: selectedTools
     })
   },
+
   /**
    * 系统调用Agent
    * @param {Object} input - 输入数据
@@ -89,5 +97,23 @@ export const agentAPI = {
    */
   updateAgentAuth: async (agentId, userIds) => {
     return await baseAPI.post(`/api/agent/${agentId}/auth`, { user_ids: userIds })
+  },
+
+  /**
+   * 获取指定 Agent 的能力列表
+   * @param {Object} params
+   * @param {string} params.agentId - Agent ID
+   * @param {string} [params.sessionId] - 会话 ID
+   * @param {Object} [params.context] - 额外上下文
+   * @returns {Promise<AbilityItem[]>}
+   */
+  getAgentAbilities: async ({ agentId, sessionId, context = {} }) => {
+    const data = await baseAPI.post('/api/agent/abilities', {
+      agent_id: agentId,
+      session_id: sessionId,
+      context
+    })
+    // 后端标准响应的 data 部分应为 { items: AbilityItem[] }
+    return data?.items || []
   }
 }
