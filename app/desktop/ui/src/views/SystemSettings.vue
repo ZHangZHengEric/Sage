@@ -109,6 +109,51 @@
                   </SelectContent>
                 </Select>
             </div>
+
+            <!-- Environment Variables Setting -->
+            <div class="flex items-center justify-between py-4">
+                <div class="space-y-0.5">
+                    <Label class="text-base">{{ t('system.envVariables') || '环境变量' }}</Label>
+                    <p class="text-sm text-muted-foreground">
+                        {{ t('system.envVariablesDesc') || '配置 .sage_env 环境变量文件' }}
+                    </p>
+                </div>
+                <Button 
+                    variant="outline" 
+                    size="sm"
+                    @click="openEnvEditor"
+                >
+                    <Settings class="w-4 h-4 mr-2" />
+                    {{ t('system.configure') || '配置' }}
+                </Button>
+            </div>
+
+            <!-- Environment Variables Editor Dialog -->
+            <Dialog v-model:open="showEnvDialog">
+                <DialogContent class="max-w-2xl max-h-[80vh]">
+                    <DialogHeader>
+                        <DialogTitle>{{ t('system.envVariables') || '环境变量配置' }}</DialogTitle>
+                        <DialogDescription>
+                            {{ t('system.envVariablesTip') || '每行一个变量，格式: KEY=VALUE' }}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div class="py-4">
+                        <Textarea 
+                            v-model="envContent" 
+                            class="font-mono text-sm min-h-[300px]"
+                            :placeholder="envPlaceholder"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" @click="showEnvDialog = false">
+                            {{ t('common.cancel') || '取消' }}
+                        </Button>
+                        <Button @click="saveEnvContent" :disabled="savingEnv">
+                            {{ savingEnv ? (t('common.saving') || '保存中...') : (t('common.save') || '保存') }}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </Card>
     </div>
   </div>
@@ -120,11 +165,13 @@ import { useLanguage } from '../utils/i18n'
 import { useThemeStore } from '../stores/theme'
 import { useUserStore } from '../stores/user'
 import { useUpdaterStore } from '../stores/updater'
+import { invoke } from '@tauri-apps/api/core'
 import { Card } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { RefreshCw, Loader2, DownloadCloud } from 'lucide-vue-next'
+import { Textarea } from '@/components/ui/textarea'
+import { RefreshCw, Loader2, DownloadCloud, Settings } from 'lucide-vue-next'
 import {
   Select,
   SelectContent,
@@ -132,7 +179,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { storeToRefs } from 'pinia'
+import { toast } from 'vue-sonner'
 
 const { t, language, setLanguage } = useLanguage()
 const themeStore = useThemeStore()
@@ -149,6 +205,16 @@ const {
   updateStatus
 } = storeToRefs(updaterStore)
 
+const showEnvDialog = ref(false)
+const envContent = ref('')
+const savingEnv = ref(false)
+const envPlaceholder = `# SAGE Environment Variables
+# Example:
+# SAGE_DEFAULT_LLM_API_KEY=sk-xxxxx
+# SAGE_DEFAULT_LLM_API_BASE_URL=https://api.deepseek.com/v1
+# HTTP_PROXY=http://127.0.0.1:7890
+# HTTPS_PROXY=http://127.0.0.1:7890`
+
 const formatBytes = (bytes, decimals = 2) => {
   if (!+bytes) return '0 B'
   const k = 1024
@@ -156,6 +222,29 @@ const formatBytes = (bytes, decimals = 2) => {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+}
+
+const openEnvEditor = async () => {
+  try {
+    const content = await invoke('get_sage_env_content')
+    envContent.value = content || envPlaceholder
+    showEnvDialog.value = true
+  } catch (error) {
+    toast.error(t('system.loadEnvError') || '加载环境变量失败: ' + error)
+  }
+}
+
+const saveEnvContent = async () => {
+  savingEnv.value = true
+  try {
+    await invoke('save_sage_env_content', { content: envContent.value })
+    showEnvDialog.value = false
+    toast.success(t('system.envSaved') || '环境变量已保存，重启后生效')
+  } catch (error) {
+    toast.error(t('system.saveEnvError') || '保存环境变量失败: ' + error)
+  } finally {
+    savingEnv.value = false
+  }
 }
 
 const checkForUpdates = () => {
