@@ -23,13 +23,7 @@ from ..services.agent import (
     get_file_workspace,
     download_agent_file,
     delete_agent_file,
-    generate_agent_abilities as generate_agent_abilities_service,
 )
-from app.server.schemas.agent import (
-    AgentAbilitiesRequest,
-    AgentAbilitiesData,
-)
-from sagents.utils.agent_abilities import AgentAbilitiesGenerationError
 from sagents.utils.prompt_manager import PromptManager
 from loguru import logger
 # ============= Agent相关模型 =============
@@ -76,7 +70,7 @@ def convert_config_to_agent(
     agent_id: str, config: Dict[str, Any], user_id: Optional[str] = None
 ) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
-
+    
     return AgentConfigDTO(
         id=agent_id,
         user_id=user_id,
@@ -288,36 +282,6 @@ async def auto_generate(request: AutoGenAgentRequest):
     )
 
 
-@agent_router.post("/abilities")
-async def get_agent_abilities(payload: AgentAbilitiesRequest, http_request: Request):
-    """生成指定 Agent 的能力卡片列表"""
-    claims = getattr(http_request.state, "user_claims", {}) or {}
-    user_id = claims.get("userid") or ""
-    role = claims.get("role") or "user"
-
-    target_user_id = None if role == "admin" else user_id
-
-    try:
-        items = await generate_agent_abilities_service(
-            agent_id=payload.agent_id,
-            user_id=target_user_id,
-            session_id=payload.session_id,
-            context=payload.context,
-            language="zh",
-        )
-        data = AgentAbilitiesData(items=items)
-        return await Response.succ(
-            data=data.model_dump(),
-            message="成功获取Agent能力列表",
-        )
-    except AgentAbilitiesGenerationError as e:
-        logger.error(f"生成 Agent 能力列表失败: {e}")
-        return await Response.error(
-            message="获取能力列表失败，请稍后重试",
-            error_detail=str(e),
-        )
-
-
 @agent_router.post("/system-prompt/optimize")
 async def optimize(request: SystemPromptOptimizeRequest):
     """
@@ -347,7 +311,6 @@ async def get_auth(agent_id: str, http_request: Request):
     
     users = await get_agent_authorized_users(agent_id, user_id, role)
     return await Response.succ(data=users, message="获取授权用户列表成功")
-
 
 
 @agent_router.post("/{agent_id}/auth")
