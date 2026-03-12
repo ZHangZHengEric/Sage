@@ -149,6 +149,24 @@ export default {
   'status.inProgress': 'In Progress',
   'error.unknown': 'Unknown Error',
 
+  // Ability panel
+  'chat.abilities.buttonLabel': 'What can you do',
+  'chat.abilities.panelTitle': 'What this assistant can do',
+  'chat.abilities.loading': 'Loading abilities...',
+  'chat.abilities.error': 'Failed to load abilities',
+  'chat.abilities.empty': 'No suggestions available',
+  'chat.abilities.retry': 'Retry',
+  'chat.abilities.close': 'Close',
+
+  // Quick help
+  'quickHelp.title': "Don't know what to ask?",
+  'quickHelp.desc': 'Click to let the assistant introduce itself and give you ready-to-use prompts.',
+  'quickHelp.cta': 'What can you do',
+  'quickHelp.tooltip': 'One-click view of this agent’s abilities',
+  'quickHelp.copy': 'Copy prompt',
+  'quickHelp.loading': 'Thinking…',
+  'quickHelp.empty': 'Click below to get the assistant intro',
+
   // Agent Config
   'agent.title': 'Agent Config',
   'agent.subtitle': 'Manage your AI assistant configurations',
