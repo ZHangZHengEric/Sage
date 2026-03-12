@@ -429,6 +429,8 @@ export default {
   'tools.playwrightHover': '悬停操作',
   'tools.playwrightEvaluate': 'JS执行',
   'tools.sysSpawnAgent': '创建智能体',
+  'tools.sysDelegateTask': '任务委派',
+  'tools.sysFinishTask': '任务完成',
   'tools.generateImage': '生成图片',
   'tools.fetchWebpage': '抓取网页',
   'tools.webFetcher': '网页抓取',
@@ -933,6 +935,10 @@ export default {
   'workbench.tool.delegationCompleted': '委派完成',
   'workbench.tool.viewResult': '查看结果',
   'workbench.tool.hideResult': '隐藏结果',
+  // Sys Finish Task
+  'workbench.tool.finishingTask': '正在完成任务...',
+  'workbench.tool.finishFailed': '任务完成失败',
+  'workbench.tool.taskCompleted': '任务执行完成',
 
   // Image Renderer
   'workbench.image.open': '打开图片',
