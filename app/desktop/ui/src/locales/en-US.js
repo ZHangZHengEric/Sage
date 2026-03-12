@@ -948,6 +948,13 @@ export default {
   'workbench.tool.finishingTask': 'Finishing Task...',
   'workbench.tool.finishFailed': 'Task Finish Failed',
   'workbench.tool.taskCompleted': 'Task Completed',
+  'chat.executionResult': 'Execution Result',
+  'chat.collapse': 'Collapse',
+  'chat.expand': 'Expand',
+  'chat.showMore': 'Show More',
+  'chat.executionFailed': 'Execution Failed',
+  'chat.showRawData': 'Show Raw Data',
+  'chat.hideRawData': 'Hide Raw Data',
 
   // Image Renderer
   'workbench.image.open': 'Open Image',
