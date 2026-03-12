@@ -208,13 +208,6 @@ const toggleSettings = () => {
   panelStore.toggleSettings()
 }
 
-// 监听消息变化，提取数据到 workbench
-watch(() => filteredMessages.value, (messages) => {
-  if (!messages) return
-  messages.forEach(msg => {
-     workbenchStore.extractFromMessage(msg, selectedAgentId.value)
-  })
-}, { deep: true, immediate: true })
 
 // 监听 Session ID 变化
 watch(() => currentSessionId.value, (id) => {
