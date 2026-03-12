@@ -161,11 +161,51 @@
     <AgentAuthModal v-model:visible="showAuthModal" :agentId="authAgentId" />
     <AppConfirmDialog ref="confirmDialogRef" />
 
+    <!-- Delete Confirmation Modal -->
+    <Teleport to="body">
+      <div v-if="showDeleteConfirmDialog" class="fixed inset-0 z-[9999]">
+        <!-- Backdrop -->
+        <div 
+          class="absolute inset-0 bg-black/60 transition-opacity" 
+          @click="showDeleteConfirmDialog = false"
+        ></div>
+        <!-- Modal Content -->
+        <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md">
+          <div class="bg-background border rounded-lg shadow-xl p-6 mx-4">
+            <h3 class="text-lg font-semibold mb-2">{{ t('agent.deleteConfirmTitle') }}</h3>
+            <p class="text-muted-foreground text-sm mb-4">
+              {{ t('agent.deleteConfirmMessage').replace('{name}', agentToDelete?.name || '') }}
+            </p>
+            <div class="space-y-4">
+              <div class="flex items-center gap-4">
+                <Label class="text-sm w-16">
+                  {{ t('agent.name') }}
+                </Label>
+                <Input
+                  v-model="deleteConfirmName"
+                  :placeholder="t('agent.deleteNamePlaceholder')"
+                  class="flex-1"
+                  @keyup.enter="confirmDelete"
+                />
+              </div>
+              <p v-if="deleteConfirmNameError" class="text-destructive text-sm text-center">
+                {{ t('agent.deleteNameError') }}
+              </p>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+              <Button variant="outline" @click="showDeleteConfirmDialog = false">{{ t('agent.cancel') }}</Button>
+              <Button variant="destructive" @click="confirmDelete" :disabled="!deleteConfirmName">{{ t('agent.delete') }}</Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, UserPlus } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
@@ -191,6 +231,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Input } from '@/components/ui/input'
 
 // State
 const agents = ref([])
@@ -208,6 +249,12 @@ const usageActiveTab = ref('curl')
 const usageCodeMap = ref({ curl: '', python: '', go: '' })
 const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
 const confirmDialogRef = ref(null)
+
+// Delete Confirmation Dialog State
+const showDeleteConfirmDialog = ref(false)
+const agentToDelete = ref(null)
+const deleteConfirmName = ref('')
+const deleteConfirmNameError = ref(false)
 
 // Export Dialog State
 const showExportDialog = ref(false)
@@ -365,12 +412,27 @@ const handleDelete = async (agent) => {
     return
   }
 
-  const confirmed = await confirmDialogRef.value.confirm(t('agent.deleteConfirm').replace('{name}', agent.name))
-  if (!confirmed) return
+  agentToDelete.value = agent
+  deleteConfirmName.value = ''
+  deleteConfirmNameError.value = false
+  showDeleteConfirmDialog.value = true
+}
+
+const confirmDelete = async () => {
+  if (!agentToDelete.value || !deleteConfirmName.value) return
+
+  if (deleteConfirmName.value !== agentToDelete.value.name) {
+    deleteConfirmNameError.value = true
+    return
+  }
 
   try {
-    await removeAgent(agent.id)
-    toast.success(t('agent.deleteSuccess').replace('{name}', agent.name))
+    await removeAgent(agentToDelete.value.id)
+    toast.success(t('agent.deleteSuccess').replace('{name}', agentToDelete.value.name))
+    showDeleteConfirmDialog.value = false
+    agentToDelete.value = null
+    deleteConfirmName.value = ''
+    deleteConfirmNameError.value = false
   } catch (error) {
     console.error('删除agent失败:', error)
     toast.error(t('agent.deleteError'))
