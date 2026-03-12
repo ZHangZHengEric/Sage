@@ -338,6 +338,10 @@ class AgentBase(ABC):
                     if first_token_time is None:
                         first_token_time = time.time()
                     all_chunks.append(chunk)
+                    
+                    # 显式让出控制权，确保在高吞吐量时不会饿死事件循环（如心跳检测）
+                    await asyncio.sleep(0)
+                    
                     yield chunk
 
                 # 成功完成，跳出重试循环
