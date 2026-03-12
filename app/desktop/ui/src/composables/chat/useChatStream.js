@@ -199,12 +199,11 @@ export const useChatStream = ({
           if (onComplete) onComplete()
         },
         (err) => {
+          updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
           if (err.name === 'AbortError') {
-            updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
-          } else {
-            updateActiveSessionLastIndex(sessionId, streamLastIndex, true)
-            if (onError) onError(err)
+            return
           }
+          if (onError) onError(err)
         }
       )
     } catch (error) {
@@ -214,20 +213,21 @@ export const useChatStream = ({
     }
   }
 
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = async (content, options = {}) => {
+    const { displayContent } = options
     if (!content.trim() || isLoading.value || !selectedAgent.value) return
     let sessionId = currentSessionId.value
     if (!sessionId) {
       sessionId = await createSession(selectedAgent.value.id)
     }
     await syncSessionIdToRoute(sessionId)
-    addUserMessage(content, sessionId)
+    const shownContent = (displayContent ?? content).trim()
+    updateActiveSession(sessionId, true, deriveSessionTitle(shownContent), shownContent, false)
+    addUserMessage(shownContent, sessionId)
     try {
       isLoading.value = true
       loadingSessionId.value = sessionId
-      // 新消息开始，重置自动滚动，因为是用户主动发的
       shouldAutoScroll.value = true
-      // 这里的 scrollToBottom(true) 强制滚动是必要的，因为用户刚发了消息
       scrollToBottom(true)
       await sendMessageApi({
         message: content,
