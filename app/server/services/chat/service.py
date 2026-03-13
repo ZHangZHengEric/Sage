@@ -36,7 +36,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     if request.agent_id is None:
         # 如果要求必须有 Agent ID，则抛出异常
         if require_agent_id:
-            raise SageHTTPException(status_code=500, detail="Agent ID 不能为空")
+            raise SageHTTPException(detail="Agent ID 不能为空")
         else:
             # 默认使用request 的信息
             pass
@@ -46,7 +46,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         if not agent or not agent.config:
             # 如果要求必须有 Agent ID，但 Agent 不存在，则抛出异常
             if require_agent_id:
-                raise SageHTTPException(status_code=500, detail="Agent 不存在")
+                raise SageHTTPException(detail="Agent 不存在")
             logger.warning(f"Agent {request.agent_id} not found")
             agent = None
         else:
@@ -271,18 +271,23 @@ class SageStreamService:
 
     def __init__(self, request: StreamRequest):
         self.request = request
-        # 2. 工具代理
-        tool_proxy = create_tool_proxy(request.available_tools)
-        self.tool_manager = tool_proxy
-        # 3. 技能代理
-        skill_proxy = create_skill_proxy(request.available_skills)
-        self.skill_manager = skill_proxy
-        # 4. 路径处理
+        # 4. 路径处理 (提前计算，供后续使用)
         cfg = get_startup_config()
         # agent工作空间由 agent_dir + user_id + agent_id来。 如果user_id 为空。用 default_user 如果agent_id 为空，用 随机8位英文字母
         user_id = self.request.user_id or "default_user"
         agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
         self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
+
+        # 2. 工具代理
+        tool_proxy = create_tool_proxy(request.available_tools)
+        self.tool_manager = tool_proxy
+        # 3. 技能代理 (带优先级: agent_workspace > user_skills > system_skills > global)
+        skill_proxy = create_skill_proxy(
+            request.available_skills,
+            user_id=self.request.user_id,
+            agent_workspace=self.agent_workspace
+        )
+        self.skill_manager = skill_proxy
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
@@ -358,7 +363,7 @@ async def prepare_session(request: StreamRequest):
         session_manager = get_global_session_manager()
         session = session_manager.get(session_id)
         if not session or session.session_context.status != SessionStatus.INTERRUPTED:
-             raise SageHTTPException(status_code=500, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
+             raise SageHTTPException(detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
         lock_wait_start = time.perf_counter()
@@ -368,7 +373,7 @@ async def prepare_session(request: StreamRequest):
         if lock_wait_cost > 0.2:
             logger.bind(session_id=session_id).warning(f"Session lock wait slow: {lock_wait_cost:.3f}s")
     except asyncio.TimeoutError:
-         raise SageHTTPException(status_code=500, detail="会话正在清理中，请稍后重试")
+         raise SageHTTPException(detail="会话正在清理中，请稍后重试")
 
     try:
         stream_service = SageStreamService(request)

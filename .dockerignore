@@ -62,7 +62,6 @@ docker-compose*.yml
 # Temporary
 tmp/
 
-skills/*
 assets/
 docs/
 release_notes/
