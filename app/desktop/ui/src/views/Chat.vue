@@ -150,7 +150,6 @@
                 {{ t('quickHelp.cta') }}
               </Button>
             </div>
-            <AgentUsageStatsCard v-if="showAgentUsageCard" v-model:days="agentUsageDays" :top-n="5" class="mb-3" />
             <MessageInput
               :is-loading="isCurrentSessionLoading"
               :preset-text="abilityPresetInput"
@@ -203,7 +202,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { Bot, Settings, FolderOpen, Monitor, Sparkles } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
@@ -214,7 +213,6 @@ import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import AbilityPanel from '@/components/chat/AbilityPanel.vue'
-import AgentUsageStatsCard from '@/components/chat/AgentUsageStatsCard.vue'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -243,8 +241,6 @@ const { t } = useLanguage()
 
 const panelStore = usePanelStore()
 const { showWorkbench, showWorkspace, showSettings } = storeToRefs(panelStore)
-
-const agentUsageDays = ref(7)
 
 const {
   agents,
@@ -326,11 +322,6 @@ const anyPanelOpen = computed(() => showWorkspace.value || showSettings.value ||
 const overlayAbilityPanel = computed(() => {
   const noMessages = !filteredMessages.value || filteredMessages.value.length === 0
   return showAbilityPanel.value && noMessages
-})
-
-const showAgentUsageCard = computed(() => {
-  const noMessages = !filteredMessages.value || filteredMessages.value.length === 0
-  return !!selectedAgent.value && noMessages
 })
 </script>
 
