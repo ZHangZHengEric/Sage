@@ -17,73 +17,148 @@
       <div v-if="loading" class="flex flex-col items-center justify-center py-20">
         <Loader class="h-8 w-8 animate-spin text-primary" />
       </div>
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 md:gap-6">
-        <Card v-for="agent in agents" :key="agent.id"
-          class="flex flex-col h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-          <CardHeader class="pb-3 md:pb-4">
-            <div class="flex items-start gap-3 md:gap-4">
-              <img
-                :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`"
-                :alt="agent.name"
-                class="h-10 w-10 md:h-12 md:w-12 rounded-lg bg-primary/10 shrink-0 object-cover"
-              />
-              <div class="space-y-1 overflow-hidden flex-1">
-                <CardTitle class="text-base md:text-lg leading-tight truncate" :title="agent.name">
-                  {{ agent.name }}
-                </CardTitle>
-                <CardDescription class="line-clamp-2 min-h-[2.5rem]">
-                  {{ agent.description }}
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
+      <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        <!-- Flip Card Container -->
+        <div 
+          v-for="agent in agents" 
+          :key="agent.id"
+          class="flip-card h-[240px]"
+          :class="{ 'flipped': flippedCard === agent.id }"
+        >
+          <div class="flip-card-inner">
+            <!-- Front Side -->
+            <Card 
+              class="flip-card-front h-full cursor-pointer border hover:border-primary/30 transition-colors flex flex-col"
+              @click="handleViewAgent(agent)"
+            >
+              <!-- Flip button - top right corner -->
+              <button 
+                class="absolute top-3 right-3 z-20 p-1.5 rounded-full bg-muted/50 hover:bg-muted transition-colors"
+                @click.stop="toggleFlip(agent.id)"
+                :title="'查看操作'"
+              >
+                <MoreHorizontal class="w-4 h-4 text-muted-foreground" />
+              </button>
+              
+              <CardHeader class="pb-2 pt-4 pr-10">
+                <div class="flex items-start gap-3">
+                  <!-- Avatar -->
+                  <img
+                    :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agent.id)}`"
+                    :alt="agent.name"
+                    class="h-12 w-12 rounded-xl bg-primary/10 object-cover shrink-0"
+                  />
+                  
+                  <!-- Name -->
+                  <div class="flex-1 min-w-0">
+                    <CardTitle class="text-base font-bold leading-tight truncate" :title="agent.name">
+                      {{ agent.name }}
+                    </CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
 
-          <CardContent class="flex-1 pb-4">
-            <div class="space-y-2 md:space-y-3 text-sm">
-              <div class="flex justify-between">
-                <span class="text-muted-foreground">{{ t('agent.model') }}:</span>
-                <span class="font-medium truncate max-w-[120px] md:max-w-[200px]"
-                  :title="getModelLabel(agent.llm_provider_id)">{{ getModelLabel(agent.llm_provider_id) }}</span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-muted-foreground">{{ t('agent.deepThinking') }}:</span>
-                <Badge :variant="getConfigBadgeVariant(agent.deepThinking)">{{ getConfigBadgeText(agent.deepThinking) }}
-                </Badge>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-muted-foreground">{{ t('agent.agentMode') }}:</span>
-                <Badge variant="outline">{{ getAgentModeText(agent.agentMode) }}</Badge>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-muted-foreground">{{ t('agent.availableTools') }}:</span>
-                <span>{{ agent.availableTools?.length || 0 }} {{ t('agent.toolsCount') }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-muted-foreground">{{ t('agent.availableSkills') }}:</span>
-                <span>{{ agent.availableSkills?.length || 0 }} {{ t('agent.toolsCount') }}</span>
-              </div>
-            </div>
-          </CardContent>
+              <!-- Description - more space -->
+              <CardContent class="pt-0 pb-3 flex-1 flex flex-col">
+                <p class="text-sm text-muted-foreground line-clamp-3 leading-relaxed flex-1">
+                  {{ agent.description || getRandomPlaceholder(agent.name) }}
+                </p>
+                
+                <!-- Info row -->
+                <div class="flex items-center gap-3 mt-3 flex-wrap">
+                  <!-- Mode badge -->
+                  <Badge 
+                    :variant="getModeBadgeVariant(agent.agentMode)"
+                    class="text-xs font-medium px-2 py-0.5 shrink-0"
+                  >
+                    <component :is="getAgentModeIcon(agent.agentMode)" class="w-3 h-3 mr-1" />
+                    {{ getAgentModeLabel(agent.agentMode) }}
+                  </Badge>
+                  
+                  <!-- Model -->
+                  <span class="text-xs text-muted-foreground truncate">
+                    {{ getModelShortName(agent.llm_provider_id) }}
+                  </span>
+                </div>
+              </CardContent>
 
-          <CardFooter class="pt-4 border-t bg-muted/20 flex flex-wrap gap-2 justify-end">
-            <Button variant="ghost" size="icon" @click="openUsageModal(agent)" :title="t('agent.usage')">
-              <FileBraces class="h-4 w-4" />
-            </Button>
-            <Button v-if="canEdit(agent)" variant="ghost" size="icon" @click="handleEditAgent(agent)"
-              :title="t('agent.edit')">
-              <Edit class="h-4 w-4" />
-            </Button>
+              <!-- Bottom row with icons -->
+              <CardFooter class="pt-0 pb-4 px-4">
+                <div class="flex items-center justify-between w-full">
+                  <!-- Tools & Skills icons -->
+                  <div class="flex items-center gap-3">
+                    <div v-if="agent.availableTools?.length" class="flex items-center gap-1 text-muted-foreground">
+                      <Wrench class="w-3.5 h-3.5" />
+                      <span class="text-xs">{{ agent.availableTools.length }}</span>
+                    </div>
+                    <div v-if="agent.availableSkills?.length" class="flex items-center gap-1 text-muted-foreground">
+                      <Zap class="w-3.5 h-3.5" />
+                      <span class="text-xs">{{ agent.availableSkills.length }}</span>
+                    </div>
+                  </div>
+                  
+                  <!-- Click hint -->
+                  <span class="text-xs text-muted-foreground/50">点击查看详情</span>
+                </div>
+              </CardFooter>
+            </Card>
 
-            <Button variant="ghost" size="icon" @click="handleExport(agent)" :title="t('agent.export')">
-              <Upload class="h-4 w-4" />
-            </Button>
-            <Button v-if="canDelete(agent)" variant="ghost" size="icon"
-              class="text-destructive hover:text-destructive hover:bg-destructive/10" @click="handleDelete(agent)"
-              :title="t('agent.delete')">
-              <Trash2 class="h-4 w-4" />
-            </Button>
-          </CardFooter>
-        </Card>
+            <!-- Back Side - Actions -->
+            <Card class="flip-card-back h-full border bg-card flex flex-col">
+              <!-- Close button -->
+              <button 
+                class="absolute top-3 right-3 z-20 p-1.5 rounded-full bg-muted/50 hover:bg-muted transition-colors"
+                @click.stop="toggleFlip(agent.id)"
+              >
+                <X class="w-4 h-4 text-muted-foreground" />
+              </button>
+              
+              <CardHeader class="pb-2 pt-4 shrink-0">
+                <CardTitle class="text-sm font-medium text-center">操作</CardTitle>
+              </CardHeader>
+
+              <CardContent class="flex-1 flex flex-col items-center justify-center gap-2 py-2 px-4">
+                <Button 
+                  variant="outline" 
+                  class="w-full max-w-[140px] justify-center gap-2"
+                  @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
+                >
+                  <FileBraces class="w-4 h-4" />
+                  调用示例
+                </Button>
+                
+                <Button 
+                  v-if="canEdit(agent)"
+                  variant="outline" 
+                  class="w-full max-w-[140px] justify-center gap-2"
+                  @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
+                >
+                  <Edit class="w-4 h-4" />
+                  编辑
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  class="w-full max-w-[140px] justify-center gap-2"
+                  @click.stop="handleExport(agent); toggleFlip(agent.id)"
+                >
+                  <Upload class="w-4 h-4" />
+                  导出
+                </Button>
+                
+                <Button 
+                  v-if="canDelete(agent)"
+                  variant="outline" 
+                  class="w-full max-w-[140px] justify-center gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  @click.stop="handleDelete(agent); toggleFlip(agent.id)"
+                >
+                  <Trash2 class="w-4 h-4" />
+                  删除
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
     <div v-else class="flex-1 overflow-hidden">
@@ -207,7 +282,10 @@
 <script setup>
 import { ref, onMounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
-import { Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, UserPlus } from 'lucide-vue-next'
+import { 
+  Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, 
+  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X
+} from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
@@ -225,7 +303,7 @@ import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 
 // UI Components
 import { Button } from '@/components/ui/button'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -249,6 +327,7 @@ const usageActiveTab = ref('curl')
 const usageCodeMap = ref({ curl: '', python: '', go: '' })
 const usageCodeRawMap = ref({ curl: '', python: '', go: '' })
 const confirmDialogRef = ref(null)
+const flippedCard = ref(null) // Track which card is flipped
 
 // Delete Confirmation Dialog State
 const showDeleteConfirmDialog = ref(false)
@@ -395,15 +474,6 @@ const removeAgent = async (agentId) => {
     console.error('删除agent失败:', err)
     throw err
   }
-}
-const getConfigBadgeVariant = (value) => {
-  if (value === null) return 'secondary' // auto
-  return value ? 'default' : 'outline' // enabled : disabled
-}
-
-const getConfigBadgeText = (value) => {
-  if (value === null) return t('common.auto')
-  return value ? t('agent.enabled') : t('agent.disabled')
 }
 
 const handleDelete = async (agent) => {
@@ -761,12 +831,85 @@ const getModelLabel = (providerId) => {
   return `${provider.name} (${provider.model})`
 }
 
-const getAgentModeText = (mode) => {
-  if (!mode || mode === 'auto') return t('agent.modeAuto')
-  if (mode === 'fibre') return t('agent.modeFibre')
-  if (mode === 'simple') return t('agent.modeSimple')
-  if (mode === 'multi') return t('agent.modeMulti')
-  return mode
+// 获取模型简称
+const getModelShortName = (providerId) => {
+  if (!providerId) return t('agent.defaultModel')
+  const provider = modelProviderMap.value[providerId]
+  if (!provider) return providerId
+  // 只返回模型名称，不包含提供商
+  return provider.model || provider.name
+}
+
+// 获取Agent模式图标
+const getAgentModeIcon = (mode) => {
+  const iconMap = {
+    'fibre': GitBranch,
+    'simple': Cpu,
+    'multi': Brain,
+    'auto': Sparkles
+  }
+  return iconMap[mode] || Sparkles
+}
+
+// 获取Agent模式提示文字
+const getAgentModeTooltip = (mode) => {
+  const tooltipMap = {
+    'fibre': 'Fibre 模式 - 复杂任务规划',
+    'simple': '简单模式 - 直接响应',
+    'multi': '多智能体模式',
+    'auto': '自动模式'
+  }
+  return tooltipMap[mode] || '自动模式'
+}
+
+// 获取Agent模式标签文字
+const getAgentModeLabel = (mode) => {
+  const labelMap = {
+    'fibre': 'Fibre',
+    'simple': 'Simple',
+    'multi': 'Multi',
+    'auto': 'Auto'
+  }
+  return labelMap[mode] || 'Auto'
+}
+
+// 获取Agent模式Badge样式
+const getModeBadgeVariant = (mode) => {
+  const variantMap = {
+    'fibre': 'default',
+    'simple': 'secondary',
+    'multi': 'destructive',
+    'auto': 'outline'
+  }
+  return variantMap[mode] || 'outline'
+}
+
+// Toggle flip card
+const toggleFlip = (agentId) => {
+  if (flippedCard.value === agentId) {
+    flippedCard.value = null
+  } else {
+    flippedCard.value = agentId
+  }
+}
+
+// 有趣的默认占位介绍
+const getRandomPlaceholder = (agentName) => {
+  const placeholders = [
+    `我是${agentName}，一个神秘的AI助手，正在等待被赋予使命...`,
+    `${agentName}已就绪，随时准备为你效劳。不过我还需要一些配置才能发挥全力！`,
+    `你好，我是${agentName}。我的创造者似乎忘了给我写介绍，但我依然很乐意帮助你。`,
+    `${agentName}在这里！虽然我的简介是空白的，但我的能力可不是。`,
+    `一个尚未被完全定义的Agent——${agentName}，正在等待它的故事被书写。`,
+    `我是${agentName}，就像一张白纸，等待被涂上色彩。你想让我成为什么样的助手？`,
+    `${agentName}：简介加载中... 实际上并没有，但我依然很能干！`,
+    `这里应该有一段关于${agentName}的精彩介绍，但显然创作者太懒了。`,
+    `${agentName}，一个低调但有实力的AI助手。（简介待补充）`,
+    `我是${agentName}，我的简介去度假了，但我还在这里为你工作！`
+  ]
+  // 使用 agentName 的字符编码来选择一个固定的占位符
+  const index = agentName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % placeholders.length
+  return placeholders[index]
 }
 
 const handleSmartConfig = async (description, selectedTools = [], callbacks = {}) => {
@@ -905,3 +1048,50 @@ const generateUsageCodes = (agent) => {
 const usageCodeMarkdown = computed(() => usageCodeMap.value[usageActiveTab.value] || '')
 
 </script>
+
+<style scoped>
+/* 多行文本截断 */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Flip Card Styles */
+.flip-card {
+  perspective: 1000px;
+}
+
+.flip-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+}
+
+.flip-card.flipped .flip-card-inner {
+  transform: rotateY(180deg);
+}
+
+.flip-card-front,
+.flip-card-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-card-back {
+  transform: rotateY(180deg);
+}
+</style>
