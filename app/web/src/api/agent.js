@@ -13,6 +13,15 @@ export const agentAPI = {
     return await baseAPI.get('/api/agent/list')
   },
 
+  /**
+   * 获取Agent详情
+   * @param {string} agentId - Agent ID
+   * @returns {Promise<Object>}
+   */
+  getAgentDetail: async (agentId) => {
+    return await baseAPI.get(`/api/agent/${agentId}`)
+  },
+
 
   /**
    * 创建新的Agent
