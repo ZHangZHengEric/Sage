@@ -4,7 +4,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel
 
 from ..core.render import Response
@@ -16,6 +16,9 @@ skill_router = APIRouter(prefix="/api/skills")
 
 class UrlImportRequest(BaseModel):
     url: str
+    is_system: bool = False
+    is_agent: bool = False
+    agent_id: Optional[str] = None
 
 
 class SkillUpdateRequest(BaseModel):
@@ -39,14 +42,23 @@ async def get_skills(http_request: Request, agent_id: Optional[str] = None):
 
 
 @skill_router.post("/upload")
-async def upload_skill(http_request: Request, file: UploadFile = File(...)):
+async def upload_skill(
+    http_request: Request,
+    file: UploadFile = File(...),
+    is_system: bool = Form(False),
+    is_agent: bool = Form(False),
+    agent_id: Optional[str] = Form(None)
+):
     """
     通过上传 ZIP 文件导入技能
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
 
-    message = await skill_service.import_skill_by_file(file, user_id)
+    message = await skill_service.import_skill_by_file(
+        file, user_id, role, is_system, is_agent, agent_id
+    )
     return await Response.succ(message=message, data={"user_id": user_id})
 
 
@@ -57,8 +69,11 @@ async def import_skill_from_url(request: UrlImportRequest, http_request: Request
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
 
-    message = await skill_service.import_skill_by_url(request.url, user_id)
+    message = await skill_service.import_skill_by_url(
+        request.url, user_id, role, request.is_system, request.is_agent, request.agent_id
+    )
     return await Response.succ(message=message, data={"user_id": user_id})
 
 
