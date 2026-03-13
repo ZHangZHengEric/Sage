@@ -191,3 +191,14 @@ class ConversationDao(BaseDao):
             conversation.updated_at = get_local_now()
             await session.merge(conversation)
             return True
+
+    async def update_timestamp(self, session_id: str) -> bool:
+        """仅更新会话的updated_at时间戳"""
+        db = await self._get_db()
+        async with db.get_session() as session:
+            conversation = await session.get(Conversation, session_id)
+            if not conversation:
+                return False
+            conversation.updated_at = get_local_now()
+            await session.merge(conversation)
+            return True
