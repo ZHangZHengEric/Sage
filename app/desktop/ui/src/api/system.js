@@ -6,6 +6,9 @@ export const systemAPI = {
   },
   updateSettings: (settings) => {
     return baseAPI.post('/api/system/update_settings', settings)
+  },
+  getAgentUsageStats: (params) => {
+    return baseAPI.post('/api/system/agent/usage-stats', params)
   }
 }
 
