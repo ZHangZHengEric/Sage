@@ -200,6 +200,10 @@ class IMServiceManager:
                 task = asyncio.create_task(
                     self._run_imessage_channel(sage_user_id, config_data['config'])
                 )
+            elif provider_type == "wechat_work":
+                task = asyncio.create_task(
+                    self._run_wechat_work_channel(sage_user_id, config_data['config'])
+                )
             else:
                 raise ValueError(f"Unknown provider: {provider_type}")
             
@@ -524,6 +528,64 @@ class IMServiceManager:
             raise
         except Exception as e:
             logger.error(f"[ServiceManager] iMessage channel {key} error: {e}")
+            with self._lock:
+                if key in self._connections:
+                    self._connections[key].status = ChannelStatus.ERROR
+                    self._connections[key].error_message = str(e)
+            raise
+    
+    async def _run_wechat_work_channel(self, sage_user_id: str, config: Dict[str, Any]):
+        """Run WeChat Work channel using WebSocket long connection."""
+        key = self._make_key(sage_user_id, "wechat_work")
+        
+        try:
+            from .providers.wechat_work import WeChatWorkProvider
+            
+            bot_id = config.get('bot_id') or config.get('client_id')
+            secret = config.get('secret') or config.get('client_secret')
+            
+            if not bot_id or not secret:
+                raise ValueError("WeChat Work bot_id and secret required")
+            
+            # Create message handler for this channel
+            message_handler = self._make_message_handler(sage_user_id, "wechat_work")
+            
+            # 确保 enabled 被设置为 True (从数据库读取时可能在单独字段)
+            provider_config = {
+                **config,
+                'enabled': True,  # 强制启用，因为已通过启用检查
+                'bot_id': bot_id,
+                'secret': secret
+            }
+            
+            # Create provider and start WebSocket client
+            provider = WeChatWorkProvider(provider_config)
+            if not provider.start_client(message_handler):
+                raise ValueError("Failed to start WeChat Work WebSocket client")
+            
+            # Update state to connected
+            with self._lock:
+                if key in self._connections:
+                    self._connections[key].status = ChannelStatus.CONNECTED
+            
+            logger.info(f"[ServiceManager] WeChat Work channel {key} connected")
+            
+            # Keep running until cancelled
+            while True:
+                await asyncio.sleep(60)
+                
+        except asyncio.CancelledError:
+            logger.info(f"[ServiceManager] WeChat Work channel {key} cancelled")
+            # Stop the client
+            try:
+                from .providers.wechat_work import WeChatWorkProvider
+                provider = WeChatWorkProvider(config)
+                provider.stop_client()
+            except Exception:
+                pass
+            raise
+        except Exception as e:
+            logger.error(f"[ServiceManager] WeChat Work channel {key} error: {e}")
             with self._lock:
                 if key in self._connections:
                     self._connections[key].status = ChannelStatus.ERROR
