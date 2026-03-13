@@ -39,7 +39,7 @@ def _ensure_bucket(client, bucket: str) -> None:
             }
             client.set_bucket_policy(bucket, json.dumps(policy))
     except Exception as e:
-        raise SageHTTPException(status_code=500, detail=f"RustFS 桶处理失败: {e}")
+        raise SageHTTPException(detail=f"RustFS 桶处理失败: {e}")
 
 
 async def init_s3_client(
@@ -114,10 +114,10 @@ async def upload_file_with_path(
         public_base = f"{protocol}{ep}/{bucket}"
     else:
         # Fallback if config is missing (should be caught by client check)
-        raise SageHTTPException(status_code=500, detail="S3 configuration missing")
+        raise SageHTTPException(detail="S3 configuration missing")
 
     if not client:
-        raise SageHTTPException(status_code=500, detail="S3 client not initialized")
+        raise SageHTTPException(detail="S3 client not initialized")
 
     # Ensure bucket exists
     try:
@@ -157,7 +157,7 @@ async def upload_file_with_path(
         )
     except Exception as e:
         logger.error(f"S3 upload failed: {e}")
-        raise SageHTTPException(status_code=500, detail=f"S3 upload failed: {str(e)}")
+        raise SageHTTPException(detail=f"S3 upload failed: {str(e)}")
 
     url = f"{public_base}/{path}"
     logger.info(f"File uploaded to {bucket}/{path}: {url}")
@@ -174,7 +174,7 @@ async def upload_kdb_file(base_name: str, data: bytes, content_type: str) -> str
     public_base = cfg.s3_public_base_url if cfg else None
 
     if not client or not bucket or not public_base:
-        raise SageHTTPException(status_code=500, detail="RustFS 未配置或未初始化")
+        raise SageHTTPException(detail="RustFS 未配置或未初始化")
 
 
     object_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{base_name}"

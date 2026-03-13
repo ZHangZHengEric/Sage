@@ -14,32 +14,26 @@ from .bootstrap import (
     shutdown_clients,
     shutdown_scheduler,
     validate_and_disable_mcp_servers,
-    ensure_system_init,
 )
-from .services.chat.stream_manager import StreamManager
 from .core.config import StartupConfig
 from .utils.async_utils import create_safe_task
 
 
 async def initialize_system(cfg: StartupConfig):
-    logger.info("sage-server：开始初始化")
+    logger.info("Sage开始初始化")
 
-    # 1. 优先初始化数据库连接 (Initialize DB connection first)
+    # 1. 优先初始化数据库和数据
     await initialize_db_connection(cfg)
-
-    # 2. 确保数据库表存在 (Ensure tables exist)
-    await ensure_system_init(cfg)
-
-    # 4. 初始化观测链路上报 (Initialize Observability - needs DB)
+    
+    # 2. 初始化观测链路上报 (Initialize Observability - needs DB)
     await initialize_observability(cfg)
 
-    # 5. 初始化其他第三方客户端 (Initialize other clients: LLM, S3, Embed, ES)
-    # LLM Provider initialization needs DB tables to be ready
+    # 5. 初始化其他第三方客户端
     await initialize_global_clients(cfg)
 
     """初始化工具与技能管理器"""
     await initialize_tool_manager()
-    await initialize_skill_manager()
+    await initialize_skill_manager(cfg)
 
     """初始化全局 SessionManager"""
     await initialize_session_manager(cfg)
@@ -47,22 +41,18 @@ async def initialize_system(cfg: StartupConfig):
     """初始化定时任务 Scheduler"""
     await initialize_scheduler(cfg)
 
-    StreamManager.get_instance()
-    logger.info("sage-server：StreamManager 已预初始化")
-
-    logger.info("sage-server：初始化完成")
+    logger.info("Sage初始化完成")
 
 
 def post_initialize_task():
     """
     服务启动完成后执行一次的后置任务
     """
-    logger.info("sage-server：启动的后置任务...")
     return create_safe_task(validate_and_disable_mcp_servers(), name="post_initialize")
 
 
 async def cleanup_system():
-    logger.info("sage-server：正在清理资源...")
+    logger.info("Sage正在清理资源...")
     await shutdown_scheduler()
     # 关闭 观测链路上报 (需在 DB 关闭前)
     await close_observability()
@@ -71,8 +61,8 @@ async def cleanup_system():
     try:
         await close_skill_manager()
     finally:
-        logger.info("sage-server：技能管理器 已关闭")
+        logger.info("Sage技能管理器 已关闭")
     try:
         await close_tool_manager()
     finally:
-        logger.info("sage-server：工具管理器 已关闭")
+        logger.info("Sage工具管理器 已关闭")

@@ -12,25 +12,25 @@ from .render import Response
 
 
 class SageHTTPException(HTTPException):
-    """自定义HTTP异常，支持更多错误信息"""
+    """自定义HTTP异常，支持更多错误信息，统一返回500状态码"""
 
-    def __init__(self, status_code: int, detail: str, error_detail: str = None):
+    def __init__(self, status_code: int = 500, detail: str = "Internal Server Error", error_detail: str = None):
         super().__init__(status_code=status_code, detail=detail)
         self.error_detail = error_detail
 
 
 def register_exception_handlers(app):
     async def handle_sage(request: Request, exc: SageHTTPException):
-        resp = await Response.error(exc.status_code, exc.detail, exc.error_detail)
+        resp = await Response.error(exc.detail, exc.error_detail)
         return JSONResponse(status_code=exc.status_code, content=resp.model_dump())
 
     async def handle_http(request: Request, exc: HTTPException):
-        resp = await Response.error(exc.status_code, exc.detail)
+        resp = await Response.error(exc.detail)
         return JSONResponse(status_code=exc.status_code, content=resp.model_dump())
 
     async def handle_general(request: Request, exc: Exception):
         logger.error(f"未处理异常: {exc}")
-        resp = await Response.error(500, "内部服务器错误", str(exc))
+        resp = await Response.error("内部服务器错误", str(exc))
         return JSONResponse(status_code=500, content=resp.model_dump())
 
     app.add_exception_handler(SageHTTPException, handle_sage)

@@ -17,18 +17,30 @@ export const skillAPI = {
   /**
    * 上传技能 (ZIP)
    * @param {File} file - ZIP文件
+   * @param {boolean} isSystem - 是否为系统技能
+   * @param {Object} extraParams - 额外参数 (is_agent, agent_id 等)
    * @returns {Promise<Object>}
    */
-  uploadSkill: async (file) => {
+  uploadSkill: async (file, isSystem = false, extraParams = {}) => {
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('is_system', isSystem)
+    // 添加额外参数
+    if (extraParams.is_agent) {
+      formData.append('is_agent', extraParams.is_agent)
+    }
+    if (extraParams.agent_id) {
+      formData.append('agent_id', extraParams.agent_id)
+    }
     // baseAPI.post handles FormData automatically
     return await baseAPI.post('/api/skills/upload', formData)
   },
 
   /**
    * 从 URL 导入技能
-   * @param {string} url - 技能 ZIP 下载链接
+   * @param {Object} data - 导入参数
+   * @param {string} data.url - 技能 ZIP 下载链接
+   * @param {boolean} data.is_system - 是否为系统技能
    * @returns {Promise<Object>}
    */
   importSkillFromUrl: async (data) => {
