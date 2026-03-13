@@ -1,170 +1,307 @@
 <template>
-  <div class="h-full flex flex-col p-6 space-y-6">
-    <Tabs default-value="recurring" class="w-full flex flex-col h-full" v-model="activeTab">
-      <div class="flex items-center justify-between mb-4">
-        <TabsList>
-          <TabsTrigger value="recurring">{{ t('scheduledTask.title') || 'Recurring Tasks' }}</TabsTrigger>
-          <TabsTrigger value="one-time">{{ t('scheduledTask.oneTimeTitle') || 'One-time Tasks' }}</TabsTrigger>
+  <div class="h-full flex flex-col p-6">
+    <Tabs v-model="activeTab" class="w-full flex flex-col h-full">
+      <div class="flex items-center justify-between mb-6">
+        <TabsList class="bg-muted/50">
+          <TabsTrigger value="recurring" class="gap-2">
+            <Repeat class="w-4 h-4" />
+            {{ t('scheduledTask.title') || '循环任务' }}
+          </TabsTrigger>
+          <TabsTrigger value="one-time" class="gap-2">
+            <Clock class="w-4 h-4" />
+            {{ t('scheduledTask.oneTimeTitle') || '一次性任务' }}
+          </TabsTrigger>
         </TabsList>
         <div class="flex items-center justify-end">
-          <Button @click="handleCreate" v-if="activeTab === 'recurring'">
-            <Plus class="mr-2 h-4 w-4" />
+          <Button @click="handleCreate" v-if="activeTab === 'recurring'" class="gap-2">
+            <Plus class="h-4 w-4" />
             {{ t('common.create') }}
           </Button>
-          <Button @click="handleCreateOneTime" v-else>
-            <Plus class="mr-2 h-4 w-4" />
+          <Button @click="handleCreateOneTime" v-else class="gap-2">
+            <Plus class="h-4 w-4" />
             {{ t('common.create') }}
           </Button>
         </div>
       </div>
 
-      <TabsContent v-if="activeTab === 'recurring'" value="recurring" class="flex-1 overflow-hidden flex flex-col h-full">
-        <div class="border rounded-md overflow-auto flex-1">
-          <Table class="min-w-[800px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>{{ t('scheduledTask.name') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.cron') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.agent') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.status') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.lastExecuted') }}</TableHead>
-                <TableHead class="w-[150px]">{{ t('common.actions') }}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="task in tasks" :key="task.id">
-                <TableCell class="font-medium">
-                  <div>{{ task.name }}</div>
-                  <div class="text-xs text-muted-foreground truncate max-w-[150px]">{{ task.description }}</div>
-                </TableCell>
-                <TableCell>
-                  <div class="flex flex-col gap-1">
-                    <Badge variant="outline" class="whitespace-nowrap w-fit">
-                      {{ formatCron(task.cron_expression) }}
-                    </Badge>
-                    <span class="text-xs text-muted-foreground font-mono">{{ task.cron_expression }}</span>
+      <!-- Recurring Tasks - Task Ticket Style -->
+      <TabsContent value="recurring" class="flex-1 overflow-hidden">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto h-full pb-4 content-start">
+          <!-- Task Ticket Card -->
+          <div
+            v-for="task in tasks"
+            :key="task.id"
+            class="group relative bg-card border rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/40 cursor-pointer"
+            :class="{ 'opacity-60': !task.enabled }"
+          >
+            <!-- Ticket Header with perforation effect -->
+            <div class="relative bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-4 py-3 border-b border-dashed">
+              <!-- Task ID badge -->
+              <div class="absolute top-2 right-2">
+                <span class="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                  #{{ String(task.id).slice(-6).toUpperCase() }}
+                </span>
+              </div>
+              
+              <div class="flex items-start gap-3 pr-16">
+                <!-- Checkbox icon for task feel -->
+                <div class="mt-0.5">
+                  <div 
+                    class="w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+                    :class="task.enabled ? 'bg-green-500 border-green-500' : 'border-muted-foreground'"
+                  >
+                    <Check v-if="task.enabled" class="w-3 h-3 text-white" />
                   </div>
-                </TableCell>
-                <TableCell>{{ getAgentName(task.agent_id) }}</TableCell>
-                <TableCell>
-                  <Switch 
-                    :checked="task.enabled" 
-                    @update:checked="(val) => handleToggle(task, val)"
-                  />
-                </TableCell>
-                <TableCell>
-                  {{ formatDate(task.last_executed_at) }}
-                </TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" @click="handleEdit(task)">
-                      <Edit class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" @click="handleHistory(task)">
-                      <History class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" @click="handleDelete(task)">
-                      <Trash2 class="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="tasks.length === 0">
-                <TableCell colspan="6" class="h-24 text-center">
-                  {{ t('common.noData') }}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+                </div>
+                
+                <div class="flex-1 min-w-0">
+                  <h3 class="text-sm font-bold leading-tight truncate" :title="task.name">
+                    {{ task.name }}
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ticket Body -->
+            <div class="px-4 py-3">
+              <p class="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-3">
+                {{ task.description || '暂无描述' }}
+              </p>
+              
+              <!-- Agent assignment line -->
+              <div class="flex items-center gap-2 text-xs border-t border-dashed pt-3">
+                <span class="text-muted-foreground">执行者:</span>
+                <div class="flex items-center gap-1.5">
+                  <Avatar class="h-5 w-5">
+                    <AvatarImage :src="getAgentAvatar(task.agent_id)" />
+                    <AvatarFallback class="text-[10px]">{{ getAgentName(task.agent_id).charAt(0) }}</AvatarFallback>
+                  </Avatar>
+                  <span class="font-medium">{{ getAgentName(task.agent_id) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ticket Footer with schedule info -->
+            <div class="px-4 py-2 bg-muted/30 border-t flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Clock class="w-3.5 h-3.5 text-primary" />
+                <span class="text-xs font-medium">{{ formatCron(task.cron_expression) }}</span>
+              </div>
+              
+              <div class="flex items-center gap-0.5 relative z-10">
+                <Button variant="ghost" size="icon" class="h-7 w-7" @click.stop="handleHistory(task)">
+                  <History class="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" class="h-7 w-7" @click.stop="handleEdit(task)">
+                  <Edit class="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" @click.stop="handleDelete(task)">
+                  <Trash2 class="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            <!-- Last execution timestamp -->
+            <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t">
+              <span v-if="task.last_executed_at">
+                上次执行: {{ formatDateShort(task.last_executed_at) }}
+              </span>
+              <span v-else>从未执行</span>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div v-if="tasks.length === 0" class="col-span-full flex flex-col items-center justify-center py-20 text-muted-foreground">
+            <div class="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+              <Repeat class="w-8 h-8 opacity-50" />
+            </div>
+            <p class="text-lg font-medium">暂无循环任务</p>
+            <p class="text-sm mt-1">点击右上角创建按钮添加任务</p>
+          </div>
         </div>
       </TabsContent>
 
-      <TabsContent v-if="activeTab === 'one-time'" value="one-time" class="flex-1 overflow-hidden flex flex-col h-full">
-        <div class="border rounded-md overflow-auto flex-1">
-          <Table class="min-w-[800px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>{{ t('scheduledTask.name') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.agent') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.status') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.executeAt') }}</TableHead>
-                <TableHead>{{ t('scheduledTask.completedAt') }}</TableHead>
-                <TableHead class="w-[120px]">{{ t('common.actions') }}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="task in oneTimeTasks" :key="task.id">
-                <TableCell class="font-medium">
-                  <div>{{ task.name }}</div>
-                  <div class="text-xs text-muted-foreground truncate max-w-[150px]">{{ task.description }}</div>
-                </TableCell>
-                <TableCell>{{ getAgentName(task.agent_id) }}</TableCell>
-                <TableCell>
-                  <Badge :variant="getStatusVariant(task.status)">{{ task.status }}</Badge>
-                </TableCell>
-                <TableCell>
-                  {{ formatDate(task.execute_at) }}
-                </TableCell>
-                <TableCell>
-                  {{ formatDate(task.completed_at) }}
-                </TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" @click="handleEditOneTime(task)">
-                      <Edit class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" @click="handleDeleteOneTime(task)">
-                      <Trash2 class="h-4 w-4 text-destructive" />
-                    </Button>
+      <!-- One-Time Tasks - Task Ticket Style -->
+      <TabsContent value="one-time" class="flex-1 overflow-hidden">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 overflow-y-auto h-full pb-4 content-start">
+          <!-- Task Ticket Card -->
+          <div
+            v-for="task in oneTimeTasks"
+            :key="task.id"
+            class="group relative bg-card border rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/40"
+          >
+            <!-- Ticket Header with status color -->
+            <div 
+              class="relative px-4 py-3 border-b border-dashed"
+              :class="{
+                'bg-green-500/10': task.status === 'completed',
+                'bg-blue-500/10': task.status === 'pending',
+                'bg-yellow-500/10': task.status === 'processing',
+                'bg-red-500/10': task.status === 'failed'
+              }"
+            >
+              <!-- Task ID badge -->
+              <div class="absolute top-2 right-2">
+                <span class="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                  #{{ String(task.id).slice(-6).toUpperCase() }}
+                </span>
+              </div>
+
+              <div class="flex items-start gap-3 pr-16">
+                <!-- Status checkbox -->
+                <div class="mt-0.5">
+                  <div 
+                    class="w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+                    :class="{
+                      'bg-green-500 border-green-500': task.status === 'completed',
+                      'bg-blue-500 border-blue-500': task.status === 'pending',
+                      'bg-yellow-500 border-yellow-500': task.status === 'processing',
+                      'bg-red-500 border-red-500': task.status === 'failed',
+                      'border-muted-foreground': task.status === 'cancelled'
+                    }"
+                  >
+                    <Check v-if="task.status === 'completed'" class="w-3 h-3 text-white" />
+                    <Clock v-else-if="task.status === 'pending'" class="w-3 h-3 text-white" />
+                    <Loader2 v-else-if="task.status === 'processing'" class="w-3 h-3 text-white animate-spin" />
+                    <X v-else-if="task.status === 'failed'" class="w-3 h-3 text-white" />
                   </div>
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="oneTimeTasks.length === 0">
-                <TableCell colspan="6" class="h-24 text-center">
-                  {{ t('common.noData') }}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+                </div>
+                
+                <div class="flex-1 min-w-0">
+                  <h3 class="text-sm font-bold leading-tight truncate" :title="task.name">
+                    {{ task.name }}
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ticket Body -->
+            <div class="px-4 py-3">
+              <p class="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-3">
+                {{ task.description || '暂无描述' }}
+              </p>
+              
+              <!-- Agent assignment line -->
+              <div class="flex items-center gap-2 text-xs border-t border-dashed pt-3">
+                <span class="text-muted-foreground">执行者:</span>
+                <div class="flex items-center gap-1.5">
+                  <Avatar class="h-5 w-5">
+                    <AvatarImage :src="getAgentAvatar(task.agent_id)" />
+                    <AvatarFallback class="text-[10px]">{{ getAgentName(task.agent_id).charAt(0) }}</AvatarFallback>
+                  </Avatar>
+                  <span class="font-medium">{{ getAgentName(task.agent_id) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ticket Footer with execute time -->
+            <div class="px-4 py-2 bg-muted/30 border-t flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CalendarClock class="w-3.5 h-3.5 text-primary" />
+                <span class="text-xs font-medium">{{ formatDate(task.execute_at) }}</span>
+              </div>
+              
+              <div class="flex items-center gap-0.5 relative z-10">
+                <Button
+                  v-if="task.session_id"
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7"
+                  @click.stop="handleViewSession(task.session_id)"
+                >
+                  <MessageSquare class="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" class="h-7 w-7" @click.stop="handleEditOneTime(task)">
+                  <Edit class="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" @click.stop="handleDeleteOneTime(task)">
+                  <Trash2 class="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+
+            <!-- Completion timestamp -->
+            <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t">
+              <span v-if="task.completed_at">
+                完成时间: {{ formatDateShort(task.completed_at) }}
+              </span>
+              <span v-else-if="task.status === 'pending'">等待执行</span>
+              <span v-else-if="task.status === 'processing'">执行中...</span>
+              <span v-else-if="task.status === 'failed'">执行失败</span>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div v-if="oneTimeTasks.length === 0" class="col-span-full flex flex-col items-center justify-center py-20 text-muted-foreground">
+            <div class="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+              <Clock class="w-8 h-8 opacity-50" />
+            </div>
+            <p class="text-lg font-medium">暂无一次性任务</p>
+            <p class="text-sm mt-1">点击右上角创建按钮添加任务</p>
+          </div>
         </div>
       </TabsContent>
     </Tabs>
 
-    <!-- Create/Edit Dialog -->
+    <!-- Create/Edit Dialog - Two Column Layout -->
     <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent class="sm:max-w-[700px] max-h-[90vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle>{{ isEdit ? t('scheduledTask.editTitle') : t('scheduledTask.createTitle') }}</DialogTitle>
         </DialogHeader>
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.name') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="form.name" :placeholder="t('scheduledTask.namePlaceholder')" />
+        <div class="grid grid-cols-2 gap-6 py-4 overflow-y-auto max-h-[calc(90vh-180px)]">
+          <!-- Left Column - Basic Info -->
+          <div class="space-y-4">
+            <div class="text-sm font-medium text-muted-foreground mb-2">基本信息</div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.name') }} <span class="text-destructive">*</span></Label>
+              <Input v-model="form.name" :placeholder="t('scheduledTask.namePlaceholder')" />
+            </div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.description') }}</Label>
+              <Textarea v-model="form.description" :placeholder="t('scheduledTask.descPlaceholder')" rows="8" class="min-h-[160px] resize-y" />
+            </div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.agent') }} <span class="text-destructive">*</span></Label>
+              <Select v-model="form.agent_id">
+                <SelectTrigger>
+                  <SelectValue :placeholder="t('scheduledTask.agentPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
+                    <div class="flex items-center gap-2">
+                      <img :src="getAgentAvatar(agent.id)" class="w-5 h-5 rounded" />
+                      {{ agent.name }}
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div class="flex items-center gap-3 pt-2">
+              <Label class="text-sm">{{ t('scheduledTask.enabled') }}</Label>
+              <Switch :checked="form.enabled" @update:checked="(val) => form.enabled = val" />
+            </div>
           </div>
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.description') }}</Label>
-            <Textarea v-model="form.description" :placeholder="t('scheduledTask.descPlaceholder')" />
-          </div>
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.agent') }} <span class="text-destructive">*</span></Label>
-            <Select v-model="form.agent_id">
-              <SelectTrigger>
-                <SelectValue :placeholder="t('scheduledTask.agentPlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
-                  {{ agent.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.cron') }} <span class="text-destructive">*</span></Label>
-            <CronEditor v-model="form.cron_expression" />
-          </div>
-          <div class="flex items-center gap-2">
-             <Label>{{ t('scheduledTask.enabled') }}</Label>
-             <Switch :checked="form.enabled" @update:checked="(val) => form.enabled = val" />
+
+          <!-- Right Column - Schedule -->
+          <div class="space-y-4">
+            <div class="text-sm font-medium text-muted-foreground mb-2">执行计划</div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.cron') }} <span class="text-destructive">*</span></Label>
+              <CronEditor v-model="form.cron_expression" />
+            </div>
+            
+            <!-- Preview -->
+            <div class="bg-muted/50 rounded-lg p-4 space-y-2">
+              <div class="text-xs text-muted-foreground">执行时间预览</div>
+              <div class="text-sm font-medium">{{ formatCron(form.cron_expression) }}</div>
+              <div class="text-xs font-mono text-muted-foreground">{{ form.cron_expression }}</div>
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -174,37 +311,59 @@
       </DialogContent>
     </Dialog>
 
-    <!-- One-Time Task Dialog -->
+    <!-- One-Time Task Dialog - Two Column Layout -->
     <Dialog :open="oneTimeDialogOpen" @update:open="oneTimeDialogOpen = $event">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent class="sm:max-w-[700px] max-h-[90vh] overflow-hidden">
         <DialogHeader>
-          <DialogTitle>{{ oneTimeIsEdit ? (t('scheduledTask.editTitle') || 'Edit One-Time Task') : (t('scheduledTask.createOneTime') || 'Create One-Time Task') }}</DialogTitle>
+          <DialogTitle>{{ oneTimeIsEdit ? (t('scheduledTask.editTitle') || '编辑一次性任务') : (t('scheduledTask.createOneTime') || '创建一次性任务') }}</DialogTitle>
         </DialogHeader>
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.name') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="oneTimeForm.name" :placeholder="t('scheduledTask.namePlaceholder')" />
+        <div class="grid grid-cols-2 gap-6 py-4 overflow-y-auto max-h-[calc(90vh-180px)]">
+          <!-- Left Column - Basic Info -->
+          <div class="space-y-4">
+            <div class="text-sm font-medium text-muted-foreground mb-2">基本信息</div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.name') }} <span class="text-destructive">*</span></Label>
+              <Input v-model="oneTimeForm.name" :placeholder="t('scheduledTask.namePlaceholder')" />
+            </div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.description') }}</Label>
+              <Textarea v-model="oneTimeForm.description" :placeholder="t('scheduledTask.descPlaceholder')" rows="8" class="min-h-[160px] resize-y" />
+            </div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.agent') }} <span class="text-destructive">*</span></Label>
+              <Select v-model="oneTimeForm.agent_id">
+                <SelectTrigger>
+                  <SelectValue :placeholder="t('scheduledTask.agentPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
+                    <div class="flex items-center gap-2">
+                      <img :src="getAgentAvatar(agent.id)" class="w-5 h-5 rounded" />
+                      {{ agent.name }}
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.description') }}</Label>
-            <Textarea v-model="oneTimeForm.description" :placeholder="t('scheduledTask.descPlaceholder')" />
-          </div>
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.agent') }} <span class="text-destructive">*</span></Label>
-            <Select v-model="oneTimeForm.agent_id">
-              <SelectTrigger>
-                <SelectValue :placeholder="t('scheduledTask.agentPlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="agent in agents" :key="agent.id" :value="agent.id">
-                  {{ agent.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="grid gap-2">
-            <Label>{{ t('scheduledTask.executeAt') }} <span class="text-destructive">*</span></Label>
-            <Input type="datetime-local" v-model="oneTimeForm.execute_at" :min="minDateTime" />
+
+          <!-- Right Column - Schedule -->
+          <div class="space-y-4">
+            <div class="text-sm font-medium text-muted-foreground mb-2">执行时间</div>
+            
+            <div class="space-y-2">
+              <Label>{{ t('scheduledTask.executeAt') }} <span class="text-destructive">*</span></Label>
+              <Input type="datetime-local" v-model="oneTimeForm.execute_at" :min="minDateTime" class="w-full" />
+            </div>
+            
+            <!-- Preview -->
+            <div class="bg-muted/50 rounded-lg p-4 space-y-2">
+              <div class="text-xs text-muted-foreground">计划执行时间</div>
+              <div class="text-sm font-medium">{{ oneTimeForm.execute_at ? formatDate(oneTimeForm.execute_at) : '请选择时间' }}</div>
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -221,41 +380,35 @@
           <DialogTitle>{{ t('scheduledTask.historyTitle') }}</DialogTitle>
         </DialogHeader>
         <div class="flex-1 overflow-auto py-4">
-           <Table>
-             <TableHeader>
-               <TableRow>
-                 <TableHead>{{ t('scheduledTask.executeAt') }}</TableHead>
-                 <TableHead>{{ t('scheduledTask.status') }}</TableHead>
-                 <TableHead>{{ t('scheduledTask.retryCount') }}</TableHead>
-                 <TableHead>{{ t('scheduledTask.completedAt') }}</TableHead>
-                 <TableHead class="w-[80px]">{{ t('common.actions') }}</TableHead>
-               </TableRow>
-             </TableHeader>
-             <TableBody>
-               <TableRow v-for="item in historyList" :key="item.id">
-                 <TableCell>{{ formatDate(item.execute_at) }}</TableCell>
-                 <TableCell>
-                    <Badge :variant="getStatusVariant(item.status)">{{ item.status }}</Badge>
-                 </TableCell>
-                 <TableCell>{{ item.retry_count }}</TableCell>
-                 <TableCell>{{ formatDate(item.completed_at) }}</TableCell>
-                 <TableCell>
-                    <Button 
-                      v-if="item.session_id" 
-                      variant="ghost" 
-                      size="icon" 
-                      @click="handleViewSession(item.session_id)"
-                      :title="t('scheduledTask.viewSession') || 'View Session'"
-                    >
-                      <MessageSquare class="h-4 w-4" />
-                    </Button>
-                 </TableCell>
-               </TableRow>
-               <TableRow v-if="historyList.length === 0">
-                 <TableCell colspan="4" class="text-center h-24">{{ t('common.noData') }}</TableCell>
-               </TableRow>
-             </TableBody>
-           </Table>
+           <div class="space-y-3">
+             <Card v-for="item in historyList" :key="item.id" class="p-4">
+               <div class="flex items-center justify-between">
+                 <div class="flex items-center gap-4">
+                   <Badge :variant="getStatusVariant(item.status)">{{ item.status }}</Badge>
+                   <span class="text-sm">{{ formatDate(item.execute_at) }}</span>
+                   <span v-if="item.retry_count > 0" class="text-xs text-muted-foreground">
+                     重试 {{ item.retry_count }} 次
+                   </span>
+                 </div>
+                 <Button 
+                   v-if="item.session_id" 
+                   variant="ghost" 
+                   size="sm" 
+                   @click="handleViewSession(item.session_id)"
+                   class="gap-2"
+                 >
+                   <MessageSquare class="h-4 w-4" />
+                   查看会话
+                 </Button>
+               </div>
+               <div v-if="item.completed_at" class="text-xs text-muted-foreground mt-2">
+                 完成时间: {{ formatDate(item.completed_at) }}
+               </div>
+             </Card>
+             <div v-if="historyList.length === 0" class="text-center py-8 text-muted-foreground">
+               暂无执行记录
+             </div>
+           </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -265,7 +418,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
-import { Plus, Edit, Trash2, History, MessageSquare } from 'lucide-vue-next'
+import { Plus, Edit, Trash2, History, MessageSquare, Repeat, Clock, CalendarClock, Check, Loader2, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -282,13 +435,17 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from '@/components/ui/avatar'
 import {
   Dialog,
   DialogContent,
@@ -367,6 +524,10 @@ const getAgentName = (agentId) => {
   return agent ? agent.name : agentId
 }
 
+const getAgentAvatar = (agentId) => {
+  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agentId)}`
+}
+
 const fetchTasks = async () => {
   try {
     const res = await taskAPI.getRecurringTasks()
@@ -393,7 +554,7 @@ const handleCreate = () => {
   form.name = ''
   form.description = ''
   form.agent_id = ''
-  form.cron_expression = '* * * * *'
+  form.cron_expression = '0 9 * * *'
   form.enabled = true
   dialogOpen.value = true
 }
@@ -420,7 +581,7 @@ const submitOneTimeForm = async () => {
 
   const selectedDate = new Date(oneTimeForm.execute_at)
   if (!oneTimeIsEdit.value && selectedDate <= new Date()) {
-    toast.error(t('scheduledTask.futureTimeRequired') || 'Execution time must be in the future')
+    toast.error(t('scheduledTask.futureTimeRequired') || '执行时间必须是未来时间')
     return
   }
 
@@ -494,7 +655,6 @@ const handleToggle = async (task, checked) => {
     toast.success(t('common.success'))
   } catch (error) {
     toast.error(error.message)
-    // Revert visually if failed
     task.enabled = !checked
   }
 }
@@ -538,19 +698,51 @@ const submitForm = async () => {
 
 const getStatusVariant = (status) => {
   switch (status) {
-    case 'completed': return 'default' // or success if available
+    case 'completed': return 'default'
     case 'failed': return 'destructive'
     case 'processing': return 'secondary'
+    case 'pending': return 'outline'
     default: return 'outline'
   }
+}
+
+const getStatusLabel = (status) => {
+  const labels = {
+    'completed': '已完成',
+    'failed': '失败',
+    'processing': '执行中',
+    'pending': '待执行'
+  }
+  return labels[status] || status
 }
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   try {
-    // Compatibility for SQLite timestamps (replace space with T for ISO format)
     const isoStr = typeof dateStr === 'string' ? dateStr.replace(' ', 'T') : dateStr
     return new Date(isoStr).toLocaleString()
+  } catch (e) {
+    return dateStr
+  }
+}
+
+const formatDateShort = (dateStr) => {
+  if (!dateStr) return '-'
+  try {
+    const isoStr = typeof dateStr === 'string' ? dateStr.replace(' ', 'T') : dateStr
+    const date = new Date(isoStr)
+    const now = new Date()
+    const diffMs = now - date
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+    
+    if (diffMins < 1) return '刚刚'
+    if (diffMins < 60) return `${diffMins}分钟前`
+    if (diffHours < 24) return `${diffHours}小时前`
+    if (diffDays < 7) return `${diffDays}天前`
+    
+    return date.toLocaleDateString()
   } catch (e) {
     return dateStr
   }
