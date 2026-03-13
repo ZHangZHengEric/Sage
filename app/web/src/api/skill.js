@@ -8,10 +8,21 @@ export const skillAPI = {
   /**
    * 获取所有技能列表
    * @param {Object} params - 查询参数
+   * @param {string} params.dimension - 可选，按维度过滤 (system, user, agent, all)
+   * @param {string} params.agent_id - 可选，过滤特定Agent的技能
    * @returns {Promise<Array>}
    */
   getSkills: async (params = {}) => {
     return await baseAPI.get('/api/skills', params)
+  },
+
+  /**
+   * 获取Agent可用的技能列表（带维度来源标签）
+   * @param {string} agentId - Agent ID
+   * @returns {Promise<Array>} - 技能列表，每个技能包含name, description, source_dimension
+   */
+  getAgentAvailableSkills: async (agentId) => {
+    return await baseAPI.get('/api/skills/agent-available', { agent_id: agentId })
   },
 
   /**

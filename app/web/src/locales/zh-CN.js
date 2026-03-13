@@ -418,7 +418,7 @@ export default {
 
   // 技能库
   'skills.title': '技能库',
-  'skills.subtitle': '管理系统、用户和 Agent 技能',
+  'skills.subtitle': '管理系统、用户技能',
   'skills.groups': '技能分组',
   'skills.all': '全部',
   'skills.allSkills': '所有技能',
@@ -428,7 +428,7 @@ export default {
   'skills.mine': '我的',
   'skills.system': '系统',
   'skills.user': '用户',
-  'skills.agent': 'Agent工作空间',
+  'skills.agent': 'Agent',
   'skills.searchPlaceholder': '搜索技能名称或描述...',
   'skills.search': '搜索技能...',
   'skills.import': '导入技能',
