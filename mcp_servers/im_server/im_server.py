@@ -144,11 +144,13 @@ async def send_message_through_im(
         provider_instance = get_im_provider(provider_name, config)
         logger.info("[IM Tool] Provider instance created, sending message...")
 
+        # WeChat Work aibot_send_msg only supports markdown, others support text
+        msg_type = "markdown" if provider_name == "wechat_work" else "text"
         result = await provider_instance.send_message(
             content=content,
             chat_id=target_chat_id,
             user_id=target_user_id,
-            msg_type="text"
+            msg_type=msg_type
         )
 
         logger.info(f"[IM Tool] send_message result: {result}")
@@ -325,6 +327,9 @@ async def handle_incoming_message(
                                 send_params["sender_staff_id"] = sender_staff_id
                             if session_webhook_expired_time:
                                 send_params["session_webhook_expired_time"] = session_webhook_expired_time
+                        elif provider == "wechat_work":
+                            # WeChat Work aibot_send_msg only supports markdown/template_card
+                            send_params["msg_type"] = "markdown"
                         else:
                             # Other providers use text by default
                             send_params["msg_type"] = "text"
