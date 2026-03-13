@@ -98,14 +98,11 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-# -------------------------
 # 复制代码
-# -------------------------
 COPY . .
 
-# -------------------------
-# 复制系统技能目录
-# -------------------------
-COPY app/skills /app/skills
+# 复制 entrypoint 脚本
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-ENTRYPOINT ["python", "-m", "app.server.main"]
+ENTRYPOINT ["/entrypoint.sh"]

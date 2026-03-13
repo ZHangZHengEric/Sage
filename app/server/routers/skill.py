@@ -27,17 +27,49 @@ class SkillUpdateRequest(BaseModel):
 
 
 @skill_router.get("")
-async def get_skills(http_request: Request, agent_id: Optional[str] = None):
+async def get_skills(
+    http_request: Request,
+    agent_id: Optional[str] = None,
+    dimension: Optional[str] = None
+):
     """
     获取可用技能列表
+    
+    Args:
+        agent_id: 可选，过滤特定Agent的技能
+        dimension: 可选，按维度过滤 (system, user, agent)
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
 
-    skills = await skill_service.list_skills(user_id, role, agent_id)
+    skills = await skill_service.list_skills(user_id, role, agent_id, dimension)
     return await Response.succ(
         message="获取技能列表成功", data={"skills": skills}
+    )
+
+
+@skill_router.get("/agent-available")
+async def get_agent_available_skills(
+    http_request: Request,
+    agent_id: str
+):
+    """
+    获取Agent可用的技能列表（带维度来源标签）
+    
+    根据skill name去重，优先级：系统 < 用户 < Agent
+    每个技能会标注其来源维度 (system, user, agent)
+    
+    Args:
+        agent_id: Agent ID（必填）
+    """
+    claims = getattr(http_request.state, "user_claims", {}) or {}
+    user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
+
+    skills = await skill_service.get_agent_available_skills(agent_id, user_id, role)
+    return await Response.succ(
+        message="获取Agent可用技能列表成功", data={"skills": skills}
     )
 
 
