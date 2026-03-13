@@ -107,14 +107,13 @@ def validate_and_prepare_request(request: ChatRequest | StreamRequest, http_requ
     """验证并准备请求参数"""
     if not get_chat_client():
         raise SageHTTPException(
-            status_code=503,
             detail="模型客户端未配置或不可用",
             error_detail="Model client is not configured or unavailable",
         )
 
     # 验证请求参数
     if not request.messages or len(request.messages) == 0:
-        raise SageHTTPException(status_code=500, detail="消息列表不能为空")
+        raise SageHTTPException(detail="消息列表不能为空")
 
     # 注入当前用户ID（如果未指定）
     claims = getattr(http_request.state, "user_claims", {}) or {}

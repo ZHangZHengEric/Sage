@@ -26,6 +26,7 @@ async def initialize_db_connection(cfg: StartupConfig):
         db_client = await init_db_client(cfg)
         if db_client is not None:
             logger.info(f"数据库客户端已初始化 ({cfg.db_type})")
+            await ensure_system_init(cfg)
     except Exception as e:
         logger.error(f"数据库客户端初始化失败: {e}")
 
@@ -93,12 +94,25 @@ async def close_tool_manager():
     set_tool_manager(None)
 
 
-async def initialize_skill_manager():
-    """初始化技能管理器"""
+async def initialize_skill_manager(cfg: StartupConfig):
+    """初始化技能管理器
+
+    技能目录结构:
+    - skills/ - 系统技能
+    - users/{user_id}/skills/ - 用户技能
+    - agents/{user_id}/{agent_id}/skills/ - Agent 技能
+    """
     try:
         skill_manager_instance = SkillManager.get_instance()
-        # 系统系统目录下的skills文件夹
-        skill_manager_instance.add_skill_dir("app/skills")
+
+        # 1. 注册系统技能目录 (skills/)
+        if os.path.exists(cfg.skill_dir):
+            skill_manager_instance.add_skill_dir(cfg.skill_dir)
+            logger.info(f"系统技能目录已注册: {cfg.skill_dir}")
+
+        # 2. 用户技能对话时，根据 user_id 注册用户技能目录 (users/{user_id}/skills/)
+        # 3. Agent 技能对话时，根据 agent_id 注册 Agent 技能目录 (agents/{user_id}/{agent_id}/skills/)
+        
         return skill_manager_instance
     except Exception as e:
         logger.error(f"技能管理器初始化失败: {e}")

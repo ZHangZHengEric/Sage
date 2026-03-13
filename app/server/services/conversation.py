@@ -38,7 +38,6 @@ async def get_session_status(session_id: str) -> Dict[str, Any]:
     session = session_manager.get(session_id)
     if not session:
         raise SageHTTPException(
-            status_code=500,
             detail=f"会话 {session_id} 已完成或者不存在",
             error_detail=f"Session '{session_id}' completed or not found",
         )
@@ -75,7 +74,6 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
     conversation = await dao.get_by_session_id(session_id)
     if not conversation:
         raise SageHTTPException(
-            status_code=500,
             detail=f"会话 {session_id} 不存在",
             error_detail=f"Conversation '{session_id}' not found",
         )
@@ -84,7 +82,6 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
         pass
     elif user_id and conversation.user_id != user_id:
         raise SageHTTPException(
-            status_code=403,
             detail="无权访问该会话",
             error_detail=f"User {user_id} does not own session {session_id}",
         )
@@ -142,14 +139,12 @@ async def delete_conversation(conversation_id: str, user_id: Optional[str] = Non
     conversation = await dao.get_by_session_id(conversation_id)
     if not conversation:
         raise SageHTTPException(
-            status_code=500,
             detail=f"会话 {conversation_id} 不存在",
             error_detail=f"Conversation '{conversation_id}' not found",
         )
 
     if user_id and conversation.user_id != user_id:
         raise SageHTTPException(
-            status_code=403,
             detail="无权删除该会话",
             error_detail=f"User {user_id} does not own session {conversation_id}",
         )
@@ -157,7 +152,6 @@ async def delete_conversation(conversation_id: str, user_id: Optional[str] = Non
     success = await dao.delete_conversation(conversation_id)
     if not success:
         raise SageHTTPException(
-            status_code=500,
             detail=f"删除会话 {conversation_id} 失败",
             error_detail=f"Failed to delete conversation '{conversation_id}'",
         )
@@ -173,13 +167,11 @@ async def update_conversation_title(session_id: str, title: str, user_id: Option
         conversation = await dao.get_by_session_id(session_id)
         if not conversation:
             raise SageHTTPException(
-                status_code=500,
                 detail=f"会话 {session_id} 不存在",
                 error_detail=f"Conversation '{session_id}' not found",
             )
         if conversation.user_id != user_id:
             raise SageHTTPException(
-                status_code=403,
                 detail="无权修改该会话",
                 error_detail=f"User {user_id} does not own session {session_id}",
             )
@@ -187,7 +179,6 @@ async def update_conversation_title(session_id: str, title: str, user_id: Option
     success = await dao.update_title(session_id, title)
     if not success:
         raise SageHTTPException(
-            status_code=500,
             detail=f"会话 {session_id} 不存在",
             error_detail=f"Conversation '{session_id}' not found",
         )
