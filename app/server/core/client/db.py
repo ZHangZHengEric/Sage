@@ -38,7 +38,6 @@ def db_retry(max_retries: int = 3, delay: float = 1.0):
             # 重试耗尽，抛出 SageHTTPException
             logger.error(f"数据库操作最终失败: {last_err}")
             raise SageHTTPException(
-                status_code=500,
                 detail="数据库操作失败",
                 error_detail=str(last_err)
             )
@@ -82,7 +81,6 @@ class SessionManager:
             logger.debug(f"使用MySQL数据库: {self.mysql_config.get('host')}:{self.mysql_config.get('port')} / {self.mysql_config.get('database')}")
         else:
             raise SageHTTPException(
-                status_code=500,
                 detail="不支持的数据库类型",
                 error_detail=f"db_type={self.db_type}",
             )
@@ -209,7 +207,6 @@ class SessionManager:
                 logger.error(f"提示: {hint}")
 
             raise SageHTTPException(
-                status_code=500,
                 detail="数据库初始化失败",
                 error_detail=f"{err_msg} | {hint}",
             )
@@ -232,7 +229,6 @@ class SessionManager:
         """
         if not self._SessionLocal or not self._engine:
             raise SageHTTPException(
-                status_code=500,
                 detail="数据库未初始化",
                 error_detail="SQLAlchemy 引擎或会话工厂不存在",
             )
@@ -274,7 +270,6 @@ class SessionManager:
 
             logger.error(f"数据库操作失败: {e}")
             raise SageHTTPException(
-                status_code=500,
                 detail="数据库操作失败",
                 error_detail=str(e),
             )
@@ -333,7 +328,6 @@ async def get_global_db() -> SessionManager:
     global DB_MANAGER
     if DB_MANAGER is None:
         raise SageHTTPException(
-            status_code=500,
             detail="全局数据库管理器未设置",
             error_detail="请在项目启动时初始化数据库客户端",
         )

@@ -5,7 +5,6 @@ from .file import File, FileDao
 from .kdb import Kdb, KdbDao
 from .kdb_doc import KdbDoc, KdbDocDao, KdbDocStatus
 from .mcp_server import MCPServer, MCPServerDao
-from .skill import SkillOwnership, SkillOwnershipDao
 from .user import User, UserDao
 from .system import SystemInfo, SystemInfoDao, Version, VersionDao, VersionArtifact
 from .llm_provider import LLMProvider, LLMProviderDao
@@ -30,8 +29,6 @@ __all__ = [
     "FileDao",
     "SystemInfo",
     "SystemInfoDao",
-    "SkillOwnership",
-    "SkillOwnershipDao",
     "LLMProvider",
     "LLMProviderDao",
     "Version",
