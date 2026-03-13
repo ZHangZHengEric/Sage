@@ -167,6 +167,7 @@
           :workspace-files="workspaceFiles"
           @download-file="downloadFile"
           @delete-file="deleteFile"
+          @quote-path="handleQuotePath"
           @close="showWorkspace = false"
         />
 
@@ -296,6 +297,21 @@ const handleClickAbilityButton = () => {
 const handleSendMessageWithAbilityClear = (content, options) => {
   handleSendMessage(content, options)
   abilityPresetInput.value = ''
+}
+
+// 处理引用路径 - 将路径添加到输入框
+const handleQuotePath = (path) => {
+  const currentValue = abilityPresetInput.value || ''
+  // 使用 {workspace_root}/ 前缀，让 AI 知道这是工作空间路径
+  const pathToInsert = `\`{workspace_root}/${path}\``
+
+  if (currentValue) {
+    // 如果输入框已有内容，在末尾添加（前面加空格）
+    abilityPresetInput.value = currentValue + ' ' + pathToInsert
+  } else {
+    // 如果输入框为空，直接添加
+    abilityPresetInput.value = pathToInsert
+  }
 }
 
 // 计算是否有面板打开
