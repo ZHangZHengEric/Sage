@@ -19,6 +19,8 @@ class StartupConfig:
     logs_dir: str = "logs"
     session_dir: str = "sessions"
     agents_dir: str = "agents"
+    skill_dir: str = "skills"  # 技能根目录（系统技能）
+    user_dir: str = "users"  # 用户目录根路径
     # DB
     db_type: str = "file"  # file | memory | mysql
     mysql_host: str = "127.0.0.1"
@@ -98,6 +100,7 @@ class ENV:
     SESSION_DIR = "SAGE_SESSION_DIR"
     LOGS_DIR = "SAGE_LOGS_DIR_PATH"
     AGENTS_DIR = "SAGE_AGENTS_DIR"
+    USER_DIR = "SAGE_USER_DIR"
     # 数据库
     DB_TYPE = "SAGE_DB_TYPE"
 
@@ -108,6 +111,9 @@ class ENV:
     S3_SECURE = "SAGE_S3_SECURE"
     S3_BUCKET_NAME = "SAGE_S3_BUCKET_NAME"
     S3_PUBLIC_BASE_URL = "SAGE_S3_PUBLIC_BASE_URL"
+
+    # Skill Workspace
+    SKILL_DIR = "SAGE_SKILL_WORKSPACE"
 
     # Knowledge Base MCP 接口
     KB_MCP_URL = "SAGE_KB_MCP_URL"
@@ -173,6 +179,8 @@ def build_startup_config() -> StartupConfig:
         logs_dir=env_str(ENV.LOGS_DIR, StartupConfig.logs_dir),
         session_dir=env_str(ENV.SESSION_DIR, StartupConfig.session_dir),
         agents_dir=env_str(ENV.AGENTS_DIR, StartupConfig.agents_dir),
+        skill_dir=env_str(ENV.SKILL_DIR, StartupConfig.skill_dir),
+        user_dir=env_str(ENV.USER_DIR, StartupConfig.user_dir),
 
         db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type),
         mysql_host=env_str(ENV.MYSQL_HOST, StartupConfig.mysql_host),
@@ -298,6 +306,12 @@ def build_startup_config() -> StartupConfig:
     if cfg.agents_dir:
         cfg.agents_dir = os.path.abspath(cfg.agents_dir)
         os.makedirs(cfg.agents_dir, exist_ok=True)
+    if cfg.skill_dir:
+        cfg.skill_dir = os.path.abspath(cfg.skill_dir)
+        os.makedirs(cfg.skill_dir, exist_ok=True)
+    if cfg.user_dir:
+        cfg.user_dir = os.path.abspath(cfg.user_dir)
+        os.makedirs(cfg.user_dir, exist_ok=True)
 
     return cfg
 
