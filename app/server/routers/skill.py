@@ -110,15 +110,23 @@ async def import_skill_from_url(request: UrlImportRequest, http_request: Request
 
 
 @skill_router.delete("")
-async def delete_skill(name: str, http_request: Request):
+async def delete_skill(
+    name: str,
+    http_request: Request,
+    agent_id: Optional[str] = None
+):
     """
     删除技能
+    
+    Args:
+        name: 技能名称
+        agent_id: 可选，如果提供则删除指定Agent工作空间下的skill
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
     role = claims.get("role") or "user"
     # name is query param
-    await skill_service.delete_skill(name, user_id, role)
+    await skill_service.delete_skill(name, user_id, role, agent_id)
     return await Response.succ(message=f"技能 '{name}' 删除成功")
 
 
