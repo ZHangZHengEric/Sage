@@ -39,8 +39,8 @@ class WeChatWorkWebSocketClient:
     HEARTBEAT_TIMEOUT = 60   # 心跳超时时间 (秒)
     
     # 重连配置
-    RECONNECT_BASE_DELAY = 5   # 基础重连延迟 (秒)
-    RECONNECT_MAX_DELAY = 60   # 最大重连延迟 (秒)
+    RECONNECT_BASE_DELAY = 0.5  # 基础重连延迟 (秒)，500ms，用于快速恢复被踢掉的连接
+    RECONNECT_MAX_DELAY = 30   # 最大重连延迟 (秒)
     RECONNECT_MAX_RETRIES = 10 # 最大重连次数
 
     def __init__(
@@ -154,13 +154,10 @@ class WeChatWorkWebSocketClient:
                     self.running = False
                     break
 
-                # 指数退避计算延迟
-                delay = min(
-                    self.RECONNECT_BASE_DELAY * (2 ** (self._reconnect_count - 1)),
-                    self.RECONNECT_MAX_DELAY
-                )
-                logger.info(f"[WeChatWork] 将在 {delay} 秒后重连 (第 {self._reconnect_count}/{self.RECONNECT_MAX_RETRIES} 次)...")
-                time.sleep(delay)
+                # 固定 500ms 延迟后重连 (避免与临时连接冲突)
+                delay_ms = int(self.RECONNECT_BASE_DELAY * 1000)
+                logger.info(f"[WeChatWork] 将在 {delay_ms}ms 后重连 (第 {self._reconnect_count}/{self.RECONNECT_MAX_RETRIES} 次)...")
+                time.sleep(self.RECONNECT_BASE_DELAY)
 
     async def _connect_and_run(self):
         """建立连接并运行消息循环"""
@@ -398,8 +395,10 @@ class WeChatWorkWebSocketClient:
 
             if event_type == "disconnected_event":
                 # 连接被断开事件 (有新连接建立时触发)
-                logger.warning("[WeChatWork] 收到断开事件 (其他地方建立了新连接)")
-                self.running = False  # 停止当前连接
+                logger.warning("[WeChatWork] 收到断开事件, 主动关闭连接触发重连")
+                # 主动关闭连接，让 async for 抛出 ConnectionClosed，进入重连逻辑
+                if self.websocket:
+                    await self.websocket.close()
                 return
             elif event_type == "enter_chat":
                 # 用户进入会话事件
