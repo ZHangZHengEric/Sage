@@ -30,6 +30,13 @@ class DingTalkConfig(BaseModel):
     client_secret: Optional[str] = None
 
 
+class WeChatWorkConfig(BaseModel):
+    """WeChat Work (企业微信) configuration for long connection mode."""
+    enabled: bool = False
+    bot_id: Optional[str] = None  # 智能机器人 BotID
+    secret: Optional[str] = None  # 长连接专用 Secret
+
+
 class IMessageConfig(BaseModel):
     """iMessage configuration."""
     enabled: bool = False
@@ -46,6 +53,7 @@ class IMConfig(BaseModel):
     """Complete IM configuration."""
     feishu: FeishuConfig = FeishuConfig()
     dingtalk: DingTalkConfig = DingTalkConfig()
+    wechat_work: WeChatWorkConfig = WeChatWorkConfig()  # 企业微信配置
     imessage: IMessageConfig = IMessageConfig()
     service: IMServiceStatus = IMServiceStatus()
 
@@ -70,6 +78,7 @@ async def get_im_config():
         result = {
             "feishu": all_configs.get("feishu", {}),
             "dingtalk": all_configs.get("dingtalk", {}),
+            "wechat_work": all_configs.get("wechat_work", {}),
             "imessage": all_configs.get("imessage", {}),
             "service": {"running": False}  # TODO: get actual service status
         }
@@ -77,6 +86,7 @@ async def get_im_config():
         logger.info("[IM] Returning config from database:")
         logger.info(f"[IM]   feishu: {result['feishu']}")
         logger.info(f"[IM]   dingtalk: {result['dingtalk']}")
+        logger.info(f"[IM]   wechat_work: {result['wechat_work']}")
         logger.info(f"[IM]   imessage: {result['imessage']}")
         logger.info("[IM] ========== END GET /api/im/config ==========")
         
@@ -103,6 +113,7 @@ async def save_im_config(config: IMConfig):
         providers = [
             ("feishu", config.feishu.dict()),
             ("dingtalk", config.dingtalk.dict()),
+            ("wechat_work", config.wechat_work.dict()),
             ("imessage", config.imessage.dict()),
         ]
 
@@ -190,6 +201,7 @@ async def get_im_service_status():
         providers_status = {
             "feishu": {"enabled": False, "connected": False, "status": "inactive"},
             "dingtalk": {"enabled": False, "connected": False, "status": "inactive"},
+            "wechat_work": {"enabled": False, "connected": False, "status": "inactive"},
             "imessage": {"enabled": False, "connected": False, "status": "inactive"},
         }
         
@@ -222,6 +234,7 @@ async def get_im_service_status():
                 "providers": {
                     "feishu": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
                     "dingtalk": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
+                    "wechat_work": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
                     "imessage": {"enabled": False, "connected": False, "status": "error", "error": str(e)},
                 }
             },

@@ -875,6 +875,20 @@ export default {
   'im.dingtalk.step2': '2. 在"机器人"中开启机器人功能',
   'im.dingtalk.step3': '3. 获取 Client ID 和 Client Secret',
 
+  // WeChat Work (企业微信)
+  'im.wechatWork.name': '企业微信',
+  'im.wechatWork.title': '企业微信配置',
+  'im.wechatWork.description': '通过企业微信智能机器人与用户进行对话（WebSocket长连接模式）',
+  'im.wechatWork.enableDesc': '启用后，可以通过企业微信机器人与用户对话',
+  'im.wechatWork.botId': 'Bot ID',
+  'im.wechatWork.botIdPlaceholder': '请输入智能机器人的 Bot ID',
+  'im.wechatWork.secret': 'Secret',
+  'im.wechatWork.secretPlaceholder': '请输入长连接专用的 Secret',
+  'im.wechatWork.setupGuide': '配置步骤',
+  'im.wechatWork.step1': '1. 在企业微信管理后台创建智能机器人',
+  'im.wechatWork.step2': '2. 开启"API模式"并选择"长连接"方式',
+  'im.wechatWork.step3': '3. 复制 Bot ID 和 Secret 到上方输入框',
+
   // iMessage
   'im.imessage.name': 'iMessage',
   'im.imessage.title': 'iMessage 配置',
@@ -887,7 +901,7 @@ export default {
   'im.imessage.monitoredSendersPlaceholder': '每行输入一个手机号或邮箱地址\n例如：\n+86138xxxxxxxx\n18910982928\nuser@icloud.com',
   'im.imessage.monitoredSendersHelp': '必须配置至少一个发送者，只有这些发送者的消息会被处理',
   'im.imessage.macosOnly': 'macOS 专属',
-  'im.imessage.macosOnlyDesc': 'iMessage 功能仅在 macOS 系统上可用。需要授予终端访问 Messages 数据库的权限。',
+  'im.imessage.macosOnlyDesc': 'iMessage 功能仅在 macOS 系统上可用。需要授予终端访问 Messages 数据库的权限',
 
   // 引导
   'tour.skip': '跳过',
