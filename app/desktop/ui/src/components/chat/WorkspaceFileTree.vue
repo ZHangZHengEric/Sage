@@ -21,9 +21,20 @@
       </div>
 
       <div class="flex items-center gap-1 ml-auto">
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <!-- Quote Path Button -->
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+          @click.stop="$emit('quote', item)"
+          :title="item.is_directory ? '引用文件夹路径' : '引用文件路径'"
+        >
+          <Quote class="w-3.5 h-3.5" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
           class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
           @click.stop="$emit('download', item)"
           :title="item.is_directory ? 'Download Folder' : 'Download File'"
@@ -31,9 +42,9 @@
           <Download class="w-3.5 h-3.5" />
         </Button>
 
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
           @click.stop="$emit('delete', item)"
           :title="item.is_directory ? 'Delete Folder' : 'Delete File'"
@@ -44,13 +55,14 @@
     </div>
 
     <div v-if="item.is_directory && isExpanded">
-      <WorkspaceFileTree 
-        v-for="child in item.children" 
-        :key="child.path" 
-        :item="child" 
+      <WorkspaceFileTree
+        v-for="child in item.children"
+        :key="child.path"
+        :item="child"
         :level="level + 1"
         @download="$emit('download', $event)"
         @delete="$emit('delete', $event)"
+        @quote="$emit('quote', $event)"
       />
     </div>
   </div>
@@ -58,7 +70,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { File, Folder, ChevronRight, ChevronDown, Download, FileJson, FileCode, FileText, Image, Trash2 } from 'lucide-vue-next'
+import { File, Folder, ChevronRight, ChevronDown, Download, FileJson, FileCode, FileText, Image, Trash2, Quote } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
 defineOptions({
@@ -76,7 +88,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['download', 'delete'])
+defineEmits(['download', 'delete', 'quote'])
 
 const isExpanded = ref(false)
 

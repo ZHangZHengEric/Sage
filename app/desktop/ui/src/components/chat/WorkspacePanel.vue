@@ -12,12 +12,13 @@
     <div class="h-full overflow-y-auto p-4 space-y-4">
       <div class="space-y-1">
         <div v-if="hasValidFiles" class="flex flex-col gap-1">
-          <WorkspaceFileTree 
-            v-for="node in fileTree" 
-            :key="node.path" 
-            :item="node" 
+          <WorkspaceFileTree
+            v-for="node in fileTree"
+            :key="node.path"
+            :item="node"
             @download="handleDownload"
             @delete="handleDelete"
+            @quote="handleQuote"
           />
         </div>
         <div v-else class="flex flex-col items-center justify-center py-8 text-muted-foreground">
@@ -42,7 +43,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'downloadFile', 'deleteFile'])
+const emit = defineEmits(['close', 'downloadFile', 'deleteFile', 'quotePath'])
 
 const { t } = useLanguage()
 
@@ -102,5 +103,9 @@ const handleDownload = (item) => {
 
 const handleDelete = (item) => {
   emit('deleteFile', item)
+}
+
+const handleQuote = (item) => {
+  emit('quotePath', item.path)
 }
 </script>
