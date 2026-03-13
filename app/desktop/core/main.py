@@ -123,6 +123,7 @@ def check_single_instance():
     """Check if another instance is already running using PID file."""
     import atexit
     import fcntl
+    import signal
     
     pid_file = Path("/tmp/sage_desktop.pid")
     
@@ -134,10 +135,67 @@ def check_single_instance():
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (IOError, OSError):
-            # Another instance is running
-            print("Error: Another Sage Desktop instance is already running.", flush=True)
-            print(f"If you're sure no other instance is running, delete: {pid_file}", flush=True)
-            sys.exit(1)
+            # Lock failed, check if the process is actually running
+            try:
+                # Read the PID from file
+                os.lseek(fd, 0, os.SEEK_SET)
+                pid_data = os.read(fd, 1024).decode().strip()
+                if pid_data:
+                    old_pid = int(pid_data)
+                    # Check if process exists
+                    try:
+                        os.kill(old_pid, 0)
+                        # Process exists, kill it
+                        print(f"Warning: Another Sage Desktop instance is running (PID: {old_pid}), terminating it...", flush=True)
+                        try:
+                            # Try graceful termination first
+                            os.kill(old_pid, signal.SIGTERM)
+                            # Wait a bit for the process to terminate
+                            import time
+                            time.sleep(2)
+                            # Check if it's still running
+                            try:
+                                os.kill(old_pid, 0)
+                                # Still running, force kill
+                                print(f"Force killing process {old_pid}...", flush=True)
+                                os.kill(old_pid, signal.SIGKILL)
+                                time.sleep(1)
+                            except (OSError, ProcessLookupError):
+                                # Process terminated successfully
+                                pass
+                            print(f"Old process {old_pid} terminated.", flush=True)
+                        except (OSError, ProcessLookupError) as e:
+                            print(f"Failed to terminate old process: {e}", flush=True)
+                        
+                        # Clean up old PID file and retry
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                        os.close(fd)
+                        pid_file.unlink(missing_ok=True)
+                        return check_single_instance()
+                    except (OSError, ProcessLookupError):
+                        # Process doesn't exist, stale PID file
+                        print(f"Warning: Stale PID file found (PID {old_pid} not running), removing...", flush=True)
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                        os.close(fd)
+                        pid_file.unlink(missing_ok=True)
+                        # Retry
+                        return check_single_instance()
+                else:
+                    # Empty PID file, remove it
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                    pid_file.unlink(missing_ok=True)
+                    return check_single_instance()
+            except (ValueError, OSError) as e:
+                # Invalid PID or other error, remove stale file
+                print(f"Warning: Invalid PID file, removing: {e}", flush=True)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                except:
+                    pass
+                pid_file.unlink(missing_ok=True)
+                return check_single_instance()
         
         # Write current PID
         os.ftruncate(fd, 0)
