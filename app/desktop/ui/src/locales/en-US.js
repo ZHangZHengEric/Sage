@@ -873,6 +873,20 @@ export default {
   'im.dingtalk.step2': '2. Enable bot feature in "Robot" settings',
   'im.dingtalk.step3': '3. Get Client ID and Client Secret',
 
+  // WeChat Work
+  'im.wechatWork.name': 'WeChat Work',
+  'im.wechatWork.title': 'WeChat Work Configuration',
+  'im.wechatWork.description': 'Chat with users via WeChat Work bot (WebSocket long connection)',
+  'im.wechatWork.enableDesc': 'Enable to chat with users via WeChat Work bot',
+  'im.wechatWork.botId': 'Bot ID',
+  'im.wechatWork.botIdPlaceholder': 'Enter the Bot ID of your intelligent robot',
+  'im.wechatWork.secret': 'Secret',
+  'im.wechatWork.secretPlaceholder': 'Enter the long connection Secret',
+  'im.wechatWork.setupGuide': 'Setup Guide',
+  'im.wechatWork.step1': '1. Create an intelligent robot in WeChat Work admin console',
+  'im.wechatWork.step2': '2. Enable "API Mode" and select "Long Connection"',
+  'im.wechatWork.step3': '3. Copy Bot ID and Secret to the fields above',
+
   // iMessage
   'im.imessage.name': 'iMessage',
   'im.imessage.title': 'iMessage Configuration',
@@ -885,7 +899,7 @@ export default {
   'im.imessage.monitoredSendersPlaceholder': 'Enter phone numbers or emails, one per line\nExamples:\n+86138xxxxxxxx\n18910982928\nuser@icloud.com',
   'im.imessage.monitoredSendersHelp': 'At least one sender must be configured. Only messages from these senders will be processed',
   'im.imessage.macosOnly': 'macOS Only',
-  'im.imessage.macosOnlyDesc': 'iMessage is only available on macOS. Requires granting Terminal access to Messages database.',
+  'im.imessage.macosOnlyDesc': 'iMessage is only available on macOS. Requires granting Terminal access to Messages database',
 
   // Tour
   'tour.skip': 'Skip',
