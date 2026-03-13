@@ -88,17 +88,18 @@ async def send_message_through_im(
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
 ) -> str:
-    """向 IM 用户发送消息。支持飞书、钉钉、iMessage。
+    """向 IM 用户发送消息。支持飞书、钉钉、企业微信、iMessage。
 
     参数:
         content: 消息内容
-        provider: 平台名称 - feishu(飞书)、dingtalk(钉钉)、imessage
-        user_id: 用户ID（私聊必填）- 飞书:user_id, 钉钉:user_id, iMessage:手机号/邮箱
+        provider: 平台名称 - feishu(飞书)、dingtalk(钉钉)、wechat_work(企业微信)、imessage
+        user_id: 用户ID（私聊必填）- 飞书:user_id, 钉钉:user_id, 企业微信:user_id, iMessage:手机号/邮箱
         chat_id: 群聊ID（群聊必填）
 
     示例:
         send_message_through_im(provider="feishu", user_id="ou_xxx", content="你好")
         send_message_through_im(provider="dingtalk", chat_id="chat_xxx", content="群消息")
+        send_message_through_im(provider="wechat_work", user_id="userid_xxx", content="企业微信消息")
         send_message_through_im(provider="imessage", user_id="+86xxx", content="iMessage")
     """
     logger.info(f"[IM Tool] send_message_through_im called: provider={provider}, user_id={user_id}, chat_id={chat_id}, content_length={len(content) if content else 0}")

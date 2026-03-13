@@ -25,6 +25,18 @@ PROVIDER_MAP: Dict[str, type] = {
     "wechat_work": WeChatWorkProvider,
 }
 
+# 添加 provider 类型到名称的映射
+PROVIDER_TYPE_MAP: Dict[str, str] = {
+    "feishu": "飞书",
+    "dingtalk": "钉钉",
+    "wechat_work": "企业微信",
+}
+
+
+def get_provider_display_name(provider_type: str) -> str:
+    """获取 provider 的显示名称"""
+    return PROVIDER_TYPE_MAP.get(provider_type.lower(), provider_type)
+
 # Add iMessage if available
 if IMESSAGE_AVAILABLE:
     PROVIDER_MAP["imessage"] = iMessageProvider
