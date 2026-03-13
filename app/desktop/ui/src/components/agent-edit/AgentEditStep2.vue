@@ -49,14 +49,20 @@
                         <div v-for="tool in displayedTools" :key="tool.name" class="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
                             <Checkbox 
                                 :id="`tool-${tool.name}`" 
-                                :checked="store.formData.availableTools.includes(tool.name)" 
-                                @update:checked="() => store.toggleTool(tool.name)" 
+                                :checked="isRequiredTool(tool.name) || store.formData.availableTools.includes(tool.name)" 
+                                :disabled="isRequiredTool(tool.name)"
+                                @update:checked="() => !isRequiredTool(tool.name) && store.toggleTool(tool.name)" 
                                 class="mt-1"
                             />
                             <div class="grid gap-1.5 leading-none flex-1">
-                                <label :for="`tool-${tool.name}`" class="text-sm font-medium leading-none cursor-pointer">
-                                    {{ tool.name }}
-                                </label>
+                                <div class="flex items-center gap-2">
+                                    <label :for="`tool-${tool.name}`" class="text-sm font-medium leading-none cursor-pointer" :class="{ 'opacity-50': isRequiredTool(tool.name) }">
+                                        {{ tool.name }}
+                                    </label>
+                                    <Badge v-if="isRequiredTool(tool.name)" variant="secondary" class="text-[10px] px-1.5 py-0">
+                                        技能必需
+                                    </Badge>
+                                </div>
                                 <p v-if="tool.description" class="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
                                     {{ tool.description }}
                                 </p>
@@ -154,6 +160,7 @@ import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 
 const props = defineProps({
   tools: { type: Array, default: () => [] },
@@ -162,6 +169,23 @@ const props = defineProps({
 
 const store = useAgentEditStore()
 const { t } = useLanguage()
+
+// Skills关联的必需工具
+const REQUIRED_TOOLS_FOR_SKILLS = [
+  'file_read',
+  'execute_python_code',
+  'execute_javascript_code',
+  'execute_shell_command',
+  'file_write',
+  'file_update',
+  'load_skill'
+]
+
+// 检查工具是否为必需工具（当skills有值时）
+const isRequiredTool = (toolName) => {
+  const hasSkills = store.formData.availableSkills && store.formData.availableSkills.length > 0
+  return hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)
+}
 
 // Collapsed state
 const sections = reactive({
@@ -222,6 +246,18 @@ watch(groupedTools, (newGroups) => {
       selectedGroupSource.value = ''
   }
 }, { immediate: true })
+
+// Watch skills变化，自动添加必需工具
+watch(() => store.formData.availableSkills, (newSkills) => {
+  if (newSkills && newSkills.length > 0) {
+    // 当skills有值时，自动添加必需工具
+    REQUIRED_TOOLS_FOR_SKILLS.forEach(toolName => {
+      if (!store.formData.availableTools.includes(toolName)) {
+        store.formData.availableTools.push(toolName)
+      }
+    })
+  }
+}, { deep: true })
 
 const filteredSkills = computed(() => {
   if (!searchQueries.skills) return props.skills
