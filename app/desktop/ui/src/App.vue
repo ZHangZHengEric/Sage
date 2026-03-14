@@ -14,12 +14,14 @@
     <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pb-[64px] lg:pb-0">
       <div class="flex-1 overflow-hidden relative flex flex-col">
         <router-view v-slot="{ Component }">
-          <component 
-            :is="Component" 
-            @select-conversation="handleSelectConversation" 
-            :selected-conversation="selectedConversation" 
-            :chat-reset-token="chatResetToken"
-          />
+          <keep-alive :include="['Chat']">
+            <component 
+              :is="Component" 
+              @select-conversation="handleSelectConversation" 
+              :selected-conversation="selectedConversation" 
+              :chat-reset-token="chatResetToken"
+            />
+          </keep-alive>
         </router-view>
       </div>
     </main>
@@ -36,6 +38,50 @@
     </Teleport>
   </div>
 
+  <!-- Close Dialog -->
+  <Dialog :open="showCloseDialog" @update:open="showCloseDialog = $event">
+    <DialogContent class="sm:max-w-[360px] p-5">
+      <DialogHeader class="pb-2">
+        <DialogTitle class="flex items-center gap-2 text-base">
+          <AlertCircle class="h-4 w-4 text-yellow-500" />
+          您点击了关闭按钮，您想要：
+        </DialogTitle>
+      </DialogHeader>
+      <div class="space-y-3">
+        <div class="space-y-2">
+          <div 
+            class="flex items-center space-x-2 p-2.5 rounded-md cursor-pointer transition-colors"
+            :class="closeAction === 'hide' ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent'"
+            @click="closeAction = 'hide'"
+          >
+            <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0" :class="closeAction === 'hide' ? 'border-primary' : 'border-muted-foreground'">
+              <div v-if="closeAction === 'hide'" class="w-2 h-2 rounded-full bg-primary" />
+            </div>
+            <Label class="cursor-pointer text-sm">最小化到托盘</Label>
+          </div>
+          <div 
+            class="flex items-center space-x-2 p-2.5 rounded-md cursor-pointer transition-colors"
+            :class="closeAction === 'exit' ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent'"
+            @click="closeAction = 'exit'"
+          >
+            <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0" :class="closeAction === 'exit' ? 'border-primary' : 'border-muted-foreground'">
+              <div v-if="closeAction === 'exit'" class="w-2 h-2 rounded-full bg-primary" />
+            </div>
+            <Label class="cursor-pointer text-sm">退出</Label>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <Checkbox id="remember" v-model:checked="rememberChoice" class="h-4 w-4 hover:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0" />
+          <Label for="remember" class="cursor-pointer text-xs text-muted-foreground">不再提示</Label>
+        </div>
+      </div>
+      <DialogFooter class="gap-2 pt-3">
+        <Button variant="outline" size="sm" @click="showCloseDialog = false">取消</Button>
+        <Button size="sm" @click="handleCloseConfirm">确定</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
 </template>
 
 <script setup>
@@ -44,6 +90,11 @@ import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
 import MobileTabBar from './components/mobile/MobileTabBar.vue'
 import { Toaster } from '@/components/ui/sonner'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { AlertCircle } from 'lucide-vue-next'
 // import { isLoggedIn } from './utils/auth.js'
 import request, { setBaseURL } from './utils/request.js'
 import { systemAPI } from './api/system'
@@ -136,9 +187,10 @@ const selectedConversation = ref(null)
 
 const handleNewChat = () => {
   selectedConversation.value = null
-  // 触发重置 token，强制 Chat 组件清理状态
-  chatResetToken.value = Date.now()
-  // 清除 URL 中的 session_id，确保创建新会话
+  // 仅当当前已在「新会话」页（无 session_id）时触发完整重置；从历史会话或从设置/历史等页点「新对话」回来时不重置
+  if (route.name === 'Chat' && !route.query.session_id) {
+    chatResetToken.value = Date.now()
+  }
   if (route.query.session_id) {
     router.replace({
       query: { ...route.query, session_id: undefined }
@@ -148,6 +200,20 @@ const handleNewChat = () => {
 
 const chatResetToken = ref(0)
 
+// Close dialog state
+const showCloseDialog = ref(false)
+const closeAction = ref('hide')
+const rememberChoice = ref(false)
+
+const handleCloseConfirm = async () => {
+  showCloseDialog.value = false
+  await invoke('handle_close_dialog_result', {
+    result: {
+      action: closeAction.value,
+      remember: rememberChoice.value
+    }
+  })
+}
 
 const handleSelectConversation = (conversation) => {
   selectedConversation.value = conversation
@@ -156,6 +222,7 @@ const handleSelectConversation = (conversation) => {
 
   let unlisten = null
   let unlistenPermission = null
+  let unlistenCloseDialog = null
 
   onMounted(async () => {
     // Listen for Tauri backend ready event
@@ -198,6 +265,11 @@ const handleSelectConversation = (conversation) => {
            }
        })
 
+      // Listen for show close dialog event
+      unlistenCloseDialog = await listen('show-close-dialog', () => {
+        showCloseDialog.value = true
+      })
+
       // Also try to get port actively, in case we missed the event
       try {
           const port = await invoke('get_server_port')
@@ -220,5 +292,6 @@ const handleSelectConversation = (conversation) => {
   onUnmounted(() => {
     if (unlisten) unlisten()
     if (unlistenPermission) unlistenPermission()
+    if (unlistenCloseDialog) unlistenCloseDialog()
   })
 </script>

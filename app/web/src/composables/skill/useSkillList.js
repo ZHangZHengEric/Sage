@@ -170,7 +170,7 @@ export function useSkillList(t) {
       // 并行请求skills和agents
       const [skillsResponse, agentsResponse] = await Promise.all([
         skillAPI.getSkills(params),
-        agentAPI.getAgents().catch(() => ({ agents: [] })) // 如果获取agents失败，返回空数组
+        agentAPI.getAgents().catch(() => []) // 如果获取agents失败，返回空数组
       ])
 
       if (skillsResponse.skills) {
@@ -178,9 +178,8 @@ export function useSkillList(t) {
       }
 
       // 保存agent列表用于显示agent名称
-      if (agentsResponse.agents) {
-        agents.value = agentsResponse.agents
-      }
+      // 后端返回格式: [...]
+      agents.value = agentsResponse || []
     } catch (error) {
       console.error('Failed to load skills:', error)
       toast.error(t('skills.loadFailed') || 'Failed to load skills')
