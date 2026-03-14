@@ -237,7 +237,6 @@ We are grateful to our sponsors for their support in making Sage better:
         <img src="assets/dudubashi.png" width="200" alt="Dudu Bus"/>
       </a>
       <br/>
-      <strong>Dudu Bus (嘟嘟巴士)</strong>
     </td>
     <td align="center" width="50%">
       <a href="#" target="_blank">
