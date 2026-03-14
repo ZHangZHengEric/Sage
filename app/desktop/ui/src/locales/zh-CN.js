@@ -163,6 +163,7 @@ export default {
   'chat.abilities.error': '获取能力列表失败',
   'chat.abilities.empty': '当前没有可用建议',
   'chat.abilities.retry': '重试',
+  'chat.abilities.regenerate': '重新生成',
   'chat.abilities.close': '关闭',
 
   // Quick help
