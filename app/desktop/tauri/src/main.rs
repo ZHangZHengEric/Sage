@@ -56,28 +56,49 @@ fn get_close_preference_path() -> PathBuf {
 
 fn load_close_preference() -> Option<ClosePreference> {
     let path = get_close_preference_path();
+    println!("Loading close preference from: {:?}", path);
     if !path.exists() {
+        println!("Close preference file does not exist");
         return None;
     }
     match std::fs::read_to_string(&path) {
         Ok(content) => {
-            serde_json::from_str(&content).ok()
+            println!("Close preference file content: {}", content);
+            match serde_json::from_str(&content) {
+                Ok(pref) => {
+                    println!("Close preference loaded successfully: {:?}", pref);
+                    Some(pref)
+                }
+                Err(e) => {
+                    eprintln!("Failed to parse close preference: {}", e);
+                    None
+                }
+            }
         }
-        Err(_) => None,
+        Err(e) => {
+            eprintln!("Failed to read close preference file: {}", e);
+            None
+        }
     }
 }
 
 fn save_close_preference(preference: &ClosePreference) -> Result<(), String> {
     let sage_root = get_sage_root_dir();
+    println!("Saving close preference to: {:?}", sage_root);
     if !sage_root.exists() {
+        println!("Creating .sage directory");
         std::fs::create_dir_all(&sage_root)
             .map_err(|e| format!("Failed to create .sage directory: {}", e))?;
     }
     let path = get_close_preference_path();
+    println!("Preference file path: {:?}", path);
     let content = serde_json::to_string(preference)
         .map_err(|e| format!("Failed to serialize preference: {}", e))?;
+    println!("Preference content: {}", content);
     std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write preference file: {}", e))
+        .map_err(|e| format!("Failed to write preference file: {}", e))?;
+    println!("Preference saved successfully");
+    Ok(())
 }
 
 fn load_sage_env_file() {
@@ -142,10 +163,15 @@ fn handle_close_dialog_result(result: CloseDialogResult, app: tauri::AppHandle) 
         } else {
             CloseAction::HideToTray
         };
-        let _ = save_close_preference(&ClosePreference {
+        match save_close_preference(&ClosePreference {
             action: close_action,
             remember_choice: true,
-        });
+        }) {
+            Ok(_) => println!("Close preference saved successfully"),
+            Err(e) => eprintln!("Failed to save close preference: {}", e),
+        }
+    } else {
+        println!("User chose not to remember preference");
     }
 
     if action == "exit" {
@@ -347,6 +373,10 @@ fn main() {
     load_sage_env_file();
     
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 当检测到已有实例运行时，显示原有窗口
+            show_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -367,7 +397,10 @@ fn main() {
                         let state = app_handle.state::<ClosePreferenceState>();
                         let preference = state.0.lock().unwrap().clone();
                         
+                        println!("Close requested, preference: {:?}", preference);
+                        
                         if let Some(pref) = preference {
+                            println!("Found preference: remember_choice={}, action={:?}", pref.remember_choice, pref.action);
                             if pref.remember_choice {
                                 match pref.action {
                                     CloseAction::HideToTray => {
