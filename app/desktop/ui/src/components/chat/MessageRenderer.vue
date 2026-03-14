@@ -49,13 +49,28 @@
             <div
               v-for="(imgUrl, index) in getImageUrls(message.content)"
               :key="index"
-              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm"
+              :class="isLocalPath(imgUrl) ? '' : 'w-[120px] h-[120px]'"
             >
+              <!-- 在线图片：直接渲染 -->
               <img
+                v-if="!isLocalPath(imgUrl)"
                 :src="resolveFilePath(imgUrl)"
                 :alt="`图片 ${index + 1}`"
                 class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                @click="handleImageClick(imgUrl)"
               />
+              <!-- 本地路径：显示文件图标 -->
+              <div
+                v-else
+                class="flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted rounded-lg cursor-pointer transition-colors group"
+                @click="handleLocalFileClick(imgUrl)"
+                :title="`打开文件: ${getFileName(imgUrl)}`"
+              >
+                <Image class="w-5 h-5 text-muted-foreground" />
+                <span class="text-sm font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
+                <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
             </div>
           </div>
         </div>
@@ -111,13 +126,28 @@
             <div
               v-for="(imgUrl, index) in getImageUrls(message.content)"
               :key="index"
-              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm"
+              :class="isLocalPath(imgUrl) ? '' : 'w-[120px] h-[120px]'"
             >
+              <!-- 在线图片：直接渲染 -->
               <img
+                v-if="!isLocalPath(imgUrl)"
                 :src="resolveFilePath(imgUrl)"
                 :alt="`图片 ${index + 1}`"
                 class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                @click="handleImageClick(imgUrl)"
               />
+              <!-- 本地路径：显示文件图标 -->
+              <div
+                v-else
+                class="flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted rounded-lg cursor-pointer transition-colors group"
+                @click="handleLocalFileClick(imgUrl)"
+                :title="`打开文件: ${getFileName(imgUrl)}`"
+              >
+                <Image class="w-5 h-5 text-muted-foreground" />
+                <span class="text-sm font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
+                <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
             </div>
           </div>
         </div>
@@ -177,7 +207,7 @@ import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap, Copy, Check } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Copy, Check, Image } from 'lucide-vue-next'
 import { getMessageLabel } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -189,6 +219,8 @@ import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-shell'
+import { FileIcon, ExternalLink } from 'lucide-vue-next'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -312,6 +344,55 @@ const resolveFilePath = (url) => {
   cleanPath = cleanPath.replace(/^\//, '')
   // 使用 Tauri 的 convertFileSrc 转换本地路径
   return convertFileSrc(cleanPath)
+}
+
+// 判断是否为本地路径
+const isLocalPath = (url) => {
+  if (!url) return false
+  // 如果是 http:// 或 https:// 开头，是在线地址
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return false
+  }
+  // 其他情况（file://、asset://、绝对路径、相对路径）都视为本地路径
+  return true
+}
+
+// 获取文件名
+const getFileName = (url) => {
+  if (!url) return 'file'
+  // 去掉 file:// 协议头
+  let cleanPath = url.replace(/^file:\/\//i, '')
+  // 获取最后一部分作为文件名
+  return cleanPath.split('/').pop() || 'file'
+}
+
+// 处理在线图片点击 - 打开浏览器
+const handleImageClick = async (url) => {
+  if (!url) return
+  try {
+    await open(url)
+  } catch (err) {
+    console.error('Failed to open URL:', err)
+  }
+}
+
+// 处理本地文件点击 - 用系统默认软件打开
+const handleLocalFileClick = async (url) => {
+  if (!url) return
+  try {
+    let filePath = url
+    // 如果是 file:// 协议，转换为普通路径
+    if (url.startsWith('file://')) {
+      filePath = url.replace(/^file:\/\//i, '')
+    }
+    // 确保路径以 / 开头
+    if (!filePath.startsWith('/')) {
+      filePath = '/' + filePath
+    }
+    await open(filePath)
+  } catch (err) {
+    console.error('Failed to open file:', err)
+  }
 }
 
 // 从多模态内容中提取图片 URL
