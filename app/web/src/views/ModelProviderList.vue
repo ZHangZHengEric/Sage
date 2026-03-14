@@ -230,6 +230,7 @@ const dialogOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
 const verifying = ref(false)
+const verified = ref(false)
 
 // Basic form state
 const form = reactive({
@@ -253,6 +254,7 @@ const handleProviderChange = (val) => {
     form.name = ''
     form.base_url = ''
     form.model = ''
+    verified.value = false
     return
   }
   const provider = MODEL_PROVIDERS.find(p => p.name === val)
@@ -261,6 +263,7 @@ const handleProviderChange = (val) => {
     form.base_url = provider.base_url
     // form.model = provider.models[0] || ''
   }
+  verified.value = false
 }
 
 const openProviderWebsite = () => {
@@ -303,6 +306,7 @@ const handleCreate = () => {
   form.topP = 0.95
   form.presencePenalty = 0
   form.maxModelLen = 64000
+  verified.value = false
   dialogOpen.value = true
 }
 
@@ -310,7 +314,7 @@ const handleEdit = (provider) => {
   isEdit.value = true
   currentId.value = provider.id
   form.name = provider.name
-  
+
   // Try to match provider
   const known = MODEL_PROVIDERS.find(p => p.base_url === provider.base_url)
   selectedProvider.value = known ? known.name : 'Custom'
@@ -328,6 +332,10 @@ const handleEdit = (provider) => {
   form.topP = provider.top_p ?? 0.9
   form.presencePenalty = provider.presence_penalty ?? 0.0
   form.maxModelLen = provider.max_model_len ?? 32000
+
+  // 编辑模式不需要重新验证
+  verified.value = true
+
   dialogOpen.value = true
 }
 
@@ -355,17 +363,19 @@ const handleVerify = async () => {
     presence_penalty: form.presencePenalty,
     max_model_len: form.maxModelLen
   }
-  
+
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
      toast.error(t('common.fillRequired') || '请填写必填项')
      return
   }
-  
+
   verifying.value = true
   try {
     await modelProviderAPI.verifyModelProvider(data)
+    verified.value = true
     toast.success(t('common.verifySuccess') || '验证成功')
   } catch (error) {
+    verified.value = false
     toast.error(error.message || '验证失败')
   } finally {
     verifying.value = false
@@ -384,14 +394,19 @@ const submitForm = async () => {
     presence_penalty: form.presencePenalty,
     max_model_len: form.maxModelLen
   }
-  
+
+  if (!isEdit.value && !verified.value) {
+    toast.error('请先验证连接')
+    return
+  }
+
   try {
     if (isEdit.value) {
       await updateModelProvider(currentId.value, data)
     } else {
       await createModelProvider(data)
     }
-    
+
     toast.success(t('common.success'))
     dialogOpen.value = false
     fetchProviders()
