@@ -331,13 +331,8 @@ const loadAgents = async () => {
     loading.value = true
     error.value = null
     const response = await agentAPI.getAgents()
-    if (response.agents) {
-      agents.value = response.agents
-    } else if (Array.isArray(response)) {
-      agents.value = response
-    } else {
-      agents.value = []
-    }
+    // 后端返回格式: { agents: [...] }
+    agents.value = response?.agents || []
   } catch (err) {
     console.error('加载agents失败:', err)
     error.value = err.message || '加载失败'
