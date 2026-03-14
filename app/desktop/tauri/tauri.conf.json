@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self' asset: http: https: data: blob:",
       "assetProtocol": {
         "enable": true,
         "scope": [
