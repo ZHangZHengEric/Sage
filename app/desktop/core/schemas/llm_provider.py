@@ -24,6 +24,7 @@ class LLMProviderCreate(BaseModel):
     top_p: Optional[float] = None
     presence_penalty: Optional[float] = None
     max_model_len: Optional[int] = None
+    supports_multimodal: bool = False
     is_default: bool = False
 
 class LLMProviderUpdate(BaseModel):
@@ -36,6 +37,7 @@ class LLMProviderUpdate(BaseModel):
     top_p: Optional[float] = None
     presence_penalty: Optional[float] = None
     max_model_len: Optional[int] = None
+    supports_multimodal: Optional[bool] = None
     is_default: Optional[bool] = None
 
 class LLMProviderDTO(LLMProviderBase):

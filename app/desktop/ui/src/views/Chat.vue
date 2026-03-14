@@ -153,6 +153,7 @@
             <MessageInput
               :is-loading="isCurrentSessionLoading"
               :preset-text="abilityPresetInput"
+              :selected-agent="selectedAgent"
               @send-message="handleSendMessageWithAbilityClear"
               @stop-generation="stopGeneration"
             />
