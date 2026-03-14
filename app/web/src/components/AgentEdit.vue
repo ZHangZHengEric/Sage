@@ -65,6 +65,7 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useAgentEditStore } from '../stores/agentEdit'
 import { useLanguage } from '../utils/i18n.js'
+import { skillAPI } from '../api/skill.js'
 import { 
   Loader, 
   PanelRightClose, 
@@ -95,6 +96,8 @@ const store = useAgentEditStore()
 const { t } = useLanguage()
 const saving = ref(false)
 const showRightPanel = ref(true)
+const agentSkills = ref([])
+const loadingAgentSkills = ref(false)
 
 // Computed for dynamic component rendering
 const currentStepComponent = computed(() => {
@@ -109,12 +112,33 @@ const stepProps = computed(() => {
   if (store.currentStep === 2) {
     return {
       tools: props.tools,
-      skills: props.skills,
-      knowledgeBases: props.knowledgeBases
+      skills: agentSkills.value.length > 0 ? agentSkills.value : props.skills,
+      knowledgeBases: props.knowledgeBases,
+      loadingSkills: loadingAgentSkills.value
     }
   }
   return {}
 })
+
+// 加载Agent可用技能列表
+const loadAgentAvailableSkills = async (agentId) => {
+  if (!agentId) {
+    agentSkills.value = []
+    return
+  }
+  try {
+    loadingAgentSkills.value = true
+    const response = await skillAPI.getAgentAvailableSkills(agentId)
+    if (response.skills) {
+      agentSkills.value = response.skills
+    }
+  } catch (error) {
+    console.error('Failed to load agent available skills:', error)
+    agentSkills.value = props.skills
+  } finally {
+    loadingAgentSkills.value = false
+  }
+}
 
 // Initialize store when agent prop changes or component mounts
 watch(() => props.agent, (newAgent) => {
@@ -125,6 +149,13 @@ watch(() => props.agent, (newAgent) => {
     store.initForm(newAgent, { preserveStep: true })
   } else {
     store.initForm(newAgent)
+  }
+  
+  // 如果是编辑现有agent，加载agent可用技能列表
+  if (newAgent && newAgent.id) {
+    loadAgentAvailableSkills(newAgent.id)
+  } else {
+    agentSkills.value = []
   }
 }, { immediate: true })
 
