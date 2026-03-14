@@ -28,8 +28,7 @@ from sagents.agent.fibre.tools import FibreTools
 from sagents.agent.fibre.agent_definition import AgentDefinition
 from sagents.agent.fibre.backend_client import FibreBackendClient
 from sagents.agent.simple_agent import SimpleAgent
-
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 
 class FibreOrchestrator:
