@@ -155,6 +155,7 @@
             <MessageInput
               :is-loading="isCurrentSessionLoading"
               :preset-text="abilityPresetInput"
+              :selected-agent="selectedAgent"
               @send-message="handleSendMessageWithAbilityClear"
               @stop-generation="stopGeneration"
             />
@@ -166,10 +167,13 @@
       <TransitionGroup name="panel">
         <WorkspacePanel
           v-if="showWorkspace"
+          ref="workspacePanelRef"
           :workspace-files="workspaceFiles"
+          :agent-id="selectedAgentId"
           @download-file="downloadFile"
           @delete-file="deleteFile"
           @quote-path="handleQuotePath"
+          @upload-files="handleUploadFiles"
           @close="showWorkspace = false"
         />
 
@@ -205,7 +209,7 @@
 
 <script setup>
 defineOptions({ name: 'Chat' })
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Bot, Settings, FolderOpen, Monitor, Sparkles } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import MessageRenderer from '@/components/chat/MessageRenderer.vue'
@@ -228,6 +232,8 @@ import { useChatPage } from '@/composables/chat/useChatPage.js'
 import { usePanelStore } from '@/stores/panel.js'
 import { storeToRefs } from 'pinia'
 import { useLanguage } from '@/utils/i18n.js'
+import { taskAPI } from '@/api/task.js'
+import { toast } from 'vue-sonner'
 
 const props = defineProps({
   selectedConversation: {
@@ -273,6 +279,7 @@ const {
   downloadFile,
   deleteFile,
   updateConfig,
+  refreshWorkspace,
   // 能力面板相关
   abilityItems,
   abilityLoading,
@@ -314,6 +321,50 @@ const handleQuotePath = (path) => {
   } else {
     // 如果输入框为空，直接添加
     abilityPresetInput.value = pathToInsert
+  }
+}
+
+// 处理上传文件
+const workspacePanelRef = ref(null)
+
+const handleUploadFiles = async (files) => {
+  if (!selectedAgentId.value || files.length === 0) return
+  
+  try {
+    workspacePanelRef.value?.setUploadStatus('准备上传...', 0)
+    
+    let uploadedCount = 0
+    const totalFiles = files.length
+    
+    for (const fileInfo of files) {
+      const { file, relativePath } = fileInfo
+      
+      workspacePanelRef.value?.setUploadStatus(
+        `上传 ${relativePath}...`,
+        Math.round((uploadedCount / totalFiles) * 100)
+      )
+      
+      // 获取目标路径（文件夹）
+      const targetPath = relativePath.includes('/') 
+        ? relativePath.substring(0, relativePath.lastIndexOf('/'))
+        : ''
+      
+      await taskAPI.uploadWorkspaceFile(selectedAgentId.value, file, targetPath)
+      uploadedCount++
+    }
+    
+    workspacePanelRef.value?.setUploadStatus('上传完成', 100)
+    toast.success(`成功上传 ${uploadedCount} 个文件`)
+    
+    // 刷新工作空间文件列表
+    setTimeout(() => {
+      workspacePanelRef.value?.setUploadStatus('')
+      refreshWorkspace()
+    }, 1000)
+  } catch (error) {
+    console.error('上传文件出错:', error)
+    workspacePanelRef.value?.setUploadStatus('')
+    toast.error(`上传失败: ${error.message}`)
   }
 }
 

@@ -26,6 +26,7 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     memoryType: "session",
     maxLoopCount: 10,
     llm_provider_id: null,
+    enableMultimodal: false,
     llmConfig: {},
     systemContext: {},
     availableTools: [],
