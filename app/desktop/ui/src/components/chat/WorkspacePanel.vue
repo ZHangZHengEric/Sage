@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { FolderOpen, Upload } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
@@ -92,6 +92,62 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadStatus = ref('')
 const dropZoneRef = ref(null)
+
+// 监听Tauri拖拽事件（桌面端）
+let tauriDropListener = null
+
+onMounted(() => {
+  // 监听Tauri的文件拖拽事件
+  tauriDropListener = (e) => {
+    const files = e.detail
+    if (files && files.length > 0) {
+      handleTauriFiles(files)
+    }
+  }
+  window.addEventListener('tauri-files-dropped', tauriDropListener)
+})
+
+onUnmounted(() => {
+  if (tauriDropListener) {
+    window.removeEventListener('tauri-files-dropped', tauriDropListener)
+  }
+})
+
+// 处理Tauri拖拽的文件
+const handleTauriFiles = async (filePaths) => {
+  if (!props.agentId || filePaths.length === 0) return
+  
+  console.log('Handling Tauri files:', filePaths)
+  
+  // 将文件路径转换为文件对象
+  const files = []
+  
+  for (const filePath of filePaths) {
+    try {
+      // 使用Tauri的fs API读取文件
+      const { readFile } = await import('@tauri-apps/plugin-fs')
+      const { basename } = await import('@tauri-apps/api/path')
+      
+      const fileName = await basename(filePath)
+      const fileData = await readFile(filePath)
+      
+      // 创建File对象
+      const file = new File([fileData], fileName, { type: 'application/octet-stream' })
+      
+      files.push({
+        file,
+        relativePath: fileName,
+        sourcePath: filePath
+      })
+    } catch (error) {
+      console.error('Failed to read file:', filePath, error)
+    }
+  }
+  
+  if (files.length > 0) {
+    emit('uploadFiles', files)
+  }
+}
 
 const hasValidFiles = computed(() => {
   return props.workspaceFiles && props.workspaceFiles.length > 0
