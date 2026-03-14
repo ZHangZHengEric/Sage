@@ -36,7 +36,7 @@ async def verify_provider(data: LLMProviderCreate):
         
         return await Response.succ(message="验证成功")
     except Exception as e:
-        logger.error(f"Provider verification failed: {e}")
+        logger.error(f"模型提供商验证失败: {e}")
         return await Response.error(message=f"验证失败: {str(e)}")
 
 @router.get("/list")
