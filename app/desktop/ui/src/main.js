@@ -9,6 +9,9 @@ import { createPinia } from 'pinia'
 import { useLanguageStore } from './utils/i18n.js'
 import { useThemeStore } from './stores/theme.js'
 
+// 导入Tauri API
+import { listen } from '@tauri-apps/api/event'
+
 const pinia = createPinia()
 
 const app = createApp(App)
@@ -39,11 +42,31 @@ window.addEventListener('dragover', (e) => {
 window.addEventListener('drop', (e) => {
   // 只允许特定区域的drop事件
   const target = e.target
-  const isInWorkspace = target.closest('.workspace-drop-zone') !== null
-  if (!isInWorkspace) {
+  const isInDropZone = target.closest('.workspace-drop-zone') !== null || target.closest('.message-input-drop-zone') !== null
+  if (!isInDropZone) {
     e.preventDefault()
   }
 })
+
+// 监听Tauri拖拽事件（桌面端）
+if (window.__TAURI__) {
+  listen('tauri-drag-enter', (event) => {
+    console.log('Tauri drag enter:', event.payload)
+    // 可以在这里设置全局拖拽状态
+  })
+  
+  listen('tauri-drag-drop', (event) => {
+    console.log('Tauri drag drop:', event.payload)
+    // 将文件路径存储在全局，供组件使用
+    window.__TAURI_DRAG_FILES__ = event.payload
+    // 触发一个自定义事件，通知组件有文件被拖拽
+    window.dispatchEvent(new CustomEvent('tauri-files-dropped', { detail: event.payload }))
+  })
+  
+  listen('tauri-drag-leave', () => {
+    console.log('Tauri drag leave')
+  })
+}
 
 // 挂载应用并初始化
 app.mount('#app')
