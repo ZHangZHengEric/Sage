@@ -331,7 +331,6 @@ const handleSubmit = async () => {
     const res = await modelProviderAPI.createModelProvider(data)
     await createDefaultAgent(res?.id)
     await markAsCompleted()
-    toast.success(t('common.success'))
     emit('close')
   } catch (error) {
     toast.error(error.message)

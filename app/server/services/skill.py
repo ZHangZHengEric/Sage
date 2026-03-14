@@ -188,7 +188,12 @@ def _check_skill_permission(
         raise SageHTTPException(detail="Permission denied")
 
 
-async def list_skills(current_user_id: str, role: str = "user", filter_agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+async def list_skills(
+    current_user_id: str,
+    role: str = "user",
+    filter_agent_id: Optional[str] = None,
+    dimension: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     获取可用技能列表
 
@@ -196,6 +201,7 @@ async def list_skills(current_user_id: str, role: str = "user", filter_agent_id:
         current_user_id: 当前用户ID
         role: 用户角色
         filter_agent_id: 可选，过滤特定Agent的技能
+        dimension: 可选，按维度过滤 (system, user, agent)
     """
     all_skills = _collect_all_skills()
 
@@ -214,12 +220,17 @@ async def list_skills(current_user_id: str, role: str = "user", filter_agent_id:
             continue
 
         dimension_info = _get_skill_dimension(skill.path)
+        skill_dimension = dimension_info["dimension"]
+
+        # 按维度过滤
+        if dimension and dimension != "all" and skill_dimension != dimension:
+            continue
 
         if role != "admin":
-            if dimension_info["dimension"] == "user":
+            if skill_dimension == "user":
                 if dimension_info["owner_user_id"] != current_user_id:
                     continue
-            elif dimension_info["dimension"] == "agent":
+            elif skill_dimension == "agent":
                 if dimension_info["owner_user_id"] != current_user_id:
                     continue
 
@@ -227,12 +238,103 @@ async def list_skills(current_user_id: str, role: str = "user", filter_agent_id:
             "name": skill.name,
             "description": skill.description,
             "user_id": dimension_info["owner_user_id"] or "",
-            "dimension": dimension_info["dimension"],
+            "dimension": skill_dimension,
             "owner_user_id": dimension_info["owner_user_id"],
             "agent_id": dimension_info["agent_id"],
             "path": skill.path
         })
     return skills
+
+
+async def get_agent_available_skills(
+    agent_id: str,
+    current_user_id: str,
+    role: str = "user"
+) -> List[Dict[str, Any]]:
+    """
+    获取Agent可用的技能列表（带维度来源标签）
+    
+    根据skill name去重排序，优先级：系统 < 用户 < Agent
+    每个技能会标注其来源维度
+    
+    Args:
+        agent_id: Agent ID
+        current_user_id: 当前用户ID
+        role: 用户角色
+        
+    Returns:
+        技能列表，每个技能包含name, description, source_dimension
+    """
+    from ..core.config import get_startup_config
+    
+    cfg = get_startup_config()
+    skill_dir = cfg.skill_dir if cfg else "skills"
+    user_dir = cfg.user_dir if cfg else "users"
+    agents_dir = cfg.agents_dir if cfg else "agents"
+    
+    # 获取agent配置中的user_id
+    agent_dao = models.AgentConfigDao()
+    agent = await agent_dao.get_by_id(agent_id)
+    agent_user_id = agent.user_id if agent and agent.user_id else current_user_id
+    
+    # 维度优先级映射（数值越大优先级越高）
+    dimension_priority = {
+        "system": 1,
+        "user": 2,
+        "agent": 3
+    }
+    
+    # 存储技能，按name去重，保留高优先级的
+    skills_map = {}
+    
+    # 1. 系统技能（最低优先级）
+    if os.path.exists(skill_dir):
+        try:
+            tm = SkillManager(skill_dirs=[skill_dir], isolated=True, include_global_skills=False)
+            for skill in tm.list_skill_info():
+                skills_map[skill.name] = {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "source_dimension": "system"
+                }
+        except Exception as e:
+            logger.warning(f"加载系统技能失败: {e}")
+    
+    # 2. 用户技能（中优先级）
+    if os.path.exists(user_dir) and agent_user_id:
+        user_skills_path = os.path.join(user_dir, agent_user_id, "skills")
+        if os.path.isdir(user_skills_path):
+            try:
+                tm = SkillManager(skill_dirs=[user_skills_path], isolated=True, include_global_skills=False)
+                for skill in tm.list_skill_info():
+                    skills_map[skill.name] = {
+                        "name": skill.name,
+                        "description": skill.description,
+                        "source_dimension": "user"
+                    }
+            except Exception as e:
+                logger.warning(f"加载用户技能失败: {e}")
+    
+    # 3. Agent技能（最高优先级）
+    if os.path.exists(agents_dir) and agent_user_id and agent_id:
+        agent_skills_path = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
+        if os.path.isdir(agent_skills_path):
+            try:
+                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True, include_global_skills=False)
+                for skill in tm.list_skill_info():
+                    skills_map[skill.name] = {
+                        "name": skill.name,
+                        "description": skill.description,
+                        "source_dimension": "agent"
+                    }
+            except Exception as e:
+                logger.warning(f"加载Agent技能失败: {e}")
+    
+    # 转换为列表并按名称排序
+    skills_list = list(skills_map.values())
+    skills_list.sort(key=lambda x: x["name"])
+    
+    return skills_list
 
 
 async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> None:
