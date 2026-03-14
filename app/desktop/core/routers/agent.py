@@ -49,6 +49,7 @@ class AgentConfigDTO(BaseModel):
     maxLoopCount: Optional[int] = 10
     deepThinking: Optional[bool] = False
     llm_provider_id: Optional[str] = None
+    enableMultimodal: Optional[bool] = False
     multiAgent: Optional[bool] = False
     agentMode: Optional[str] = None
     description: Optional[str] = None
@@ -72,7 +73,7 @@ def convert_config_to_agent(
     agent_id: str, config: Dict[str, Any]
 ) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
-    
+
     return AgentConfigDTO(
         id=agent_id,
         name=config.get("name", f"Agent {agent_id}"),
@@ -87,6 +88,7 @@ def convert_config_to_agent(
         memoryType=config.get("memoryType") or config.get("memory_type"),
         maxLoopCount=config.get("maxLoopCount") or config.get("max_loop_count", 10),
         deepThinking=config.get("deepThinking") or config.get("deep_thinking", False),
+        enableMultimodal=config.get("enableMultimodal") or config.get("enable_multimodal", False),
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
         agentMode=config.get("agentMode") or config.get("agent_mode"),
         description=config.get("description"),
@@ -109,6 +111,7 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "memoryType": agent.memoryType,
         "maxLoopCount": agent.maxLoopCount,
         "deepThinking": agent.deepThinking,
+        "enableMultimodal": agent.enableMultimodal,
         "multiAgent": agent.multiAgent,
         "agentMode": agent.agentMode,
         "description": agent.description,

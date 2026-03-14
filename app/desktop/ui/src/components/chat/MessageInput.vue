@@ -271,31 +271,51 @@ const handleSubmit = (e) => {
       messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
     }
 
-    if (uploadedFiles.value.length > 0) {
-      const fileInfos = uploadedFiles.value.filter(f => f.url).map(f => {
-        // 清理文件名，去掉时间戳后缀（如 _20260307191202.md）
+    // 构建多模态内容格式
+    const multimodalContent = []
+
+    // 添加文本内容
+    if (messageContent) {
+      multimodalContent.push({ type: 'text', text: messageContent })
+    }
+
+    // 添加图片内容（仅用于多模态模式）
+    const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
+    for (const img of imageFiles) {
+      multimodalContent.push({
+        type: 'image_url',
+        image_url: { url: img.url }
+      })
+    }
+
+    // 非图片文件使用 Markdown 链接格式附加到文本中
+    // 图片文件已经在上面作为多模态内容添加，不再重复添加为 Markdown 链接
+    const nonImageFiles = uploadedFiles.value.filter(f => f.url && f.type !== 'image')
+    if (nonImageFiles.length > 0) {
+      const fileInfos = nonImageFiles.map(f => {
         let cleanName = f.name || '文件'
-        // 移除时间戳模式：_YYYYMMDDhhmmss.扩展名
         cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
-        // 如果还有时间戳在中间，也尝试移除
         cleanName = cleanName.replace(/_\d{14}_/, '_')
-        return {
-          url: f.url,
-          name: cleanName
-        }
+        return { url: f.url, name: cleanName }
       })
 
-      if (fileInfos.length > 0) {
-        if (messageContent) {
-          messageContent += '\n\n'
-        }
-        // 使用 Markdown 链接格式显示文件
-        const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
-        messageContent += markdownLinks.join('\n')
+      if (messageContent && fileInfos.length > 0) {
+        messageContent += '\n\n'
+      }
+      const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
+      messageContent += markdownLinks.join('\n')
+
+      // 更新 multimodalContent 中的文本（如果存在）
+      if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
+        multimodalContent[0].text = messageContent
       }
     }
-    if (messageContent) {
-      emit('sendMessage', messageContent)
+
+    // 发送消息，同时传递普通格式和多模态格式
+    if (messageContent || multimodalContent.length > 0) {
+      emit('sendMessage', messageContent, {
+        multimodalContent: multimodalContent.length > 0 ? multimodalContent : null
+      })
       inputValue.value = ''
       uploadedFiles.value = []
       currentSkill.value = null
