@@ -6,16 +6,18 @@
      <!-- Dimension Filter Tabs -->
       <div class="mt-4">
         <Tabs v-model="selectedDimension" class="w-full">
-          <TabsList class="grid w-full max-w-md grid-cols-2">
+          <TabsList class="grid w-full max-w-md grid-cols-3">
             <TabsTrigger value="system" class="gap-2">
               <Shield class="h-4 w-4" />
               <span>{{ t('skills.system') }}</span>
-              <Badge variant="secondary" class="ml-1 text-xs">{{ counts.system }}</Badge>
             </TabsTrigger>
             <TabsTrigger value="user" class="gap-2">
               <User class="h-4 w-4" />
               <span>{{ t('skills.mine')  }}</span>
-              <Badge variant="secondary" class="ml-1 text-xs">{{ counts.user }}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="agent" class="gap-2">
+              <Bot class="h-4 w-4" />
+              <span>{{ t('skills.agent') || 'Agent' }}</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -61,60 +63,118 @@
 
       <ScrollArea v-else class="h-full">
         <div class="space-y-2 pr-4">
-          <!-- Skill Items -->
-          <Card v-for="skill in displayedSkills" :key="skill.name"
-            class="group hover:shadow-md transition-all duration-200">
-            <CardContent class="p-4">
-              <div class="flex items-start gap-4">
-                <!-- Icon -->
-                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Box class="h-5 w-5" />
-                </div>
-
-                <!-- Content -->
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-start justify-between gap-4">
-                    <div class="min-w-0">
-                      <h3 class="font-medium text-foreground truncate" :title="skill.name">
-                        {{ skill.name }}
-                      </h3>
-                      <p class="text-sm text-muted-foreground line-clamp-3 mt-1">
-                        {{ skill.description || t('skills.noDescription') }}
-                      </p>
+          <!-- Agent Dimension: Group by Agent -->
+          <div v-if="selectedDimension === 'agent'">
+            <div v-for="group in groupedAgentSkills" :key="group.agentId" class="mb-6">
+              <!-- Agent Group Header -->
+              <div class="flex items-center gap-2 mb-3 px-2">
+                <Bot class="h-4 w-4 text-muted-foreground" />
+                <span class="text-sm font-medium text-muted-foreground">{{ group.agentName }}</span>
+                <Badge variant="secondary" class="text-xs">{{ group.skills?.length || 0 }}</Badge>
+              </div>
+              <!-- Agent Skills -->
+              <div class="space-y-2">
+                <Card v-for="skill in group.skills" :key="skill.name"
+                  class="group hover:shadow-md transition-all duration-200">
+                  <CardContent class="p-4">
+                    <div class="flex items-start gap-4">
+                      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Box class="h-5 w-5" />
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-start justify-between gap-4">
+                          <div class="min-w-0">
+                            <h3 class="font-medium text-foreground truncate" :title="skill.name">
+                              {{ skill.name }}
+                            </h3>
+                            <p class="text-sm text-muted-foreground line-clamp-3 mt-1">
+                              {{ skill.description || t('skills.noDescription') }}
+                            </p>
+                          </div>
+                          <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
+                            <DropdownMenuTrigger as-child>
+                              <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0">
+                                <MoreVertical class="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" class="w-40">
+                              <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
+                                <Edit class="h-4 w-4 mr-2" />
+                                {{ t('skills.edit') || 'Edit' }}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
+                              <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
+                                @click="confirmDelete(skill, group.agentId)">
+                                <Trash2 class="h-4 w-4 mr-2" />
+                                {{ t('skills.delete') || 'Delete' }}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
                     </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
 
-                    <!-- Actions -->
-                    <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
-                      <DropdownMenuTrigger as-child>
-                        <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0">
-                          <MoreVertical class="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" class="w-40">
-                        <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
-                          <Edit class="h-4 w-4 mr-2" />
-                          {{ t('skills.edit') || 'Edit' }}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
-                        <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
-                          @click="confirmDelete(skill)">
-                          <Trash2 class="h-4 w-4 mr-2" />
-                          {{ t('skills.delete') || 'Delete' }}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+          <!-- Other Dimensions: Flat List -->
+          <div v-else>
+            <Card v-for="skill in displayedSkills" :key="skill.name"
+              class="group hover:shadow-md transition-all duration-200">
+              <CardContent class="p-4">
+                <div class="flex items-start gap-4">
+                  <!-- Icon -->
+                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Box class="h-5 w-5" />
                   </div>
 
+                  <!-- Content -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="min-w-0">
+                        <h3 class="font-medium text-foreground truncate" :title="skill.name">
+                          {{ skill.name }}
+                        </h3>
+                        <p class="text-sm text-muted-foreground line-clamp-3 mt-1">
+                          {{ skill.description || t('skills.noDescription') }}
+                        </p>
+                      </div>
+
+                      <!-- Actions -->
+                      <DropdownMenu v-if="canEdit(skill) || canDelete(skill)">
+                        <DropdownMenuTrigger as-child>
+                          <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0">
+                            <MoreVertical class="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" class="w-40">
+                          <DropdownMenuItem v-if="canEdit(skill)" @click="openEditModal(skill)">
+                            <Edit class="h-4 w-4 mr-2" />
+                            {{ t('skills.edit') || 'Edit' }}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator v-if="canEdit(skill) && canDelete(skill)" />
+                          <DropdownMenuItem v-if="canDelete(skill)" class="text-destructive focus:text-destructive"
+                            @click="confirmDelete(skill)">
+                            <Trash2 class="h-4 w-4 mr-2" />
+                            {{ t('skills.delete') || 'Delete' }}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </ScrollArea>
     </div>
 
     <!-- Import Dialog -->
-    <Dialog v-model:open="showImportModal">
+    <Dialog :open="showImportModal" @update:open="showImportModal = $event">
       <DialogContent class="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>{{ t('skills.import') || 'Import Skill' }}</DialogTitle>
@@ -208,7 +268,7 @@
     </Dialog>
 
     <!-- Edit Dialog -->
-    <Dialog v-model:open="showEditModal">
+    <Dialog :open="showEditModal" @update:open="showEditModal = $event">
       <DialogContent class="sm:max-w-[800px] sm:h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{{ t('skills.edit') }} - {{ editingSkill?.name }}</DialogTitle>
@@ -234,17 +294,22 @@
       </DialogContent>
     </Dialog>
 
-    <!-- Delete Confirmation Dialog -->
-    <Dialog v-model:open="showDeleteDialog">
-      <DialogContent class="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>{{ t('skills.deleteConfirmTitle') || 'Delete Skill' }}</DialogTitle>
-          <DialogDescription>
-            {{ t('skills.deleteConfirmDesc', { name: skillToDelete?.name }) || `Are you sure you want to delete
-            "${skillToDelete?.name}"? This action cannot be undone.` }}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
+    <!-- Delete Confirmation Popover -->
+    <div v-if="showDeleteDialog" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/50" @click="showDeleteDialog = false"></div>
+      <Card class="relative z-10 w-full max-w-md mx-4">
+        <CardHeader>
+          <CardTitle class="text-lg">{{ t('skills.deleteConfirmTitle') || 'Delete Confirmation' }}</CardTitle>
+          <CardDescription>
+            <template v-if="skillToDelete?.dimension === 'agent'">
+              {{ t('skills.deleteAgentSkillConfirm') || '即将删除 Agent 工作空间下的 Skill，是否确认？' }}
+            </template>
+            <template v-else>
+              {{ t('skills.deleteSkillConfirm', { name: skillToDelete?.name }) || `确定要删除 Skill "${skillToDelete?.name}" 吗？此操作无法撤销。` }}
+            </template>
+          </CardDescription>
+        </CardHeader>
+        <CardFooter class="flex justify-end gap-3 pt-4">
           <Button variant="outline" @click="showDeleteDialog = false">
             {{ t('common.cancel') || 'Cancel' }}
           </Button>
@@ -252,9 +317,10 @@
             <Loader v-if="deleting" class="mr-2 h-4 w-4 animate-spin" />
             {{ t('common.delete') || 'Delete' }}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CardFooter>
+      </Card>
+    </div>
+
   </div>
 </template>
 
@@ -268,6 +334,7 @@ import {
   Trash2,
   User,
   Shield,
+  Bot,
   Edit,
   MoreVertical,
   AlertCircle
@@ -281,7 +348,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Dialog,
@@ -339,6 +406,7 @@ const {
   counts,
   displayedSkills,
   isImportDisabled,
+  groupedAgentSkills,
 
   // Methods
   getDimensionBadgeVariant,

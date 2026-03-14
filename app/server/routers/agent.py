@@ -128,10 +128,10 @@ agent_router = APIRouter(prefix="/api/agent", tags=["Agent"])
 @agent_router.get("/list")
 async def list(http_request: Request):
     """
-    获取所有Agent配置
+    获取所有Agent列表（简要信息，不包含详细配置）
 
     Returns:
-        StandardResponse: 包含所有Agent配置的标准响应
+        StandardResponse: 包含所有Agent简要信息的标准响应
     """
     claims = getattr(http_request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
@@ -142,13 +142,18 @@ async def list(http_request: Request):
     all_configs = await list_agents(target_user_id)
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
-        agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
-        agents_data.append(agent_resp.model_dump())
+        # 只返回简要信息，不包含详细配置
+        agents_data.append({
+            "id": agent.agent_id,
+            "name": agent.name,
+            "user_id": agent.user_id,
+            "created_at": agent.created_at.isoformat() if agent.created_at else None,
+            "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
+        })
     # 根据agent名称排序
     agents_data.sort(key=lambda x: x["name"])
     return await Response.succ(
-        data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent配置"
+        data={"agents": agents_data}, message=f"成功获取 {len(agents_data)} 个Agent"
     )
 
 

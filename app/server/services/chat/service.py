@@ -6,7 +6,7 @@ import traceback
 import uuid
 import random
 import string
-
+from typing import List
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
@@ -283,12 +283,14 @@ class SageStreamService:
         tool_proxy = create_tool_proxy(request.available_tools)
         self.tool_manager = tool_proxy
         # 3. 技能代理 (带优先级: agent_workspace > user_skills > system_skills > global)
-        skill_proxy = create_skill_proxy(
+        skill_proxy, agent_skill_manager = create_skill_proxy(
             request.available_skills,
             user_id=self.request.user_id,
             agent_workspace=self.agent_workspace
         )
-        self.skill_manager = skill_proxy
+        self.skill_proxy = skill_proxy
+        self.agent_skill_manager = agent_skill_manager
+
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
@@ -316,7 +318,7 @@ class SageStreamService:
                 session_id=session_id,
                 input_messages=messages,
                 tool_manager=self.tool_manager,
-                skill_manager=self.skill_manager,
+                skill_manager=self.skill_proxy,
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
@@ -394,6 +396,11 @@ async def execute_chat_session(
     """
 
     session_id = stream_service.request.session_id
+    request = stream_service.request
+    
+    # 记录会话开始时下的原始skills
+    original_skills = stream_service.agent_skill_manager.list_skills() if stream_service.agent_skill_manager else []
+    
     stream_counter = 0
     last_activity_time = time.time()
     async for result in stream_service.process_stream():
@@ -420,39 +427,39 @@ async def execute_chat_session(
     }
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
-    # 会话结束后的处理
-    await _handle_session_end(stream_service.request)
+    # 会话结束后的处理，传入原始skills用于合并
+    await _handle_session_end(request, original_skills)
 
 
-async def _handle_session_end(request: StreamRequest) -> None:
+async def _handle_session_end(request: StreamRequest, original_skills: List[str]) -> None:
     """
     会话结束后的处理逻辑
     1. 更新conversation表的updated_at
     2. 如果入参available_skills有值，异步检查agent工作空间下的skills目录
     """
-    # 1. 更新会话时间戳
+    # 更新会话时间戳
     conversation_dao = models.ConversationDao()
     await conversation_dao.update_timestamp(request.session_id)
     logger.bind(session_id=request.session_id).info("会话结束，已更新conversation时间戳")
 
     # 2. 如果available_skills有值，启动异步任务检查skills目录
     if request.available_skills and request.agent_id:
-        asyncio.create_task(_check_and_update_agent_skills(request))
+        asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
 
 
-async def _check_and_update_agent_skills(request: StreamRequest) -> None:
+async def _check_and_update_agent_skills(request: StreamRequest, original_skills: List[str]) -> None:
     """
-    异步检查agent工作空间下的skills目录，与入参available_skills做比对
-    如果有差异，则更新对应的agent_config
+    异步检查agent工作空间下的skills目录，只处理新增的skills
+    将会话期间新增的skills添加到数据库配置中
     """
     try:
         from ...core.config import get_startup_config
 
         cfg = get_startup_config()
-        user_id = request.user_id or "default_user"
+        user_id = request.user_id
         agent_id = request.agent_id
 
-        # 获取agent工作空间下的skills
+        # 获取agent工作空间下的实际skills
         agent_skills_path = os.path.join(cfg.agents_dir, user_id, agent_id, "skills")
         
         actual_skills = set()
@@ -465,33 +472,28 @@ async def _check_and_update_agent_skills(request: StreamRequest) -> None:
             except Exception as e:
                 logger.warning(f"加载Agent工作空间技能失败: {e}")
 
-        # 入参的skills
-        request_skills = set(request.available_skills or [])
-
-        # 比对差异
-        if actual_skills != request_skills:
-            # 计算新增和删除的技能
-            added_skills = actual_skills - request_skills
-            removed_skills = request_skills - actual_skills
-            
-            # 有差异，更新agent_config
+        # 原始skills（会话开始时工作空间中的）
+        original_skills_set = set(original_skills or [])
+        
+        # 计算会话期间新增的skills
+        added_in_session = actual_skills - original_skills_set
+        
+        # 如果有新增的skills，更新到数据库配置
+        if added_in_session:
             agent_dao = models.AgentConfigDao()
             agent = await agent_dao.get_by_id(agent_id)
             if agent and agent.config:
-                # 更新availableSkills为实际存在的skills
-                agent.config["availableSkills"] = list(actual_skills)
-                agent.config["available_skills"] = list(actual_skills)
+                # 获取当前配置的skills
+                current_skills = set(agent.config.get("availableSkills") or [])
+                # 合并新增的skills
+                updated_skills = current_skills | added_in_session
+                
+                # 更新配置
+                agent.config["availableSkills"] = list(updated_skills)
                 await agent_dao.save(agent)
                 
-                # 构建日志信息
-                changes = []
-                if added_skills:
-                    changes.append(f"新增={added_skills}")
-                if removed_skills:
-                    changes.append(f"删除={removed_skills}")
-                
                 logger.bind(session_id=request.session_id, agent_id=agent_id).info(
-                    f"Agent技能列表已更新: {', '.join(changes)}"
+                    f"Agent技能列表已更新: 新增={added_in_session}, 最终={updated_skills}"
                 )
     except Exception as e:
         logger.bind(session_id=request.session_id).error(f"检查并更新Agent技能失败: {e}")
