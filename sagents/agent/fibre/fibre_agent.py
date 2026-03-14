@@ -2,7 +2,6 @@ from typing import List, Dict, Any, Optional, Union, AsyncGenerator
 import uuid
 import time
 import traceback
-import logging
 import json
 
 from sagents.context.messages.message import MessageChunk
@@ -13,8 +12,7 @@ from sagents.context.user_memory import UserMemoryManager
 from sagents.observability import ObservabilityManager, OpenTelemetryTraceHandler, ObservableAsyncOpenAI
 from sagents.agent.agent_base import AgentBase
 from sagents.utils.prompt_manager import PromptManager
-
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 class FibreAgent(AgentBase):
     """
