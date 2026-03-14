@@ -257,10 +257,15 @@ export const useChatPage = (props) => {
     nextTick(() => scrollToBottom())
   }
 
-  const addUserMessage = (content, sessionId) => {
+  const addUserMessage = (content, sessionId, multimodalContent = null) => {
+    // 如果有多模态内容，使用数组格式；否则使用纯文本
+    const messageContent = multimodalContent && multimodalContent.length > 0
+      ? multimodalContent
+      : content.trim()
+
     const userMessage = {
       role: 'user',
-      content: content.trim(),
+      content: messageContent,
       message_id: Date.now().toString(),
       type: 'USER',
       session_id: sessionId

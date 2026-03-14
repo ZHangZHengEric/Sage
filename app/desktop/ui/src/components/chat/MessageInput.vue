@@ -27,7 +27,14 @@
       </div>
     </div>
 
-    <div class="relative flex items-end gap-2 p-3 bg-muted/30 border border-input rounded-3xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm">
+    <div
+      class="relative flex items-end gap-2 p-3 bg-muted/30 border border-input rounded-3xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm"
+      :class="{ 'bg-primary/5 border-primary/50': isDraggingOver }"
+      @dragenter="handleDragEnter"
+      @dragover="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+    >
       <!-- 技能列表弹窗 -->
       <div v-if="showSkillList && (filteredSkills.length > 0 || loadingSkills)" class="absolute bottom-full left-0 w-full mb-2 bg-popover border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto z-50 bg-background">
         <div v-if="loadingSkills" class="p-3 text-center text-sm text-muted-foreground">
@@ -146,6 +153,10 @@ const props = defineProps({
   presetText: {
     type: String,
     default: ''
+  },
+  selectedAgent: {
+    type: Object,
+    default: null
   }
 })
 
@@ -209,6 +220,84 @@ const selectSkill = (skill) => {
 // 文件上传相关状态
 const uploadedFiles = ref([])
 const isComposing = ref(false)
+const isDraggingOver = ref(false)
+
+// 拖拽事件处理
+const handleDragEnter = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer && e.dataTransfer.types) {
+    const types = Array.from(e.dataTransfer.types)
+    if (types.includes('Files') || types.includes('application/x-moz-file')) {
+      isDraggingOver.value = true
+    }
+  }
+}
+
+const handleDragOver = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+const handleDragLeave = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDraggingOver.value = false
+}
+
+const handleDrop = async (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDraggingOver.value = false
+
+  const files = []
+
+  // 方式1: 使用dataTransfer.items
+  const items = e.dataTransfer?.items
+  if (items && items.length > 0) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const entry = item.webkitGetAsEntry?.() || item.getAsEntry?.()
+
+      if (entry && entry.isFile) {
+        const file = await getFileFromEntry(entry)
+        if (file) files.push(file)
+      } else if (!entry) {
+        const file = item.getAsFile()
+        if (file) files.push(file)
+      }
+    }
+  }
+
+  // 方式2: 使用dataTransfer.files
+  if (files.length === 0) {
+    const dtFiles = e.dataTransfer?.files
+    if (dtFiles && dtFiles.length > 0) {
+      for (let i = 0; i < dtFiles.length; i++) {
+        files.push(dtFiles[i])
+      }
+    }
+  }
+
+  // 处理所有文件
+  for (const file of files) {
+    await processFile(file)
+  }
+}
+
+// 从FileEntry获取File对象
+const getFileFromEntry = (fileEntry) => {
+  return new Promise((resolve) => {
+    fileEntry.file((file) => {
+      resolve(file)
+    }, () => {
+      resolve(null)
+    })
+  })
+}
 
 // 自动调整文本区域高度
 const adjustTextareaHeight = async () => {
@@ -271,31 +360,56 @@ const handleSubmit = (e) => {
       messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
     }
 
-    if (uploadedFiles.value.length > 0) {
-      const fileInfos = uploadedFiles.value.filter(f => f.url).map(f => {
-        // 清理文件名，去掉时间戳后缀（如 _20260307191202.md）
+    // 构建多模态内容格式
+    const multimodalContent = []
+
+    // 添加文本内容
+    if (messageContent) {
+      multimodalContent.push({ type: 'text', text: messageContent })
+    }
+
+
+    // 非图片文件使用 Markdown 链接格式附加到文本中
+    // 如果开启了多模态，图片文件已经在上面作为多模态内容添加，不再重复添加为 Markdown 链接
+    const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
+
+    if (isMultimodalEnabled) {
+         // 添加图片内容（仅用于多模态模式）
+        const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
+        for (const img of imageFiles) {
+          multimodalContent.push({
+            type: 'image_url',
+            image_url: { url: img.url }
+          })
+    }
+
+    }
+    const nonImageFiles = uploadedFiles.value.filter(f => f.url && (isMultimodalEnabled ? f.type !== 'image' : true))
+    if (nonImageFiles.length > 0) {
+      const fileInfos = nonImageFiles.map(f => {
         let cleanName = f.name || '文件'
-        // 移除时间戳模式：_YYYYMMDDhhmmss.扩展名
         cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
-        // 如果还有时间戳在中间，也尝试移除
         cleanName = cleanName.replace(/_\d{14}_/, '_')
-        return {
-          url: f.url,
-          name: cleanName
-        }
+        return { url: f.url, name: cleanName }
       })
 
-      if (fileInfos.length > 0) {
-        if (messageContent) {
-          messageContent += '\n\n'
-        }
-        // 使用 Markdown 链接格式显示文件
-        const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
-        messageContent += markdownLinks.join('\n')
+      if (messageContent && fileInfos.length > 0) {
+        messageContent += '\n\n'
+      }
+      const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
+      messageContent += markdownLinks.join('\n')
+
+      // 更新 multimodalContent 中的文本（如果存在）
+      if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
+        multimodalContent[0].text = messageContent
       }
     }
-    if (messageContent) {
-      emit('sendMessage', messageContent)
+
+    // 发送消息，同时传递普通格式和多模态格式
+    if (messageContent || multimodalContent.length > 0) {
+      emit('sendMessage', messageContent, {
+        multimodalContent: multimodalContent.length > 0 ? multimodalContent : null
+      })
       inputValue.value = ''
       uploadedFiles.value = []
       currentSkill.value = null
