@@ -27,9 +27,6 @@ from .session_manager import get_session_manager
 from .agent_client import get_agent_client
 from .service_manager import get_service_manager
 
-# Initialize FastMCP server
-mcp = FastMCP("IM Service")
-
 # Constants
 logger = logging.getLogger("IMServer")
 
@@ -37,6 +34,17 @@ logger = logging.getLogger("IMServer")
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Initialize FastMCP server
+mcp = FastMCP("IM Service")
+
+# Register file tools
+try:
+    from .tools.file_tools import register_file_tools
+    register_file_tools(mcp)
+    logger.info("[IM Server] File tools registered")
+except Exception as e:
+    logger.warning(f"[IM Server] Failed to register file tools: {e}")
 
 # Default Sage user ID for desktop app
 DEFAULT_SAGE_USER_ID = "desktop_default_user"
@@ -67,6 +75,7 @@ async def _send_message_to_agent(
     user_id: str = "im_user",
     provider: str = "unknown",
     user_name: Optional[str] = None,
+    file_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Send a message to agent and get response."""
     client = get_agent_client()
@@ -76,7 +85,8 @@ async def _send_message_to_agent(
         content=content,
         user_id=user_id,
         user_name=user_name,
-        provider=provider
+        provider=provider,
+        file_info=file_info
     )
 
 
@@ -244,7 +254,8 @@ async def handle_incoming_message(
     default_agent_id: Optional[str] = None,
     session_webhook: Optional[str] = None,
     sender_staff_id: Optional[str] = None,
-    session_webhook_expired_time: Optional[int] = None
+    session_webhook_expired_time: Optional[int] = None,
+    file_info: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Handle incoming message from any IM provider.
@@ -261,6 +272,7 @@ async def handle_incoming_message(
         session_webhook: DingTalk session webhook (optional)
         sender_staff_id: DingTalk sender staff ID (optional)
         session_webhook_expired_time: DingTalk webhook expiry (optional)
+        file_info: File information dict (optional) - {name, size, mime_type, local_path}
 
     Returns:
         Dict with success status and session_id
@@ -287,7 +299,8 @@ async def handle_incoming_message(
         content=content,
         user_id=user_id,
         provider=provider,
-        user_name=user_name
+        user_name=user_name,
+        file_info=file_info
     )
 
     if result.get("success"):
