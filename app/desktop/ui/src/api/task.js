@@ -116,6 +116,40 @@ class TaskAPI extends BaseAPI {
     }
     return this.delete(url)
   }
+
+  /**
+   * 上传文件到工作空间
+   * @param {string} agentId - Agent ID
+   * @param {File} file - 文件对象
+   * @param {string} targetPath - 目标路径（可选）
+   * @returns {Promise<Object>}
+   */
+  uploadWorkspaceFile(agentId, file, targetPath = '') {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (targetPath) {
+      formData.append('target_path', targetPath)
+    }
+    return this.post(`/api/agent/${agentId}/file_workspace/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  }
+
+  /**
+   * 上传文件夹到工作空间（桌面端使用）
+   * @param {string} agentId - Agent ID
+   * @param {Array} files - 文件列表 [{source_path, relative_path}]
+   * @param {string} targetFolder - 目标文件夹
+   * @returns {Promise<Object>}
+   */
+  uploadWorkspaceFolder(agentId, files, targetFolder = '') {
+    return this.post(`/api/agent/${agentId}/file_workspace/upload_folder`, {
+      files,
+      target_folder: targetFolder
+    })
+  }
 }
 
 export const taskAPI = new TaskAPI()

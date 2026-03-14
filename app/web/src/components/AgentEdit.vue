@@ -26,7 +26,7 @@
         >
           <Loader v-if="saving" class="mr-1.5 h-3 w-3 animate-spin" />
           <Save v-else class="mr-1.5 h-3 w-3" />
-          {{ t('common.save') }}}
+          {{ t('common.save') }}
         </Button>
         <Button
           @click="handleSave(true)"
@@ -207,16 +207,39 @@
 
               <!-- Row 3: Model Provider -->
               <FormItem :label="t('agent.modelProvider')">
-                <Select v-model="store.formData.llm_provider_id">
+                <Select v-model="llmProviderSelectValue">
                   <SelectTrigger class="h-10">
                     <SelectValue :placeholder="t('agent.selectModelProvider')" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
-                      {{ provider.name }} ({{ provider.model }})
+                      <div class="flex items-center gap-2">
+                        <span>{{ provider.name }} ({{ provider.model }})</span>
+                        <div class="flex items-center gap-1 ml-2">
+                          <!-- 文本输入图标 (默认) -->
+                          <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
+                          <!-- 多模态图像图标 -->
+                          <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
+                        </div>
+                      </div>
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </FormItem>
+
+              <!-- Row 3.5: Enable Multimodal -->
+              <FormItem label="开启多模态">
+                <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
+                  <Switch 
+                    :checked="store.formData.enableMultimodal" 
+                    @update:checked="(v) => store.formData.enableMultimodal = v"
+                    :disabled="!selectedProviderSupportsMultimodal"
+                  />
+                  <span class="text-sm text-muted-foreground">
+                    {{ store.formData.enableMultimodal ? '已开启' : '已关闭' }}
+                    <span v-if="!selectedProviderSupportsMultimodal" class="text-xs text-destructive ml-2">(当前模型源不支持多模态)</span>
+                  </span>
+                </div>
               </FormItem>
 
               <!-- Row 4: Sub Agent Selection (Only for Fibre Mode) -->
@@ -713,7 +736,7 @@ import { skillAPI } from '../api/skill.js'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, User, Cpu, Database, Workflow,
-  FileText, X
+  FileText, X, Image as ImageIcon
 } from 'lucide-vue-next'
 
 // UI Components
@@ -861,6 +884,25 @@ watch(() => props.agent, (newAgent) => {
 const providers = ref([])
 const allAgents = ref([])
 
+// Default provider option
+const defaultProviderOption = '__default__'
+const llmProviderSelectValue = computed({
+  get: () => store.formData.llm_provider_id ?? defaultProviderOption,
+  set: (val) => {
+    store.formData.llm_provider_id = val === defaultProviderOption ? null : val
+    // Reset multimodal when provider changes
+    store.formData.enableMultimodal = false
+  }
+})
+
+// Check if selected provider supports multimodal
+const selectedProviderSupportsMultimodal = computed(() => {
+  const providerId = store.formData.llm_provider_id
+  if (!providerId) return false
+  const provider = providers.value.find(p => p.id === providerId)
+  return provider?.supports_multimodal === true
+})
+
 const loadData = async () => {
   try {
     const [providersRes, agentsRes] = await Promise.all([
@@ -868,7 +910,8 @@ const loadData = async () => {
       agentAPI.getAgents()
     ])
     providers.value = providersRes || []
-    allAgents.value = agentsRes?.agents || agentsRes || []
+    // 后端返回格式: [...]
+    allAgents.value = agentsRes || []
   } catch (e) {
     console.error('Failed to load data', e)
   }
