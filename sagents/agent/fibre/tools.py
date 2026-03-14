@@ -1,8 +1,6 @@
-import logging
 from typing import Dict, List
 from sagents.tool.tool_base import tool
-
-logger = logging.getLogger(__name__)
+from sagents.utils.logger import logger
 
 
 class FibreTools:
