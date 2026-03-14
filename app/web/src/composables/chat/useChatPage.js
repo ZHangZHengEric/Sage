@@ -181,7 +181,7 @@ export const useChatPage = (props) => {
     if (res.conversation_info?.agent_id) {
       const agent = agents.value.find(a => a.id === res.conversation_info.agent_id)
       if (agent) {
-        selectAgent(agent)
+        await selectAgent(agent)
       }
     }
     if (res.conversation_info && activeSessions.value[sessionId]?.status === 'running') {
@@ -228,10 +228,18 @@ export const useChatPage = (props) => {
     nextTick(() => scrollToBottom(true))
   }
 
-  const addUserMessage = (content, sessionId) => {
+  const addUserMessage = (content, sessionId, multimodalContent = null, enableMultimodal = false) => {
+    // 根据 enableMultimodal 决定是否使用多模态格式
+    // 只有当 enableMultimodal 为 true 且有多模态内容时，才使用数组格式
+    console.log('enableMultimodal:', enableMultimodal)
+    console.log('multimodalContent:', multimodalContent)
+    const messageContent = (enableMultimodal && multimodalContent && multimodalContent.length > 0)
+      ? multimodalContent
+      : content.trim()
+
     const userMessage = {
       role: 'user',
-      content: content.trim(),
+      content: messageContent,
       message_id: Date.now().toString(),
       type: 'USER',
       session_id: sessionId
@@ -343,9 +351,9 @@ export const useChatPage = (props) => {
       if (conversation.agent_id && agents.value.length > 0) {
         const agent = agents.value.find(a => a.id === conversation.agent_id)
         if (agent) {
-          selectAgent(agent)
+          await selectAgent(agent)
         } else {
-          selectAgent(agents.value[0])
+          await selectAgent(agents.value[0])
         }
       }
       if (conversation.messages && conversation.messages.length > 0) {

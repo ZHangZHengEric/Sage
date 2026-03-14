@@ -55,7 +55,7 @@ def create_skill_proxy(
     from app.server.core.config import get_startup_config
 
     if not available_skills:
-        return SkillProxy(get_skill_manager(), [])
+        return SkillProxy(get_skill_manager(), []), None
 
     # 获取全局 skill_manager 作为基础
     global_skill_manager = get_skill_manager()
