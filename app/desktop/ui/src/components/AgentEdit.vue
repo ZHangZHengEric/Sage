@@ -508,7 +508,7 @@
             </div>
             <div class="pl-10 space-y-4">
               <div class="flex items-center gap-3">
-                <Button variant="outline" size="sm" class="h-9 px-4">
+                <Button variant="outline" size="sm" class="h-9 px-4" @click="selectExternalPath">
                   <Plus class="h-3.5 w-3.5 mr-2" />
                   添加文件夹
                 </Button>
