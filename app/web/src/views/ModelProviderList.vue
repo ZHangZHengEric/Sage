@@ -193,9 +193,6 @@
             <p v-if="form.supportsMultimodal && !multimodalVerified" class="text-xs text-amber-600">
               请验证多模态支持以确保功能正常
             </p>
-            <p v-if="multimodalVerified" class="text-xs text-green-600">
-              多模态验证通过
-            </p>
           </div>
         </div>
         <DialogFooter class="flex sm:justify-between items-center w-full">
