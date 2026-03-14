@@ -37,9 +37,28 @@
           </button>
           {{ getLabel({ role: 'user', type: message.type }) }}
         </div>
-        <div
-          class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
-          <MarkdownRenderer :content="formatMessageContent(message.content)" />
+        <div class="flex flex-col gap-2">
+          <!-- 文本内容 -->
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
+            <MarkdownRenderer
+              :content="formatMessageContent(getTextContent(message.content))"
+            />
+          </div>
+        <!-- 图片内容 -->
+          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+            <div
+              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              :key="index"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
+            >
+              <img
+                :src="imgUrl"
+                :alt="`图片 ${index + 1}`"
+                class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                @click="handleImageClick(imgUrl)"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -58,7 +77,7 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content"
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)"
       class="flex flex-row items-start gap-3 px-4 group">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.type" role="assistant" :agentId="agentId" />
@@ -76,8 +95,29 @@
             <Copy v-else class="w-3 h-3" />
           </button>
         </div>
-        <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
-          <MarkdownRendererWithPreview :content="formatMessageContent(message.content)" :components="markdownComponents" />
+        <div class="flex flex-col gap-2 w-full">
+          <!-- 文本内容 -->
+          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
+            <MarkdownRendererWithPreview
+              :content="formatMessageContent(getTextContent(message.content))"
+              :components="markdownComponents"
+            />
+          </div>
+          <!-- 图片内容 -->
+          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+            <div
+              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              :key="index"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
+            >
+              <img
+                :src="imgUrl"
+                :alt="`图片 ${index + 1}`"
+                class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                @click="handleImageClick(imgUrl)"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -125,7 +165,7 @@ import MarkdownRendererWithPreview from './MarkdownRendererWithPreview.vue'
 import EChartsRenderer from './EChartsRenderer.vue'
 import SyntaxHighlighter from './SyntaxHighlighter.vue'
 import TokenUsage from './TokenUsage.vue'
-import { Terminal, FileText, Search, Zap, Copy, Check } from 'lucide-vue-next'
+import { Terminal, FileText, Search, Zap, Copy, Check, Image } from 'lucide-vue-next'
 import { getMessageLabel } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
@@ -255,6 +295,39 @@ const formatMessageContent = (content) => {
     .replace(/\*(.*?)\*/g, '*$1*') // 保持斜体
     .replace(/`(.*?)`/g, '`$1`') // 保持行内代码
     .replace(/\n/g, '\n') // 保持换行
+}
+
+// 从多模态内容中提取文本
+const getTextContent = (content) => {
+  if (!content) return ''
+  // 如果是字符串，直接返回
+  if (typeof content === 'string') return content
+  // 如果是数组，提取所有文本类型的内容
+  if (Array.isArray(content)) {
+    const textParts = content
+      .filter(item => item.type === 'text' && item.text)
+      .map(item => item.text)
+    return textParts.join('\n')
+  }
+  return ''
+}
+
+// 从多模态内容中提取图片 URL
+const getImageUrls = (content) => {
+  if (!content || typeof content === 'string') return []
+  // 如果是数组，提取所有图片类型的 URL
+  if (Array.isArray(content)) {
+    return content
+      .filter(item => item.type === 'image_url' && item.image_url?.url)
+      .map(item => item.image_url.url)
+  }
+  return []
+}
+
+// 处理图片点击 - 打开浏览器
+const handleImageClick = (url) => {
+  if (!url) return
+  window.open(url, '_blank')
 }
 
 const getToolResult = (toolCall) => {
@@ -414,10 +487,11 @@ const isCustomToolMessage = computed(() => {
 const copied = ref(false)
 
 const handleCopy = async () => {
-  if (!props.message.content) return
+  const textToCopy = getTextContent(props.message.content)
+  if (!textToCopy) return
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(props.message.content)
+      await navigator.clipboard.writeText(textToCopy)
       copied.value = true
       setTimeout(() => {
         copied.value = false
@@ -425,16 +499,16 @@ const handleCopy = async () => {
     } else {
       // Fallback for browsers/environments where clipboard API is not available (e.g. non-secure context)
       const textArea = document.createElement('textarea')
-      textArea.value = props.message.content
+      textArea.value = textToCopy
       textArea.style.position = 'fixed'
       textArea.style.left = '-9999px'
       document.body.appendChild(textArea)
       textArea.focus()
       textArea.select()
-      
+
       const successful = document.execCommand('copy')
       document.body.removeChild(textArea)
-      
+
       if (successful) {
         copied.value = true
         setTimeout(() => {

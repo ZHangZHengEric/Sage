@@ -43,6 +43,10 @@ const props = defineProps({
 
 const imageUrl = computed(() => {
   if (!props.filePath) return ''
+  // 如果已经是 asset:// 或 http:// URL，直接返回
+  if (props.filePath.startsWith('asset://') || props.filePath.startsWith('http://') || props.filePath.startsWith('https://')) {
+    return props.filePath
+  }
   let cleanPath = props.filePath
   // 如果已经是 file:// URL，去掉协议头
   if (props.filePath.startsWith('file://')) {
