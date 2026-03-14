@@ -31,6 +31,20 @@ const initializeApp = async () => {
   }
 }
 
+// 阻止默认的拖拽行为，允许文件拖拽
+window.addEventListener('dragover', (e) => {
+  e.preventDefault()
+})
+
+window.addEventListener('drop', (e) => {
+  // 只允许特定区域的drop事件
+  const target = e.target
+  const isInWorkspace = target.closest('.workspace-drop-zone') !== null
+  if (!isInWorkspace) {
+    e.preventDefault()
+  }
+})
+
 // 挂载应用并初始化
 app.mount('#app')
 initializeApp()

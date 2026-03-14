@@ -12,8 +12,10 @@ defineProps({
 
 <template>
   <div :class="cn('space-y-2', $props.class)">
-    <div v-if="label" class="flex items-center gap-1">
-      <Label :class="error ? 'text-destructive' : ''">{{ label }}</Label>
+    <div v-if="label || $slots.label" class="flex items-center gap-1">
+      <slot name="label">
+        <Label :class="error ? 'text-destructive' : ''">{{ label }}</Label>
+      </slot>
       <span v-if="required" class="text-destructive">*</span>
     </div>
     <slot />

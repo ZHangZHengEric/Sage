@@ -242,7 +242,9 @@ class MessageManager:
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk.from_dict(message)
-            token_length += MessageManager._calculate_str_token_length_static(message.get_content() or '')
+            # 提取文本内容（处理多模态格式）
+            content = MessageManager._extract_text_from_content(message.get_content())
+            token_length += MessageManager._calculate_str_token_length_static(content)
         return token_length
 
     @staticmethod
@@ -278,27 +280,59 @@ class MessageManager:
         return int(token_length)
 
     @staticmethod
-    def calculate_str_token_length(content: str) -> int:
+    def _extract_text_from_content(content: Union[str, List[Dict[str, Any]], None]) -> str:
+        """
+        从消息内容中提取文本
+        支持多模态消息格式
+
+        Args:
+            content: 字符串或多模态列表
+
+        Returns:
+            str: 提取的文本内容
+        """
+        if content is None:
+            return ""
+
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            # 从多模态列表中提取文本内容
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+            return " ".join(text_parts)
+
+        return str(content)
+
+    @staticmethod
+    def calculate_str_token_length(content: Union[str, List[Dict[str, Any]], None]) -> int:
         """
         计算字符串的token长度（公共静态方法）
         优先使用动态比例，如果没有样本则使用静态规则
+        支持多模态消息格式
 
         Args:
-            content: 字符串内容
+            content: 字符串内容或多模态列表
 
         Returns:
             int: 字符串的token长度
         """
-        if not content:
+        # 提取文本内容（处理多模态格式）
+        text_content = MessageManager._extract_text_from_content(content)
+
+        if not text_content:
             return 0
 
         # 如果有动态比例样本，使用动态比例
         if _global_token_ratio_samples:
             ratio = MessageManager.get_dynamic_token_ratio()
-            return int(len(content) * ratio)
+            return int(len(text_content) * ratio)
 
         # 否则使用静态规则
-        return MessageManager._calculate_str_token_length_static(content)
+        return MessageManager._calculate_str_token_length_static(text_content)
 
     def update_token_ratio(self, char_count: int, actual_token_count: int) -> None:
         """
@@ -398,7 +432,12 @@ class MessageManager:
         if existing_message:
             # 流式消息的特点是每次传递的都是新的增量内容
             if new_message.content is not None:
-                existing_message.content = (existing_message.content or '') + new_message.content
+                # 处理多模态消息格式 - 只对纯文本消息进行合并
+                if isinstance(existing_message.content, list) or isinstance(new_message.content, list):
+                    # 多模态消息不合并，直接替换
+                    existing_message.content = new_message.content
+                else:
+                    existing_message.content = (existing_message.content or '') + new_message.content
             
             # 合并 tool_calls（流式 tool_calls 增量合并）
             if new_message.tool_calls is not None:
@@ -487,15 +526,17 @@ class MessageManager:
         for msg in messages:
             if msg is None:
                 continue
+            # 提取文本内容（处理多模态格式）
+            content_str = MessageManager._extract_text_from_content(msg.content)
             if msg.role == 'user':
-                messages_str_list.append(f"User: {msg.content}")
+                messages_str_list.append(f"User: {content_str}")
             elif msg.role == 'assistant':
-                if msg.content is not None:
-                    messages_str_list.append(f"AI: {msg.content}")
+                if content_str:
+                    messages_str_list.append(f"AI: {content_str}")
                 elif msg.tool_calls is not None:
                     messages_str_list.append(f"AI: Tool calls: {msg.tool_calls}")
             elif msg.role == 'tool':
-                messages_str_list.append(f"Tool: {msg.content}")
+                messages_str_list.append(f"Tool: {content_str}")
         
         result = "\n".join(messages_str_list) or "None"
         logger.info(f"AgentBase: 转换后字符串长度: {MessageManager._calculate_str_token_length_static(result)}")
@@ -774,8 +815,15 @@ class MessageManager:
             MessageChunk: 压缩后的消息副本
         """
         new_msg = deepcopy(msg)
-        content = new_msg.content or ""
-        
+        content = new_msg.content
+
+        # 处理多模态消息格式 - 只对纯文本消息进行压缩
+        if isinstance(content, list):
+            # 多模态消息不压缩，直接返回
+            return new_msg
+
+        content = content or ""
+
         if level == 1:
             # Level 1: Tool Output 截断 (100+100), Remove Thinking
             if new_msg.role == MessageRole.TOOL.value:
@@ -785,7 +833,7 @@ class MessageManager:
                 # 移除 <thinking>
                 if "<thinking>" in content:
                     new_msg.content = re.sub(r'<thinking>.*?</thinking>', '', content, flags=re.DOTALL).strip()
-                
+
         elif level == 2:
             # Level 2: 强力截断 (100 chars)
             if new_msg.role == MessageRole.TOOL.value:
@@ -794,7 +842,7 @@ class MessageManager:
             elif new_msg.role == MessageRole.ASSISTANT.value:
                 if len(content) > 100:
                     new_msg.content = content[:100] + "...[Content truncated]"
-                    
+
         return new_msg
 
     @staticmethod

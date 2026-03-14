@@ -331,13 +331,8 @@ const loadAgents = async () => {
     loading.value = true
     error.value = null
     const response = await agentAPI.getAgents()
-    if (response.agents) {
-      agents.value = response.agents
-    } else if (Array.isArray(response)) {
-      agents.value = response
-    } else {
-      agents.value = []
-    }
+    // 后端返回格式: [...]
+    agents.value = response || []
   } catch (err) {
     console.error('加载agents失败:', err)
     error.value = err.message || '加载失败'
@@ -557,8 +552,8 @@ const handleEditAgent = async (agent) => {
     loading.value = true
     // 调用详情接口获取完整信息
     const response = await agentAPI.getAgentDetail(agent.id)
-    if (response.agent) {
-      editingAgent.value = response.agent
+    if (response) {
+      editingAgent.value = response
     } else {
       // 如果接口返回格式不同，直接使用原有数据
       editingAgent.value = agent
@@ -609,9 +604,7 @@ const handleSaveAgent = async (agentData, shouldExit = true, doneCallback = null
       // 如果是创建操作且不退出，需要更新editingAgent为新创建的agent
       if (!agentData.id) {
         let newAgent = null
-        if (result && result.agent) {
-          newAgent = result.agent
-        } else if (result && result.id) {
+        if (result && result.id) {
           newAgent = result
         }
         
@@ -674,7 +667,7 @@ const handleSmartConfig = async (description, selectedTools = [], callbacks = {}
 
     // 调用后端API生成Agent配置
     const result = await agentAPI.generateAgentConfig(description, selectedTools)
-    const agentConfig = result.agent
+    const agentConfig = result
     const duration = Date.now() - startTime
     console.log(`📨 收到响应，耗时: ${duration}ms`)
     console.log('✅ 解析响应成功')
