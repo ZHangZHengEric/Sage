@@ -27,8 +27,8 @@ export const useChatAgentConfig = ({
     if (agent && (isAgentChange || forceConfigUpdate)) {
       try {
         const response = await agentAPI.getAgentDetail(agent.id)
-        // API返回格式: { agent: {...} }
-        const agentDetail = response?.agent || response
+        // API返回格式: {...}
+        const agentDetail = response
         // 合并详情数据
         agent = { ...agent, ...agentDetail }
       } catch (error) {
@@ -82,8 +82,8 @@ export const useChatAgentConfig = ({
     }
     try {
       const response = await agentAPI.getAgents()
-      // 后端返回格式: { agents: [...] }
-      agents.value = response?.agents || []
+      // 后端返回格式: [...]
+      agents.value = response || []
     } catch (error) {
       if (isLoggedIn()) {
         toast.error(t('chat.loadAgentsError'))
