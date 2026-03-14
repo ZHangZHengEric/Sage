@@ -299,6 +299,10 @@ const getTextContent = (content) => {
 
 const resolveFilePath = (url) => {
   if (!url) return ''
+  // 如果已经是 asset:// 或 file:// URL，直接返回
+  if (url.startsWith('asset://') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
   let cleanPath = url
   // 如果已经是 file:// URL，去掉协议头
   if (url.startsWith('file://')) {
