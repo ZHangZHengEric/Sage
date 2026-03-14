@@ -273,13 +273,15 @@ async def ensure_system_init(cfg: StartupConfig):
     from . import models
     from .services.user import _hash_password
     from .utils.id import gen_id
-    from .core.client.db import get_global_db
+    from .core.client.db import get_global_db, sync_database_schema
 
     db = await get_global_db()
     async with db._engine.begin() as conn:
         from . import models
 
         await conn.run_sync(models.Base.metadata.create_all)
+        # Sync schema: add missing columns to existing tables
+        await conn.run_sync(sync_database_schema, models.Base)
     logger.debug("数据库自动建表完成")
 
     # Check System Info
