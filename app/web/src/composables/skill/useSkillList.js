@@ -178,9 +178,8 @@ export function useSkillList(t) {
       }
 
       // 保存agent列表用于显示agent名称
-      if (agentsResponse.agents) {
-        agents.value = agentsResponse.agents
-      }
+      // 后端返回格式: { agents: [...] }
+      agents.value = agentsResponse?.agents || []
     } catch (error) {
       console.error('Failed to load skills:', error)
       toast.error(t('skills.loadFailed') || 'Failed to load skills')

@@ -20,8 +20,23 @@ export const useChatAgentConfig = ({
 
   const selectedAgentId = computed(() => selectedAgent.value?.id)
 
-  const selectAgent = (agent, forceConfigUpdate = false) => {
+  const selectAgent = async (agent, forceConfigUpdate = false) => {
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
+
+    // 如果有agent且是切换或强制更新，获取完整详情
+    if (agent && (isAgentChange || forceConfigUpdate)) {
+      try {
+        const response = await agentAPI.getAgentDetail(agent.id)
+        // API返回格式: { agent: {...} }
+        const agentDetail = response?.agent || response
+        // 合并详情数据
+        agent = { ...agent, ...agentDetail }
+      } catch (error) {
+        console.warn('获取Agent详情失败:', error)
+        // 继续使用传入的agent数据
+      }
+    }
+
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
       config.value = {
@@ -41,7 +56,7 @@ export const useChatAgentConfig = ({
     userConfigOverrides.value = updatedOverrides
   }
 
-  const restoreSelectedAgent = (agentsList) => {
+  const restoreSelectedAgent = async (agentsList) => {
     if (!agentsList || agentsList.length === 0) return
     if (selectedAgent.value) {
       const currentAgentExists = agentsList.find(agent => agent.id === selectedAgent.value.id)
@@ -51,12 +66,12 @@ export const useChatAgentConfig = ({
     if (savedAgentId) {
       const savedAgent = agentsList.find(agent => agent.id === savedAgentId)
       if (savedAgent) {
-        selectAgent(savedAgent)
+        await selectAgent(savedAgent)
         return
       }
     }
     if (agentsList[0]) {
-      selectAgent(agentsList[0])
+      await selectAgent(agentsList[0])
     }
   }
 
@@ -67,7 +82,8 @@ export const useChatAgentConfig = ({
     }
     try {
       const response = await agentAPI.getAgents()
-      agents.value = response || []
+      // 后端返回格式: { agents: [...] }
+      agents.value = response?.agents || []
     } catch (error) {
       if (isLoggedIn()) {
         toast.error(t('chat.loadAgentsError'))
@@ -79,7 +95,7 @@ export const useChatAgentConfig = ({
     if (agentId !== selectedAgentId.value) {
       const agent = agents.value.find(a => a.id === agentId)
       if (agent) {
-        selectAgent(agent)
+        await selectAgent(agent)
         await createSession(agentId)
         clearMessages()
       }
