@@ -1449,12 +1449,16 @@ class AgentBase(ABC):
         try:
             result_clean = MessageChunk.extract_json_from_markdown(all_content)
             suggested_tool_ids = json.loads(result_clean)
-            # 确保返回的工具ID列表是数字列表，不是字符串列表，并且不是数字的item要过滤掉
-            # 过滤掉非数字的item，确保返回的是数字列表
-            suggested_tool_ids = [int(item) for item in suggested_tool_ids if isinstance(item, (int, str)) and str(item).isdigit()]
-            return suggested_tool_ids
+            if isinstance(suggested_tool_ids, list):
+                # 确保返回的工具ID列表是数字列表，不是字符串列表，并且不是数字的item要过滤掉
+                # 过滤掉非数字的item，确保返回的是数字列表
+                suggested_tool_ids = [int(item) for item in suggested_tool_ids if isinstance(item, (int, str)) and str(item).isdigit()]
+                return suggested_tool_ids
+            else:
+                logger.warning(f"AgentBase: 解析工具建议响应时JSON格式错误, 响应内容: {result_clean}")
+                return []
         except json.JSONDecodeError:
-            logger.warning("AgentBase: 解析工具建议响应时JSON解码错误")
+            logger.warning(f"AgentBase: 解析工具建议响应时JSON解码错误, 响应内容: {result_clean}")
             return []
 
     async def _handle_tool_calls(self,
