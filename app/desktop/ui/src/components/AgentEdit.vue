@@ -154,7 +154,7 @@
               </div>
             </div>
             <div class="space-y-6 pl-10">
-              <!-- Row 1: Memory Type & Agent Mode -->
+              <!-- Row 1: Memory Type, Agent Mode, Enable Multimodal -->
               <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <FormItem :label="t('agent.memoryType')">
                   <Select v-model="store.formData.memoryType">
@@ -180,38 +180,23 @@
                     </SelectContent>
                   </Select>
                 </FormItem>
-                              <!-- Row 3.5: Enable Multimodal -->
-              <FormItem>
-                <template #label>
-                  <div class="flex items-center gap-1.5">
-                    <span>开启多模态</span>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <span class="inline-flex">
-                            <AlertCircle class="h-4 w-4 text-muted-foreground" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p class="text-xs">需要模型源多模态支持</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                </template>
-                <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
-                  <Switch 
-                    :checked="store.formData.enableMultimodal" 
-                    @update:checked="(v) => store.formData.enableMultimodal = v"
-                    :disabled="!selectedProviderSupportsMultimodal"
-                  />
-                  <span class="text-sm text-muted-foreground">
-                    {{ store.formData.enableMultimodal ? '已开启' : '已关闭' }}
-                    <span v-if="!selectedProviderSupportsMultimodal" class="text-xs text-destructive ml-2">(当前模型源不支持多模态)</span>
-                  </span>
-                </div>
-              </FormItem>
 
+                <!-- Enable Multimodal -->
+                <FormItem label="开启多模态">
+                  <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
+                    <Switch 
+                      :checked="store.formData.enableMultimodal" 
+                      @update:checked="(v) => {
+                        userManuallySetMultimodal.value = true
+                        store.formData.enableMultimodal = v
+                      }"
+                      :disabled="!selectedProviderSupportsMultimodal"
+                    />
+                    <span class="text-sm text-muted-foreground">
+                      {{ store.formData.enableMultimodal ? '已开启' : '已关闭' }}
+                    </span>
+                  </div>
+                </FormItem>
               </div>
 
               <!-- Row 2: Deep Thinking, More Suggest, Max Loop -->
@@ -523,7 +508,7 @@
             </div>
             <div class="pl-10 space-y-4">
               <div class="flex items-center gap-3">
-                <Button variant="outline" size="sm" class="h-9 px-4">
+                <Button variant="outline" size="sm" class="h-9 px-4" @click="selectExternalPath">
                   <Plus class="h-3.5 w-3.5 mr-2" />
                   添加文件夹
                 </Button>
@@ -857,12 +842,22 @@ const loadData = async () => {
 
 // Default provider option
 const defaultProviderOption = '__default__'
+// Track if user has manually set multimodal
+const userManuallySetMultimodal = ref(false)
+
 const llmProviderSelectValue = computed({
   get: () => store.formData.llm_provider_id ?? defaultProviderOption,
   set: (val) => {
     store.formData.llm_provider_id = val === defaultProviderOption ? null : val
-    // Reset multimodal when provider changes
-    store.formData.enableMultimodal = false
+    // Reset manual flag when provider changes
+    userManuallySetMultimodal.value = false
+    // Auto-enable multimodal if new provider supports it
+    const newProvider = providers.value.find(p => p.id === val)
+    if (newProvider?.supports_multimodal) {
+      store.formData.enableMultimodal = true
+    } else {
+      store.formData.enableMultimodal = false
+    }
   }
 })
 
@@ -873,6 +868,16 @@ const selectedProviderSupportsMultimodal = computed(() => {
   const provider = providers.value.find(p => p.id === providerId)
   return provider?.supports_multimodal === true
 })
+
+// Watch for provider changes and auto-enable multimodal
+watch(selectedProviderSupportsMultimodal, (supportsMultimodal) => {
+  // Only auto-enable if user hasn't manually set it and provider supports it
+  if (supportsMultimodal && !userManuallySetMultimodal.value) {
+    store.formData.enableMultimodal = true
+  } else if (!supportsMultimodal) {
+    store.formData.enableMultimodal = false
+  }
+}, { immediate: true })
 
 // Save handlers
 const handleSave = async (shouldExit = true) => {
