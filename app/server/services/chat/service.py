@@ -309,8 +309,6 @@ class SageStreamService:
             message_dict = msg.model_dump()
             if "message_id" not in message_dict or not message_dict["message_id"]:
                 message_dict["message_id"] = str(uuid.uuid4())
-            if message_dict.get("content"):
-                message_dict["content"] = str(message_dict["content"])
             messages.append(message_dict)
         await _ensure_conversation(self.request)
         try:
@@ -517,6 +515,17 @@ async def create_conversation_title(request: StreamRequest):
     if not request.messages or len(request.messages) == 0:
         return "新会话"
 
-    first_message = request.messages[0].content
+    content = request.messages[0].content
+    # 处理多模态消息格式，提取文本内容
+    if isinstance(content, list):
+        # 从多模态列表中提取文本内容
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(item.get("text", ""))
+        first_message = " ".join(text_parts) if text_parts else "新会话"
+    else:
+        first_message = content or "新会话"
+
     conversation_title = (first_message[:50] + "..." if len(first_message) > 50 else first_message)
     return conversation_title
