@@ -73,6 +73,10 @@ const codeClass = computed(() => {
 })
 
 const escapeHtml = (text) => {
+  // 确保 text 是字符串
+  if (typeof text !== 'string') {
+    text = String(text ?? '')
+  }
   const map = {
     '&': '&amp;',
     '<': '&lt;',
@@ -84,19 +88,22 @@ const escapeHtml = (text) => {
 }
 
 const highlightedCode = computed(() => {
-  if (!props.code) return ''
+  // 确保 code 是字符串
+  const code = typeof props.code === 'string' ? props.code : String(props.code ?? '')
+  
+  if (!code) return ''
   
   try {
     // 检查语言是否支持
     if (props.language && props.language !== 'text' && hljs.getLanguage(props.language)) {
-      return hljs.highlight(props.code, { language: props.language }).value
+      return hljs.highlight(code, { language: props.language }).value
     } else {
       // 如果不支持该语言，返回原始代码（HTML转义）
-      return escapeHtml(props.code)
+      return escapeHtml(code)
     }
   } catch (error) {
     console.error('代码高亮失败:', error)
-    return escapeHtml(props.code)
+    return escapeHtml(code)
   }
 })
 

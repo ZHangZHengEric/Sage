@@ -258,6 +258,10 @@ const props = defineProps({
   openWorkbench: {
     type: Function,
     default: null
+  },
+  extractWorkbenchItems: {
+    type: Boolean,
+    default: true  // 默认提取工作台项目
   }
 })
 
@@ -613,7 +617,13 @@ onMounted(() => {
   const messageId = props.message.message_id || props.message.id
   const sessionId = props.message.session_id
 
-  console.log('[MessageRenderer] onMounted, messageId:', messageId, 'role:', props.message.role, 'tool_calls:', props.message.tool_calls?.length)
+  console.log('[MessageRenderer] onMounted, messageId:', messageId, 'role:', props.message.role, 'tool_calls:', props.message.tool_calls?.length, 'extractWorkbenchItems:', props.extractWorkbenchItems)
+
+  // 如果不提取工作台项目，直接返回
+  if (!props.extractWorkbenchItems) {
+    console.log('[MessageRenderer] Skipping workbench extraction for message:', messageId)
+    return
+  }
 
   // 处理工具结果消息（role='tool'）
   if (props.message.role === 'tool' && props.message.tool_call_id) {

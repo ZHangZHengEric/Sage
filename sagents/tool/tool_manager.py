@@ -788,9 +788,9 @@ class ToolManager:
         logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
         logger.debug(f"Tool arguments: {kwargs}")
         
-        # Remove duplicate session_id from kwargs if present
-        # This is especially important for MCP tools which strictly follow the schema
-        session_id = kwargs.pop("session_id", session_id)
+        # Ensure session_id is in kwargs for parameter validation
+        # The session_id will be used for injection in _execute_standard_tool_async if needed
+        kwargs['session_id'] = session_id
 
         # Step 1: Tool Lookup
         tool = self.get_tool(tool_name)
@@ -808,6 +808,8 @@ class ToolManager:
         try:
             # Step 3: Execute tool
             if isinstance(tool, McpToolSpec):
+                # For MCP tools, session_id is passed explicitly, so remove from kwargs
+                kwargs.pop("session_id", None)
                 final_result = await self._execute_mcp_tool(tool, session_id, **kwargs)
             elif isinstance(tool, SageMcpToolSpec):
                 # Ensure session_id is not in kwargs
@@ -839,7 +841,8 @@ class ToolManager:
                     "file_update",
                     "extract_text_from_non_text_file",
                     "todo_read",
-                    "todo_write"
+                    "todo_write",
+                    "analyze_image"
                 ]
                 
                 if tool.name in SANDBOX_TOOLS:
@@ -868,12 +871,27 @@ class ToolManager:
                             # Inject session_id if the tool function expects it
                             import inspect
                             func_to_inspect = tool.func
-                            # Handle bound methods or wrapped functions
+                            
+                            # Try multiple ways to get the original function signature
                             if hasattr(func_to_inspect, "__wrapped__"):
                                 func_to_inspect = func_to_inspect.__wrapped__
+                            if inspect.ismethod(func_to_inspect):
+                                func_to_inspect = func_to_inspect.__func__
                             
-                            sig = inspect.signature(func_to_inspect)
-                            if "session_id" in sig.parameters:
+                            has_session_id_param = False
+                            try:
+                                sig = inspect.signature(func_to_inspect)
+                                has_session_id_param = "session_id" in sig.parameters
+                            except (ValueError, TypeError):
+                                pass
+                            
+                            # Also check from tool spec as fallback
+                            if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
+                                has_session_id_param = 'session_id' in tool.parameters
+                            if not has_session_id_param and hasattr(tool, 'required') and tool.required:
+                                has_session_id_param = 'session_id' in tool.required
+                            
+                            if has_session_id_param:
                                 kwargs["session_id"] = session_id
 
                             # Use run_tool which handles path mapping and execution
@@ -944,6 +962,7 @@ class ToolManager:
                         else:
                              # Fallback to standard execution if no sandbox found (should not happen in new setup)
                             logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")
+                            # Remove session_id from kwargs to avoid duplication, _execute_standard_tool_async will inject it
                             kwargs.pop("session_id", None)
                             final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
 
@@ -951,6 +970,7 @@ class ToolManager:
                         logger.error(f"Sandbox execution failed for {tool.name}, aborting.")
                         raise e
                 else:
+                    # Remove session_id from kwargs to avoid duplication, _execute_standard_tool_async will inject it
                     kwargs.pop("session_id", None)
                     final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
             elif isinstance(tool, AgentToolSpec):
@@ -1105,13 +1125,39 @@ class ToolManager:
             # Inject session_id if the tool function expects it
             import inspect
             func_to_inspect = tool.func
-            # Handle bound methods or wrapped functions
+            
+            # Try multiple ways to get the original function signature
+            # 1. Check if it's a wrapped function (from @tool decorator)
             if hasattr(func_to_inspect, "__wrapped__"):
                 func_to_inspect = func_to_inspect.__wrapped__
             
-            sig = inspect.signature(func_to_inspect)
-            if "session_id" in sig.parameters:
+            # 2. Check if it's a bound method and get the underlying function
+            if inspect.ismethod(func_to_inspect):
+                func_to_inspect = func_to_inspect.__func__
+            
+            # 3. For bound methods from classes, we need to check the original method
+            # The tool.func might be a bound method like <bound method ImageUnderstandingTool.analyze_image of <instance>>
+            # In this case, we should check if the tool_spec has session_id in required params
+            has_session_id_param = False
+            
+            # Check from function signature
+            try:
+                sig = inspect.signature(func_to_inspect)
+                has_session_id_param = "session_id" in sig.parameters
+            except (ValueError, TypeError):
+                pass
+            
+            # Also check from tool spec parameters (as fallback)
+            if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
+                has_session_id_param = 'session_id' in tool.parameters
+            
+            # Also check from tool spec required params (as fallback)
+            if not has_session_id_param and hasattr(tool, 'required') and tool.required:
+                has_session_id_param = 'session_id' in tool.required
+            
+            if has_session_id_param:
                 kwargs["session_id"] = session_id
+                logger.debug(f"Injected session_id for tool: {tool.name}")
 
             # Execute the tool function
             if hasattr(tool.func, "__self__"):
