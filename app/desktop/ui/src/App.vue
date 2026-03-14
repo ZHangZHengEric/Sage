@@ -69,7 +69,7 @@
           </div>
         </div>
         <div class="flex items-center space-x-2">
-          <Checkbox id="remember" v-model:checked="rememberChoice" class="h-4 w-4" />
+          <Checkbox id="remember" v-model:checked="rememberChoice" class="h-4 w-4 hover:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0" />
           <Label for="remember" class="cursor-pointer text-xs text-muted-foreground">不再提示</Label>
         </div>
       </div>
