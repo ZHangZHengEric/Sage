@@ -369,24 +369,24 @@ const handleSubmit = (e) => {
     }
 
 
-    // 非图片文件使用 Markdown 链接格式附加到文本中
-    // 如果开启了多模态，图片文件已经在上面作为多模态内容添加，不再重复添加为 Markdown 链接
+    // 处理文件引用链接（包括图片和非图片文件）
     const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
 
     if (isMultimodalEnabled) {
-         // 添加图片内容（仅用于多模态模式）
-        const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
-        for (const img of imageFiles) {
-          multimodalContent.push({
-            type: 'image_url',
-            image_url: { url: img.url }
-          })
+      // 添加图片内容到 multimodalContent（用于多模态模式）
+      const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
+      for (const img of imageFiles) {
+        multimodalContent.push({
+          type: 'image_url',
+          image_url: { url: img.url }
+        })
+      }
     }
 
-    }
-    const nonImageFiles = uploadedFiles.value.filter(f => f.url && (isMultimodalEnabled ? f.type !== 'image' : true))
-    if (nonImageFiles.length > 0) {
-      const fileInfos = nonImageFiles.map(f => {
+    // 所有文件（包括图片）都添加 Markdown 链接到 messageContent
+    const allFiles = uploadedFiles.value.filter(f => f.url)
+    if (allFiles.length > 0) {
+      const fileInfos = allFiles.map(f => {
         let cleanName = f.name || '文件'
         cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
         cleanName = cleanName.replace(/_\d{14}_/, '_')
