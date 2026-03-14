@@ -71,9 +71,9 @@ export const useChatLifecycle = ({
     clearScrollTimer()
   })
 
-  watch(() => agents.value, (newAgents) => {
+  watch(() => agents.value, async (newAgents) => {
     if (newAgents && newAgents.length > 0) {
-      restoreSelectedAgent(newAgents)
+      await restoreSelectedAgent(newAgents)
     }
   })
 
