@@ -138,12 +138,13 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useLanguage } from '../../utils/i18n.js'
 import { ossApi } from '../../api/oss.js'
 import { skillAPI } from '../../api/skill.js'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { listen } from '@tauri-apps/api/event'
 
 const props = defineProps({
   isLoading: {
@@ -297,6 +298,62 @@ const getFileFromEntry = (fileEntry) => {
       resolve(null)
     })
   })
+}
+
+// Tauri 桌面端文件拖拽处理
+let tauriDropListener = null
+let tauriEnterListener = null
+let tauriLeaveListener = null
+
+onMounted(() => {
+  // 监听 Tauri 的文件拖拽事件（桌面端）
+  if (window.__TAURI__) {
+    listen('tauri-drag-enter', () => {
+      isDraggingOver.value = true
+    }).then(unlisten => { tauriEnterListener = unlisten })
+    
+    listen('tauri-drag-drop', async (event) => {
+      isDraggingOver.value = false
+      const filePaths = event.payload
+      if (filePaths && filePaths.length > 0) {
+        // 处理拖拽的文件
+        for (const filePath of filePaths) {
+          await processTauriFile(filePath)
+        }
+      }
+    }).then(unlisten => { tauriDropListener = unlisten })
+    
+    listen('tauri-drag-leave', () => {
+      isDraggingOver.value = false
+    }).then(unlisten => { tauriLeaveListener = unlisten })
+  }
+})
+
+onUnmounted(() => {
+  // 清理 Tauri 事件监听
+  if (tauriEnterListener) tauriEnterListener()
+  if (tauriDropListener) tauriDropListener()
+  if (tauriLeaveListener) tauriLeaveListener()
+})
+
+// 处理 Tauri 拖拽的文件
+const processTauriFile = async (filePath) => {
+  try {
+    // 使用 Tauri 的 fs API 读取文件
+    const { readFile } = await import('@tauri-apps/plugin-fs')
+    const { basename } = await import('@tauri-apps/api/path')
+    
+    const fileName = await basename(filePath)
+    const fileData = await readFile(filePath)
+    
+    // 创建 File 对象
+    const file = new File([fileData], fileName, { type: 'application/octet-stream' })
+    
+    // 使用现有的 processFile 处理
+    await processFile(file)
+  } catch (error) {
+    console.error('Failed to process Tauri file:', filePath, error)
+  }
 }
 
 // 自动调整文本区域高度

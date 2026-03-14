@@ -6,9 +6,18 @@ import base64
 from pathlib import Path
 from typing import Dict, Any, Optional
 import os
+import io
 
 from ..tool_base import tool
 from sagents.utils.logger import logger
+
+# 尝试导入 PIL，如果不可用则给出警告
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    logger.warning("PIL (Pillow) 未安装，图片压缩功能将不可用。请安装: pip install Pillow")
 
 
 class ImageUnderstandingError(Exception):
@@ -34,12 +43,78 @@ class ImageUnderstandingTool:
         }
         return mime_types.get(file_extension.lower(), 'image/jpeg')
 
-    def _encode_image_to_base64(self, image_path: str) -> tuple[str, str]:
+    def _resize_image_if_needed(self, image_path: str, max_resolution: int = 512) -> bytes:
         """
-        将图片文件转换为 base64 编码
+        调整图片大小，确保总分辨率不超过 max_resolution * max_resolution
+        
+        Args:
+            image_path: 图片文件路径
+            max_resolution: 最大分辨率（默认512，即总分辨率不超过512*512）
+            
+        Returns:
+            bytes: 调整后的图片数据
+        """
+        if not PIL_AVAILABLE:
+            # 如果 PIL 不可用，直接返回原始文件内容
+            with open(image_path, 'rb') as f:
+                return f.read()
+        
+        try:
+            with Image.open(image_path) as img:
+                # 转换为 RGB 模式（处理 RGBA 等模式）
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    # 创建白色背景
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    if img.mode in ('RGBA', 'LA'):
+                        background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                        img = background
+                    else:
+                        img = img.convert('RGB')
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # 计算当前总分辨率
+                current_resolution = img.width * img.height
+                max_total_resolution = max_resolution * max_resolution
+                
+                # 如果当前分辨率已经小于等于最大允许分辨率，直接返回
+                if current_resolution <= max_total_resolution:
+                    logger.info(f"图片分辨率 {img.width}x{img.height} ({current_resolution}) 在限制范围内，无需压缩")
+                    buffer = io.BytesIO()
+                    # 保存为 JPEG 格式，质量85%
+                    img.save(buffer, format='JPEG', quality=85, optimize=True)
+                    return buffer.getvalue()
+                
+                # 计算缩放比例
+                scale_factor = (max_total_resolution / current_resolution) ** 0.5
+                new_width = int(img.width * scale_factor)
+                new_height = int(img.height * scale_factor)
+                
+                logger.info(f"图片压缩: {img.width}x{img.height} ({current_resolution}) -> {new_width}x{new_height} ({new_width * new_height})")
+                
+                # 调整图片大小
+                resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # 保存到内存
+                buffer = io.BytesIO()
+                resized_img.save(buffer, format='JPEG', quality=85, optimize=True)
+                return buffer.getvalue()
+                
+        except Exception as e:
+            logger.warning(f"图片压缩失败: {e}，将使用原始图片")
+            # 压缩失败时返回原始文件内容
+            with open(image_path, 'rb') as f:
+                return f.read()
+
+    def _encode_image_to_base64(self, image_path: str, max_resolution: int = 512) -> tuple[str, str]:
+        """
+        将图片文件转换为 base64 编码，并在需要时压缩图片
 
         Args:
             image_path: 图片文件路径
+            max_resolution: 最大分辨率限制（默认512，即总分辨率不超过512*512）
 
         Returns:
             tuple: (base64编码的数据, mime类型)
@@ -54,15 +129,16 @@ class ImageUnderstandingTool:
         if file_extension not in self.supported_formats:
             raise ImageUnderstandingError(f"不支持的图片格式: {file_extension}，支持的格式: {', '.join(self.supported_formats)}")
 
-        # 读取文件并转换为 base64
+        # 读取并压缩图片，然后转换为 base64
         try:
-            with open(path_obj, 'rb') as f:
-                image_data = f.read()
+            # 压缩图片（如果需要）
+            image_data = self._resize_image_if_needed(image_path, max_resolution)
             base64_data = base64.b64encode(image_data).decode('utf-8')
-            mime_type = self._get_mime_type(file_extension)
+            # 压缩后的图片统一使用 JPEG 格式
+            mime_type = 'image/jpeg'
             return base64_data, mime_type
         except Exception as e:
-            raise ImageUnderstandingError(f"读取图片文件失败: {e}")
+            raise ImageUnderstandingError(f"读取或压缩图片文件失败: {e}")
 
     async def _call_llm_with_image(self, messages: list, session_id: Optional[str] = None) -> str:
         """
@@ -130,7 +206,7 @@ class ImageUnderstandingTool:
             "en": "Analyze image content and return detailed description and text on the image. Uses the current session's multimodal model.",
         },
         param_description_i18n={
-            "image_path": {"zh": "图片文件的绝对路径", "en": "Absolute path to the image file"},
+            "image_path": {"zh": "图片文件的绝对路径或 HTTP/HTTPS URL", "en": "Absolute path to the image file or HTTP/HTTPS URL"},
             "session_id": {"zh": "当前会话 ID", "en": "Current session ID"},
             "prompt": {"zh": "可选的自定义提示词，用于指导模型如何分析图片", "en": "Optional custom prompt to guide how the model analyzes the image"},
         }
@@ -140,7 +216,7 @@ class ImageUnderstandingTool:
         分析图片内容，使用当前会话的多模态大模型
 
         Args:
-            image_path: 图片文件的绝对路径
+            image_path: 图片文件的绝对路径或 HTTP/HTTPS URL
             session_id: 当前会话 ID
             prompt: 可选的自定义提示词
 
@@ -150,20 +226,14 @@ class ImageUnderstandingTool:
         logger.info(f"🔍 开始分析图片: {image_path}")
 
         try:
-            # 1. 验证图片文件
-            if not os.path.isabs(image_path):
+            # 1. 检查是否为 HTTP/HTTPS URL
+            is_url = image_path.startswith(('http://', 'https://'))
+            
+            # 2. 验证图片路径
+            if not is_url and not os.path.isabs(image_path):
                 return {
                     "status": "error",
-                    "message": f"请提供图片的绝对路径，当前路径: {image_path}"
-                }
-
-            # 2. 将图片转换为 base64
-            try:
-                base64_data, mime_type = self._encode_image_to_base64(image_path)
-            except ImageUnderstandingError as e:
-                return {
-                    "status": "error",
-                    "message": str(e)
+                    "message": f"请提供图片的绝对路径或有效的 HTTP/HTTPS URL，当前路径: {image_path}"
                 }
 
             # 3. 构建默认提示词
@@ -178,17 +248,45 @@ class ImageUnderstandingTool:
             user_prompt = prompt if prompt else default_prompt
 
             # 4. 构建消息格式（OpenAI 多模态格式）
+            mime_type = "image/jpeg"  # 默认值
+            if is_url:
+                # 对于 URL 图片，直接使用 URL
+                logger.info(f"使用 URL 图片: {image_path}")
+                image_content = {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_path
+                    }
+                }
+                # 尝试从 URL 推断 MIME 类型
+                if image_path.lower().endswith('.png'):
+                    mime_type = "image/png"
+                elif image_path.lower().endswith('.gif'):
+                    mime_type = "image/gif"
+                elif image_path.lower().endswith('.webp'):
+                    mime_type = "image/webp"
+            else:
+                # 对于本地图片，转换为 base64
+                try:
+                    base64_data, mime_type = self._encode_image_to_base64(image_path)
+                    image_content = {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{base64_data}"
+                        }
+                    }
+                except ImageUnderstandingError as e:
+                    return {
+                        "status": "error",
+                        "message": str(e)
+                    }
+
             messages = [
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": user_prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime_type};base64,{base64_data}"
-                            }
-                        }
+                        image_content
                     ]
                 }
             ]
