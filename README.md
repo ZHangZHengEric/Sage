@@ -224,6 +224,32 @@ We welcome contributions! Please see our [GitHub Issues](https://github.com/ZHan
 
 ---
 
+## 💖 **Sponsors**
+
+<div align="center">
+
+We are grateful to our sponsors for their support in making Sage better:
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="#" target="_blank">
+        <img src="assets/dudubashi.png" width="200" alt="Dudu Bus"/>
+      </a>
+      <br/>
+    </td>
+    <td align="center" width="50%">
+      <a href="#" target="_blank">
+        <img src="assets/xunhuanzhineng.svg" width="200" alt="RcrAI"/>
+      </a>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+---
+
 <div align="center">
 Built with ❤️ by the Sage Team
 </div>
