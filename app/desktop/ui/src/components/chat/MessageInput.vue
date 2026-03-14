@@ -146,6 +146,10 @@ const props = defineProps({
   presetText: {
     type: String,
     default: ''
+  },
+  selectedAgent: {
+    type: Object,
+    default: null
   }
 })
 
@@ -279,7 +283,12 @@ const handleSubmit = (e) => {
       multimodalContent.push({ type: 'text', text: messageContent })
     }
 
-    // 添加图片内容（仅用于多模态模式）
+
+    // 非图片文件使用 Markdown 链接格式附加到文本中
+    // 如果开启了多模态，图片文件已经在上面作为多模态内容添加，不再重复添加为 Markdown 链接
+    const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
+    if (!isMultimodalEnabled) {
+         // 添加图片内容（仅用于多模态模式）
     const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
     for (const img of imageFiles) {
       multimodalContent.push({
@@ -288,9 +297,8 @@ const handleSubmit = (e) => {
       })
     }
 
-    // 非图片文件使用 Markdown 链接格式附加到文本中
-    // 图片文件已经在上面作为多模态内容添加，不再重复添加为 Markdown 链接
-    const nonImageFiles = uploadedFiles.value.filter(f => f.url && f.type !== 'image')
+    }
+    const nonImageFiles = uploadedFiles.value.filter(f => f.url && (isMultimodalEnabled ? f.type !== 'image' : true))
     if (nonImageFiles.length > 0) {
       const fileInfos = nonImageFiles.map(f => {
         let cleanName = f.name || '文件'
