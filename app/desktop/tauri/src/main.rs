@@ -387,6 +387,26 @@ fn main() {
         .manage(ClosePreferenceState(Mutex::new(load_close_preference())))
         .on_window_event(|window, event| {
             match event {
+                WindowEvent::DragDrop(drag_event) => {
+                    // 处理文件拖拽事件
+                    match drag_event {
+                        tauri::DragDropEvent::Enter { paths, position: _ } => {
+                            println!("Drag enter with {} paths", paths.len());
+                            // 发射事件给前端
+                            let _ = window.emit("tauri-drag-enter", paths.clone());
+                        }
+                        tauri::DragDropEvent::Drop { paths, position: _ } => {
+                            println!("Drop with {} paths", paths.len());
+                            // 发射事件给前端
+                            let _ = window.emit("tauri-drag-drop", paths.clone());
+                        }
+                        tauri::DragDropEvent::Leave => {
+                            println!("Drag leave");
+                            let _ = window.emit("tauri-drag-leave", ());
+                        }
+                        _ => {}
+                    }
+                }
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     

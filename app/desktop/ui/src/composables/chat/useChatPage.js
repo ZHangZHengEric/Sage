@@ -379,6 +379,14 @@ export const useChatPage = (props) => {
     createSession()
   }
 
+  /** 仅切换为新会话视图（清空消息、新建 session），不关闭面板、不重置能力入口。用于从历史会话点「新会话」时 */
+  const switchToNewSession = () => {
+    clearCurrentStreamViewState()
+    clearMessages()
+    clearTaskAndWorkspace()
+    createSession()
+  }
+
   const loadConversationData = async (conversation) => {
     try {
       clearMessages()
@@ -543,6 +551,7 @@ export const useChatPage = (props) => {
     restoreSelectedAgent,
     loadConversationData,
     resetChat,
+    switchToNewSession,
     messages,
     shouldAutoScroll,
     scrollToBottom,
