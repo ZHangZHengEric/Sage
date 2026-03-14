@@ -1,29 +1,33 @@
 FROM docker.m.daocloud.io/python:3.11-slim
-RUN sed -i s@/deb.debian.org/@/mirrors.aliyun.com/@g /etc/apt/sources.list.d/debian.sources
 
-# 设置工作目录
+ENV TZ=Asia/Shanghai \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PIP_CACHE_DIR=/root/.cache/pip \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    BUN_INSTALL=/root/.bun \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
 WORKDIR /app
 
-ENV TZ=Asia/Shanghai
+# 使用阿里源
+RUN sed -i 's@deb.debian.org@mirrors.aliyun.com@g' /etc/apt/sources.list.d/debian.sources
 
+# 安装系统依赖
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    git \
-    curl \
+    git curl ca-certificates tzdata gnupg unzip \
     build-essential \
-    libreoffice \
-    fonts-noto-cjk \
-    lsof \
+    lsof tree file \
     pandoc \
-    ca-certificates \
-    tzdata \
-    upx \
-    unzip \
-    nodejs \
-    npm \
+    libreoffice \
     bubblewrap \
-    tree \
-    file \
+    upx \
+    fonts-noto-cjk \
+    fonts-dejavu-core \
+    fonts-wqy-microhei \
     chromium \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -39,86 +43,66 @@ RUN apt-get update && \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
     libpangocairo-1.0-0 \
+    libcairo2 \
     libcairo2-dev \
     libcairo-gobject2 \
     libgdk-pixbuf-2.0-0 \
     libgdk-pixbuf-2.0-dev \
     libfontconfig1-dev \
     libfreetype6-dev \
-    fonts-dejavu-core \
-    fonts-wqy-microhei \
-    libcairo2 \
     libffi-dev \
-    gnupg \
     shared-mime-info \
     texlive-xetex \
     texlive-lang-chinese \
     latexmk \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
-    && npm config set registry https://registry.npmmirror.com/ \
-    && npm install -g npm@latest \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-    
-ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com/
-ENV npm_config_registry=https://registry.npmmirror.com/
+    && rm -rf /var/lib/apt/lists/*
 
+# -------------------------
+# 安装 Node.js (只安装一次)
+# -------------------------
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get update \
+    && apt-get install -y nodejs \
+    && npm install -g npm@latest puppeteer --unsafe-perm \
+    && rm -rf /var/lib/apt/lists/*
+
+# -------------------------
 # 安装 Bun
-RUN BUN_VERSION=$(npm view bun dist-tags.latest) \
-    && ARCH=$(uname -m) \
-    && if [ "$ARCH" = "x86_64" ]; then BUN_ARCH="linux-x64"; elif [ "$ARCH" = "aarch64" ]; then BUN_ARCH="linux-aarch64"; else echo "Unsupported arch: $ARCH"; exit 1; fi \
-    && echo "Downloading Bun v${BUN_VERSION} for ${BUN_ARCH}..." \
-    && (curl -fsSL "https://npmmirror.com/mirrors/bun/bun-v${BUN_VERSION}/bun-${BUN_ARCH}.zip" -o bun.zip || \
-        curl -fsSL "https://npmmirror.com/mirrors/bun/v${BUN_VERSION}/bun-${BUN_ARCH}.zip" -o bun.zip) \
-    && unzip bun.zip \
-    && mkdir -p /root/.bun/bin \
-    && mv bun-${BUN_ARCH}/bun /root/.bun/bin/bun \
-    && chmod +x /root/.bun/bin/bun \
-    && rm -rf bun.zip bun-${BUN_ARCH}
+# -------------------------
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then BUN_ARCH="linux-x64"; \
+    elif [ "$ARCH" = "aarch64" ]; then BUN_ARCH="linux-aarch64"; \
+    else echo "Unsupported arch: $ARCH"; exit 1; fi && \
+    BUN_VERSION=$(npm view bun dist-tags.latest) && \
+    curl -fsSL https://npmmirror.com/mirrors/bun/bun-v${BUN_VERSION}/bun-${BUN_ARCH}.zip -o bun.zip && \
+    unzip bun.zip && \
+    mkdir -p $BUN_INSTALL/bin && \
+    mv bun-${BUN_ARCH}/bun $BUN_INSTALL/bin/bun && \
+    chmod +x $BUN_INSTALL/bin/bun && \
+    rm -rf bun.zip bun-${BUN_ARCH}
 
-# 设置 Bun 环境变量
-ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# 验证 Node/npm 安装成功
-RUN node -v && npm -v
-
-# 第三步：直接安装 Puppeteer（无需 package.json）
-# 核心修改：跳过 package.json，直接 npm install puppeteer
-# --registry：国内源加速；--unsafe-perm：解决非 root 安装权限问题；--save：可选（会生成 package.json，不影响使用）
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-# 2. 指定 Puppeteer 使用系统安装的 Chromium 路径（Debian 系固定路径）
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-
-# 第三步：安装 Puppeteer（此时不会下载 Chrome，仅装核心代码）
-RUN npm config set registry https://registry.npmmirror.com \
-    && npm install -g puppeteer --unsafe-perm
-
-
-# 复制 requirements.txt 文件
-COPY requirements.txt .
-
+# -------------------------
+# pip 国内源
+# -------------------------
 RUN mkdir -p /etc/pip \
     && printf "[global]\nindex-url = https://mirrors.aliyun.com/pypi/simple\ntrusted-host = mirrors.aliyun.com\n" > /etc/pip.conf
 
-# 安装 Python 依赖
-# 保留 pip 缓存以供 agent 运行时使用
-ENV PIP_CACHE_DIR=/root/.cache/pip
-RUN pip install -r requirements.txt
+# -------------------------
+# 安装 Python 依赖（缓存优化）
+# -------------------------
+COPY requirements.txt .
 
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制代码
 COPY . .
 
+# 复制 entrypoint 脚本
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# 创建工作空间目录 & 日志目录
-RUN mkdir -p /app/agent_workspace /app/logs
-
-
-# 设置环境变量
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-ENTRYPOINT [ "python", "-m", "app.server.main" ]
+ENTRYPOINT ["/entrypoint.sh"]

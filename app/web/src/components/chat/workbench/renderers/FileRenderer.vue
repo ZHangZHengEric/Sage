@@ -244,8 +244,19 @@ const fileExtension = computed(() => {
   return getFileExtension(props.filePath, displayFileName.value)
 })
 
+// 检测是否为在线图片 URL
+const isOnlineImageUrl = computed(() => {
+  const path = props.filePath || ''
+  const isHttpUrl = path.startsWith('http://') || path.startsWith('https://')
+  if (!isHttpUrl) return false
+  // 检查是否是图片扩展名
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(fileExtension.value)
+})
+
 // 文件类型检测
 const fileType = computed(() => {
+  // 如果是在线图片 URL，返回 image 类型
+  if (isOnlineImageUrl.value) return 'image'
   return getFileType(fileExtension.value)
 })
 
@@ -342,7 +353,14 @@ const loadContent = async () => {
   try {
     loading.value = true
     error.value = null
-    
+
+    // 如果是在线图片 URL，直接使用该 URL 预览
+    if (isOnlineImageUrl.value) {
+      blobUrl.value = props.filePath
+      loading.value = false
+      return
+    }
+
     // 获取 Agent ID
     const agentId = props.item?.agentId
     if (!agentId) {
@@ -360,7 +378,7 @@ const loadContent = async () => {
 
     // 下载文件 Blob
     const blob = await agentAPI.downloadFile(agentId, safePath)
-    
+
     // 创建 Blob URL 用于预览（图片、PDF）
     if (blobUrl.value) {
         URL.revokeObjectURL(blobUrl.value)
@@ -415,6 +433,12 @@ const loadContent = async () => {
 
 // 打开文件 (下载)
 const openFile = async () => {
+  // 如果是在线图片 URL，直接在新标签页打开
+  if (isOnlineImageUrl.value) {
+    window.open(props.filePath, '_blank')
+    return
+  }
+
   if (blobUrl.value) {
     const a = document.createElement('a')
     a.href = blobUrl.value

@@ -6,7 +6,7 @@ import traceback
 import uuid
 import random
 import string
-
+from typing import List
 from loguru import logger
 from sagents.context.session_context import (
     SessionStatus,
@@ -36,7 +36,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
     if request.agent_id is None:
         # 如果要求必须有 Agent ID，则抛出异常
         if require_agent_id:
-            raise SageHTTPException(status_code=500, detail="Agent ID 不能为空")
+            raise SageHTTPException(detail="Agent ID 不能为空")
         else:
             # 默认使用request 的信息
             pass
@@ -46,7 +46,7 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         if not agent or not agent.config:
             # 如果要求必须有 Agent ID，但 Agent 不存在，则抛出异常
             if require_agent_id:
-                raise SageHTTPException(status_code=500, detail="Agent 不存在")
+                raise SageHTTPException(detail="Agent 不存在")
             logger.warning(f"Agent {request.agent_id} not found")
             agent = None
         else:
@@ -184,7 +184,8 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         if current_skills is None:
             current_skills = []
             setattr(request, "available_skills", current_skills)
-        need_tools = ["load_skill", "execute_python_code", "execute_shell_command", "file_write", "file_update"]
+        need_tools = ['file_read', 'execute_python_code', 'execute_javascript_code',
+                    'execute_shell_command', 'file_write', 'file_update', 'load_skill']
         current_tools = request.available_tools
         for tool in need_tools:
             if tool not in current_tools:
@@ -271,18 +272,25 @@ class SageStreamService:
 
     def __init__(self, request: StreamRequest):
         self.request = request
-        # 2. 工具代理
-        tool_proxy = create_tool_proxy(request.available_tools)
-        self.tool_manager = tool_proxy
-        # 3. 技能代理
-        skill_proxy = create_skill_proxy(request.available_skills)
-        self.skill_manager = skill_proxy
-        # 4. 路径处理
+        # 4. 路径处理 (提前计算，供后续使用)
         cfg = get_startup_config()
         # agent工作空间由 agent_dir + user_id + agent_id来。 如果user_id 为空。用 default_user 如果agent_id 为空，用 随机8位英文字母
         user_id = self.request.user_id or "default_user"
         agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
         self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
+
+        # 2. 工具代理
+        tool_proxy = create_tool_proxy(request.available_tools)
+        self.tool_manager = tool_proxy
+        # 3. 技能代理 (带优先级: agent_workspace > user_skills > system_skills > global)
+        skill_proxy, agent_skill_manager = create_skill_proxy(
+            request.available_skills,
+            user_id=self.request.user_id,
+            agent_workspace=self.agent_workspace
+        )
+        self.skill_proxy = skill_proxy
+        self.agent_skill_manager = agent_skill_manager
+
         # 5. 构造模型客户端
         model_client = create_model_client(request.llm_model_config)
         self.sage_engine = SAgent(
@@ -301,8 +309,6 @@ class SageStreamService:
             message_dict = msg.model_dump()
             if "message_id" not in message_dict or not message_dict["message_id"]:
                 message_dict["message_id"] = str(uuid.uuid4())
-            if message_dict.get("content"):
-                message_dict["content"] = str(message_dict["content"])
             messages.append(message_dict)
         await _ensure_conversation(self.request)
         try:
@@ -310,7 +316,7 @@ class SageStreamService:
                 session_id=session_id,
                 input_messages=messages,
                 tool_manager=self.tool_manager,
-                skill_manager=self.skill_manager,
+                skill_manager=self.skill_proxy,
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
@@ -358,7 +364,7 @@ async def prepare_session(request: StreamRequest):
         session_manager = get_global_session_manager()
         session = session_manager.get(session_id)
         if not session or session.session_context.status != SessionStatus.INTERRUPTED:
-             raise SageHTTPException(status_code=500, detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
+             raise SageHTTPException(detail="会话正在运行中，请先调用 interrupt 或使用不同的会话ID")
 
     try:
         lock_wait_start = time.perf_counter()
@@ -368,7 +374,7 @@ async def prepare_session(request: StreamRequest):
         if lock_wait_cost > 0.2:
             logger.bind(session_id=session_id).warning(f"Session lock wait slow: {lock_wait_cost:.3f}s")
     except asyncio.TimeoutError:
-         raise SageHTTPException(status_code=500, detail="会话正在清理中，请稍后重试")
+         raise SageHTTPException(detail="会话正在清理中，请稍后重试")
 
     try:
         stream_service = SageStreamService(request)
@@ -388,6 +394,11 @@ async def execute_chat_session(
     """
 
     session_id = stream_service.request.session_id
+    request = stream_service.request
+    
+    # 记录会话开始时下的原始skills
+    original_skills = stream_service.agent_skill_manager.list_skills() if stream_service.agent_skill_manager else []
+    
     stream_counter = 0
     last_activity_time = time.time()
     async for result in stream_service.process_stream():
@@ -414,6 +425,77 @@ async def execute_chat_session(
     }
     yield json.dumps(end_data, ensure_ascii=False) + "\n"
 
+    # 会话结束后的处理，传入原始skills用于合并
+    await _handle_session_end(request, original_skills)
+
+
+async def _handle_session_end(request: StreamRequest, original_skills: List[str]) -> None:
+    """
+    会话结束后的处理逻辑
+    1. 更新conversation表的updated_at
+    2. 如果入参available_skills有值，异步检查agent工作空间下的skills目录
+    """
+    # 更新会话时间戳
+    conversation_dao = models.ConversationDao()
+    await conversation_dao.update_timestamp(request.session_id)
+    logger.bind(session_id=request.session_id).info("会话结束，已更新conversation时间戳")
+
+    # 2. 如果available_skills有值，启动异步任务检查skills目录
+    if request.available_skills and request.agent_id:
+        asyncio.create_task(_check_and_update_agent_skills(request, original_skills))
+
+
+async def _check_and_update_agent_skills(request: StreamRequest, original_skills: List[str]) -> None:
+    """
+    异步检查agent工作空间下的skills目录，只处理新增的skills
+    将会话期间新增的skills添加到数据库配置中
+    """
+    try:
+        from ...core.config import get_startup_config
+
+        cfg = get_startup_config()
+        user_id = request.user_id
+        agent_id = request.agent_id
+
+        # 获取agent工作空间下的实际skills
+        agent_skills_path = os.path.join(cfg.agents_dir, user_id, agent_id, "skills")
+        
+        actual_skills = set()
+        if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
+            try:
+                from sagents.skill.skill_manager import SkillManager
+                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True, include_global_skills=False)
+                for skill in tm.list_skill_info():
+                    actual_skills.add(skill.name)
+            except Exception as e:
+                logger.warning(f"加载Agent工作空间技能失败: {e}")
+
+        # 原始skills（会话开始时工作空间中的）
+        original_skills_set = set(original_skills or [])
+        
+        # 计算会话期间新增的skills
+        added_in_session = actual_skills - original_skills_set
+        
+        # 如果有新增的skills，更新到数据库配置
+        if added_in_session:
+            agent_dao = models.AgentConfigDao()
+            agent = await agent_dao.get_by_id(agent_id)
+            if agent and agent.config:
+                # 获取当前配置的skills
+                current_skills = set(agent.config.get("availableSkills") or [])
+                # 合并新增的skills
+                updated_skills = current_skills | added_in_session
+                
+                # 更新配置
+                agent.config["availableSkills"] = list(updated_skills)
+                await agent_dao.save(agent)
+                
+                logger.bind(session_id=request.session_id, agent_id=agent_id).info(
+                    f"Agent技能列表已更新: 新增={added_in_session}, 最终={updated_skills}"
+                )
+    except Exception as e:
+        logger.bind(session_id=request.session_id).error(f"检查并更新Agent技能失败: {e}")
+
 async def _ensure_conversation(request: StreamRequest) -> None:
     conversation_dao = models.ConversationDao()
     existing_conversation = await conversation_dao.get_by_session_id(request.session_id)
@@ -433,6 +515,17 @@ async def create_conversation_title(request: StreamRequest):
     if not request.messages or len(request.messages) == 0:
         return "新会话"
 
-    first_message = request.messages[0].content
+    content = request.messages[0].content
+    # 处理多模态消息格式，提取文本内容
+    if isinstance(content, list):
+        # 从多模态列表中提取文本内容
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(item.get("text", ""))
+        first_message = " ".join(text_parts) if text_parts else "新会话"
+    else:
+        first_message = content or "新会话"
+
     conversation_title = (first_message[:50] + "..." if len(first_message) > 50 else first_message)
     return conversation_title

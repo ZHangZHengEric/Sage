@@ -82,29 +82,29 @@
             
             <div class="grid gap-2">
               <Label class="text-base">{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
-              <Input v-model="modelForm.base_url" placeholder="https://api.openai.com/v1" class="h-11" />
+              <Input v-model="modelForm.base_url" placeholder="https://api.openai.com/v1" class="h-11" @update:model-value="onKeyConfigChange" />
             </div>
-            
+
             <div class="grid gap-2">
               <div class="flex items-center justify-between">
                 <Label class="text-base">{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
-                <Button 
-                  v-if="currentProvider?.website" 
-                  variant="link" 
-                  size="sm" 
-                  class="h-auto p-0 text-primary" 
+                <Button
+                  v-if="currentProvider?.website"
+                  variant="link"
+                  size="sm"
+                  class="h-auto p-0 text-primary"
                   @click="openProviderWebsite"
                 >
                   获取 API Key
                   <ArrowRight class="ml-1 w-3 h-3" />
                 </Button>
               </div>
-              <Input v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="h-11" />
+              <Input v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="h-11" @update:model-value="onKeyConfigChange" />
             </div>
-            
+
             <div class="grid gap-2">
                <Label class="text-base">{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-               <Input v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" />
+               <Input v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" @update:model-value="onKeyConfigChange" />
                <p class="text-sm text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
             </div>
             
@@ -118,6 +118,31 @@
                 <Input type="number" v-model.number="modelForm.temperature" step="0.1" placeholder="0.7" class="h-11" />
               </div>
             </div>
+
+            <!-- 多模态支持 -->
+            <div class="grid gap-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <Checkbox id="multimodal" v-model:checked="modelForm.supportsMultimodal" />
+                  <Label for="multimodal" class="text-base cursor-pointer">支持多模态（图像输入）</Label>
+                </div>
+                <Button
+                  v-if="modelForm.supportsMultimodal"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  @click="handleVerifyMultimodal"
+                  :disabled="verifyingMultimodal || !modelForm.model"
+                >
+                  <Loader v-if="verifyingMultimodal" class="mr-2 h-4 w-4 animate-spin" />
+                  {{ multimodalVerified ? '已验证' : '验证多模态' }}
+                </Button>
+              </div>
+              <p v-if="modelForm.supportsMultimodal && !multimodalVerified" class="text-xs text-amber-600">
+                请验证多模态支持以确保功能正常
+              </p>
+  
+            </div>
           </div>
 
           <div class="flex justify-between pt-4">
@@ -125,7 +150,7 @@
                <Loader v-if="verifying" class="mr-2 h-5 w-5 animate-spin" />
                验证连接
             </Button>
-            <Button size="lg" @click="handleModelSubmit" :disabled="loading" class="px-8 h-12 text-base">
+            <Button size="lg" @click="handleModelSubmit" :disabled="loading || !canSave" class="px-8 h-12 text-base">
               <Loader v-if="loading" class="mr-2 h-5 w-5 animate-spin" />
               {{ t('common.nextStep') }}
             </Button>
@@ -162,6 +187,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -179,6 +205,9 @@ const { t } = useLanguage()
 const step = ref('loading') // loading, welcome, model, creating_agent
 const loading = ref(false)
 const verifying = ref(false)
+const verified = ref(false)
+const verifyingMultimodal = ref(false)
+const multimodalVerified = ref(false)
 const tools = ref([])
 const skills = ref([])
 const systemStatus = ref({
@@ -196,11 +225,21 @@ const modelForm = reactive({
   temperature: 0.7,
   topP: 0.95,
   presencePenalty: 0,
-  maxModelLen: 32000
+  maxModelLen: 32000,
+  supportsMultimodal: false
 })
 
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+
+// 保存按钮是否可点击
+const canSave = computed(() => {
+  if (modelForm.supportsMultimodal) {
+    return multimodalVerified.value
+  } else {
+    return verified.value
+  }
+})
 
 const handleProviderChange = (val) => {
   selectedProvider.value = val
@@ -210,6 +249,15 @@ const handleProviderChange = (val) => {
     modelForm.base_url = provider.base_url
     // modelForm.model = provider.models[0] || '' // Don't auto-select first model
   }
+  verified.value = false
+  multimodalVerified.value = false
+  modelForm.supportsMultimodal = false
+}
+
+const onKeyConfigChange = () => {
+  // 当关键配置变化时，重置验证状态
+  verified.value = false
+  multimodalVerified.value = false
 }
 
 const openProviderWebsite = async () => {
@@ -305,15 +353,60 @@ const handleVerify = async () => {
       top_p: modelForm.topP,
       presence_penalty: modelForm.presencePenalty,
       max_model_len: modelForm.maxModelLen,
+      supports_multimodal: modelForm.supportsMultimodal,
       is_default: true
     }
     await modelProviderAPI.verifyModelProvider(data)
+    verified.value = true
     toast.success('连接验证成功')
   } catch (error) {
     console.error('Failed to verify model provider:', error)
+    verified.value = false
     toast.error(error.message || '连接验证失败')
   } finally {
     verifying.value = false
+  }
+}
+
+const handleVerifyMultimodal = async () => {
+  if (!modelForm.model) {
+    toast.error('请先填写模型名称')
+    return
+  }
+
+  verifyingMultimodal.value = true
+  try {
+    const data = {
+      name: modelForm.name,
+      base_url: modelForm.base_url,
+      api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+      model: modelForm.model,
+      max_tokens: modelForm.maxTokens,
+      temperature: modelForm.temperature,
+      top_p: modelForm.topP,
+      presence_penalty: modelForm.presencePenalty,
+      max_model_len: modelForm.maxModelLen,
+      is_default: true
+    }
+    const res = await modelProviderAPI.verifyMultimodal(data)
+    if (res?.supports_multimodal) {
+      multimodalVerified.value = true
+      if (res?.recognized) {
+        toast.success('多模态验证成功，模型正确识别了测试图片内容')
+      } else {
+        toast.success('多模态验证成功，但模型未能正确识别测试图片内容')
+      }
+    } else {
+      multimodalVerified.value = false
+      toast.warning('该模型不支持多模态')
+      modelForm.supportsMultimodal = false
+    }
+  } catch (error) {
+    console.error('Failed to verify multimodal:', error)
+    multimodalVerified.value = false
+    toast.error(error.message || '多模态验证失败')
+  } finally {
+    verifyingMultimodal.value = false
   }
 }
 
@@ -403,7 +496,20 @@ const handleModelSubmit = async () => {
     toast.error('请填写所有必填字段')
     return
   }
-  
+
+  // 如果开启多模态，必须验证多模态；否则必须验证连接
+  if (modelForm.supportsMultimodal) {
+    if (!multimodalVerified.value) {
+      toast.error('请先验证多模态支持')
+      return
+    }
+  } else {
+    if (!verified.value) {
+      toast.error('请先验证模型连接性')
+      return
+    }
+  }
+
   loading.value = true
   try {
     const data = {
