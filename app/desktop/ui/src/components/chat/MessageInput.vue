@@ -27,7 +27,14 @@
       </div>
     </div>
 
-    <div class="relative flex items-end gap-2 p-3 bg-muted/30 border border-input rounded-3xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm">
+    <div
+      class="relative flex items-end gap-2 p-3 bg-muted/30 border border-input rounded-3xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm"
+      :class="{ 'bg-primary/5 border-primary/50': isDraggingOver }"
+      @dragenter="handleDragEnter"
+      @dragover="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+    >
       <!-- 技能列表弹窗 -->
       <div v-if="showSkillList && (filteredSkills.length > 0 || loadingSkills)" class="absolute bottom-full left-0 w-full mb-2 bg-popover border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto z-50 bg-background">
         <div v-if="loadingSkills" class="p-3 text-center text-sm text-muted-foreground">
@@ -209,6 +216,84 @@ const selectSkill = (skill) => {
 // 文件上传相关状态
 const uploadedFiles = ref([])
 const isComposing = ref(false)
+const isDraggingOver = ref(false)
+
+// 拖拽事件处理
+const handleDragEnter = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer && e.dataTransfer.types) {
+    const types = Array.from(e.dataTransfer.types)
+    if (types.includes('Files') || types.includes('application/x-moz-file')) {
+      isDraggingOver.value = true
+    }
+  }
+}
+
+const handleDragOver = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+const handleDragLeave = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDraggingOver.value = false
+}
+
+const handleDrop = async (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDraggingOver.value = false
+
+  const files = []
+
+  // 方式1: 使用dataTransfer.items
+  const items = e.dataTransfer?.items
+  if (items && items.length > 0) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const entry = item.webkitGetAsEntry?.() || item.getAsEntry?.()
+
+      if (entry && entry.isFile) {
+        const file = await getFileFromEntry(entry)
+        if (file) files.push(file)
+      } else if (!entry) {
+        const file = item.getAsFile()
+        if (file) files.push(file)
+      }
+    }
+  }
+
+  // 方式2: 使用dataTransfer.files
+  if (files.length === 0) {
+    const dtFiles = e.dataTransfer?.files
+    if (dtFiles && dtFiles.length > 0) {
+      for (let i = 0; i < dtFiles.length; i++) {
+        files.push(dtFiles[i])
+      }
+    }
+  }
+
+  // 处理所有文件
+  for (const file of files) {
+    await processFile(file)
+  }
+}
+
+// 从FileEntry获取File对象
+const getFileFromEntry = (fileEntry) => {
+  return new Promise((resolve) => {
+    fileEntry.file((file) => {
+      resolve(file)
+    }, () => {
+      resolve(null)
+    })
+  })
+}
 
 // 自动调整文本区域高度
 const adjustTextareaHeight = async () => {
