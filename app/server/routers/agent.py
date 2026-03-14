@@ -156,7 +156,7 @@ async def list(http_request: Request):
     # 根据agent名称排序
     agents_data.sort(key=lambda x: x["name"])
     return await Response.succ(
-        data={"agents": agents_data}, message=f"成功获取 {len(agents_data)} 个Agent"
+        data=agents_data, message=f"成功获取 {len(agents_data)} 个Agent"
     )
 
 
@@ -231,7 +231,7 @@ async def get(agent_id: str, http_request: Request):
     agent = await get_agent(agent_id, target_user_id)
     agent_resp = convert_config_to_agent(agent_id, agent.config, agent.user_id)
     return await Response.succ(
-        data={"agent": agent_resp.model_dump()}, message=f"获取Agent '{agent_id}' 成功"
+        data=agent_resp.model_dump(), message=f"获取Agent '{agent_id}' 成功"
     )
 
 
