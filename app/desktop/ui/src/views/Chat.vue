@@ -72,6 +72,7 @@
               :error="abilityError"
               @close="closeAbilityPanel"
               @retry="retryAbilityFetch"
+              @refresh="retryAbilityFetch"
               @select="onAbilityCardClick"
             />
           </div>
@@ -86,6 +87,7 @@
               :error="abilityError"
               @close="closeAbilityPanel"
               @retry="retryAbilityFetch"
+              @refresh="retryAbilityFetch"
               @select="onAbilityCardClick"
             />
 
