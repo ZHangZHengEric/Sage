@@ -171,6 +171,7 @@ class FibreOrchestrator:
 
                 # Check if agent already exists in backend or local memory
                 agent_exists = False
+                backend_agent = None
                 if self.backend_client and await self.backend_client.check_health():
                     # Check backend
                     user_id = getattr(session_context, 'user_id', None)
@@ -197,6 +198,25 @@ class FibreOrchestrator:
                             "name": agent_cfg.get("name", agent_id),
                             "description": agent_description
                         }]
+                    
+                    # 如果agent存在于后端但不在sub_agents中，需要创建一个轻量级的AgentDefinition
+                    # 这样delegate_task时才能找到这个agent
+                    if backend_agent and agent_id not in self.sub_agents:
+                        logger.info(f"FibreOrchestrator: Adding backend agent '{agent_id}' to sub_agents for task delegation")
+                        from sagents.agent.fibre.agent_definition import AgentDefinition
+                        agent_def = AgentDefinition(
+                            agent_id=agent_id,
+                            name=agent_cfg.get("name", agent_id),
+                            description=agent_description,
+                            system_prompt=agent_system_prompt,
+                            backend_stored=True,
+                            available_tools=agent_tools,
+                            available_skills=agent_skills,
+                            available_workflows=agent_workflows,
+                            system_context=agent_system_context
+                        )
+                        self.sub_agents[agent_id] = agent_def
+                    
                     continue
 
                 await self.spawn_agent(
