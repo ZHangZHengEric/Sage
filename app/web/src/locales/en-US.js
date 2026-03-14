@@ -267,6 +267,9 @@ export default {
   'agent.descriptionLength': 'Description max 200 characters',
   'agent.systemPrefixRequired': 'Please enter System Prompt',
   'agent.selectModelProvider': 'Select Custom Model Provider',
+  'agent.basicInfo': 'Basic Info',
+  'agent.unnamed': 'Unnamed',
+  'common.saveAndExit': 'Save & Exit',
   // Agent Creation Modal
   'agentCreation.title': 'Create New Agent',
   'agentCreation.blankConfig': 'Blank Config',

@@ -318,6 +318,9 @@ export default {
   'agent.descriptionLength': '描述长度不能超过200个字符',
   'agent.systemPrefixRequired': '请输入系统提示词',
   'agent.selectModelProvider': '选择自定义模型源',
+  'agent.basicInfo': '基本信息',
+  'agent.unnamed': '未命名',
+  'common.saveAndExit': '保存并退出',
   // Agent创建模态框
   'agentCreation.title': '创建新Agent',
   'agentCreation.blankConfig': '空白配置',
