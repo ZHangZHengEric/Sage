@@ -385,7 +385,7 @@ export default {
   'skills.mine': 'Mine',
   'skills.system': 'System',
   'skills.user': 'User',
-  'skills.agent': 'Agent Workspace',
+  'skills.agent': 'Agent',
   'skills.searchPlaceholder': 'Search skills...',
   'skills.search': 'Search...',
   'skills.import': 'Import Skill',
