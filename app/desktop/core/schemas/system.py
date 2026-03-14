@@ -18,3 +18,10 @@ class TauriUpdateResponse(BaseModel):
     notes: str
     pub_date: str
     platforms: Dict[str, TauriPlatform]
+
+
+class AgentUsageStatsRequest(BaseModel):
+    days: int
+
+class AgentUsageStatsResponse(BaseModel):
+    usage: Dict[str, int]

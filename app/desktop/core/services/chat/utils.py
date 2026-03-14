@@ -2,6 +2,8 @@ import asyncio
 import json
 import random
 from typing import Any, AsyncGenerator, Dict, List, Tuple
+from pathlib import Path
+import os
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -40,3 +42,14 @@ def create_skill_proxy(available_skills: List[str]):
     logger.info(f"初始化技能代理，可用技能: {available_skills}")
     skill_proxy = SkillProxy(get_skill_manager(), available_skills)
     return skill_proxy
+
+
+def get_sessions_root() -> str:
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+
+    if os.environ.get("SAGE_SESSIONS_PATH"):
+        sessions_root = Path(os.environ.get("SAGE_SESSIONS_PATH"))
+    else:
+        sessions_root = sage_home / "sessions"
+    return str(sessions_root)
