@@ -185,7 +185,7 @@ async def generate_agent_abilities_from_config(
 
 内容约束：
 - 严格依据给定的描述与技能信息，不要虚构技能。
-- 覆盖不同技能/场景，避免同义重复；总数 6-8 条。
+- 覆盖不同技能/场景，避免同义重复；总数最多 4 条。
 
 语言：生成语言为 "{language}"。
 
@@ -202,7 +202,7 @@ async def generate_agent_abilities_from_config(
 可选上下文（如有）：
 {context_summary}
 
-请基于以上信息生成 6-8 条「可直接运行、确定性、有明确指向性」的提问模板，每条 promptText 必须具体、完整、无需用户再补充任何内容。
+请基于以上信息生成最多 4 条「可直接运行、确定性、有明确指向性」的提问模板，每条 promptText 必须具体、完整、无需用户再补充任何内容。
 """.strip()
 
     try:
