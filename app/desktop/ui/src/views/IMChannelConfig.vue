@@ -140,6 +140,57 @@
         </div>
       </div>
 
+      <!-- WeChat Work Configuration -->
+      <div v-if="activeProvider === 'wechat_work'" class="space-y-6 max-w-2xl mx-auto">
+        <div class="space-y-2">
+          <h2 class="text-xl font-semibold">{{ t('im.wechatWork.title') }}</h2>
+          <p class="text-sm text-muted-foreground">{{ t('im.wechatWork.description') }}</p>
+        </div>
+
+        <div class="flex items-center justify-between p-4 bg-card rounded-lg border">
+          <div class="space-y-1">
+            <Label class="text-base">{{ t('im.enable') }}</Label>
+            <p class="text-sm text-muted-foreground">{{ t('im.wechatWork.enableDesc') }}</p>
+          </div>
+          <Switch 
+            :checked="config.wechat_work.enabled"
+            @update:checked="(val) => onEnableChange('wechat_work', val)"
+          />
+        </div>
+
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <Label for="wechat-work-bot-id">{{ t('im.wechatWork.botId') }} <span class="text-red-500">*</span></Label>
+            <Input
+              id="wechat-work-bot-id"
+              v-model="config.wechat_work.bot_id"
+              :placeholder="t('im.wechatWork.botIdPlaceholder')"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="wechat-work-secret">{{ t('im.wechatWork.secret') }} <span class="text-red-500">*</span></Label>
+            <Input
+              id="wechat-work-secret"
+              v-model="config.wechat_work.secret"
+              type="password"
+              :placeholder="t('im.wechatWork.secretPlaceholder')"
+            />
+          </div>
+
+          <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <h4 class="font-medium text-blue-900 dark:text-blue-100 mb-2">
+              {{ t('im.wechatWork.setupGuide') }}
+            </h4>
+            <ol class="text-sm text-blue-800 dark:text-blue-200 space-y-1 list-decimal list-inside">
+              <li>{{ t('im.wechatWork.step1') }}</li>
+              <li>{{ t('im.wechatWork.step2') }}</li>
+              <li>{{ t('im.wechatWork.step3') }}</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
       <!-- iMessage Configuration -->
       <div v-if="activeProvider === 'imessage'" class="space-y-6 max-w-2xl mx-auto">
         <div class="space-y-2">
@@ -248,6 +299,12 @@ const providers = computed(() => {
       icon: 'MessageSquare',
       isEnabled: config.value.dingtalk.enabled,
     },
+    {
+      key: 'wechat_work',
+      label: t('im.wechatWork.name'),
+      icon: 'MessageSquare',
+      isEnabled: config.value.wechat_work.enabled,
+    },
   ]
   
   // 只在 Apple 平台上显示 iMessage
@@ -273,6 +330,11 @@ const config = ref({
     enabled: false,
     client_id: '',
     client_secret: '',
+  },
+  wechat_work: {
+    enabled: false,
+    bot_id: '',
+    secret: '',
   },
   imessage: {
     enabled: false,
@@ -312,6 +374,12 @@ const loadConfig = async () => {
         client_id: '',
         client_secret: '',
         ...data?.dingtalk,
+      },
+      wechat_work: {
+        enabled: false,
+        bot_id: '',
+        secret: '',
+        ...data?.wechat_work,
       },
       imessage: {
         enabled: false,
@@ -370,6 +438,19 @@ const onEnableChange = async (provider, value) => {
     if (!clientSecret || !clientSecret.trim()) {
       isValid = false
       missingFields.push(t('im.dingtalk.clientSecret'))
+    }
+  } else if (provider === 'wechat_work') {
+    const botId = config.value.wechat_work.bot_id
+    const secret = config.value.wechat_work.secret
+    console.log(`[IM] WeChat Work - bot_id: "${botId}", secret: "${secret}"`)
+
+    if (!botId || !botId.trim()) {
+      isValid = false
+      missingFields.push(t('im.wechatWork.botId'))
+    }
+    if (!secret || !secret.trim()) {
+      isValid = false
+      missingFields.push(t('im.wechatWork.secret'))
     }
   } else if (provider === 'imessage') {
     const monitoredSenders = config.value.imessage.allowed_senders

@@ -29,9 +29,9 @@ class KdbService:
     async def _check_kdb_permission(self, kdb_id: str, user_id: Optional[str]) -> models.Kdb:
         kdb = await self.kdb_dao.get_by_id(kdb_id)
         if not kdb:
-            raise SageHTTPException(status_code=500, detail="KDB not found")
+            raise SageHTTPException(detail="KDB not found")
         if user_id and kdb.user_id and kdb.user_id != user_id:
-            raise SageHTTPException(status_code=500, detail="forbidden")
+            raise SageHTTPException(detail="forbidden")
         return kdb
 
     async def add(
@@ -190,7 +190,6 @@ class KdbService:
                 filename = uf.filename.lower()
                 if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xls")):
                     raise SageHTTPException(
-                        status_code=500,
                         detail=f"QA知识库仅支持CSV或Excel文件: {uf.filename}",
                     )
                 
@@ -231,7 +230,6 @@ class KdbService:
                             
                 except Exception as e:
                     raise SageHTTPException(
-                        status_code=500,
                         detail=f"文件格式错误 {uf.filename}: {e} (QA库要求两列数据: Question, Answer)",
                     )
                 finally:
@@ -276,7 +274,7 @@ class KdbService:
     async def doc_delete(self, doc_id: str, user_id: Optional[str] = None) -> models.Kdb:
         kdb_doc = await self.kdb_doc_dao.get_by_id(doc_id)
         if not kdb_doc:
-            raise SageHTTPException(status_code=500, detail="KDB Doc not found")
+            raise SageHTTPException(detail="KDB Doc not found")
         kdb = await self._check_kdb_permission(kdb_doc.kdb_id, user_id)
         await DocumentService().doc_document_delete(kdb.get_index_name(), [doc_id])
         await self.kdb_doc_dao.delete_by_ids([doc_id])
