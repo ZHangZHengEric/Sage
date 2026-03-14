@@ -144,6 +144,10 @@ const props = defineProps({
   agentId: {
     type: String,
     default: null
+  },
+  selectedAgent: {
+    type: Object,
+    default: null
   }
 })
 
@@ -246,24 +250,62 @@ const handleSubmit = (e) => {
   e.preventDefault()
   if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) && !props.isLoading) {
     let messageContent = inputValue.value.trim()
-    
+
     // 如果有选中的技能，添加到消息头部
     if (currentSkill.value) {
       messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
     }
 
-    if (uploadedFiles.value.length > 0) {
-      const fileUrls = uploadedFiles.value.filter(f => f.url).map(f => f.url)
+    // 构建多模态内容格式
+    const multimodalContent = []
 
-      if (fileUrls.length > 0) {
-        if (messageContent) {
-          messageContent += '\n\n'
-        }
-        messageContent += fileUrls.join('\n')
+    // 添加文本内容
+    if (messageContent) {
+      multimodalContent.push({ type: 'text', text: messageContent })
+    }
+
+
+    // 非图片文件使用 Markdown 链接格式附加到文本中
+    // 如果开启了多模态，图片文件已经在上面作为多模态内容添加，不再重复添加为 Markdown 链接
+    const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
+
+    if (isMultimodalEnabled) {
+         // 添加图片内容（仅用于多模态模式）
+        const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
+        for (const img of imageFiles) {
+          multimodalContent.push({
+            type: 'image_url',
+            image_url: { url: img.url }
+          })
+    }
+
+    }
+    const nonImageFiles = uploadedFiles.value.filter(f => f.url && (isMultimodalEnabled ? f.type !== 'image' : true))
+    if (nonImageFiles.length > 0) {
+      const fileInfos = nonImageFiles.map(f => {
+        let cleanName = f.name || '文件'
+        cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
+        cleanName = cleanName.replace(/_\d{14}_/, '_')
+        return { url: f.url, name: cleanName }
+      })
+
+      if (messageContent && fileInfos.length > 0) {
+        messageContent += '\n\n'
+      }
+      const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
+      messageContent += markdownLinks.join('\n')
+
+      // 更新 multimodalContent 中的文本（如果存在）
+      if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
+        multimodalContent[0].text = messageContent
       }
     }
-    if (messageContent) {
-      emit('sendMessage', messageContent)
+
+    // 发送消息，同时传递普通格式和多模态格式
+    if (messageContent || multimodalContent.length > 0) {
+      emit('sendMessage', messageContent, {
+        multimodalContent: multimodalContent.length > 0 ? multimodalContent : null
+      })
       inputValue.value = ''
       uploadedFiles.value = []
       currentSkill.value = null
@@ -357,10 +399,10 @@ const processFile = async (file) => {
 
   try {
     // 调用OSS API上传
-    const url = await ossApi.uploadFile(file)
+    const response = await ossApi.uploadFile(file)
 
-    // 更新文件URL
-    fileItem.url = url
+    // 更新文件URL - 从响应中提取URL
+    fileItem.url = response.data?.url || response.url || response
     fileItem.uploading = false
   } catch (error) {
 

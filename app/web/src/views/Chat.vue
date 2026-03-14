@@ -98,7 +98,7 @@
         </div>
         
         <div class="flex-none p-4  bg-background" v-if="selectedAgent">
-            <MessageInput :agent-id="selectedAgentId" :is-loading="isCurrentSessionLoading" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
+            <MessageInput :agent-id="selectedAgentId" :is-loading="isCurrentSessionLoading" :selected-agent="selectedAgent" @send-message="handleSendMessage" @stop-generation="stopGeneration" />
         </div>
       </div>
 
