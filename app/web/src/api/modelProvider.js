@@ -44,5 +44,14 @@ export const modelProviderAPI = {
    */
   verifyModelProvider: async (data) => {
     return await baseAPI.post('/api/llm-provider/verify', data)
+  },
+
+  /**
+   * 验证模型提供商是否支持多模态
+   * @param {Object} data
+   * @returns {Promise<Object>}
+   */
+  verifyMultimodal: async (data) => {
+    return await baseAPI.post('/api/llm-provider/verify-multimodal', data)
   }
 }

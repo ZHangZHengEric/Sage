@@ -41,7 +41,6 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
     tool_manager = get_tool_manager()
     if not tool_manager:
         raise SageHTTPException(
-            status_code=500,
             detail="工具管理器未初始化",
             error_detail="Tool manager not initialized",
         )
@@ -50,7 +49,6 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
     if request.tool_name not in tool_manager.tools.keys():
         logger.error(f"执行工具失败: {request.tool_name}")
         raise SageHTTPException(
-            status_code=500,
             detail="工具不存在",
             error_detail=f"Tool '{request.tool_name}' not found",
         )
@@ -65,7 +63,6 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
             server = await dao.get_by_name(source)
             if server and server.user_id and server.user_id != user_id:
                 raise SageHTTPException(
-                    status_code=500,
                     detail="无权使用该工具",
                     error_detail="Permission denied",
                 )
@@ -82,7 +79,6 @@ async def exec_tool(request: ExecToolRequest, http_request: Request):
     else:
         logger.error(f"执行工具失败: {request.tool_name}")
         raise SageHTTPException(
-            status_code=500,
             detail="工具执行失败",
             error_detail=f"Tool '{request.tool_name}' execution failed",
         )

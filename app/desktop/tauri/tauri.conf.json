@@ -52,6 +52,7 @@
       "frameworks": [],
       "providerShortName": null,
       "signingIdentity": null,
+      "minimumSystemVersion": "11.0",
       "dmg": {
         "windowSize": {
           "width": 600,

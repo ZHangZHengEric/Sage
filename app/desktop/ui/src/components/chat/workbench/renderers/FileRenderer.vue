@@ -67,6 +67,9 @@
       <!-- 图片预览 -->
       <ImageRenderer v-else-if="fileType === 'image'" :file-path="filePath" :file-name="displayFileName" />
 
+      <!-- 视频预览 -->
+      <VideoRenderer v-else-if="fileType === 'video'" :file-path="filePath" :file-name="displayFileName" />
+
       <!-- HTML 预览 -->
       <HtmlRenderer v-else-if="fileType === 'html'" :file-path="filePath" :content="fileContent" />
 
@@ -152,6 +155,7 @@ import { init as initPptxPreview } from 'pptx-preview'
 import ExcalidrawRenderer from './filerender/ExcalidrawRenderer.vue'
 import PdfRenderer from './filerender/PdfRenderer.vue'
 import ImageRenderer from './filerender/ImageRenderer.vue'
+import VideoRenderer from './filerender/VideoRenderer.vue'
 import HtmlRenderer from './filerender/HtmlRenderer.vue'
 import MarkdownRenderer from './filerender/MarkdownRenderer.vue'
 import CodeRenderer from './filerender/CodeRenderer.vue'
@@ -287,6 +291,7 @@ const fileType = computed(() => {
   const typeMap = {
     'pdf': 'pdf',
     'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'gif': 'image', 'webp': 'image', 'svg': 'image',
+    'mp4': 'video', 'webm': 'video', 'mov': 'video', 'mkv': 'video', 'avi': 'video', 'flv': 'video', 'm4v': 'video',
     'html': 'html', 'htm': 'html',
     'md': 'markdown', 'markdown': 'markdown',
     'excalidraw': 'excalidraw',
@@ -309,6 +314,7 @@ const fileTypeLabel = computed(() => {
   const labels = {
     'pdf': 'PDF',
     'image': '图片',
+    'video': '视频',
     'html': 'HTML',
     'markdown': 'Markdown',
     'excalidraw': 'Excalidraw',
@@ -325,6 +331,7 @@ const fileIcon = computed(() => {
   const icons = {
     'pdf': '📕',
     'image': '🖼️',
+    'video': '🎬',
     'html': '🌐',
     'markdown': '📝',
     'excalidraw': '✏️',

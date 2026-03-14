@@ -88,27 +88,27 @@
           </div>
           <div class="grid gap-2">
             <Label>{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
-            <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" />
+            <Input v-model="form.base_url" placeholder="https://api.openai.com/v1" @update:model-value="onKeyConfigChange" />
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
               <Label>{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
-              <Button 
-                v-if="currentProvider?.website" 
-                variant="link" 
-                size="sm" 
-                class="h-auto p-0 text-primary" 
+              <Button
+                v-if="currentProvider?.website"
+                variant="link"
+                size="sm"
+                class="h-auto p-0 text-primary"
                 @click="openProviderWebsite"
               >
                 Get API Key
                 <ArrowRight class="ml-1 w-3 h-3" />
               </Button>
             </div>
-            <Input v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" />
+            <Input v-model="form.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" @update:model-value="onKeyConfigChange" />
           </div>
           <div class="grid gap-2">
              <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-             <Input v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" />
+             <Input v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" @update:model-value="onKeyConfigChange" />
              <p class="text-xs text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
           </div>
           
@@ -136,6 +136,31 @@
               <Label>{{ t('agent.maxModelLen') }}</Label>
               <Input type="number" v-model.number="form.maxModelLen" placeholder="32000" />
           </div>
+
+          <!-- 多模态支持 -->
+          <div class="grid gap-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Checkbox id="multimodal" v-model:checked="form.supportsMultimodal" />
+                <Label for="multimodal" class="cursor-pointer">多模态（图像输入）</Label>
+              </div>
+              <Button
+                v-if="form.supportsMultimodal"
+                type="button"
+                variant="outline"
+                size="sm"
+                @click="handleVerifyMultimodal"
+                :disabled="verifyingMultimodal || !form.model"
+              >
+                <Loader v-if="verifyingMultimodal" class="mr-2 h-4 w-4 animate-spin" />
+                {{ multimodalVerified ? '已验证' : '验证多模态' }}
+              </Button>
+            </div>
+            <p v-if="form.supportsMultimodal && !multimodalVerified" class="text-xs text-amber-600">
+              请验证多模态支持以确保功能正常
+            </p>
+   
+          </div>
         </div>
         <DialogFooter class="flex sm:justify-between items-center w-full">
           <Button type="button" variant="secondary" @click="handleVerify" :disabled="verifying">
@@ -144,7 +169,7 @@
           </Button>
           <div class="flex gap-2">
             <Button variant="outline" @click="dialogOpen = false">{{ t('common.cancel') }}</Button>
-            <Button @click="submitForm">{{ t('common.save') }}</Button>
+            <Button @click="submitForm" :disabled="!canSave">{{ t('common.save') }}</Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -160,6 +185,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { open } from '@tauri-apps/plugin-shell'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
 import {
@@ -199,6 +225,9 @@ const dialogOpen = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
 const verifying = ref(false)
+const verified = ref(false)
+const verifyingMultimodal = ref(false)
+const multimodalVerified = ref(false)
 const confirmDialogRef = ref(null)
 
 // Basic form state
@@ -211,11 +240,57 @@ const form = reactive({
   temperature: 0.7,
   topP: 0.95,
   presencePenalty: 0,
-  maxModelLen: 64000
+  maxModelLen: 64000,
+  supportsMultimodal: false
+})
+
+// 存储原始值用于比较（编辑模式）
+const originalValues = reactive({
+  base_url: '',
+  api_keys_str: '',
+  model: '',
+  supportsMultimodal: false
 })
 
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+
+// 保存按钮是否可点击
+const canSave = computed(() => {
+  if (!isEdit.value) {
+    // 新建模式：根据多模态开关决定需要哪种验证
+    if (form.supportsMultimodal) {
+      return multimodalVerified.value
+    } else {
+      return verified.value
+    }
+  }
+
+  // 编辑模式
+  // 检查关键配置是否发生变化
+  const configChanged =
+    form.base_url !== originalValues.base_url ||
+    form.api_keys_str !== originalValues.api_keys_str ||
+    form.model !== originalValues.model
+
+  // 检查多模态是否从关闭变为开启
+  const multimodalNewlyEnabled = form.supportsMultimodal && !originalValues.supportsMultimodal
+
+  if (multimodalNewlyEnabled) {
+    // 新开启多模态，必须验证多模态
+    return multimodalVerified.value
+  } else if (configChanged) {
+    // 关键配置变化，根据当前多模态状态决定验证类型
+    if (form.supportsMultimodal) {
+      return multimodalVerified.value
+    } else {
+      return verified.value
+    }
+  }
+
+  // 没有变化，可以保存
+  return true
+})
 
 const handleProviderChange = (val) => {
   selectedProvider.value = val
@@ -223,6 +298,9 @@ const handleProviderChange = (val) => {
     form.name = ''
     form.base_url = ''
     form.model = ''
+    verified.value = false
+    multimodalVerified.value = false
+    form.supportsMultimodal = false
     return
   }
   const provider = MODEL_PROVIDERS.find(p => p.name === val)
@@ -231,6 +309,15 @@ const handleProviderChange = (val) => {
     form.base_url = provider.base_url
     // form.model = provider.models[0] || ''
   }
+  verified.value = false
+  multimodalVerified.value = false
+  form.supportsMultimodal = false
+}
+
+const onKeyConfigChange = () => {
+  // 当关键配置变化时，重置验证状态
+  verified.value = false
+  multimodalVerified.value = false
 }
 
 const openProviderWebsite = async () => {
@@ -267,6 +354,14 @@ const handleCreate = () => {
   form.topP = 0.95
   form.presencePenalty = 0
   form.maxModelLen = 64000
+  form.supportsMultimodal = false
+  verified.value = false
+  multimodalVerified.value = false
+  // 清空原始值
+  originalValues.base_url = ''
+  originalValues.api_keys_str = ''
+  originalValues.model = ''
+  originalValues.supportsMultimodal = false
   dialogOpen.value = true
 }
 
@@ -275,13 +370,13 @@ const handleEdit = (provider) => {
     isEdit.value = true
     currentId.value = provider.id
     form.name = provider.name
-    
+
     // Try to match provider
     const known = MODEL_PROVIDERS.find(p => p.base_url === provider.base_url)
     selectedProvider.value = known ? known.name : 'Custom'
 
     form.base_url = provider.base_url
-    
+
     // Handle API keys safely
     let keys = provider.api_keys
     if (!Array.isArray(keys)) {
@@ -295,7 +390,18 @@ const handleEdit = (provider) => {
     form.topP = provider.top_p ?? 0.9
     form.presencePenalty = provider.presence_penalty ?? 0.0
     form.maxModelLen = provider.max_model_len ?? 32000
-    
+    form.supportsMultimodal = provider.supports_multimodal ?? false
+
+    // 保存原始值用于比较
+    originalValues.base_url = provider.base_url
+    originalValues.api_keys_str = keys.join(',')
+    originalValues.model = provider.model
+    originalValues.supportsMultimodal = provider.supports_multimodal ?? false
+
+    // 编辑模式初始状态设为已验证（如果没有变化）
+    verified.value = true
+    multimodalVerified.value = form.supportsMultimodal
+
     dialogOpen.value = true
   } catch (error) {
     console.error('Failed to open edit dialog:', error)
@@ -327,20 +433,63 @@ const handleVerify = async () => {
     presence_penalty: form.presencePenalty,
     max_model_len: form.maxModelLen
   }
-  
+
   if (!data.name || !data.base_url || !data.api_keys.length || !data.model) {
      toast.error(t('common.fillRequired') || '请填写必填项')
      return
   }
-  
+
   verifying.value = true
   try {
     await modelProviderAPI.verifyModelProvider(data)
+    verified.value = true
     toast.success(t('common.verifySuccess') || '验证成功')
   } catch (error) {
+    verified.value = false
     toast.error(error.message || '验证失败')
   } finally {
     verifying.value = false
+  }
+}
+
+const handleVerifyMultimodal = async () => {
+  if (!form.model) {
+    toast.error('请先填写模型名称')
+    return
+  }
+
+  verifyingMultimodal.value = true
+  try {
+    const data = {
+      name: form.name,
+      base_url: form.base_url,
+      api_keys: form.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
+      model: form.model,
+      max_tokens: form.maxTokens,
+      temperature: form.temperature,
+      top_p: form.topP,
+      presence_penalty: form.presencePenalty,
+      max_model_len: form.maxModelLen
+    }
+    const res = await modelProviderAPI.verifyMultimodal(data)
+    if (res?.supports_multimodal) {
+      multimodalVerified.value = true
+      if (res?.recognized) {
+        toast.success('多模态验证成功，模型正确识别了图片内容')
+      } else {
+        toast.success('多模态验证成功，但模型未能正确识别图片内容')
+      }
+    } else {
+      multimodalVerified.value = false
+      toast.warning('该模型不支持多模态')
+      form.supportsMultimodal = false
+    }
+  } catch (error) {
+    console.error('Failed to verify multimodal:', error)
+    multimodalVerified.value = false
+    toast.error(error.message || '多模态验证失败')
+  } finally {
+    verifyingMultimodal.value = false
   }
 }
 
@@ -354,16 +503,32 @@ const submitForm = async () => {
     temperature: form.temperature,
     top_p: form.topP,
     presence_penalty: form.presencePenalty,
-    max_model_len: form.maxModelLen
+    max_model_len: form.maxModelLen,
+    supports_multimodal: form.supportsMultimodal
   }
-  
+
+  // 如果开启多模态，必须验证多模态；否则必须验证连接（新建时）
+  if (!isEdit.value) {
+    if (form.supportsMultimodal) {
+      if (!multimodalVerified.value) {
+        toast.error('请先验证多模态支持')
+        return
+      }
+    } else {
+      if (!verified.value) {
+        toast.error('请先验证连接')
+        return
+      }
+    }
+  }
+
   try {
     if (isEdit.value) {
       await updateModelProvider(currentId.value, data)
     } else {
       await createModelProvider(data)
     }
-    
+
     toast.success(t('common.success'))
     dialogOpen.value = false
     fetchProviders()

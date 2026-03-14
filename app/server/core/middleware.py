@@ -13,7 +13,6 @@ from loguru import logger
 
 from .context import set_request_context
 from .auth import parse_access_token
-from .config import get_startup_config
 from .exceptions import SageHTTPException
 from .render import Response
 

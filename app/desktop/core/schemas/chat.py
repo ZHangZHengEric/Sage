@@ -6,7 +6,9 @@ from pydantic import BaseModel
 class Message(BaseModel):
     message_id: Optional[str] = None
     role: str
-    content: str
+    # content 可以是字符串或列表（支持多模态，如图片+文本）
+    # 列表格式: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
+    content: Optional[Union[str, List[Dict[str, Any]]]] = None
 
 class BaseChatRequest(BaseModel):
     """基础聊天请求，包含公共字段"""
