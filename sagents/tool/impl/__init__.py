@@ -4,6 +4,7 @@ from .file_system_tool import FileSystemTool
 from .memory_tool import MemoryTool
 from .task_interruption_tool import TaskInterruptionTool
 from .web_fetcher_tool import WebFetcherTool
+from .image_understanding_tool import ImageUnderstandingTool
 
 __all__ = [
     'ExecuteCommandTool',
@@ -12,4 +13,5 @@ __all__ = [
     'MemoryTool',
     'TaskInterruptionTool',
     'WebFetcherTool',
+    'ImageUnderstandingTool',
 ]
