@@ -9,10 +9,11 @@ import zipfile
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, UploadFile, File
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
+import shutil
 
 from ..core.render import Response
 from ..core.exceptions import SageHTTPException
@@ -440,4 +441,132 @@ async def delete_file(agent_id: str, request: Request):
         return await Response.succ(message=f"文件 {file_path} 已删除")
     except Exception as e:
         logger.bind(agent_id=agent_id).error(f"Delete failed: {e}")
+        raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/upload")
+async def upload_file(agent_id: str, file: UploadFile = File(...), target_path: str = ""):
+    """上传文件到Agent工作空间"""
+    logger.bind(agent_id=agent_id).info(f"Upload request: filename={file.filename}, target_path={target_path}")
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+    workspace_path = sage_home / "agents" / agent_id
+    
+    try:
+        # 确保工作空间目录存在
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        
+        # 构建目标文件路径
+        if target_path:
+            # 如果指定了目标路径，创建子目录
+            target_dir = workspace_path / target_path
+            target_dir.mkdir(parents=True, exist_ok=True)
+            file_path = target_dir / file.filename
+        else:
+            file_path = workspace_path / file.filename
+        
+        # 安全检查：确保文件路径在工作空间内
+        workspace_abs = os.path.normcase(os.path.abspath(workspace_path))
+        file_abs = os.path.normcase(os.path.abspath(file_path))
+        try:
+            in_workspace = os.path.commonpath([workspace_abs, file_abs]) == workspace_abs
+        except ValueError:
+            in_workspace = False
+        
+        if not in_workspace:
+            raise SageHTTPException(status_code=400, detail="访问被拒绝：文件路径超出工作空间范围")
+        
+        # 保存文件
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        file_size = os.path.getsize(file_path)
+        logger.bind(agent_id=agent_id).info(f"Upload successful: {file_path}, size={file_size}")
+        
+        return await Response.succ(
+            message=f"文件 {file.filename} 上传成功",
+            data={
+                "filename": file.filename,
+                "path": str(file_path.relative_to(workspace_path)),
+                "size": file_size,
+            }
+        )
+    except Exception as e:
+        logger.bind(agent_id=agent_id).error(f"Upload failed: {e}")
+        raise
+
+
+@agent_router.post("/{agent_id}/file_workspace/upload_folder")
+async def upload_folder(agent_id: str, request: Request):
+    """上传文件夹到Agent工作空间（通过文件列表）"""
+    logger.bind(agent_id=agent_id).info(f"Upload folder request")
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+    workspace_path = sage_home / "agents" / agent_id
+    
+    try:
+        data = await request.json()
+        files = data.get("files", [])
+        target_folder = data.get("target_folder", "")
+        
+        if not files:
+            raise SageHTTPException(status_code=400, detail="没有要上传的文件")
+        
+        # 确保工作空间目录存在
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        
+        # 构建目标目录
+        if target_folder:
+            target_dir = workspace_path / target_folder
+            target_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            target_dir = workspace_path
+        
+        uploaded_files = []
+        
+        for file_info in files:
+            relative_path = file_info.get("relative_path", "")
+            source_path = file_info.get("source_path", "")
+            
+            if not source_path or not os.path.exists(source_path):
+                logger.warning(f"Source file not found: {source_path}")
+                continue
+            
+            # 构建目标文件路径
+            if relative_path:
+                dest_path = target_dir / relative_path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                dest_path = target_dir / os.path.basename(source_path)
+            
+            # 安全检查
+            workspace_abs = os.path.normcase(os.path.abspath(workspace_path))
+            dest_abs = os.path.normcase(os.path.abspath(dest_path))
+            try:
+                in_workspace = os.path.commonpath([workspace_abs, dest_abs]) == workspace_abs
+            except ValueError:
+                in_workspace = False
+            
+            if not in_workspace:
+                logger.warning(f"Path outside workspace: {dest_path}")
+                continue
+            
+            # 复制文件
+            shutil.copy2(source_path, dest_path)
+            file_size = os.path.getsize(dest_path)
+            
+            uploaded_files.append({
+                "filename": os.path.basename(source_path),
+                "path": str(dest_path.relative_to(workspace_path)),
+                "size": file_size,
+            })
+        
+        logger.bind(agent_id=agent_id).info(f"Folder upload successful: {len(uploaded_files)} files")
+        
+        return await Response.succ(
+            message=f"成功上传 {len(uploaded_files)} 个文件",
+            data={"files": uploaded_files}
+        )
+    except Exception as e:
+        logger.bind(agent_id=agent_id).error(f"Folder upload failed: {e}")
         raise
