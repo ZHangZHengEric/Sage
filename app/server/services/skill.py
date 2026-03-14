@@ -18,6 +18,7 @@ from sagents.skill.skill_manager import get_skill_manager, SkillManager
 
 from .. import models
 from ..core.exceptions import SageHTTPException
+from ..core.config import get_startup_config
 
 
 def _set_permissions_recursive(path, dir_mode=0o755, file_mode=0o644):
@@ -212,6 +213,11 @@ async def list_skills(
         if agent and agent.config:
             allowed_skills = agent.config.get("availableSkills") or agent.config.get("available_skills")
 
+    # 预加载所有agent信息用于获取agent名称
+    agent_dao = models.AgentConfigDao()
+    all_agents = await agent_dao.get_list()
+    agent_name_map = {agent.agent_id: agent.name for agent in all_agents}
+    
     skills = []
     for skill in all_skills:
         name = skill.name
@@ -234,13 +240,15 @@ async def list_skills(
                 if dimension_info["owner_user_id"] != current_user_id:
                     continue
 
+        agent_id = dimension_info["agent_id"]
         skills.append({
             "name": skill.name,
             "description": skill.description,
             "user_id": dimension_info["owner_user_id"] or "",
             "dimension": skill_dimension,
             "owner_user_id": dimension_info["owner_user_id"],
-            "agent_id": dimension_info["agent_id"],
+            "agent_id": agent_id,
+            "agent_name": agent_name_map.get(agent_id, agent_id) if agent_id else None,
             "path": skill.path
         })
     return skills
@@ -337,28 +345,74 @@ async def get_agent_available_skills(
     return skills_list
 
 
-async def delete_skill(skill_name: str, user_id: str, role: str = "user") -> None:
-    """删除技能"""
-    skill_info = _find_skill_by_name(skill_name)
-    if not skill_info:
-        raise SageHTTPException(detail=f"Skill '{skill_name}' not found")
-
-    dimension_info = _get_skill_dimension(skill_info.path)
-    _check_skill_permission(dimension_info, user_id, role, "delete")
-
-    try:
-        skill_path = skill_info.path
-        if os.path.exists(skill_path):
+async def delete_skill(skill_name: str, user_id: str, role: str = "user", agent_id: Optional[str] = None) -> None:
+    """删除技能
+    
+    删除粒度：
+    1. Agent粒度：如果指定agent_id，删除Agent工作空间下的skill
+    2. 用户粒度：删除用户目录下的skill（users/{user_id}/skills/）
+    3. 系统粒度：删除系统目录下的skill（skills/），需要admin权限，并更新全局skill_manager
+    
+    Args:
+        skill_name: 技能名称
+        user_id: 用户ID
+        role: 用户角色
+        agent_id: 可选，如果提供则删除指定Agent工作空间下的skill
+    """
+    cfg = get_startup_config()
+    
+    # 1. 如果指定了agent_id，删除Agent工作空间下的skill
+    if agent_id:
+        agent_skills_path = os.path.join(cfg.agents_dir, user_id, agent_id, "skills", skill_name)
+        
+        if not os.path.exists(agent_skills_path):
+            raise SageHTTPException(detail=f"Skill '{skill_name}' not found in agent workspace")
+        
+        try:
+            shutil.rmtree(agent_skills_path)
+            logger.info(f"Deleted agent skill '{skill_name}' from agent '{agent_id}'")
+            return
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Could not delete agent skill files for '{skill_name}': {e}")
+            raise SageHTTPException(detail=f"删除技能文件失败: {e}")
+    
+    # 2. 删除用户粒度skill
+    if user_id:
+        user_skills_path = os.path.join(cfg.user_dir, user_id, "skills", skill_name)
+        if os.path.exists(user_skills_path):
             try:
-                shutil.rmtree(skill_path)
+                shutil.rmtree(user_skills_path)
+                logger.info(f"Deleted user skill '{skill_name}' for user '{user_id}'")
+                return
             except (PermissionError, OSError) as e:
-                logger.warning(f"Could not delete skill files for '{skill_name}': {e}")
+                logger.warning(f"Could not delete user skill files for '{skill_name}': {e}")
                 raise SageHTTPException(detail=f"删除技能文件失败: {e}")
 
-    except Exception as e:
-        logger.error(f"Delete skill failed: {e}")
-        raise SageHTTPException(detail=f"删除失败: {str(e)}")
-
+    # 3. 尝试删除系统粒度skill（需要admin权限）
+    system_skills_path = os.path.join(cfg.skill_dir, skill_name)
+    if os.path.exists(system_skills_path):
+        # 检查权限
+        if role != "admin":
+            raise SageHTTPException(detail="无权删除系统技能", error_detail="forbidden")
+        
+        try:
+            shutil.rmtree(system_skills_path)
+            logger.info(f"Deleted system skill '{skill_name}'")
+            
+            # 更新全局skill_manager
+            try:
+                skill_manager = get_skill_manager()
+                if skill_manager:
+                    skill_manager.reload()
+                    logger.info(f"Reloaded global skill_manager after deleting '{skill_name}'")
+            except Exception as e:
+                logger.warning(f"Failed to reload skill_manager: {e}")
+            
+            return
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Could not delete system skill files for '{skill_name}': {e}")
+            raise SageHTTPException(detail=f"删除技能文件失败: {e}")
+    
 
 async def get_skill_content(skill_name: str, user_id: str, role: str = "user") -> str:
     """获取技能内容 (SKILL.md)"""
@@ -524,26 +578,6 @@ async def _process_zip_to_dir(
     finally:
         if os.path.exists(temp_extract_dir):
             shutil.rmtree(temp_extract_dir)
-
-
-def _get_skill_target_path(skill_dir_name: str, user_id: str) -> str:
-    """
-    根据 user_id 获取技能的目标存储路径
-    - 系统技能 (user_id 为空): skills/{skill_name}
-    - 用户技能: users/{user_id}/skills/{skill_name}
-    """
-    from ..core.config import get_startup_config
-    cfg = get_startup_config()
-    skill_dir = cfg.skill_dir if cfg else "skills"
-    user_dir = cfg.user_dir if cfg else "users"
-
-    if user_id:
-        target_dir = os.path.join(user_dir, user_id, "skills")
-    else:
-        target_dir = skill_dir
-
-    os.makedirs(target_dir, exist_ok=True)
-    return os.path.join(target_dir, skill_dir_name)
 
 
 async def import_skill_by_file(
