@@ -186,6 +186,8 @@ async def generate_agent_abilities_from_config(
 内容约束：
 - 严格依据给定的描述与技能信息，不要虚构技能。
 - 覆盖不同技能/场景，避免同义重复；总数最多 4 条。
+- 随机生成：每次生成时随机选择要体现的能力与场景，不要固定套路；输出的 4 条模板在主题、侧重点上应有随机性和多样性。
+- 忽略输入顺序：下方「可用工具」「可用技能」「可用工作流」等列表的先后顺序仅供参考，不要优先选用排在前面或后面的项；应把列表中所有项视为平等，随机挑选不同项来设计模板，使每次生成的结果在覆盖面上更随机。
 
 语言：生成语言为 "{language}"。
 
@@ -202,7 +204,7 @@ async def generate_agent_abilities_from_config(
 可选上下文（如有）：
 {context_summary}
 
-请基于以上信息生成最多 4 条「可直接运行、确定性、有明确指向性」的提问模板，每条 promptText 必须具体、完整、无需用户再补充任何内容。
+请基于以上信息随机选取能力与场景，生成最多 4 条「可直接运行、确定性、有明确指向性」的提问模板，每条 promptText 必须具体、完整、无需用户再补充任何内容。不要按上述配置中列举顺序偏好选材，应随机覆盖。
 """.strip()
 
     try:
@@ -212,7 +214,7 @@ async def generate_agent_abilities_from_config(
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
-            # temperature=0.3,
+            # temperature=0.7,
             max_tokens=1500,
         )
     except Exception as e:  # pragma: no cover - 具体异常类型由底层 SDK 决定
