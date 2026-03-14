@@ -163,6 +163,7 @@ export default {
   'chat.abilities.error': 'Failed to load abilities',
   'chat.abilities.empty': 'No suggestions available',
   'chat.abilities.retry': 'Retry',
+  'chat.abilities.regenerate': 'Regenerate',
   'chat.abilities.close': 'Close',
 
   // Quick help

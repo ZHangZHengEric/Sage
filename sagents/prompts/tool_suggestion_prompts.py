@@ -32,28 +32,28 @@ tool_suggestion_template = {
     5,
     ...
 ]
-```""",
+```
+不要包含任何额外的文本或解释。只返回 JSON 数组。
+""",
 
 
-    "en": """You are an intelligent tool recommendation expert. Please recommend the most suitable combination of tools based on user needs and conversation context.
-
-## Analysis Requirements
-1. Carefully analyze the user's request and conversation history
-2. Understand user intent and task objectives
-3. Select the most relevant tools from available options
-4. Ensure recommended tools can fully address user needs
-
-## Agent Configuration
-{agent_config}
-
-## Available Tools
-{available_tools_str}
+    "en": """By reviewing the user conversation history, current request, and your system requirements, recommend the most suitable combination of tools.
 
 ## User Conversation History and Current Request
 {messages}
 
+## Available Tools List
+{available_tools_str}
+
+## Notes
+1. Only return the numbers (indices) from the available tools list
+2. Prioritize directly relevant tools and avoid redundancy
+3. Recommend between 5-15 tools
+4. Ensure the recommended tool combination can fully address the user's needs
+5. If the user's request is unclear, return commonly used basic tools
+
 ## Output Format
-Please strictly return JSON array format containing recommended tool numbers:
+Please strictly return in JSON array format containing the recommended tool numbers:
 ```json
 [
     1,
@@ -62,36 +62,22 @@ Please strictly return JSON array format containing recommended tool numbers:
     ...
 ]
 ```
+Do not include any additional text or explanations. Only return the JSON array.""",
 
-## Notes
-1. Only return numbers from the available tools list
-2. Prioritize directly relevant tools, avoid redundancy
-3. Recommend between 5-15 tools
-4. Ensure the tool combination can fully solve user requirements
-5. If user request is unclear, return common basic tools
-
-## Example
-If user needs to "read file and analyze data", recommended tools might include:
-- file_read (read file)
-- execute_python_code (execute analysis code)
-- file_write (write results)""",
-
-    "pt": """Você é um especialista inteligente em recomendação de ferramentas. Por favor, recomende a combinação mais adequada de ferramentas com base nas necessidades do usuário e no contexto da conversa.
-
-## Requisitos de Análise
-1. Analise cuidadosamente a solicitação do usuário e o histórico da conversa
-2. Entenda a intenção do usuário e os objetivos da tarefa
-3. Selecione as ferramentas mais relevantes das opções disponíveis
-4. Garanta que as ferramentas recomendadas possam atender totalmente às necessidades do usuário
-
-## Configuração do Agente
-{agent_config}
-
-## Ferramentas Disponíveis
-{available_tools_str}
+    "pt": """Ao revisar o histórico de conversas do usuário, a solicitação atual e os requisitos do sistema, recomende a combinação mais adequada de ferramentas.
 
 ## Histórico de Conversas do Usuário e Solicitação Atual
 {messages}
+
+## Lista de Ferramentas Disponíveis
+{available_tools_str}
+
+## Notas
+1. Retorne apenas os números (índices) da lista de ferramentas disponíveis
+2. Priorize ferramentas diretamente relevantes, evite redundância
+3. Recomende entre 5-15 ferramentas
+4. Garanta que a combinação de ferramentas recomendadas possa atender totalmente às necessidades do usuário
+5. Se a solicitação do usuário não estiver clara, retorne ferramentas básicas comuns
 
 ## Formato de Saída
 Por favor, retorne estritamente no formato de array JSON contendo os números das ferramentas recomendadas:
@@ -103,13 +89,7 @@ Por favor, retorne estritamente no formato de array JSON contendo os números da
     ...
 ]
 ```
-
-## Notas
-1. Retorne apenas números da lista de ferramentas disponíveis
-2. Priorize ferramentas diretamente relevantes, evite redundância
-3. Recomende entre 5-15 ferramentas
-4. Garanta que a combinação de ferramentas possa resolver totalmente as necessidades do usuário
-5. Se a solicitação do usuário não estiver clara, retorne ferramentas básicas comuns"""
+Não inclua nenhum texto ou explicação adicional. Retorne apenas o array JSON."""
 }
 
 # 工具推荐系统提示
