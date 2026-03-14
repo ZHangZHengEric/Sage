@@ -27,8 +27,8 @@
       </div>
       <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
         <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
-          <button 
-            @click="handleCopy" 
+          <button
+            @click="handleCopy"
             class="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
             :title="copied ? '已复制' : '复制内容'"
           >
@@ -37,10 +37,27 @@
           </button>
           {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
         </div>
-        <div class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
-          <MarkdownRenderer
-            :content="formatMessageContent(message.content)"
-          />
+        <div class="flex flex-col gap-2">
+          <!-- 文本内容 -->
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
+            <MarkdownRenderer
+              :content="formatMessageContent(getTextContent(message.content))"
+            />
+          </div>
+        <!-- 图片内容 -->
+          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+            <div
+              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              :key="index"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
+            >
+              <img
+                :src="resolveFilePath(imgUrl)"
+                :alt="`图片 ${index + 1}`"
+                class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -63,7 +80,7 @@
     </div>
 
     <!-- 助手消息 -->
-    <div v-else-if="message.role === 'assistant' && !hasToolCalls && message.content" class="flex flex-row items-start gap-3 px-4 group" data-message-type="assistant">
+    <div v-else-if="message.role === 'assistant' && !hasToolCalls && (message.content || getImageUrls(message.content).length > 0)" class="flex flex-row items-start gap-3 px-4 group" data-message-type="assistant">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
@@ -73,8 +90,8 @@
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
           </span>
-          <button 
-            @click="handleCopy" 
+          <button
+            @click="handleCopy"
             class="opacity-0 group-hover:opacity-100 transition-opacity ml-2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
             :title="copied ? '已复制' : '复制内容'"
           >
@@ -82,10 +99,27 @@
             <Copy v-else class="w-3 h-3" />
           </button>
         </div>
-        <div class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
-          <MarkdownRendererWithPreview
-            :content="formatMessageContent(message.content)"
-          />
+        <div class="flex flex-col gap-2 w-full">
+          <!-- 文本内容 -->
+          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
+            <MarkdownRendererWithPreview
+              :content="formatMessageContent(getTextContent(message.content))"
+            />
+          </div>
+          <!-- 图片内容 -->
+          <div v-if="getImageUrls(message.content).length > 0" class="flex flex-wrap gap-2">
+            <div
+              v-for="(imgUrl, index) in getImageUrls(message.content)"
+              :key="index"
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm w-[120px] h-[120px]"
+            >
+              <img
+                :src="resolveFilePath(imgUrl)"
+                :alt="`图片 ${index + 1}`"
+                class="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -154,6 +188,7 @@ import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
+import { convertFileSrc } from '@tauri-apps/api/core'
 
 // Custom Tools
 const TOOL_COMPONENT_MAP = {
@@ -229,57 +264,16 @@ const tokenUsageData = computed(() => {
 
 const hasToolCalls = computed(() => {
   const hasCalls = props.message.tool_calls && Array.isArray(props.message.tool_calls) && props.message.tool_calls.length > 0
-  console.log('MessageRenderer - role:', props.message.role, 'hasToolCalls:', hasCalls, 'content:', props.message.content?.substring(0, 100))
+  const contentPreview = typeof props.message.content === 'string' ? props.message.content?.substring(0, 100) : '[multimodal content]'
+  console.log('MessageRenderer - role:', props.message.role, 'hasToolCalls:', hasCalls, 'content:', contentPreview)
   return hasCalls
 })
 
 
-// Markdown组件配置
-const markdownComponents = {
-  code: ({ node, inline, className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '')
-    const language = match ? match[1] : ''
-    
-    // 处理 ECharts 代码块
-    if (!inline && (language === 'echarts' || language === 'echart')) {
-      try {
-        const chartOption = JSON.parse(String(children).replace(/\n$/, ''))
-        return h('div', { class: 'echarts-container', style: { margin: '16px 0' } }, [
-          h(EChartsRenderer, { 
-            option: chartOption, 
-            style: { height: '400px', width: '100%' },
-            opts: { renderer: 'canvas' }
-          })
-        ])
-      } catch (error) {
-        return h('div', { 
-          class: 'p-4 bg-destructive/5 border border-destructive/20 rounded-lg text-destructive text-sm'
-        }, [
-          h('strong', { class: 'font-semibold block mb-1' }, 'ECharts 配置错误'),
-          h('div', { class: 'opacity-90' }, error.message),
-          h('pre', { class: 'mt-2 p-2 bg-black/5 rounded text-xs overflow-x-auto' }, String(children).replace(/\n$/, ''))
-        ])
-      }
-    }
-    
-    // 普通代码块
-    if (!inline && match) {
-      return h(SyntaxHighlighter, {
-        language: match[1],
-        code: String(children).replace(/\n$/, ''),
-        ...props
-      })
-    }
-    
-    // 行内代码
-    return h('code', { class: className, ...props }, children)
-  }
-}
-
 // 方法
 const formatMessageContent = (content) => {
   if (!content) return ''
-  
+
   // 处理特殊格式
   return content
     .replace(/\*\*(.*?)\*\*/g, '**$1**') // 保持粗体
@@ -287,6 +281,47 @@ const formatMessageContent = (content) => {
     .replace(/`(.*?)`/g, '`$1`') // 保持行内代码
     .replace(/\n/g, '\n') // 保持换行
 }
+
+// 从多模态内容中提取文本
+const getTextContent = (content) => {
+  if (!content) return ''
+  // 如果是字符串，直接返回
+  if (typeof content === 'string') return content
+  // 如果是数组，提取所有文本类型的内容
+  if (Array.isArray(content)) {
+    const textParts = content
+      .filter(item => item.type === 'text' && item.text)
+      .map(item => item.text)
+    return textParts.join('\n')
+  }
+  return ''
+}
+
+const resolveFilePath = (url) => {
+  if (!url) return ''
+  let cleanPath = url
+  // 如果已经是 file:// URL，去掉协议头
+  if (url.startsWith('file://')) {
+    cleanPath = url.replace(/^file:\/\//i, '')
+  }
+  // 去掉开头的 /，因为 convertFileSrc 会将其编码为 %2F
+  cleanPath = cleanPath.replace(/^\//, '')
+  // 使用 Tauri 的 convertFileSrc 转换本地路径
+  return convertFileSrc(cleanPath)
+}
+
+// 从多模态内容中提取图片 URL
+const getImageUrls = (content) => {
+  if (!content || typeof content === 'string') return []
+  // 如果是数组，提取所有图片类型的 URL
+  if (Array.isArray(content)) {
+    return content
+      .filter(item => item.type === 'image_url' && item.image_url?.url)
+      .map(item => item.image_url.url)
+  }
+  return []
+}
+
 
 const getToolResult = (toolCall) => {
   if (!props.messages || !Array.isArray(props.messages)) return null
@@ -470,9 +505,10 @@ const isCustomToolMessage = computed(() => {
 const copied = ref(false)
 
 const handleCopy = async () => {
-  if (!props.message.content) return
+  const textToCopy = getTextContent(props.message.content)
+  if (!textToCopy) return
   try {
-    await navigator.clipboard.writeText(props.message.content)
+    await navigator.clipboard.writeText(textToCopy)
     copied.value = true
     setTimeout(() => {
       copied.value = false

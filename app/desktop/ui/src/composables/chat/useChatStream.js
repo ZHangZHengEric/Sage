@@ -162,14 +162,29 @@ export const useChatStream = ({
     abortControllerRef,
     onMessage,
     onError,
-    onComplete
+    onComplete,
+    multimodalContent
   }) => {
     try {
       if (abortControllerRef) {
         abortControllerRef.value = new AbortController()
       }
+
+      // Check if multimodal is enabled for this agent
+      const isMultimodalEnabled = selectedAgent.enableMultimodal === true
+
+      // Determine content format based on multimodal setting
+      let messageContent
+      if (isMultimodalEnabled && multimodalContent && multimodalContent.length > 0) {
+        // Use multimodal format when enabled and content is provided
+        messageContent = multimodalContent
+      } else {
+        // Use plain string format otherwise
+        messageContent = message
+      }
+
       const requestBody = {
-        messages: [{ role: 'user', content: message }],
+        messages: [{ role: 'user', content: messageContent }],
         session_id: sessionId,
         deep_thinking: config.deepThinking,
         agent_mode: config.agentMode,
@@ -214,7 +229,7 @@ export const useChatStream = ({
   }
 
   const handleSendMessage = async (content, options = {}) => {
-    const { displayContent } = options
+    const { displayContent, multimodalContent } = options
     if (!content.trim() || isLoading.value || !selectedAgent.value) return
     let sessionId = currentSessionId.value
     if (!sessionId) {
@@ -223,7 +238,7 @@ export const useChatStream = ({
     await syncSessionIdToRoute(sessionId)
     const shownContent = (displayContent ?? content).trim()
     updateActiveSession(sessionId, true, deriveSessionTitle(shownContent), shownContent, false)
-    addUserMessage(shownContent, sessionId)
+    addUserMessage(shownContent, sessionId, multimodalContent)
     try {
       isLoading.value = true
       loadingSessionId.value = sessionId
@@ -235,6 +250,7 @@ export const useChatStream = ({
         selectedAgent: selectedAgent.value,
         config: config.value,
         abortControllerRef,
+        multimodalContent,
         onMessage: (data) => {
           if (data.type === 'trace_info') {
             currentTraceId.value = data.trace_id

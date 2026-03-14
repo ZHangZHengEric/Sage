@@ -155,7 +155,7 @@
             </div>
             <div class="space-y-6 pl-10">
               <!-- Row 1: Memory Type & Agent Mode -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <FormItem :label="t('agent.memoryType')">
                   <Select v-model="store.formData.memoryType">
                     <SelectTrigger class="h-10">
@@ -180,6 +180,38 @@
                     </SelectContent>
                   </Select>
                 </FormItem>
+                              <!-- Row 3.5: Enable Multimodal -->
+              <FormItem>
+                <template #label>
+                  <div class="flex items-center gap-1.5">
+                    <span>开启多模态</span>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <span class="inline-flex">
+                            <AlertCircle class="h-4 w-4 text-muted-foreground" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p class="text-xs">需要模型源多模态支持</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                </template>
+                <div class="flex items-center h-10 gap-3 border rounded-md px-3 bg-background">
+                  <Switch 
+                    :checked="store.formData.enableMultimodal" 
+                    @update:checked="(v) => store.formData.enableMultimodal = v"
+                    :disabled="!selectedProviderSupportsMultimodal"
+                  />
+                  <span class="text-sm text-muted-foreground">
+                    {{ store.formData.enableMultimodal ? '已开启' : '已关闭' }}
+                    <span v-if="!selectedProviderSupportsMultimodal" class="text-xs text-destructive ml-2">(当前模型源不支持多模态)</span>
+                  </span>
+                </div>
+              </FormItem>
+
               </div>
 
               <!-- Row 2: Deep Thinking, More Suggest, Max Loop -->
@@ -214,7 +246,15 @@
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
-                      {{ provider.name }} ({{ provider.model }})
+                      <div class="flex items-center gap-2">
+                        <span>{{ provider.name }} ({{ provider.model }})</span>
+                        <div class="flex items-center gap-1 ml-2">
+                          <!-- 文本输入图标 (默认) -->
+                          <span class="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-primary/10 text-primary rounded">T</span>
+                          <!-- 多模态图像图标 -->
+                          <ImageIcon v-if="provider.supports_multimodal" class="w-4 h-4 text-primary" />
+                        </div>
+                      </div>
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -679,7 +719,7 @@ import { modelProviderAPI } from '@/api/modelProvider'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, FolderOpen, User, Cpu, Database, Workflow,
-  GripVertical, X
+  GripVertical, X, Image as ImageIcon, AlertCircle
 } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
@@ -821,7 +861,17 @@ const llmProviderSelectValue = computed({
   get: () => store.formData.llm_provider_id ?? defaultProviderOption,
   set: (val) => {
     store.formData.llm_provider_id = val === defaultProviderOption ? null : val
+    // Reset multimodal when provider changes
+    store.formData.enableMultimodal = false
   }
+})
+
+// Check if selected provider supports multimodal
+const selectedProviderSupportsMultimodal = computed(() => {
+  const providerId = store.formData.llm_provider_id
+  if (!providerId) return false
+  const provider = providers.value.find(p => p.id === providerId)
+  return provider?.supports_multimodal === true
 })
 
 // Save handlers

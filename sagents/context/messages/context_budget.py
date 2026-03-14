@@ -94,6 +94,15 @@ class ContextBudgetManager:
         """计算单条消息的token数（私有辅助方法）"""
         content = msg.get_content()
 
+        # 处理多模态消息格式
+        if isinstance(content, list):
+            # 从多模态列表中提取文本内容计算token
+            text_content = ""
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text_content += item.get("text", "")
+            return ContextBudgetManager.calculate_str_token_length(text_content)
+
         return ContextBudgetManager.calculate_str_token_length(content)
     
     @staticmethod
