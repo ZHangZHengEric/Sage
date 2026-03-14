@@ -99,7 +99,7 @@ async def login_user(username_or_email: str, password: str) -> Tuple[str, str, i
         user = await dao.get_by_email(username_or_email)
 
     if not user or not _verify_password(password, user.password_hash):
-        raise SageHTTPException(status_code=500, detail="用户名或密码错误", error_detail="invalid credentials")
+        raise SageHTTPException(detail="用户名或密码错误", error_detail="invalid credentials")
     return _gen_tokens(user)
 
 
@@ -109,11 +109,11 @@ async def change_password(user_id: str, old_password: str, new_password: str) ->
     if not user:
         # Check if it's admin (admin user in config cannot change password via this API)
         if user_id == "admin":
-            raise SageHTTPException(status_code=500, detail="管理员账户请通过配置文件修改密码", error_detail="admin password immutable via api")
-        raise SageHTTPException(status_code=500, detail="用户不存在", error_detail="user not found")
+            raise SageHTTPException(detail="管理员账户请通过配置文件修改密码", error_detail="admin password immutable via api")
+        raise SageHTTPException(detail="用户不存在", error_detail="user not found")
 
     if not _verify_password(old_password, user.password_hash):
-        raise SageHTTPException(status_code=500, detail="旧密码错误", error_detail="invalid old password")
+        raise SageHTTPException(detail="旧密码错误", error_detail="invalid old password")
 
     user.password_hash = _hash_password(new_password)
     await dao.save(user)
@@ -129,9 +129,9 @@ async def delete_user(user_id: str) -> bool:
     dao = models.UserDao()
     user = await dao.get_by_id(user_id)
     if not user:
-        raise SageHTTPException(status_code=500, detail="用户不存在", error_detail="user not found")
+        raise SageHTTPException(detail="用户不存在", error_detail="user not found")
     if user.role == "admin":
-        raise SageHTTPException(status_code=500, detail="无法删除管理员用户", error_detail="cannot delete admin")
+        raise SageHTTPException(detail="无法删除管理员用户", error_detail="cannot delete admin")
     await dao.delete_by_id(models.User, user_id)
     return True
 

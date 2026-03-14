@@ -52,7 +52,6 @@ async def create_agent(
     existing_config = await dao.get_by_name_and_user(agent_name, user_id)
     if existing_config:
         raise SageHTTPException(
-            status_code=500,
             detail=f"Agent '{agent_name}' 已存在",
             error_detail=f"Agent '{agent_name}' 已存在",
         )
@@ -70,7 +69,6 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agen
     existing = await dao.get_by_id(agent_id)
     if not existing:
         raise SageHTTPException(
-            status_code=500,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
@@ -79,7 +77,6 @@ async def get_agent(agent_id: str, user_id: Optional[str] = None) -> models.Agen
         authorized_users = await dao.get_authorized_users(agent_id)
         if user_id not in authorized_users:
             raise SageHTTPException(
-                status_code=500,
                 detail="无权访问该Agent",
                 error_detail="forbidden",
             )
@@ -91,11 +88,11 @@ async def get_agent_authorized_users(agent_id: str, user_id: str, role: str) -> 
     dao = models.AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(status_code=500, detail="Agent不存在", error_detail="not found")
+        raise SageHTTPException(detail="Agent不存在", error_detail="not found")
     
     # Only Admin or Owner can view authorized users
     if role != "admin" and agent.user_id != user_id:
-        raise SageHTTPException(status_code=500, detail="无权查看授权用户", error_detail="forbidden")
+        raise SageHTTPException(detail="无权查看授权用户", error_detail="forbidden")
         
     return await dao.get_authorized_users(agent_id)
 
@@ -107,11 +104,11 @@ async def update_agent_authorizations(
     dao = models.AgentConfigDao()
     agent = await dao.get_by_id(agent_id)
     if not agent:
-        raise SageHTTPException(status_code=500, detail="Agent不存在", error_detail="not found")
+        raise SageHTTPException(detail="Agent不存在", error_detail="not found")
     
     # Only Admin or Owner can update authorizations
     if role != "admin" and agent.user_id != user_id:
-        raise SageHTTPException(status_code=500, detail="无权修改授权", error_detail="forbidden")
+        raise SageHTTPException(detail="无权修改授权", error_detail="forbidden")
     
     # Remove owner from list if present (redundant)
     if agent.user_id in authorized_user_ids:
@@ -129,14 +126,12 @@ async def update_agent(
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
-            status_code=500,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
     # Check permission: if user_id is provided, it must match
     if role != "admin" and user_id and existing_config.user_id and existing_config.user_id != user_id:
         raise SageHTTPException(
-            status_code=500,
             detail="无权更新该Agent",
             error_detail="forbidden",
         )
@@ -156,13 +151,11 @@ async def delete_agent(agent_id: str, user_id: Optional[str] = None, role: str =
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:
         raise SageHTTPException(
-            status_code=500,
             detail=f"Agent '{agent_id}' 不存在",
             error_detail=f"Agent '{agent_id}' 不存在",
         )
     if role != "admin" and user_id and existing_config.user_id and existing_config.user_id != user_id:
         raise SageHTTPException(
-            status_code=500,
             detail="无权删除该Agent",
             error_detail="forbidden",
         )
@@ -199,7 +192,6 @@ async def auto_generate_agent(
 
     if not agent_config:
         raise SageHTTPException(
-            status_code=500,
             detail="自动生成Agent失败",
             error_detail="生成的Agent配置为空",
         )
@@ -225,7 +217,6 @@ async def optimize_system_prompt(
 
     if not optimized_prompt:
         raise SageHTTPException(
-            status_code=500,
             detail="系统提示词优化失败",
             error_detail="优化后的提示词为空",
         )
@@ -329,14 +320,12 @@ async def download_agent_file(agent_id: str, user_id: str, file_path: str) -> Tu
             return zip_path, zip_filename, "application/zip"
         except Exception as e:
             raise SageHTTPException(
-                status_code=500,
                 detail=f"创建压缩文件失败: {str(e)}",
                 error_detail=f"Failed to create zip file: {str(e)}",
             )
 
     if not os.path.isfile(full_path):
         raise SageHTTPException(
-            status_code=500,
             detail=f"路径不是文件: {file_path}",
             error_detail=f"Path is not a file: {file_path}",
         )
@@ -370,7 +359,6 @@ async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool
             shutil.rmtree(full_path)
         else:
             raise SageHTTPException(
-                status_code=500,
                 detail=f"路径不存在: {file_path}",
                 error_detail=f"Path not found: {file_path}",
             )
@@ -378,7 +366,6 @@ async def delete_agent_file(agent_id: str, user_id: str, file_path: str) -> bool
     except Exception as e:
         logger.error(f"删除文件失败: {e}")
         raise SageHTTPException(
-            status_code=500,
             detail=f"删除文件失败: {str(e)}",
             error_detail=f"Failed to delete file: {str(e)}",
         )
@@ -388,20 +375,17 @@ def resolve_download_path(workspace_path: str, file_path: str) -> str:
     """校验并返回可下载的文件绝对路径"""
     if not workspace_path or not file_path:
         raise SageHTTPException(
-            status_code=500,
             detail="缺少必要的路径参数",
             error_detail="workspace_path or file_path missing",
         )
     full_file_path = os.path.join(workspace_path, file_path)
     if not os.path.abspath(full_file_path).startswith(os.path.abspath(workspace_path)):
         raise SageHTTPException(
-            status_code=500,
             detail="访问被拒绝：文件路径超出工作空间范围",
             error_detail="Access denied: file path outside workspace",
         )
     if not os.path.exists(full_file_path):
         raise SageHTTPException(
-            status_code=500,
             detail=f"文件不存在: {file_path}",
             error_detail=f"File not found: {file_path}",
         )

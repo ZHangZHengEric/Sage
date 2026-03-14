@@ -465,7 +465,9 @@ onMounted(() => {
   }
 
   // 2. 提取工具调用、文件引用和代码块
-  workbenchStore.extractFromMessage(props.message, props.agentId)
+  // 使用 props.agentId 或 message.agent_id 作为 fallback
+  const effectiveAgentId = props.agentId || props.message.agent_id
+  workbenchStore.extractFromMessage(props.message, effectiveAgentId)
 })
 
 // 监听消息变化（用于流式输出）
@@ -473,7 +475,9 @@ watch(() => props.message, (newMessage) => {
   if (!newMessage) return
 
   // 1. 实时提取新出现的工具调用、文件引用和代码块
-  workbenchStore.extractFromMessage(newMessage, props.agentId)
+  // 使用 props.agentId 或 message.agent_id 作为 fallback
+  const effectiveAgentId = props.agentId || newMessage.agent_id
+  workbenchStore.extractFromMessage(newMessage, effectiveAgentId)
 
   // 2. 实时更新工具结果
   if (newMessage.tool_calls && newMessage.tool_calls.length > 0) {

@@ -552,9 +552,27 @@ const handleBlankConfig = async (selectedTools = []) => {
   currentView.value = 'create'
 }
 
-const handleEditAgent = (agent) => {
-  editingAgent.value = agent
-  currentView.value = 'edit'
+const handleEditAgent = async (agent) => {
+  try {
+    loading.value = true
+    // 调用详情接口获取完整信息
+    const response = await agentAPI.getAgentDetail(agent.id)
+    if (response.agent) {
+      editingAgent.value = response.agent
+    } else {
+      // 如果接口返回格式不同，直接使用原有数据
+      editingAgent.value = agent
+    }
+    currentView.value = 'edit'
+  } catch (error) {
+    console.error('获取Agent详情失败:', error)
+    toast.error('获取Agent详情失败')
+    // 失败时使用列表数据
+    editingAgent.value = agent
+    currentView.value = 'edit'
+  } finally {
+    loading.value = false
+  }
 }
 
 const handleAuthorize = (agent) => {
