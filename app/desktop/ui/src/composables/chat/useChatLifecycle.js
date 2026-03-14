@@ -19,6 +19,7 @@ export const useChatLifecycle = ({
   restoreSelectedAgent,
   loadConversationData,
   resetChat,
+  switchToNewSession,
   messages,
   shouldAutoScroll,
   scrollToBottom,
@@ -26,6 +27,7 @@ export const useChatLifecycle = ({
   isLoading,
   isHistoryLoading
 }) => {
+  const doSwitchToNewSession = switchToNewSession || resetChat
   watch(currentSessionId, (newVal) => {
     if (newVal) {
       currentTraceId.value = makeTraceId(newVal)
@@ -135,7 +137,7 @@ export const useChatLifecycle = ({
     if (newConversation && agents.value.length > 0) {
       await loadConversationData(newConversation)
     } else if (!newConversation) {
-      resetChat()
+      doSwitchToNewSession()
     }
   }, { immediate: false })
 
@@ -144,7 +146,7 @@ export const useChatLifecycle = ({
     if (newSessionId) {
       handleSessionLoad(newSessionId)
     } else {
-      resetChat()
+      doSwitchToNewSession()
     }
   })
 
