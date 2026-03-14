@@ -67,7 +67,7 @@ def create_skill_proxy(
 
     # 构建优先级列表 (高优先级在前)
     skill_managers = []
-
+    agent_skill_manager = None
     # 1. Agent 工作区技能 (最高优先级)
     if agent_workspace:
         agent_skills_dir = os.path.join(agent_workspace, "skills")
@@ -95,4 +95,4 @@ def create_skill_proxy(
 
     logger.info(f"初始化技能代理，可用技能: {available_skills}, 优先级层数: {len(skill_managers)}")
     skill_proxy = SkillProxy(skill_managers, available_skills)
-    return skill_proxy
+    return skill_proxy, agent_skill_manager

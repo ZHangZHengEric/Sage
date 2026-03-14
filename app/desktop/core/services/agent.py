@@ -95,8 +95,55 @@ async def update_agent(
     # 保留原始创建时间
     orm_obj.created_at = existing_config.created_at
     await dao.save(orm_obj)
+    
+    # 清理工作空间中不在available_skills范围内的skills
+    await _cleanup_agent_workspace_skills(agent_id, agent_config)
+    
     logger.info(f"Agent {agent_id} 更新成功")
     return orm_obj
+
+
+async def _cleanup_agent_workspace_skills(agent_id: str, agent_config: Dict[str, Any]) -> None:
+    """
+    清理agent工作空间中不在available_skills范围内的skills
+    Desktop端工作空间路径: ~/.sage/agents/{agent_id}/skills
+    """
+    try:
+        from pathlib import Path
+        
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        agent_skills_path = sage_home / "agents" / agent_id / "skills"
+        
+        if not agent_skills_path.exists() or not agent_skills_path.is_dir():
+            return
+        
+        # 获取配置中的available_skills
+        allowed_skills = set()
+        if agent_config:
+            skills_list = agent_config.get("availableSkills") or agent_config.get("available_skills") or []
+            allowed_skills = set(skills_list)
+        
+        # 遍历工作空间中的skills目录
+        removed_skills = []
+        for skill_path in agent_skills_path.iterdir():
+            if not skill_path.is_dir():
+                continue
+            
+            skill_name = skill_path.name
+            # 如果skill不在allowed_skills中，删除它
+            if skill_name not in allowed_skills:
+                try:
+                    shutil.rmtree(skill_path)
+                    removed_skills.append(skill_name)
+                    logger.info(f"已删除agent工作空间中的skill: {skill_name}")
+                except Exception as e:
+                    logger.warning(f"删除skill失败 {skill_name}: {e}")
+        
+        if removed_skills:
+            logger.bind(agent_id=agent_id).info(f"清理agent工作空间skills完成，删除: {removed_skills}")
+    except Exception as e:
+        logger.bind(agent_id=agent_id).warning(f"清理agent工作空间skills失败: {e}")
 
 
 async def delete_agent(agent_id: str) -> models.Agent:
