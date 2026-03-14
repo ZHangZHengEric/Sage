@@ -24,6 +24,7 @@ class LLMProvider(Base):
     top_p: Mapped[float] = mapped_column(Float, nullable=True)
     presence_penalty: Mapped[float] = mapped_column(Float, nullable=True)
     max_model_len: Mapped[int] = mapped_column(Integer, nullable=True)
+    supports_multimodal: Mapped[bool] = mapped_column(Boolean, default=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
@@ -40,6 +41,7 @@ class LLMProvider(Base):
         top_p: Optional[float] = None,
         presence_penalty: Optional[float] = None,
         max_model_len: Optional[int] = None,
+        supports_multimodal: bool = False,
         is_default: bool = False,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -54,6 +56,7 @@ class LLMProvider(Base):
         self.top_p = top_p
         self.presence_penalty = presence_penalty
         self.max_model_len = max_model_len
+        self.supports_multimodal = supports_multimodal
         self.is_default = is_default
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -70,6 +73,7 @@ class LLMProvider(Base):
             "top_p": self.top_p,
             "presence_penalty": self.presence_penalty,
             "max_model_len": self.max_model_len,
+            "supports_multimodal": self.supports_multimodal,
             "is_default": self.is_default,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S"),
             "updated_at": self.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
