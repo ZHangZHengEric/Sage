@@ -234,14 +234,14 @@ We are grateful to our sponsors for their support in making Sage better:
   <tr>
     <td align="center" width="50%">
       <a href="#" target="_blank">
-        <img src="assets/logo@2x.png" width="200" alt="Dudu Bus"/>
+        <img src="assets/dudubashi.png" width="200" alt="Dudu Bus"/>
       </a>
       <br/>
       <strong>Dudu Bus (嘟嘟巴士)</strong>
     </td>
     <td align="center" width="50%">
       <a href="#" target="_blank">
-        <img src="assets/xunhuanzhinengLOGO2.0-16.svg" width="200" alt="Xunhuan AI"/>
+        <img src="assets/xunhuanzhineng.svg" width="200" alt="RcrAI"/>
       </a>
     </td>
   </tr>
