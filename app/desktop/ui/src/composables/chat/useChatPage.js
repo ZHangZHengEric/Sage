@@ -257,10 +257,15 @@ export const useChatPage = (props) => {
     nextTick(() => scrollToBottom())
   }
 
-  const addUserMessage = (content, sessionId) => {
+  const addUserMessage = (content, sessionId, multimodalContent = null) => {
+    // 如果有多模态内容，使用数组格式；否则使用纯文本
+    const messageContent = multimodalContent && multimodalContent.length > 0
+      ? multimodalContent
+      : content.trim()
+
     const userMessage = {
       role: 'user',
-      content: content.trim(),
+      content: messageContent,
       message_id: Date.now().toString(),
       type: 'USER',
       session_id: sessionId
@@ -371,6 +376,14 @@ export const useChatPage = (props) => {
     abilityError.value = null
     hasUsedAbilityEntryInSession.value = false
     showAbilityButton.value = true
+    createSession()
+  }
+
+  /** 仅切换为新会话视图（清空消息、新建 session），不关闭面板、不重置能力入口。用于从历史会话点「新会话」时 */
+  const switchToNewSession = () => {
+    clearCurrentStreamViewState()
+    clearMessages()
+    clearTaskAndWorkspace()
     createSession()
   }
 
@@ -538,6 +551,7 @@ export const useChatPage = (props) => {
     restoreSelectedAgent,
     loadConversationData,
     resetChat,
+    switchToNewSession,
     messages,
     shouldAutoScroll,
     scrollToBottom,
