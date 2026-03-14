@@ -224,6 +224,33 @@ Sage/
 
 ---
 
+## 💖 **赞助者**
+
+<div align="center">
+
+感谢以下赞助者对 Sage 的支持：
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="#" target="_blank">
+        <img src="assets/logo@2x.png" width="200" alt="嘟嘟巴士"/>
+      </a>
+      <br/>
+      <strong>嘟嘟巴士</strong>
+    </td>
+    <td align="center" width="50%">
+      <a href="#" target="_blank">
+        <img src="assets/xunhuanzhinengLOGO2.0-16.svg" width="200" alt="循环智能"/>
+      </a>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+---
+
 <div align="center">
 Built with ❤️ by the Sage Team
 </div>
