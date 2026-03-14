@@ -229,8 +229,9 @@ const isLoading = ref(true)
 // 加载agents
 const loadAgents = async () => {
   try {
-    const agentList = await agentAPI.getAgents()
-    agents.value = agentList || []
+    const response = await agentAPI.getAgents()
+    // 后端返回格式: { agents: [...] }
+    agents.value = response?.agents || []
   } catch (error) {
     agents.value = []
   }
