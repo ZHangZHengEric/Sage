@@ -6,6 +6,10 @@ export const systemAPI = {
   },
   updateSettings: (settings) => {
     return baseAPI.post('/api/system/update_settings', settings)
+  },
+  /** 获取最近 N 天的 Agent 工具使用统计 */
+  getAgentUsageStats: (days) => {
+    return baseAPI.post('/api/system/agent/usage-stats', { days })
   }
 }
 
