@@ -179,6 +179,7 @@ const { t } = useLanguage()
 const step = ref('loading') // loading, welcome, model, creating_agent
 const loading = ref(false)
 const verifying = ref(false)
+const verified = ref(false)
 const tools = ref([])
 const skills = ref([])
 const systemStatus = ref({
@@ -210,6 +211,7 @@ const handleProviderChange = (val) => {
     modelForm.base_url = provider.base_url
     // modelForm.model = provider.models[0] || '' // Don't auto-select first model
   }
+  verified.value = false
 }
 
 const openProviderWebsite = async () => {
@@ -308,9 +310,11 @@ const handleVerify = async () => {
       is_default: true
     }
     await modelProviderAPI.verifyModelProvider(data)
+    verified.value = true
     toast.success('连接验证成功')
   } catch (error) {
     console.error('Failed to verify model provider:', error)
+    verified.value = false
     toast.error(error.message || '连接验证失败')
   } finally {
     verifying.value = false
@@ -403,7 +407,12 @@ const handleModelSubmit = async () => {
     toast.error('请填写所有必填字段')
     return
   }
-  
+
+  if (!verified.value) {
+    toast.error('请先验证模型连接性')
+    return
+  }
+
   loading.value = true
   try {
     const data = {
