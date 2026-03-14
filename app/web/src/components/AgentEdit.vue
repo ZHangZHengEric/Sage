@@ -910,8 +910,8 @@ const loadData = async () => {
       agentAPI.getAgents()
     ])
     providers.value = providersRes || []
-    // 后端返回格式: { agents: [...] }
-    allAgents.value = agentsRes?.agents || []
+    // 后端返回格式: [...]
+    allAgents.value = agentsRes || []
   } catch (e) {
     console.error('Failed to load data', e)
   }

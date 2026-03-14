@@ -230,8 +230,8 @@ const isLoading = ref(true)
 const loadAgents = async () => {
   try {
     const response = await agentAPI.getAgents()
-    // 后端返回格式: { agents: [...] }
-    agents.value = response?.agents || []
+    // 后端返回格式: [...]
+    agents.value = response || []
   } catch (error) {
     agents.value = []
   }
