@@ -202,6 +202,7 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'Chat' })
 import { computed } from 'vue'
 import { Bot, Settings, FolderOpen, Monitor, Sparkles } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'

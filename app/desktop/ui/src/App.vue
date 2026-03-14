@@ -14,12 +14,14 @@
     <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background pb-[64px] lg:pb-0">
       <div class="flex-1 overflow-hidden relative flex flex-col">
         <router-view v-slot="{ Component }">
-          <component 
-            :is="Component" 
-            @select-conversation="handleSelectConversation" 
-            :selected-conversation="selectedConversation" 
-            :chat-reset-token="chatResetToken"
-          />
+          <keep-alive :include="['Chat']">
+            <component 
+              :is="Component" 
+              @select-conversation="handleSelectConversation" 
+              :selected-conversation="selectedConversation" 
+              :chat-reset-token="chatResetToken"
+            />
+          </keep-alive>
         </router-view>
       </div>
     </main>
@@ -136,9 +138,10 @@ const selectedConversation = ref(null)
 
 const handleNewChat = () => {
   selectedConversation.value = null
-  // 触发重置 token，强制 Chat 组件清理状态
-  chatResetToken.value = Date.now()
-  // 清除 URL 中的 session_id，确保创建新会话
+  // 仅当当前已在「新会话」页（无 session_id）时触发完整重置；从历史会话或从设置/历史等页点「新对话」回来时不重置
+  if (route.name === 'Chat' && !route.query.session_id) {
+    chatResetToken.value = Date.now()
+  }
   if (route.query.session_id) {
     router.replace({
       query: { ...route.query, session_id: undefined }
