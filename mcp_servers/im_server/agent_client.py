@@ -237,7 +237,8 @@ class AgentClient:
         user_name: Optional[str] = None,
         chat_id: Optional[str] = None,
         provider: str = "unknown",
-        force_summary: bool = True
+        force_summary: bool = True,
+        file_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Async version of send_message.
@@ -251,13 +252,20 @@ class AgentClient:
             chat_id: Chat/Group ID (optional)
             provider: IM provider name (for context)
             force_summary: Whether to force summary generation
+            file_info: File information dict (optional) - {name, size, mime_type, local_path}
 
         Returns:
             Dict with 'success', 'has_im_tool', 'response' (optional), or 'error'
         """
         try:
             # Add platform context to content with comprehensive information
-            platform_info = f"【IM消息 - 平台: {provider}"
+            is_file_message = file_info is not None
+            
+            if is_file_message:
+                platform_info = f"【IM文件消息 - 平台: {provider}"
+            else:
+                platform_info = f"【IM消息 - 平台: {provider}"
+            
             if user_name:
                 platform_info += f", 用户: {user_name}"
             else:
@@ -267,18 +275,25 @@ class AgentClient:
                 platform_info += f", 用户ID: {user_id}"
             if chat_id:
                 platform_info += f", 群聊ID: {chat_id}"
-            # if session_id:
-            #     platform_info += f", 会话ID: {session_id}"
             platform_info += "】\n\n"
 
-            full_content = platform_info + content + "\n\n(P.S. 如需回复该用户，请使用 send_message_through_im 工具，参数: provider='" + provider + "', user_id='" + (user_id or "") + "', chat_id='" + (chat_id or "") + "')"
+            # 构建消息内容
+            if is_file_message:
+                file_desc = f"文件名: {file_info.get('name', 'unknown')}\n"
+                file_desc += f"文件大小: {file_info.get('size', 0)} 字节\n"
+                file_desc += f"文件类型: {file_info.get('mime_type', 'unknown')}\n"
+                file_desc += f"本地路径: {file_info.get('local_path', 'unknown')}\n"
+                
+                full_content = platform_info + content + "\n" + file_desc
+                full_content += "\n(P.S. 如需回复该用户，请使用 send_message_through_im 工具，如需发送文件请使用 send_file_through_im 工具)"
+            else:
+                full_content = platform_info + content + "\n\n(P.S. 如需回复该用户，请使用 send_message_through_im 工具，参数: provider='" + provider + "', user_id='" + (user_id or "") + "', chat_id='" + (chat_id or "") + "')"
             
             payload = {
                 "agent_id": agent_id,
                 "messages": [{"role": "user", "content": full_content}],
                 "session_id": session_id,
                 "force_summary": force_summary,
-                # "user_id": user_id,
             }
             
             logger.info(f"Sending async message to agent {agent_id}...")
