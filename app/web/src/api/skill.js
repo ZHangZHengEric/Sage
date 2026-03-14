@@ -61,10 +61,15 @@ export const skillAPI = {
   /**
    * 删除技能
    * @param {string} skillName - 技能名称
+   * @param {string} agentId - 可选，Agent ID，如果提供则删除Agent工作空间下的skill
    * @returns {Promise<Object>}
    */
-  deleteSkill: async (skillName) => {
-    return await baseAPI.delete('/api/skills', { params: { name: skillName } })
+  deleteSkill: async (skillName, agentId = null) => {
+    const params = { name: skillName }
+    if (agentId) {
+      params.agent_id = agentId
+    }
+    return await baseAPI.delete('/api/skills', { params })
   },
 
   /**
