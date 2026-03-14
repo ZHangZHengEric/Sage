@@ -450,6 +450,10 @@ const isLocalAbsolutePath = (path) => {
 }
 
 const toFileUrl = (localPath) => {
+  // 如果已经是 asset:// 或 http:// URL，直接返回
+  if (localPath.startsWith('asset://') || localPath.startsWith('http://') || localPath.startsWith('https://')) {
+    return localPath
+  }
   // 使用 Tauri 的 convertFileSrc 转换本地路径
   let cleanPath = localPath
   // 如果已经是 file:// 协议，去掉协议头
