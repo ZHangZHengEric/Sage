@@ -6,6 +6,7 @@ Agent 业务处理模块
 
 import uuid
 from typing import Any, Dict, List, Optional
+import shutil
 
 from loguru import logger
 from sagents.tool.tool_manager import get_tool_manager
@@ -25,6 +26,7 @@ from ..core.exceptions import SageHTTPException
 from ..schemas.agent import AgentAbilityItem
 from ..models.llm_provider import LLMProviderDao
 
+from .chat.utils import create_model_client
 from .skill import list_skills_for_agent
 # ================= 工具函数 =================
 
@@ -243,17 +245,34 @@ async def generate_agent_abilities(
     agent = await get_agent(agent_id)
     agent_config: Dict[str, Any] = agent.config or {}
 
+    # 能力列表始终用「当前 Agent 对应的配置」自己建 client，不依赖全局 Pool
     startup_cfg = config.get_startup_config()
-    model_name = startup_cfg.default_llm_model_name
-
     llm_provider_id = agent_config.get("llm_provider_id")
     llm_provider_dao = LLMProviderDao()
-    if llm_provider_id:
-        provider = await llm_provider_dao.get_by_id(llm_provider_id)
-        if provider:
-            model_name = provider.model
+    provider = await llm_provider_dao.get_by_id(llm_provider_id) if llm_provider_id else None
 
-    client = get_chat_client(model_name or None)
+    if provider:
+        # api_keys 在模型中为 List[str]；若为单字符串则直接使用，避免 join 成逐字符
+        raw_keys = provider.api_keys
+        if isinstance(raw_keys, str):
+            api_key_str = raw_keys.strip()
+        elif raw_keys:
+            api_key_str = ",".join(str(k).strip() for k in raw_keys if k)
+        else:
+            api_key_str = ""
+        llm_config = {
+            "api_key": api_key_str,
+            "base_url": provider.base_url,
+            "model": provider.model,
+        }
+    else:
+        llm_config = {
+            "api_key": startup_cfg.default_llm_api_key,
+            "base_url": startup_cfg.default_llm_base_url,
+            "model": startup_cfg.default_llm_model_name,
+        }
+    client = create_model_client(llm_config)
+    model_name = llm_config["model"]
 
     skills = await list_skills_for_agent(agent_config)
 
