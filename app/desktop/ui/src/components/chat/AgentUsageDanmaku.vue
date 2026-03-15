@@ -105,11 +105,16 @@ function getOnScreenCount () {
   return laneOccupied.filter(Boolean).length
 }
 
+/** 后端返回的 action 为 snake_case，locale key 与文件内约定一致用驼峰 */
+function snakeToCamel (s) {
+  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+}
+
 function buildDanmakuText (days, action, count) {
   const timeText = t('danmaku.timeDays', { n: days })
-  const actionKey = 'danmaku.action.' + action
-  let actionText = t(actionKey)
-  if (actionText === actionKey) actionText = action
+  const toolsKey = 'tools.' + snakeToCamel(action)
+  let actionText = t(toolsKey)
+  if (actionText === toolsKey) actionText = action
   const suffix = t('danmaku.countSuffix')
   return `${timeText} · ${actionText} · ${formatCount(count)}${suffix}`
 }
@@ -178,11 +183,14 @@ function injectKeyframes () {
       font-size: 14px;
       font-weight: 500;
       color: #111;
-      text-shadow: 0 0 1px #fff, 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;
       line-height: 1.4;
       padding: 2px 0;
       will-change: transform;
       backface-visibility: hidden;
+    }
+    .dark .danmaku-item {
+      color: #f8fafc;
+      text-shadow: 0 0 1px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.6);
     }
     .danmaku-layer {
       contain: layout style paint;
