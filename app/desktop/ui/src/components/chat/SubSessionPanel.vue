@@ -30,6 +30,7 @@
               :messages="messages" 
               :message-index="index"
               :is-loading="isLoading && index === messages.length - 1"
+              :extract-workbench-items="extractWorkbenchItems"
               @download-file="handleDownloadFile"
               @toolClick="handleToolClick" 
               @openSubSession="handleOpenSubSession"
@@ -70,6 +71,10 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  extractWorkbenchItems: {
+    type: Boolean,
+    default: false  // 子会话面板默认不提取工作台项目，避免重复
   }
 })
 
