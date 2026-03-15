@@ -62,6 +62,16 @@ export const useChatPage = (props) => {
   const abilityPresetInput = ref('')
   const showAbilityButton = ref(true)
   const hasUsedAbilityEntryInSession = ref(false)
+  /** 新会话时递增，用于让弹幕组件重置（与「你能做什么」逻辑一致：关闭后在新会话再出现） */
+  const danmakuResetTrigger = ref(0)
+  /** 当前为历史会话时为 true，弹幕不展示（与「你能做什么」逻辑一致） */
+  const isViewingHistorySession = ref(false)
+  /** 用户点击弹幕关闭键时为 true，切换页面再回来不重置弹幕（仍保持关闭） */
+  const danmakuClosedByUser = ref(false)
+  /** 进入历史会话前「你能做什么」是否还在显示，从历史回新会话时用于恢复 */
+  const abilityButtonVisibleBeforeHistory = ref(true)
+  /** 进入历史会话前能力面板是否打开（含加载中），从历史回新会话时恢复，避免「点你能做什么→加载中→进历史→回来」动画/结果丢失 */
+  const abilityPanelOpenBeforeHistory = ref(false)
 
   // 打开工作台（统一方法）
   const openWorkbench = (options = {}) => {
@@ -376,14 +386,26 @@ export const useChatPage = (props) => {
     abilityError.value = null
     hasUsedAbilityEntryInSession.value = false
     showAbilityButton.value = true
+    isViewingHistorySession.value = false
+    danmakuClosedByUser.value = false
+    danmakuResetTrigger.value += 1
     createSession()
   }
 
-  /** 仅切换为新会话视图（清空消息、新建 session），不关闭面板、不重置能力入口。用于从历史会话点「新会话」时 */
+  /** 从历史点回新会话：恢复「你能做什么」与弹幕仅当进入历史前未关；已关则保持不显示；并恢复能力面板打开状态（含加载中/已加载结果） */
   const switchToNewSession = () => {
     clearCurrentStreamViewState()
     clearMessages()
     clearTaskAndWorkspace()
+    // 从历史回新会话：重置工作台状态并关闭面板（避免工作台带入新会话）
+    workbenchStore.resetState()
+    panelStore.closeAll()
+    isViewingHistorySession.value = false
+    showAbilityButton.value = abilityButtonVisibleBeforeHistory.value
+    if (abilityButtonVisibleBeforeHistory.value) hasUsedAbilityEntryInSession.value = false
+    if (!danmakuClosedByUser.value) danmakuResetTrigger.value += 1
+    // 若进历史前能力面板是打开的（含加载中），回来时重新打开，避免加载动画/结果丢失
+    showAbilityPanel.value = abilityPanelOpenBeforeHistory.value
     createSession()
   }
 
@@ -401,10 +423,14 @@ export const useChatPage = (props) => {
         rebuildMessageIdIndexMap()
       }
       currentSessionId.value = conversation.session_id || null
-      // 加载历史会话时，不展示新手引导入口
+      // 进入历史前保存「你能做什么」与能力面板状态，从历史回新会话时据此恢复
+      abilityButtonVisibleBeforeHistory.value = showAbilityButton.value
+      abilityPanelOpenBeforeHistory.value = showAbilityPanel.value
+      // 加载历史会话时，不展示新手引导入口与弹幕
       showAbilityPanel.value = false
       showAbilityButton.value = false
       hasUsedAbilityEntryInSession.value = true
+      isViewingHistorySession.value = true
       nextTick(() => {
         shouldAutoScroll.value = true
         scrollToBottom(true)
@@ -541,6 +567,14 @@ export const useChatPage = (props) => {
       // 切换会话时重置工作台状态
       workbenchStore.resetState()
       panelStore.closeAll()
+      // 进入历史前保存「你能做什么」与能力面板状态，从历史回新会话时恢复
+      abilityButtonVisibleBeforeHistory.value = showAbilityButton.value
+      abilityPanelOpenBeforeHistory.value = showAbilityPanel.value
+      // 通过 session_id 进入的均为历史会话，不展示「你能做什么」与弹幕
+      showAbilityPanel.value = false
+      showAbilityButton.value = false
+      hasUsedAbilityEntryInSession.value = true
+      isViewingHistorySession.value = true
       console.log('[ChatPage] Reset workbench state before loading session:', sessionId)
       await handleSessionLoad(sessionId)
     },
@@ -634,6 +668,9 @@ export const useChatPage = (props) => {
     abilityPresetInput,
     showAbilityButton,
     hasUsedAbilityEntryInSession,
+    danmakuResetTrigger,
+    isViewingHistorySession,
+    danmakuClosedByUser,
     openAbilityPanel,
     closeAbilityPanel,
     retryAbilityFetch,
