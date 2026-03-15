@@ -598,7 +598,9 @@ Agent系统提示词：
             "complete_task",
             "calculate",
             "file_read",
-            "file_write"
+            "file_write",
+            "search_web_page",
+            "search_image_from_web"
         ]
 
     def _get_default_workflows(self) -> Dict[str, List[str]]:
