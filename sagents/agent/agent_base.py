@@ -291,6 +291,7 @@ class AgentBase(ABC):
                 start_request_time = time.time()
                 first_token_time = None
                 serializable_messages = []
+
                 for msg in messages:
                     if isinstance(msg, MessageChunk):
                         msg_dict = msg.to_dict()
@@ -304,6 +305,18 @@ class AgentBase(ABC):
                         serializable_messages.append(msg_copy)
                 # 只保留model.chat.completions.create 需要的messages的key，移除掉不不要的
                 serializable_messages = [{k: v for k, v in msg.items() if k in ['role', 'content', 'tool_calls', 'tool_call_id']} for msg in serializable_messages]
+
+                # 统计图片数量
+                image_count = 0
+                for msg in serializable_messages:
+                    content = msg.get('content')
+                    if isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and item.get('type') == 'image_url':
+                                image_count += 1
+                if image_count > 0:
+                    logger.info(f"[LLM请求] 包含 {image_count} 张图片")
+
                 # print("serializable_messages:",serializable_messages)
                 # 确保所有的messages 中都包含role 和 content
                 for msg in serializable_messages:

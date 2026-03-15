@@ -97,6 +97,7 @@
         @keydown="handleKeyDown"
         @compositionstart="handleCompositionStart"
         @compositionend="handleCompositionEnd"
+        @paste="handlePaste"
         :placeholder="t('messageInput.placeholder')"
         class="flex-1 min-h-[24px] max-h-[200px] py-2 px-0 bg-transparent border-0 focus-visible:ring-0 resize-none shadow-none text-base"
         :disabled="isLoading"
@@ -526,6 +527,50 @@ const handleCompositionEnd = () => {
   isComposing.value = false
 }
 
+// 处理粘贴事件
+const handlePaste = async (e) => {
+  const clipboardData = e.clipboardData || e.originalEvent?.clipboardData
+  if (!clipboardData) return
+
+  const items = clipboardData.items
+  if (!items || items.length === 0) return
+
+  let hasFiles = false
+
+  // 遍历剪贴板项目
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+
+    // 处理图片
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      hasFiles = true
+      const blob = item.getAsFile()
+      if (blob) {
+        // 生成默认文件名
+        const ext = item.type.split('/')[1] || 'png'
+        const filename = `pasted_image_${Date.now()}.${ext}`
+        const file = new File([blob], filename, { type: item.type })
+        await processFile(file)
+      }
+    }
+    // 处理其他文件类型
+    else if (item.kind === 'file') {
+      e.preventDefault()
+      hasFiles = true
+      const file = item.getAsFile()
+      if (file) {
+        await processFile(file)
+      }
+    }
+  }
+
+  // 如果没有文件，允许默认粘贴行为（文本）
+  if (!hasFiles) {
+    return
+  }
+}
+
 // 处理停止生成
 const handleStop = () => {
   emit('stopGeneration')
@@ -611,8 +656,14 @@ const handleFileSelect = async (event) => {
 
 // 处理单个文件
 const processFile = async (file) => {
-  const isImage = file.type.startsWith('image/')
-  const isVideo = file.type.startsWith('video/')
+  // 通过 MIME type 或文件扩展名判断类型
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg']
+  const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi']
+  const fileName = file.name.toLowerCase()
+  const fileExtension = fileName.substring(fileName.lastIndexOf('.'))
+
+  const isImage = file.type.startsWith('image/') || imageExtensions.includes(fileExtension)
+  const isVideo = file.type.startsWith('video/') || videoExtensions.includes(fileExtension)
 
   let preview = null
   if (isImage || isVideo) {

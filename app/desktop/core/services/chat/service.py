@@ -326,6 +326,7 @@ class SageStreamService:
             if "message_id" not in message_dict or not message_dict["message_id"]:
                 message_dict["message_id"] = str(uuid.uuid4())
             messages.append(message_dict)
+
         await _ensure_conversation(self.request)
         try:
             stream_result = self.sage_engine.run_stream(
