@@ -31,29 +31,29 @@
           <div
             v-for="task in tasks"
             :key="task.id"
-            class="group relative bg-card border rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/40 cursor-pointer"
+            class="group relative bg-card border rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/40 cursor-pointer flex flex-col"
             :class="{ 'opacity-60': !task.enabled }"
           >
             <!-- Ticket Header with perforation effect -->
-            <div class="relative bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-4 py-3 border-b border-dashed">
+            <div class="relative bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-4 py-3 border-b border-dashed flex-shrink-0">
               <!-- Task ID badge -->
               <div class="absolute top-2 right-2">
                 <span class="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
                   #{{ String(task.id).slice(-6).toUpperCase() }}
                 </span>
               </div>
-              
+
               <div class="flex items-start gap-3 pr-16">
                 <!-- Checkbox icon for task feel -->
                 <div class="mt-0.5">
-                  <div 
+                  <div
                     class="w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
                     :class="task.enabled ? 'bg-green-500 border-green-500' : 'border-muted-foreground'"
                   >
                     <Check v-if="task.enabled" class="w-3 h-3 text-white" />
                   </div>
                 </div>
-                
+
                 <div class="flex-1 min-w-0">
                   <h3 class="text-sm font-bold leading-tight truncate" :title="task.name">
                     {{ task.name }}
@@ -62,12 +62,12 @@
               </div>
             </div>
 
-            <!-- Ticket Body -->
-            <div class="px-4 py-3">
+            <!-- Ticket Body - 可滚动区域 -->
+            <div class="px-4 py-3 flex-1 overflow-hidden">
               <p class="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-3">
                 {{ task.description || '暂无描述' }}
               </p>
-              
+
               <!-- Agent assignment line -->
               <div class="flex items-center gap-2 text-xs border-t border-dashed pt-3">
                 <span class="text-muted-foreground">执行者:</span>
@@ -81,28 +81,28 @@
               </div>
             </div>
 
-            <!-- Ticket Footer with schedule info -->
-            <div class="px-4 py-2 bg-muted/30 border-t flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <Clock class="w-3.5 h-3.5 text-primary" />
-                <span class="text-xs font-medium">{{ formatCron(task.cron_expression) }}</span>
+            <!-- Ticket Footer with schedule info - 始终显示 -->
+            <div class="px-4 py-2 bg-muted/30 border-t flex items-center justify-between gap-2 flex-shrink-0">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <Clock class="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span class="text-xs font-medium truncate">{{ formatCron(task.cron_expression) }}</span>
               </div>
-              
-              <div class="flex items-center gap-0.5 relative z-10">
-                <Button variant="ghost" size="icon" class="h-7 w-7" @click.stop="handleHistory(task)">
+
+              <div class="flex items-center gap-0.5 relative z-10 flex-shrink-0">
+                <Button variant="ghost" size="icon" class="h-7 w-7 flex-shrink-0" @click.stop="handleHistory(task)">
                   <History class="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-7 w-7" @click.stop="handleEdit(task)">
+                <Button variant="ghost" size="icon" class="h-7 w-7 flex-shrink-0" @click.stop="handleEdit(task)">
                   <Edit class="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" @click.stop="handleDelete(task)">
+                <Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive flex-shrink-0" @click.stop="handleDelete(task)">
                   <Trash2 class="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
 
-            <!-- Last execution timestamp -->
-            <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t">
+            <!-- Last execution timestamp - 始终显示 -->
+            <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t flex-shrink-0">
               <span v-if="task.last_executed_at">
                 上次执行: {{ formatDateShort(task.last_executed_at) }}
               </span>
@@ -128,11 +128,11 @@
           <div
             v-for="task in oneTimeTasks"
             :key="task.id"
-            class="group relative bg-card border rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/40"
+            class="group relative bg-card border rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/40 flex flex-col"
           >
             <!-- Ticket Header with status color -->
-            <div 
-              class="relative px-4 py-3 border-b border-dashed"
+            <div
+              class="relative px-4 py-3 border-b border-dashed flex-shrink-0"
               :class="{
                 'bg-green-500/10': task.status === 'completed',
                 'bg-blue-500/10': task.status === 'pending',
@@ -150,7 +150,7 @@
               <div class="flex items-start gap-3 pr-16">
                 <!-- Status checkbox -->
                 <div class="mt-0.5">
-                  <div 
+                  <div
                     class="w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
                     :class="{
                       'bg-green-500 border-green-500': task.status === 'completed',
@@ -166,7 +166,7 @@
                     <X v-else-if="task.status === 'failed'" class="w-3 h-3 text-white" />
                   </div>
                 </div>
-                
+
                 <div class="flex-1 min-w-0">
                   <h3 class="text-sm font-bold leading-tight truncate" :title="task.name">
                     {{ task.name }}
@@ -175,12 +175,12 @@
               </div>
             </div>
 
-            <!-- Ticket Body -->
-            <div class="px-4 py-3">
+            <!-- Ticket Body - 可滚动区域 -->
+            <div class="px-4 py-3 flex-1 overflow-hidden">
               <p class="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-3">
                 {{ task.description || '暂无描述' }}
               </p>
-              
+
               <!-- Agent assignment line -->
               <div class="flex items-center gap-2 text-xs border-t border-dashed pt-3">
                 <span class="text-muted-foreground">执行者:</span>
@@ -194,34 +194,34 @@
               </div>
             </div>
 
-            <!-- Ticket Footer with execute time -->
-            <div class="px-4 py-2 bg-muted/30 border-t flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <CalendarClock class="w-3.5 h-3.5 text-primary" />
-                <span class="text-xs font-medium">{{ formatDate(task.execute_at) }}</span>
+            <!-- Ticket Footer with execute time - 始终显示 -->
+            <div class="px-4 py-2 bg-muted/30 border-t flex items-center justify-between gap-2 flex-shrink-0">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <CalendarClock class="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span class="text-xs font-medium truncate">{{ formatDate(task.execute_at) }}</span>
               </div>
-              
-              <div class="flex items-center gap-0.5 relative z-10">
+
+              <div class="flex items-center gap-0.5 relative z-10 flex-shrink-0">
                 <Button
                   v-if="task.session_id"
                   variant="ghost"
                   size="icon"
-                  class="h-7 w-7"
+                  class="h-7 w-7 flex-shrink-0"
                   @click.stop="handleViewSession(task.session_id)"
                 >
                   <MessageSquare class="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-7 w-7" @click.stop="handleEditOneTime(task)">
+                <Button variant="ghost" size="icon" class="h-7 w-7 flex-shrink-0" @click.stop="handleEditOneTime(task)">
                   <Edit class="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive" @click.stop="handleDeleteOneTime(task)">
+                <Button variant="ghost" size="icon" class="h-7 w-7 text-destructive hover:text-destructive flex-shrink-0" @click.stop="handleDeleteOneTime(task)">
                   <Trash2 class="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
 
-            <!-- Completion timestamp -->
-            <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t">
+            <!-- Completion timestamp - 始终显示 -->
+            <div class="px-4 py-1.5 bg-muted/50 text-[10px] text-muted-foreground border-t flex-shrink-0">
               <span v-if="task.completed_at">
                 完成时间: {{ formatDateShort(task.completed_at) }}
               </span>
