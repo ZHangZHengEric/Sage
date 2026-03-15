@@ -432,49 +432,81 @@ class ExecuteCommandTool:
         }
     
     def _execute_normal(self, command: str, workdir: Optional[str], env: Dict, timeout: int, process_id: str) -> Dict[str, Any]:
-        """普通执行"""
-        process = subprocess.Popen(
-            command,
-            cwd=workdir,
-            shell=True,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            preexec_fn=os.setsid if platform.system() != "Windows" else None
-        )
-        
-        self.process_manager.add_process(process_id, process)
-        
+        """普通执行 - 使用临时文件捕获输出，避免 PIPE 缓冲区限制，限制输出不超过10K字符"""
+        import tempfile
+
+        MAX_OUTPUT_LENGTH = 10000  # 最大输出长度限制
+
+        # 创建临时文件用于捕获输出
+        stdout_fd, stdout_path = tempfile.mkstemp(prefix=f"stdout_{process_id}_", suffix=".log")
+        stderr_fd, stderr_path = tempfile.mkstemp(prefix=f"stderr_{process_id}_", suffix=".log")
+
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
-            return_code = process.returncode
-            
-            if return_code == 0:
-                return {
-                    "success": True,
+            process = subprocess.Popen(
+                command,
+                cwd=workdir,
+                shell=True,
+                env=env,
+                stdout=stdout_fd,
+                stderr=stderr_fd,
+                preexec_fn=os.setsid if platform.system() != "Windows" else None
+            )
+
+            self.process_manager.add_process(process_id, process)
+
+            try:
+                process.wait(timeout=timeout)
+                return_code = process.returncode
+
+                # 读取输出文件
+                with open(stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                    stdout = f.read()
+                with open(stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                    stderr = f.read()
+
+                # 检查输出是否超过限制
+                truncated = False
+                if len(stdout) > MAX_OUTPUT_LENGTH:
+                    stdout = stdout[:MAX_OUTPUT_LENGTH] + "\n... [输出已截断，超过10K字符限制，请调整代码减少输出]"
+                    truncated = True
+                if len(stderr) > MAX_OUTPUT_LENGTH:
+                    stderr = stderr[:MAX_OUTPUT_LENGTH] + "\n... [错误输出已截断，超过10K字符限制，请调整代码减少输出]"
+                    truncated = True
+
+                result = {
+                    "success": return_code == 0,
                     "stdout": stdout,
                     "stderr": stderr,
                     "return_code": return_code,
                 }
-            else:
+                if not result["success"]:
+                    result["command"] = command
+                if truncated:
+                    result["output_truncated"] = True
+                    result["output_hint"] = "输出超过10K字符限制，已截断显示。如需完整输出，请调整代码将结果写入文件或减少输出量。"
+
+                return result
+
+            except subprocess.TimeoutExpired:
+                process.kill()
                 return {
                     "success": False,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "return_code": return_code,
+                    "error": f"命令执行超时 (>{timeout}秒)",
                     "command": command,
+                    "timeout": timeout,
                 }
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return {
-                "success": False,
-                "error": f"命令执行超时 (>{timeout}秒)",
-                "command": command,
-                "timeout": timeout,
-            }
+            finally:
+                self.process_manager.remove_process(process_id)
         finally:
-            self.process_manager.remove_process(process_id)
+            # 关闭文件描述符
+            os.close(stdout_fd)
+            os.close(stderr_fd)
+            # 删除临时文件
+            try:
+                os.unlink(stdout_path)
+                os.unlink(stderr_path)
+            except OSError:
+                pass
 
     @tool(
         description_i18n={
