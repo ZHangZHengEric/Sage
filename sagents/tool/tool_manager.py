@@ -788,10 +788,6 @@ class ToolManager:
         logger.debug(f"Executing tool: {tool_name} (session: {session_id})")
         logger.debug(f"Tool arguments: {kwargs}")
         
-        # Ensure session_id is in kwargs for parameter validation
-        # The session_id will be used for injection in _execute_standard_tool_async if needed
-        kwargs['session_id'] = session_id
-
         # Step 1: Tool Lookup
         tool = self.get_tool(tool_name)
         if not tool:
@@ -818,6 +814,7 @@ class ToolManager:
             elif isinstance(tool, ToolSpec):
                 # 检查必填参数
                 required_params = getattr(tool, 'required', []) or []
+                # session_id 是系统注入的参数，如果不在 kwargs 中但工具需要，不算 missing
                 missing_params = [p for p in required_params if p not in kwargs or kwargs.get(p) is None]
                 if missing_params:
                     # 返回错误信息而不是 raise
@@ -872,27 +869,30 @@ class ToolManager:
                             import inspect
                             func_to_inspect = tool.func
                             
-                            # Try multiple ways to get the original function signature
-                            if hasattr(func_to_inspect, "__wrapped__"):
-                                func_to_inspect = func_to_inspect.__wrapped__
-                            if inspect.ismethod(func_to_inspect):
-                                func_to_inspect = func_to_inspect.__func__
-                            
                             has_session_id_param = False
+                            
+                            # For bound methods, check the bound method's signature directly
+                            # Don't unwrap __wrapped__ because we need to see the actual signature
+                            # that will be used when calling the method
                             try:
                                 sig = inspect.signature(func_to_inspect)
                                 has_session_id_param = "session_id" in sig.parameters
-                            except (ValueError, TypeError):
+                                logger.debug(f"[Sandbox] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}")
+                            except (ValueError, TypeError) as e:
+                                logger.debug(f"[Sandbox] Failed to get signature for {tool.name}: {e}")
                                 pass
                             
                             # Also check from tool spec as fallback
                             if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
                                 has_session_id_param = 'session_id' in tool.parameters
+                                logger.debug(f"[Sandbox] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}")
                             if not has_session_id_param and hasattr(tool, 'required') and tool.required:
                                 has_session_id_param = 'session_id' in tool.required
+                                logger.debug(f"[Sandbox] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}")
                             
                             if has_session_id_param:
                                 kwargs["session_id"] = session_id
+                                logger.debug(f"[Sandbox] Injected session_id for {tool.name}")
 
                             # Use run_tool which handles path mapping and execution
                             # We pass the function object from the tool spec
@@ -1126,38 +1126,32 @@ class ToolManager:
             import inspect
             func_to_inspect = tool.func
             
-            # Try multiple ways to get the original function signature
-            # 1. Check if it's a wrapped function (from @tool decorator)
-            if hasattr(func_to_inspect, "__wrapped__"):
-                func_to_inspect = func_to_inspect.__wrapped__
-            
-            # 2. Check if it's a bound method and get the underlying function
-            if inspect.ismethod(func_to_inspect):
-                func_to_inspect = func_to_inspect.__func__
-            
-            # 3. For bound methods from classes, we need to check the original method
-            # The tool.func might be a bound method like <bound method ImageUnderstandingTool.analyze_image of <instance>>
-            # In this case, we should check if the tool_spec has session_id in required params
             has_session_id_param = False
             
-            # Check from function signature
+            # For bound methods, check the bound method's signature directly
+            # Don't unwrap __wrapped__ because we need to see the actual signature
+            # that will be used when calling the method
             try:
                 sig = inspect.signature(func_to_inspect)
                 has_session_id_param = "session_id" in sig.parameters
-            except (ValueError, TypeError):
+                logger.debug(f"[_execute_standard_tool_async] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}")
+            except (ValueError, TypeError) as e:
+                logger.debug(f"[_execute_standard_tool_async] Failed to get signature for {tool.name}: {e}")
                 pass
             
             # Also check from tool spec parameters (as fallback)
             if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
                 has_session_id_param = 'session_id' in tool.parameters
+                logger.debug(f"[_execute_standard_tool_async] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}")
             
             # Also check from tool spec required params (as fallback)
             if not has_session_id_param and hasattr(tool, 'required') and tool.required:
                 has_session_id_param = 'session_id' in tool.required
+                logger.debug(f"[_execute_standard_tool_async] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}")
             
             if has_session_id_param:
                 kwargs["session_id"] = session_id
-                logger.debug(f"Injected session_id for tool: {tool.name}")
+                logger.debug(f"[_execute_standard_tool_async] Injected session_id for tool: {tool.name}")
 
             # Execute the tool function
             if hasattr(tool.func, "__self__"):
