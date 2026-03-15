@@ -3,17 +3,19 @@ Python 虚拟环境管理。
 """
 import os
 import venv
+import sys
 from typing import Optional
 from sagents.utils.logger import logger
+from sagents.utils.common_utils import get_system_python_path
 
 
 class VenvManager:
     """管理沙箱的 Python 虚拟环境"""
-    
+
     def __init__(self, venv_dir: str, python_version: Optional[str] = None):
         """
         初始化虚拟环境管理器。
-        
+
         Args:
             venv_dir: 虚拟环境目录路径
             python_version: Python 版本（默认使用系统 Python）
@@ -21,15 +23,23 @@ class VenvManager:
         self.venv_dir = venv_dir
         self.python_version = python_version
         self._ensure_venv()
-        
+
     def _ensure_venv(self):
         """确保虚拟环境存在"""
         if not os.path.exists(self.venv_dir):
             logger.info(f"[VenvManager] 创建虚拟环境: {self.venv_dir}")
             os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
 
-            # 创建虚拟环境
-            venv.create(self.venv_dir, with_pip=True)
+            # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+            system_python = get_system_python_path()
+            if not system_python:
+                logger.error("[VenvManager] 无法找到系统 Python 解释器")
+                raise RuntimeError("无法找到系统 Python 解释器")
+
+            logger.info(f"[VenvManager] 使用 Python 解释器: {system_python}")
+
+            # 创建虚拟环境，指定正确的 Python 解释器
+            venv.create(self.venv_dir, with_pip=True, executable=system_python)
 
             # 配置阿里云 pip 源
             self._configure_pip_mirror()

@@ -138,9 +138,19 @@ class Sandbox:
         def create_venv_in_background():
             try:
                 import venv
+                from sagents.utils.common_utils import get_system_python_path
+
                 logger.info(f"后台创建虚拟环境: {self.venv_dir}")
                 os.makedirs(os.path.dirname(self.venv_dir), exist_ok=True)
-                venv.create(self.venv_dir, with_pip=True)
+
+                # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+                system_python = get_system_python_path()
+                if not system_python:
+                    logger.error("无法找到系统 Python 解释器")
+                    return
+
+                logger.info(f"使用 Python 解释器创建 venv: {system_python}")
+                venv.create(self.venv_dir, with_pip=True, executable=system_python)
                 logger.info(f"虚拟环境创建完成: {self.venv_dir}")
             except Exception as e:
                 logger.error(f"创建虚拟环境失败: {self.venv_dir}, 错误: {e}")
@@ -193,16 +203,18 @@ class Sandbox:
     def get_venv_python(self) -> Optional[str]:
         """获取沙箱 venv 的 Python 路径"""
         import sys
+        from sagents.utils.common_utils import get_system_python_path
+
         if self.venv_dir:
             if sys.platform == 'win32':
                 venv_python = os.path.join(self.venv_dir, 'Scripts', 'python.exe')
             else:
                 venv_python = os.path.join(self.venv_dir, 'bin', 'python')
-                
+
             if os.path.exists(venv_python):
                 return venv_python
-        # 没有沙箱时，返回系统 Python
-        return sys.executable
+        # 没有沙箱时，使用 get_system_python_path 处理 PyInstaller 打包环境
+        return get_system_python_path()
     
     def get_cwd(self) -> str:
         """获取当前工作目录（宿主机路径）"""
