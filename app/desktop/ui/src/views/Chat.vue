@@ -60,6 +60,10 @@
         class="flex-1 flex flex-col min-w-0 bg-muted/5 relative transition-all duration-200"
         :class="{ 'mr-0': !anyPanelOpen }"
       >
+        <!-- 弹幕叠在聊天区域上方；能力面板打开时不渲染弹幕，避免同时出现 -->
+        <div v-if="!showAbilityPanel" class="absolute top-5 left-0 right-0 h-[25%] min-h-[100px] max-h-[180px] overflow-hidden pointer-events-none z-10">
+          <AgentUsageDanmaku :hide-for-history="isViewingHistorySession" :closed-by-user="danmakuClosedByUser" :reset-trigger="danmakuResetTrigger" @close="onDanmakuClose" />
+        </div>
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth" @scroll="handleScroll">
           <!-- 覆盖模式：当无消息且能力结果已加载好时，用能力面板直接占据原聊天空态区域 -->
           <div
@@ -220,6 +224,7 @@ import LoadingBubble from '@/components/chat/LoadingBubble.vue'
 import SubSessionPanel from '@/components/chat/SubSessionPanel.vue'
 import WorkbenchPreview from '@/components/chat/WorkbenchPreview.vue'
 import AbilityPanel from '@/components/chat/AbilityPanel.vue'
+import AgentUsageDanmaku from '@/components/chat/AgentUsageDanmaku.vue'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -288,11 +293,19 @@ const {
   abilityPresetInput,
   showAbilityButton,
   hasUsedAbilityEntryInSession,
+  danmakuResetTrigger,
+  isViewingHistorySession,
+  danmakuClosedByUser,
   openAbilityPanel,
   closeAbilityPanel,
   retryAbilityFetch,
   onAbilityCardClick
 } = useChatPage(props)
+
+// 用户点击弹幕关闭键时记录，切换页面再回来不重置弹幕
+const onDanmakuClose = () => {
+  danmakuClosedByUser.value = true
+}
 
 // 能力按钮点击：仅在本会话首次点击时打开能力面板，并隐藏入口按钮
 const handleClickAbilityButton = () => {
