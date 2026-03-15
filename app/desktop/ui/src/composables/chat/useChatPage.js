@@ -397,6 +397,9 @@ export const useChatPage = (props) => {
     clearCurrentStreamViewState()
     clearMessages()
     clearTaskAndWorkspace()
+    // 从历史回新会话：重置工作台状态并关闭面板（避免工作台带入新会话）
+    workbenchStore.resetState()
+    panelStore.closeAll()
     isViewingHistorySession.value = false
     showAbilityButton.value = abilityButtonVisibleBeforeHistory.value
     if (abilityButtonVisibleBeforeHistory.value) hasUsedAbilityEntryInSession.value = false
