@@ -281,9 +281,6 @@ async def import_github_version(dao: VersionDao = Depends(get_version_dao)):
     data = await fetch_github_release_info()
     if not data:
         return await Response.error(code=500, message="Failed to fetch from GitHub")
-    #给所有的url添加ghfast.top前缀
-    for artifact in data["artifacts"]:
-        artifact["updater_url"] = f"https://ghfast.top/{artifact['updater_url']}"
     # Check if version exists
     existing = await dao.get_version_by_tag(data["version"])
     if existing:
