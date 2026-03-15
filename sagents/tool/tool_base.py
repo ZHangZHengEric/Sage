@@ -103,6 +103,14 @@ def tool(
             param_info = {"type": "string", "description": ""}
             if param.annotation != inspect.Parameter.empty:
                 param_info["type"] = _infer_json_type(param.annotation)
+                # 数组类型必须包含 items，否则 OpenAI/上游 API 会报 "array schema missing items"
+                if param_info["type"] == "array":
+                    args = get_args(param.annotation)
+                    if args:
+                        item_type = _infer_json_type(args[0])
+                        param_info["items"] = {"type": item_type}
+                    else:
+                        param_info["items"] = {"type": "string"}
 
             param_desc = doc_param_map.get(name, "")
             param_info["description"] = param_desc or f"The {name} parameter"
