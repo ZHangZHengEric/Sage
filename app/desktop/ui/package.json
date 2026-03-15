@@ -29,6 +29,7 @@
     "js-cookie": "^3.0.5",
     "js-yaml": "^4.1.1",
     "jszip": "^3.10.1",
+    "lottie-vue": "^1.0.3",
     "lucide-vue-next": "^0.563.0",
     "mammoth": "^1.11.0",
     "marked": "^16.4.0",
