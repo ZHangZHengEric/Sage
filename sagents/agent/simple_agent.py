@@ -159,6 +159,14 @@ class SimpleAgent(AgentBase):
             logger.debug("messages_input[-1].role是 tool 调用结果，不是任务完成")
             return False
 
+        # 如果最后一条消息是工具调用参数解析错误（DO_SUBTASK_RESULT），说明工具调用出错，不能停止任务
+        last_message = messages_input[-1]
+        if last_message.type == MessageType.DO_SUBTASK_RESULT.value:
+            # 检查内容是否包含参数解析失败的提示
+            if last_message.content and '参数解析失败' in last_message.content:
+                logger.debug("最后一条消息是工具调用参数解析错误，不是任务完成")
+                return False
+
         # 只提取最后一个user以及之后的messages
         last_user_index = None
         for i, message in enumerate(messages_input):

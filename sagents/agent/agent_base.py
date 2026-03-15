@@ -948,7 +948,7 @@ class AgentBase(ABC):
             suggestions.append("• 确保没有多余的逗号或缺少逗号")
 
         # 截断过长的参数显示
-        display_args = raw_arguments[:500] + "..." if len(raw_arguments) > 500 else raw_arguments
+        display_args = raw_arguments[:200] + "..." if len(raw_arguments) > 200 else raw_arguments
 
         content = f"""我尝试调用工具 `{tool_name}`，但参数解析失败。
 
