@@ -89,7 +89,7 @@ class VersionDao(BaseDao):
                     version_id=v.id,
                     platform=art['platform'],
                     installer_url=art.get('installer_url'),
-                    updater_url=art.get('updater_url'),
+                    updater_url= "https://ghfast.top/" + art.get('updater_url'),
                     updater_signature=art.get('updater_signature')
                 )
                 session.add(a)
