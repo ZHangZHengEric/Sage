@@ -244,7 +244,25 @@ class OpenTelemetryTraceHandler(BaseTraceHandler):
             return
 
         try:
-            span.set_attribute("llm.response", json.dumps(response, ensure_ascii=False))
+            # Convert response to serializable dict if needed
+            if hasattr(response, 'model_dump'):
+                # Pydantic v2 model
+                response_dict = response.model_dump()
+            elif hasattr(response, 'dict'):
+                # Pydantic v1 model
+                response_dict = response.dict()
+            elif hasattr(response, '__dict__'):
+                # Regular object
+                response_dict = response.__dict__
+            else:
+                response_dict = str(response)
+            
+            # Limit response size to avoid span attribute limits
+            response_str = json.dumps(response_dict, ensure_ascii=False, default=str)
+            if len(response_str) > 10000:
+                response_str = response_str[:10000] + "... [truncated]"
+            
+            span.set_attribute("llm.response", response_str)
         except Exception as e:
             logger.error(f"Error setting llm.response attribute: {e}")
             pass

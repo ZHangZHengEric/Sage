@@ -1087,7 +1087,8 @@ class AgentBase(ABC):
 
             # 构造调用参数，确保 session_id 正确传递且不重复
             call_kwargs = arguments.copy()
-            call_kwargs['session_id'] = session_id
+            # 如果 arguments 中有 session_id，移除它（因为会作为显式参数传递）
+            call_kwargs.pop('session_id', None)
 
             from sagents.session_runtime import get_global_session_manager
             session_manager = get_global_session_manager()
@@ -1097,6 +1098,7 @@ class AgentBase(ABC):
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
                 session_context=session_context,
+                session_id=session_id,
                 **call_kwargs
             )
 

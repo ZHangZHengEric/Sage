@@ -70,6 +70,9 @@
       <!-- 视频预览 -->
       <VideoRenderer v-else-if="fileType === 'video'" :file-path="filePath" :file-name="displayFileName" />
 
+      <!-- 音频预览 -->
+      <AudioRenderer v-else-if="fileType === 'audio'" :file-path="filePath" :file-name="displayFileName" />
+
       <!-- HTML 预览 -->
       <HtmlRenderer v-else-if="fileType === 'html'" :file-path="filePath" :content="fileContent" />
 
@@ -156,6 +159,7 @@ import ExcalidrawRenderer from './filerender/ExcalidrawRenderer.vue'
 import PdfRenderer from './filerender/PdfRenderer.vue'
 import ImageRenderer from './filerender/ImageRenderer.vue'
 import VideoRenderer from './filerender/VideoRenderer.vue'
+import AudioRenderer from './filerender/AudioRenderer.vue'
 import HtmlRenderer from './filerender/HtmlRenderer.vue'
 import MarkdownRenderer from './filerender/MarkdownRenderer.vue'
 import CodeRenderer from './filerender/CodeRenderer.vue'
@@ -292,6 +296,7 @@ const fileType = computed(() => {
     'pdf': 'pdf',
     'png': 'image', 'jpg': 'image', 'jpeg': 'image', 'gif': 'image', 'webp': 'image', 'svg': 'image',
     'mp4': 'video', 'webm': 'video', 'mov': 'video', 'mkv': 'video', 'avi': 'video', 'flv': 'video', 'm4v': 'video',
+    'mp3': 'audio', 'wav': 'audio', 'ogg': 'audio', 'm4a': 'audio', 'aac': 'audio', 'flac': 'audio', 'wma': 'audio',
     'html': 'html', 'htm': 'html',
     'md': 'markdown', 'markdown': 'markdown',
     'excalidraw': 'excalidraw',
@@ -315,6 +320,7 @@ const fileTypeLabel = computed(() => {
     'pdf': 'PDF',
     'image': '图片',
     'video': '视频',
+    'audio': '音频',
     'html': 'HTML',
     'markdown': 'Markdown',
     'excalidraw': 'Excalidraw',
@@ -332,6 +338,7 @@ const fileIcon = computed(() => {
     'pdf': '📕',
     'image': '🖼️',
     'video': '🎬',
+    'audio': '🎵',
     'html': '🌐',
     'markdown': '📝',
     'excalidraw': '✏️',
@@ -497,7 +504,7 @@ const loadContent = async () => {
     loading.value = true
     error.value = null
     
-    if (['pdf', 'image'].includes(fileType.value)) {
+    if (['pdf', 'image', 'audio'].includes(fileType.value)) {
       loading.value = false
       return
     }

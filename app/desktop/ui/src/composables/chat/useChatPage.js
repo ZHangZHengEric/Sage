@@ -625,6 +625,7 @@ export const useChatPage = (props) => {
     downloadFile,
     deleteFile,
     updateConfig,
+    refreshWorkspace,
     // 能力面板相关
     abilityItems,
     abilityLoading,
