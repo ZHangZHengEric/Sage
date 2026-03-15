@@ -19,6 +19,29 @@ const readActiveSessionsCache = () => {
 activeSessions.value = readActiveSessionsCache()
 
 const deriveSessionTitle = (content = '') => {
+  // 处理数组类型（messages 格式）
+  if (Array.isArray(content)) {
+    // 尝试从数组中提取文本内容
+    const textParts = content
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object') {
+          // 处理 OpenAI 格式的 message
+          if (item.type === 'text' && item.text) return item.text
+          if (item.content) return item.content
+          if (item.text) return item.text
+          if (item.message) return item.message
+        }
+        return ''
+      })
+      .filter(Boolean)
+    content = textParts.join(' ')
+  }
+  // 处理对象类型（防止 [object Object]）
+  else if (content && typeof content === 'object') {
+    // 尝试提取对象中的文本字段
+    content = content.text || content.content || content.message || JSON.stringify(content)
+  }
   const normalized = String(content || '').trim()
   if (!normalized) return '进行中的会话'
   return normalized
@@ -42,11 +65,13 @@ const updateLocalCacheFromRemote = (remoteSessions) => {
     remoteIds.add(session.session_id)
     const existing = localCache[session.session_id] || {}
     
+    // 确保 query 是字符串类型
+    const queryText = deriveSessionTitle(session.query)
     localCache[session.session_id] = {
       ...existing,
       lastUpdate: session.last_activity * 1000,
-      title: deriveSessionTitle(session.query || existing.title),
-      user_input: session.query || existing.user_input || '',
+      title: queryText,
+      user_input: queryText,
       status: 'running',
       include_in_sidebar: true,
       last_index: existing.last_index || 0

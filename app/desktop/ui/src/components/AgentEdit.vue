@@ -748,6 +748,27 @@ const saving = ref(false)
 const contentRef = ref(null)
 const activeSection = ref('basic')
 
+// 监听工具列表更新事件，重新过滤已选中的工具
+const handleToolsUpdated = async () => {
+  // 等待 props.tools 更新（使用 nextTick）
+  await nextTick()
+
+  // 获取当前可用的工具名称
+  const availableToolNames = new Set(props.tools.map(t => t.name))
+  const currentTools = store.formData.availableTools || []
+
+  // 过滤掉已不存在的工具（保留必需的技能工具）
+  const filteredTools = currentTools.filter(toolName => {
+    if (isRequiredTool(toolName)) return true
+    return availableToolNames.has(toolName)
+  })
+
+  // 如果有变化，更新表单
+  if (filteredTools.length !== currentTools.length) {
+    store.formData.availableTools = filteredTools
+  }
+}
+
 // Navigation sections
 const sections = [
   { id: 'basic', label: t('agent.basicInfo'), icon: User },
@@ -803,12 +824,14 @@ onMounted(() => {
     contentRef.value.addEventListener('scroll', handleScroll, { passive: true })
   }
   loadData()
+  window.addEventListener('tools-updated', handleToolsUpdated)
 })
 
 onBeforeUnmount(() => {
   if (contentRef.value) {
     contentRef.value.removeEventListener('scroll', handleScroll)
   }
+  window.removeEventListener('tools-updated', handleToolsUpdated)
 })
 
 // Watch agent changes
@@ -1090,6 +1113,32 @@ watch(() => store.formData.availableSkills, (newSkills) => {
         store.formData.availableTools.push(toolName)
       }
     })
+  }
+}, { deep: true })
+
+// 监听工具列表变化，自动清理已不存在（被禁用）的工具
+watch(() => props.tools, (newTools) => {
+  console.log('[AgentEdit] props.tools changed:', newTools?.length, 'tools')
+  if (!newTools || newTools.length === 0) return
+  
+  const availableToolNames = new Set(newTools.map(t => t.name))
+  const currentTools = store.formData.availableTools || []
+  
+  console.log('[AgentEdit] Current selected tools:', currentTools)
+  console.log('[AgentEdit] Available tool names:', Array.from(availableToolNames))
+  
+  // 过滤掉已不存在的工具（保留必需的技能工具）
+  const filteredTools = currentTools.filter(toolName => {
+    // 如果是必需的技能工具，保留
+    if (isRequiredTool(toolName)) return true
+    // 如果工具仍然存在于可用列表中，保留
+    return availableToolNames.has(toolName)
+  })
+  
+  // 如果有变化，更新表单
+  if (filteredTools.length !== currentTools.length) {
+    console.log('[AgentEdit] Removing unavailable tools:', currentTools.filter(t => !filteredTools.includes(t)))
+    store.formData.availableTools = filteredTools
   }
 }, { deep: true })
 

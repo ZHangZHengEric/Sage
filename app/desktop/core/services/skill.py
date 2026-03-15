@@ -228,15 +228,21 @@ async def delete_skill(skill_name: str) -> None:
 
     try:
         # 1. Remove from SkillManager (Cache)
+        logger.info(f"Removing skill from SkillManager: {skill_name}")
         tm.remove_skill(skill_name)
+        logger.info(f"Removed skill from SkillManager: {skill_name}")
 
         # 2. Delete files
         skill_path = skill_info.path
+        logger.info(f"Deleting skill files at: {skill_path}")
         if os.path.exists(skill_path):
             try:
                 shutil.rmtree(skill_path)
+                logger.info(f"Deleted skill files for '{skill_name}'")
             except (PermissionError, OSError) as e:
                 logger.warning(f"Could not delete skill files for '{skill_name}' (possibly mounted): {e}")
+        else:
+            logger.warning(f"Skill path does not exist: {skill_path}")
 
     except Exception as e:
         logger.error(f"Delete skill failed: {e}")

@@ -317,7 +317,9 @@ const canDelete = (skill) => {
   // If skill has no owner (system skill), user cannot delete
   if (currentUser.value.role && currentUser.value.role.toLowerCase() === 'admin') return true
   if (!skill.user_id) return false
-  return skill.user_id === currentUser.value.userid
+  const canDeleteResult = skill.user_id === currentUser.value.userid
+  console.log('[SkillList] canDelete check:', skill.name, 'skill.user_id:', skill.user_id, 'currentUser.userid:', currentUser.value.userid, 'result:', canDeleteResult)
+  return canDeleteResult
 }
 
 const canEdit = (skill) => {
@@ -340,16 +342,22 @@ const loadSkills = async () => {
 }
 
 const deleteSkill = async (skill) => {
-  if (!canDelete(skill)) return
+  if (!canDelete(skill)) {
+    console.log('[SkillList] Cannot delete skill:', skill.name, 'user_id:', skill.user_id, 'currentUser:', currentUser.value.userid)
+    return
+  }
   const confirmed = await confirmDialogRef.value.confirm(t('skills.deleteConfirm', { name: skill.name }) || 'Are you sure you want to delete this skill?')
   if (!confirmed) return
-  
+
   try {
     loading.value = true
-    await skillAPI.deleteSkill(skill.name)
+    console.log('[SkillList] Deleting skill:', skill.name)
+    const result = await skillAPI.deleteSkill(skill.name)
+    console.log('[SkillList] Delete result:', result)
     toast.success(t('skills.deleteSuccess'))
     await loadSkills()
   } catch (error) {
+    console.error('[SkillList] Delete failed:', error)
     toast.error(t('skills.deleteFailed'), {
       description: error.message,
     })
