@@ -842,14 +842,14 @@ class ExecuteCommandTool:
                     if os.path.exists(npm_path) and npm_path not in current_path:
                         current_path = f"{npm_path}{os.pathsep}{current_path}"
                 search_env["PATH"] = current_path
-                
+
                 # 如果存在 SAGE_NODE_MODULES_DIR，将其添加到 PATH
                 sage_node_modules = os.environ.get("SAGE_NODE_MODULES_DIR")
                 if sage_node_modules:
                     # 添加 .bin 目录到 PATH
                     node_bin_path = os.path.join(sage_node_modules, "node_modules", ".bin")
                     if os.path.exists(node_bin_path):
-                        current_path = env.get("PATH", "")
+                        current_path = search_env.get("PATH", "")
                         # 将 node_modules/.bin 添加到 PATH 最前面
                         search_env["PATH"] = f"{node_bin_path}{os.pathsep}{current_path}"
                         logger.debug(f"[execute_shell_command] 添加 node_modules/.bin 到 PATH: {node_bin_path}")
@@ -986,7 +986,7 @@ class ExecuteCommandTool:
                     # 添加 .bin 目录到 PATH
                     node_bin_path = os.path.join(sage_node_modules, "node_modules", ".bin")
                     if os.path.exists(node_bin_path):
-                        current_path = env.get("PATH", "")
+                        current_path = check_env.get("PATH", "")
                         # 将 node_modules/.bin 添加到 PATH 最前面
                         check_env["PATH"] = f"{node_bin_path}{os.pathsep}{current_path}"
                         logger.debug(f"[execute_shell_command] 添加 node_modules/.bin 到 PATH: {node_bin_path}")
