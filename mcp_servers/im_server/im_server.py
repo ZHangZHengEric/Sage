@@ -318,39 +318,53 @@ async def handle_incoming_message(
                 logger.info(f"[IM] Sending response back to {provider}: chat_id={chat_id}, user_id={user_id}")
 
                 if binding:
-                    config = get_provider_config(provider)
-                    if config:
-                        provider_instance = get_im_provider(provider, config)
-                        logger.info(f"[IM] Calling {provider}.send_message with content length: {len(response)}")
-
-                        # Prepare send parameters
-                        send_params = {
-                            "content": response,
-                            "chat_id": chat_id,
-                            "user_id": user_id,
-                        }
-
-                        # Add session_webhook for DingTalk (if available)
-                        if provider == "dingtalk":
-                            # Default to markdown for DingTalk
-                            send_params["msg_type"] = "markdown"
-                            if session_webhook:
-                                send_params["session_webhook"] = session_webhook
-                            if sender_staff_id:
-                                send_params["sender_staff_id"] = sender_staff_id
-                            if session_webhook_expired_time:
-                                send_params["session_webhook_expired_time"] = session_webhook_expired_time
-                        elif provider == "wechat_work":
-                            # WeChat Work aibot_send_msg only supports markdown/template_card
-                            send_params["msg_type"] = "markdown"
-                        else:
-                            # Other providers use text by default
-                            send_params["msg_type"] = "text"
-
-                        send_result = await provider_instance.send_message(**send_params)
-                        logger.info(f"[IM] send_message result: {send_result}")
+                    # 首先尝试从 service_manager 获取正在运行的 provider（复用现有连接）
+                    from .service_manager import get_service_manager
+                    sm = get_service_manager()
+                    
+                    # 通过 provider + user_id 查找正在运行的 provider
+                    provider_instance = sm.find_provider_by_user(provider, user_id)
+                    
+                    if provider_instance:
+                        logger.info(f"[IM] Reusing existing provider connection for {provider}:{user_id}")
                     else:
-                        logger.error(f"[IM] No config found for provider: {provider}")
+                        # 如果没有运行的 provider，创建新实例
+                        logger.warning(f"[IM] No running provider for {provider}:{user_id}, creating new instance")
+                        config = get_provider_config(provider)
+                        if config:
+                            provider_instance = get_im_provider(provider, config)
+                        else:
+                            logger.error(f"[IM] No config found for provider: {provider}")
+                            return {"success": True, "session_id": session_id}
+
+                    logger.info(f"[IM] Calling {provider}.send_message with content length: {len(response)}")
+
+                    # Prepare send parameters
+                    send_params = {
+                        "content": response,
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                    }
+
+                    # Add session_webhook for DingTalk (if available)
+                    if provider == "dingtalk":
+                        # Default to markdown for DingTalk
+                        send_params["msg_type"] = "markdown"
+                        if session_webhook:
+                            send_params["session_webhook"] = session_webhook
+                        if sender_staff_id:
+                            send_params["sender_staff_id"] = sender_staff_id
+                        if session_webhook_expired_time:
+                            send_params["session_webhook_expired_time"] = session_webhook_expired_time
+                    elif provider == "wechat_work":
+                        # WeChat Work aibot_send_msg only supports markdown/template_card
+                        send_params["msg_type"] = "markdown"
+                    else:
+                        # Other providers use text by default
+                        send_params["msg_type"] = "text"
+
+                    send_result = await provider_instance.send_message(**send_params)
+                    logger.info(f"[IM] send_message result: {send_result}")
                 else:
                     logger.error(f"[IM] No binding found for session: {session_id}")
             except Exception as e:
