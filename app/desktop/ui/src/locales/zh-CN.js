@@ -89,7 +89,7 @@ export default {
   'modelProvider.name': '供应商名称',
   'modelProvider.baseUrl': 'Base URL',
   'modelProvider.apiKey': 'API Key',
-  'modelProvider.apiKeyPlaceholder': '输入API Key，支持多个（换行或逗号分隔）',
+  'modelProvider.apiKeyPlaceholder': '输入API Key',
   'modelProvider.apiKeyHint': '支持多个Key，用于轮询负载均衡',
   'modelProvider.model': '模型名称',
   'modelProvider.modelPlaceholder': '输入模型名称',

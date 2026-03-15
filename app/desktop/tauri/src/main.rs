@@ -40,12 +40,100 @@ struct ClosePreference {
 struct ClosePreferenceState(Mutex<Option<ClosePreference>>);
 
 const SAGE_ENV_FILE: &str = ".sage_env";
+const SAGE_NODE_MODULES_DIR: &str = ".sage_node_env";
+
+// 预设的 npx 包列表
+const PRESET_NPX_PACKAGES: &[&str] = &[
+
+    // Skill 依赖
+    "agent-browser",          // social-push, agent-browser skills
+    "docx",                   // docx skill - 创建 Word 文档
+];
 
 fn get_sage_root_dir() -> PathBuf {
     let home_dir = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_default();
     PathBuf::from(home_dir).join(".sage")
+}
+
+fn get_sage_node_modules_dir() -> PathBuf {
+    get_sage_root_dir().join(SAGE_NODE_MODULES_DIR)
+}
+
+/// 初始化 .sage_node_modules 目录并安装预设的 npx 包
+async fn initialize_sage_node_modules() -> Result<PathBuf, String> {
+    let sage_root = get_sage_root_dir();
+    let node_modules_dir = sage_root.join(SAGE_NODE_MODULES_DIR);
+    
+    // 创建目录
+    if !node_modules_dir.exists() {
+        println!("Creating .sage_node_modules directory at {:?}", node_modules_dir);
+        std::fs::create_dir_all(&node_modules_dir)
+            .map_err(|e| format!("Failed to create .sage_node_modules directory: {}", e))?;
+    }
+    
+    // 检查是否需要初始化 npm
+    let package_json_path = node_modules_dir.join("package.json");
+    if !package_json_path.exists() {
+        println!("Initializing npm in .sage_node_modules...");
+        
+        // 手动创建 package.json，因为目录名以点开头，npm init 会报错
+        let package_json_content = serde_json::json!({
+            "name": "sage-node-modules",
+            "version": "1.0.0",
+            "description": "Sage npx packages environment",
+            "private": true
+        });
+        
+        std::fs::write(&package_json_path, package_json_content.to_string())
+            .map_err(|e| format!("Failed to create package.json: {}", e))?;
+        
+        // 创建 .npmrc 文件配置国内镜像源
+        let npmrc_path = node_modules_dir.join(".npmrc");
+        let npmrc_content = r#"registry=https://registry.npmmirror.com
+@anthropics:registry=https://registry.npmmirror.com
+@modelcontextprotocol:registry=https://registry.npmmirror.com
+"#;
+        std::fs::write(&npmrc_path, npmrc_content)
+            .map_err(|e| format!("Failed to create .npmrc: {}", e))?;
+        
+        println!("package.json and .npmrc created successfully");
+    }
+    
+    // 安装预设的 npx 包
+    println!("Installing preset npx packages...");
+    for package in PRESET_NPX_PACKAGES {
+        let package_name = package;
+        println!("Checking package: {}", package_name);
+        
+        // 检查包是否已安装 (对于 scoped packages，检查 scope 目录)
+        let scoped_package_dir = node_modules_dir.join("node_modules").join(package_name.split('/').next().unwrap_or(""));
+        
+        if scoped_package_dir.exists() {
+            println!("Package {} already installed, skipping", package_name);
+            continue;
+        }
+        
+        println!("Installing package: {}", package_name);
+        let install_result = Command::new("npm")
+            .args(&["install", package_name, "--save"])
+            .current_dir(&node_modules_dir)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to install package {}: {}", package_name, e))?;
+        
+        if install_result.status.success() {
+            println!("Successfully installed {}", package_name);
+        } else {
+            let stderr = String::from_utf8_lossy(&install_result.stderr);
+            eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
+            // 继续安装其他包，不中断
+        }
+    }
+    
+    println!("Preset npx packages installation completed");
+    Ok(node_modules_dir)
 }
 
 const CLOSE_PREFERENCE_FILE: &str = "close_preference.json";
@@ -150,6 +238,27 @@ struct CloseDialogResult {
 #[tauri::command(async)]
 fn get_server_port() -> Option<u16> {
     std::env::var("SAGE_PORT").ok().and_then(|p| p.parse().ok())
+}
+
+#[tauri::command]
+fn get_sage_node_modules_path() -> Result<String, String> {
+    match std::env::var("SAGE_NODE_MODULES_DIR") {
+        Ok(path) => Ok(path),
+        Err(_) => {
+            // 如果环境变量未设置，尝试获取默认路径
+            let default_path = get_sage_node_modules_dir();
+            if default_path.exists() {
+                Ok(default_path.to_string_lossy().to_string())
+            } else {
+                Err("SAGE_NODE_MODULES_DIR not initialized yet".to_string())
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn get_sage_node_path() -> Option<String> {
+    std::env::var("SAGE_NODE_PATH").ok()
 }
 
 #[tauri::command]
@@ -569,6 +678,31 @@ fn main() {
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
             
+            // Initialize .sage_node_modules and set environment variable
+            let app_handle_clone = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match initialize_sage_node_modules().await {
+                    Ok(node_modules_dir) => {
+                        let node_modules_path = node_modules_dir.to_string_lossy().to_string();
+                        std::env::set_var("SAGE_NODE_MODULES_DIR", &node_modules_path);
+                        println!("Set SAGE_NODE_MODULES_DIR: {}", node_modules_path);
+                        
+                        // Also set NODE_PATH to include the node_modules
+                        let node_modules_lib = node_modules_dir.join("node_modules");
+                        if node_modules_lib.exists() {
+                            let node_path = node_modules_lib.to_string_lossy().to_string();
+                            std::env::set_var("SAGE_NODE_PATH", &node_path);
+                            println!("Set SAGE_NODE_PATH: {}", node_path);
+                        }
+                        
+                        // Emit event to notify frontend that node_modules is ready
+                        let _ = app_handle_clone.emit("sage-node-modules-ready", node_modules_path);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to initialize .sage_node_modules: {}", e);
+                    }
+                }
+            });
             
             tauri::async_runtime::spawn(async move {
                 // Determine how to run the backend
@@ -775,7 +909,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy, get_sage_env_content, save_sage_env_content, handle_close_dialog_result])
+        .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
