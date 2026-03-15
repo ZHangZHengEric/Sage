@@ -71,9 +71,9 @@ async def test_decrypt():
 
 
 async def test_file_downloader():
-    """Test file download functionality"""
+    """Test file download functionality with new path structure"""
     print("\n" + "="*60)
-    print("Test 2: File Downloader")
+    print("Test 2: File Downloader (with new path structure)")
     print("="*60)
     
     try:
@@ -81,19 +81,36 @@ async def test_file_downloader():
         
         # 测试下载一个小文件 (使用公开的测试文件)
         test_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+        test_provider = "wechat_work"
+        test_chat_id = "chat_group_123"
+        test_user_id = "user_abc123"
         
         print(f"Downloading from: {test_url}")
+        print(f"Provider: {test_provider}")
+        print(f"Chat ID: {test_chat_id}")
+        print(f"User ID: {test_user_id}")
+        
+        # 测试群聊场景 (使用 chat_id)
         file_info = await downloader.download(
             url=test_url,
-            aes_key=None,  # 不解密
-            filename="test_download.pdf"
+            aes_key=None,
+            filename="test_group_file.pdf",
+            provider=test_provider,
+            chat_id=test_chat_id,
+            user_id=test_user_id
         )
         
-        print(f"✅ Downloaded successfully:")
+        print(f"✅ Downloaded successfully (group chat):")
         print(f"   Name: {file_info.name}")
         print(f"   Size: {file_info.size} bytes")
         print(f"   MIME: {file_info.mime_type}")
         print(f"   Path: {file_info.local_path}")
+        
+        # 验证路径结构: ~/.sage/files/im/{provider}/{chat_id}/
+        assert "im" in file_info.local_path, "Path should contain 'im'!"
+        assert test_provider in file_info.local_path, "Path should contain provider!"
+        assert test_chat_id in file_info.local_path, "Path should contain chat_id!"
+        print("✅ Path structure verification passed!")
         
         # 验证文件存在
         assert os.path.exists(file_info.local_path), "File not found!"
@@ -101,6 +118,24 @@ async def test_file_downloader():
         
         # 清理
         os.remove(file_info.local_path)
+        
+        # 测试单聊场景 (只使用 user_id)
+        print("\n--- Testing private chat scenario ---")
+        file_info2 = await downloader.download(
+            url=test_url,
+            aes_key=None,
+            filename="test_private_file.pdf",
+            provider=test_provider,
+            chat_id=None,  # 单聊没有 chat_id
+            user_id=test_user_id
+        )
+        
+        print(f"✅ Downloaded successfully (private chat):")
+        print(f"   Path: {file_info2.local_path}")
+        assert test_user_id in file_info2.local_path, "Path should contain user_id!"
+        print("✅ Private chat path verification passed!")
+        
+        os.remove(file_info2.local_path)
         
         await downloader.close()
         
@@ -110,10 +145,52 @@ async def test_file_downloader():
         traceback.print_exc()
 
 
+def test_get_sage_files_dir():
+    """Test the new path structure"""
+    print("\n" + "="*60)
+    print("Test 3: New Path Structure")
+    print("="*60)
+    
+    try:
+        from mcp_servers.im_server.providers.wechat_work.file_handler import get_sage_files_dir
+        
+        # 测试1: 基础路径
+        base_dir = get_sage_files_dir()
+        print(f"Base dir: {base_dir}")
+        assert "im" in str(base_dir), "Base path should contain 'im'"
+        
+        # 测试2: 带 provider
+        provider_dir = get_sage_files_dir(provider="wechat_work")
+        print(f"Provider dir: {provider_dir}")
+        assert "wechat_work" in str(provider_dir), "Path should contain provider"
+        
+        # 测试3: 带 provider 和 chat_id (群聊)
+        group_dir = get_sage_files_dir(provider="wechat_work", chat_id="group_123")
+        print(f"Group dir: {group_dir}")
+        assert "group_123" in str(group_dir), "Path should contain chat_id"
+        
+        # 测试4: 带 provider 和 user_id (单聊)
+        user_dir = get_sage_files_dir(provider="wechat_work", user_id="user_456")
+        print(f"User dir: {user_dir}")
+        assert "user_456" in str(user_dir), "Path should contain user_id"
+        
+        # 测试5: chat_id 优先于 user_id
+        mixed_dir = get_sage_files_dir(provider="feishu", chat_id="chat_abc", user_id="user_xyz")
+        print(f"Mixed dir (chat_id优先): {mixed_dir}")
+        assert "chat_abc" in str(mixed_dir), "Path should contain chat_id (priority)"
+        
+        print("✅ New path structure test passed!")
+        
+    except Exception as e:
+        print(f"❌ Path structure test failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 async def test_file_manager():
     """Test file manager functionality"""
     print("\n" + "="*60)
-    print("Test 3: File Manager")
+    print("Test 4: File Manager")
     print("="*60)
     
     try:
@@ -291,6 +368,7 @@ async def main():
     
     await test_decrypt()
     await test_file_downloader()
+    test_get_sage_files_dir()  # 新增：测试新路径结构
     await test_file_manager()
     test_mime_detection()
     await test_message_parsing()

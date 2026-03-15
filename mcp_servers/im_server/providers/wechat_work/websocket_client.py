@@ -348,7 +348,7 @@ class WeChatWorkWebSocketClient:
 
             # 根据消息类型提取内容
             content = ""
-            file_info = None
+            file_info = None  # 初始化 file_info，用于存储下载的文件信息
             
             if msg_type == "text":
                 # 文本消息
@@ -364,18 +364,35 @@ class WeChatWorkWebSocketClient:
                 media_data = body.get(msg_type, {})
                 file_url = media_data.get("url")
                 aes_key = media_data.get("aeskey")
-                filename = media_data.get("filename", f"{msg_type}_file")
                 
-                content = f"[{msg_type.upper()}消息] {filename}"
+                # 注意: 企业微信 Smart Robot API 不提供原始文件名
+                # 文件将使用时间戳格式保存: YYYYMMDD_HHMMSS_文件类型.扩展名
+                # 扩展名会从 HTTP 响应头、URL 或文件内容中自动检测
+                # 
+                # 如果需要获取原始文件名，需要开通"会话内容存档 API"（收费）:
+                # - 办公版: 100元/账号/年
+                # - 服务版: 450元/账号/年  
+                # - 企业版: 900元/账号/年
+                # 参考文档: https://developer.work.weixin.qq.com/document/path/91774
                 
-                # 下载并解密文件 (如果 file_handler 可用)
+                # 文件类型标识（用于文件名前缀）
+                file_type = msg_type  # image/voice/video/file
+                
+                content = f"[{msg_type.upper()}消息] 文件类型: {file_type}"
+                file_info = None
+                
+                # 同步下载文件（立即下载，不等待，一次性处理）
+                # 使用同步文件写入，不依赖事件循环，避免"Event loop is closed"错误
                 if FILE_HANDLER_AVAILABLE and file_url:
                     try:
-                        logger.info(f"[WeChatWork] 开始下载 {msg_type} 文件: {filename}")
+                        logger.info(f"[WeChatWork] 开始下载 {msg_type} 文件")
                         file_info = await download_wechat_file(
                             url=file_url,
                             aes_key=aes_key,
-                            filename=filename
+                            filename=file_type,
+                            provider="wechat_work",
+                            chat_id=chat_id,
+                            user_id=user_id
                         )
                         logger.info(f"[WeChatWork] 文件下载成功: {file_info.local_path}")
                         content += f"\n文件路径: {file_info.local_path}"
