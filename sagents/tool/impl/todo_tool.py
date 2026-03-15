@@ -316,6 +316,15 @@ class ToDoTool:
                 # 更新 - 保留原有的 created_at
                 existing_task = task_map[task_id]
                 new_task['created_at'] = existing_task.get('created_at', now_str)
+
+                # 如果新的 content 为空但原有任务有 content，保留原有 content
+                if ('content' not in new_task or not new_task['content']) and existing_task.get('content'):
+                    new_task['content'] = existing_task['content']
+
+                # 如果 content 仍为空但有 conclusion，使用 conclusion 作为 content
+                if ('content' not in new_task or not new_task['content']) and 'conclusion' in new_task:
+                    new_task['content'] = new_task['conclusion']
+
                 task_map[task_id].update(new_task)
                 updated_count += 1
             else:
@@ -347,15 +356,24 @@ class ToDoTool:
             return task.get('created_at') or task.get('updated_at') or ''
 
         sorted_tasks = sorted(final_tasks, key=get_sort_key)
-        task_list = [
-            {
+        task_list = []
+        for idx, t in enumerate(sorted_tasks, start=1):
+            content = t.get('content', '')
+            # 如果 content 为空，尝试使用 conclusion 或其他字段
+            if not content:
+                content = t.get('conclusion', '')
+            if not content:
+                content = t.get('title', '')
+            if not content:
+                content = f"任务 {t.get('id', idx)}"
+                logger.warning(f"ToDoTool: Task {t.get('id')} has empty content, using default name.", session_id=session_id)
+
+            task_list.append({
                 "index": idx,
                 "id": str(t.get('id', '')),
-                "name": t.get('content', ''),
+                "name": content,
                 "status": "completed" if t.get('completed', False) else "pending"
-            }
-            for idx, t in enumerate(sorted_tasks, start=1)
-        ]
+            })
 
         logger.debug(f"ToDoTool: Checking deletion condition - pending_tasks: {len(pending_tasks)}, final_tasks: {len(final_tasks)}, file_path: {file_path}", session_id=session_id)
         
