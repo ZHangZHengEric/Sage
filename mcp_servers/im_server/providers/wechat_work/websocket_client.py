@@ -22,6 +22,14 @@ from typing import Callable, Dict, Any, Optional
 import websockets
 from websockets.exceptions import ConnectionClosed, InvalidStatusCode
 
+# Import file handler
+try:
+    from .file_handler import download_wechat_file, FileInfo
+    FILE_HANDLER_AVAILABLE = True
+except ImportError:
+    FILE_HANDLER_AVAILABLE = False
+    FileInfo = None
+
 logger = logging.getLogger("WeChatWorkWebSocket")
 
 
@@ -340,6 +348,8 @@ class WeChatWorkWebSocketClient:
 
             # 根据消息类型提取内容
             content = ""
+            file_info = None
+            
             if msg_type == "text":
                 # 文本消息
                 content = body.get("text", {}).get("content", "")
@@ -349,9 +359,32 @@ class WeChatWorkWebSocketClient:
                 for item in mixed_items:
                     if item.get("type") == "text":
                         content += item.get("content", "")
-            elif msg_type in ["image", "voice", "file"]:
+            elif msg_type in ["image", "voice", "file", "video"]:
                 # 媒体消息 (仅单聊支持)
-                content = f"[{msg_type.upper()} 消息]"
+                media_data = body.get(msg_type, {})
+                file_url = media_data.get("url")
+                aes_key = media_data.get("aeskey")
+                filename = media_data.get("filename", f"{msg_type}_file")
+                
+                content = f"[{msg_type.upper()}消息] {filename}"
+                
+                # 下载并解密文件 (如果 file_handler 可用)
+                if FILE_HANDLER_AVAILABLE and file_url:
+                    try:
+                        logger.info(f"[WeChatWork] 开始下载 {msg_type} 文件: {filename}")
+                        file_info = await download_wechat_file(
+                            url=file_url,
+                            aes_key=aes_key,
+                            filename=filename
+                        )
+                        logger.info(f"[WeChatWork] 文件下载成功: {file_info.local_path}")
+                        content += f"\n文件路径: {file_info.local_path}"
+                    except Exception as e:
+                        logger.error(f"[WeChatWork] 文件下载失败: {e}")
+                        content += f"\n[文件下载失败: {e}]"
+                elif not FILE_HANDLER_AVAILABLE:
+                    logger.warning("[WeChatWork] file_handler 模块不可用，跳过文件下载")
+                    content += "\n[文件下载功能未启用]"
             else:
                 content = str(body)
 
@@ -369,8 +402,17 @@ class WeChatWorkWebSocketClient:
                 "req_id": req_id,  # 重要: 用于回复关联
                 "raw_data": body
             }
+            
+            # 添加文件信息 (如果有)
+            if file_info:
+                parsed_message["file_info"] = {
+                    "name": file_info.name,
+                    "size": file_info.size,
+                    "mime_type": file_info.mime_type,
+                    "local_path": file_info.local_path
+                }
 
-            logger.info(f"[WeChatWork] 收到消息 来自 {user_id} ({chat_type}): {content[:50]}...")
+            logger.info(f"[WeChatWork] 收到消息 来自 {user_id} ({chat_type}): {content[:80]}...")
 
             # 调用消息处理器
             self._call_message_handler(parsed_message)

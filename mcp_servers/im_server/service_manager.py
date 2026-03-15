@@ -609,6 +609,11 @@ class IMServiceManager:
                 chat_id = message.get('chat_id')
                 content = message.get('content', {})
                 user_name = message.get('user_name') or message.get('sender_name')
+                
+                # Extract file info (if present) - for WeChat Work file messages
+                file_info = message.get('file_info')
+                if file_info:
+                    logger.info(f"[ServiceManager] File message detected: {file_info.get('name')}")
 
                 # Extract text content
                 if isinstance(content, dict):
@@ -629,7 +634,8 @@ class IMServiceManager:
                     user_id=user_id,
                     content=text,
                     chat_id=chat_id,
-                    user_name=user_name
+                    user_name=user_name,
+                    file_info=file_info
                 )
 
             except Exception as e:
