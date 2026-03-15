@@ -161,6 +161,11 @@ class SAgent:
             IfNode(condition="need_summary", true_body=AgentNode(agent_key="task_summary"))
         ])
         
+        fib_agent_body = SequenceNode(steps=[
+            AgentNode(agent_key="tool_suggestion"),
+            AgentNode(agent_key="fibre"),
+        ])
+
         # 如果传入了 agent_mode，我们仍然使用 SwitchNode，因为 agent_mode 可能会在运行时被 Router 修改
         # 但我们需要确保 agent_mode 的默认值被正确处理
         # 这里 SwitchNode 的 variable 是 "agent_mode"，它会从 audit_status 或 system_context 中读取
@@ -169,7 +174,7 @@ class SAgent:
         steps.append(SwitchNode(
             variable="agent_mode",
             cases={
-                "fibre": AgentNode(agent_key="fibre"),
+                "fibre": fib_agent_body,
                 "simple": simple_agent_body,
                 "multi": multi_agent_full
             },
