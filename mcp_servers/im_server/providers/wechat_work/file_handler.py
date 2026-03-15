@@ -2,13 +2,14 @@
 
 企业微信文件处理模块
 支持文件下载、解密、管理和上传功能
+
+文件存储路径: ~/.sage/files/{user_id}/
 """
 
 import os
 import hashlib
 import base64
 import logging
-import tempfile
 import asyncio
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
@@ -21,6 +22,61 @@ from cryptography.hazmat.primitives import padding
 from cryptography.exceptions import InvalidSignature
 
 logger = logging.getLogger("WeChatWorkFileHandler")
+
+
+def get_sage_files_dir(
+    provider: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> Path:
+    """获取 Sage 文件存储目录
+    
+    Args:
+        provider: IM 平台类型 (wechat_work, feishu, dingtalk, imessage)
+        chat_id: 群聊/频道ID（可选）
+        user_id: 用户ID（可选）
+        
+    Returns:
+        Path: 文件存储目录路径
+        
+    路径结构:
+        ~/.sage/files/im/{provider}/{chat_id_or_user_id}/
+        
+    示例:
+        - 企业微信群聊: ~/.sage/files/im/wechat_work/group_xxx/
+        - 企业微信单聊: ~/.sage/files/im/wechat_work/user_xxx/
+        - 飞书私聊: ~/.sage/files/im/feishu/user_xxx/
+    """
+    def _sanitize_dir_name(name: Optional[str]) -> Optional[str]:
+        """清理目录名，只保留安全字符"""
+        if not name:
+            return None
+        sanitized = "".join(c for c in name if c.isalnum() or c in "-_").strip()
+        return sanitized if sanitized else None
+    
+    # 获取用户主目录
+    home_dir = Path.home()
+    
+    # 构建基础路径: ~/.sage/files/im
+    sage_files_dir = home_dir / ".sage" / "files" / "im"
+    
+    # 添加 provider 层级
+    if provider:
+        safe_provider = _sanitize_dir_name(provider)
+        if safe_provider:
+            sage_files_dir = sage_files_dir / safe_provider
+    
+    # 确定最后层级: 优先使用 chat_id（群聊），否则使用 user_id（单聊）
+    target_id = chat_id or user_id
+    if target_id:
+        safe_target_id = _sanitize_dir_name(target_id)
+        if safe_target_id:
+            sage_files_dir = sage_files_dir / safe_target_id
+    
+    # 创建目录
+    sage_files_dir.mkdir(parents=True, exist_ok=True)
+    
+    return sage_files_dir
 
 
 @dataclass
@@ -115,53 +171,67 @@ class FileDownloader:
             self._client = httpx.AsyncClient(timeout=self.timeout)
         return self._client
     
-    async def download(
+    def download_sync(
         self, 
         url: str, 
         aes_key: Optional[str] = None,
-        filename: Optional[str] = None
+        filename: Optional[str] = None,
+        provider: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> FileInfo:
-        """下载并解密文件
+        """同步下载文件（不依赖事件循环）
+        
+        使用同步 HTTP 客户端下载文件，完全避免事件循环依赖问题。
+        即使 WebSocket 连接断开，下载仍能正常完成。
         
         Args:
             url: 文件下载地址
             aes_key: 解密密钥 (如果文件加密)
-            filename: 文件名 (如果未提供，从URL或Content-Disposition获取)
+            filename: 文件类型标识 (如 "image", "voice", "file" 等)
+            provider: IM 平台类型
+            chat_id: 群聊/频道ID（可选）
+            user_id: 用户ID（可选）
             
         Returns:
             FileInfo: 文件信息
         """
-        client = await self._get_client()
+        import httpx
         
         try:
-            logger.info(f"[FileDownloader] Downloading from {url[:50]}...")
+            logger.info(f"[FileDownloader] 同步下载: {url[:50]}...")
             
-            response = await client.get(url)
-            response.raise_for_status()
+            # 使用同步 HTTP 客户端
+            with httpx.Client(timeout=30) as client:
+                response = client.get(url)
+                response.raise_for_status()
+                
+                # 获取原始数据
+                raw_data = response.content
+                logger.info(f"[FileDownloader] 下载完成: {len(raw_data)} bytes")
             
-            # 获取文件名
-            if not filename:
-                filename = self._extract_filename(response, url)
-            
-            # 获取原始数据
-            raw_data = response.content
-            logger.info(f"[FileDownloader] Downloaded {len(raw_data)} bytes")
-            
-            # 解密 (如果需要)
+            # 解密 (如果需要) - 解密是 CPU 操作，不需要事件循环
             if aes_key:
                 data = FileDecryptor.decrypt(raw_data, aes_key)
-                logger.info(f"[FileDownloader] File decrypted successfully")
+                logger.info(f"[FileDownloader] 文件解密成功")
             else:
                 data = raw_data
             
-            # 保存到临时目录
-            local_path = await self._save_to_temp(data, filename)
+            # 确定扩展名
+            file_type = filename or "file"
+            extension = self._detect_extension(response, url, data, file_type)
+            
+            # 同步保存文件
+            local_path = self._save_file_sync(data, file_type, extension, provider, chat_id, user_id)
+            
+            # 构建完整文件名
+            full_filename = f"{file_type}.{extension}"
             
             # 检测 MIME 类型
-            mime_type = self._detect_mime_type(filename, data)
+            mime_type = self._detect_mime_type(full_filename, data)
             
             return FileInfo(
-                name=filename,
+                name=full_filename,
                 size=len(data),
                 mime_type=mime_type,
                 local_path=local_path,
@@ -170,53 +240,180 @@ class FileDownloader:
             )
             
         except httpx.HTTPError as e:
-            logger.error(f"[FileDownloader] HTTP error: {e}")
+            logger.error(f"[FileDownloader] HTTP 错误: {e}")
             raise
         except Exception as e:
-            logger.error(f"[FileDownloader] Download failed: {e}")
+            logger.error(f"[FileDownloader] 下载失败: {e}")
             raise
     
-    def _extract_filename(self, response: httpx.Response, url: str) -> str:
-        """从响应头或URL提取文件名"""
-        # 尝试从 Content-Disposition 获取
+    async def download(
+        self, 
+        url: str, 
+        aes_key: Optional[str] = None,
+        filename: Optional[str] = None,
+        provider: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> FileInfo:
+        """异步下载文件（包装器）
+        
+        内部使用同步下载，但包装为 async 函数以兼容现有接口。
+        在单独的线程中执行下载，不阻塞事件循环。
+        
+        Returns:
+            FileInfo: 文件信息
+        """
+        # 在后台线程中执行同步下载
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,  # 使用默认线程池
+            self.download_sync,
+            url, aes_key, filename, provider, chat_id, user_id
+        )
+    
+    def _detect_extension(
+        self, 
+        response: httpx.Response, 
+        url: str, 
+        data: bytes,
+        file_type: str
+    ) -> str:
+        """检测文件扩展名（多优先级）
+        
+        优先级顺序：
+        1. HTTP Content-Disposition 头中的文件名
+        2. URL 路径中的文件名
+        3. 文件内容魔数检测
+        4. 根据文件类型使用默认扩展名
+        
+        Args:
+            response: HTTP 响应
+            url: 下载 URL
+            data: 文件数据
+            file_type: 文件类型标识 (image/voice/video/file)
+            
+        Returns:
+            str: 扩展名 (不含点)
+        """
+        # 1. 尝试从 Content-Disposition 提取扩展名
         content_disposition = response.headers.get('content-disposition', '')
         if 'filename=' in content_disposition:
             parts = content_disposition.split('filename=')
             if len(parts) > 1:
                 filename = parts[1].strip('"\'')
-                return filename
+                if '.' in filename:
+                    return filename.rsplit('.', 1)[1].lower()
         
-        # 从 URL 路径获取
+        # 2. 尝试从 URL 路径提取扩展名
         from urllib.parse import urlparse
         parsed = urlparse(url)
         path = parsed.path
         if path:
-            filename = os.path.basename(path)
-            if filename:
-                return filename
+            url_filename = os.path.basename(path).split('?')[0]
+            if '.' in url_filename:
+                return url_filename.rsplit('.', 1)[1].lower()
         
-        # 默认文件名
-        return f"unknown_file_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # 3. 从文件内容魔数检测
+        magic_exts = {
+            b'\x89PNG': 'png',
+            b'\xff\xd8\xff': 'jpg',
+            b'GIF87a': 'gif',
+            b'GIF89a': 'gif',
+            b'%PDF': 'pdf',
+            b'PK\x03\x04': 'zip',
+            b'\x25\x50\x44\x46': 'pdf',  # PDF
+            b'\x50\x4b\x03\x04': 'zip',  # ZIP (docx/xlsx/pptx 都是 zip)
+            b'\xd0\xcf\x11\xe0': 'doc',  # MS Office 旧格式
+            b'\x7b\x5c\x72\x74\x66': 'rtf',  # RTF
+        }
+        for magic, ext in magic_exts.items():
+            if data.startswith(magic):
+                # 对于 ZIP 格式，可能是 docx/xlsx/pptx，需要进一步判断
+                if ext == 'zip' and len(data) > 100:
+                    # 检查是否包含 [Content_Types].xml
+                    try:
+                        content_types = b'[Content_Types].xml'
+                        if content_types in data[:5000]:
+                            # 可能是 Office 2007+ 格式
+                            if b'word/' in data[:5000]:
+                                return 'docx'
+                            elif b'xl/' in data[:5000]:
+                                return 'xlsx'
+                            elif b'ppt/' in data[:5000]:
+                                return 'pptx'
+                    except:
+                        pass
+                return ext
+        
+        # 4. 根据文件类型使用默认扩展名
+        default_exts = {
+            'image': 'jpg',
+            'voice': 'mp3',
+            'video': 'mp4',
+            'file': 'bin'
+        }
+        return default_exts.get(file_type, 'bin')
     
-    async def _save_to_temp(self, data: bytes, filename: str) -> str:
-        """保存数据到临时文件"""
-        # 创建专用目录
-        temp_dir = Path(tempfile.gettempdir()) / "wechat_work_files"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+    def _save_file_sync(
+        self, 
+        data: bytes, 
+        file_type: str,
+        extension: str,
+        provider: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> str:
+        """同步保存文件
         
-        # 生成安全文件名
-        safe_filename = self._sanitize_filename(filename)
+        完全同步的文件保存方法，不依赖任何异步操作。
+        
+        Args:
+            data: 文件数据
+            file_type: 文件类型标识
+            extension: 文件扩展名
+            provider: IM 平台类型
+            chat_id: 群聊/频道ID
+            user_id: 用户ID
+            
+        Returns:
+            str: 保存后的文件完整路径
+        """
+        # 获取 Sage 文件目录
+        files_dir = get_sage_files_dir(provider, chat_id, user_id)
+        
+        # 生成时间戳文件名
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_name = f"{timestamp}_{safe_filename}"
+        safe_type = self._sanitize_filename(file_type)[:20]
+        safe_ext = self._sanitize_filename(extension)[:10]
+        unique_name = f"{timestamp}_{safe_type}.{safe_ext}"
         
-        file_path = temp_dir / unique_name
+        file_path = files_dir / unique_name
         
-        # 异步写入
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, file_path.write_bytes, data)
+        # 同步文件写入
+        file_path.write_bytes(data)
         
-        logger.info(f"[FileDownloader] Saved to {file_path}")
+        logger.info(f"[FileDownloader] 同步保存: {file_path}")
         return str(file_path)
+    
+    async def _save_file(
+        self, 
+        data: bytes, 
+        file_type: str,
+        extension: str,
+        provider: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> str:
+        """异步保存文件（包装器）
+        
+        内部使用同步保存，在后台线程中执行。
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._save_file_sync,
+            data, file_type, extension, provider, chat_id, user_id
+        )
     
     def _sanitize_filename(self, filename: str) -> str:
         """清理文件名，移除不安全字符"""
@@ -229,6 +426,16 @@ class FileDownloader:
             safe = name[:96] + ext
         return safe
     
+    def _has_extension(self, filename: str) -> bool:
+        """检查文件名是否有扩展名"""
+        return '.' in filename and not filename.endswith('.')
+    
+    def _get_extension(self, filename: str) -> str:
+        """获取文件扩展名（包含点）"""
+        if '.' in filename:
+            return '.' + filename.split('.')[-1]
+        return ''
+    
     def _detect_mime_type(self, filename: str, data: bytes) -> str:
         """检测 MIME 类型"""
         import mimetypes
@@ -239,6 +446,10 @@ class FileDownloader:
             return mime_type
         
         # 从文件内容检测 (简单魔数检测)
+        return self._detect_mime_from_content(data)
+    
+    def _detect_mime_from_content(self, data: bytes) -> str:
+        """从文件内容检测 MIME 类型"""
         magic_mimes = {
             b'\x89PNG': 'image/png',
             b'\xff\xd8\xff': 'image/jpeg',
@@ -253,6 +464,23 @@ class FileDownloader:
                 return mime
         
         return 'application/octet-stream'
+    
+    def _detect_extension_from_content(self, data: bytes) -> str:
+        """从文件内容检测扩展名"""
+        magic_exts = {
+            b'\x89PNG': 'png',
+            b'\xff\xd8\xff': 'jpg',
+            b'GIF87a': 'gif',
+            b'GIF89a': 'gif',
+            b'%PDF': 'pdf',
+            b'PK\x03\x04': 'zip',
+        }
+        
+        for magic, ext in magic_exts.items():
+            if data.startswith(magic):
+                return ext
+        
+        return 'bin'
     
     async def close(self):
         """关闭客户端"""
@@ -367,7 +595,10 @@ def get_file_downloader() -> FileDownloader:
 async def download_wechat_file(
     url: str, 
     aes_key: Optional[str] = None,
-    filename: Optional[str] = None
+    filename: Optional[str] = None,
+    provider: str = "wechat_work",
+    chat_id: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> FileInfo:
     """便捷函数：下载企业微信文件
     
@@ -375,12 +606,18 @@ async def download_wechat_file(
         url: 文件下载地址
         aes_key: 解密密钥
         filename: 文件名
+        provider: IM 平台类型 (默认: wechat_work)
+        chat_id: 群聊/频道ID
+        user_id: 用户ID
         
     Returns:
         FileInfo: 文件信息
+        
+    文件存储路径:
+        ~/.sage/files/im/{provider}/{chat_id_or_user_id}/{timestamp}_{filename}
     """
     downloader = get_file_downloader()
-    file_info = await downloader.download(url, aes_key, filename)
+    file_info = await downloader.download(url, aes_key, filename, provider, chat_id, user_id)
     
     # 注册到管理器
     manager = get_file_manager()
