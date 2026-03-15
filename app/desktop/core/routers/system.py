@@ -7,7 +7,14 @@ import httpx
 from ..core.render import Response
 from ..models import SystemInfoDao, LLMProviderDao, AgentConfigDao
 from ..schemas.base import BaseResponse
-from ..schemas.system import SystemSettingsRequest, TauriUpdateResponse
+from ..schemas.system import (
+    SystemSettingsRequest,
+    TauriUpdateResponse,
+    AgentUsageStatsRequest,
+    AgentUsageStatsResponse,
+)
+from ..services.agent_usage_stats import analyze_tools_usage
+from ..services.chat.utils import get_sessions_root
 
 # 创建路由器
 system_router = APIRouter(prefix="/api", tags=["System"])
@@ -108,4 +115,20 @@ async def health_check():
             "timestamp": time.time(),
             "service": "SagePlatform",
         },
+    )
+
+
+@system_router.post(
+    "/system/agent/usage-stats",
+    response_model=BaseResponse[AgentUsageStatsResponse],
+)
+async def get_agent_usage_stats(req: AgentUsageStatsRequest):
+    """
+    获取最近 N 天的 Agent 工具使用统计。
+    """
+    sessions_root = get_sessions_root()
+    stats = analyze_tools_usage(sessions_root, days=req.days)
+    return await Response.succ(
+        message="获取 Agent 工具使用统计成功",
+        data=AgentUsageStatsResponse(usage=stats).model_dump(),
     )
