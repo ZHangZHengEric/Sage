@@ -4,11 +4,27 @@
 使用 WebSocket 长连接模式实现双向消息通信
 """
 
+import os
 import logging
 from typing import Dict, Any, Optional
 
 from ..base import IMProviderBase
 from .websocket_client import WeChatWorkWebSocketClient
+
+# Import file handling modules
+try:
+    from .chunked_uploader import ChunkedUploader, UploadResult
+    UPLOADER_AVAILABLE = True
+except ImportError:
+    UPLOADER_AVAILABLE = False
+    UploadResult = None
+
+try:
+    from .file_handler import FileInfo
+    FILE_HANDLER_AVAILABLE = True
+except ImportError:
+    FILE_HANDLER_AVAILABLE = False
+    FileInfo = None
 
 logger = logging.getLogger("WeChatWorkProvider")
 
@@ -130,6 +146,168 @@ class WeChatWorkProvider(IMProviderBase):
         except Exception as e:
             logger.error(f"[WeChatWork] 发送消息异常: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+    
+    async def send_file(
+        self,
+        file_path: str,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        filename: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """发送文件给企业微信用户
+        
+        流程:
+        1. 使用分片上传将文件上传到临时素材库，获取 media_id
+        2. 通过 WebSocket 发送文件消息
+        
+        Args:
+            file_path: 本地文件路径
+            chat_id: 群聊 ID (可选)
+            user_id: 用户 ID (可选, 单聊时使用)
+            filename: 显示的文件名 (可选，默认使用原始文件名)
+            
+        Returns:
+            Dict: {"success": bool, "media_id": str (可选), "error": str (可选)}
+        """
+        logger.info(f"[WeChatWork] send_file 被调用: file={file_path}, chat_id={chat_id}, user_id={user_id}")
+        
+        # 检查凭证
+        if not self.bot_id or not self.secret:
+            logger.error("[WeChatWork] 缺少必要的配置: bot_id 或 secret")
+            return {"success": False, "error": "缺少必要的配置: bot_id 或 secret"}
+        
+        # 检查文件
+        if not os.path.exists(file_path):
+            return {"success": False, "error": f"文件不存在: {file_path}"}
+        
+        # 检查上传模块
+        if not UPLOADER_AVAILABLE:
+            return {"success": False, "error": "文件上传模块不可用"}
+        
+        try:
+            # 1. 上传文件到临时素材库
+            logger.info(f"[WeChatWork] 开始上传文件: {file_path}")
+            uploader = ChunkedUploader(self.bot_id, self.secret)
+            
+            upload_result = await uploader.upload_file(file_path)
+            
+            if not upload_result.success:
+                logger.error(f"[WeChatWork] 文件上传失败: {upload_result.error}")
+                return {
+                    "success": False, 
+                    "error": f"上传失败: {upload_result.error}"
+                }
+            
+            media_id = upload_result.media_id
+            logger.info(f"[WeChatWork] 文件上传成功: media_id={media_id[:20]}...")
+            
+            # 2. 发送文件消息
+            return await self._send_media_message(
+                media_id=media_id,
+                msg_type="file",
+                chat_id=chat_id,
+                user_id=user_id
+            )
+            
+        except Exception as e:
+            logger.error(f"[WeChatWork] 发送文件异常: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    
+    async def send_image(
+        self,
+        image_path: str,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """发送图片给企业微信用户
+        
+        Args:
+            image_path: 本地图片路径
+            chat_id: 群聊 ID (可选)
+            user_id: 用户 ID (可选, 单聊时使用)
+            
+        Returns:
+            Dict: {"success": bool, "media_id": str (可选), "error": str (可选)}
+        """
+        logger.info(f"[WeChatWork] send_image 被调用: image={image_path}")
+        
+        # 复用 send_file 的逻辑，但消息类型为 image
+        result = await self.send_file(image_path, chat_id, user_id)
+        
+        if result.get("success") and result.get("media_id"):
+            # 重新发送为图片消息类型
+            return await self._send_media_message(
+                media_id=result["media_id"],
+                msg_type="image",
+                chat_id=chat_id,
+                user_id=user_id
+            )
+        
+        return result
+    
+    async def _send_media_message(
+        self,
+        media_id: str,
+        msg_type: str,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """发送媒体消息
+        
+        Args:
+            media_id: 媒体文件 ID
+            msg_type: 消息类型 (file/image/voice/video)
+            chat_id: 群聊 ID
+            user_id: 用户 ID
+        """
+        import json
+        import uuid
+        
+        # 确定目标 chatid
+        target_chat_id = chat_id or user_id
+        if not target_chat_id:
+            return {"success": False, "error": "未提供 chat_id 或 user_id"}
+        
+        # 确定 chat_type: 1=单聊, 2=群聊
+        chat_type = 2 if chat_id else 1
+        
+        # 构建消息体
+        body = {
+            "chatid": target_chat_id,
+            "chat_type": chat_type,
+            "msgtype": msg_type
+        }
+        
+        if msg_type == "file":
+            body["file"] = {"media_id": media_id}
+        elif msg_type == "image":
+            body["image"] = {"media_id": media_id}
+        elif msg_type == "voice":
+            body["voice"] = {"media_id": media_id}
+        elif msg_type == "video":
+            body["video"] = {"media_id": media_id}
+        else:
+            return {"success": False, "error": f"不支持的媒体类型: {msg_type}"}
+        
+        # 构建主动推送消息命令
+        message = {
+            "cmd": "aibot_send_msg",
+            "headers": {
+                "req_id": str(uuid.uuid4())
+            },
+            "body": body
+        }
+        
+        # 如果当前有 WebSocket 连接，直接使用
+        if self._client and self._client.is_connected():
+            logger.info(f"[WeChatWork] 使用现有连接发送 {msg_type} 消息")
+            # 这里我们需要通过 WebSocket 发送，但当前的 send_message 不支持原始 JSON
+            # 所以我们使用临时连接
+            return await self._send_via_temporary_ws(message)
+        
+        # 否则创建临时 WebSocket 连接发送
+        logger.info(f"[WeChatWork] 创建临时连接发送 {msg_type} 消息")
+        return await self._send_via_temporary_ws(message)
     
     async def _send_via_temporary_ws(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """通过临时 WebSocket 连接发送消息
