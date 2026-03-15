@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full overflow-hidden relative">
+  <div class="agent-usage-danmaku h-full w-full overflow-hidden relative">
     <!-- 整块可悬停区域：弹幕关闭或能力面板打开时不拦截点击，让下方内容可点 -->
     <div
       class="danmaku-hover-zone absolute inset-0 z-20"
@@ -58,7 +58,6 @@ const layerRef = ref(null)
 const trackHovered = ref(false)
 const closed = ref(false)
 let danmakuItems = []
-let styleEl = null
 let spawnTimeoutId = null
 let pendingSpawn = false
 const laneOccupied = Array(LANE_COUNT).fill(false)
@@ -110,13 +109,24 @@ function snakeToCamel (s) {
   return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
 }
 
-function buildDanmakuText (days, action, count) {
-  const timeText = t('danmaku.timeDays', { n: days })
+function getActionText (action) {
   const toolsKey = 'tools.' + snakeToCamel(action)
   let actionText = t(toolsKey)
   if (actionText === toolsKey) actionText = action
-  const suffix = t('danmaku.countSuffix')
-  return `${timeText} · ${actionText} · ${formatCount(count)}${suffix}`
+  return actionText
+}
+
+function buildDanmakuParts (days, action, count) {
+  const dayUnit = days === 1 ? 'day' : 'days'
+  const timeText = t('danmaku.timeDays', { n: days, unit: dayUnit })
+  const actionText = getActionText(action)
+  const countUnit = count === 1 ? 'use' : 'uses'
+  const suffix = t('danmaku.countSuffix', { unit: countUnit })
+  return {
+    timeText,
+    actionText,
+    countText: `${formatCount(count)}${suffix}`
+  }
 }
 
 function updateAllDanmakuText () {
@@ -127,7 +137,13 @@ function updateAllDanmakuText () {
     const action = el.dataset.action
     const count = el.dataset.count
     if (days != null && action != null && count != null) {
-      el.textContent = buildDanmakuText(Number(days), action, Number(count))
+      const parts = buildDanmakuParts(Number(days), action, Number(count))
+      const segments = el.querySelectorAll('.danmaku-segment')
+      if (segments.length >= 3) {
+        segments[0].textContent = parts.timeText
+        segments[1].textContent = parts.actionText
+        segments[2].textContent = parts.countText
+      }
     }
   })
 }
@@ -139,10 +155,26 @@ function spawnOne () {
   if (laneIndex < 0) return
 
   const item = danmakuItems[Math.floor(Math.random() * danmakuItems.length)]
+  const parts = buildDanmakuParts(item.days, item.action, item.count)
 
   const el = document.createElement('div')
-  el.className = 'danmaku-item'
-  el.textContent = buildDanmakuText(item.days, item.action, item.count)
+  el.className = 'danmaku-item danmaku-group'
+
+  const timeSpan = document.createElement('span')
+  timeSpan.className = 'danmaku-segment'
+  timeSpan.textContent = parts.timeText
+
+  const actionSpan = document.createElement('span')
+  actionSpan.className = 'danmaku-segment danmaku-segment-action'
+  actionSpan.textContent = parts.actionText
+
+  const countSpan = document.createElement('span')
+  countSpan.className = 'danmaku-segment'
+  countSpan.textContent = parts.countText
+
+  el.appendChild(timeSpan)
+  el.appendChild(actionSpan)
+  el.appendChild(countSpan)
   el.dataset.lane = String(laneIndex)
   el.dataset.days = String(item.days)
   el.dataset.action = item.action
@@ -167,37 +199,6 @@ function spawnOne () {
       trySpawn(true)
     }
   })
-}
-
-function injectKeyframes () {
-  if (styleEl) return
-  styleEl = document.createElement('style')
-  styleEl.textContent = `
-    @keyframes danmaku-drift {
-      from { transform: translate3d(0, 0, 0); }
-      to { transform: translate3d(calc(-100vw - 100%), 0, 0); }
-    }
-    .danmaku-item {
-      position: absolute;
-      white-space: nowrap;
-      font-size: 14px;
-      font-weight: 500;
-      color: #111;
-      line-height: 1.4;
-      padding: 2px 0;
-      will-change: transform;
-      backface-visibility: hidden;
-    }
-    .dark .danmaku-item {
-      color: #f8fafc;
-      text-shadow: 0 0 1px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.6);
-    }
-    .danmaku-layer {
-      contain: layout style paint;
-      transform: translateZ(0);
-    }
-  `
-  document.head.appendChild(styleEl)
 }
 
 /** 摇一个「多久后出下一条」的随机数；区间大则有时密集（2～3 条同屏）、有时稀疏（1 条或 0 条） */
@@ -296,7 +297,6 @@ watch(language, () => {
 })
 
 onMounted(async () => {
-  injectKeyframes()
   try {
     danmakuItems = await fetchAllUsage()
     // 若父组件标记为用户已关闭、或当前是历史会话页，不自动开始弹幕（历史会话不展示弹幕）
@@ -314,3 +314,62 @@ onUnmounted(() => {
   stopSpawning()
 })
 </script>
+
+<style>
+/* 弹幕动画与样式：写在静态 style 中随构建打包，避免生产环境 CSP 拦截运行时注入的 <style> */
+@keyframes danmaku-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(calc(-100vw - 100%), 0, 0); }
+}
+.agent-usage-danmaku .danmaku-item {
+  position: absolute;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.agent-usage-danmaku .danmaku-segment {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1;
+}
+.agent-usage-danmaku .danmaku-segment-action {
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.28);
+  color: #1e40af;
+}
+.dark .agent-usage-danmaku .danmaku-item {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.5);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.55);
+}
+.dark .agent-usage-danmaku .danmaku-segment {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: rgba(148, 163, 184, 0.55);
+  color: #f1f5f9;
+  text-shadow: 0 1px 2px rgba(2, 6, 23, 0.6);
+}
+.dark .agent-usage-danmaku .danmaku-segment-action {
+  background: rgba(59, 130, 246, 0.28);
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #dbeafe;
+}
+.agent-usage-danmaku .danmaku-layer {
+  contain: layout style paint;
+  transform: translateZ(0);
+}
+</style>
