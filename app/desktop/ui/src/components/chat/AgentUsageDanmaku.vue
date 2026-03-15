@@ -109,13 +109,24 @@ function snakeToCamel (s) {
   return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
 }
 
-function buildDanmakuText (days, action, count) {
-  const timeText = t('danmaku.timeDays', { n: days })
+function getActionText (action) {
   const toolsKey = 'tools.' + snakeToCamel(action)
   let actionText = t(toolsKey)
   if (actionText === toolsKey) actionText = action
-  const suffix = t('danmaku.countSuffix')
-  return `${timeText} · ${actionText} · ${formatCount(count)}${suffix}`
+  return actionText
+}
+
+function buildDanmakuParts (days, action, count) {
+  const dayUnit = days === 1 ? 'day' : 'days'
+  const timeText = t('danmaku.timeDays', { n: days, unit: dayUnit })
+  const actionText = getActionText(action)
+  const countUnit = count === 1 ? 'use' : 'uses'
+  const suffix = t('danmaku.countSuffix', { unit: countUnit })
+  return {
+    timeText,
+    actionText,
+    countText: `${formatCount(count)}${suffix}`
+  }
 }
 
 function updateAllDanmakuText () {
@@ -126,7 +137,13 @@ function updateAllDanmakuText () {
     const action = el.dataset.action
     const count = el.dataset.count
     if (days != null && action != null && count != null) {
-      el.textContent = buildDanmakuText(Number(days), action, Number(count))
+      const parts = buildDanmakuParts(Number(days), action, Number(count))
+      const segments = el.querySelectorAll('.danmaku-segment')
+      if (segments.length >= 3) {
+        segments[0].textContent = parts.timeText
+        segments[1].textContent = parts.actionText
+        segments[2].textContent = parts.countText
+      }
     }
   })
 }
@@ -138,10 +155,26 @@ function spawnOne () {
   if (laneIndex < 0) return
 
   const item = danmakuItems[Math.floor(Math.random() * danmakuItems.length)]
+  const parts = buildDanmakuParts(item.days, item.action, item.count)
 
   const el = document.createElement('div')
-  el.className = 'danmaku-item'
-  el.textContent = buildDanmakuText(item.days, item.action, item.count)
+  el.className = 'danmaku-item danmaku-group'
+
+  const timeSpan = document.createElement('span')
+  timeSpan.className = 'danmaku-segment'
+  timeSpan.textContent = parts.timeText
+
+  const actionSpan = document.createElement('span')
+  actionSpan.className = 'danmaku-segment danmaku-segment-action'
+  actionSpan.textContent = parts.actionText
+
+  const countSpan = document.createElement('span')
+  countSpan.className = 'danmaku-segment'
+  countSpan.textContent = parts.countText
+
+  el.appendChild(timeSpan)
+  el.appendChild(actionSpan)
+  el.appendChild(countSpan)
   el.dataset.lane = String(laneIndex)
   el.dataset.days = String(item.days)
   el.dataset.action = item.action
@@ -291,17 +324,49 @@ onUnmounted(() => {
 .agent-usage-danmaku .danmaku-item {
   position: absolute;
   white-space: nowrap;
-  font-size: 14px;
-  font-weight: 500;
-  color: #111;
-  line-height: 1.4;
-  padding: 2px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   will-change: transform;
   backface-visibility: hidden;
 }
+.agent-usage-danmaku .danmaku-segment {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1;
+}
+.agent-usage-danmaku .danmaku-segment-action {
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.28);
+  color: #1e40af;
+}
 .dark .agent-usage-danmaku .danmaku-item {
-  color: #f8fafc;
-  text-shadow: 0 0 1px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.6);
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.5);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.55);
+}
+.dark .agent-usage-danmaku .danmaku-segment {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: rgba(148, 163, 184, 0.55);
+  color: #f1f5f9;
+  text-shadow: 0 1px 2px rgba(2, 6, 23, 0.6);
+}
+.dark .agent-usage-danmaku .danmaku-segment-action {
+  background: rgba(59, 130, 246, 0.28);
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #dbeafe;
 }
 .agent-usage-danmaku .danmaku-layer {
   contain: layout style paint;
