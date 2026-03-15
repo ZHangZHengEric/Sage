@@ -171,7 +171,6 @@
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectLabel>推荐模型</SelectLabel>
                         <SelectItem v-for="model in currentProviderModels" :key="model" :value="model">
                           {{ model }}
                         </SelectItem>
