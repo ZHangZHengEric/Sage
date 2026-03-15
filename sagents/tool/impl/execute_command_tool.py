@@ -326,7 +326,51 @@ class ExecuteCommandTool:
             # 准备环境变量
             logger.debug(f"[execute_shell_command] 准备环境变量")
             env = os.environ.copy()
-            
+
+            # 在 PyInstaller 打包环境中，需要显式添加全局 npm 路径
+            from sagents.utils.common_utils import is_pyinstaller_frozen
+            if is_pyinstaller_frozen():
+                # 添加常见的全局 npm 路径
+                global_npm_paths = []
+                home_dir = os.path.expanduser("~")
+
+                if platform.system() == "Darwin":  # macOS
+                    global_npm_paths = [
+                        "/usr/local/bin",
+                        "/opt/homebrew/bin",
+                        os.path.join(home_dir, ".npm-global/bin"),
+                        os.path.join(home_dir, ".nvm/versions/node/*/bin"),
+                    ]
+                elif platform.system() == "Windows":
+                    global_npm_paths = [
+                        os.path.join(home_dir, "AppData/Roaming/npm"),
+                        "C:/Program Files/nodejs",
+                    ]
+                else:  # Linux
+                    global_npm_paths = [
+                        "/usr/local/bin",
+                        "/usr/bin",
+                        os.path.join(home_dir, ".npm-global/bin"),
+                        os.path.join(home_dir, ".nvm/versions/node/*/bin"),
+                    ]
+
+                current_path = env.get("PATH", "")
+                # 检查并添加存在的路径
+                for npm_path in global_npm_paths:
+                    if "*" in npm_path:
+                        # 处理通配符路径（如 nvm）
+                        import glob
+                        matching_paths = glob.glob(npm_path)
+                        for matched_path in matching_paths:
+                            if os.path.exists(matched_path) and matched_path not in current_path:
+                                current_path = f"{matched_path}{os.pathsep}{current_path}"
+                                logger.debug(f"[execute_shell_command] 添加全局 npm 路径: {matched_path}")
+                    elif os.path.exists(npm_path) and npm_path not in current_path:
+                        current_path = f"{npm_path}{os.pathsep}{current_path}"
+                        logger.debug(f"[execute_shell_command] 添加全局 npm 路径: {npm_path}")
+
+                env["PATH"] = current_path
+
             # 如果存在 SAGE_NODE_MODULES_DIR，将其添加到 PATH
             sage_node_modules = os.environ.get("SAGE_NODE_MODULES_DIR")
             if sage_node_modules:
@@ -766,7 +810,40 @@ class ExecuteCommandTool:
         
         try:
             # 检查node环境
-            node_path = shutil.which("node")
+            # 在 PyInstaller 打包环境中，需要显式添加全局 npm 路径到 PATH
+            from sagents.utils.common_utils import is_pyinstaller_frozen
+            search_env = os.environ.copy()
+
+            if is_pyinstaller_frozen():
+                # 添加常见的全局 npm 路径到 PATH
+                global_npm_paths = []
+                home_dir = os.path.expanduser("~")
+
+                if platform.system() == "Darwin":  # macOS
+                    global_npm_paths = [
+                        "/usr/local/bin",
+                        "/opt/homebrew/bin",
+                        os.path.join(home_dir, ".npm-global/bin"),
+                    ]
+                elif platform.system() == "Windows":
+                    global_npm_paths = [
+                        os.path.join(home_dir, "AppData/Roaming/npm"),
+                        "C:/Program Files/nodejs",
+                    ]
+                else:  # Linux
+                    global_npm_paths = [
+                        "/usr/local/bin",
+                        "/usr/bin",
+                        os.path.join(home_dir, ".npm-global/bin"),
+                    ]
+
+                current_path = search_env.get("PATH", "")
+                for npm_path in global_npm_paths:
+                    if os.path.exists(npm_path) and npm_path not in current_path:
+                        current_path = f"{npm_path}{os.pathsep}{current_path}"
+                search_env["PATH"] = current_path
+
+            node_path = shutil.which("node", path=search_env.get("PATH"))
             if not node_path:
                 raise RuntimeError("未找到Node.js环境")
             
@@ -859,16 +936,49 @@ class ExecuteCommandTool:
         
         try:
             results = {}
-            
+
+            # 在 PyInstaller 打包环境中，需要显式添加全局 npm 路径到 PATH
+            from sagents.utils.common_utils import is_pyinstaller_frozen
+            check_env = os.environ.copy()
+
+            if is_pyinstaller_frozen():
+                # 添加常见的全局 npm 路径到 PATH
+                global_npm_paths = []
+                home_dir = os.path.expanduser("~")
+
+                if platform.system() == "Darwin":  # macOS
+                    global_npm_paths = [
+                        "/usr/local/bin",
+                        "/opt/homebrew/bin",
+                        os.path.join(home_dir, ".npm-global/bin"),
+                    ]
+                elif platform.system() == "Windows":
+                    global_npm_paths = [
+                        os.path.join(home_dir, "AppData/Roaming/npm"),
+                        "C:/Program Files/nodejs",
+                    ]
+                else:  # Linux
+                    global_npm_paths = [
+                        "/usr/local/bin",
+                        "/usr/bin",
+                        os.path.join(home_dir, ".npm-global/bin"),
+                    ]
+
+                current_path = check_env.get("PATH", "")
+                for npm_path in global_npm_paths:
+                    if os.path.exists(npm_path) and npm_path not in current_path:
+                        current_path = f"{npm_path}{os.pathsep}{current_path}"
+                check_env["PATH"] = current_path
+
             for command in commands:
                 logger.debug(f"🔍 检查命令: {command}")
-                
+
                 # 使用 which/where 命令检查
                 if platform.system().lower() == "windows":
                     check_cmd = f"where {command}"
                 else:
                     check_cmd = f"which {command}"
-                
+
                 try:
                     result = subprocess.run(
                         check_cmd,
@@ -876,7 +986,8 @@ class ExecuteCommandTool:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
-                        timeout=5
+                        timeout=5,
+                        env=check_env
                     )
                     
                     if result.returncode == 0:
