@@ -1,169 +1,224 @@
 <template>
-  <div class="h-screen w-full bg-background text-foreground flex flex-col overflow-hidden animate-in fade-in duration-300">
-    
-    <!-- Welcome Step: Centered Full Screen -->
+  <div class="h-screen w-full bg-background text-foreground flex flex-col overflow-hidden">
+    <!-- Welcome Step: Animated Introduction -->
     <div v-if="step === 'welcome'" class="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto">
-      <div class="max-w-4xl w-full flex flex-col items-center text-center space-y-12 py-8">
+      <div class="max-w-4xl w-full flex flex-col items-center text-center space-y-12 py-8 animate-in fade-in zoom-in-95 duration-700">
         
-        <div class="space-y-6">
-          <div class="p-8 bg-primary/5 rounded-full inline-block mb-4">
-            <Bot class="w-24 h-24 text-primary" />
+        <!-- Animated Logo -->
+        <div class="relative">
+          <div class="absolute inset-0 bg-primary/30 blur-3xl rounded-full animate-pulse"></div>
+          <div class="relative p-8  from-primary/20 to-primary/5 rounded-3xl  backdrop-blur-sm">
+            <Bot class="w-24 h-24 text-primary animate-bounce" style="animation-duration: 2s;" />
           </div>
-          <h1 class="text-4xl md:text-5xl font-bold tracking-tight">欢迎使用 Sage</h1>
+        </div>
+
+        <div class="space-y-4">
+          <h1 class="text-4xl md:text-6xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            欢迎使用 Sage
+          </h1>
           <p class="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            您的智能 AI 工作空间已准备就绪。让我们设置您的环境以开始使用。
+            您的智能 AI 工作空间已准备就绪<br>让我们设置您的环境以开始使用
           </p>
         </div>
         
-        <div class="grid md:grid-cols-2 gap-8 w-full text-left">
-          <div class="p-8 rounded-2xl bg-muted/30 border border-transparent hover:border-primary/20 hover:bg-muted/50 transition-all duration-300">
+        <!-- Feature Cards with Hover Animation -->
+        <div class="grid md:grid-cols-2 gap-6 w-full text-left">
+          <div class="group p-8 rounded-2xl bg-gradient-to-br from-muted/50 to-muted/20 border border-transparent hover:border-primary/30 hover:shadow-lg hover:shadow-primary/10 transition-all duration-500 hover:-translate-y-1">
             <div class="flex items-center gap-4 mb-4">
-              <div class="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
+              <div class="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl group-hover:scale-110 transition-transform duration-300">
                 <Brain class="w-6 h-6 text-blue-600 dark:text-blue-400" />
               </div>
               <h3 class="text-xl font-semibold">模型提供商</h3>
             </div>
             <p class="text-muted-foreground leading-relaxed">
-              AI 的“大脑”。连接到 OpenAI、DeepSeek 或其他服务以为您的代理提供动力。
+              AI 的"大脑"。连接到 OpenAI、DeepSeek 或其他服务以为您的代理提供动力。
             </p>
           </div>
           
-          <div class="p-8 rounded-2xl bg-muted/30 border border-transparent hover:border-primary/20 hover:bg-muted/50 transition-all duration-300">
+          <div class="group p-8 rounded-2xl bg-gradient-to-br from-muted/50 to-muted/20 border border-transparent hover:border-green-500/30 hover:shadow-lg hover:shadow-green-500/10 transition-all duration-500 hover:-translate-y-1">
             <div class="flex items-center gap-4 mb-4">
-              <div class="p-3 bg-green-100 dark:bg-green-900/30 rounded-xl">
+              <div class="p-3 bg-green-100 dark:bg-green-900/30 rounded-xl group-hover:scale-110 transition-transform duration-300">
                 <MessageSquare class="w-6 h-6 text-green-600 dark:text-green-400" />
               </div>
               <h3 class="text-xl font-semibold">智能体</h3>
             </div>
             <p class="text-muted-foreground leading-relaxed">
-              您与之交互的“角色”。定义它的行为方式、使用的工具及其个性。
+              您与之交互的"角色"。定义它的行为方式、使用的工具及其个性。
             </p>
           </div>
         </div>
 
-        <Button size="lg" @click="handleWelcomeNext" class="px-12 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
+        <!-- Animated Button -->
+        <Button size="lg" @click="handleWelcomeNext" class="px-12 py-6 text-lg rounded-full shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all duration-300 hover:scale-105 group">
           开始使用
-          <ArrowRight class="ml-2 w-6 h-6" />
+          <ArrowRight class="ml-2 w-6 h-6 group-hover:translate-x-1 transition-transform" />
         </Button>
       </div>
     </div>
 
-    <!-- Model Provider Step: Centered Form with Scroll -->
+    <!-- Model Provider Step: Animated Form -->
     <div v-else-if="step === 'model'" class="flex-1 overflow-y-auto bg-background">
-      <div class="min-h-full flex flex-col items-center justify-center p-8">
-        <div class="max-w-2xl w-full space-y-8 py-8">
-          <div class="space-y-2 text-center">
-            <h2 class="text-3xl font-bold">{{ currentStepTitle }}</h2>
-            <p class="text-lg text-muted-foreground">{{ currentStepDescription }}</p>
-          </div>
+      <div class="min-h-full flex flex-col items-center justify-center p-4">
+        <!-- Header -->
+        <div class="space-y-2 text-center mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <h2 class="text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            {{ currentStepTitle }}
+          </h2>
+          <p class="text-lg text-muted-foreground">{{ currentStepDescription }}</p>
+        </div>
 
-          <div class="space-y-6 bg-card/50 p-8 rounded-xl border shadow-sm backdrop-blur-sm">
-            <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.providerLabel') }} <span class="text-destructive">*</span></Label>
-              <Select :model-value="selectedProvider" @update:model-value="handleProviderChange">
-                <SelectTrigger class="h-11">
-                  <SelectValue :placeholder="t('modelProvider.selectProviderPlaceholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>{{ t('modelProvider.providerLabel') }}</SelectLabel>
-                    <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
-                      {{ provider.name }}
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.name') }} <span class="text-destructive">*</span></Label>
-              <Input v-model="modelForm.name" :placeholder="t('modelProvider.customNamePlaceholder')" class="h-11" />
-            </div>
-            
-            <div class="grid gap-2">
-              <Label class="text-base">{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
-              <Input v-model="modelForm.base_url" placeholder="https://api.openai.com/v1" class="h-11" @update:model-value="onKeyConfigChange" />
-            </div>
-
-            <div class="grid gap-2">
-              <div class="flex items-center justify-between">
-                <Label class="text-base">{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
-                <Button
-                  v-if="currentProvider?.website"
-                  variant="link"
-                  size="sm"
-                  class="h-auto p-0 text-primary"
-                  @click="openProviderWebsite"
-                >
-                  获取 API Key
-                  <ArrowRight class="ml-1 w-3 h-3" />
-                </Button>
-              </div>
-              <Input v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="h-11" @update:model-value="onKeyConfigChange" />
-            </div>
-
-            <div class="grid gap-2">
-               <Label class="text-base">{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-               <Input v-model="modelForm.model" :placeholder="t('modelProvider.modelPlaceholder')" class="h-11" @update:model-value="onKeyConfigChange" />
-               <p class="text-sm text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
-            </div>
-            
-            <div class="grid grid-cols-2 gap-6">
-              <div class="grid gap-2">
-                <Label>{{ t('agent.maxTokens') }}</Label>
-                <Input type="number" v-model.number="modelForm.maxTokens" placeholder="4096" class="h-11" />
-              </div>
-              <div class="grid gap-2">
-                <Label>{{ t('agent.temperature') }}</Label>
-                <Input type="number" v-model.number="modelForm.temperature" step="0.1" placeholder="0.7" class="h-11" />
-              </div>
-            </div>
-
-            <!-- 多模态支持 -->
-            <div class="grid gap-3">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <Checkbox id="multimodal" v-model:checked="modelForm.supportsMultimodal" />
-                  <Label for="multimodal" class="text-base cursor-pointer">支持多模态（图像输入）</Label>
+        <div class="w-full max-w-3xl flex gap-6 items-start justify-center">
+          
+          <!-- Left Side: Form Content -->
+          <div class="flex-1 max-w-2xl space-y-6">
+    
+            <!-- Provider Selection Card -->
+            <div class="bg-card/50 p-8 rounded-2xl border shadow-sm backdrop-blur-sm animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200">
+              <!-- Provider Selection with Toggle -->
+              <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                  <Label class="text-base font-medium">模型提供商 <span class="text-destructive">*</span></Label>
+                  <button 
+                    @click="toggleProviderInputMode" 
+                    class="text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-2"
+                  >
+                    {{ providerInputMode === 'select' ? '自定义模型提供商' : '使用推荐提供商' }}
+                  </button>
                 </div>
-                <Button
-                  v-if="modelForm.supportsMultimodal"
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  @click="handleVerifyMultimodal"
-                  :disabled="verifyingMultimodal || !modelForm.model"
-                >
-                  <Loader v-if="verifyingMultimodal" class="mr-2 h-4 w-4 animate-spin" />
-                  {{ multimodalVerified ? '已验证' : '验证多模态' }}
-                </Button>
+                
+                <!-- Provider Select Mode -->
+                <Select v-if="providerInputMode === 'select'" v-model="selectedProvider" @update:model-value="handleProviderChange">
+                  <SelectTrigger class="h-12">
+                    <SelectValue placeholder="请选择模型提供商" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem v-for="provider in MODEL_PROVIDERS" :key="provider.name" :value="provider.name">
+                        <div class="flex items-center gap-3">
+                          <span class="font-medium shrink-0">{{ provider.name }}</span>
+                          <span class="text-xs text-muted-foreground truncate">{{ provider.base_url }}</span>
+                        </div>
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                
+                <!-- Provider Custom Input Mode -->
+                <div v-else class="space-y-3">
+                  <Input 
+                    v-model="customProviderName" 
+                    placeholder="请输入提供商名称，如：My Custom Provider" 
+                    class="h-12"
+                    @update:model-value="onCustomProviderChange"
+                  />
+                  <Input 
+                    v-model="modelForm.base_url" 
+                    placeholder="请输入符合OpenAI 规范的Base URL，如：https://api.example.com/v1" 
+                    class="h-12"
+                    @update:model-value="onKeyConfigChange"
+                  />
+                </div>
               </div>
-              <p v-if="modelForm.supportsMultimodal && !multimodalVerified" class="text-xs text-amber-600">
-                请验证多模态支持以确保功能正常
-              </p>
-  
             </div>
+
+            <!-- Config Fields (Animated Appear) -->
+            <div 
+              v-if="showConfigFields" 
+              class="space-y-6 bg-card/50 p-8 rounded-2xl border shadow-sm backdrop-blur-sm config-fields-appear"
+            >
+                <!-- Base URL (only for custom mode) -->
+                <div v-if="providerInputMode === 'custom'" class="grid gap-2">
+                  <Label class="text-base">{{ t('modelProvider.baseUrl') }} <span class="text-destructive">*</span></Label>
+                  <Input v-model="modelForm.base_url" placeholder="https://api.example.com/v1" class="h-12" @update:model-value="onKeyConfigChange" />
+                </div>
+
+                <!-- API Key -->
+                <div class="grid gap-2">
+                  <div class="flex items-center justify-between">
+                    <Label class="text-base">{{ t('modelProvider.apiKey') }} <span class="text-destructive">*</span></Label>
+                    <Button
+                      v-if="currentProvider?.website"
+                      variant="link"
+                      size="sm"
+                      class="h-auto p-0 text-primary"
+                      @click="openProviderWebsite"
+                    >
+                      获取 API Key
+                      <ArrowRight class="ml-1 w-3 h-3" />
+                    </Button>
+                  </div>
+                  <Input v-model="modelForm.api_keys_str" :placeholder="t('modelProvider.apiKeyPlaceholder')" class="h-12" @update:model-value="onKeyConfigChange" />
+                </div>
+
+                <!-- Model Selection -->
+                <div class="grid gap-3">
+                  <div class="flex items-center justify-between">
+                    <Label class="text-base">模型名称 <span class="text-destructive">*</span></Label>
+                    <!-- 只有选择预设提供商时才显示切换按钮 -->
+                    <button 
+                      v-if="providerInputMode === 'select'"
+                      @click="toggleModelInputMode" 
+                      class="text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-2"
+                    >
+                      {{ modelInputMode === 'select' ? '自定义模型名称' : '使用推荐模型' }}
+                    </button>
+                  </div>
+                  
+                  <!-- Model Select Mode (only for preset providers) -->
+                  <Select v-if="providerInputMode === 'select' && modelInputMode === 'select'" v-model="modelForm.model" @update:model-value="onKeyConfigChange">
+                    <SelectTrigger class="h-12">
+                      <SelectValue placeholder="请选择模型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectLabel>推荐模型</SelectLabel>
+                        <SelectItem v-for="model in currentProviderModels" :key="model" :value="model">
+                          {{ model }}
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  
+                  <!-- Model Custom Input Mode (for custom providers or when toggled) -->
+                  <Input 
+                    v-else
+                    v-model="customModelName" 
+                    placeholder="请输入模型名称" 
+                    class="h-12"
+                    @update:model-value="onCustomModelChange"
+                  />
+                  
+                </div>
+              </div>
           </div>
 
-          <div class="flex justify-between pt-4">
-            <Button variant="outline" size="lg" @click="handleVerify" :disabled="verifying || loading" class="h-12 px-6">
-               <Loader v-if="verifying" class="mr-2 h-5 w-5 animate-spin" />
-               验证连接
-            </Button>
-            <Button size="lg" @click="handleModelSubmit" :disabled="loading || !canSave" class="px-8 h-12 text-base">
-              <Loader v-if="loading" class="mr-2 h-5 w-5 animate-spin" />
-              {{ t('common.nextStep') }}
+          <!-- Right Side: Action Button -->
+          <div class="self-center animate-in fade-in slide-in-from-right-4 duration-500 delay-300 ml-4">
+            <Button 
+              size="lg" 
+              @click="handleModelSubmit" 
+              :disabled="loading || !canSave" 
+              class="w-14 h-14 rounded-full p-0 flex items-center justify-center shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all duration-300 hover:scale-105"
+            >
+              <Loader v-if="loading" class="w-6 h-6 animate-spin" />
+              <ArrowRight v-else class="w-6 h-6" />
             </Button>
           </div>
         </div>
       </div>
     </div>
     
-    <!-- Loading State -->
-    <div v-else class="flex-1 flex items-center justify-center">
-      <div class="flex flex-col items-center gap-4">
-        <Loader class="w-12 h-12 animate-spin text-primary" />
-        <p v-if="step === 'creating_agent'" class="text-muted-foreground">正在初始化 Agent...</p>
+    <!-- Creating Agent State -->
+    <div v-else-if="step === 'creating_agent'" class="flex-1 flex items-center justify-center">
+      <div class="flex flex-col items-center gap-6">
+        <div class="relative">
+          <div ref="agentLottieContainer" class="w-48 h-48"></div>
+          <div class="absolute inset-0 bg-primary/20 blur-3xl rounded-full animate-pulse"></div>
+        </div>
+        <div class="text-center space-y-2">
+          <h3 class="text-xl font-semibold">正在初始化 Agent...</h3>
+          <p class="text-muted-foreground">请稍候，即将进入您的工作空间</p>
+        </div>
       </div>
     </div>
 
@@ -171,7 +226,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLanguage } from '@/utils/i18n'
 import { systemAPI } from '@/api/system'
@@ -180,14 +235,12 @@ import { agentAPI } from '@/api/agent'
 import { toolAPI } from '@/api/tool'
 import { skillAPI } from '@/api/skill'
 import { toast } from 'vue-sonner'
-import { Loader, Bot, Brain, MessageSquare, ArrowRight } from 'lucide-vue-next'
+import { Loader, Bot, Brain, MessageSquare, ArrowRight, RefreshCw, CheckCircle } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-shell'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -202,12 +255,13 @@ import { MODEL_PROVIDERS } from '@/utils/modelProviders'
 const router = useRouter()
 const { t } = useLanguage()
 
-const step = ref('loading') // loading, welcome, model, creating_agent
+
+
+// Steps: loading, welcome, model, creating_agent
+const step = ref('loading')
 const loading = ref(false)
 const verifying = ref(false)
 const verified = ref(false)
-const verifyingMultimodal = ref(false)
-const multimodalVerified = ref(false)
 const tools = ref([])
 const skills = ref([])
 const systemStatus = ref({
@@ -215,49 +269,121 @@ const systemStatus = ref({
   has_agent: false
 })
 
+// Input Mode Toggles
+const providerInputMode = ref('select') // 'select' | 'custom'
+const modelInputMode = ref('select') // 'select' | 'custom'
+const showConfigFields = ref(false)
+
 // Model Form State
 const modelForm = reactive({
-  name: 'Default Provider',
+  name: '',
   base_url: '',
-  api_keys_str: 'sk-xxxxxxxx',
-  model: '',
-  maxTokens: 4096,
-  temperature: 0.7,
-  topP: 0.95,
-  presencePenalty: 0,
-  maxModelLen: 32000,
-  supportsMultimodal: false
+  api_keys_str: '',
+  model: ''
 })
+
+// 高级参数默认值（写死）
+const DEFAULT_MAX_TOKENS = 4096
+const DEFAULT_TEMPERATURE = 0.3
+const DEFAULT_TOP_P = 0.95
+const DEFAULT_PRESENCE_PENALTY = 0
+const DEFAULT_MAX_MODEL_LEN = 32000
 
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+const currentProviderModels = computed(() => currentProvider.value?.models || [])
 
-// 保存按钮是否可点击
+// Custom Input Values
+const customProviderName = ref('')
+const customModelName = ref('')
+
+
 const canSave = computed(() => {
-  if (modelForm.supportsMultimodal) {
-    return multimodalVerified.value
+  // 检查所有必填字段是否已填写
+  if (providerInputMode.value === 'select') {
+    return selectedProvider.value && modelForm.base_url && modelForm.api_keys_str && 
+           (modelInputMode.value === 'custom' ? customModelName.value : modelForm.model)
   } else {
-    return verified.value
+    return customProviderName.value && modelForm.base_url && modelForm.api_keys_str && 
+           customModelName.value
   }
 })
+
+const actualProviderName = computed(() => {
+  return providerInputMode.value === 'select' ? selectedProvider.value : customProviderName.value
+})
+
+const actualModelName = computed(() => {
+  return modelInputMode.value === 'custom' ? customModelName.value : modelForm.model
+})
+
+// Methods
+const toggleProviderInputMode = () => {
+  providerInputMode.value = providerInputMode.value === 'select' ? 'custom' : 'select'
+  // Reset related fields
+  if (providerInputMode.value === 'custom') {
+    selectedProvider.value = ''
+    modelForm.name = ''
+    modelForm.base_url = ''
+    // 切换到自定义模式时强制使用自定义模型名称
+    modelInputMode.value = 'custom'
+    modelForm.model = ''
+    customModelName.value = ''
+    // 切换到自定义模式时显示配置表单
+    showConfigFields.value = true
+  } else {
+    customProviderName.value = ''
+    modelForm.name = ''
+    modelForm.base_url = ''
+    // 切换回预设模式时恢复模型选择模式
+    modelInputMode.value = 'select'
+    customModelName.value = ''
+    showConfigFields.value = false
+  }
+  verified.value = false
+}
+
+const toggleModelInputMode = () => {
+  modelInputMode.value = modelInputMode.value === 'select' ? 'custom' : 'select'
+  // Reset model field
+  if (modelInputMode.value === 'custom') {
+    modelForm.model = ''
+  } else {
+    customModelName.value = ''
+  }
+  verified.value = false
+}
 
 const handleProviderChange = (val) => {
   selectedProvider.value = val
   const provider = MODEL_PROVIDERS.find(p => p.name === val)
   if (provider) {
-    // modelForm.name = provider.name // Don't override name for setup
+    modelForm.name = provider.name
     modelForm.base_url = provider.base_url
-    // modelForm.model = provider.models[0] || '' // Don't auto-select first model
   }
   verified.value = false
-  multimodalVerified.value = false
-  modelForm.supportsMultimodal = false
+  customModelName.value = ''
+  // Show config fields with animation
+  showConfigFields.value = true
+}
+
+const onCustomProviderChange = (val) => {
+  customProviderName.value = val
+  modelForm.name = val
+  // Show config fields when provider name is entered
+  if (val && modelForm.base_url) {
+    showConfigFields.value = true
+  }
+  onKeyConfigChange()
+}
+
+const onCustomModelChange = (val) => {
+  customModelName.value = val
+  onKeyConfigChange()
 }
 
 const onKeyConfigChange = () => {
-  // 当关键配置变化时，重置验证状态
   verified.value = false
-  multimodalVerified.value = false
 }
 
 const openProviderWebsite = async () => {
@@ -266,7 +392,6 @@ const openProviderWebsite = async () => {
       await open(currentProvider.value.website)
     } catch (error) {
       console.error('Failed to open external link:', error)
-      // Fallback to window.open if Tauri open fails (e.g. in browser mode)
       window.open(currentProvider.value.website, '_blank')
     }
   }
@@ -278,7 +403,7 @@ const currentStepTitle = computed(() => {
 })
 
 const currentStepDescription = computed(() => {
-  if (step.value === 'model') return '首先，我们需要连接到一个 LLM 提供商（“大脑”）来为您的智能体提供动力。'
+  if (step.value === 'model') return '首先，我们需要连接到一个 LLM 提供商（"大脑"）来为您的智能体提供动力。'
   return '正在检查系统状态...'
 })
 
@@ -289,10 +414,9 @@ const fetchSystemInfo = async () => {
     
     if (!res.has_model_provider || !res.has_agent) {
       if (res.has_model_provider && !res.has_agent) {
-          // Skip welcome if model provider is already configured
-          createDefaultAgent()
+        createDefaultAgent()
       } else {
-          step.value = 'welcome'
+        step.value = 'welcome'
       }
     } else {
       router.replace('/')
@@ -300,6 +424,7 @@ const fetchSystemInfo = async () => {
   } catch (error) {
     console.error('Failed to fetch system info:', error)
     toast.error('Failed to initialize system info')
+    step.value = 'welcome'
   }
 }
 
@@ -319,24 +444,15 @@ const fetchResources = async () => {
       toolAPI.getTools(),
       skillAPI.getSkills()
     ])
-    if (toolsRes && toolsRes.tools) {
-        tools.value = toolsRes.tools
-    } else {
-        tools.value = []
-    }
-    
-    if (skillsRes && skillsRes.skills) {
-        skills.value = skillsRes.skills
-    } else {
-        skills.value = []
-    }
+    tools.value = toolsRes?.tools || []
+    skills.value = skillsRes?.skills || []
   } catch (error) {
     console.error('Failed to fetch resources:', error)
   }
 }
 
 const handleVerify = async () => {
-  if (!modelForm.name || !modelForm.base_url || !modelForm.api_keys_str || !modelForm.model) {
+  if (!actualProviderName.value || !modelForm.base_url || !modelForm.api_keys_str || !actualModelName.value) {
     toast.error('请填写所有必填字段')
     return
   }
@@ -344,16 +460,15 @@ const handleVerify = async () => {
   verifying.value = true
   try {
     const data = {
-      name: modelForm.name,
+      name: actualProviderName.value,
       base_url: modelForm.base_url,
       api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-      model: modelForm.model,
-      max_tokens: modelForm.maxTokens,
-      temperature: modelForm.temperature,
-      top_p: modelForm.topP,
-      presence_penalty: modelForm.presencePenalty,
-      max_model_len: modelForm.maxModelLen,
-      supports_multimodal: modelForm.supportsMultimodal,
+      model: actualModelName.value,
+      max_tokens: DEFAULT_MAX_TOKENS,
+      temperature: DEFAULT_TEMPERATURE,
+      top_p: DEFAULT_TOP_P,
+      presence_penalty: DEFAULT_PRESENCE_PENALTY,
+      max_model_len: DEFAULT_MAX_MODEL_LEN,
       is_default: true
     }
     await modelProviderAPI.verifyModelProvider(data)
@@ -368,86 +483,41 @@ const handleVerify = async () => {
   }
 }
 
-const handleVerifyMultimodal = async () => {
-  if (!modelForm.model) {
-    toast.error('请先填写模型名称')
-    return
-  }
-
-  verifyingMultimodal.value = true
-  try {
-    const data = {
-      name: modelForm.name,
-      base_url: modelForm.base_url,
-      api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-      model: modelForm.model,
-      max_tokens: modelForm.maxTokens,
-      temperature: modelForm.temperature,
-      top_p: modelForm.topP,
-      presence_penalty: modelForm.presencePenalty,
-      max_model_len: modelForm.maxModelLen,
-      is_default: true
-    }
-    const res = await modelProviderAPI.verifyMultimodal(data)
-    if (res?.supports_multimodal) {
-      multimodalVerified.value = true
-      if (res?.recognized) {
-        toast.success('多模态验证成功，模型正确识别了测试图片内容')
-      } else {
-        toast.success('多模态验证成功，但模型未能正确识别测试图片内容')
-      }
-    } else {
-      multimodalVerified.value = false
-      toast.warning('该模型不支持多模态')
-      modelForm.supportsMultimodal = false
-    }
-  } catch (error) {
-    console.error('Failed to verify multimodal:', error)
-    multimodalVerified.value = false
-    toast.error(error.message || '多模态验证失败')
-  } finally {
-    verifyingMultimodal.value = false
-  }
-}
-
 const createDefaultAgent = async (providerId = null) => {
   step.value = 'creating_agent'
   loading.value = true
   
   try {
-    // Ensure resources are fetched
     await fetchResources()
     
-    // Get default system prompt
     let systemPrompt = ''
     try {
-        const promptRes = await agentAPI.getDefaultSystemPrompt()
-        if (promptRes && promptRes.system_prompt) {
-            systemPrompt = promptRes.system_prompt
-        }
+      const promptRes = await agentAPI.getDefaultSystemPrompt()
+      if (promptRes?.system_prompt) {
+        systemPrompt = promptRes.system_prompt
+      }
     } catch (e) {
-        console.error('Failed to get default system prompt', e)
+      console.error('Failed to get default system prompt', e)
     }
 
     let currentProviderId = providerId
     if (!currentProviderId) {
-        try {
-            const providers = await modelProviderAPI.listModelProviders()
-            if (providers && providers.length > 0) {
-                // Prefer one that is default if available, or just the first one
-                const defaultProvider = providers.find(p => p.is_default)
-                currentProviderId = defaultProvider ? defaultProvider.id : providers[0].id
-            }
-        } catch (e) {
-            console.error('Failed to fetch providers for default agent', e)
+      try {
+        const providers = await modelProviderAPI.listModelProviders()
+        if (providers?.length > 0) {
+          const defaultProvider = providers.find(p => p.is_default)
+          currentProviderId = defaultProvider ? defaultProvider.id : providers[0].id
         }
+      } catch (e) {
+        console.error('Failed to fetch providers for default agent', e)
+      }
     }
 
     if (!currentProviderId) {
-        toast.error('未找到模型提供商，请先配置。')
-        step.value = 'model'
-        loading.value = false
-        return
+      toast.error('未找到模型提供商，请先配置。')
+      step.value = 'model'
+      loading.value = false
+      return
     }
 
     const agentData = {
@@ -457,24 +527,10 @@ const createDefaultAgent = async (providerId = null) => {
       memoryType: "session",
       agentMode: "fibre",
       availableTools: [
-        'todo_write',
-        'todo_read',
-        'execute_shell_command',
-        'execute_python_code',
-        'execute_javascript_code',
-        'file_read',
-        'file_write',
-        'download_file_from_url',
-        'file_update',
-        'load_skill',
-        'add_task',
-        'delete_task',
-        'complete_task',
-        'enable_task',
-        'get_task_details',
-        'fetch_webpages',
-        'search_web_page',
-        'search_image_from_web'
+        'todo_write', 'todo_read', 'execute_shell_command', 'execute_python_code',
+        'execute_javascript_code', 'file_read', 'file_write', 'download_file_from_url',
+        'file_update', 'load_skill', 'add_task', 'delete_task', 'complete_task',
+        'enable_task', 'get_task_details', 'fetch_webpages', 'search_web_page', 'search_image_from_web'
       ],
       availableSkills: skills.value.map(s => s.name),
       systemPrefix: systemPrompt,
@@ -483,7 +539,6 @@ const createDefaultAgent = async (providerId = null) => {
     
     await agentAPI.createAgent(agentData)
     router.replace('/')
-    
   } catch (error) {
     console.error('Failed to create agent:', error)
     toast.error('创建默认 Agent 失败: ' + error.message)
@@ -494,50 +549,81 @@ const createDefaultAgent = async (providerId = null) => {
 }
 
 const handleModelSubmit = async () => {
-  if (!modelForm.name || !modelForm.base_url || !modelForm.api_keys_str || !modelForm.model) {
+  if (!actualProviderName.value || !modelForm.base_url || !modelForm.api_keys_str || !actualModelName.value) {
     toast.error('请填写所有必填字段')
     return
   }
 
-  // 如果开启多模态，必须验证多模态；否则必须验证连接
-  if (modelForm.supportsMultimodal) {
-    if (!multimodalVerified.value) {
-      toast.error('请先验证多模态支持')
-      return
-    }
-  } else {
-    if (!verified.value) {
-      toast.error('请先验证模型连接性')
-      return
-    }
-  }
-
+  // 先验证连接
   loading.value = true
   try {
-    const data = {
-      name: modelForm.name,
+    const verifyData = {
+      name: actualProviderName.value,
       base_url: modelForm.base_url,
       api_keys: modelForm.api_keys_str.trim().split(/[\n,]+/).map(k => k.trim()).filter(k => k),
-      model: modelForm.model,
-      max_tokens: modelForm.maxTokens,
-      temperature: modelForm.temperature,
-      top_p: modelForm.topP,
-      presence_penalty: modelForm.presencePenalty,
-      max_model_len: modelForm.maxModelLen,
+      model: actualModelName.value,
+      max_tokens: DEFAULT_MAX_TOKENS,
+      temperature: DEFAULT_TEMPERATURE,
+      top_p: DEFAULT_TOP_P,
+      presence_penalty: DEFAULT_PRESENCE_PENALTY,
+      max_model_len: DEFAULT_MAX_MODEL_LEN,
       is_default: true
     }
-
-    const res = await modelProviderAPI.createModelProvider(data)
+    await modelProviderAPI.verifyModelProvider(verifyData)
     
+    // 验证成功后保存
+    const res = await modelProviderAPI.createModelProvider(verifyData)
     await createDefaultAgent(res?.id)
   } catch (error) {
     console.error('Failed to save model provider:', error)
-    toast.error(error.message || '保存模型提供商失败')
+    toast.error(error.message || '连接模型验证失败，请检查配置')
     loading.value = false
   }
 }
 
+// Lifecycle
 onMounted(() => {
-  fetchSystemInfo()
+  
+  // Fetch system info after a short delay for animation
+  setTimeout(() => {
+    fetchSystemInfo()
+  }, 1500)
 })
 </script>
+
+<style scoped>
+/* Custom animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+.config-fields-appear {
+  animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+</style>
