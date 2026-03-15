@@ -1508,30 +1508,73 @@ class HtmlPptConverter:
         self._check_table_contrast(slide, table_shape, el, theme)
 
     def _check_table_contrast(self, slide, table_shape, el: ET.Element, theme: dict) -> None:
+        """检查表格文字与背景的对比度，确保文字清晰可见"""
         preset = self._resolve_preset_style("table", theme, el.attrib.get("class") or el.attrib.get("style"))
-        header_fill = el.attrib.get("header-fill") or preset.get("header-fill")
-        cell_fill = el.attrib.get("cell-fill") or preset.get("cell-fill")
-        header_color = el.attrib.get("header-color") or preset.get("header-color")
-        cell_color = el.attrib.get("cell-color") or preset.get("cell-color")
-        
-        if not cell_color and not cell_fill:
-            return
-            
-        if cell_color and cell_fill:
-            bg_rgb = self._color_to_rgb_tuple(cell_fill, default="FFFFFF")
-            text_rgb = self._color_to_rgb_tuple(cell_color, default="000000")
-            contrast = self._contrast_ratio(text_rgb, bg_rgb)
-            if contrast < 4.5:
-                slide_info = str(self.current_slide_path) if self.current_slide_path else "Unknown XML"
-                self._add_error(
-                    f"Error: 表格单元格对比度不足({contrast:.2f})，必须修改XML: {slide_info} | cell-fill={cell_fill} | cell-color={cell_color}"
-                )
+
+        # 获取实际使用的颜色（XML属性优先，其次是主题预设）
+        header_fill = el.attrib.get("header-fill") or preset.get("header-fill") or "#111827"
+        cell_fill = el.attrib.get("cell-fill") or preset.get("cell-fill") or "#0F172A"
+        header_color = el.attrib.get("header-color") or preset.get("header-color") or "#E5E7EB"
+        cell_color = el.attrib.get("cell-color") or preset.get("cell-color") or "#CBD5E1"
+
+        slide_info = str(self.current_slide_path) if self.current_slide_path else "Unknown XML"
+
+        # 检查表头对比度
+        self._validate_contrast_pair(
+            slide_info=slide_info,
+            bg_color=header_fill,
+            text_color=header_color,
+            element_name="表格表头",
+            color_attrs="header-fill, header-color"
+        )
+
+        # 检查单元格对比度
+        self._validate_contrast_pair(
+            slide_info=slide_info,
+            bg_color=cell_fill,
+            text_color=cell_color,
+            element_name="表格单元格",
+            color_attrs="cell-fill, cell-color"
+        )
+
+    def _validate_contrast_pair(
+        self,
+        slide_info: str,
+        bg_color: str,
+        text_color: str,
+        element_name: str,
+        color_attrs: str
+    ) -> None:
+        """验证一对背景色和文字色的对比度"""
+        bg_rgb = self._color_to_rgb_tuple(bg_color, default="FFFFFF")
+        text_rgb = self._color_to_rgb_tuple(text_color, default="000000")
+        contrast = self._contrast_ratio(text_rgb, bg_rgb)
+
+        if contrast < 4.5:
+            # 计算推荐的颜色
+            recommended_color = self._recommend_text_color(bg_color)
+
+            self._add_error(
+                f"Error: {element_name}对比度不足({contrast:.2f})，必须修改XML: {slide_info} | "
+                f"{color_attrs} | 当前: {text_color} on {bg_color} | "
+                f"建议: 使用 {recommended_color} 作为文字色"
+            )
+
+    def _recommend_text_color(self, bg_color: str) -> str:
+        """根据背景色推荐合适的文字颜色（黑色或白色）"""
+        bg_rgb = self._color_to_rgb_tuple(bg_color, default="FFFFFF")
+
+        # 计算与黑色和白色的对比度
+        black_rgb = (0, 0, 0)
+        white_rgb = (255, 255, 255)
+        black_contrast = self._contrast_ratio(black_rgb, bg_rgb)
+        white_contrast = self._contrast_ratio(white_rgb, bg_rgb)
+
+        # 返回对比度更高的颜色
+        if white_contrast > black_contrast:
+            return "#FFFFFF" if white_contrast >= 4.5 else f"#FFFFFF(对比度{white_contrast:.1f}仍不足)"
         else:
-            if cell_fill and not cell_color:
-                slide_info = str(self.current_slide_path) if self.current_slide_path else "Unknown XML"
-                self._add_error(
-                    f"Error: 表格单元格缺少cell-color，必须修改XML: {slide_info} | cell-fill={cell_fill} (深色背景必须配浅色文字)"
-                )
+            return "#000000" if black_contrast >= 4.5 else f"#000000(对比度{black_contrast:.1f}仍不足)"
 
     def _add_image(self, slide, el: ET.Element, slide_path: Path) -> None:
         if self.debug_skip_images:

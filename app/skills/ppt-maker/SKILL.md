@@ -242,11 +242,14 @@ python {ppt-maker-folder-path}/scripts/ppt_manager.py add /path/to/project \
 # 初始化
 python {ppt-maker-folder-path}/scripts/ppt_manager.py init /path/to/project --theme tech-dark
 
-# 添加新页面（自动验证和修复，返回详细结果）
+# 添加新页面（自动验证和修复，添加到末尾）
 python {ppt-maker-folder-path}/scripts/ppt_manager.py add /path/to/project --name "content" --xml '<ppt-slide>...</ppt-slide>'
 
-# 更新第 3 页（自动验证和修复，返回详细结果）
+# 更新第 3 页（自动验证和修复）
 python {ppt-maker-folder-path}/scripts/ppt_manager.py update /path/to/project --position 3 --xml '<ppt-slide>...</ppt-slide>'
+
+# 在第 2 页前插入新页面（自动验证和修复，插入后原第2页及之后的页面自动后移）
+python {ppt-maker-folder-path}/scripts/ppt_manager.py insert /path/to/project --position 2 --name "new_slide" --xml '<ppt-slide>...</ppt-slide>'
 
 # 删除第 5 页
 python {ppt-maker-folder-path}/scripts/ppt_manager.py remove /path/to/project --position 5
