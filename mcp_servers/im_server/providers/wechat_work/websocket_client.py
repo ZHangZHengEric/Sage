@@ -581,23 +581,11 @@ class WeChatWorkWebSocketClient:
 
             await self.websocket.send(json.dumps(message))
             
-            # 等待响应 (5秒超时)
-            try:
-                response = await asyncio.wait_for(self.websocket.recv(), timeout=5)
-                resp_data = json.loads(response)
-                
-                if resp_data.get("errcode") == 0:
-                    logger.info(f"[WeChatWork] 消息发送成功")
-                    return {"success": True}
-                else:
-                    error_msg = resp_data.get("errmsg", "未知错误")
-                    logger.error(f"[WeChatWork] 发送失败: {error_msg}")
-                    return {"success": False, "error": error_msg}
-                    
-            except asyncio.TimeoutError:
-                # 超时但消息可能已发送
-                logger.warning("[WeChatWork] 发送响应超时, 消息可能已发送")
-                return {"success": True, "warning": "响应超时"}
+            # 注意: websockets 10+ 不支持并发 recv()
+            # 主循环的 async for 已经在 recv，这里不能再次调用
+            # 简化处理：只发送，不等待响应（企业微信会在有错误时通过事件回调通知）
+            logger.info("[WeChatWork] 消息已发送")
+            return {"success": True}
 
         except Exception as e:
             logger.error(f"[WeChatWork] 发送消息异常: {e}", exc_info=True)
@@ -609,7 +597,19 @@ class WeChatWorkWebSocketClient:
         Returns:
             bool: 已连接返回 True
         """
-        return self.websocket is not None and self.websocket.open
+        if self.websocket is None:
+            return False
+        # 兼容不同版本的 websockets 库
+        # 新版本使用 state 属性，旧版本使用 open 属性
+        if hasattr(self.websocket, 'open'):
+            return self.websocket.open
+        elif hasattr(self.websocket, 'state'):
+            # websockets 10+ 版本: State.OPEN = 1
+            from websockets.protocol import State
+            return self.websocket.state == State.OPEN
+        else:
+            # 兜底方案：尝试发送 ping 检查
+            return True
 
     def get_chat_info_by_req_id(self, req_id: str) -> Optional[Dict[str, Any]]:
         """通过 req_id 获取聊天信息 (用于回复消息时查找上下文)

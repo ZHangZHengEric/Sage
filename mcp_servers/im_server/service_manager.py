@@ -50,6 +50,7 @@ class ConnectionState:
     last_heartbeat: Optional[datetime] = None
     error_message: Optional[str] = None
     task: Optional[asyncio.Task] = None
+    provider: Optional[Any] = None  # Provider 实例，用于发送消息时复用
 
 
 class IMServiceManager:
@@ -263,6 +264,54 @@ class IMServiceManager:
         
         logger.info(f"[ServiceManager] Channel {key} stopped")
         return True
+    
+    def get_provider(self, sage_user_id: str, provider_type: str) -> Optional[Any]:
+        """
+        获取正在运行的 Provider 实例
+        
+        用于发送消息时复用现有的 WebSocket 连接，避免创建临时连接。
+        
+        Args:
+            sage_user_id: Sage user ID
+            provider_type: IM provider type
+            
+        Returns:
+            Provider 实例，如果没有运行则返回 None
+        """
+        key = self._make_key(sage_user_id, provider_type)
+        
+        with self._lock:
+            state = self._connections.get(key)
+            if state and state.status == ChannelStatus.CONNECTED and state.provider:
+                return state.provider
+        
+        return None
+    
+    def find_provider_by_user(self, provider_type: str, user_id: str) -> Optional[Any]:
+        """
+        通过 provider + user_id 查找正在运行的 Provider 实例
+        
+        用于从 IM 会话中查找对应的 provider 连接。
+        
+        Args:
+            provider_type: IM provider type (wechat_work, feishu, etc.)
+            user_id: 用户在 IM 平台的 user_id
+            
+        Returns:
+            Provider 实例，如果没有运行则返回 None
+        """
+        # 遍历所有连接，查找匹配的 provider
+        # 对于企业微信，只有一个连接（通过 bot_id），所以直接返回第一个匹配的
+        with self._lock:
+            for key, state in self._connections.items():
+                if (state.provider_type == provider_type and 
+                    state.status == ChannelStatus.CONNECTED and 
+                    state.provider):
+                    # 找到匹配的 provider
+                    logger.debug(f"[ServiceManager] Found provider for {provider_type}:{user_id}")
+                    return state.provider
+        
+        return None
     
     async def restart_channel(self, sage_user_id: str, provider_type: str) -> bool:
         """Restart a channel."""
@@ -563,10 +612,11 @@ class IMServiceManager:
             if not provider.start_client(message_handler):
                 raise ValueError("Failed to start WeChat Work WebSocket client")
             
-            # Update state to connected
+            # Update state to connected and save provider instance
             with self._lock:
                 if key in self._connections:
                     self._connections[key].status = ChannelStatus.CONNECTED
+                    self._connections[key].provider = provider  # 保存 provider 实例供后续使用
             
             logger.info(f"[ServiceManager] WeChat Work channel {key} connected")
             
@@ -677,16 +727,22 @@ class IMServiceManager:
     ):
         """Send agent response back to user via IM."""
         try:
-            from .im_providers import get_im_provider
+            # 首先尝试通过 provider + user_id 获取正在运行的 provider 实例
+            provider = self.find_provider_by_user(provider_type, user_id)
             
-            # Get config from database
-            config_data = self._db.get_user_config(sage_user_id, provider_type)
-            if not config_data:
-                logger.error(f"[ServiceManager] No config found for {sage_user_id}:{provider_type}")
-                return
-            
-            # Get provider instance
-            provider = get_im_provider(provider_type, config_data['config'])
+            if not provider:
+                # 如果没有运行的 provider，尝试从数据库创建新的（原有逻辑）
+                logger.warning(f"[ServiceManager] No running provider for {provider_type}:{user_id}, creating new instance")
+                from .im_providers import get_im_provider
+                
+                config_data = self._db.get_user_config(sage_user_id, provider_type)
+                if not config_data:
+                    logger.error(f"[ServiceManager] No config found for {sage_user_id}:{provider_type}")
+                    return
+                
+                provider = get_im_provider(provider_type, config_data['config'])
+            else:
+                logger.info(f"[ServiceManager] Reusing existing provider for {provider_type}:{user_id}")
             
             # Send message
             result = await provider.send_message(
