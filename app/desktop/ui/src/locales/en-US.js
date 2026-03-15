@@ -118,6 +118,8 @@ export default {
   'chat.traceWorkflow': 'Trace Workflow',
   'chat.agentSpawned': 'Agent Spawned',
   'chat.agentName': 'Agent Name',
+  'danmaku.timeDays': 'Last {n} days',
+  'danmaku.countSuffix': ' times',
   'chat.agentDescription': 'Description',
   'chat.agentSystemPrompt': 'System Prompt',
   'chat.taskDelegation': 'Task Delegation',
