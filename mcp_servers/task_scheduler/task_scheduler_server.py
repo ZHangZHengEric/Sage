@@ -453,52 +453,89 @@ scheduler_thread.start()
 
 @mcp.tool()
 @sage_mcp_tool(server_name="task_scheduler")
-async def list_tasks(agent_id: Optional[str] = None, status: Optional[str] = None, include_recurring: bool = True, limit: int = 50) -> str:
+async def list_tasks(
+    task_type: str = "once",
+    status: Optional[str] = None,
+    scheduled_after: Optional[str] = None,
+    scheduled_before: Optional[str] = None,
+    limit: int = 50
+) -> str:
     """
-    List tasks (both one-time and recurring) for a specific agent or all tasks.
+    List tasks from the task scheduler database with flexible filtering.
 
     [Effect]
-    - Retrieves a list of tasks from the task scheduler database.
-    - Can be filtered by agent_id and/or status.
-    - Returns task details including name, description, execution time, and status.
+    - Retrieves a list of tasks (one-time tasks and/or recurring task templates).
     - One-time tasks have IDs starting with 'once_'
     - Recurring tasks have IDs starting with 'rec_'
 
     [When to Use]
-    - Use this to check what tasks are scheduled for an agent.
+    - Use this to check what tasks are scheduled.
     - Use this to monitor task status (pending, processing, completed, failed).
+    - Use time range filters to find tasks in a specific period.
 
     Args:
-        agent_id: Optional filter by agent ID. If not provided, returns tasks for all agents.
-        status: Optional filter by status ('pending', 'processing', 'completed', 'failed'). Only applies to one-time tasks.
-        include_recurring: Whether to include recurring task templates. Default True.
+        task_type: Type of tasks to list. Options:
+                   - "once": Only one-time tasks (supports status and time filters)
+                   - "recurring": Only recurring task templates (no status/time filters)
+                   - "all": Both one-time and recurring tasks
+        status: Filter by status ('pending', 'processing', 'completed', 'failed').
+                Only applies to one-time tasks. Ignored for recurring tasks.
+        scheduled_after: Filter one-time tasks scheduled after this time.
+                         Format: "YYYY-MM-DD HH:MM:SS" or ISO 8601.
+                         Only applies to one-time tasks.
+        scheduled_before: Filter one-time tasks scheduled before this time.
+                          Format: "YYYY-MM-DD HH:MM:SS" or ISO 8601.
+                          Only applies to one-time tasks.
         limit: Maximum number of tasks to return (default 50).
 
     Returns:
         JSON string containing list of tasks with task_type field ('once' or 'recurring').
+
+    Examples:
+        # List pending one-time tasks
+        list_tasks(task_type="once", status="pending")
+
+        # List tasks scheduled for today
+        list_tasks(task_type="once", scheduled_after="2024-03-15 00:00:00", scheduled_before="2024-03-15 23:59:59")
+
+        # List recurring task templates
+        list_tasks(task_type="recurring")
+
+        # List all tasks (limited to 50)
+        list_tasks(task_type="all")
     """
     try:
         result = []
-        
-        # Get one-time tasks
-        once_tasks = db.list_tasks(agent_id=agent_id, status=status, limit=limit)
-        for task in once_tasks:
-            task['task_id'] = _encode_task_id(task['id'], is_recurring=False)
-            task['task_type'] = 'once'
-            task.pop('id', None)  # Remove raw id
-            task.pop('description', None)  # Keep response concise
-            result.append(task)
-        
+
+        # Validate task_type
+        if task_type not in ("once", "recurring", "all"):
+            return f"Error: Invalid task_type '{task_type}'. Must be 'once', 'recurring', or 'all'."
+
+        # Get one-time tasks if requested
+        if task_type in ("once", "all"):
+            once_tasks = db.list_tasks(
+                status=status,
+                execute_after=scheduled_after,
+                execute_before=scheduled_before,
+                limit=limit
+            )
+            for task in once_tasks:
+                task['task_id'] = _encode_task_id(task['id'], is_recurring=False)
+                task['task_type'] = 'once'
+                task.pop('id', None)  # Remove raw id
+                task.pop('description', None)  # Keep response concise
+                result.append(task)
+
         # Get recurring tasks if requested
-        if include_recurring:
-            recurring_tasks = db.list_recurring_tasks(agent_id=agent_id)
+        if task_type in ("recurring", "all"):
+            recurring_tasks = db.list_recurring_tasks()
             for task in recurring_tasks:
                 task['task_id'] = _encode_task_id(task['id'], is_recurring=True)
                 task['task_type'] = 'recurring'
                 task.pop('id', None)  # Remove raw id
                 task.pop('description', None)  # Keep response concise
                 result.append(task)
-        
+
         return json.dumps(result[:limit], indent=2, ensure_ascii=False)
     except Exception as e:
         return f"Error listing tasks: {str(e)}"

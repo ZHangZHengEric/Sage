@@ -216,10 +216,12 @@ class TaskSchedulerDB:
         self,
         agent_id: Optional[str] = None,
         status: Optional[str] = None,
+        execute_after: Optional[str] = None,
+        execute_before: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """List one-time tasks"""
+        """List one-time tasks with optional time range filtering"""
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -233,6 +235,12 @@ class TaskSchedulerDB:
             if status:
                 query += " AND status = ?"
                 params.append(status)
+            if execute_after:
+                query += " AND execute_at >= ?"
+                params.append(execute_after)
+            if execute_before:
+                query += " AND execute_at <= ?"
+                params.append(execute_before)
 
             query += " ORDER BY execute_at ASC LIMIT ? OFFSET ?"
             params.append(limit)

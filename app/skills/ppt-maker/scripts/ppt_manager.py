@@ -96,6 +96,25 @@ def _get_slide_number(filename: str) -> int:
     return 0
 
 
+def _get_slide_name(filename: str) -> Optional[str]:
+    """从文件名中提取名称部分（去掉开头的数字序号和扩展名）"""
+    # 去掉扩展名
+    name_without_ext = filename
+    if filename.lower().endswith('.xml'):
+        name_without_ext = filename[:-4]
+    elif filename.lower().endswith('.html'):
+        name_without_ext = filename[:-5]
+    elif filename.lower().endswith('.htm'):
+        name_without_ext = filename[:-4]
+
+    # 去掉开头的数字序号
+    match = re.match(r'^\d+-?(.*)', name_without_ext)
+    if match:
+        name = match.group(1)
+        return name if name else None
+    return None
+
+
 def _format_slide_filename(number: int, name: Optional[str] = None) -> str:
     """格式化幻灯片文件名"""
     if name:
@@ -498,6 +517,162 @@ class PPTProjectManager:
                 fixes=fixes if auto_fix else []
             )
     
+    def insert(self, position: int, name: str, xml_content: str, auto_fix: bool = True) -> OperationResult:
+        """
+        在指定位置插入新页面（自动验证和修复）
+        插入后，该位置及之后的页面序号会自动后移
+
+        Args:
+            position: 插入位置（1-based，插入到该位置之前）
+            name: 页面名称（用于文件名）
+            xml_content: XML 内容
+            auto_fix: 是否自动修复可修复的问题
+
+        Returns:
+            OperationResult 包含执行结果、修复信息、错误详情等
+        """
+        # 使用 html_to_ppt 的验证和修复功能
+        valid, fixes, fixed_xml = validate_and_fix_slide_xml(xml_content, self._theme_name)
+
+        if not valid:
+            # 验证失败，返回详细错误信息，引导 Agent 调整
+            error_msg = "XML 验证失败，请根据以下错误调整:\n"
+            for fix in fixes:
+                error_msg += f"  - {fix}\n"
+            error_msg += "\n建议:\n"
+            error_msg += "  1. 确保 XML 包含 <ppt-slide> 根节点\n"
+            error_msg += "  2. 确保包含至少一个内容元素 (ppt-text/ppt-rect/ppt-table/ppt-chart/ppt-image)\n"
+            error_msg += "  3. 检查 XML 语法是否正确"
+
+            return OperationResult(
+                success=False,
+                message=error_msg,
+                errors=fixes,
+                fixes=[]
+            )
+
+        # 如果有修复，使用修复后的内容
+        if auto_fix and fixed_xml and fixes:
+            xml_content = fixed_xml
+
+        # 获取所有现有幻灯片
+        slides = _get_all_slides(self.slides_dir)
+        total_slides = len(slides)
+
+        # 验证位置有效性
+        if position < 1:
+            position = 1
+        if position > total_slides + 1:
+            position = total_slides + 1
+
+        try:
+            # 创建临时目录用于存储文件
+            temp_dir = self.slides_dir / ".temp_insert"
+            temp_dir.mkdir(exist_ok=True)
+
+            # 将插入位置及之后的文件移动到临时目录，并增加序号
+            for slide in reversed(slides):
+                slide_num = _get_slide_number(slide.name)
+                if slide_num >= position:
+                    # 提取文件名中的名称部分
+                    slide_name = _get_slide_name(slide.name)
+                    # 新的序号
+                    new_num = slide_num + 1
+                    new_name = _format_slide_filename(new_num, slide_name)
+                    # 先移动到临时目录
+                    temp_file = temp_dir / new_name
+                    shutil.move(str(slide), str(temp_file))
+
+            # 确定新文件的名称
+            target_file = self.slides_dir / _format_slide_filename(position, name)
+
+            # 写入临时文件进行渲染验证
+            temp_file = self.slides_dir / f".temp_insert_{position}_{name}.xml"
+            temp_file.write_text(xml_content, encoding="utf-8")
+
+            try:
+                # 渲染验证（使用 HtmlPptConverter 的完整验证）
+                success, errors = _render_validate(self.project_dir, temp_file)
+                if not success:
+                    temp_file.unlink()
+                    # 恢复原来的文件
+                    for temp_f in temp_dir.iterdir():
+                        if temp_f.is_file():
+                            original_num = _get_slide_number(temp_f.name) - 1
+                            slide_name = _get_slide_name(temp_f.name)
+                            original_name = _format_slide_filename(original_num, slide_name)
+                            shutil.move(str(temp_f), str(self.slides_dir / original_name))
+                    temp_dir.rmdir()
+
+                    # 构建引导性错误信息
+                    error_msg = "页面渲染验证失败，未插入。请根据以下错误调整 XML:\n"
+                    for err in errors:
+                        error_msg += f"  - {err}\n"
+                    error_msg += "\n建议调整:\n"
+                    error_msg += "  1. 检查元素坐标和尺寸是否超出幻灯片边界\n"
+                    error_msg += "  2. 检查颜色对比度是否足够\n"
+                    error_msg += "  3. 检查表格结构是否正确\n"
+                    error_msg += "  4. 确保所有必需的属性都已设置"
+
+                    return OperationResult(
+                        success=False,
+                        message=error_msg,
+                        errors=errors,
+                        fixes=fixes if auto_fix else []
+                    )
+
+                # 验证通过，重命名为正式文件
+                temp_file.rename(target_file)
+
+                # 将临时目录中的文件移回 slides 目录
+                for temp_f in temp_dir.iterdir():
+                    if temp_f.is_file():
+                        shutil.move(str(temp_f), str(self.slides_dir / temp_f.name))
+
+                # 删除临时目录
+                temp_dir.rmdir()
+
+                success_msg = f"已在第 {position} 位插入页面: {target_file.name}"
+                if fixes and auto_fix:
+                    success_msg += "\n自动修复的问题:\n"
+                    for fix in fixes:
+                        success_msg += f"  - {fix}\n"
+
+                return OperationResult(
+                    success=True,
+                    message=success_msg,
+                    file_path=target_file,
+                    fixes=fixes if auto_fix else []
+                )
+
+            except Exception as e:
+                # 清理临时文件
+                if temp_file.exists():
+                    temp_file.unlink()
+                # 恢复原来的文件
+                for temp_f in temp_dir.iterdir():
+                    if temp_f.is_file():
+                        original_num = _get_slide_number(temp_f.name) - 1
+                        slide_name = _get_slide_name(temp_f.name)
+                        original_name = _format_slide_filename(original_num, slide_name)
+                        shutil.move(str(temp_f), str(self.slides_dir / original_name))
+                temp_dir.rmdir()
+
+                return OperationResult(
+                    success=False,
+                    message=f"插入页面时发生错误: {e}",
+                    errors=[str(e)],
+                    fixes=fixes if auto_fix else []
+                )
+
+        except Exception as e:
+            return OperationResult(
+                success=False,
+                message=f"插入页面时发生错误: {e}",
+                errors=[str(e)],
+                fixes=fixes if auto_fix else []
+            )
+
     def remove(self, position: int, reorder: bool = True) -> OperationResult:
         """删除指定位置的页面"""
         target_file = _get_slide_by_position(self.slides_dir, position)
@@ -507,16 +682,16 @@ class PPTProjectManager:
                 message=f"未找到第 {position} 页",
                 errors=[f"未找到第 {position} 页"]
             )
-        
+
         try:
             trash_dir = self.project_dir / ".trash"
             trash_dir.mkdir(exist_ok=True)
             trash_file = trash_dir / f"{target_file.stem}.{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
             shutil.move(str(target_file), str(trash_file))
-            
+
             if reorder:
                 _reorder_slides(self.slides_dir)
-            
+
             return OperationResult(
                 success=True,
                 message=f"已删除第 {position} 页: {target_file.name}\n已移动到: {trash_file}",
@@ -629,11 +804,14 @@ def main() -> None:
   # 初始化项目
   %(prog)s init /path/to/project --theme tech-dark
 
-  # 添加新页面（自动验证）
+  # 添加新页面（自动验证，添加到末尾）
   %(prog)s add /path/to/project --name "content" --xml '<ppt-slide>...</ppt-slide>'
 
   # 更新第 3 页
   %(prog)s update /path/to/project --position 3 --xml '<ppt-slide>...</ppt-slide>'
+
+  # 在第 2 页前插入新页面
+  %(prog)s insert /path/to/project --position 2 --name "new_slide" --xml '<ppt-slide>...</ppt-slide>'
 
   # 删除第 5 页
   %(prog)s remove /path/to/project --position 5
@@ -667,7 +845,14 @@ def main() -> None:
     update_parser.add_argument("--position", "-p", type=int, required=True, help="页面位置（1-based）")
     update_parser.add_argument("--xml", default=None, help="XML 内容（直接传入）")
     update_parser.add_argument("--file", "-f", type=Path, default=None, help="XML 文件路径")
-    
+
+    insert_parser = subparsers.add_parser("insert", help="在指定位置插入新页面（自动验证）")
+    insert_parser.add_argument("project_dir", help="项目目录路径")
+    insert_parser.add_argument("--position", "-p", type=int, required=True, help="插入位置（1-based，插入到该位置之前）")
+    insert_parser.add_argument("--name", "-n", required=True, help="页面名称（用于文件名）")
+    insert_parser.add_argument("--xml", default=None, help="XML 内容（直接传入）")
+    insert_parser.add_argument("--file", "-f", type=Path, default=None, help="XML 文件路径")
+
     remove_parser = subparsers.add_parser("remove", help="删除页面")
     remove_parser.add_argument("project_dir", help="项目目录路径")
     remove_parser.add_argument("--position", "-p", type=int, required=True, help="要删除的页面位置（1-based）")
@@ -718,7 +903,7 @@ def main() -> None:
         
         elif args.command == "update":
             manager = PPTProjectManager(project_dir)
-            
+
             xml_content = None
             if args.xml:
                 xml_content = args.xml
@@ -727,11 +912,27 @@ def main() -> None:
             else:
                 print("错误: 必须提供 --xml 或 --file 参数", file=sys.stderr)
                 sys.exit(1)
-            
+
             result = manager.update(position=args.position, xml_content=xml_content)
             print(result.message)
             sys.exit(0 if result.success else 1)
-        
+
+        elif args.command == "insert":
+            manager = PPTProjectManager(project_dir)
+
+            xml_content = None
+            if args.xml:
+                xml_content = args.xml
+            elif args.file:
+                xml_content = args.file.read_text(encoding="utf-8")
+            else:
+                print("错误: 必须提供 --xml 或 --file 参数", file=sys.stderr)
+                sys.exit(1)
+
+            result = manager.insert(position=args.position, name=args.name, xml_content=xml_content)
+            print(result.message)
+            sys.exit(0 if result.success else 1)
+
         elif args.command == "remove":
             manager = PPTProjectManager(project_dir)
             result = manager.remove(args.position, reorder=not args.no_reorder)
