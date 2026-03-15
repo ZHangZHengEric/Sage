@@ -176,7 +176,7 @@ def _execute_task_sync(task: Dict[str, Any]) -> None:
 
     try:
         # Prepare the message content
-        content = f"【定时任务】{name}\n\n{description}" if description else f"【定时任务】{name}"
+        content = f"【定时任务】{description}" if description else f"【定时任务】{name}"
 
         # Note: session_id is not passed - backend will auto-generate it
         payload = {
