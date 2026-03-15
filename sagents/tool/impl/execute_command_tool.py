@@ -328,6 +328,18 @@ class ExecuteCommandTool:
             # 准备环境变量
             logger.debug(f"[execute_shell_command] 准备环境变量")
             env = os.environ.copy()
+            
+            # 如果存在 SAGE_NODE_MODULES_DIR，将其添加到 PATH
+            sage_node_modules = os.environ.get("SAGE_NODE_MODULES_DIR")
+            if sage_node_modules:
+                # 添加 .bin 目录到 PATH
+                node_bin_path = os.path.join(sage_node_modules, "node_modules", ".bin")
+                if os.path.exists(node_bin_path):
+                    current_path = env.get("PATH", "")
+                    # 将 node_modules/.bin 添加到 PATH 最前面
+                    env["PATH"] = f"{node_bin_path}{os.pathsep}{current_path}"
+                    logger.debug(f"[execute_shell_command] 添加 node_modules/.bin 到 PATH: {node_bin_path}")
+            
             if env_vars:
                 env.update(env_vars)
                 logger.debug(f"[execute_shell_command] 更新环境变量: {env_vars.keys()}")
@@ -335,6 +347,9 @@ class ExecuteCommandTool:
             # 自动修复权限
             logger.debug(f"[execute_shell_command] 检查执行权限")
             self._fix_execute_permission(command, actual_workdir)
+            
+            # 处理 npm/npx 命令，添加 --prefix 指向预设的 node_modules 目录
+            command = self._prepare_npm_command(command)
             
             # 执行命令
             exec_start_time = time.time()
@@ -382,6 +397,47 @@ class ExecuteCommandTool:
                     os.chmod(target_file, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         except Exception:
             pass
+    
+    def _prepare_npm_command(self, command: str) -> str:
+        """处理 npm/npx 命令，如果 SAGE_NODE_MODULES_DIR 环境变量存在，则添加 --prefix 参数
+        
+        Args:
+            command: 原始命令字符串
+            
+        Returns:
+            处理后的命令字符串
+        """
+        import re
+        
+        sage_node_modules = os.environ.get("SAGE_NODE_MODULES_DIR")
+        if not sage_node_modules:
+            return command
+        
+        # 检查是否是 npm 或 npx 命令
+        cmd_trimmed = command.strip()
+        
+        # 匹配 npm 或 npx 命令（考虑 sudo、nohup 等前缀）
+        npm_pattern = r'^(\s*(?:sudo|nohup|time)?\s*)(npm|npx)(\s+)'
+        match = re.match(npm_pattern, cmd_trimmed)
+        
+        if match:
+            prefix = match.group(1)  # sudo/nohup 等前缀
+            cmd_type = match.group(2)  # npm 或 npx
+            space = match.group(3)
+            rest = cmd_trimmed[match.end():]
+            
+            # 检查是否已经有 --prefix 参数
+            if '--prefix' in rest:
+                return command
+            
+            # 构建新命令，添加 --prefix 参数
+            # npm 命令：npm --prefix <dir> <cmd>
+            # npx 命令：npx --prefix <dir> <cmd>
+            new_command = f"{prefix}{cmd_type} --prefix {sage_node_modules}{space}{rest}"
+            logger.info(f"📝 [NPM] 添加 --prefix 参数: {sage_node_modules}")
+            return new_command
+        
+        return command
     
     def _execute_background(self, command: str, workdir: Optional[str], env: Dict, process_id: str) -> Dict[str, Any]:
         """後台執行"""
