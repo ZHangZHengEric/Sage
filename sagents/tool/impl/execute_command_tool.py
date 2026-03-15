@@ -7,7 +7,6 @@ Execute Command Tool
 """
 
 import os
-import sys
 import stat
 import asyncio
 import subprocess
@@ -15,12 +14,11 @@ import tempfile
 import time
 import platform
 import shutil
-import json
 import hashlib
 import traceback
 from typing import Dict, List, Any, Optional, Tuple, Union
 
-from sagents.utils.common_utils import ensure_list
+from sagents.utils.common_utils import ensure_list, get_system_python_path
 from ..tool_base import tool
 from sagents.utils.logger import logger
 
@@ -567,12 +565,13 @@ class ExecuteCommandTool:
             # 优先使用沙箱的 Python
             from sagents.utils.sandbox import get_sandbox_python_path
             python_path = get_sandbox_python_path(session_id)
-            
+
             if not python_path:
-                python_path = sys.executable
+                # 使用 get_system_python_path 来处理 PyInstaller 打包环境
+                python_path = get_system_python_path()
                 if not python_path:
                     python_path = shutil.which("python") or shutil.which("python3")
-            
+
             if not python_path:
                 raise RuntimeError("未找到Python解释器，请确保Python已正确安装")
             parsed_requirements: List[str] = []

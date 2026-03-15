@@ -841,7 +841,7 @@ class ToolManager:
                 # 检查必填参数
                 required_params = getattr(tool, 'required', []) or []
                 # session_id 是系统注入的参数，如果不在 kwargs 中但工具需要，不算 missing
-                missing_params = [p for p in required_params if p not in kwargs or kwargs.get(p) is None]
+                missing_params = [p for p in required_params if p != 'session_id' and (p not in kwargs or kwargs.get(p) is None)]
                 if missing_params:
                     # 返回错误信息而不是 raise
                     return json.dumps({

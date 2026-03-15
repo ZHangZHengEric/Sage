@@ -192,6 +192,7 @@ export const useChatStream = ({
         max_loop_count: config.maxLoopCount,
         agent_id: selectedAgent.id
       }
+
       const response = await chatAPI.streamChat(requestBody, abortControllerRef?.value)
       // 后端已创建会话，触发同步以在侧边栏显示
       updateActiveSession(sessionId, true)

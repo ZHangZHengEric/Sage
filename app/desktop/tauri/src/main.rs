@@ -473,6 +473,14 @@ fn main() {
                         }
                     }
                 }
+                WindowEvent::Resized(_) => {
+                    // 窗口大小改变时，通知前端刷新
+                    let _ = window.emit("tauri-window-resized", ());
+                }
+                WindowEvent::ScaleFactorChanged { .. } => {
+                    // DPI 缩放改变时，通知前端刷新
+                    let _ = window.emit("tauri-scale-factor-changed", ());
+                }
                 _ => {}
             }
         })
