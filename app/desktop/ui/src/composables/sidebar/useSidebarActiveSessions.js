@@ -26,15 +26,27 @@ export const useSidebarActiveSessions = ({
     Object.entries(activeSessions.value || {})
       .filter(([, meta]) => !!meta && !!meta.include_in_sidebar)
       .sort(([, a], [, b]) => (b?.lastUpdate || 0) - (a?.lastUpdate || 0))
-      .map(([sessionId, meta]) => ({
-        id: sessionId,
-        sessionId,
-        sessionStatus: meta?.status === 'completed' ? 'completed' : 'running',
-        rawName: (String(meta?.user_input || '').replace(/^<skill>.*?<\/skill>\s*/, '').split('\n')[0].trim()) || meta?.title || `会话 ${sessionId.slice(-8)}`,
-        url: 'Chat',
-        isInternal: true,
-        query: { session_id: sessionId }
-      }))
+      .map(([sessionId, meta]) => {
+        // 处理 user_input 可能是对象的情况
+        let userInput = meta?.user_input || ''
+        if (userInput && typeof userInput === 'object') {
+          userInput = userInput.text || userInput.content || userInput.message || JSON.stringify(userInput)
+        }
+        // 处理 title 可能是对象的情况
+        let title = meta?.title || ''
+        if (title && typeof title === 'object') {
+          title = title.text || title.content || title.message || JSON.stringify(title)
+        }
+        return {
+          id: sessionId,
+          sessionId,
+          sessionStatus: meta?.status === 'completed' ? 'completed' : 'running',
+          rawName: (String(userInput).replace(/^<skill>.*?<\/skill>\s*/, '').split('\n')[0].trim()) || String(title) || `会话 ${sessionId.slice(-8)}`,
+          url: 'Chat',
+          isInternal: true,
+          query: { session_id: sessionId }
+        }
+      })
   )
 
   const isActiveSessionCurrent = (session) => {

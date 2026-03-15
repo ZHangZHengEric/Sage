@@ -4,7 +4,7 @@
       <DialogHeader class="px-6 py-4 border-b bg-muted/20">
         <DialogTitle class="flex items-center gap-2">
            <Terminal class="w-5 h-5 text-primary" />
-                       {{ t('chat.toolName') }}： {{ toolExecution.function.name }}
+                       {{ t('chat.toolName') }}： {{ displayToolName }}
         </DialogTitle>
       </DialogHeader>
       
@@ -107,6 +107,22 @@ const emit = defineEmits(['update:open'])
 
 const copiedParams = ref(false)
 const copiedResult = ref(false)
+
+// 工具名称多语言映射
+const displayToolName = computed(() => {
+  const toolName = props.toolExecution?.function?.name || ''
+  const nameMap = {
+    'execute_shell_command': t('workbench.tool.shellCommand'),
+    'load_skill': t('workbench.tool.loadSkill'),
+    'file_read': t('workbench.tool.readFile'),
+    'file_write': t('workbench.tool.writeFile'),
+    'execute_python_code': t('workbench.tool.pythonCode'),
+    'execute_javascript_code': t('workbench.tool.jsCode'),
+    'search_web_page': t('workbench.tool.searchWebPage'),
+    'search_image_from_web': t('workbench.tool.searchImageFromWeb')
+  }
+  return nameMap[toolName] || toolName
+})
 
 const parsedArguments = computed(() => {
   try {

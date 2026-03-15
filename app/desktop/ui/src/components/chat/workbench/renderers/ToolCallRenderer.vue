@@ -435,7 +435,101 @@
         </div>
       </template>
 
-      <!-- 9. 其他工具 - 统一显示 -->
+      <!-- 10. search_web_page - 网页搜索结果显示 -->
+      <template v-else-if="isSearchWebPage">
+        <div class="search-web-container h-full flex flex-col overflow-hidden">
+          <!-- 搜索头部 -->
+          <div class="search-header px-4 py-3 border-b border-border/30 bg-muted/20 flex-none">
+            <div class="flex items-center gap-2">
+              <Search class="w-4 h-4 text-primary" />
+              <span class="text-sm font-medium">{{ searchQuery }}</span>
+              <Badge v-if="searchResults.length > 0" variant="secondary" class="text-xs">
+                {{ searchResults.length }} {{ t('workbench.tool.results') }}
+              </Badge>
+            </div>
+          </div>
+          <!-- 搜索结果列表 -->
+          <div class="search-results flex-1 overflow-auto p-4 space-y-3">
+            <div v-if="searchLoading" class="flex items-center justify-center h-full text-muted-foreground">
+              <Loader2 class="w-5 h-5 animate-spin mr-2" />
+              {{ t('workbench.tool.searching') }}
+            </div>
+            <div v-else-if="searchResults.length === 0" class="flex items-center justify-center h-full text-muted-foreground">
+              <div class="text-center">
+                <Search class="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p class="text-sm">{{ t('workbench.tool.noSearchResults') }}</p>
+              </div>
+            </div>
+            <div 
+              v-for="(result, index) in searchResults" 
+              :key="index"
+              class="search-result-item border rounded-lg p-3 hover:bg-muted/30 transition-colors cursor-pointer"
+              @click="openSearchResult(result.url)"
+            >
+              <div class="flex items-start gap-3">
+                <div class="flex-1 min-w-0">
+                  <h4 class="text-sm font-medium text-primary truncate">{{ result.title }}</h4>
+                  <p class="text-xs text-muted-foreground mt-1 line-clamp-2">{{ result.content }}</p>
+                  <div class="flex items-center gap-2 mt-2">
+                    <Globe class="w-3 h-3 text-muted-foreground" />
+                    <span class="text-xs text-muted-foreground truncate">{{ result.url }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 11. search_image_from_web - 图片搜索结果显示 -->
+      <template v-else-if="isSearchImageFromWeb">
+        <div class="search-image-container h-full flex flex-col overflow-hidden">
+          <!-- 搜索头部 -->
+          <div class="search-header px-4 py-3 border-b border-border/30 bg-muted/20 flex-none">
+            <div class="flex items-center gap-2">
+              <ImageIcon class="w-4 h-4 text-primary" />
+              <span class="text-sm font-medium">{{ searchImageQuery }}</span>
+              <Badge v-if="searchImageResults.length > 0" variant="secondary" class="text-xs">
+                {{ searchImageResults.length }} {{ t('workbench.tool.images') }}
+              </Badge>
+            </div>
+          </div>
+          <!-- 图片结果网格 -->
+          <div class="search-image-results flex-1 overflow-auto p-4">
+            <div v-if="searchImageLoading" class="flex items-center justify-center h-full text-muted-foreground">
+              <Loader2 class="w-5 h-5 animate-spin mr-2" />
+              {{ t('workbench.tool.searchingImages') }}
+            </div>
+            <div v-else-if="searchImageResults.length === 0" class="flex items-center justify-center h-full text-muted-foreground">
+              <div class="text-center">
+                <ImageIcon class="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p class="text-sm">{{ t('workbench.tool.noImageResults') }}</p>
+              </div>
+            </div>
+            <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              <div 
+                v-for="(image, index) in searchImageResults" 
+                :key="index"
+                class="search-image-item relative group aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors cursor-pointer"
+                @click="openImagePreview(image.url)"
+              >
+                <img 
+                  :src="image.url" 
+                  :alt="image.title"
+                  class="w-full h-full object-cover"
+                  @error="handleImageError($event, index)"
+                />
+                <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
+                  <p class="text-xs text-white truncate">{{ image.title }}</p>
+                  <p class="text-[10px] text-white/70 truncate">{{ image.source }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 12. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -497,7 +591,8 @@ import {
   ArrowRight,
   User,
   Eye,
-  EyeOff
+  EyeOff,
+  Image as ImageIcon
 } from 'lucide-vue-next'
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
@@ -574,6 +669,8 @@ const isTodoWrite = computed(() => toolName.value === 'todo_write')
 const isSysSpawnAgent = computed(() => toolName.value === 'sys_spawn_agent')
 const isSysDelegateTask = computed(() => toolName.value === 'sys_delegate_task')
 const isSysFinishTask = computed(() => toolName.value === 'sys_finish_task')
+const isSearchWebPage = computed(() => toolName.value === 'search_web_page')
+const isSearchImageFromWeb = computed(() => toolName.value === 'search_image_from_web')
 
 // 显示名称映射
 const displayToolName = computed(() => {
@@ -583,7 +680,9 @@ const displayToolName = computed(() => {
     'file_read': t('workbench.tool.readFile'),
     'file_write': t('workbench.tool.writeFile'),
     'execute_python_code': t('workbench.tool.pythonCode'),
-    'execute_javascript_code': t('workbench.tool.jsCode')
+    'execute_javascript_code': t('workbench.tool.jsCode'),
+    'search_web_page': t('workbench.tool.searchWebPage'),
+    'search_image_from_web': t('workbench.tool.searchImageFromWeb')
   }
   return nameMap[toolName.value] || toolName.value
 })
@@ -1091,6 +1190,66 @@ const finishTaskError = computed(() => {
   if (typeof content === 'string') return content
   return JSON.stringify(content)
 })
+
+// ============ 11. Search Web Page ============
+const searchQuery = computed(() => toolArgs.value.query || '')
+const searchLoading = computed(() => !toolResult.value)
+const searchResults = computed(() => {
+  if (!toolResult.value) return []
+  const content = toolResult.value.content
+  try {
+    const parsed = typeof content === 'string' ? JSON.parse(content) : content
+    if (parsed.results && Array.isArray(parsed.results)) {
+      return parsed.results
+    }
+    if (Array.isArray(parsed)) {
+      return parsed
+    }
+    return []
+  } catch {
+    return []
+  }
+})
+
+const openSearchResult = (url) => {
+  if (url) {
+    window.open(url, '_blank')
+  }
+}
+
+// ============ 12. Search Image From Web ============
+const searchImageQuery = computed(() => toolArgs.value.query || '')
+const searchImageLoading = computed(() => !toolResult.value)
+const searchImageResults = computed(() => {
+  if (!toolResult.value) return []
+  const content = toolResult.value.content
+  try {
+    const parsed = typeof content === 'string' ? JSON.parse(content) : content
+    if (parsed.images && Array.isArray(parsed.images)) {
+      return parsed.images
+    }
+    if (parsed.results && Array.isArray(parsed.results)) {
+      return parsed.results
+    }
+    if (Array.isArray(parsed)) {
+      return parsed
+    }
+    return []
+  } catch {
+    return []
+  }
+})
+
+const openImagePreview = (url) => {
+  if (url) {
+    window.open(url, '_blank')
+  }
+}
+
+const handleImageError = (event, index) => {
+  // 图片加载失败时显示占位符
+  event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23f3f4f6"/%3E%3Ctext x="50" y="50" font-family="Arial" font-size="12" fill="%239ca3af" text-anchor="middle" dy=".3em"%3EImage Error%3C/text%3E%3C/svg%3E'
+}
 </script>
 
 <style scoped>

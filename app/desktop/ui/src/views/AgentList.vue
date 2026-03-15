@@ -280,7 +280,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, Teleport } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { 
   Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, 
@@ -376,12 +376,23 @@ const canDelete = (agent) => {
   return agent.user_id === currentUser.value.userid
 }
 
+// 监听工具列表更新事件
+const handleToolsUpdated = () => {
+  console.log('[AgentList] Received tools-updated event, reloading tools...')
+  loadAvailableTools()
+}
+
 // 生命周期
 onMounted(async () => {
   await loadAgents()
   await loadModelProviders()
   await loadAvailableTools()
   await loadAvailableSkills()
+  window.addEventListener('tools-updated', handleToolsUpdated)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('tools-updated', handleToolsUpdated)
 })
 
 

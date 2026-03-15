@@ -106,6 +106,17 @@
             {{ t('tools.edit') || 'Edit' }}
           </Button>
 
+          <Button 
+            variant="outline" 
+            size="sm" 
+            class="h-8" 
+            :class="getCurrentGroupDisabled() ? 'text-emerald-600 hover:text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:text-amber-600 hover:bg-amber-50'"
+            @click="handleToggleMcpTool(selectedGroupSource)"
+          >
+            <component :is="getCurrentGroupDisabled() ? Power : PowerOff" class="mr-2 h-3.5 w-3.5" />
+            {{ getCurrentGroupDisabled() ? (t('tools.enable') || '启用') : (t('tools.disable') || '禁用') }}
+          </Button>
+
           <Button variant="outline" size="sm" class="h-8" @click="handleRefreshMcpTool(selectedGroupSource)">
             <RefreshCw class="mr-2 h-3.5 w-3.5" />
             {{ t('tools.refresh') }}
@@ -264,7 +275,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info } from 'lucide-vue-next'
+import { Wrench, Search, Code, Database, Globe, Cpu, Plus, Trash2, Loader, RefreshCw, LayoutGrid, Server, Edit, Info, Power, PowerOff } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 import { toolAPI } from '../api/tool.js'
 import { getCurrentUser } from '../utils/auth.js'
@@ -637,6 +648,34 @@ const getGroupCategoryLabel = (source) => {
   if (source.startsWith('内置MCP:')) return '内置MCP'
   if (source.startsWith('MCP Server:')) return '外部MCP'
   return '基础工具'
+}
+
+const getCurrentGroupDisabled = () => {
+  const group = groupedTools.value.find(g => g.source === selectedGroupSource.value)
+  return group?.disabled || false
+}
+
+const handleToggleMcpTool = async (sourceName) => {
+  const serverName = sourceName.startsWith('MCP Server: ') ? sourceName.substring('MCP Server: '.length) : sourceName
+
+  try {
+    loading.value = true
+    const result = await toolAPI.toggleMcpServer(serverName)
+    console.log('[ToolList] toggleMcpServer result:', result)
+    const isDisabled = result?.disabled
+    console.log('[ToolList] isDisabled:', isDisabled)
+    toast.success(isDisabled ? (t('tools.disabledSuccess') || '已禁用') : (t('tools.enabledSuccess') || '已启用'))
+    await loadMcpServers()
+    await loadBasicTools()
+    // 通知其他组件工具列表已更新
+    console.log('[ToolList] Dispatching tools-updated event')
+    window.dispatchEvent(new Event('tools-updated'))
+  } catch (error) {
+    console.error('Failed to toggle MCP server:', error)
+    toast.error(error.message || t('tools.toggleFailed') || '切换失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 // 生命周期

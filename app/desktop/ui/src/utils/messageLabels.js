@@ -63,6 +63,9 @@ export const toolLabelKeys = {
   'forget_user_memory': 'tools.forgetUserMemory',
   // 技能工具
   'load_skill': 'tools.loadSkill',
+  // 搜索工具
+  'search_web_page': 'tools.searchWebPage',
+  'search_image_from_web': 'tools.searchImageFromWeb',
   // Fibre Agent 工具
   'sys_spawn_agent': 'tools.sysSpawnAgent',
   'sys_delegate_task': 'tools.sysDelegateTask',
@@ -130,6 +133,9 @@ export const toolLabels = {
   'forget_user_memory': '遗忘记忆',
   // 技能工具
   'load_skill': '加载技能',
+  // 搜索工具
+  'search_web_page': '网页搜索',
+  'search_image_from_web': '图片搜索',
   // Fibre Agent 工具
   'sys_spawn_agent': '创建智能体',
   'sys_delegate_task': '任务委派',
