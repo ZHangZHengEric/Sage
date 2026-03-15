@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full overflow-hidden relative">
+  <div class="agent-usage-danmaku h-full w-full overflow-hidden relative">
     <!-- 整块可悬停区域：弹幕关闭或能力面板打开时不拦截点击，让下方内容可点 -->
     <div
       class="danmaku-hover-zone absolute inset-0 z-20"
@@ -58,7 +58,6 @@ const layerRef = ref(null)
 const trackHovered = ref(false)
 const closed = ref(false)
 let danmakuItems = []
-let styleEl = null
 let spawnTimeoutId = null
 let pendingSpawn = false
 const laneOccupied = Array(LANE_COUNT).fill(false)
@@ -169,37 +168,6 @@ function spawnOne () {
   })
 }
 
-function injectKeyframes () {
-  if (styleEl) return
-  styleEl = document.createElement('style')
-  styleEl.textContent = `
-    @keyframes danmaku-drift {
-      from { transform: translate3d(0, 0, 0); }
-      to { transform: translate3d(calc(-100vw - 100%), 0, 0); }
-    }
-    .danmaku-item {
-      position: absolute;
-      white-space: nowrap;
-      font-size: 14px;
-      font-weight: 500;
-      color: #111;
-      line-height: 1.4;
-      padding: 2px 0;
-      will-change: transform;
-      backface-visibility: hidden;
-    }
-    .dark .danmaku-item {
-      color: #f8fafc;
-      text-shadow: 0 0 1px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.6);
-    }
-    .danmaku-layer {
-      contain: layout style paint;
-      transform: translateZ(0);
-    }
-  `
-  document.head.appendChild(styleEl)
-}
-
 /** 摇一个「多久后出下一条」的随机数；区间大则有时密集（2～3 条同屏）、有时稀疏（1 条或 0 条） */
 function rollNextDelayMs () {
   return (
@@ -296,7 +264,6 @@ watch(language, () => {
 })
 
 onMounted(async () => {
-  injectKeyframes()
   try {
     danmakuItems = await fetchAllUsage()
     // 若父组件标记为用户已关闭、或当前是历史会话页，不自动开始弹幕（历史会话不展示弹幕）
@@ -314,3 +281,30 @@ onUnmounted(() => {
   stopSpawning()
 })
 </script>
+
+<style>
+/* 弹幕动画与样式：写在静态 style 中随构建打包，避免生产环境 CSP 拦截运行时注入的 <style> */
+@keyframes danmaku-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(calc(-100vw - 100%), 0, 0); }
+}
+.agent-usage-danmaku .danmaku-item {
+  position: absolute;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: #111;
+  line-height: 1.4;
+  padding: 2px 0;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.dark .agent-usage-danmaku .danmaku-item {
+  color: #f8fafc;
+  text-shadow: 0 0 1px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.6);
+}
+.agent-usage-danmaku .danmaku-layer {
+  contain: layout style paint;
+  transform: translateZ(0);
+}
+</style>
