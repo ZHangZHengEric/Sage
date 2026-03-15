@@ -806,20 +806,43 @@ class MessageManager:
     def _apply_compression_level(msg: MessageChunk, level: int) -> MessageChunk:
         """
         应用特定等级的压缩 (Level 1 / Level 2)
-        
+
         Args:
             msg: 原始消息
             level: 压缩等级 (1: 轻度, 2: 强力)
-            
+
         Returns:
             MessageChunk: 压缩后的消息副本
         """
         new_msg = deepcopy(msg)
         content = new_msg.content
 
-        # 处理多模态消息格式 - 只对纯文本消息进行压缩
+        # 处理多模态消息格式
         if isinstance(content, list):
-            # 多模态消息不压缩，直接返回
+            # 多模态消息：压缩文本部分，保留图片
+            new_content = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get('type') == 'text':
+                        # 压缩文本内容
+                        text = item.get('text', '')
+                        if level == 1 and len(text) > 200:
+                            text = text[:100] + f"\n...[Text truncated, total {len(text)} chars]...\n" + text[-100:]
+                        elif level == 2 and len(text) > 100:
+                            text = text[:100] + f"...[Text omitted, length: {len(text)}]"
+                        new_content.append({'type': 'text', 'text': text})
+                    elif item.get('type') == 'image_url':
+                        # 保留图片，但在 Level 2 时可以考虑替换为占位符
+                        if level == 2:
+                            # Level 2: 将图片替换为占位符描述
+                            new_content.append({'type': 'text', 'text': '...[Image content omitted]...'})
+                        else:
+                            new_content.append(item)
+                    else:
+                        new_content.append(item)
+                else:
+                    new_content.append(item)
+            new_msg.content = new_content
             return new_msg
 
         content = content or ""
