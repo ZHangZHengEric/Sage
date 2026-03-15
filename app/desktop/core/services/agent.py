@@ -44,12 +44,45 @@ async def list_agents() -> List[models.Agent]:
     return all_configs
 
 
+def _validate_and_filter_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
+    """验证并过滤掉不可用的工具"""
+    tm = get_tool_manager()
+    if not tm:
+        return agent_config
+    
+    available_tools = agent_config.get("available_tools", []) or agent_config.get("availableTools", [])
+    if not available_tools:
+        return agent_config
+    
+    # 获取当前可用的工具名称列表
+    valid_tool_names = set(tm.list_all_tools_name())
+    
+    # 过滤掉不可用的工具
+    filtered_tools = [t for t in available_tools if t in valid_tool_names]
+    
+    if len(filtered_tools) != len(available_tools):
+        removed_tools = set(available_tools) - set(filtered_tools)
+        logger.warning(f"以下工具不可用，已自动移除: {removed_tools}")
+        
+        # 更新配置
+        if "available_tools" in agent_config:
+            agent_config["available_tools"] = filtered_tools
+        if "availableTools" in agent_config:
+            agent_config["availableTools"] = filtered_tools
+    
+    return agent_config
+
+
 async def create_agent(
     agent_name: str, agent_config: Dict[str, Any]
 ) -> models.Agent:
     """创建新的 Agent，返回创建的 Agent 对象"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
+    
+    # 验证并过滤工具
+    agent_config = _validate_and_filter_tools(agent_config)
+    
     dao = models.AgentConfigDao()
     existing_config = await dao.get_by_name(agent_name)
     if existing_config:
@@ -83,6 +116,10 @@ async def update_agent(
 ) -> models.Agent:
     """更新指定 Agent 的配置，返回 Agent 对象"""
     logger.info(f"开始更新Agent: {agent_id}")
+    
+    # 验证并过滤工具
+    agent_config = _validate_and_filter_tools(agent_config)
+    
     dao = models.AgentConfigDao()
     existing_config = await dao.get_by_id(agent_id)
     if not existing_config:

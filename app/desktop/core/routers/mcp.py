@@ -16,6 +16,7 @@ from ..services.mcp import (
     list_mcp_servers,
     refresh_mcp_server,
     remove_mcp_server,
+    toggle_mcp_server,
 )
 
 # 创建路由器
@@ -133,3 +134,21 @@ async def refresh(server_name: str, http_request: Request):
     """
     status = await refresh_mcp_server(server_name)
     return await Response.succ(data={"server_name": server_name, "status": status})
+
+
+@mcp_router.put("/{server_name}/toggle")
+async def toggle(server_name: str, http_request: Request):
+    """
+    切换MCP服务器启用/禁用状态
+
+    Args:
+        server_name: 服务器名称
+
+    Returns:
+        StandardResponse: 包含操作结果的标准响应
+    """
+    disabled, status_text = await toggle_mcp_server(server_name)
+    return await Response.succ(
+        data={"server_name": server_name, "disabled": disabled},
+        message=f"MCP服务器 '{server_name}' 已{status_text}"
+    )

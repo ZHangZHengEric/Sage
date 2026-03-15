@@ -379,7 +379,51 @@ class Session:
 
     async def _handle_workflow_error(self, error: Exception) -> AsyncGenerator[List[MessageChunk], None]:
         logger.error(f"SAgent: 处理工作流错误: {str(error)}\n{traceback.format_exc()}")
-        yield [MessageChunk(role="assistant", content=f"工作流执行失败: {str(error)}", type="final_answer")]
+        error_message = self._extract_friendly_error_message(error)
+        yield [MessageChunk(role="assistant", content=f"工作流执行失败: {error_message}", type="final_answer")]
+
+    def _extract_friendly_error_message(self, error: Exception) -> str:
+        """从异常中提取友好的错误信息"""
+        error_str = str(error)
+
+        # 处理数据检查失败错误（内容审核）
+        if "DataInspectionFailed" in error_str or "data_inspection_failed" in error_str:
+            if "inappropriate content" in error_str or "inappropriate" in error_str:
+                return "输入内容可能包含不适当的内容，请修改后重试"
+            return "内容安全检查未通过，请修改输入后重试"
+
+        # 处理速率限制错误
+        if "rate_limit" in error_str.lower() or "RateLimitError" in error_str:
+            return "请求过于频繁，请稍后再试"
+
+        # 处理配额不足错误
+        if "quota" in error_str.lower() or "insufficient_quota" in error_str.lower():
+            return "API 配额不足，请检查账户余额或配额设置"
+
+        # 处理认证错误
+        if "authentication" in error_str.lower() or "unauthorized" in error_str.lower() or "401" in error_str:
+            return "API 认证失败，请检查 API Key 是否正确"
+
+        # 处理模型不存在错误
+        if "model" in error_str.lower() and ("not found" in error_str.lower() or "does not exist" in error_str.lower()):
+            return "指定的模型不存在或不可用，请检查模型配置"
+
+        # 处理上下文长度超限
+        if "context_length" in error_str.lower() or "token" in error_str.lower() and "exceed" in error_str.lower():
+            return "输入内容过长，请缩短后重试"
+
+        # 处理连接错误
+        if "connection" in error_str.lower() or "timeout" in error_str.lower() or "network" in error_str.lower():
+            return "网络连接失败，请检查网络设置或稍后重试"
+
+        # 处理服务不可用
+        if "service unavailable" in error_str.lower() or "503" in error_str or "502" in error_str:
+            return "服务暂时不可用，请稍后再试"
+
+        # 默认返回原始错误信息（但截断过长的）
+        if len(error_str) > 200:
+            return error_str[:200] + "..."
+        return error_str
 
     async def run_stream_safe(self, **kwargs) -> AsyncGenerator[List[MessageChunk], None]:
         session_id = kwargs.get("session_id")

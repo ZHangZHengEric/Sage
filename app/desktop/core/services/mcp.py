@@ -132,8 +132,6 @@ async def remove_mcp_server(server_name: str) -> str:
 
 async def toggle_mcp_server(server_name: str) -> (bool, str):
     """切换 MCP 服务器启用/禁用状态，返回 (disabled, status_text)"""
-    tm = get_tool_manager()
-
     dao = models.MCPServerDao()
     existing_server = await dao.get_by_name(server_name)
     if not existing_server:
@@ -149,19 +147,35 @@ async def toggle_mcp_server(server_name: str) -> (bool, str):
 
     await dao.save_mcp_server(server_name, server_config)
 
-    if new_disabled:
-        tm.remove_tool_by_mcp(server_name)
-        status_text = "禁用"
-    else:
-        success = await tm.register_mcp_server(server_name, server_config)
-        if not success:
-            raise SageHTTPException(
-                status_code=500,
-                detail=f"MCP服务器 '{server_name}' 启用失败",
-                error_detail="工具管理器注册失败",
-            )
-        status_text = "启用"
+    # 重新初始化所有 MCP 工具（根据最新配置）
+    await reload_all_mcp_tools()
+
+    status_text = "禁用" if new_disabled else "启用"
     return new_disabled, status_text
+
+
+async def reload_all_mcp_tools():
+    """重新加载所有启用的 MCP 工具"""
+    tm = get_tool_manager()
+    dao = models.MCPServerDao()
+
+    # 1. 清除所有 MCP 工具
+    await tm.clear_mcp_tools()
+
+    # 2. 从数据库获取所有启用的 MCP Server
+    all_servers = await dao.get_list()
+    enabled_servers = [s for s in all_servers if not s.config.get("disabled", False)]
+
+    # 3. 重新注册所有启用的 MCP Server
+    for server in enabled_servers:
+        try:
+            success = await tm.register_mcp_server(server.name, server.config)
+            if success:
+                logger.info(f"[MCP Reload] 成功注册 MCP Server: {server.name}")
+            else:
+                logger.warning(f"[MCP Reload] 注册 MCP Server 失败: {server.name}")
+        except Exception as e:
+            logger.error(f"[MCP Reload] 注册 MCP Server 异常: {server.name}, {e}")
 
 
 async def refresh_mcp_server(server_name: str) -> str:

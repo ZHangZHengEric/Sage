@@ -509,6 +509,32 @@ class ToolManager:
             logger.error(f"Failed to remove MCP server '{server_name}': {e}")
             return False
 
+    async def clear_mcp_tools(self) -> int:
+        """
+        清除所有 MCP 工具（包括 McpToolSpec 和 SageMcpToolSpec）
+
+        Returns:
+            int: 被清除的工具数量
+        """
+        removed_count = 0
+        try:
+            to_delete = []
+            for tool_name, spec in list(self.tools.items()):
+                # 清除所有 MCP 相关工具
+                if isinstance(spec, (McpToolSpec, SageMcpToolSpec)):
+                    to_delete.append(tool_name)
+
+            for tool_name in to_delete:
+                del self.tools[tool_name]
+                removed_count += 1
+                logger.debug(f"Removed MCP tool '{tool_name}'")
+
+            logger.info(f"Cleared {removed_count} MCP tools")
+            return removed_count
+        except Exception as e:
+            logger.error(f"Failed to clear MCP tools: {e}")
+            return 0
+
     async def _discover_mcp_tools(self, mcp_setting_path: Optional[str] = None):
         bool_registered = False
         """Discover and register tools from MCP servers"""

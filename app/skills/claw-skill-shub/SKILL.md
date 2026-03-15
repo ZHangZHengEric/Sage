@@ -1,15 +1,15 @@
 ---
-name: openclaw
-description: OpenClaw Skill Manager - Search and install skills from the OpenClaw registry.
+name: claw-skills-hub
+description: ClawSkillsHub Skill Manager - Search and install skills from the ClawSkillHub registry.
 ---
 
-# OpenClaw Skill Manager
+# ClawSkillsHub Skill Manager
 
-This skill provides capabilities to search and install new skills from the OpenClaw registry (clawhub).
+This skill provides capabilities to search and install new skills from the ClawSkillsHub registry (clawhub).
 
 ## Usage
 
-You can use the `execute_shell_command` tool to interact with the OpenClaw registry using the `clawhub` CLI.
+You can use the `execute_shell_command` tool to interact with the ClawSkillsHub registry using the `clawhub` CLI.
 
 ### Searching for Skills
 
