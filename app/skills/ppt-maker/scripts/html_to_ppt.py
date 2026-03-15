@@ -634,11 +634,13 @@ class HtmlPptConverter:
 
     def _resolve_preset_style(self, tag: str, theme: dict, style_name: str | None) -> dict:
         style_key = (style_name or "").strip()
-        if not style_key:
-            return {}
         group = theme.get(tag, {})
-        if isinstance(group, dict) and style_key in group and isinstance(group[style_key], dict):
-            return dict(group[style_key])
+        if isinstance(group, dict):
+            # If style_key is provided and exists, use it; otherwise use "default" if available
+            if style_key and style_key in group and isinstance(group[style_key], dict):
+                return dict(group[style_key])
+            if "default" in group and isinstance(group["default"], dict):
+                return dict(group["default"])
         return {}
 
     def _add_error(self, message: str) -> None:
@@ -1448,6 +1450,28 @@ class HtmlPptConverter:
                 tf = cell.text_frame
                 tf.clear()
                 p = tf.paragraphs[0]
+
+                # Determine colors for this cell
+                is_header_row = header and r_idx == 0
+                # Use explicit XML attribute, or preset, or hardcoded default
+                default_bg_color = "#111827" if is_header_row else "#0F172A"
+                default_txt_color = "#E5E7EB" if is_header_row else "#CBD5E1"
+                cell_bg_color = header_fill if is_header_row else cell_fill
+                cell_text_color = header_color if is_header_row else cell_color
+
+                # Ensure we always have colors (use hardcoded defaults as fallback)
+                if not cell_bg_color:
+                    cell_bg_color = default_bg_color
+                if not cell_text_color:
+                    cell_text_color = default_txt_color
+
+                # Set cell background color first
+                try:
+                    cell.fill.solid()
+                    cell.fill.fore_color.rgb = _parse_color(cell_bg_color, default=default_bg_color)
+                except Exception:
+                    traceback.print_exc()
+
                 # p.text = value # Don't set text directly, use rich text if needed, but for table usually simple.
                 # However, to support newlines in table cells too:
                 if "\n" in value:
@@ -1461,47 +1485,24 @@ class HtmlPptConverter:
                         p.text = v_line.strip()
                         p.font.size = Pt(font_size)
                         # Re-apply styles
-                        if header and r_idx == 0:
+                        if is_header_row:
                             p.font.bold = True
-                            if header_color:
-                                try:
-                                    p.font.color.rgb = _parse_color(header_color, default="E5E7EB")
-                                except Exception:
-                                    traceback.print_exc()
-                        else:
-                            if cell_color:
-                                try:
-                                    p.font.color.rgb = _parse_color(cell_color, default="CBD5E1")
-                                except Exception:
-                                    traceback.print_exc()
+                        # Set font color immediately after setting text
+                        try:
+                            p.font.color.rgb = _parse_color(cell_text_color, default=default_txt_color)
+                        except Exception:
+                            traceback.print_exc()
                 else:
                     p.text = value
                     p.font.size = Pt(font_size)
-                    if header and r_idx == 0:
+                    if is_header_row:
                         p.font.bold = True
-                        if header_color:
-                            try:
-                                p.font.color.rgb = _parse_color(header_color, default="E5E7EB")
-                            except Exception:
-                                traceback.print_exc()
-                        if header_fill:
-                            try:
-                                cell.fill.solid()
-                                cell.fill.fore_color.rgb = _parse_color(header_fill, default="111827")
-                            except Exception:
-                                traceback.print_exc()
-                    else:
-                        if cell_color:
-                            try:
-                                p.font.color.rgb = _parse_color(cell_color, default="CBD5E1")
-                            except Exception:
-                                traceback.print_exc()
-                        if cell_fill:
-                            try:
-                                cell.fill.solid()
-                                cell.fill.fore_color.rgb = _parse_color(cell_fill, default="0F172A")
-                            except Exception:
-                                traceback.print_exc()
+                    # Set font color immediately after setting text
+                    try:
+                        p.font.color.rgb = _parse_color(cell_text_color, default=default_txt_color)
+                    except Exception:
+                        traceback.print_exc()
+
                 if border_width:
                     _apply_table_cell_border(cell, border_color, border_width)
 
@@ -1700,8 +1701,9 @@ class HtmlPptConverter:
         
         chart_data = self._parse_chart_data(el)
         if not chart_data:
-            print(f"Warning: Empty or invalid data for chart at ({x}, {y})")
-            return
+            error_msg = f"图表数据无效或为空 at ({x}, {y})。请检查图表数据格式，确保包含标题行和至少一行数据，使用换行符分隔。示例：\nType, Hours\nSingle agent, 10\nMulti-agent, 6"
+            self._add_error(error_msg)
+            raise ValueError(error_msg)
 
         try:
             graphic_frame = slide.shapes.add_chart(
@@ -1739,15 +1741,45 @@ class HtmlPptConverter:
                 # 饼图等某些图表类型没有 category_axis，需要特殊处理
                 try:
                     cat_axis = chart.category_axis
-                    if cat_axis and hasattr(cat_axis, 'has_tick_labels') and cat_axis.has_tick_labels:
-                        cat_axis.tick_labels.font.color.rgb = body_rgb
+                    if cat_axis:
+                        # 设置刻度标签颜色（强制设置，不管 has_tick_labels）
+                        try:
+                            cat_axis.tick_labels.font.color.rgb = body_rgb
+                        except Exception:
+                            pass
+                        # 设置坐标轴标题颜色
+                        if hasattr(cat_axis, 'has_title') and cat_axis.has_title and cat_axis.axis_title:
+                            try:
+                                cat_axis.axis_title.text_frame.paragraphs[0].font.color.rgb = body_rgb
+                            except Exception:
+                                pass
+                        # 设置坐标轴线条颜色
+                        try:
+                            cat_axis.format.line.color.rgb = body_rgb
+                        except Exception:
+                            pass
                 except ValueError:
                     # 饼图等没有 category axis，忽略
                     pass
                 try:
                     val_axis = chart.value_axis
-                    if val_axis and hasattr(val_axis, 'has_tick_labels') and val_axis.has_tick_labels:
-                        val_axis.tick_labels.font.color.rgb = body_rgb
+                    if val_axis:
+                        # 设置刻度标签颜色（强制设置，不管 has_tick_labels）
+                        try:
+                            val_axis.tick_labels.font.color.rgb = body_rgb
+                        except Exception:
+                            pass
+                        # 设置坐标轴标题颜色
+                        if hasattr(val_axis, 'has_title') and val_axis.has_title and val_axis.axis_title:
+                            try:
+                                val_axis.axis_title.text_frame.paragraphs[0].font.color.rgb = body_rgb
+                            except Exception:
+                                pass
+                        # 设置坐标轴线条颜色
+                        try:
+                            val_axis.format.line.color.rgb = body_rgb
+                        except Exception:
+                            pass
                 except ValueError:
                     # 某些图表没有 value axis，忽略
                     pass

@@ -223,6 +223,8 @@ const handleSelectConversation = (conversation) => {
   let unlisten = null
   let unlistenPermission = null
   let unlistenCloseDialog = null
+  let unlistenResize = null
+  let unlistenScaleFactor = null
 
   onMounted(async () => {
     // Listen for Tauri backend ready event
@@ -270,6 +272,22 @@ const handleSelectConversation = (conversation) => {
         showCloseDialog.value = true
       })
 
+      // Listen for window resize events to force repaint
+      unlistenResize = await listen('tauri-window-resized', () => {
+        // Force a repaint by triggering a layout recalculation
+        document.body.style.display = 'none'
+        document.body.offsetHeight // Force reflow
+        document.body.style.display = ''
+      })
+
+      // Listen for scale factor changes (DPI changes)
+      unlistenScaleFactor = await listen('tauri-scale-factor-changed', () => {
+        // Force a repaint
+        document.body.style.display = 'none'
+        document.body.offsetHeight // Force reflow
+        document.body.style.display = ''
+      })
+
       // Also try to get port actively, in case we missed the event
       try {
           const port = await invoke('get_server_port')
@@ -293,5 +311,7 @@ const handleSelectConversation = (conversation) => {
     if (unlisten) unlisten()
     if (unlistenPermission) unlistenPermission()
     if (unlistenCloseDialog) unlistenCloseDialog()
+    if (unlistenResize) unlistenResize()
+    if (unlistenScaleFactor) unlistenScaleFactor()
   })
 </script>

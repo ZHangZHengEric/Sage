@@ -18,8 +18,20 @@
       </Button>
     </div>
     <!-- PPT 预览容器 -->
-    <div v-show="!loading && !error" ref="containerRef" class="pptx-preview-container flex-1 overflow-auto">
-      <!-- pptx-preview 将在这里渲染 -->
+    <div v-show="!loading && !error" class="flex flex-col flex-1 overflow-hidden">
+      <!-- 提示信息 -->
+      <div class="bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 px-4 py-2 flex items-center justify-between shrink-0">
+        <p class="text-xs text-amber-700 dark:text-amber-300">
+          <span class="font-medium">提示：</span>预览效果可能与实际文件有差异，建议用 PowerPoint 或 WPS 打开查看
+        </p>
+        <Button variant="ghost" size="sm" class="h-6 text-xs" @click="openFile">
+          <ExternalLink class="w-3 h-3 mr-1" />
+          打开文件
+        </Button>
+      </div>
+      <div ref="containerRef" class="pptx-preview-container flex-1 overflow-auto">
+        <!-- pptx-preview 将在这里渲染 -->
+      </div>
     </div>
   </div>
 </template>
