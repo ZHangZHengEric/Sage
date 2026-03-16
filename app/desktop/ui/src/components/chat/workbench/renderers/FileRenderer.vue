@@ -275,7 +275,9 @@ const formatTime = (timestamp) => {
 // 文件信息
 const displayFileName = computed(() => {
   // 优先从 filePath 提取文件名，因为 fileName 可能是链接文本
-  const pathName = props.filePath.split('/').pop()
+  let pathName = props.filePath.split('/').pop()
+  // 移除查询参数（如 ?t=123）
+  pathName = pathName.split('?')[0]
   // 如果 pathName 有扩展名，使用它；否则使用 fileName
   if (pathName && pathName.includes('.')) {
     return pathName
