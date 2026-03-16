@@ -9,6 +9,32 @@ const CONFIG = {
     timeout: 1000 * 60 * 10 // request timeout
 }
 
+// 请求配置常量
+export const REQUEST_CONFIG = {
+    // 默认超时时间
+    DEFAULT_TIMEOUT: 1000 * 60 * 10, // 10分钟
+
+    // 重试配置
+    RETRY_COUNT: 3,
+    RETRY_DELAY: 1000,
+
+    // 响应状态码
+    SUCCESS_CODES: [200, 201, 204],
+
+    // 错误处理配置
+    SHOW_ERROR_MESSAGE: true,
+    SHOW_SUCCESS_MESSAGE: false
+}
+
+// 业务状态码
+export const BUSINESS_CODES = {
+    SUCCESS: 200,
+    UNAUTHORIZED: 401,
+    FORBIDDEN: 403,
+    NOT_FOUND: 404,
+    SERVER_ERROR: 500,
+    TIMEOUT: 408
+}
 
 // 创建请求实例
 class Request {
@@ -161,6 +187,36 @@ class Request {
         return result
     }
 
+    // 处理响应
+    handleResponse(response) {
+        // request.js已经处理了响应格式化，直接返回
+        if (response.success) {
+            return response.data
+        } else {
+            // 如果不成功，抛出错误让上层处理
+            const error = new Error(response.message || '请求失败')
+            error.code = response.code
+            error.response = response
+            throw error
+        }
+    }
+
+    // 处理错误
+    async handleError(error, method, url) {
+        console.error(`API ${method} ${url} 失败:`, error)
+
+        // 如果是request.js返回的格式化错误响应，直接抛出
+        if (error.success === false) {
+            throw error
+        }
+
+        // 其他错误，包装后抛出
+        const wrappedError = new Error(error.message || '网络请求失败')
+        wrappedError.code = error.code || 'NETWORK_ERROR'
+        wrappedError.originalError = error
+        throw wrappedError
+    }
+
     // 基础请求方法
     async request(config) {
         try {
@@ -249,55 +305,246 @@ class Request {
     }
 
     // GET请求
-    get(url, params = {}, config = {}) {
-        // 处理查询参数
-        const queryString = Object.keys(params).length > 0
-            ? '?' + new URLSearchParams(params).toString()
-            : ''
+    async get(url, params = {}, config = {}) {
+        try {
+            // 处理查询参数
+            const queryString = Object.keys(params).length > 0
+                ? '?' + new URLSearchParams(params).toString()
+                : ''
 
-        return this.request({
-            method: 'GET',
-            url: url + queryString,
-            ...config
-        })
+            const response = await this.request({
+                method: 'GET',
+                url: url + queryString,
+                ...config
+            })
+            return this.handleResponse(response)
+        } catch (error) {
+            return this.handleError(error, 'GET', url)
+        }
     }
 
     // POST请求
-    post(url, data = {}, config = {}) {
-        return this.request({
-            method: 'POST',
-            url,
-            data,
-            ...config
-        })
+    async post(url, data = {}, config = {}) {
+        try {
+            const response = await this.request({
+                method: 'POST',
+                url,
+                data,
+                ...config
+            })
+            return this.handleResponse(response)
+        } catch (error) {
+            return this.handleError(error, 'POST', url)
+        }
     }
 
     // PUT请求
-    put(url, data = {}, config = {}) {
-        return this.request({
-            method: 'PUT',
-            url,
-            data,
-            ...config
-        })
+    async put(url, data = {}, config = {}) {
+        try {
+            const response = await this.request({
+                method: 'PUT',
+                url,
+                data,
+                ...config
+            })
+            return this.handleResponse(response)
+        } catch (error) {
+            return this.handleError(error, 'PUT', url)
+        }
     }
 
     // DELETE请求
-    delete(url, config = {}) {
-        return this.request({
-            method: 'DELETE',
-            url,
-            ...config
-        })
+    async delete(url, config = {}) {
+        try {
+            const response = await this.request({
+                method: 'DELETE',
+                url,
+                ...config
+            })
+            return this.handleResponse(response)
+        } catch (error) {
+            return this.handleError(error, 'DELETE', url)
+        }
     }
 
     // PATCH请求
-    patch(url, data = {}, config = {}) {
-        return this.request({
-            method: 'PATCH',
+    async patch(url, data = {}, config = {}) {
+        try {
+            const response = await this.request({
+                method: 'PATCH',
+                url,
+                data,
+                ...config
+            })
+            return this.handleResponse(response)
+        } catch (error) {
+            return this.handleError(error, 'PATCH', url)
+        }
+    }
+
+    /**
+     * 流式POST请求
+     * @param {string} url - 请求URL
+     * @param {Object} data - 请求数据
+     * @param {Object} config - 请求配置
+     * @returns {Promise<Response>}
+     */
+    async postStream(url, data = {}, config = {}) {
+        try {
+            // 直接使用request.js的底层request方法，但不解析JSON
+            const finalConfig = await this.executeRequestInterceptors({
+                baseURL: this.baseURL,
+                timeout: this.timeout,
+                credentials: this.withCredentials ? 'include' : 'omit',
+                method: 'POST',
+                url,
+                data,
+                ...config
+            })
+
+            // 构建完整URL
+            const fullUrl = finalConfig.url.startsWith('http')
+                ? finalConfig.url
+                : `${finalConfig.baseURL}${finalConfig.url}`
+
+            // 创建AbortController用于超时控制
+            const controller = config.signal || new AbortController()
+            const timeoutId = !config.signal ? setTimeout(() => controller.abort(), finalConfig.timeout) : null
+
+            // 构建fetch选项
+            const fetchOptions = {
+                method: 'POST',
+                headers: finalConfig.headers,
+                credentials: finalConfig.credentials,
+                signal: controller.signal,
+                body: JSON.stringify(finalConfig.data)
+            }
+
+            // 发送请求
+            const response = await fetch(fullUrl, fetchOptions)
+            if (timeoutId) clearTimeout(timeoutId)
+
+            // 检查响应状态
+            if (!response.ok) {
+                let errorData = null
+                try {
+                    const contentType = response.headers.get('content-type') || ''
+                    if (contentType.includes('application/json')) {
+                        errorData = await response.json()
+                    } else {
+                        const text = await response.text()
+                        errorData = {detail: text}
+                    }
+                } catch (e) {
+                    errorData = null
+                }
+
+                const detailMessage = errorData && (errorData.detail || errorData.message)
+                    ? (errorData.detail || errorData.message)
+                    : `HTTP ${response.status}`
+
+                throw Object.assign(new Error(detailMessage), {
+                    status: response.status,
+                    statusText: response.statusText,
+                    response: errorData
+                })
+            }
+
+            return response
+        } catch (error) {
+            return this.handleError(error, 'POST_STREAM', url)
+        }
+    }
+
+    /**
+     * 流式GET请求
+     * @param {string} url - 请求URL
+     * @param {Object} config - 请求配置
+     * @returns {Promise<Response>}
+     */
+    async getStream(url, config = {}) {
+        try {
+            const finalConfig = await this.executeRequestInterceptors({
+                baseURL: this.baseURL,
+                timeout: this.timeout,
+                credentials: this.withCredentials ? 'include' : 'omit',
+                method: 'GET',
+                url,
+                ...config
+            })
+
+            const fullUrl = finalConfig.url.startsWith('http')
+                ? finalConfig.url
+                : `${finalConfig.baseURL}${finalConfig.url}`
+
+            const controller = config.signal || new AbortController()
+            const timeoutId = !config.signal ? setTimeout(() => controller.abort(), finalConfig.timeout) : null
+
+            const fetchOptions = {
+                method: 'GET',
+                headers: finalConfig.headers,
+                credentials: finalConfig.credentials,
+                signal: controller.signal
+            }
+
+            const response = await fetch(fullUrl, fetchOptions)
+            if (timeoutId) clearTimeout(timeoutId)
+
+            if (!response.ok) {
+                let errorData = null
+                try {
+                    const contentType = response.headers.get('content-type') || ''
+                    if (contentType.includes('application/json')) {
+                        errorData = await response.json()
+                    } else {
+                        const text = await response.text()
+                        errorData = {detail: text}
+                    }
+                } catch (e) {
+                    errorData = null
+                }
+
+                const detailMessage = errorData && (errorData.detail || errorData.message)
+                    ? (errorData.detail || errorData.message)
+                    : `HTTP ${response.status}`
+
+                throw Object.assign(new Error(detailMessage), {
+                    status: response.status,
+                    statusText: response.statusText,
+                    response: errorData
+                })
+            }
+
+            return response
+        } catch (error) {
+            return this.handleError(error, 'GET_STREAM', url)
+        }
+    }
+
+    /**
+     * SSE请求
+     * @param {string} url - 请求URL
+     * @param {Object} config - 请求配置
+     * @returns {Promise<EventSource>}
+     */
+    async sse(url, config = {}) {
+        // 直接复用 request.js 的拦截器逻辑构建 URL
+        const finalConfig = await this.executeRequestInterceptors({
+            baseURL: this.baseURL,
+            timeout: this.timeout,
+            credentials: this.withCredentials ? 'include' : 'omit',
+            method: 'GET',
             url,
-            data,
             ...config
+        })
+
+        const fullUrl = finalConfig.url.startsWith('http')
+            ? finalConfig.url
+            : `${finalConfig.baseURL}${finalConfig.url}`
+
+        // 使用 EventSource
+        return new EventSource(fullUrl, {
+            withCredentials: finalConfig.credentials === 'include'
         })
     }
 
@@ -328,7 +575,6 @@ export {Request}
 export const setBaseURL = (url) => {
     console.log('[Request] Updating Base URL to:', url)
     request.baseURL = url
-    // Update axios instance defaults if needed (but Request class uses this.baseURL in request method)
 }
 
 // 便捷方法
@@ -337,3 +583,6 @@ export const post = (url, data, config) => request.post(url, data, config)
 export const put = (url, data, config) => request.put(url, data, config)
 export const del = (url, config) => request.delete(url, config)
 export const patch = (url, data, config) => request.patch(url, data, config)
+export const postStream = (url, data, config) => request.postStream(url, data, config)
+export const getStream = (url, config) => request.getStream(url, config)
+export const sse = (url, config) => request.sse(url, config)

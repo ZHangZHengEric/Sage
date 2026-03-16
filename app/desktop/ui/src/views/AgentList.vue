@@ -49,11 +49,21 @@
                     class="h-12 w-12 rounded-xl bg-primary/10 object-cover shrink-0"
                   />
                   
-                  <!-- Name -->
+                  <!-- Name and ID -->
                   <div class="flex-1 min-w-0">
                     <CardTitle class="text-base font-bold leading-tight truncate" :title="agent.name">
                       {{ agent.name }}
                     </CardTitle>
+                    <div class="flex items-center gap-1 mt-0.5">
+                      <button
+                        @click.stop="copyAgentId(agent.id)"
+                        class="text-[10px] font-mono text-muted-foreground/70 bg-muted/40 hover:bg-muted/60 px-1.5 py-0.5 rounded transition-colors cursor-pointer flex items-center gap-1"
+                        title="点击复制完整ID"
+                      >
+                        <span class="truncate max-w-[120px]">{{ agent.id }}</span>
+                        <Copy class="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -901,6 +911,31 @@ const toggleFlip = (agentId) => {
     flippedCard.value = null
   } else {
     flippedCard.value = agentId
+  }
+}
+
+// 复制 Agent ID
+const copyAgentId = async (agentId) => {
+  try {
+    // 使用 Web Clipboard API（Tauri 也支持）
+    await navigator.clipboard.writeText(agentId)
+    toast.success('Agent ID 已复制到剪贴板')
+  } catch (error) {
+    console.error('复制失败:', error)
+    // 降级方案：使用传统方法
+    const textarea = document.createElement('textarea')
+    textarea.value = agentId
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      toast.success('Agent ID 已复制到剪贴板')
+    } catch (e) {
+      toast.error('复制失败，请手动复制')
+    }
+    document.body.removeChild(textarea)
   }
 }
 

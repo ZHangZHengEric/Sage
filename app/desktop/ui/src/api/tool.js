@@ -1,8 +1,8 @@
 /**
- * Tool相关API接口
+ * Tool 相关 API 接口
  */
 
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const toolAPI = {
   /**
@@ -11,7 +11,7 @@ export const toolAPI = {
    * @returns {Promise<Array>}
    */
   getTools: async (params = {}) => {
-    return await baseAPI.get('/api/tools')
+    return await request.get('/api/tools')
   },
 
 
@@ -21,7 +21,7 @@ export const toolAPI = {
    * @returns {Promise<Object>}
    */
   getMcpServers: async () => {
-    return await baseAPI.get('/api/mcp/list')
+    return await request.get('/api/mcp/list')
   },
 
   /**
@@ -30,7 +30,7 @@ export const toolAPI = {
    * @returns {Promise<Object>}
    */
   toggleMcpServer: async (serverName) => {
-    return await baseAPI.put(`/api/mcp/${serverName}/toggle`)
+    return await request.put(`/api/mcp/${serverName}/toggle`)
   },
 
   /**
@@ -39,7 +39,7 @@ export const toolAPI = {
    * @returns {Promise<Object>}
    */
   deleteMcpServer: async (serverName) => {
-    return await baseAPI.delete(`/api/mcp/${serverName}`)
+    return await request.delete(`/api/mcp/${serverName}`)
   },
 
   /**
@@ -56,7 +56,7 @@ export const toolAPI = {
    * @returns {Promise<Object>}
    */
   addMcpServer: async (payload) => {
-    return await baseAPI.post('/api/mcp/add', payload)
+    return await request.post('/api/mcp/add', payload)
   },
 
   /**
@@ -65,6 +65,6 @@ export const toolAPI = {
    * @returns {Promise<Object>}
    */
   refreshMcpServer: async (serverName) => {
-    return await baseAPI.post(`/api/mcp/${serverName}/refresh`)
+    return await request.post(`/api/mcp/${serverName}/refresh`)
   }
 }
