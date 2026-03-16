@@ -157,7 +157,7 @@ def init_logging(log_name="app", log_level="DEBUG", log_path= "./logs"):
     logger.add(SafeStdout(), level=log_level, format="{message}")
 
     params = {
-        "rotation": "100MB",
+        "rotation": "10MB",
         "retention": 20,
         "compression": "zip",
         "encoding": "utf8",
