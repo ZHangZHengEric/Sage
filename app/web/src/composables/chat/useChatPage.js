@@ -26,9 +26,10 @@ export const useChatPage = (props) => {
     getSessionLastIndex,
     updateActiveSessionLastIndex,
     updateActiveSession,
-    persistRunningSessionToCache,
     removeSessionFromCache,
-    deriveSessionTitle
+    deriveSessionTitle,
+    startSSESync,
+    stopSSESync
   } = useChatActiveSessionCache()
 
   const {
@@ -406,32 +407,13 @@ export const useChatPage = (props) => {
     })
   }
   const persistRunningSessionOnLeaveChat = (includeInSidebar = true) => {
+    // 如果页面正在生成回复，中断它
     if (isLoading.value && abortControllerRef.value) {
       abortControllerRef.value.abort()
       abortControllerRef.value = null
     }
-
-    const sessionId = currentSessionId.value
-    if (!sessionId) return
-    const meta = activeSessions.value?.[sessionId]
-    if (meta?.status === 'running') {
-      const firstUserMessage = (messages.value || []).find(item =>
-        item?.session_id === sessionId && item?.role === 'user' && String(item?.content || '').trim()
-      )
-      if (firstUserMessage) {
-        const firstUserInput = String(firstUserMessage.content || '')
-          .replace(/^<skill>.*?<\/skill>\s*/, '')
-          .trim()
-        if (firstUserInput) {
-          updateActiveSession(sessionId, true, deriveSessionTitle(firstUserInput), firstUserInput, false)
-        }
-      }
-      persistRunningSessionToCache(sessionId, includeInSidebar)
-      return
-    }
-    if (meta?.status === 'completed') {
-      removeSessionFromCache(sessionId)
-    }
+    // 注意：进行中的会话状态现在由服务端通过 SSE 同步
+    // 前端不再主动管理 activeSessions 状态
   }
 
   useChatLifecycle({
@@ -461,7 +443,9 @@ export const useChatPage = (props) => {
     activeSubSessionId,
     isLoading,
     isHistoryLoading,
-    onLeaveChatPage: persistRunningSessionOnLeaveChat
+    onLeaveChatPage: persistRunningSessionOnLeaveChat,
+    startSSESync,
+    stopSSESync
   })  
   
   // 监听工作台 items 变化，当有新 item 且处于实时模式时，自动打开工作台

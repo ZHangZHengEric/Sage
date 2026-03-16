@@ -1,4 +1,4 @@
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 
 /**
@@ -12,7 +12,7 @@ async function upload(file, path) {
     if (path) {
         formData.append('path', path)
     }
-    return baseAPI.post('/api/oss/upload', formData)
+    return request.post('/api/oss/upload', formData)
 }
 
 export const ossAPI = {

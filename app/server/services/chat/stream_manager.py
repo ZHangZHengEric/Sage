@@ -25,6 +25,7 @@ class StreamManager:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(StreamManager, cls).__new__(cls)
+            cls._instance._active_sessions_subscribers: Set[asyncio.Queue] = set()
         return cls._instance
 
     @classmethod
@@ -32,6 +33,36 @@ class StreamManager:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    def _notify_active_sessions_changed(self):
+        """通知所有订阅者活跃会话列表已变更"""
+        sessions = self.get_active_sessions()
+        for queue in list(self._active_sessions_subscribers):
+            try:
+                asyncio.create_task(queue.put(sessions))
+            except Exception as e:
+                logger.warning(f"Failed to notify subscriber: {e}")
+
+    async def subscribe_active_sessions(self):
+        """
+        SSE 订阅活跃会话列表
+        当活跃会话列表变更时，会收到更新
+        """
+        queue = asyncio.Queue()
+        self._active_sessions_subscribers.add(queue)
+        try:
+            # 立即推送一次当前状态
+            await queue.put(self.get_active_sessions())
+            while True:
+                sessions = await queue.get()
+                if sessions is None:  # 结束信号
+                    break
+                yield sessions
+        except asyncio.CancelledError:
+            logger.info("Client disconnected from active sessions stream")
+            raise
+        finally:
+            self._active_sessions_subscribers.discard(queue)
 
     async def start_session(self, session_id: str, query: str, generator, lock: asyncio.Lock):
         """
@@ -54,7 +85,10 @@ class StreamManager:
         session = SessionState(session_id=session_id, lock=lock)
         session.query=query
         self._sessions[session_id] = session
-        
+
+        # 通知活跃会话列表变更
+        self._notify_active_sessions_changed()
+
         # 启动后台任务
         session.task = asyncio.create_task(self._background_worker(session, generator))
         logger.debug(f"Started background task for session {session_id}")
@@ -93,7 +127,10 @@ class StreamManager:
 
             if self._sessions.get(session.session_id) is session:
                 del self._sessions[session.session_id]
-            
+
+            # 通知活跃会话列表变更
+            self._notify_active_sessions_changed()
+
     async def cleanup_session(self, session_id: str):
         if session_id in self._sessions:
             del self._sessions[session_id]
@@ -165,12 +202,13 @@ class StreamManager:
             session.subscribers.discard(queue)
 
     def get_active_sessions(self):
+        """获取所有活跃会话列表（可选，用于侧边栏展示）"""
         if not self._sessions:
             return []
-        """获取所有活跃会话列表（可选，用于侧边栏展示）"""
         return [
             {
                 "session_id": s.session_id,
+                "query": s.query,
                 "created_at": s.created_at,
                 "is_completed": s.is_completed,
                 "last_activity": s.last_activity
