@@ -334,20 +334,27 @@ class ExecuteCommandTool:
                 global_npm_paths = []
                 home_dir = os.path.expanduser("~")
 
+                # Sage客户端 预设的 node_modules .bin 路径（优先级最高）
+                sage_bin_path = os.path.join(home_dir, ".sage", ".sage_node_env", "node_modules", ".bin")
+
                 if platform.system() == "Darwin":  # macOS
                     global_npm_paths = [
+                        sage_bin_path,
                         "/usr/local/bin",
                         "/opt/homebrew/bin",
                         os.path.join(home_dir, ".npm-global/bin"),
                         os.path.join(home_dir, ".nvm/versions/node/*/bin"),
+
                     ]
                 elif platform.system() == "Windows":
                     global_npm_paths = [
+                        sage_bin_path,
                         os.path.join(home_dir, "AppData/Roaming/npm"),
                         "C:/Program Files/nodejs",
                     ]
                 else:  # Linux
                     global_npm_paths = [
+                        sage_bin_path,
                         "/usr/local/bin",
                         "/usr/bin",
                         os.path.join(home_dir, ".npm-global/bin"),
@@ -371,17 +378,6 @@ class ExecuteCommandTool:
 
                 env["PATH"] = current_path
 
-            # 如果存在 SAGE_NODE_MODULES_DIR，将其添加到 PATH
-            sage_node_modules = os.environ.get("SAGE_NODE_MODULES_DIR")
-            if sage_node_modules:
-                # 添加 .bin 目录到 PATH
-                node_bin_path = os.path.join(sage_node_modules, "node_modules", ".bin")
-                if os.path.exists(node_bin_path):
-                    current_path = env.get("PATH", "")
-                    # 将 node_modules/.bin 添加到 PATH 最前面
-                    env["PATH"] = f"{node_bin_path}{os.pathsep}{current_path}"
-                    logger.debug(f"[execute_shell_command] 添加 node_modules/.bin 到 PATH: {node_bin_path}")
-            
             if env_vars:
                 env.update(env_vars)
                 logger.debug(f"[execute_shell_command] 更新环境变量: {env_vars.keys()}")
@@ -819,19 +815,25 @@ class ExecuteCommandTool:
                 global_npm_paths = []
                 home_dir = os.path.expanduser("~")
 
+                # Sage客户端 预设的 node_modules .bin 路径（优先级最高）
+                sage_bin_path = os.path.join(home_dir, ".sage", ".sage_node_env", "node_modules", ".bin")
+
                 if platform.system() == "Darwin":  # macOS
                     global_npm_paths = [
+                        sage_bin_path,
                         "/usr/local/bin",
                         "/opt/homebrew/bin",
                         os.path.join(home_dir, ".npm-global/bin"),
                     ]
                 elif platform.system() == "Windows":
                     global_npm_paths = [
+                        sage_bin_path,
                         os.path.join(home_dir, "AppData/Roaming/npm"),
                         "C:/Program Files/nodejs",
                     ]
                 else:  # Linux
                     global_npm_paths = [
+                        sage_bin_path,
                         "/usr/local/bin",
                         "/usr/bin",
                         os.path.join(home_dir, ".npm-global/bin"),
@@ -945,20 +947,25 @@ class ExecuteCommandTool:
                 # 添加常见的全局 npm 路径到 PATH
                 global_npm_paths = []
                 home_dir = os.path.expanduser("~")
-
+                # Sage客户端 预设的 node_modules .bin 路径（优先级最高）
+                sage_bin_path = os.path.join(home_dir, ".sage", ".sage_node_env", "node_modules", ".bin")
+                
                 if platform.system() == "Darwin":  # macOS
                     global_npm_paths = [
+                        sage_bin_path,
                         "/usr/local/bin",
                         "/opt/homebrew/bin",
                         os.path.join(home_dir, ".npm-global/bin"),
                     ]
                 elif platform.system() == "Windows":
                     global_npm_paths = [
+                        sage_bin_path,
                         os.path.join(home_dir, "AppData/Roaming/npm"),
                         "C:/Program Files/nodejs",
                     ]
                 else:  # Linux
                     global_npm_paths = [
+                        sage_bin_path,
                         "/usr/local/bin",
                         "/usr/bin",
                         os.path.join(home_dir, ".npm-global/bin"),
@@ -969,7 +976,7 @@ class ExecuteCommandTool:
                     if os.path.exists(npm_path) and npm_path not in current_path:
                         current_path = f"{npm_path}{os.pathsep}{current_path}"
                 check_env["PATH"] = current_path
-
+  
             for command in commands:
                 logger.debug(f"🔍 检查命令: {command}")
 
