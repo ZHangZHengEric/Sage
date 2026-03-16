@@ -1,4 +1,4 @@
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const modelProviderAPI = {
   /**
@@ -6,7 +6,7 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   listModelProviders: async () => {
-    return await baseAPI.get('/api/llm-provider/list')
+    return await request.get('/api/llm-provider/list')
   },
 
   /**
@@ -15,7 +15,7 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   createModelProvider: async (data) => {
-    return await baseAPI.post('/api/llm-provider/create', data)
+    return await request.post('/api/llm-provider/create', data)
   },
 
   /**
@@ -25,7 +25,7 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   updateModelProvider: async (id, data) => {
-    return await baseAPI.put(`/api/llm-provider/update/${id}`, data)
+    return await request.put(`/api/llm-provider/update/${id}`, data)
   },
 
   /**
@@ -34,7 +34,7 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   deleteModelProvider: async (id) => {
-    return await baseAPI.delete(`/api/llm-provider/delete/${id}`)
+    return await request.delete(`/api/llm-provider/delete/${id}`)
   },
 
   /**
@@ -43,7 +43,7 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   verifyModelProvider: async (data) => {
-    return await baseAPI.post('/api/llm-provider/verify', data)
+    return await request.post('/api/llm-provider/verify', data)
   },
 
   /**
@@ -52,6 +52,6 @@ export const modelProviderAPI = {
    * @returns {Promise<Object>}
    */
   verifyMultimodal: async (data) => {
-    return await baseAPI.post('/api/llm-provider/verify-multimodal', data)
+    return await request.post('/api/llm-provider/verify-multimodal', data)
   }
 }
