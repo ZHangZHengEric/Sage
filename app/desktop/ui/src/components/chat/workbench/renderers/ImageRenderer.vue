@@ -11,6 +11,18 @@
         <span class="text-sm font-medium truncate">{{ displayAlt }}</span>
         <Badge variant="secondary" class="text-xs">{{ isSvg ? 'SVG' : '图片' }}</Badge>
       </div>
+      <div class="flex items-center gap-1 flex-shrink-0">
+        <Button 
+          variant="ghost" 
+          size="sm"
+          @click="downloadFile"
+          class="h-7 px-2"
+          title="下载文件"
+        >
+          <Download class="w-4 h-4 mr-1" />
+          下载
+        </Button>
+      </div>
     </div>
 
     <!-- SVG 内容 -->
@@ -48,8 +60,12 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { readFile, readTextFile } from '@tauri-apps/plugin-fs'
+import { save } from '@tauri-apps/plugin-dialog'
+import { Download } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 
 const props = defineProps({
   item: {
@@ -188,6 +204,55 @@ const alt = computed(() => {
 const displayAlt = computed(() => {
   return alt.value || '图片'
 })
+
+// 下载文件
+const downloadFile = async () => {
+  try {
+    // 获取文件路径
+    const filePath = rawSrc.value
+    if (!filePath) {
+      toast.error('文件路径为空')
+      return
+    }
+
+    // 去掉 file:// 协议头
+    let cleanPath = filePath
+    if (/^file:\/\//i.test(filePath)) {
+      cleanPath = filePath.replace(/^file:\/\//i, '')
+    }
+
+    console.log('[ImageRenderer] Download file from:', cleanPath)
+
+    // 读取文件内容
+    const fileData = await readFile(cleanPath)
+    console.log('[ImageRenderer] File loaded, size:', fileData.length)
+
+    // 提取原始文件扩展名
+    const originalFileName = displayAlt.value || 'image'
+    const extMatch = originalFileName.match(/\.([^.]+)$/)
+    const ext = extMatch ? extMatch[1] : (isSvg.value ? 'svg' : 'png')
+
+    // 弹出保存对话框
+    const savePath = await save({
+      defaultPath: originalFileName,
+      filters: [{
+        name: '图片文件',
+        extensions: [ext]
+      }]
+    })
+
+    if (savePath) {
+      console.log('[ImageRenderer] Saving to:', savePath)
+      // 写入文件
+      const { writeFile } = await import('@tauri-apps/plugin-fs')
+      await writeFile(savePath, fileData)
+      toast.success(`已保存到: ${savePath}`)
+    }
+  } catch (error) {
+    console.error('[ImageRenderer] 下载文件失败:', error)
+    toast.error('下载失败: ' + error.message)
+  }
+}
 
 // ItemHeader 相关信息
 const roleLabel = computed(() => {
