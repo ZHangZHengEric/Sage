@@ -7,6 +7,7 @@ import os
 import json
 import logging
 from typing import Optional, Dict, Any, List
+from pathlib import Path
 
 import httpx
 
@@ -20,6 +21,28 @@ except ImportError:
     MessageChunk = None
     MessageManager = None
     MessageRole = None
+
+# IM Server file sending tool will be imported lazily to avoid circular imports
+SEND_FILE_AVAILABLE = None  # Will be determined on first use
+send_file_through_im = None
+
+def _ensure_send_file_import():
+    """Lazily import send_file_through_im to avoid circular imports."""
+    global SEND_FILE_AVAILABLE, send_file_through_im
+    if SEND_FILE_AVAILABLE is not None:
+        return SEND_FILE_AVAILABLE
+    
+    try:
+        from mcp_servers.im_server.im_server import send_file_through_im as _send_file
+        send_file_through_im = _send_file
+        SEND_FILE_AVAILABLE = True
+        logger.debug("[AgentClient] send_file_through_im imported successfully")
+    except Exception as e:
+        logger.warning(f"[AgentClient] Failed to import send_file_through_im: {e}")
+        SEND_FILE_AVAILABLE = False
+        send_file_through_im = None
+    
+    return SEND_FILE_AVAILABLE
 
 logger = logging.getLogger("AgentClient")
 
@@ -146,6 +169,160 @@ class AgentClient:
             if isinstance(content, str) and content.strip():
                 return content
         return ""
+    
+    def _extract_tool_arguments(self, tool_call: Any) -> Dict[str, Any]:
+        """Extract tool arguments from tool_call object."""
+        if isinstance(tool_call, dict):
+            args_str = tool_call.get("function", {}).get("arguments", "{}")
+        elif hasattr(tool_call, 'function'):
+            args_str = getattr(tool_call.function, 'arguments', "{}")
+        else:
+            return {}
+        
+        try:
+            if isinstance(args_str, str):
+                return json.loads(args_str)
+            elif isinstance(args_str, dict):
+                return args_str
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse tool arguments: {args_str}")
+        return {}
+    
+    def _extract_file_paths_from_messages(self, messages: List[Any]) -> List[str]:
+        """
+        Extract file paths from file_write and send_file_through_im tool calls.
+        
+        Returns list of file paths that Agent created or tried to send.
+        """
+        file_paths = []
+        
+        for msg in messages:
+            # Handle both MessageChunk objects and dicts (fallback mode)
+            if isinstance(msg, dict):
+                if msg.get("role") != "assistant":
+                    continue
+                tool_calls = msg.get("tool_calls", [])
+            else:
+                if SAGE_MESSAGE_AVAILABLE and MessageRole:
+                    if msg.role != MessageRole.ASSISTANT.value:
+                        continue
+                tool_calls = msg.tool_calls if hasattr(msg, 'tool_calls') else []
+            
+            if not tool_calls:
+                continue
+            
+            for tool_call in tool_calls:
+                tool_name = self._extract_tool_name(tool_call)
+                
+                if tool_name in ("file_write", "send_file_through_im"):
+                    args = self._extract_tool_arguments(tool_call)
+                    file_path = args.get("file_path")
+                    if file_path and file_path not in file_paths:
+                        file_paths.append(file_path)
+                        logger.debug(f"[AgentClient] Found file path from {tool_name}: {file_path}")
+        
+        return file_paths
+    
+    def _convert_virtual_to_host_path(self, virtual_path: str, agent_id: str) -> Optional[str]:
+        """
+        Convert virtual path to host file system path.
+        
+        Args:
+            virtual_path: Path like /sage-workspace/outputs/file.txt
+            agent_id: Agent ID to determine the host workspace
+            
+        Returns:
+            Host path or None if conversion fails
+        """
+        # Get Sage home directory
+        sage_home = Path.home() / ".sage"
+        agent_workspace = sage_home / "agents" / agent_id
+        
+        # Common virtual path prefixes
+        virtual_prefixes = ["/sage-workspace", "/workspace"]
+        
+        for prefix in virtual_prefixes:
+            if virtual_path.startswith(prefix + "/") or virtual_path == prefix:
+                # Replace virtual prefix with actual path
+                relative_path = virtual_path[len(prefix):].lstrip("/")
+                host_path = agent_workspace / relative_path
+                
+                if host_path.exists():
+                    return str(host_path)
+                else:
+                    # Try to find file in common subdirectories
+                    for subdir in ["outputs", "data", "temp"]:
+                        candidate = agent_workspace / subdir / relative_path
+                        if candidate.exists():
+                            return str(candidate)
+                        # Also try if relative_path already contains subdir
+                        candidate2 = agent_workspace / relative_path
+                        if candidate2.exists():
+                            return str(candidate2)
+        
+        # If path doesn't match virtual prefixes, check if it exists as-is (might be already host path)
+        if os.path.exists(virtual_path):
+            return virtual_path
+        
+        # Try relative to agent workspace
+        direct_path = agent_workspace / virtual_path.lstrip("/")
+        if direct_path.exists():
+            return str(direct_path)
+        
+        logger.warning(f"[AgentClient] Could not convert virtual path to host path: {virtual_path}")
+        return None
+    
+    async def _send_files_to_im(self, file_paths: List[str], agent_id: str, 
+                                provider: str, user_id: str, chat_id: Optional[str]) -> List[Dict[str, Any]]:
+        """
+        Send files to IM user.
+        
+        Args:
+            file_paths: List of file paths (virtual or host paths)
+            agent_id: Agent ID for path conversion
+            provider: IM provider name
+            user_id: User ID
+            chat_id: Chat ID (optional)
+            
+        Returns:
+            List of send results
+        """
+        # Ensure import is attempted
+        if not _ensure_send_file_import():
+            logger.warning("[AgentClient] send_file_through_im not available, cannot send files")
+            return []
+        
+        results = []
+        for virtual_path in file_paths:
+            # Convert to host path
+            host_path = self._convert_virtual_to_host_path(virtual_path, agent_id)
+            if not host_path:
+                logger.warning(f"[AgentClient] Skipping file (path not found): {virtual_path}")
+                continue
+            
+            try:
+                logger.info(f"[AgentClient] Sending file to {provider}: {host_path}")
+                result = await send_file_through_im(
+                    provider=provider,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    file_path=host_path
+                )
+                results.append({
+                    "virtual_path": virtual_path,
+                    "host_path": host_path,
+                    "result": result
+                })
+                logger.info(f"[AgentClient] File send result: {result}")
+            except Exception as e:
+                logger.error(f"[AgentClient] Failed to send file {host_path}: {e}")
+                results.append({
+                    "virtual_path": virtual_path,
+                    "host_path": host_path,
+                    "error": str(e)
+                })
+        
+        return results
     
     def _create_message_chunk(self, data: Dict[str, Any]) -> Optional[Any]:
         """Create MessageChunk from response data."""
@@ -277,7 +454,7 @@ class AgentClient:
                 platform_info += f", 群聊ID: {chat_id}"
             platform_info += "】\n\n"
 
-            # 构建消息内容
+            # 构建消息内容 - 始终提供完整的工具提示
             if is_file_message:
                 file_desc = f"文件名: {file_info.get('name', 'unknown')}\n"
                 file_desc += f"文件大小: {file_info.get('size', 0)} 字节\n"
@@ -285,9 +462,15 @@ class AgentClient:
                 file_desc += f"本地路径: {file_info.get('local_path', 'unknown')}\n"
                 
                 full_content = platform_info + content + "\n" + file_desc
-                full_content += "\n(P.S. 如需回复该用户，请使用 send_message_through_im 工具，如需发送文件请使用 send_file_through_im 工具)"
             else:
-                full_content = platform_info + content + "\n\n(P.S. 如需回复该用户，请使用 send_message_through_im 工具，参数: provider='" + provider + "', user_id='" + (user_id or "") + "', chat_id='" + (chat_id or "") + "')"
+                full_content = platform_info + content
+            
+            file_write_path = ""
+            # 统一添加工具使用提示
+            full_content += f"\n\n【可用工具】"
+            full_content += f"\n- 发送文本: send_message_through_im(provider='{provider}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', content='消息内容')"
+            full_content += f"\n- 发送文件: send_file_through_im(provider='{provider}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', file_path='文件的绝对路径')"
+            # full_content += f"\n\n【提示】创建文件请保存到 /sage-workspace/outputs/ 目录，发送文件时使用相同的绝对路径。"
             
             payload = {
                 "agent_id": agent_id,
@@ -339,7 +522,8 @@ class AgentClient:
                 return {
                     "success": True,
                     "has_im_tool": True,
-                    "response": None
+                    "response": None,
+                    "sent_files": sent_files
                 }
             else:
                 logger.info(f"[AgentClient] Agent response received. Length: {len(response_text)}")
@@ -348,7 +532,8 @@ class AgentClient:
                 return {
                     "success": True,
                     "has_im_tool": False,
-                    "response": response_text
+                    "response": response_text,
+                    "sent_files": sent_files
                 }
             
         except Exception as e:
