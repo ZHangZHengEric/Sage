@@ -28,6 +28,16 @@
         <Button 
           variant="ghost" 
           size="sm"
+          @click="downloadFile"
+          class="h-7 px-2"
+          title="下载文件"
+        >
+          <Download class="w-4 h-4 mr-1" />
+          下载
+        </Button>
+        <Button 
+          variant="ghost" 
+          size="sm"
           @click="openFile"
           class="h-7 px-2"
           title="打开文件"
@@ -144,10 +154,13 @@ import {
   File,
   Globe,
   FileText,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Download
 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-shell'
 import { readTextFile, readFile } from '@tauri-apps/plugin-fs'
+import { save } from '@tauri-apps/plugin-dialog'
+import { toast } from 'vue-sonner'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useThemeStore } from '@/stores/theme'
@@ -582,6 +595,40 @@ const openFile = async () => {
     await open(props.filePath)
   } catch (err) {
     console.error('打开文件失败:', err)
+  }
+}
+
+// 下载文件
+const downloadFile = async () => {
+  try {
+    // 读取文件内容
+    const fileData = await readFile(props.filePath)
+    console.log('[FileRenderer] Download file, size:', fileData.length, 'name:', displayFileName.value)
+
+    // 提取文件扩展名
+    const fileName = displayFileName.value
+    const extMatch = fileName.match(/\.([^.]+)$/)
+    const ext = extMatch ? extMatch[1] : ''
+
+    // 弹出保存对话框
+    const savePath = await save({
+      defaultPath: fileName,
+      filters: ext ? [{
+        name: `${ext.toUpperCase()} 文件`,
+        extensions: [ext]
+      }] : undefined
+    })
+
+    if (savePath) {
+      console.log('[FileRenderer] Saving to:', savePath)
+      // 写入文件 - 使用 Uint8Array 直接写入
+      const { writeFile } = await import('@tauri-apps/plugin-fs')
+      await writeFile(savePath, fileData)
+      toast.success(`已保存到: ${savePath}`)
+    }
+  } catch (error) {
+    console.error('[FileRenderer] 下载文件失败:', error)
+    toast.error('下载失败: ' + error.message)
   }
 }
 
