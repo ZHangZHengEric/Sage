@@ -728,7 +728,16 @@ watch(() => props.message, (newMessage, oldMessage) => {
     const fileMatches = extractFileReferences(newMessage.content)
     console.log('[MessageRenderer] Watch found file references:', fileMatches.length)
     fileMatches.forEach((file) => {
-      // addItem 内部会去重
+      // 检查该文件是否已经在该消息中添加过
+      const existingFileItem = workbenchStore.items.find(item =>
+        item.messageId === messageId &&
+        item.type === (file.isImage ? 'image' : 'file') &&
+        (item.data?.filePath === file.filePath || item.data?.src === file.filePath)
+      )
+      if (existingFileItem) {
+        console.log('[MessageRenderer] File already exists in workbench for this message:', file.filePath)
+        return
+      }
       // 图片文件使用 type: 'image'，其他文件使用 type: 'file'
       workbenchStore.addItem({
         type: file.isImage ? 'image' : 'file',
@@ -750,7 +759,16 @@ watch(() => props.message, (newMessage, oldMessage) => {
     const codeBlocks = extractCodeBlocks(newMessage.content)
     console.log('[MessageRenderer] Watch found code blocks:', codeBlocks.length)
     codeBlocks.forEach((code) => {
-      // addItem 内部会去重
+      // 检查该代码块是否已经在该消息中添加过
+      const existingCodeItem = workbenchStore.items.find(item =>
+        item.messageId === messageId &&
+        item.type === 'code' &&
+        item.data?.code === code.code
+      )
+      if (existingCodeItem) {
+        console.log('[MessageRenderer] Code block already exists in workbench for this message:', code.language)
+        return
+      }
       workbenchStore.addItem({
         type: 'code',
         role: 'assistant',
