@@ -21,7 +21,9 @@ export const useChatLifecycle = ({
   activeSubSessionId,
   isLoading,
   isHistoryLoading,
-  onLeaveChatPage
+  onLeaveChatPage,
+  startSSESync,
+  stopSSESync
 }) => {
   const handleBeforeUnload = () => {
     if (typeof onLeaveChatPage === 'function') {
@@ -57,6 +59,10 @@ export const useChatLifecycle = ({
     } else {
       createSession()
     }
+    // 启动 SSE 同步
+    if (typeof startSSESync === 'function') {
+      startSSESync()
+    }
   })
 
   onUnmounted(() => {
@@ -69,6 +75,10 @@ export const useChatLifecycle = ({
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
     clearScrollTimer()
+    // 停止 SSE 同步
+    if (typeof stopSSESync === 'function') {
+      stopSSESync()
+    }
   })
 
   watch(() => agents.value, async (newAgents) => {

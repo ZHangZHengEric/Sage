@@ -440,7 +440,6 @@ const {
   disableActiveSessionSelection
 } = useSidebarActiveSessions({
   route,
-  chatAPI,
   onSessionClick: handleActiveSessionNavigate
 })
 

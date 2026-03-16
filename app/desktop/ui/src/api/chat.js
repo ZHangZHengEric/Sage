@@ -2,7 +2,7 @@
  * Chat相关API接口
  */
 
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const chatAPI = {
 
@@ -12,7 +12,7 @@ export const chatAPI = {
    * @returns {Promise<Object>}
    */
   getConversationMessages: async (conversationId) => {
-    return await baseAPI.get(`/api/conversations/${conversationId}/messages`)
+    return await request.get(`/api/conversations/${conversationId}/messages`)
   },
 
   /**
@@ -21,7 +21,7 @@ export const chatAPI = {
    * @returns {Promise<Object>}
    */
   getSharedConversationMessages: async (conversationId) => {
-    return await baseAPI.get(`/api/share/conversations/${conversationId}/messages`)
+    return await request.get(`/api/share/conversations/${conversationId}/messages`)
   },
 
   /**
@@ -30,7 +30,7 @@ export const chatAPI = {
    * @returns {Promise<boolean>}
    */
   deleteConversation: async (conversationId) => {
-    return await baseAPI.delete(`/api/conversations/${conversationId}`)
+    return await request.delete(`/api/conversations/${conversationId}`)
   },
 
   /**
@@ -51,9 +51,9 @@ export const chatAPI = {
     if (params.search) queryParams.append('search', params.search)
     if (params.agent_id) queryParams.append('agent_id', params.agent_id)
     if (params.sort_by) queryParams.append('sort_by', params.sort_by)
-    
+
     const url = `/api/conversations${queryParams.toString() ? '?' + queryParams.toString() : ''}`
-    return await baseAPI.get(url)
+    return await request.get(url)
   },
 
   /**
@@ -63,7 +63,7 @@ export const chatAPI = {
    * @returns {Promise<Response>} 流式响应
    */
   streamChat: async (messageData, abortController = null) => {
-    return await baseAPI.postStream('/api/web-stream', messageData, {
+    return await request.postStream('/api/web-stream', messageData, {
       signal: abortController
     })
   },
@@ -75,7 +75,7 @@ export const chatAPI = {
    * @returns {Promise<Object>}
    */
   interruptSession: async (sessionId, message = '用户请求中断') => {
-    return await baseAPI.post(`/api/sessions/${sessionId}/interrupt`, {
+    return await request.post(`/api/sessions/${sessionId}/interrupt`, {
       message
     })
   },
@@ -88,17 +88,17 @@ export const chatAPI = {
    * @returns {Promise<Response>} 流式响应
    */
   resumeStream: async (sessionId, lastIndex = 0, abortController = null) => {
-    return await baseAPI.getStream(`/api/stream/resume/${sessionId}?last_index=${lastIndex}`, {
+    return await request.getStream(`/api/stream/resume/${sessionId}?last_index=${lastIndex}`, {
       signal: abortController
     })
   },
 
   getActiveSessions: async (timeout = 800) => {
     // 兼容普通 GET
-    return await baseAPI.get('/api/stream/active_sessions', {}, { timeout })
+    return await request.get('/api/stream/active_sessions', {}, { timeout })
   },
-  
+
   subscribeActiveSessions: async () => {
-    return await baseAPI.sse('/api/stream/active_sessions')
+    return await request.sse('/api/stream/active_sessions')
   }
 }
