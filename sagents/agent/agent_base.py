@@ -144,6 +144,7 @@ class AgentBase(ABC):
         """
         处理多模态消息内容，将本地图片路径转换为 base64
         保持远程图片 URL 不变
+        图片会被压缩至最大 512x512 像素
 
         Args:
             msg: 消息字典
@@ -153,6 +154,8 @@ class AgentBase(ABC):
         """
         import base64
         from pathlib import Path
+        from PIL import Image
+        import io
 
         content = msg.get('content')
         if not isinstance(content, list):
@@ -197,13 +200,24 @@ class AgentBase(ABC):
                     continue
 
                 try:
-                    # 读取文件并转换为 base64
-                    with open(path_obj, 'rb') as f:
-                        image_data = f.read()
+                    # 打开图片并压缩
+                    with Image.open(path_obj) as img:
+                        # 转换为 RGB 模式（处理 RGBA 等模式）
+                        if img.mode in ('RGBA', 'P'):
+                            img = img.convert('RGB')
+
+                        # 压缩图片至最大 512x512，保持原始比例
+                        img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+
+                        # 保存到内存缓冲区
+                        buffer = io.BytesIO()
+                        img.save(buffer, format='JPEG', quality=85)
+                        image_data = buffer.getvalue()
+
                     base64_data = base64.b64encode(image_data).decode('utf-8')
 
-                    # 获取 MIME 类型
-                    mime_type = self._get_mime_type(path_obj.suffix.lower())
+                    # 使用 JPEG MIME 类型（因为压缩后统一转为 JPEG）
+                    mime_type = 'image/jpeg'
 
                     # 构建 data URL
                     data_url = f"data:{mime_type};base64,{base64_data}"
@@ -212,7 +226,7 @@ class AgentBase(ABC):
                         'type': 'image_url',
                         'image_url': {'url': data_url}
                     })
-                    logger.debug(f"Converted local image to base64: {file_path}")
+                    logger.debug(f"Converted and compressed local image to base64: {file_path}, size: {len(image_data)} bytes")
 
                 except Exception as e:
                     logger.error(f"Failed to convert image to base64: {file_path}, error: {e}")
