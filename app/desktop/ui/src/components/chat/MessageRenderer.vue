@@ -814,4 +814,11 @@ function extractCodeBlocks(content) {
 
 </script>
 
+<style scoped>
+/* SVG 预览样式 */
+.svg-preview {
+  background-color: hsl(var(--muted) / 0.3);
+}
+</style>
+
 
