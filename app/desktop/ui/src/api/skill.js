@@ -1,8 +1,8 @@
 /**
- * Skill相关API接口
+ * Skill 相关 API 接口
  */
 
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const skillAPI = {
   /**
@@ -11,19 +11,19 @@ export const skillAPI = {
    * @returns {Promise<Array>}
    */
   getSkills: async (params = {}) => {
-    return await baseAPI.get('/api/skills')
+    return await request.get('/api/skills')
   },
 
   /**
    * 上传技能 (ZIP)
-   * @param {File} file - ZIP文件
+   * @param {File} file - ZIP 文件
    * @returns {Promise<Object>}
    */
   uploadSkill: async (file) => {
     const formData = new FormData()
     formData.append('file', file)
-    // baseAPI.post handles FormData automatically
-    return await baseAPI.post('/api/skills/upload', formData)
+    // request.post handles FormData automatically
+    return await request.post('/api/skills/upload', formData)
   },
 
   /**
@@ -32,7 +32,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   importSkillFromUrl: async (data) => {
-    return await baseAPI.post('/api/skills/import-url', data)
+    return await request.post('/api/skills/import-url', data)
   },
 
   /**
@@ -41,7 +41,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   deleteSkill: async (skillName) => {
-    return await baseAPI.delete('/api/skills', { params: { name: skillName } })
+    return await request.delete('/api/skills', { params: { name: skillName } })
   },
 
   /**
@@ -50,7 +50,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   getSkillContent: async (skillName) => {
-    return await baseAPI.get('/api/skills/content', { name: skillName })
+    return await request.get('/api/skills/content', { name: skillName })
   },
 
   /**
@@ -60,6 +60,6 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   updateSkillContent: async (skillName, content) => {
-    return await baseAPI.put('/api/skills/content', { name: skillName, content: content })
+    return await request.put('/api/skills/content', { name: skillName, content: content })
   }
 }
