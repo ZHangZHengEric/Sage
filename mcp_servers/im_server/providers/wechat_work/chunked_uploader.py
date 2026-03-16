@@ -85,7 +85,14 @@ class ChunkedUploader:
                 close_timeout=5
             ) as websocket:
                 
-                # 1. 初始化上传
+                # 1. 先订阅 WebSocket（必需步骤）
+                subscribed = await self._subscribe(websocket)
+                if not subscribed:
+                    return UploadResult(success=False, error="WebSocket subscription failed")
+                
+                logger.info("[ChunkedUploader] WebSocket subscribed")
+                
+                # 2. 初始化上传
                 upload_id = await self._init_upload(websocket, file_path, file_name)
                 if not upload_id:
                     return UploadResult(success=False, error="Failed to initialize upload")
@@ -137,6 +144,54 @@ class ChunkedUploader:
         chunks = (file_size + self.CHUNK_SIZE - 1) // self.CHUNK_SIZE
         return min(chunks, self.MAX_CHUNKS)
     
+    async def _subscribe(self, websocket) -> bool:
+        """
+        发送订阅请求进行身份认证（必需步骤）
+        
+        Args:
+            websocket: WebSocket 连接
+            
+        Returns:
+            bool: 认证成功返回 True, 否则返回 False
+        """
+        try:
+            subscribe_msg = {
+                "cmd": "aibot_subscribe",
+                "headers": {
+                    "req_id": self._generate_req_id()
+                },
+                "body": {
+                    "bot_id": self.bot_id,
+                    "secret": self.secret
+                }
+            }
+            
+            logger.info("[ChunkedUploader] Sending subscription request...")
+            await websocket.send(json.dumps(subscribe_msg))
+            
+            # 等待响应
+            response = await asyncio.wait_for(
+                websocket.recv(),
+                timeout=10
+            )
+            
+            data = json.loads(response)
+            logger.debug(f"[ChunkedUploader] Subscribe response: {data}")
+            
+            if data.get("errcode") == 0:
+                logger.info("[ChunkedUploader] Subscription successful")
+                return True
+            else:
+                logger.error(f"[ChunkedUploader] Subscription failed: {data.get('errmsg')}")
+                return False
+                
+        except asyncio.TimeoutError:
+            logger.error("[ChunkedUploader] Subscription timeout")
+            return False
+        except Exception as e:
+            logger.error(f"[ChunkedUploader] Subscription error: {e}")
+            return False
+    
     async def _init_upload(
         self, 
         websocket, 
@@ -165,16 +220,19 @@ class ChunkedUploader:
             file_md5 = md5_hash.hexdigest()
             
             init_msg = {
-                "cmd": "aibot_init_upload",
+                "cmd": "aibot_upload_media_init",
                 "headers": {
                     "req_id": self._generate_req_id()
                 },
                 "body": {
                     "bot_id": self.bot_id,
                     "secret": self.secret,
+                    "type": "file",
                     "filename": file_name,
                     "filesize": file_size,
-                    "filemd5": file_md5
+                    "total_size": file_size,
+                    "filemd5": file_md5,
+                    "total_chunks": self._calculate_chunks(file_size)
                 }
             }
             
@@ -238,14 +296,14 @@ class ChunkedUploader:
                     
                     # 上传分片
                     chunk_msg = {
-                        "cmd": "aibot_upload_chunk",
+                        "cmd": "aibot_upload_media_chunk",
                         "headers": {
                             "req_id": self._generate_req_id()
                         },
                         "body": {
                             "upload_id": upload_id,
                             "chunk_index": chunk_index,
-                            "chunk_data": chunk_base64
+                            "base64_data": chunk_base64
                         }
                     }
                     
@@ -301,7 +359,7 @@ class ChunkedUploader:
         """
         try:
             finish_msg = {
-                "cmd": "aibot_finish_upload",
+                "cmd": "aibot_upload_media_finish",
                 "headers": {
                     "req_id": self._generate_req_id()
                 },
