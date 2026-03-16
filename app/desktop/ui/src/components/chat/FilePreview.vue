@@ -74,7 +74,12 @@
       
       <!-- 图片预览 -->
       <div v-else-if="fileType === 'image'" class="image-preview p-2">
-        <div class="p-4 text-center text-muted-foreground bg-muted/30">
+        <!-- SVG 文件直接渲染 -->
+        <div v-if="isSvg && svgContent" class="svg-preview p-4 bg-muted/30 rounded-lg overflow-auto max-h-[400px]">
+          <div v-html="svgContent" class="svg-content"></div>
+        </div>
+        <!-- 其他图片显示提示 -->
+        <div v-else class="p-4 text-center text-muted-foreground bg-muted/30">
           <span class="text-5xl block mb-2">🖼️</span>
           <p class="text-sm mb-2">图片文件</p>
           <p class="text-xs text-muted-foreground/60 mb-3">由于浏览器安全限制，无法直接预览本地图片</p>
@@ -281,6 +286,12 @@ const fileType = computed(() => {
   return typeMap[ext] || 'other'
 })
 
+// 判断是否为 SVG
+const isSvg = computed(() => fileExtension.value === 'svg')
+
+// SVG 内容
+const svgContent = ref('')
+
 // 文件图标
 const fileIcon = computed(() => {
   const icons = {
@@ -440,27 +451,45 @@ const generateExcalidrawSvg = (data) => {
 // 加载文件内容
 const loadContent = async () => {
   if (fileType.value === 'other') return
-  
+
   try {
     loading.value = true
     error.value = null
-    
-    // 对于 PDF 和图片，不需要读取内容，直接使用 URL
-    if (['pdf', 'image', 'html'].includes(fileType.value)) {
+
+    // 对于 PDF 和 HTML，不需要读取内容
+    if (['pdf', 'html'].includes(fileType.value)) {
       loading.value = false
       return
     }
-    
+
+    // SVG 文件特殊处理：读取并渲染
+    if (isSvg.value) {
+      const content = await readTextFile(props.filePath)
+      // 清理 SVG 内容
+      svgContent.value = content
+        .replace(/<\?xml[^?]*\?>/gi, '')
+        .replace(/<!DOCTYPE[^>]*>/gi, '')
+        .trim()
+      loading.value = false
+      return
+    }
+
+    // 对于其他图片类型，不需要读取内容
+    if (fileType.value === 'image') {
+      loading.value = false
+      return
+    }
+
     // 使用 Tauri FS API 读取文本内容
     fileContent.value = await readTextFile(props.filePath)
-    
+
     // 解析 Excalidraw 数据
     if (fileType.value === 'excalidraw') {
       try {
         const data = JSON.parse(fileContent.value)
         excalidrawElementCount.value = data.elements?.length || 0
         excalidrawBgColor.value = data.appState?.viewBackgroundColor || '#ffffff'
-        
+
         // 统计元素类型
         const typeCount = {}
         data.elements?.forEach(el => {
@@ -469,14 +498,14 @@ const loadContent = async () => {
         excalidrawTypeSummary.value = Object.entries(typeCount)
           .map(([type, count]) => `${type}: ${count}`)
           .join(', ')
-        
+
         // 生成 SVG
         excalidrawSvg.value = generateExcalidrawSvg(data)
       } catch (e) {
         console.warn('解析 Excalidraw 数据失败:', e)
       }
     }
-    
+
     loading.value = false
   } catch (err) {
     console.error('加载文件失败:', err)
@@ -559,5 +588,22 @@ onMounted(() => {
 /* Excalidraw SVG 样式 */
 .excalidraw-preview svg {
   background-color: rgba(255, 255, 255, 0.8);
+}
+
+/* SVG 预览样式 */
+.svg-preview {
+  background-color: hsl(var(--muted) / 0.3);
+}
+
+.svg-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.svg-content svg {
+  max-width: 100%;
+  max-height: 350px;
+  height: auto;
 }
 </style>
