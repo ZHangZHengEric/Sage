@@ -1,44 +1,47 @@
-import { BaseAPI } from './base.js'
+import request from '../utils/request.js'
 
-class TaskAPI extends BaseAPI {
+class TaskAPI {
+  constructor() {
+    this.request = request
+  }
   getRecurringTasks(params) {
-    return this.get('/tasks/recurring', params)
+    return this.request.get('/tasks/recurring', params)
   }
 
   getOneTimeTasks(params) {
-    return this.get('/tasks/one-time', params)
+    return this.request.get('/tasks/one-time', params)
   }
 
   createRecurringTask(data) {
-    return this.post('/tasks/recurring', data)
+    return this.request.post('/tasks/recurring', data)
   }
 
   createOneTimeTask(data) {
-    return this.post('/tasks/one-time', data)
+    return this.request.post('/tasks/one-time', data)
   }
 
   updateOneTimeTask(id, data) {
-    return this.put(`/tasks/one-time/${id}`, data)
+    return this.request.put(`/tasks/one-time/${id}`, data)
   }
 
   deleteOneTimeTask(id) {
-    return this.delete(`/tasks/one-time/${id}`)
+    return this.request.delete(`/tasks/one-time/${id}`)
   }
 
   updateRecurringTask(id, data) {
-    return this.put(`/tasks/recurring/${id}`, data)
+    return this.request.put(`/tasks/recurring/${id}`, data)
   }
 
   deleteRecurringTask(id) {
-    return this.delete(`/tasks/recurring/${id}`)
+    return this.request.delete(`/tasks/recurring/${id}`)
   }
 
   toggleTaskStatus(id, enabled) {
-    return this.post(`/tasks/recurring/${id}/toggle`, { enabled })
+    return this.request.post(`/tasks/recurring/${id}/toggle`, { enabled })
   }
 
   getTaskHistory(id, params) {
-    return this.get(`/tasks/recurring/${id}/history`, params)
+    return this.request.get(`/tasks/recurring/${id}/history`, params)
   }
 
   /**
@@ -47,7 +50,7 @@ class TaskAPI extends BaseAPI {
    * @returns {Promise<Object>}
    */
   getWorkspaceFiles(agentId) {
-    return this.post(`/api/agent/${agentId}/file_workspace`, {})
+    return this.request.post(`/api/agent/${agentId}/file_workspace`, {})
   }
 
   /**
@@ -114,7 +117,7 @@ class TaskAPI extends BaseAPI {
     } else {
       throw new Error('agentId or sessionId is required')
     }
-    return this.delete(url)
+    return this.request.delete(url)
   }
 
   /**
@@ -130,7 +133,7 @@ class TaskAPI extends BaseAPI {
     if (targetPath) {
       formData.append('target_path', targetPath)
     }
-    return this.post(`/api/agent/${agentId}/file_workspace/upload`, formData, {
+    return this.request.post(`/api/agent/${agentId}/file_workspace/upload`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -145,7 +148,7 @@ class TaskAPI extends BaseAPI {
    * @returns {Promise<Object>}
    */
   uploadWorkspaceFolder(agentId, files, targetFolder = '') {
-    return this.post(`/api/agent/${agentId}/file_workspace/upload_folder`, {
+    return this.request.post(`/api/agent/${agentId}/file_workspace/upload_folder`, {
       files,
       target_folder: targetFolder
     })

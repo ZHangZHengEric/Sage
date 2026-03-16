@@ -1,4 +1,4 @@
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const taskAPI = {
 
