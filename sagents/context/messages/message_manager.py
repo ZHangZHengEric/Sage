@@ -312,7 +312,7 @@ class MessageManager:
         """
         计算字符串的token长度（公共静态方法）
         优先使用动态比例，如果没有样本则使用静态规则
-        支持多模态消息格式
+        支持多模态消息格式（包含图片token估算）
 
         Args:
             content: 字符串内容或多模态列表
@@ -320,19 +320,63 @@ class MessageManager:
         Returns:
             int: 字符串的token长度
         """
-        # 提取文本内容（处理多模态格式）
-        text_content = MessageManager._extract_text_from_content(content)
+        # 处理多模态消息格式
+        if isinstance(content, list):
+            total_tokens = 0
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get('type') == 'text':
+                        # 文本内容
+                        text = item.get('text', '')
+                        total_tokens += MessageManager._calculate_text_token_length(text)
+                    elif item.get('type') == 'image_url':
+                        # 图片内容 - 估算token
+                        # 对于 base64 图片，根据数据长度估算
+                        # 通常一张 512x512 的图片大约需要 1000-2000 tokens
+                        image_url = item.get('image_url', {})
+                        if isinstance(image_url, dict):
+                            url = image_url.get('url', '')
+                        else:
+                            url = str(image_url)
 
-        if not text_content:
+                        if url.startswith('data:'):
+                            # base64 图片：根据数据长度估算
+                            # base64 每4个字符 = 3字节，大约 0.75 token/字符
+                            base64_data = url.split(',')[-1] if ',' in url else url
+                            # 估算：base64长度 / 4 * 3 ≈ 原始字节数，再按一定比例算token
+                            estimated_tokens = max(500, int(len(base64_data) * 0.2))
+                            total_tokens += min(estimated_tokens, 2000)  # 上限2000 tokens
+                        else:
+                            # 远程URL：估算为固定值
+                            total_tokens += 1000
+            return total_tokens
+
+        # 纯文本内容
+        return MessageManager._calculate_text_token_length(content)
+
+    @staticmethod
+    def _calculate_text_token_length(text: Union[str, None]) -> int:
+        """
+        计算文本的token长度
+
+        Args:
+            text: 文本内容
+
+        Returns:
+            int: token长度
+        """
+        if not text:
             return 0
+
+        text_str = str(text)
 
         # 如果有动态比例样本，使用动态比例
         if _global_token_ratio_samples:
             ratio = MessageManager.get_dynamic_token_ratio()
-            return int(len(text_content) * ratio)
+            return int(len(text_str) * ratio)
 
         # 否则使用静态规则
-        return MessageManager._calculate_str_token_length_static(text_content)
+        return MessageManager._calculate_str_token_length_static(text_str)
 
     def update_token_ratio(self, char_count: int, actual_token_count: int) -> None:
         """
