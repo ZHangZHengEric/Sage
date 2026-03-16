@@ -88,11 +88,11 @@ class WeChatWorkProvider(IMProviderBase):
         Returns:
             Dict: {"success": bool, "error": str (可选)}
         """
-        logger.info(f"[WeChatWork] send_message 被调用: chat_id={chat_id}, user_id={user_id}, msg_type={msg_type}")
+        logger.info(f"[WeChatWork] send_message 被调用: chat_id={chat_id}, user_id={user_id}, msg_type={msg_type}, bot_id={'已设置' if self.bot_id else '未设置'}, secret={'已设置' if self.secret else '未设置'}")
         
         # 检查凭证
         if not self.bot_id or not self.secret:
-            logger.error("[WeChatWork] 缺少必要的配置: bot_id 或 secret")
+            logger.error(f"[WeChatWork] 缺少必要的配置: bot_id={self.bot_id}, secret={'已设置' if self.secret else '未设置'}")
             return {"success": False, "error": "缺少必要的配置: bot_id 或 secret"}
 
         try:
@@ -320,6 +320,13 @@ class WeChatWorkProvider(IMProviderBase):
         import uuid
         
         ws_url = "wss://openws.work.weixin.qq.com"
+        
+        # 检查凭证
+        if not self.bot_id or not self.secret:
+            logger.error(f"[WeChatWork] _send_via_temporary_ws: 缺少凭证 bot_id={self.bot_id}, secret={'已设置' if self.secret else '未设置'}")
+            return {"success": False, "error": "缺少必要的配置: bot_id 或 secret"}
+        
+        logger.info(f"[WeChatWork] _send_via_temporary_ws: 使用 bot_id={self.bot_id[:10]}... 创建临时连接")
         
         try:
             async with websockets.connect(ws_url, ping_interval=None) as ws:
