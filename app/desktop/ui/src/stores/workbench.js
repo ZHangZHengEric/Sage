@@ -96,15 +96,21 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // 检查是否已存在相同的项（根据 type 和唯一标识）
     const existingItem = items.value.find(i => {
       if (i.type !== item.type) return false
-      // 文件类型：根据 filePath 或 path 去重
+      // 文件类型：根据 messageId + filePath 去重
+      // 同一消息中的同一文件不重复，但不同消息可以重复（文件可能已修改）
       if (item.type === 'file') {
         const itemPath = item.data?.filePath || item.data?.path || ''
         const existingPath = i.data?.filePath || i.data?.path || ''
-        return itemPath && existingPath && itemPath === existingPath
+        const samePath = itemPath && existingPath && itemPath === existingPath
+        const sameMessage = item.messageId && i.messageId && item.messageId === i.messageId
+        // 只有路径相同且来自同一消息才认为是重复
+        return samePath && sameMessage
       }
-      // 代码块类型：根据 code 内容去重
+      // 代码块类型：根据 messageId + code 内容去重
       if (item.type === 'code' && item.data?.code) {
-        return i.data?.code === item.data.code
+        const sameCode = i.data?.code === item.data.code
+        const sameMessage = item.messageId && i.messageId && item.messageId === i.messageId
+        return sameCode && sameMessage
       }
       // 工具调用类型：根据 toolCall id 去重
       if (item.type === 'tool_call' && item.data?.id) {
