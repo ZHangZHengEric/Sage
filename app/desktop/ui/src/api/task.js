@@ -57,6 +57,18 @@ class TaskAPI extends BaseAPI {
    * @returns {Promise<Blob>}
    */
   async downloadFile(agentId, filePath) {
+    // 如果是 http/https 链接，直接下载
+    if (filePath && (filePath.startsWith('http://') || filePath.startsWith('https://'))) {
+      const response = await fetch(filePath, {
+        method: 'GET',
+        mode: 'cors',
+      })
+      if (!response.ok) {
+        throw new Error(`下载文件失败: ${response.status}`)
+      }
+      return response.blob()
+    }
+
     let apiPrefix = this.request.baseURL;
     // remove trailing slash
     if (apiPrefix.endsWith('/')) {

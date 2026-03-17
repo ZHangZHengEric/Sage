@@ -119,14 +119,26 @@ export const agentAPI = {
    * @returns {Promise<Blob>}
    */
   downloadFile: async (agentId, filePath) => {
+    // 如果是 http/https 链接，直接下载
+    if (filePath && (filePath.startsWith('http://') || filePath.startsWith('https://'))) {
+      const response = await fetch(filePath, {
+        method: 'GET',
+        mode: 'cors',
+      })
+      if (!response.ok) {
+        throw new Error(`下载文件失败: ${response.status}`)
+      }
+      return response.blob()
+    }
+
     const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';
     const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
-    
+
     // 准备请求头
     const headers = {
       'Accept': 'application/json',
     }
-    
+
     // 添加认证Token
     if (typeof localStorage !== 'undefined') {
         const token = localStorage.getItem('access_token');
@@ -134,7 +146,7 @@ export const agentAPI = {
             headers['Authorization'] = `Bearer ${token}`;
         }
     }
-    
+
     // 使用原生fetch处理blob响应
     const response = await fetch(url, {
       method: 'GET',
