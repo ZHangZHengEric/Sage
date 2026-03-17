@@ -1336,158 +1336,158 @@ class AgentBase(ABC):
             usage=usage,
         )
 
-    async def _get_suggested_tools(self,
-                                   messages_input: List[MessageChunk],
-                                   tool_manager: ToolManager,
-                                   session_id: str,
-                                   session_context: SessionContext) -> List[str]:
-        """
-        基于用户输入和历史对话获取建议工具
+    # async def _get_suggested_tools(self,
+    #                                messages_input: List[MessageChunk],
+    #                                tool_manager: ToolManager,
+    #                                session_id: str,
+    #                                session_context: SessionContext) -> List[str]:
+    #     """
+    #     基于用户输入和历史对话获取建议工具
 
-        Args:
-            messages_input: 消息列表
-            tool_manager: 工具管理器
-            session_id: 会话ID
+    #     Args:
+    #         messages_input: 消息列表
+    #         tool_manager: 工具管理器
+    #         session_id: 会话ID
 
-        Returns:
-            List[str]: 建议工具名称列表
-        """
-        logger.info("AgentBase: 开始获取建议工具")
+    #     Returns:
+    #         List[str]: 建议工具名称列表
+    #     """
+    #     logger.info("AgentBase: 开始获取建议工具")
 
-        if not messages_input or not tool_manager:
-            logger.warning("AgentBase: 未提供消息或工具管理器，返回空列表")
-            return []
-        try:
-            # 获取可用工具，只提取工具名称和ID
-            available_tools = tool_manager.list_tools_simplified()
+    #     if not messages_input or not tool_manager:
+    #         logger.warning("AgentBase: 未提供消息或工具管理器，返回空列表")
+    #         return []
+    #     try:
+    #         # 获取可用工具，只提取工具名称和ID
+    #         available_tools = tool_manager.list_tools_simplified()
 
-            if len(available_tools) <= 15:
-                logger.info("AgentBase: 可用工具数量小于等于15个，直接返回所有工具")
-                # 移除complete_task工具
-                tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
-                return tool_names
+    #         if len(available_tools) <= 15:
+    #             logger.info("AgentBase: 可用工具数量小于等于15个，直接返回所有工具")
+    #             # 移除complete_task工具
+    #             tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
+    #             return tool_names
 
-            # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
-            available_tools_str = "\n".join([f"{i+1}. {tool['name']} - {tool['description'][:100]}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'    
+    #         # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
+    #         available_tools_str = "\n".join([f"{i+1}. {tool['name']} - {tool['description'][:100]}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'    
 
-            # 准备消息
-            # messages_input = MessageManager.compress_messages(messages_input, budget_limit=10000)
-            logger.info(f"AgentBase: messages_input 的token长度为{MessageManager.calculate_messages_token_length(messages_input)}")
-            clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
+    #         # 准备消息
+    #         # messages_input = MessageManager.compress_messages(messages_input, budget_limit=10000)
+    #         logger.info(f"AgentBase: messages_input 的token长度为{MessageManager.calculate_messages_token_length(messages_input)}")
+    #         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
 
-            logger.info(f"AgentBase: clean_messages的字符长度为{len(json.dumps(clean_messages, ensure_ascii=False, indent=2))}")
+    #         logger.info(f"AgentBase: clean_messages的字符长度为{len(json.dumps(clean_messages, ensure_ascii=False, indent=2))}")
 
-            # 重新获取agent_custom_system_prefix以支持动态语言切换
-            current_system_prefix = prompt_manager.get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language(),default='')
+    #         # 重新获取agent_custom_system_prefix以支持动态语言切换
+    #         current_system_prefix = prompt_manager.get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language(),default='')
 
-            # 生成提示
-            tool_suggestion_template = prompt_manager.get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
-            prompt = tool_suggestion_template.format(
-                session_id=session_id,
-                available_tools_str=available_tools_str,
-                agent_config=self.prepare_unified_system_message(
-                    session_id,
-                    custom_prefix=current_system_prefix,
-                    language=session_context.get_language(),
-                ).content,
-                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
-            )
+    #         # 生成提示
+    #         tool_suggestion_template = prompt_manager.get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
+    #         prompt = tool_suggestion_template.format(
+    #             session_id=session_id,
+    #             available_tools_str=available_tools_str,
+    #             agent_config=self.prepare_unified_system_message(
+    #                 session_id,
+    #                 custom_prefix=current_system_prefix,
+    #                 language=session_context.get_language(),
+    #             ).content,
+    #             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+    #         )
 
-            # 调用LLM获取建议,一定要有返回list的结果，如果没有则最大重试3次，依旧没有，使用全量的工具列表
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                suggested_tool_ids = await self._get_tool_suggestions(prompt, session_id)
-                if suggested_tool_ids:
-                    break
-                retry_count += 1
-            if not suggested_tool_ids:
-                logger.warning(f"AgentBase: 最大重试{max_retries}次后仍未获取到建议工具，使用全量工具列表")
-                suggested_tool_ids = [str(i+1) for i in range(len(available_tools))]
+    #         # 调用LLM获取建议,一定要有返回list的结果，如果没有则最大重试3次，依旧没有，使用全量的工具列表
+    #         max_retries = 3
+    #         retry_count = 0
+    #         while retry_count < max_retries:
+    #             suggested_tool_ids = await self._get_tool_suggestions(prompt, session_id)
+    #             if suggested_tool_ids:
+    #                 break
+    #             retry_count += 1
+    #         if not suggested_tool_ids:
+    #             logger.warning(f"AgentBase: 最大重试{max_retries}次后仍未获取到建议工具，使用全量工具列表")
+    #             suggested_tool_ids = [str(i+1) for i in range(len(available_tools))]
 
-            # 将工具ID转换为工具名称
-            suggested_tool_names = []
-            for tool_id in suggested_tool_ids:
-                try:
-                    index = int(tool_id) - 1
-                    if 0 <= index < len(available_tools):
-                        suggested_tool_names.append(available_tools[index]['name'])
-                except (ValueError, IndexError):
-                    pass
+    #         # 将工具ID转换为工具名称
+    #         suggested_tool_names = []
+    #         for tool_id in suggested_tool_ids:
+    #             try:
+    #                 index = int(tool_id) - 1
+    #                 if 0 <= index < len(available_tools):
+    #                     suggested_tool_names.append(available_tools[index]['name'])
+    #             except (ValueError, IndexError):
+    #                 pass
 
-            # 确保有必要的工具
-            if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
-                # 添加必要的工具
-                necessary_tools = ['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'file_update', 'load_skill']
-                for tool_name in necessary_tools:
-                    if tool_name not in suggested_tool_names:
-                        suggested_tool_names.append(tool_name)
+    #         # 确保有必要的工具
+    #         if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
+    #             # 添加必要的工具
+    #             necessary_tools = ['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'file_update', 'load_skill']
+    #             for tool_name in necessary_tools:
+    #                 if tool_name not in suggested_tool_names:
+    #                     suggested_tool_names.append(tool_name)
 
-            # 添加系统工具'add_task','todo_write','delete_task','complete_task','enable_task','get_task_details','update_task'
-            system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task','send_message_through_im']
-            for tool_name in system_tools:
-                if tool_name not in suggested_tool_names:
-                    # 检查工具是否存在
-                    for tool in available_tools:
-                        if tool['name'] == tool_name:
-                            suggested_tool_names.append(tool_name)
-                            break
+    #         # 添加系统工具'add_task','todo_write','delete_task','complete_task','enable_task','get_task_details','update_task'
+    #         system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task','send_message_through_im']
+    #         for tool_name in system_tools:
+    #             if tool_name not in suggested_tool_names:
+    #                 # 检查工具是否存在
+    #                 for tool in available_tools:
+    #                     if tool['name'] == tool_name:
+    #                         suggested_tool_names.append(tool_name)
+    #                         break
 
-            # 移除complete_task工具
-            if 'complete_task' in suggested_tool_names:
-                suggested_tool_names.remove('complete_task')
+    #         # 移除complete_task工具
+    #         if 'complete_task' in suggested_tool_names:
+    #             suggested_tool_names.remove('complete_task')
 
-            # 去重
-            suggested_tool_names = list(set(suggested_tool_names))    
+    #         # 去重
+    #         suggested_tool_names = list(set(suggested_tool_names))    
 
-            logger.info(f"AgentBase: 获取到建议工具: {suggested_tool_names}")
-            return suggested_tool_names
+    #         logger.info(f"AgentBase: 获取到建议工具: {suggested_tool_names}")
+    #         return suggested_tool_names
 
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            logger.error(f"AgentBase: 获取建议工具时发生错误: {str(e)}")
-            return []
+    #     except Exception as e:
+    #         logger.error(traceback.format_exc())
+    #         logger.error(f"AgentBase: 获取建议工具时发生错误: {str(e)}")
+    #         return []
 
-    async def _get_tool_suggestions(self, prompt: str, session_id: str) -> List[str]:
-        """
-        调用LLM获取工具建议（流式调用）
+    # async def _get_tool_suggestions(self, prompt: str, session_id: str) -> List[str]:
+    #     """
+    #     调用LLM获取工具建议（流式调用）
 
-        Args:
-            prompt: 提示文本
+    #     Args:
+    #         prompt: 提示文本
 
-        Returns:
-            List[str]: 建议工具ID列表
-        """
-        logger.debug("AgentBase: 调用LLM获取工具建议（流式）")
+    #     Returns:
+    #         List[str]: 建议工具ID列表
+    #     """
+    #     logger.debug("AgentBase: 调用LLM获取工具建议（流式）")
 
-        messages_input = [{'role': 'user', 'content': prompt}]
-        # 使用基类的流式调用方法，自动处理LLM request日志
-        response = self._call_llm_streaming(
-            messages=messages_input,
-            session_id=session_id,
-            step_name="tool_suggestion"
-        )
-        # 收集流式响应内容
-        all_content = ""
-        async for chunk in response:
-            if len(chunk.choices) == 0:
-                continue
-            if chunk.choices[0].delta.content:
-                all_content += chunk.choices[0].delta.content
-        try:
-            result_clean = MessageChunk.extract_json_from_markdown(all_content)
-            suggested_tool_ids = json.loads(result_clean)
-            if isinstance(suggested_tool_ids, list):
-                # 确保返回的工具ID列表是数字列表，不是字符串列表，并且不是数字的item要过滤掉
-                # 过滤掉非数字的item，确保返回的是数字列表
-                suggested_tool_ids = [int(item) for item in suggested_tool_ids if isinstance(item, (int, str)) and str(item).isdigit()]
-                return suggested_tool_ids
-            else:
-                logger.warning(f"AgentBase: 解析工具建议响应时JSON格式错误, 响应内容: {result_clean}")
-                return []
-        except json.JSONDecodeError:
-            logger.warning(f"AgentBase: 解析工具建议响应时JSON解码错误, 响应内容: {result_clean}")
-            return []
+    #     messages_input = [{'role': 'user', 'content': prompt}]
+    #     # 使用基类的流式调用方法，自动处理LLM request日志
+    #     response = self._call_llm_streaming(
+    #         messages=messages_input,
+    #         session_id=session_id,
+    #         step_name="tool_suggestion"
+    #     )
+    #     # 收集流式响应内容
+    #     all_content = ""
+    #     async for chunk in response:
+    #         if len(chunk.choices) == 0:
+    #             continue
+    #         if chunk.choices[0].delta.content:
+    #             all_content += chunk.choices[0].delta.content
+    #     try:
+    #         result_clean = MessageChunk.extract_json_from_markdown(all_content)
+    #         suggested_tool_ids = json.loads(result_clean)
+    #         if isinstance(suggested_tool_ids, list):
+    #             # 确保返回的工具ID列表是数字列表，不是字符串列表，并且不是数字的item要过滤掉
+    #             # 过滤掉非数字的item，确保返回的是数字列表
+    #             suggested_tool_ids = [int(item) for item in suggested_tool_ids if isinstance(item, (int, str)) and str(item).isdigit()]
+    #             return suggested_tool_ids
+    #         else:
+    #             logger.warning(f"AgentBase: 解析工具建议响应时JSON格式错误, 响应内容: {result_clean}")
+    #             return []
+    #     except json.JSONDecodeError:
+    #         logger.warning(f"AgentBase: 解析工具建议响应时JSON解码错误, 响应内容: {result_clean}")
+    #         return []
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],
