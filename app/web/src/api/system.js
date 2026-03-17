@@ -1,26 +1,26 @@
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const systemAPI = {
   getSystemInfo: () => {
-    return baseAPI.get('/api/system/info')
+    return request.get('/api/system/info')
   },
   updateSettings: (settings) => {
-    return baseAPI.post('/api/system/update_settings', settings)
+    return request.post('/api/system/update_settings', settings)
   },
   getLatestVersion: () => {
-    return baseAPI.get('/api/system/version/latest')
+    return request.get('/api/system/version/latest')
   },
   getVersions: () => {
-    return baseAPI.get('/api/system/version')
+    return request.get('/api/system/version')
   },
   createVersion: (data) => {
-    return baseAPI.post('/api/system/version', data)
+    return request.post('/api/system/version', data)
   },
   importGithubVersion: () => {
-    return baseAPI.post('/api/system/version/import_github')
+    return request.post('/api/system/version/import_github')
   },
   deleteVersion: (version) => {
-    return baseAPI.delete(`/api/system/version/${version}`)
+    return request.delete(`/api/system/version/${version}`)
   }
 }
 

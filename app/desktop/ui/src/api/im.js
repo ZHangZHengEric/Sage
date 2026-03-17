@@ -1,4 +1,4 @@
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const imAPI = {
   /**
@@ -6,7 +6,7 @@ export const imAPI = {
    * @returns {Promise<Object>} IM configuration
    */
   getConfig() {
-    return baseAPI.get('/api/im/config')
+    return request.get('/api/im/config')
   },
 
   /**
@@ -15,7 +15,7 @@ export const imAPI = {
    * @returns {Promise<Object>}
    */
   saveConfig(config) {
-    return baseAPI.post('/api/im/config', config)
+    return request.post('/api/im/config', config)
   },
 
   /**
@@ -23,6 +23,6 @@ export const imAPI = {
    * @returns {Promise<Object>}
    */
   getServiceStatus() {
-    return baseAPI.get('/api/im/service/status')
+    return request.get('/api/im/service/status')
   },
 }

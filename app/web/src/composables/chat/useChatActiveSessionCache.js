@@ -1,32 +1,188 @@
 import { ref } from 'vue'
+import { chatAPI } from '@/api/chat'
 
-export const useChatActiveSessionCache = () => {
-  const readActiveSessionsCache = () => {
-    try {
-      return JSON.parse(localStorage.getItem('activeSessions') || '{}')
-    } catch (e) {
-      return {}
+// Module-level singletons
+let activeSessions = ref({})
+let sessionStreamOffsets = ref({})
+let sseSource = null
+let subscriberCount = 0
+
+const readActiveSessionsCache = () => {
+  try {
+    return JSON.parse(localStorage.getItem('activeSessions') || '{}')
+  } catch (e) {
+    return {}
+  }
+}
+
+// Initialize activeSessions from local storage once
+activeSessions.value = readActiveSessionsCache()
+
+const deriveSessionTitle = (content = '') => {
+  // 处理数组类型（messages 格式）
+  if (Array.isArray(content)) {
+    // 尝试从数组中提取文本内容
+    const textParts = content
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object') {
+          // 处理 OpenAI 格式的 message
+          if (item.type === 'text' && item.text) return item.text
+          if (item.content) return item.content
+          if (item.text) return item.text
+          if (item.message) return item.message
+        }
+        return ''
+      })
+      .filter(Boolean)
+    content = textParts.join(' ')
+  }
+  // 处理对象类型（防止 [object Object]）
+  else if (content && typeof content === 'object') {
+    // 尝试提取对象中的文本字段
+    content = content.text || content.content || content.message || JSON.stringify(content)
+  }
+  const normalized = String(content || '').trim()
+  if (!normalized) return '进行中的会话'
+  return normalized.length > 50 ? `${normalized.slice(0, 50)}...` : normalized
+}
+
+const syncSessionOffsetsFromActiveSessions = () => {
+  const nextOffsets = {}
+  Object.entries(activeSessions.value || {}).forEach(([sid, meta]) => {
+    const parsed = Number(meta?.last_index || 0)
+    nextOffsets[sid] = Number.isFinite(parsed) ? parsed : 0
+  })
+  sessionStreamOffsets.value = nextOffsets
+}
+
+const updateLocalCacheFromRemote = (remoteSessions) => {
+  const localCache = readActiveSessionsCache()
+  const remoteIds = new Set()
+
+  // 1. Update local cache with remote sessions
+  remoteSessions.forEach(session => {
+    remoteIds.add(session.session_id)
+    const existing = localCache[session.session_id] || {}
+
+    // 确保 query 是字符串类型
+    const queryText = deriveSessionTitle(session.query)
+    localCache[session.session_id] = {
+      ...existing,
+      lastUpdate: session.last_activity * 1000,
+      title: queryText,
+      user_input: queryText,
+      status: 'running',
+      include_in_sidebar: true,
+      last_index: existing.last_index || 0
+    }
+  })
+
+  // 2. Mark missing running sessions as completed
+  Object.keys(localCache).forEach(sid => {
+    const session = localCache[sid]
+    if (session.status === 'running' && !remoteIds.has(sid)) {
+      localCache[sid] = {
+        ...session,
+        status: 'completed',
+        completedAt: Date.now()
+      }
+    }
+  })
+
+  localStorage.setItem('activeSessions', JSON.stringify(localCache))
+  activeSessions.value = localCache
+  syncSessionOffsetsFromActiveSessions()
+  window.dispatchEvent(new Event('active-sessions-updated'))
+}
+
+const connectSSE = async () => {
+  if (sseSource) return
+
+  try {
+    const source = await chatAPI.subscribeActiveSessions()
+
+    if (subscriberCount <= 0) {
+      source.close()
+      return
+    }
+
+    if (sseSource) {
+      source.close()
+      return
+    }
+
+    sseSource = source
+
+    sseSource.onmessage = (event) => {
+      try {
+        const remoteSessions = JSON.parse(event.data)
+        if (Array.isArray(remoteSessions)) {
+          updateLocalCacheFromRemote(remoteSessions)
+        }
+      } catch (e) {
+        console.error('[ActiveSessionCache] Failed to parse SSE active sessions:', e, event.data)
+      }
+    }
+
+    sseSource.onerror = (err) => {
+      console.error('[ActiveSessionCache] SSE connection error:', err)
+      if (sseSource) {
+        sseSource.close()
+        sseSource = null
+      }
+      if (subscriberCount > 0) {
+         setTimeout(() => {
+           if (subscriberCount > 0 && !sseSource) {
+              connectSSE()
+           }
+         }, 5000)
+      }
+    }
+  } catch (e) {
+    console.error('[ActiveSessionCache] Failed to start SSE sync:', e)
+    // 连接失败不减少 subscriberCount，而是尝试重连
+    if (subscriberCount > 0) {
+         setTimeout(() => {
+           if (subscriberCount > 0 && !sseSource) {
+              connectSSE()
+           }
+         }, 5000)
     }
   }
+}
 
-  const activeSessions = ref(readActiveSessionsCache())
-  const sessionStreamOffsets = ref({})
-
-  const syncSessionOffsetsFromActiveSessions = () => {
-    const nextOffsets = {}
-    Object.entries(activeSessions.value || {}).forEach(([sid, meta]) => {
-      const parsed = Number(meta?.last_index || 0)
-      nextOffsets[sid] = Number.isFinite(parsed) ? parsed : 0
-    })
-    sessionStreamOffsets.value = nextOffsets
+const startSSESync = async () => {
+  if (typeof EventSource === 'undefined') {
+    return
   }
 
+  subscriberCount++
+
+  if (sseSource) {
+    return
+  }
+
+  connectSSE()
+}
+
+const stopSSESync = () => {
+  subscriberCount--
+
+  if (subscriberCount <= 0) {
+    subscriberCount = 0
+    if (sseSource) {
+      sseSource.close()
+      sseSource = null
+    }
+  }
+}
+
+export const useChatActiveSessionCache = () => {
   const handleActiveSessionsUpdated = () => {
     activeSessions.value = readActiveSessionsCache()
     syncSessionOffsetsFromActiveSessions()
   }
-
-  syncSessionOffsetsFromActiveSessions()
 
   const getSessionLastIndex = (sessionId) => {
     const inMemory = Number(sessionStreamOffsets.value?.[sessionId] ?? 0)
@@ -43,6 +199,7 @@ export const useChatActiveSessionCache = () => {
       [sessionId]: safeIndex
     }
 
+    // 更新内存中的状态
     if (activeSessions.value[sessionId]) {
       activeSessions.value[sessionId] = {
         ...activeSessions.value[sessionId],
@@ -52,6 +209,7 @@ export const useChatActiveSessionCache = () => {
 
     if (!persist) return
 
+    // 持久化到缓存，但不要覆盖 activeSessions.value（避免丢失内存中尚未持久化的新会话）
     const cache = readActiveSessionsCache()
     const existing = cache[sessionId]
     if (!existing) return
@@ -65,54 +223,8 @@ export const useChatActiveSessionCache = () => {
   }
 
   const updateActiveSession = (sessionId, isActive, title = null, userInput = null, persist = true) => {
-    if (persist) {
-      activeSessions.value = readActiveSessionsCache()
-    }
-    if (isActive) {
-      const existing = activeSessions.value[sessionId] || {}
-      const preservedTitle = existing.title && existing.title !== '进行中的会话' ? existing.title : null
-      const preservedUserInput = existing.user_input || null
-      activeSessions.value[sessionId] = {
-        lastUpdate: Date.now(),
-        title: preservedTitle || title || '进行中的会话',
-        user_input: preservedUserInput || userInput || '',
-        status: 'running',
-        last_index: 0,
-        include_in_sidebar: !!existing.include_in_sidebar
-      }
-    } else {
-      const existing = activeSessions.value[sessionId]
-      if (existing) {
-        activeSessions.value[sessionId] = {
-          ...existing,
-          status: 'completed',
-          completedAt: Date.now(),
-          lastUpdate: Date.now()
-        }
-      }
-    }
-    syncSessionOffsetsFromActiveSessions()
-    if (!persist) return
-    localStorage.setItem('activeSessions', JSON.stringify(activeSessions.value))
-    window.dispatchEvent(new Event('active-sessions-updated'))
-  }
-
-  const persistRunningSessionToCache = (sessionId, includeInSidebar = true) => {
-    if (!sessionId) return
-    const existing = activeSessions.value?.[sessionId]
-    if (!existing) return
-    if (existing.status !== 'running') return
-    const cacheSnapshot = readActiveSessionsCache()
-    cacheSnapshot[sessionId] = {
-      ...existing,
-      include_in_sidebar: includeInSidebar,
-      last_index: Math.max(getSessionLastIndex(sessionId), Number(existing.last_index || 0)),
-      lastUpdate: Date.now()
-    }
-    activeSessions.value = cacheSnapshot
-    syncSessionOffsetsFromActiveSessions()
-    localStorage.setItem('activeSessions', JSON.stringify(cacheSnapshot))
-    window.dispatchEvent(new Event('active-sessions-updated'))
+    // Frontend no longer actively inserts data.
+    // Relies on SSE for sync.
   }
 
   const removeSessionFromCache = (sessionId) => {
@@ -126,20 +238,15 @@ export const useChatActiveSessionCache = () => {
     window.dispatchEvent(new Event('active-sessions-updated'))
   }
 
-  const deriveSessionTitle = (content = '') => {
-    const normalized = String(content || '').trim()
-    if (!normalized) return '进行中的会话'
-    return normalized.length > 50 ? `${normalized.slice(0, 50)}...` : normalized
-  }
-
   return {
     activeSessions,
     handleActiveSessionsUpdated,
     getSessionLastIndex,
     updateActiveSessionLastIndex,
     updateActiveSession,
-    persistRunningSessionToCache,
     removeSessionFromCache,
-    deriveSessionTitle
+    deriveSessionTitle,
+    startSSESync,
+    stopSSESync
   }
 }

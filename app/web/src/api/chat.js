@@ -1,49 +1,23 @@
 /**
- * Chat相关API接口
+ * Chat 相关 API 接口
  */
 
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const chatAPI = {
 
-  /**
-   * 获取对话消息
-   * @param {string} conversationId - 对话ID
-   * @returns {Promise<Object>}
-   */
   getConversationMessages: async (conversationId) => {
-    return await baseAPI.get(`/api/conversations/${conversationId}/messages`)
+    return await request.get(`/api/conversations/${conversationId}/messages`)
   },
 
-  /**
-   * 获取分享的对话消息（无需登录）
-   * @param {string} conversationId - 对话ID
-   * @returns {Promise<Object>}
-   */
   getSharedConversationMessages: async (conversationId) => {
-    return await baseAPI.get(`/api/share/conversations/${conversationId}/messages`)
+    return await request.get(`/api/share/conversations/${conversationId}/messages`)
   },
 
-  /**
-   * 删除对话
-   * @param {string} conversationId - 对话ID
-   * @returns {Promise<boolean>}
-   */
   deleteConversation: async (conversationId) => {
-    return await baseAPI.delete(`/api/conversations/${conversationId}`)
+    return await request.delete(`/api/conversations/${conversationId}`)
   },
 
-  /**
-   * 分页获取对话列表
-   * @param {Object} params - 查询参数
-   * @param {number} params.page - 页码，从1开始
-   * @param {number} params.page_size - 每页大小
-   * @param {string} [params.user_id] - 用户ID（可选）
-   * @param {string} [params.search] - 搜索关键词（可选）
-   * @param {string} [params.agent_id] - Agent ID过滤（可选）
-   * @param {string} [params.sort_by] - 排序方式（可选）
-   * @returns {Promise<Object>} 分页对话列表响应
-   */
   getConversationsPaginated: async (params = {}) => {
     const queryParams = new URLSearchParams()
     if (params.page) queryParams.append('page', params.page)
@@ -51,49 +25,88 @@ export const chatAPI = {
     if (params.search) queryParams.append('search', params.search)
     if (params.agent_id) queryParams.append('agent_id', params.agent_id)
     if (params.sort_by) queryParams.append('sort_by', params.sort_by)
-    
+
     const url = `/api/conversations${queryParams.toString() ? '?' + queryParams.toString() : ''}`
-    return await baseAPI.get(url)
+    return await request.get(url)
   },
 
-  /**
-   * 流式聊天
-   * @param {Object} messageData - 消息数据
-   * @param {AbortController} abortController - 中断控制器
-   * @returns {Promise<Response>} 流式响应
-   */
   streamChat: async (messageData, abortController = null) => {
-    return await baseAPI.postStream('/api/web-stream', messageData, {
+    return await request.postStream('/api/web-stream', messageData, {
       signal: abortController
     })
   },
 
-  /**
-   * 中断会话
-   * @param {string} sessionId - 会话ID
-   * @param {string} message - 中断消息
-   * @returns {Promise<Object>}
-   */
   interruptSession: async (sessionId, message = '用户请求中断') => {
-    return await baseAPI.post(`/api/sessions/${sessionId}/interrupt`, {
+    return await request.post(`/api/sessions/${sessionId}/interrupt`, {
       message
     })
   },
 
-  /**
-   * 恢复流式聊天
-   * @param {string} sessionId - 会话ID
-   * @param {number} lastIndex - 已收到的消息索引
-   * @param {AbortController} abortController - 中断控制器
-   * @returns {Promise<Response>} 流式响应
-   */
   resumeStream: async (sessionId, lastIndex = 0, abortController = null) => {
-    return await baseAPI.getStream(`/api/stream/resume/${sessionId}?last_index=${lastIndex}`, {
+    return await request.getStream(`/api/stream/resume/${sessionId}?last_index=${lastIndex}`, {
       signal: abortController
     })
   },
 
-  getActiveSessions: async (timeout = 800) => {
-    return await baseAPI.get('/api/stream/active_sessions', {}, { timeout })
+
+  subscribeActiveSessions: async () => {
+    const controller = new AbortController()
+    
+    // 使用 getStream 以便通过拦截器添加 Authorization 头
+    // request.sse 使用 EventSource 不支持自定义 header
+    const response = await request.getStream('/api/stream/active_sessions', {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'text/event-stream'
+      }
+    })
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    
+    // 模拟 EventSource 接口
+    const eventSource = {
+      close: () => controller.abort(),
+      onmessage: null,
+      onerror: null,
+      readyState: 1 // OPEN
+    }
+
+    // 异步读取流
+    ;(async () => {
+      let buffer = ''
+      let currentData = ''
+      
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            // 流结束视为错误（连接断开），触发重连
+            if (eventSource.onerror) eventSource.onerror(new Error('Stream closed'))
+            break
+          }
+          
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split(/\r?\n/)
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            if (line.trim() === '') {
+              if (currentData.trim() && eventSource.onmessage) {
+                eventSource.onmessage({ data: currentData.trim() })
+              }
+              currentData = ''
+            } else if (line.startsWith('data: ')) {
+              currentData += line.slice(6) + '\n'
+            }
+          }
+        }
+      } catch (error) {
+        if (error.name === 'AbortError') return
+        if (eventSource.onerror) eventSource.onerror(error)
+      }
+    })()
+
+    return eventSource
   }
 }
