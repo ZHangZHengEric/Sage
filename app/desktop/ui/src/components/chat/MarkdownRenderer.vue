@@ -298,8 +298,35 @@ const downloadImage = (url, filename) => {
 
 // 将图片添加下载按钮
 const addImageDownloadButton = (html) => {
-  return html.replace(/<img([^>]*src="([^"]*)"[^>]*)>/g, (match, attrs, src) => {
-    const filename = src.split('/').pop().split('?')[0] || 'image'
+  return html.replace(/<img([^>]*)>/g, (match, attrs) => {
+    // 提取 src 属性
+    const srcMatch = attrs.match(/src="([^"]*)"/)
+    const src = srcMatch ? srcMatch[1] : ''
+    // 提取 data-local-image 属性（本地图片标记）
+    const localImageMatch = attrs.match(/data-local-image="([^"]*)"/)
+    const localImagePath = localImageMatch ? localImageMatch[1] : ''
+    
+    const filename = (src || localImagePath).split('/').pop().split('?')[0] || 'image'
+    
+    // 检查是否为本地路径（file://、asset://、绝对路径，或有 data-local-image 属性）
+    const isLocal = src.startsWith('file://') || src.startsWith('asset://') || src.startsWith('/') || !!localImagePath
+    
+    // 本地图片：显示复制到下载目录按钮
+    if (isLocal) {
+      const pathToCopy = localImagePath || src
+      return `<div class="relative group inline-block max-w-full my-2">
+        <img${attrs} class="rounded-lg max-w-full h-auto block border">
+        <button class="absolute top-2 right-2 p-1.5 bg-background/80 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background text-foreground border" onclick="window.copyLocalImageToDownloads('${pathToCopy}', '${filename}')" title="复制到下载目录">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7,10 12,15 17,10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+      </div>`
+    }
+    
+    // 在线图片：显示下载按钮
     return `<div class="relative group inline-block max-w-full my-2">
       <img${attrs} class="rounded-lg max-w-full h-auto block border">
       <button class="absolute top-2 right-2 p-1.5 bg-background/80 backdrop-blur-sm rounded-md shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background text-foreground border" onclick="window.downloadMarkdownImage('${src}', '${filename}')" title="下载图片">
@@ -692,7 +719,31 @@ const loadLocalImages = async () => {
 
     try {
       console.log('[MarkdownRenderer] Loading image:', localPath)
-      // 读取文件内容为 Uint8Array
+
+      // 检查是否为 SVG 文件
+      if (localPath.toLowerCase().endsWith('.svg')) {
+        // SVG 文件：读取文本内容并内联渲染
+        const { readTextFile } = await import('@tauri-apps/plugin-fs')
+        const svgContent = await readTextFile(localPath)
+        // 清理 SVG 内容
+        const cleanedSvg = svgContent
+          .replace(/<\?xml[^?]*\?>/gi, '')
+          .replace(/<!DOCTYPE[^>]*>/gi, '')
+          .trim()
+        // 创建 SVG 容器
+        const wrapper = document.createElement('div')
+        wrapper.className = 'svg-inline-wrapper my-2'
+        wrapper.style.maxWidth = '100%'
+        wrapper.style.overflow = 'auto'
+        wrapper.innerHTML = cleanedSvg
+        // 替换 img 标签（检查 parentNode 是否存在）
+        if (img.parentNode) {
+          img.parentNode.replaceChild(wrapper, img)
+        }
+        continue
+      }
+
+      // 其他图片：读取文件内容为 Uint8Array
       const fileData = await readFile(localPath)
       console.log('[MarkdownRenderer] File loaded, size:', fileData.length)
 
@@ -708,8 +759,10 @@ const loadLocalImages = async () => {
       img.removeAttribute('data-local-image')
     } catch (error) {
       console.error('[MarkdownRenderer] Failed to load image:', localPath, error)
-      // 显示错误占位符
-      img.alt = `加载失败: ${localPath.split('/').pop()}`
+      // 显示错误占位符（检查 img 是否还在 DOM 中）
+      if (img && img.parentNode) {
+        img.alt = `加载失败: ${localPath.split('/').pop()}`
+      }
     }
   }
 }
@@ -772,6 +825,36 @@ onMounted(() => {
           const detail2 = getErrorDetail(error2)
           console.error('打开本地文件失败:', localPath, detail1, detail2)
         }
+      }
+    }
+    
+    // 复制本地图片到下载目录
+    window.copyLocalImageToDownloads = async (localPath, filename) => {
+      try {
+        const { readFile } = await import('@tauri-apps/plugin-fs')
+        const { save } = await import('@tauri-apps/plugin-dialog')
+        
+        // 读取文件内容
+        const fileData = await readFile(localPath)
+        
+        // 弹出保存对话框
+        const savePath = await save({
+          defaultPath: filename,
+          filters: [{
+            name: '图片文件',
+            extensions: [filename.split('.').pop() || 'png']
+          }]
+        })
+        
+        if (savePath) {
+          // 写入文件
+          const { writeFile } = await import('@tauri-apps/plugin-fs')
+          await writeFile(savePath, fileData)
+          toast.success(`已保存到: ${savePath}`)
+        }
+      } catch (error) {
+        console.error('保存文件失败:', error)
+        toast.error('保存失败: ' + error.message)
       }
     }
     

@@ -2,7 +2,7 @@
  * Skill相关API接口
  */
 
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 export const skillAPI = {
   /**
@@ -13,7 +13,7 @@ export const skillAPI = {
    * @returns {Promise<Array>}
    */
   getSkills: async (params = {}) => {
-    return await baseAPI.get('/api/skills', params)
+    return await request.get('/api/skills', params)
   },
 
   /**
@@ -22,7 +22,7 @@ export const skillAPI = {
    * @returns {Promise<Array>} - 技能列表，每个技能包含name, description, source_dimension
    */
   getAgentAvailableSkills: async (agentId) => {
-    return await baseAPI.get('/api/skills/agent-available', { agent_id: agentId })
+    return await request.get('/api/skills/agent-available', { agent_id: agentId })
   },
 
   /**
@@ -43,8 +43,8 @@ export const skillAPI = {
     if (extraParams.agent_id) {
       formData.append('agent_id', extraParams.agent_id)
     }
-    // baseAPI.post handles FormData automatically
-    return await baseAPI.post('/api/skills/upload', formData)
+    // request.post handles FormData automatically
+    return await request.post('/api/skills/upload', formData)
   },
 
   /**
@@ -55,7 +55,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   importSkillFromUrl: async (data) => {
-    return await baseAPI.post('/api/skills/import-url', data)
+    return await request.post('/api/skills/import-url', data)
   },
 
   /**
@@ -69,7 +69,7 @@ export const skillAPI = {
     if (agentId) {
       params.agent_id = agentId
     }
-    return await baseAPI.delete('/api/skills', { params })
+    return await request.delete('/api/skills', { params })
   },
 
   /**
@@ -78,7 +78,7 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   getSkillContent: async (skillName) => {
-    return await baseAPI.get('/api/skills/content', { name: skillName })
+    return await request.get('/api/skills/content', { name: skillName })
   },
 
   /**
@@ -88,6 +88,6 @@ export const skillAPI = {
    * @returns {Promise<Object>}
    */
   updateSkillContent: async (skillName, content) => {
-    return await baseAPI.put('/api/skills/content', { name: skillName, content: content })
+    return await request.put('/api/skills/content', { name: skillName, content: content })
   }
 }

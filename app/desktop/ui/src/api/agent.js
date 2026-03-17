@@ -2,7 +2,7 @@
  * Agent相关API接口
  */
 
-import { baseAPI } from './base.js'
+import request from '../utils/request.js'
 
 /**
  * @typedef {Object} AbilityItem
@@ -18,7 +18,7 @@ export const agentAPI = {
    * @returns {Promise<Array>}
    */
   getAgents: async () => {
-    return await baseAPI.get('/api/agent/list')
+    return await request.get('/api/agent/list')
   },
 
   /**
@@ -27,7 +27,7 @@ export const agentAPI = {
    * @returns {Promise<Object>}
    */
   createAgent: async (agentData) => {
-    return await baseAPI.post('/api/agent/create', agentData)
+    return await request.post('/api/agent/create', agentData)
   },
 
   /**
@@ -37,7 +37,7 @@ export const agentAPI = {
    * @returns {Promise<Object>}
    */
   updateAgent: async (agentId, updates) => {
-    return await baseAPI.put(`/api/agent/${agentId}`, updates)
+    return await request.put(`/api/agent/${agentId}`, updates)
   },
 
   /**
@@ -46,7 +46,7 @@ export const agentAPI = {
    * @returns {Promise<boolean>}
    */
   deleteAgent: async (agentId) => {
-    return await baseAPI.delete(`/api/agent/${agentId}`)
+    return await request.delete(`/api/agent/${agentId}`)
   },
 
   /**
@@ -56,7 +56,7 @@ export const agentAPI = {
    * @returns {Promise<Object>}
    */
   generateAgentConfig: async (description, selectedTools) => {
-    return await baseAPI.post('/api/agent/auto-generate', {
+    return await request.post('/api/agent/auto-generate', {
       agent_description: description,
       available_tools: selectedTools
     })
@@ -68,7 +68,7 @@ export const agentAPI = {
    * @returns {Promise<Object>}
    */
   systemPromptOptimize: async (input) => {
-    return await baseAPI.post(`/api/agent/system-prompt/optimize`, input)
+    return await request.post(`/api/agent/system-prompt/optimize`, input)
   },
 
   /**
@@ -77,7 +77,7 @@ export const agentAPI = {
    * @returns {Promise<Object>}
    */
   getDefaultSystemPrompt: async (language = 'zh') => {
-    return await baseAPI.get('/api/agent/template/default_system_prompt', { params: { language } })
+    return await request.get('/api/agent/template/default_system_prompt', { params: { language } })
   },
 
   /**
@@ -86,7 +86,7 @@ export const agentAPI = {
    * @returns {Promise<Array>}
    */
   getAgentAuth: async (agentId) => {
-    return await baseAPI.get(`/api/agent/${agentId}/auth`)
+    return await request.get(`/api/agent/${agentId}/auth`)
   },
 
   /**
@@ -96,7 +96,7 @@ export const agentAPI = {
    * @returns {Promise<Object>}
    */
   updateAgentAuth: async (agentId, userIds) => {
-    return await baseAPI.post(`/api/agent/${agentId}/auth`, { user_ids: userIds })
+    return await request.post(`/api/agent/${agentId}/auth`, { user_ids: userIds })
   },
 
   /**
@@ -111,7 +111,7 @@ export const agentAPI = {
   getAgentAbilities: async ({ agentId, sessionId, context = {}, language }) => {
     const savedLanguage = language || (typeof localStorage !== 'undefined' ? localStorage.getItem('language') : null)
     const normalizedLanguage = ['enUS', 'en', 'en-US'].includes(savedLanguage) ? 'en' : 'zh'
-    const data = await baseAPI.post('/api/agent/abilities', {
+    const data = await request.post('/api/agent/abilities', {
       agent_id: agentId,
       session_id: sessionId,
       context,
