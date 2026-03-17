@@ -151,7 +151,7 @@ class FibreBackendClient:
                     timeout=10
                 ) as resp:
                     resp_text = await resp.text()
-                    logger.info(f"[Backend API] Get agent response: status={resp.status}, body={resp_text}")
+                    logger.debug(f"[Backend API] Get agent response: status={resp.status}, body={resp_text}")
                     if resp.status == 200:
                         data = json.loads(resp_text)
                         # Check success by "success" field or "code" field
