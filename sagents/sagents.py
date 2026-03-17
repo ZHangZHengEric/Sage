@@ -7,7 +7,7 @@ from sagents.context.messages.message import MessageChunk, MessageType
 from sagents.skill import SkillManager, SkillProxy
 from sagents.tool import ToolManager, ToolProxy
 from sagents.utils.logger import logger
-from sagents.flow.schema import AgentFlow, SequenceNode, AgentNode, IfNode, SwitchNode, LoopNode
+from sagents.flow.schema import AgentFlow, SequenceNode, ParallelNode, AgentNode, IfNode, SwitchNode, LoopNode
 from sagents.session_runtime import get_global_session_manager
 
 
@@ -146,6 +146,7 @@ class SAgent:
 
         # 预定义多智能体完整流程（包含总结）
         multi_agent_full = SequenceNode(steps=[
+            AgentNode(agent_key="memory_recall"),
             LoopNode(
                 condition="task_not_completed",
                 max_loops=max_loop_count,
@@ -156,13 +157,19 @@ class SAgent:
 
         # 预定义简单模式
         simple_agent_body = SequenceNode(steps=[
-            AgentNode(agent_key="tool_suggestion"),
+            ParallelNode(branches=[
+                AgentNode(agent_key="tool_suggestion"),
+                AgentNode(agent_key="memory_recall"),
+            ]),
             AgentNode(agent_key="simple"),
             IfNode(condition="need_summary", true_body=AgentNode(agent_key="task_summary"))
         ])
-        
+
         fib_agent_body = SequenceNode(steps=[
-            AgentNode(agent_key="tool_suggestion"),
+            ParallelNode(branches=[
+                AgentNode(agent_key="tool_suggestion"),
+                AgentNode(agent_key="memory_recall"),
+            ]),
             AgentNode(agent_key="fibre"),
         ])
 

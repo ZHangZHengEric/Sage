@@ -61,6 +61,7 @@ export const toolLabelKeys = {
   'recall_user_memory': 'tools.recallUserMemory',
   'recall_user_memory_by_type': 'tools.recallUserMemoryByType',
   'forget_user_memory': 'tools.forgetUserMemory',
+  'search_memory': 'tools.searchMemory',
   // 技能工具
   'load_skill': 'tools.loadSkill',
   // 搜索工具
@@ -131,6 +132,7 @@ export const toolLabels = {
   'recall_user_memory': '回忆记忆',
   'recall_user_memory_by_type': '按类型回忆',
   'forget_user_memory': '遗忘记忆',
+  'search_memory': '搜索记忆',
   // 技能工具
   'load_skill': '加载技能',
   // 搜索工具
