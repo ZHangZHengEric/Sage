@@ -505,6 +505,7 @@ class AgentBase(ABC):
                             session_context.add_llm_request(llm_request, llm_response)
 
                             # 更新动态 token 比例
+                            logger.debug(f"{self.__class__.__name__}: 检查 token 比例更新条件: llm_response={llm_response is not None}, usage={llm_response.usage if llm_response else None}")
                             if llm_response and llm_response.usage:
                                 # 计算总字符数（输入+输出）
                                 # 处理 MessageChunk 对象和字典两种类型
