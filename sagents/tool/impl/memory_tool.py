@@ -82,14 +82,10 @@ class MemoryTool:
             # 2. Search session history
             history_results = await self._search_session_history(query, top_k, session_id)
             
-            # 3. Build narrative memory description
-            memory_narrative = self._build_memory_narrative(query, file_results, history_results)
-            
             return {
                 "status": "success",
                 "message": f"Found {len(file_results)} files and {len(history_results)} history messages",
                 "query": query,
-                "memory_summary": memory_narrative,
                 "long_term_memory": file_results,
                 "session_history": history_results
             }
@@ -102,35 +98,6 @@ class MemoryTool:
                 "results": [],
                 "history_results": []
             }
-
-    def _build_memory_narrative(self, query: str, file_results: List[Dict], history_results: List[Dict]) -> str:
-        """Build a narrative description of the found memories"""
-        parts = []
-        
-        if file_results:
-            parts.append(f"关于 '{query}'，我在工作空间中找到了 {len(file_results)} 个相关文件：")
-            for i, item in enumerate(file_results[:3], 1):
-                filename = os.path.basename(item.get('path', ''))
-                snippets = item.get('snippets', [])
-                if snippets:
-                    preview = snippets[0].get('text', '')[:80]
-                    parts.append(f"  {i}. {filename}: {preview}...")
-                else:
-                    parts.append(f"  {i}. {filename}")
-        
-        if history_results:
-            if parts:
-                parts.append("")
-            parts.append(f"另外，在之前的对话中，我们讨论过 '{query}' 相关的内容：")
-            for i, item in enumerate(history_results[:2], 1):
-                role = "你" if item.get('role') == 'user' else "我"
-                preview = item.get('content_preview', '')[:80]
-                parts.append(f"  {i}. {role}提到: {preview}...")
-        
-        if not parts:
-            return f"没有找到关于 '{query}' 的相关记忆。"
-        
-        return "\n".join(parts)
 
     async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
         """Search file memory using BM25 index"""
@@ -215,10 +182,141 @@ class MemoryTool:
             retrieved_messages = session_memory_manager.retrieve_history_messages(
                 messages=history_messages,
                 query=query,
-                history_budget=top_k * 200  # 估算每个消息约200字符
+                history_budget=top_k * 200  # 估算每个消息约500字符
             )
             
             # 4. 限制返回数量
             retrieved_messages = retrieved_messages[:top_k]
             
-            logger.info(f"Memory
+            logger.info(f"MemoryTool: Retrieved {len(retrieved_messages)} history messages for query '{query}'")
+            
+            # 5. 格式化结果
+            formatted_results = []
+            for msg in retrieved_messages:
+                content = msg.content or ""
+                
+                # 提取包含查询词的片段
+                snippet = self._extract_history_snippet(content, query.lower().split())
+                
+                formatted_results.append({
+                    "role": msg.role,
+                    "content_preview": snippet,
+                    "timestamp": getattr(msg, 'timestamp', None)
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"MemoryTool: Session history search failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
+
+    def _extract_history_snippet(self, content: str, query_terms: List[str], snippet_size: int = 100) -> str:
+        """Extract snippet from history message containing query terms"""
+        if not content:
+            return ""
+        
+        content_lower = content.lower()
+        
+        # Find first match position
+        first_match_pos = len(content)
+        for term in query_terms:
+            pos = content_lower.find(term)
+            if pos != -1 and pos < first_match_pos:
+                first_match_pos = pos
+        
+        if first_match_pos == len(content):
+            # No match found, return first part
+            return content[:snippet_size] + "..." if len(content) > snippet_size else content
+        
+        # Extract snippet around match
+        start = max(0, first_match_pos - snippet_size // 2)
+        end = min(len(content), first_match_pos + snippet_size // 2)
+        
+        snippet = content[start:end]
+        
+        # Add ellipsis
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(content):
+            snippet = snippet + "..."
+        
+        return snippet.strip()
+
+    def _get_workspace_path(self, session_id: str) -> Optional[str]:
+        """
+        Get workspace path of session
+        
+        Priority:
+        1. session_context.agent_workspace
+        2. session_context.working_dir
+        3. session.workspace
+        4. Default path: ~/.sage/workspaces/{session_id}
+        """
+        try:
+            from sagents.session_runtime import get_global_session_manager
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            
+            if not session:
+                logger.warning(f"MemoryTool: Session not found: {session_id}")
+                return None
+            
+            session_context = session.session_context
+            
+            # Priority 1: agent_workspace
+            if hasattr(session_context, 'agent_workspace') and session_context.agent_workspace:
+                path = session_context.agent_workspace
+                if os.path.exists(path):
+                    logger.debug(f"MemoryTool: Using agent_workspace: {path}")
+                    return path
+            
+            # Priority 2: working_dir
+            if hasattr(session_context, 'working_dir') and session_context.working_dir:
+                path = session_context.working_dir
+                if os.path.exists(path):
+                    logger.debug(f"MemoryTool: Using working_dir: {path}")
+                    return path
+            
+            # Priority 3: session's workspace
+            if hasattr(session, 'workspace') and session.workspace:
+                path = session.workspace
+                if os.path.exists(path):
+                    logger.debug(f"MemoryTool: Using session.workspace: {path}")
+                    return path
+            
+            # Priority 4: Default path
+            home = os.path.expanduser("~")
+            workspace = os.path.join(home, ".sage", "workspaces", session_id)
+            if os.path.exists(workspace):
+                logger.debug(f"MemoryTool: Using default workspace: {workspace}")
+                return workspace
+            
+            logger.warning(f"MemoryTool: No valid workspace found for session {session_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"MemoryTool: Get workspace failed: {e}")
+            return None
+    
+    def _get_index_path(self, session_id: str) -> str:
+        """
+        Get index file path for session
+        
+        Index is stored in: $SAGE_ROOT/memory/{session_id}.pkl
+        Fallback to: ~/.sage/memory/{session_id}.pkl
+        """
+        # Get SAGE_ROOT from environment variable
+        user_home = Path.home()
+        sage_home = user_home / ".sage"
+        sage_root = os.environ.get('SAGE_ROOT', str(sage_home))
+        
+        # Create memory directory
+        memory_dir = Path(sage_root) / 'memory'
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        
+        index_path = memory_dir / f"{session_id}.pkl"
+        logger.debug(f"MemoryTool: Index path: {index_path}")
+        
+        return str(index_path)
