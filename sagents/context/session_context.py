@@ -477,11 +477,14 @@ class SessionContext:
             for skill_name, arguments in found_skills.items():
                 try:
                     logger.info(f"SessionContext: Loading skill '{skill_name}' via ToolManager...")
+                    # 移除 arguments 中的 session_id，避免重复传递
+                    args = arguments.copy()
+                    args.pop('session_id', None)
                     await self.tool_manager.run_tool_async(
                         tool_name='load_skill',
                         session_context=self,
                         session_id=self.session_id,
-                        **arguments
+                        **args
                     )
                 except Exception as e:
                     logger.error(f"SessionContext: Failed to load skill '{skill_name}': {e}")
