@@ -9,6 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/📄_许可证-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/🐍_Python-3.11+-brightgreen.svg?style=for-the-badge)](https://python.org)
 [![Version](https://img.shields.io/badge/🚀_版本-1.0.0-green.svg?style=for-the-badge)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage 多智能体框架**
 

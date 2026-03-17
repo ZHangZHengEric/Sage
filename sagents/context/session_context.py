@@ -1013,14 +1013,6 @@ class SessionContext:
             f"总耗时: {time.time() - t_start:.3f}s (准备: {t_prepare - t_start:.3f}s, 检索: {t_retrieve - t_prepare:.3f}s)"
         )
 
-# def get_sub_session_messages(parent_session_id: str, sub_session_id: str) -> List[MessageChunk]:
-#     # 同样使用 SessionManager，但 SessionManager 目前的 get_session_messages 是基于 session_id 查找
-#     # 如果 sub_session_id 也是全局唯一的，并且被 scan 到了，可以直接用
-#     from sagents.session_runtime import get_global_session_manager
-#     manager = get_global_session_manager()
-#     return manager.get_session_messages(sub_session_id)
-
-
 def get_session_run_lock(session_id: str) -> UnifiedLock:
     return lock_manager.get_lock(session_id)
 
