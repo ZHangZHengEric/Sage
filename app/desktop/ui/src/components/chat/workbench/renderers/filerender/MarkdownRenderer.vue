@@ -35,6 +35,7 @@ const props = defineProps({
 
 const contentRef = ref(null)
 const isRendering = ref(false)
+const renderedMermaidIds = ref(new Set()) // 跟踪已经渲染的 mermaid 图表
 
 const isBinary = computed(() => {
   if (!props.content) return false
@@ -96,6 +97,10 @@ const renderMermaid = async () => {
 
   if (mermaidList.length === 0) return
 
+  // 过滤掉已经渲染过的图表
+  const unrenderedItems = mermaidList.filter(({ id }) => !renderedMermaidIds.value.has(id))
+  if (unrenderedItems.length === 0) return
+
   isRendering.value = true
 
   // 初始化 mermaid
@@ -123,6 +128,9 @@ const renderMermaid = async () => {
 
       // 渲染当前批次
       await Promise.all(batch.map(async ({ id, code }) => {
+        // 检查是否已经渲染过
+        if (renderedMermaidIds.value.has(id)) return
+
         const el = document.getElementById(id)
         if (!el) return
 
@@ -131,15 +139,19 @@ const renderMermaid = async () => {
           const { svg } = await mermaid.render(`mermaid-svg-${id}`, code)
           el.innerHTML = svg
           el.classList.add('mermaid-rendered')
+          // 标记为已渲染
+          renderedMermaidIds.value.add(id)
         } catch (err) {
           console.error(`Mermaid 图表 ${id} 渲染失败:`, err)
           el.innerHTML = `<pre class="text-destructive p-4 border border-destructive/50 rounded bg-destructive/10">Mermaid 渲染错误: ${err.message}</pre>`
+          // 即使失败也标记为已渲染，避免重复尝试
+          renderedMermaidIds.value.add(id)
         }
       }))
     }
   }
 
-  await renderBatch(mermaidList)
+  await renderBatch(unrenderedItems)
   isRendering.value = false
 }
 
@@ -150,12 +162,19 @@ const openFile = () => {
 }
 
 // 监听内容变化，重新渲染 mermaid
-watch(() => props.content, async () => {
-  await renderMermaid()
+watch(() => props.content, async (newContent, oldContent) => {
+  // 只在内容真正变化时重新渲染，避免重复渲染
+  if (newContent !== oldContent) {
+    await renderMermaid()
+  }
 }, { immediate: true })
 
 onMounted(() => {
-  renderMermaid()
+  // onMounted 时不需要调用 renderMermaid，因为 watch 的 immediate: true 已经处理了初始渲染
+  // 但如果 watch 因为内容为空没有触发，则需要手动调用
+  if (!props.content) {
+    renderMermaid()
+  }
 })
 </script>
 
