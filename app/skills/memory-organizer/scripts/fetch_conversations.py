@@ -27,7 +27,10 @@ def get_sage_base_url() -> str:
 
 def get_available_agents() -> List[str]:
     """获取所有可用的 Agent ID"""
-    sage_root = os.environ.get('SAGE_ROOT', '/Users/zhangzheng/.sage')
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+
+    sage_root = os.environ.get('SAGE_ROOT', str(sage_home))
     agents_path = Path(sage_root) / 'agents'
     
     if not agents_path.exists():

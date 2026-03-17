@@ -1,859 +1,224 @@
-"""记忆管理工具
-
-提供简化的用户记忆操作：记住、获取、忘记。
-以user_id为索引，支持本地文件和MCP两种实现。
-
-Author: Eric ZZ
-Date: 2024-12-21
+#!/usr/bin/env python3
 """
-
+Memory tool based on BM25 file system - search version
+Get workspace through session_id, build file index and support search
+"""
 import os
-import json
 import re
-import traceback
-from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
-from datetime import datetime
+from typing import Dict, Any, Optional, List
 from ..tool_base import tool
 from sagents.utils.logger import logger
 
-try:
-    from rank_bm25 import BM25Okapi
-    BM25_AVAILABLE = True
-except ImportError:
-    BM25_AVAILABLE = False
-    logger.warning("rank_bm25 not available, falling back to simple text matching")
-
-
-# ========== 记忆数据格式规范 ==========
-"""
-记忆存储格式说明：
-
-1. 文件结构：
-   - 路径：{MEMORY_ROOT_PATH}/{user_id}/memories.json
-   - 格式：JSON文件，UTF-8编码
-
-2. 数据结构：
-   {
-     "memory_key1": {
-       "content": "记忆内容（必需，字符串）",
-       "tags": ["标签1", "标签2"],  // 可选，字符串数组
-       "created_at": "2024-12-21T18:45:00.123456",  // 必需，ISO格式时间戳
-       "updated_at": "2024-12-21T18:45:00.123456",  // 必需，ISO格式时间戳
-       "metadata": {  // 可选，扩展元数据
-         "importance": 0.8,  // 重要性评分 0-1
-         "category": "技术",  // 分类
-         "source": "用户输入"  // 来源
-       }
-     },
-     "memory_key2": { ... }
-   }
-
-3. 字段说明：
-   - memory_key: 记忆的唯一标识符，字符串类型，不能为空
-   - content: 记忆内容，字符串类型，不能为空
-   - tags: 标签数组，可选，每个标签为非空字符串
-   - created_at: 创建时间，ISO 8601格式字符串
-   - updated_at: 更新时间，ISO 8601格式字符串
-   - metadata: 可选的扩展元数据，对象类型
-
-4. 约束条件：
-   - memory_key长度：1-100字符
-   - content长度：1-10000字符
-   - tags数量：最多20个
-   - 单个tag长度：1-50字符
-   - 时间格式：必须是有效的ISO 8601格式
-
-5. 工具返回格式规范：
-    {{
-        "success": true/false,
-        "message": "操作结果描述", 
-        "memories": [...],     # 只有在recall 的时候返回memories 列表
-        "error": "错误信息"   # 仅在success为false时存在
-    }}
-"""
-
 
 class MemoryTool:
-    """记忆管理工具 - 简化的记忆操作接口（以user_id为索引）"""
+    """
+    Agent memory tool - BM25 index search based on file system and session history
+    
+    Features:
+    1. Auto build/update BM25 index of workspace files
+    2. Search related files based on filename and content
+    3. Search session history messages
+    4. Use file extension whitelist and directory blacklist managed by MemoryIndex
+    """
 
-    def __init__(self):
-        """
-        初始化记忆工具
-
-        不在初始化时获取环境变量，而是在使用时动态获取
-        """
-
-    def _validate_memory_data(self, memory_key: Optional[str] = None, content: Optional[str] = None,
-                              tags: Optional[List[str]] = None, memories: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
-        """统一的记忆数据校验函数
-
-        Args:
-            memory_key: 记忆键（可选）
-            content: 记忆内容（可选）
-            tags: 标签列表（可选）
-            memories: 完整记忆数据（可选）
-
-        Returns:
-            (是否有效, 错误信息)
-        """
-        try:
-            # 校验记忆键
-            if memory_key is not None:
-                if not memory_key or not isinstance(memory_key, str):
-                    return False, "记忆键不能为空且必须是字符串"
-                if len(memory_key) < 1 or len(memory_key) > 100:
-                    return False, "记忆键长度必须在1-100字符之间"
-                if any(char in memory_key for char in ['/', '\\', '..', '\0']):
-                    return False, "记忆键不能包含路径分隔符"
-
-            # 校验内容
-            if content is not None:
-                if not content or not isinstance(content, str):
-                    return False, "记忆内容不能为空且必须是字符串"
-                if len(content.strip()) < 1 or len(content) > 10000:
-                    return False, "记忆内容长度必须在1-10000字符之间"
-
-            # 校验标签
-            if tags is not None:
-                if not isinstance(tags, list):
-                    return False, "标签必须是列表类型"
-                if len(tags) > 20:
-                    return False, "标签数量不能超过20个"
-                for tag in tags:
-                    if not isinstance(tag, str) or len(tag.strip()) < 1 or len(tag) > 50:
-                        return False, "每个标签必须是1-50字符的非空字符串"
-
-            # 校验完整记忆数据
-            if memories is not None:
-                if not isinstance(memories, dict):
-                    return False, "记忆数据必须是字典类型"
-
-                for key, entry in memories.items():
-                    # 递归校验每个条目
-                    is_valid, error_msg = self._validate_memory_data(memory_key=key)
-                    if not is_valid:
-                        return False, f"记忆键 '{key}' 无效: {error_msg}"
-
-                    if not isinstance(entry, dict):
-                        return False, f"记忆条目 '{key}' 必须是字典类型"
-
-                    # 检查必需字段
-                    if 'content' not in entry:
-                        return False, f"记忆条目 '{key}' 缺少content字段"
-
-                    is_valid, error_msg = self._validate_memory_data(content=entry['content'])
-                    if not is_valid:
-                        return False, f"记忆条目 '{key}' 内容无效: {error_msg}"
-
-                    # 校验可选字段
-                    if 'tags' in entry:
-                        is_valid, error_msg = self._validate_memory_data(tags=entry['tags'])
-                        if not is_valid:
-                            return False, f"记忆条目 '{key}' 标签无效: {error_msg}"
-
-            return True, ""
-
-        except Exception as e:
-            return False, f"校验过程中发生错误: {str(e)}"
-
-    def _format_response(self, success: bool, message: str, memories: Optional[List[Dict]] = None, error: Optional[str] = None) -> str:
-        """格式化标准返回结果
-
-        Args:
-            success: 操作是否成功
-            message: 操作结果描述
-            memories: 记忆列表（仅在recall时使用）
-            error: 错误信息（仅在success为false时使用）
-
-        Returns:
-            JSON格式的标准返回字符串
-        """
-        import json
-
-        response = {
-            "success": success,
-            "message": message
+    @tool(
+        description_i18n={
+            "zh": "搜索 Agent 的记忆。包括工作空间中的长期记忆（代码文件、文档等）和本次会话的历史对话。返回最相关的内容。",
+            "en": "Search Agent's memory. Includes long-term memory (code files, docs) in workspace and current session history. Uses BM25 algorithm."
+        },
+        param_description_i18n={
+            "query": {
+                "zh": "搜索关键词。可以是文件名、函数描述、代码片段、历史对话内容等。支持中文和英文。",
+                "en": "Search query. Can be filename, function description, code snippet, history message, etc. Supports Chinese and English."
+            },
+            "top_k": {
+                "zh": "返回结果数量，默认 5",
+                "en": "Number of results to return, default 5"
+            },
+            "session_id": {
+                "zh": "会话 ID（可选，自动注入，无需填写）",
+                "en": "Session ID (Optional, Auto-injected)"
+            }
         }
-
-        if memories is not None:
-            response["memories"] = memories
-
-        if not success and error:
-            response["error"] = error
-
-        return json.dumps(response, ensure_ascii=False)
-
-    def _repair_memories_data(self, memories: Dict[str, Any]) -> Dict[str, Any]:
-        """尝试修复损坏的记忆数据
-
-        Args:
-            memories: 原始记忆数据
-
-        Returns:
-            修复后的记忆数据
+    )
+    async def search_memory(
+        self,
+        query: str,
+        top_k: int = 5,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        repaired_memories = {}
-        current_time = datetime.now().isoformat()
-
-        if not isinstance(memories, dict):
-            logger.warning("记忆数据不是字典类型，返回空数据")
-            return {}
-
-        for memory_key, memory_entry in memories.items():
-            try:
-                # 校验记忆键
-                is_valid, _ = self._validate_memory_data(memory_key=memory_key)
-                if not is_valid:
-                    logger.warning(f"跳过无效的记忆键: {memory_key}")
-                    continue
-
-                # 修复记忆条目
-                if not isinstance(memory_entry, dict):
-                    logger.warning(f"跳过无效的记忆条目: {memory_key}")
-                    continue
-
-                repaired_entry = {}
-
-                # 修复内容字段
-                content = memory_entry.get('content', '')
-                is_valid, _ = self._validate_memory_data(content=content)
-                if not is_valid:
-                    if isinstance(content, str) and len(content.strip()) > 0:
-                        # 截断过长的内容
-                        content = content[:10000]
-                        is_valid, _ = self._validate_memory_data(content=content)
-                        if not is_valid:
-                            logger.warning(f"跳过内容无效的记忆: {memory_key}")
-                            continue
-                    else:
-                        logger.warning(f"跳过内容无效的记忆: {memory_key}")
-                        continue
-                repaired_entry['content'] = content
-
-                # 修复标签字段
-                tags = memory_entry.get('tags', [])
-                if not isinstance(tags, list):
-                    tags = []
-                else:
-                    # 过滤无效标签
-                    valid_tags = []
-                    for tag in tags[:20]:  # 最多保留20个标签
-                        if isinstance(tag, str) and 1 <= len(tag.strip()) <= 50:
-                            valid_tags.append(tag.strip())
-                    tags = valid_tags
-
-                # 校验修复后的标签
-                is_valid, _ = self._validate_memory_data(tags=tags)
-                if is_valid:
-                    repaired_entry['tags'] = tags
-                else:
-                    repaired_entry['tags'] = []
-
-                # 修复时间戳字段
-                created_at = memory_entry.get('created_at', current_time)
-                if not self._validate_timestamp(created_at):
-                    created_at = current_time
-                repaired_entry['created_at'] = created_at
-
-                updated_at = memory_entry.get('updated_at', current_time)
-                if not self._validate_timestamp(updated_at):
-                    updated_at = current_time
-                repaired_entry['updated_at'] = updated_at
-
-                # 保留有效的元数据
-                if 'metadata' in memory_entry and isinstance(memory_entry['metadata'], dict):
-                    repaired_entry['metadata'] = memory_entry['metadata']
-
-                repaired_memories[memory_key] = repaired_entry
-
-            except Exception as e:
-                logger.warning(f"修复记忆条目失败 {memory_key}: {e}")
-                continue
-
-        logger.info(f"数据修复完成，保留 {len(repaired_memories)} 条有效记忆")
-        return repaired_memories
-
-    def _get_user_memory_path(self, user_id: str) -> Path:
-        """获取用户记忆文件路径
-
+        Search memory (files and session history)
+        
         Args:
-            user_id: 用户ID
-
+            query: Search query
+            top_k: Number of results to return
+            session_id: Session ID
+        
         Returns:
-            用户记忆文件路径
+            Search results including files and history messages
         """
-        memory_root = os.getenv('MEMORY_ROOT_PATH')
-        logger.debug(f"获取用户记忆文件路径，用户ID: {user_id}")
-        logger.debug(f"获取用户记忆文件路径，记忆根路径: {memory_root}")
-
-        if not memory_root:
-            raise RuntimeError("本地记忆功能不可用：未设置MEMORY_ROOT_PATH环境变量")
-
-        user_dir = Path(memory_root) / user_id
-        user_dir.mkdir(parents=True, exist_ok=True)
-        return user_dir / "memories.json"
-
-    def _load_user_memories(self, user_id: str) -> Dict[str, Any]:
-        """加载用户记忆（带数据校验）
-
-        Args:
-            user_id: 用户ID
-
-        Returns:
-            用户记忆字典
-        """
+        if not session_id:
+            return {
+                "status": "error",
+                "message": "Session ID not provided",
+                "results": [],
+                "history_results": []
+            }
+        
+        if not query or not query.strip():
+            return {
+                "status": "error",
+                "message": "Search query cannot be empty",
+                "results": [],
+                "history_results": []
+            }
+        
         try:
-            memory_file = self._get_user_memory_path(user_id)
-            if memory_file.exists():
-                with open(memory_file, 'r', encoding='utf-8') as f:
-                    memories = json.load(f)
-
-                # 数据校验
-                is_valid, error_msg = self._validate_memory_data(memories=memories)
-                if not is_valid:
-                    logger.warning(f"用户记忆数据格式无效 {user_id}: {error_msg}，尝试修复")
-                    # 尝试修复数据
-                    memories = self._repair_memories_data(memories)
-                    # 保存修复后的数据
-                    self._save_user_memories(user_id, memories)
-
-                return memories
-            return {}
+            # 1. Search file memory
+            file_results = await self._search_file_memory(query, top_k, session_id)
+            
+            # 2. Search session history
+            history_results = await self._search_session_history(query, top_k, session_id)
+            
+            # 3. Build narrative memory description
+            memory_narrative = self._build_memory_narrative(query, file_results, history_results)
+            
+            return {
+                "status": "success",
+                "message": f"Found {len(file_results)} files and {len(history_results)} history messages",
+                "query": query,
+                "memory_summary": memory_narrative,
+                "long_term_memory": file_results,
+                "session_history": history_results
+            }
+            
         except Exception as e:
-            logger.error(f"加载用户记忆失败 {user_id}: {e}")
-            return {}
-
-    def _save_user_memories(self, user_id: str, memories: Dict[str, Any]):
-        """保存用户记忆（带数据校验）
-
-        Args:
-            user_id: 用户ID
-            memories: 记忆字典
-
-        Raises:
-            ValueError: 数据格式无效
-            IOError: 文件保存失败
-        """
-        try:
-            # 保存前进行数据校验
-            is_valid, error_msg = self._validate_memory_data(memories=memories)
-            if not is_valid:
-                raise ValueError(f"记忆数据格式无效: {error_msg}")
-
-            memory_file = self._get_user_memory_path(user_id)
-
-            # 创建备份（如果原文件存在）
-            if memory_file.exists():
-                backup_file = memory_file.with_suffix('.json.backup')
-                memory_file.rename(backup_file)
-                logger.debug(f"创建备份文件: {backup_file}")
-
-            # 保存新数据
-            with open(memory_file, 'w', encoding='utf-8') as f:
-                json.dump(memories, f, ensure_ascii=False, indent=2)
-
-            logger.debug(f"成功保存用户记忆 {user_id}: {len(memories)} 条记忆")
-
-        except Exception as e:
-            logger.error(f"保存用户记忆失败 {user_id}: {e}")
-            # 如果保存失败且存在备份，尝试恢复
-            backup_file = self._get_user_memory_path(user_id).with_suffix('.json.backup')
-            if backup_file.exists():
-                try:
-                    backup_file.rename(self._get_user_memory_path(user_id))
-                    logger.info(f"已恢复备份文件 {user_id}")
-                except Exception as restore_error:
-                    logger.error(f"恢复备份失败 {user_id}: {restore_error}")
-            raise
-
-    def _tokenize_text(self, text: str) -> List[str]:
-        """文本分词
-
-        Args:
-            text: 输入文本
-
-        Returns:
-            分词结果列表
-        """
-        if not text or not text.strip():
-            return []
-
-        # 简单的中英文分词
-        # 移除标点符号，转换为小写
-        text = re.sub(r'[^\w\s\u4e00-\u9fff]', ' ', text.lower())
-
-        tokens = []
-        # 按空格分割
-        words = text.split()
-
-        for word in words:
-            if not word.strip():
-                continue
-
-            # 检查是否包含中文
-            if re.search(r'[\u4e00-\u9fff]', word):
-                # 包含中文，提取中文字符和英文单词
-                chinese_chars = re.findall(r'[\u4e00-\u9fff]', word)
-                english_parts = re.findall(r'[a-zA-Z]+', word)
-                tokens.extend(chinese_chars)
-                tokens.extend(english_parts)
-            else:
-                # 纯英文单词
-                if len(word) > 1:  # 过滤单字符
-                    tokens.append(word)
-
-        return [token for token in tokens if token.strip() and len(token) > 0]
-
-    def _bm25_search(self, query: str, documents: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
-        """使用BM25算法进行相似度搜索
-
-        Args:
-            query: 查询字符串
-            documents: 文档列表，每个文档包含key, content, tags等字段
-            limit: 返回结果数量限制
-
-        Returns:
-            按相似度排序的文档列表
-        """
-        if not BM25_AVAILABLE or not documents:
-            return []
-
-        try:
-            # 构建文档语料库（key + content的拼接）
-            corpus = []
-            for doc in documents:
-                key = doc.get('key', '')
-                content = doc.get('content', '')
-                # 拼接key和content
-                combined_text = f"{key} {content}"
-                # 分词
-                tokens = self._tokenize_text(combined_text)
-                corpus.append(tokens)
-
-            if not corpus:
-                return []
-
-            # 创建BM25模型
-            bm25 = BM25Okapi(corpus)
-
-            # 查询分词
-            query_tokens = self._tokenize_text(query)
-
-            # 计算相似度分数
-            scores = bm25.get_scores(query_tokens)
-
-            # 将分数与文档配对并排序
-            scored_docs = list(zip(documents, scores))
-            scored_docs.sort(key=lambda x: x[1], reverse=True)
-
-            # 调试信息
-            logger.debug(f"BM25搜索结果: {[(doc['key'], score) for doc, score in scored_docs[:5]]}")
-
-            # 降低阈值，只要分数大于0.1就认为相关
-            filtered_docs = [(doc, score) for doc, score in scored_docs if score > 0.1][:limit]
-
-            # 如果没有找到相关结果，返回分数最高的几个
-            if not filtered_docs and scored_docs:
-                filtered_docs = scored_docs[:limit]
-
-            return [doc for doc, score in filtered_docs]
-
-        except Exception as e:
-            logger.error(f"BM25搜索失败: {e}")
-            return []
-
-    def _simple_search(self, query: str, documents: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
-        """简单文本匹配搜索（BM25不可用时的回退方案）
-
-        Args:
-            query: 查询字符串
-            documents: 文档列表
-            limit: 返回结果数量限制
-
-        Returns:
-            匹配的文档列表
-        """
-        matches = []
-        query_lower = query.lower()
-
-        for doc in documents:
-            key = doc.get('key', '')
-            content = doc.get('content', '')
-            tags = doc.get('tags', [])
-
-            # 在key、content和标签中搜索
-            if (query_lower in content.lower() or
-                query_lower in key.lower() or
-                    any(query_lower in tag.lower() for tag in tags)):
-                matches.append(doc)
-
-        # 按创建时间排序
-        matches.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-        return matches[:limit]
-
-    # @tool(
-    #     description_i18n={
-    #         "zh": "记录用户记忆条目",
-    #         "en": "Record a user memory entry",
-    #         "pt": "Registra uma memória do usuário"
-    #     },
-    #     param_description_i18n={
-    #         "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
-    #         "memory_key": {"zh": "记忆键（唯一标识）", "en": "Memory key (unique)", "pt": "Chave da memória (única)"},
-    #         "content": {"zh": "记忆内容", "en": "Memory content", "pt": "Conteúdo da memória"},
-    #         "memory_type": {"zh": "记忆类型", "en": "Memory type", "pt": "Tipo de memória"},
-    #         "tags": {"zh": "标签（逗号分隔或列表）", "en": "Tags (comma-separated or list)", "pt": "Tags (separadas por vírgula ou lista)"}
-    #     }
-    # )
-    def remember_user_memory(self, user_id: str, memory_key: str, content: str, memory_type: str = "experience", tags: str = "") -> str:
-        """记录用户的记忆，包括不限于用户偏好、个人信息、特殊要求、重要上下文等，memory_key和content 均使用用户的语言种类，便于后续检索。
-        memory_key 和 content 中的描述尽可能使用绝对值，例如时间"明天"，要转换成绝对日期。
-
-        Args:
-            user_id: 用户ID
-            memory_key: 记忆键（唯一标识）
-            content: 记忆内容
-            memory_type: 记忆类型（preference/requirement/persona/constraint/context/project/workflow/experience/learning/skill/note/bookmark/pattern）
-            tags: 标签（逗号分隔或列表）
-
-        Returns:
-            JSON格式的标准返回字符串
-
-        Example:
-            remember('user123', 'coding_style', '用户偏好函数式编程', 'preference', 'coding')
-        """
-        # 检查环境变量是否设置
-        if not os.getenv('MEMORY_ROOT_PATH'):
-            return self._format_response(False, "本地记忆功能不可用：未设置MEMORY_ROOT_PATH环境变量")
-
-        try:
-            logger.debug(f"记录记忆 {user_id}: {memory_key}, 类型: {memory_type}")
-
-            # 输入参数校验
-            is_valid, error_msg = self._validate_memory_data(memory_key=memory_key)
-            if not is_valid:
-                return self._format_response(False, "记忆键格式无效", error=error_msg)
-
-            is_valid, error_msg = self._validate_memory_data(content=content)
-            if not is_valid:
-                return self._format_response(False, "记忆内容格式无效", error=error_msg)
-
-            # 验证记忆类型
-            valid_types = ["preference", "requirement", "persona", "constraint", "context",
-                           "project", "workflow", "experience", "learning", "skill",
-                           "note", "bookmark", "pattern"]
-            if memory_type not in valid_types:
-                return self._format_response(False, f"无效的记忆类型: {memory_type}，支持的类型: {', '.join(valid_types)}")
-
-            # 处理标签
-            if isinstance(tags, list):
-                tag_list = tags
-            else:
-                tag_list = [tag.strip() for tag in tags.split(',') if tag.strip()] if tags else []
-            is_valid, error_msg = self._validate_memory_data(tags=tag_list)
-            if not is_valid:
-                return self._format_response(False, "标签格式无效", error=error_msg)
-
-            memories = self._load_user_memories(user_id)
-
-            # 创建记忆条目
-            current_time = datetime.now().isoformat()
-            memory_entry = {
-                "content": content.strip(),
-                "memory_type": memory_type,
-                "tags": tag_list,
-                "created_at": current_time,
-                "updated_at": current_time
+            logger.error(f"MemoryTool: Search failed: {e}")
+            return {
+                "status": "error",
+                "message": f"Search failed: {str(e)}",
+                "results": [],
+                "history_results": []
             }
 
-            # 如果记忆已存在，更新时间戳
-            is_update = memory_key in memories
-            if is_update:
-                memory_entry["created_at"] = memories[memory_key].get("created_at", current_time)
-                logger.debug(f"更新已存在的记忆: {memory_key}")
-
-            memories[memory_key] = memory_entry
-            self._save_user_memories(user_id, memories)
-
-            action = "更新" if is_update else "记住"
-            return self._format_response(True, f"已{action}记忆：{memory_key} (类型: {memory_type})")
-
-        except ValueError as e:
-            logger.error(traceback.format_exc())
-            logger.error(f"记录记忆数据校验失败 {user_id}: {e}")
-            return self._format_response(False, "记录记忆失败", error=str(e))
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            logger.error(f"记录记忆失败 {user_id}: {e}")
-            return self._format_response(False, "记录记忆失败", error=str(e))
-
-    # @tool(
-    #     description_i18n={
-    #         "zh": "按类型检索用户记忆",
-    #         "en": "Recall user memories by type",
-    #         "pt": "Recupera memórias por tipo"
-    #     },
-    #     param_description_i18n={
-    #         "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
-    #         "memory_type": {"zh": "记忆类型", "en": "Memory type", "pt": "Tipo de memória"},
-    #         "query": {"zh": "查询内容（可选）", "en": "Query text (optional)", "pt": "Consulta (opcional)"},
-    #         "limit": {"zh": "返回数量限制", "en": "Result limit", "pt": "Limite de resultados"}
-    #     }
-    # )
-    def recall_user_memory_by_type(self, user_id: str, memory_type: str, query: str = "", limit: int = 5) -> str:
-        """按记忆类型检索用户的记忆
-
-        Args:
-            user_id: 用户ID
-            memory_type: 记忆类型（preference/requirement/persona/constraint/context/project/workflow/experience/learning/skill/note/bookmark/pattern）
-            query: 查询内容（可选，为空时返回该类型的所有记忆）
-            limit: 返回结果数量限制（1-50）
-
-        Returns:
-            按相似度排序的匹配记忆列表
-
-        Example:
-            recall_by_type('user123', 'preference', 'coding', 3)
-        """
-        # 检查环境变量是否设置
-        if not os.getenv('MEMORY_ROOT_PATH'):
-            return self._format_response(False, "本地记忆功能不可用：未设置MEMORY_ROOT_PATH环境变量")
-
-        try:
-            # 验证记忆类型
-            valid_types = ["preference", "requirement", "persona", "constraint", "context",
-                           "project", "workflow", "experience", "learning", "skill",
-                           "note", "bookmark", "pattern"]
-            if memory_type not in valid_types:
-                return self._format_response(False, f"无效的记忆类型: {memory_type}，支持的类型: {', '.join(valid_types)}")
-
-            logger.debug(f"按类型搜索记忆 {user_id}: 类型={memory_type}, 查询={query}")
-
-            memories = self._load_user_memories(user_id)
-
-            if not memories:
-                return "未找到任何记忆"
-
-            # 按类型过滤记忆
-            type_filtered_docs = []
-            for key, memory in memories.items():
-                if memory.get('memory_type') == memory_type:
-                    content = memory.get('content', '')
-                    if content and content.strip():
-                        type_filtered_docs.append({
-                            'key': key,
-                            'content': content,
-                            'memory_type': memory.get('memory_type', ''),
-                            'tags': memory.get('tags', []),
-                            'created_at': memory.get('created_at', '')
-                        })
-
-            if not type_filtered_docs:
-                return self._format_response(True, f"未找到类型为 '{memory_type}' 的记忆", memories=[])
-
-            # 如果有查询条件，进行搜索；否则返回所有该类型的记忆
-            if query and query.strip():
-                if BM25_AVAILABLE:
-                    matches = self._bm25_search(query, type_filtered_docs, limit)
-                    search_method = "BM25"
+    def _build_memory_narrative(self, query: str, file_results: List[Dict], history_results: List[Dict]) -> str:
+        """Build a narrative description of the found memories"""
+        parts = []
+        
+        if file_results:
+            parts.append(f"关于 '{query}'，我在工作空间中找到了 {len(file_results)} 个相关文件：")
+            for i, item in enumerate(file_results[:3], 1):
+                filename = os.path.basename(item.get('path', ''))
+                snippets = item.get('snippets', [])
+                if snippets:
+                    preview = snippets[0].get('text', '')[:80]
+                    parts.append(f"  {i}. {filename}: {preview}...")
                 else:
-                    matches = self._simple_search(query, type_filtered_docs, limit)
-                    search_method = "简单匹配"
+                    parts.append(f"  {i}. {filename}")
+        
+        if history_results:
+            if parts:
+                parts.append("")
+            parts.append(f"另外，在之前的对话中，我们讨论过 '{query}' 相关的内容：")
+            for i, item in enumerate(history_results[:2], 1):
+                role = "你" if item.get('role') == 'user' else "我"
+                preview = item.get('content_preview', '')[:80]
+                parts.append(f"  {i}. {role}提到: {preview}...")
+        
+        if not parts:
+            return f"没有找到关于 '{query}' 的相关记忆。"
+        
+        return "\n".join(parts)
 
-                if matches:
-                    formatted_memories = []
-                    for match in matches:
-                        formatted_memories.append({
-                            "key": match['key'],
-                            "content": match['content'],
-                            "memory_type": match['memory_type'],
-                            "tags": match['tags'],
-                            "created_at": match.get('created_at', '')
+    async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
+        """Search file memory using BM25 index"""
+        try:
+            # Get workspace path
+            workspace_path = self._get_workspace_path(session_id)
+            if not workspace_path:
+                logger.warning(f"MemoryTool: Cannot get workspace path for session {session_id}")
+                return []
+            
+            # Get index path for this workspace
+            index_path = self._get_index_path(session_id)
+            
+            # Load/build index
+            from .memory_index import MemoryIndex
+            index = MemoryIndex(workspace_path, index_path)
+            
+            # Auto update index (fast check if no changes)
+            stats = index.update_index()
+            logger.info(f"MemoryTool: Index update stats: {stats}")
+            
+            # Search
+            results = index.search(query, top_k)
+            
+            # Format results with snippets
+            formatted_results = []
+            for r in results:
+                # Extract snippets from the content preview
+                snippets = []
+                if r.content:
+                    # Split by line number markers
+                    snippet_matches = re.findall(r'\[Line (\d+)\] (.*?)(?=\n\n|\Z)', r.content, re.DOTALL)
+                    for line_num, snippet_text in snippet_matches:
+                        snippets.append({
+                            "line_number": int(line_num),
+                            "text": snippet_text.strip()
                         })
-
-                    message = f"找到 {len(matches)} 条类型为 '{memory_type}' 的相关记忆（{search_method}）"
-                    return self._format_response(True, message, memories=formatted_memories)
-                else:
-                    return self._format_response(True, f"未找到类型为 '{memory_type}' 且与 '{query}' 相关的记忆", memories=[])
-            else:
-                # 无查询条件，返回所有该类型的记忆
-                # 按创建时间排序
-                type_filtered_docs.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-                limited_docs = type_filtered_docs[:limit]
-
-                formatted_memories = []
-                for doc in limited_docs:
-                    formatted_memories.append({
-                        "key": doc['key'],
-                        "content": doc['content'],
-                        "memory_type": doc['memory_type'],
-                        "tags": doc['tags'],
-                        "created_at": doc.get('created_at', '')
-                    })
-
-                message = f"找到 {len(formatted_memories)} 条类型为 '{memory_type}' 的记忆"
-                return self._format_response(True, message, memories=formatted_memories)
-
+                
+                formatted_results.append({
+                    "path": r.path,
+                    "snippets": snippets,
+                })
+            
+            return formatted_results
+            
         except Exception as e:
-            logger.error(f"按类型搜索记忆失败 {user_id}: {e}")
-            return self._format_response(False, "搜索记忆失败", error=str(e))
+            logger.error(f"MemoryTool: File memory search failed: {e}")
+            return []
 
-    # @tool(
-    #     description_i18n={
-    #         "zh": "根据关键词搜索用户记忆",
-    #         "en": "Search user memories by keywords",
-    #         "pt": "Pesquisa memórias por palavras-chave"
-    #     },
-    #     param_description_i18n={
-    #         "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
-    #         "query": {"zh": "查询内容（关键词）", "en": "Query keywords", "pt": "Palavras-chave de consulta"},
-    #         "limit": {"zh": "返回数量限制", "en": "Result limit", "pt": "Limite de resultados"}
-    #     }
-    # )
-    def recall_user_memory(self, user_id: str, query: str, limit: int = 5) -> str:
-        """根据查询内容检索用户的记忆，返回与查询内容相关的记忆列表
-
-        Args:
-            user_id: 用户ID
-            query: 查询内容（关键词）
-            limit: 返回结果数量限制（1-50）
-
-        Returns:
-            按相似度排序的匹配记忆列表
-
-        Example:
-            recall('user123', 'coding', 3)
+    async def _search_session_history(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
         """
-        # 检查环境变量是否设置
-        if not os.getenv('MEMORY_ROOT_PATH'):
-            return self._format_response(False, "本地记忆功能不可用：未设置MEMORY_ROOT_PATH环境变量")
-
-        try:
-            logger.debug(f"使用BM25搜索记忆 {user_id}: {query}")
-
-            memories = self._load_user_memories(user_id)
-
-            if not memories:
-                return "未找到任何记忆"
-
-            # 将记忆转换为文档格式，过滤掉空内容
-            documents = []
-            for key, memory in memories.items():
-                content = memory.get('content', '')
-                # 过滤掉空内容的记忆
-                if content and content.strip():
-                    documents.append({
-                        'key': key,
-                        'content': content,
-                        'tags': memory.get('tags', []),
-                        'created_at': memory.get('created_at', '')
-                    })
-
-            if not documents:
-                return "未找到任何有效记忆"
-
-            # 使用BM25搜索或简单搜索
-            if BM25_AVAILABLE:
-                matches = self._bm25_search(query, documents, limit)
-                search_method = "BM25"
-            else:
-                matches = self._simple_search(query, documents, limit)
-                search_method = "简单匹配"
-
-            if matches:
-                # 格式化记忆列表
-                formatted_memories = []
-                for match in matches:
-                    formatted_memories.append({
-                        "key": match['key'],
-                        "content": match['content'],
-                        "tags": match['tags'],
-                        "created_at": match.get('created_at', '')
-                    })
-
-                message = f"找到 {len(matches)} 条相关记忆（{search_method}）"
-                return self._format_response(True, message, memories=formatted_memories)
-            else:
-                return self._format_response(True, f"未找到与 '{query}' 相关的记忆", memories=[])
-
-        except Exception as e:
-            logger.error(f"搜索记忆失败 {user_id}: {e}")
-            return self._format_response(False, "搜索记忆失败", error=str(e))
-
-    # @tool(
-    #     description_i18n={
-    #         "zh": "删除指定的用户记忆",
-    #         "en": "Delete a specific user memory",
-    #         "pt": "Exclui uma memória específica"
-    #     },
-    #     param_description_i18n={
-    #         "user_id": {"zh": "用户ID", "en": "User ID", "pt": "ID do usuário"},
-    #         "memory_key": {"zh": "要删除的记忆键", "en": "Memory key to delete", "pt": "Chave da memória a excluir"}
-    #     }
-    # )
-    def forget_user_memory(self, user_id: str, memory_key: str) -> str:
-        """删除用户的指定的记忆
-
-        Args:
-            user_id: 用户ID
-            memory_key: 要删除的记忆键
-
-        Returns:
-            JSON格式的标准返回字符串
-
-        Example:
-            forget('user123', 'old_preference')
-        """
-        # 检查环境变量是否设置
-        if not os.getenv('MEMORY_ROOT_PATH'):
-            return self._format_response(False, "本地记忆功能不可用：未设置MEMORY_ROOT_PATH环境变量")
-
-        try:
-            logger.debug(f"删除记忆 {user_id}: {memory_key}")
-
-            memories = self._load_user_memories(user_id)
-
-            if memory_key in memories:
-                del memories[memory_key]
-                self._save_user_memories(user_id, memories)
-                return self._format_response(True, f"已忘记：{memory_key}")
-            else:
-                return self._format_response(False, f"记忆不存在：{memory_key}")
-
-        except Exception as e:
-            logger.error(f"删除记忆失败 {user_id}: {e}")
-            return self._format_response(False, "删除记忆失败", error=str(e))
-
-    def _validate_timestamp(self, timestamp: str) -> bool:
-        """验证时间戳格式是否正确
-
-        Args:
-            timestamp: 时间戳字符串
-
-        Returns:
-            是否为正确的时间戳格式
+        Search session history messages using BM25 retrieval
+        
+        流程：准备历史上下文 -> 使用 session_memory_manager 检索 -> 返回结果
         """
         try:
-            datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            return True
-        except ValueError:
-            return False
-
-
-# 工具实例（单例模式）
-_memory_tool_instance = None
-
-
-def get_memory_tool() -> MemoryTool:
-    """获取记忆工具实例
-
-    Returns:
-        记忆工具实例
-    """
-    global _memory_tool_instance
-
-    if _memory_tool_instance is None:
-        _memory_tool_instance = MemoryTool()
-
-    return _memory_tool_instance
+            from sagents.session_runtime import get_global_session_manager
+            
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            
+            if not session:
+                logger.warning(f"MemoryTool: Session not found: {session_id}")
+                return []
+            
+            session_context = session.session_context
+            message_manager = session_context.message_manager
+            session_memory_manager = session_context.session_memory_manager
+            
+            # 1. 准备历史上下文（计算预算、切分消息）
+            agent_config = getattr(session_context, 'agent_config', {})
+            prepare_result = message_manager.prepare_history_split(agent_config)
+            
+            # 2. 获取历史消息（排除最近的消息）
+            history_messages = prepare_result['split_result']['history_messages']
+            
+            if not history_messages:
+                logger.debug("MemoryTool: No history messages to search")
+                return []
+            
+            # 3. 使用 session_memory_manager 进行 BM25 检索
+            retrieved_messages = session_memory_manager.retrieve_history_messages(
+                messages=history_messages,
+                query=query,
+                history_budget=top_k * 200  # 估算每个消息约200字符
+            )
+            
+            # 4. 限制返回数量
+            retrieved_messages = retrieved_messages[:top_k]
+            
+            logger.info(f"Memory
