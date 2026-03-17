@@ -535,6 +535,9 @@ class ExecuteCommandTool:
         stdout_fd, stdout_path = tempfile.mkstemp(prefix=f"stdout_{process_id}_", suffix=".log")
         stderr_fd, stderr_path = tempfile.mkstemp(prefix=f"stderr_{process_id}_", suffix=".log")
 
+        # 设置 Python 无缓冲模式，确保输出及时写入文件
+        env['PYTHONUNBUFFERED'] = '1'
+
         try:
             process = subprocess.Popen(
                 command,
@@ -548,15 +551,30 @@ class ExecuteCommandTool:
 
             self.process_manager.add_process(process_id, process)
 
+            # 关闭文件描述符，确保子进程可以正常写入
+            os.close(stdout_fd)
+            os.close(stderr_fd)
+            stdout_fd = -1  # 标记为已关闭
+            stderr_fd = -1
+
             try:
                 process.wait(timeout=timeout)
                 return_code = process.returncode
 
                 # 读取输出文件
-                with open(stdout_path, 'r', encoding='utf-8', errors='replace') as f:
-                    stdout = f.read()
-                with open(stderr_path, 'r', encoding='utf-8', errors='replace') as f:
-                    stderr = f.read()
+                try:
+                    with open(stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                        stdout = f.read()
+                except Exception as e:
+                    logger.warning(f"读取 stdout 文件失败: {e}")
+                    stdout = ""
+
+                try:
+                    with open(stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                        stderr = f.read()
+                except Exception as e:
+                    logger.warning(f"读取 stderr 文件失败: {e}")
+                    stderr = ""
 
                 # 检查输出是否超过限制
                 truncated = False
@@ -592,9 +610,17 @@ class ExecuteCommandTool:
             finally:
                 self.process_manager.remove_process(process_id)
         finally:
-            # 关闭文件描述符
-            os.close(stdout_fd)
-            os.close(stderr_fd)
+            # 关闭文件描述符（如果还未关闭）
+            try:
+                if stdout_fd >= 0:
+                    os.close(stdout_fd)
+            except OSError:
+                pass
+            try:
+                if stderr_fd >= 0:
+                    os.close(stderr_fd)
+            except OSError:
+                pass
             # 删除临时文件
             try:
                 os.unlink(stdout_path)
