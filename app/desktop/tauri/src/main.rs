@@ -314,83 +314,83 @@ fn handle_close_dialog_result(result: CloseDialogResult, app: tauri::AppHandle) 
     }
 }
 
-#[tauri::command(async)]
-fn get_system_proxy() -> Option<String> {
-    // 1. Try environment variables first
-    if let Ok(proxy) = std::env::var("HTTP_PROXY")
-        .or_else(|_| std::env::var("http_proxy"))
-        .or_else(|_| std::env::var("HTTPS_PROXY"))
-        .or_else(|_| std::env::var("https_proxy"))
-        .or_else(|_| std::env::var("ALL_PROXY"))
-        .or_else(|_| std::env::var("all_proxy")) 
-    {
-        return Some(proxy);
-    }
+// #[tauri::command(async)]
+// fn get_system_proxy() -> Option<String> {
+//     // 1. Try environment variables first
+//     if let Ok(proxy) = std::env::var("HTTP_PROXY")
+//         .or_else(|_| std::env::var("http_proxy"))
+//         .or_else(|_| std::env::var("HTTPS_PROXY"))
+//         .or_else(|_| std::env::var("https_proxy"))
+//         .or_else(|_| std::env::var("ALL_PROXY"))
+//         .or_else(|_| std::env::var("all_proxy")) 
+//     {
+//         return Some(proxy);
+//     }
 
-    // 2. macOS specific check using scutil
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-        if let Ok(output) = Command::new("scutil").arg("--proxy").output() {
-            let output_str = String::from_utf8_lossy(&output.stdout);
+//     // 2. macOS specific check using scutil
+//     #[cfg(target_os = "macos")]
+//     {
+//         use std::process::Command;
+//         if let Ok(output) = Command::new("scutil").arg("--proxy").output() {
+//             let output_str = String::from_utf8_lossy(&output.stdout);
             
-            let mut host = String::new();
-            let mut port = String::new();
-            let mut enabled = false;
+//             let mut host = String::new();
+//             let mut port = String::new();
+//             let mut enabled = false;
             
-            for line in output_str.lines() {
-                let line = line.trim();
-                if line.starts_with("HTTPEnable") && line.contains("1") {
-                    enabled = true;
-                }
-                if line.starts_with("HTTPProxy") {
-                    if let Some(val) = line.split(':').nth(1) {
-                        host = val.trim().to_string();
-                    }
-                }
-                if line.starts_with("HTTPPort") {
-                     if let Some(val) = line.split(':').nth(1) {
-                        port = val.trim().to_string();
-                    }
-                }
-            }
+//             for line in output_str.lines() {
+//                 let line = line.trim();
+//                 if line.starts_with("HTTPEnable") && line.contains("1") {
+//                     enabled = true;
+//                 }
+//                 if line.starts_with("HTTPProxy") {
+//                     if let Some(val) = line.split(':').nth(1) {
+//                         host = val.trim().to_string();
+//                     }
+//                 }
+//                 if line.starts_with("HTTPPort") {
+//                      if let Some(val) = line.split(':').nth(1) {
+//                         port = val.trim().to_string();
+//                     }
+//                 }
+//             }
             
-            if enabled && !host.is_empty() && !port.is_empty() {
-                return Some(format!("http://{}:{}", host, port));
-            }
-        }
-    }
+//             if enabled && !host.is_empty() && !port.is_empty() {
+//                 return Some(format!("http://{}:{}", host, port));
+//             }
+//         }
+//     }
 
-    // 3. Windows specific check using netsh
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        if let Ok(output) = Command::new("netsh").args(["winhttp", "show", "proxy"]).output() {
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            // Check if proxy is enabled (not "Direct access")
-            if !output_str.contains("Direct access") {
-                // Try to extract proxy server address
-                for line in output_str.lines() {
-                    let line = line.trim();
-                    if line.starts_with("Proxy Server(s)") || line.starts_with("Proxy Server") {
-                        if let Some(proxy_part) = line.split(':').nth(1) {
-                            let proxy = proxy_part.trim().to_string();
-                            if !proxy.is_empty() {
-                                // Add http:// prefix if not present
-                                if !proxy.starts_with("http://") && !proxy.starts_with("https://") {
-                                    return Some(format!("http://{}", proxy));
-                                }
-                                return Some(proxy);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+//     // 3. Windows specific check using netsh
+//     #[cfg(target_os = "windows")]
+//     {
+//         use std::process::Command;
+//         if let Ok(output) = Command::new("netsh").args(["winhttp", "show", "proxy"]).output() {
+//             let output_str = String::from_utf8_lossy(&output.stdout);
+//             // Check if proxy is enabled (not "Direct access")
+//             if !output_str.contains("Direct access") {
+//                 // Try to extract proxy server address
+//                 for line in output_str.lines() {
+//                     let line = line.trim();
+//                     if line.starts_with("Proxy Server(s)") || line.starts_with("Proxy Server") {
+//                         if let Some(proxy_part) = line.split(':').nth(1) {
+//                             let proxy = proxy_part.trim().to_string();
+//                             if !proxy.is_empty() {
+//                                 // Add http:// prefix if not present
+//                                 if !proxy.starts_with("http://") && !proxy.starts_with("https://") {
+//                                     return Some(format!("http://{}", proxy));
+//                                 }
+//                                 return Some(proxy);
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
 
-    None
-}
+//     None
+// }
 
 #[tauri::command]
 fn get_sage_env_content() -> Result<String, String> {
@@ -909,7 +909,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_port, get_system_proxy, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path])
+        .invoke_handler(tauri::generate_handler![get_server_port, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

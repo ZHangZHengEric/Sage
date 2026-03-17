@@ -108,8 +108,22 @@
           </div>
           <div class="grid gap-2">
              <Label>{{ t('modelProvider.model') }} <span class="text-destructive">*</span></Label>
-             <Input v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" @update:model-value="onKeyConfigChange" />
-             <p class="text-xs text-muted-foreground">{{ t('modelProvider.modelHint') }}</p>
+             <div class="space-y-3">
+               <Select :model-value="selectedModel" @update:model-value="handleModelChange">
+                 <SelectTrigger>
+                   <SelectValue :placeholder="t('modelProvider.modelPlaceholder')" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectGroup>
+                     <SelectItem v-for="model in availableModels" :key="model" :value="model">
+                       {{ model }}
+                     </SelectItem>
+                     <SelectItem value="Custom">{{ t('modelProvider.custom') }}</SelectItem>
+                   </SelectGroup>
+                 </SelectContent>
+               </Select>
+               <Input v-if="selectedModel === 'Custom'" v-model="form.model" :placeholder="t('modelProvider.modelPlaceholder')" @update:model-value="onKeyConfigChange" />
+             </div>
           </div>
           
           <div class="grid grid-cols-2 gap-4">
@@ -254,6 +268,14 @@ const originalValues = reactive({
 
 const selectedProvider = ref('')
 const currentProvider = computed(() => MODEL_PROVIDERS.find(p => p.name === selectedProvider.value))
+const selectedModel = ref('')
+
+const availableModels = computed(() => {
+  if (currentProvider.value && currentProvider.value.models) {
+    return currentProvider.value.models
+  }
+  return []
+})
 
 // 保存按钮是否可点击
 const canSave = computed(() => {
@@ -298,6 +320,7 @@ const handleProviderChange = (val) => {
     form.name = ''
     form.base_url = ''
     form.model = ''
+    selectedModel.value = ''
     verified.value = false
     multimodalVerified.value = false
     form.supportsMultimodal = false
@@ -307,11 +330,27 @@ const handleProviderChange = (val) => {
   if (provider) {
     form.name = provider.name
     form.base_url = provider.base_url
-    // form.model = provider.models[0] || ''
+    if (provider.models && provider.models.length > 0) {
+      selectedModel.value = provider.models[0]
+      form.model = provider.models[0]
+    } else {
+      selectedModel.value = ''
+      form.model = ''
+    }
   }
   verified.value = false
   multimodalVerified.value = false
   form.supportsMultimodal = false
+}
+
+const handleModelChange = (val) => {
+  selectedModel.value = val
+  if (val !== 'Custom') {
+    form.model = val
+  } else {
+    form.model = ''
+  }
+  onKeyConfigChange()
 }
 
 const onKeyConfigChange = () => {
@@ -346,6 +385,7 @@ const handleCreate = () => {
   currentId.value = null
   form.name = ''
   selectedProvider.value = ''
+  selectedModel.value = ''
   form.base_url = ''
   form.api_keys_str = ''
   form.model = ''
@@ -385,6 +425,14 @@ const handleEdit = (provider) => {
     form.api_keys_str = keys.join(',')
 
     form.model = provider.model
+    
+    // Initialize selectedModel
+    if (known && known.models && known.models.includes(provider.model)) {
+      selectedModel.value = provider.model
+    } else {
+      selectedModel.value = 'Custom'
+    }
+
     form.maxTokens = provider.max_tokens ?? 4096
     form.temperature = provider.temperature ?? 0.7
     form.topP = provider.top_p ?? 0.9
