@@ -63,7 +63,7 @@ class FileSystemTool:
         },
         param_description_i18n={
             "file_path": {"zh": "文件绝对路径", "en": "Absolute file path", "pt": "Caminho absoluto do arquivo"},
-            "content": {"zh": "要写入的文本内容", "en": "Text content to write", "pt": "Conteúdo de texto a gravar"},
+            "content": {"zh": "要写入的文本内容（单次不要超过2000字符，超过请分多次调用）", "en": "Text content to write (max 2000 chars per call, split into multiple calls if exceeded)", "pt": "Conteúdo de texto a gravar (máx 2000 chars por chamada, divida em várias chamadas se excedido)"},
             "mode": {"zh": "写入模式 overwrite/append/prepend", "en": "Write mode overwrite/append/prepend", "pt": "Modo de gravação overwrite/append/prepend"},
             "encoding": {"zh": "文件编码", "en": "File encoding", "pt": "Codificação do arquivo"}
         }
@@ -300,17 +300,17 @@ class FileSystemTool:
             }
 
     
-    @tool(
-        description_i18n={
-            "zh": "从URL下载文件到目录",
-            "en": "Download file from URL to directory",
-            "pt": "Baixa arquivo da URL para diretório"
-        },
-        param_description_i18n={
-            "url": {"zh": "要下载的文件URL", "en": "File URL to download", "pt": "URL do arquivo para download"},
-            "working_dir": {"zh": "保存文件的目录", "en": "Directory to save the file", "pt": "Diretório para salvar o arquivo"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "从URL下载文件到目录",
+    #         "en": "Download file from URL to directory",
+    #         "pt": "Baixa arquivo da URL para diretório"
+    #     },
+    #     param_description_i18n={
+    #         "url": {"zh": "要下载的文件URL", "en": "File URL to download", "pt": "URL do arquivo para download"},
+    #         "working_dir": {"zh": "保存文件的目录", "en": "Directory to save the file", "pt": "Diretório para salvar o arquivo"}
+    #     }
+    # )
     async def download_file_from_url(self, url: str, working_dir: str) -> Dict[str, Any]:
         """从URL下载文件并保存到指定目录
 
