@@ -134,7 +134,7 @@ class SimpleAgent(AgentBase):
 
         # 根据建议过滤工具
         # 强制包含 todo 工具，如果它们存在于可用工具中
-        always_include = ['todo_write', 'todo_read']
+        always_include = ['todo_write']
         
         tools_suggest_json = [
             tool for tool in tools_json

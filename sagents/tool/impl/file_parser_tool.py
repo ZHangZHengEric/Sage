@@ -11,19 +11,19 @@ from sagents.utils.file_parser import FileParser
 class FileParserTool:
     """文件解析工具集"""
 
-    @tool(
-        description_i18n={
-            "zh": "从非文本文件中提取Markdown文本（含PDF/Office/CSV等）",
-            "en": "Extract Markdown text from non-text files (PDF/Office/CSV)",
-            "pt": "Extrai texto Markdown de arquivos não textuais (PDF/Office/CSV)"
-        },
-        param_description_i18n={
-            "input_file_path": {"zh": "输入文件的绝对路径", "en": "Absolute path of input file", "pt": "Caminho absoluto do arquivo de entrada"},
-            "start_index": {"zh": "开始字符位置，默认0", "en": "Start character index, default 0", "pt": "Índice inicial de caractere, padrão 0"},
-            "max_length": {"zh": "最大提取长度，默认5000，最大5000", "en": "Max extract length, default 5000, max 5000", "pt": "Comprimento máximo de extração, padrão 5000, máximo 5000"},
-            "include_metadata": {"zh": "是否包含文件元数据", "en": "Whether to include file metadata", "pt": "Se deve incluir metadados do arquivo"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "从非文本文件中提取Markdown文本（含PDF/Office/CSV等）",
+    #         "en": "Extract Markdown text from non-text files (PDF/Office/CSV)",
+    #         "pt": "Extrai texto Markdown de arquivos não textuais (PDF/Office/CSV)"
+    #     },
+    #     param_description_i18n={
+    #         "input_file_path": {"zh": "输入文件的绝对路径", "en": "Absolute path of input file", "pt": "Caminho absoluto do arquivo de entrada"},
+    #         "start_index": {"zh": "开始字符位置，默认0", "en": "Start character index, default 0", "pt": "Índice inicial de caractere, padrão 0"},
+    #         "max_length": {"zh": "最大提取长度，默认5000，最大5000", "en": "Max extract length, default 5000, max 5000", "pt": "Comprimento máximo de extração, padrão 5000, máximo 5000"},
+    #         "include_metadata": {"zh": "是否包含文件元数据", "en": "Whether to include file metadata", "pt": "Se deve incluir metadados do arquivo"}
+    #     }
+    # )
     def extract_text_from_non_text_file(
         self, 
         input_file_path: str, 

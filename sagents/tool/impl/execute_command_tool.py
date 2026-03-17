@@ -327,6 +327,19 @@ class ExecuteCommandTool:
             logger.debug(f"[execute_shell_command] 准备环境变量")
             env = os.environ.copy()
 
+            # 自动设置沙箱 Python 环境变量（如果存在）
+            if session_id:
+                from sagents.utils.sandbox import get_sandbox_python_path
+                sandbox_python = get_sandbox_python_path(session_id)
+                if sandbox_python:
+                    env['SANDBOX_PYTHON_PATH'] = sandbox_python
+                    # 将沙箱 Python 的目录添加到 PATH 最前面
+                    sandbox_bin = os.path.dirname(sandbox_python)
+                    current_path = env.get("PATH", "")
+                    if sandbox_bin not in current_path:
+                        env["PATH"] = f"{sandbox_bin}{os.pathsep}{current_path}"
+                        logger.debug(f"[execute_shell_command] 添加沙箱 Python 到 PATH: {sandbox_bin}")
+
             # 在 PyInstaller 打包环境中，需要显式添加全局 npm 路径
             from sagents.utils.common_utils import is_pyinstaller_frozen
             if is_pyinstaller_frozen():
@@ -628,20 +641,20 @@ class ExecuteCommandTool:
             except OSError:
                 pass
 
-    @tool(
-        description_i18n={
-            "zh": "在临时文件中运行Python代码，可选依赖安装",
-            "en": "Run Python code in a temp file, optionally install deps",
-            "pt": "Execute código Python em arquivo temporário, opcionalmente instale dependências"
-        },
-        param_description_i18n={
-            "code": {"zh": "Python代码文本", "en": "Python code text", "pt": "Texto de código Python"},
-            "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
-            "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
-            "requirement_list": {"zh": "需要安装的包名称列表", "en": "List of packages to install", "pt": "Lista de pacotes para instalar"},
-            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "在临时文件中运行Python代码，可选依赖安装",
+    #         "en": "Run Python code in a temp file, optionally install deps",
+    #         "pt": "Execute código Python em arquivo temporário, opcionalmente instale dependências"
+    #     },
+    #     param_description_i18n={
+    #         "code": {"zh": "Python代码文本", "en": "Python code text", "pt": "Texto de código Python"},
+    #         "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
+    #         "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
+    #         "requirement_list": {"zh": "需要安装的包名称列表", "en": "List of packages to install", "pt": "Lista de pacotes para instalar"},
+    #         "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
+    #     }
+    # )
     async def execute_python_code(self, code: str, requirement_list: Optional[Union[List[str], str]] = None,
                                   workdir: Optional[str] = None, timeout: int = 60,
                                   session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -803,20 +816,20 @@ class ExecuteCommandTool:
             # 脚本文件保留用于备份，不自动删除
             pass
 
-    @tool(
-        description_i18n={
-            "zh": "在临时文件中运行JavaScript代码，可选依赖安装",
-            "en": "Run JavaScript code in a temp file, optionally install deps",
-            "pt": "Execute código JavaScript em arquivo temporário, opcionalmente instale dependências"
-        },
-        param_description_i18n={
-            "code": {"zh": "JavaScript代码文本", "en": "JavaScript code text", "pt": "Texto de código JavaScript"},
-            "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
-            "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
-            "npm_packages": {"zh": "需要安装的npm包列表", "en": "List of npm packages to install", "pt": "Lista de pacotes npm para instalar"},
-            "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
-        }
-    )
+    # @tool(
+    #     description_i18n={
+    #         "zh": "在临时文件中运行JavaScript代码，可选依赖安装",
+    #         "en": "Run JavaScript code in a temp file, optionally install deps",
+    #         "pt": "Execute código JavaScript em arquivo temporário, opcionalmente instale dependências"
+    #     },
+    #     param_description_i18n={
+    #         "code": {"zh": "JavaScript代码文本", "en": "JavaScript code text", "pt": "Texto de código JavaScript"},
+    #         "workdir": {"zh": "运行目录，默认临时目录", "en": "Working directory, defaults to temp", "pt": "Diretório de execução, padrão temporário"},
+    #         "timeout": {"zh": "超时秒数，默认30", "en": "Timeout in seconds, default 30", "pt": "Tempo limite em segundos, padrão 30"},
+    #         "npm_packages": {"zh": "需要安装的npm包列表", "en": "List of npm packages to install", "pt": "Lista de pacotes npm para instalar"},
+    #         "session_id": {"zh": "会话ID (可选, 自动注入, 无需填写)", "en": "Session ID (Optional, Auto-injected)", "pt": "ID da Sessão (Opcional)"}
+    #     }
+    # )
     def execute_javascript_code(self, code: str, npm_packages: Optional[Union[List[str], str]] = None, 
                               workdir: Optional[str] = None, timeout: int = 60,
                               session_id: Optional[str] = None) -> Dict[str, Any]:
