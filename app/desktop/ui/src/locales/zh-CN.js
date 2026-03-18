@@ -209,7 +209,7 @@ export default {
   'agent.name': '名称',
   'agent.description': '描述',
   'agent.model': '模型',
-  'agent.modelProvider': '自定义模型源',
+  'agent.modelProvider': 'LLM模型',
   'agent.selectProvider': '选择模型源',
   'agent.useSystemDefault': '使用系统默认',
   'agent.noProviders': '暂无可用模型源，请先在模型源管理中添加',
