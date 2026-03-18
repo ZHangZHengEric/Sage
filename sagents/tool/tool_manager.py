@@ -8,7 +8,6 @@ from .tool_schema import (
     SageMcpToolSpec,
     SseServerParameters,
     StreamableHttpServerParameters,
-    AgentToolSpec,
 )
 from sagents.utils.logger import logger
 from sagents.context.session_context import SessionContext
@@ -210,7 +209,7 @@ class ToolManager:
 
         logger.debug(f"Initializing ToolManager (isolated={isolated})")
 
-        self.tools: Dict[str, Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]] = {}
+        self.tools: Dict[str, Union[ToolSpec, McpToolSpec, SageMcpToolSpec]] = {}
         self._tool_instances: Dict[type, Any] = {}  # 缓存工具实例
         self._mcp_setting_path = None
 
@@ -419,21 +418,20 @@ class ToolManager:
                     
         return registered_tools
 
-    def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, AgentToolSpec, SageMcpToolSpec]):
+    def register_tool(self, tool_spec: Union[ToolSpec, McpToolSpec, SageMcpToolSpec]):
         """Register a tool specification with priority-based replacement
 
         Priority order (high to low):
         1. McpToolSpec (MCP tools)
-        2. AgentToolSpec (Agent tools)
-        3. SageMcpToolSpec (Built-in MCP tools)
-        4. ToolSpec (Local tools)
+        2. SageMcpToolSpec (Built-in MCP tools)
+        3. ToolSpec (Local tools)
         """
 
         if tool_spec.name in self.tools:
             existing_tool = self.tools[tool_spec.name]
 
-            # 定义优先级：MCP > Agent > SageMcp > Local
-            priority_order = {McpToolSpec: 3, AgentToolSpec: 2, SageMcpToolSpec: 1.5, ToolSpec: 1}
+            # 定义优先级：MCP > SageMcp > Local
+            priority_order = {McpToolSpec: 3, SageMcpToolSpec: 1.5, ToolSpec: 1}
 
             existing_priority = priority_order.get(type(existing_tool), 0)
             new_priority = priority_order.get(type(tool_spec), 0)
@@ -714,7 +712,7 @@ class ToolManager:
         registered = self.register_tool(tool_spec)
         logger.debug(f"MCP tool {tool_info['name']} registration result: {registered}")
 
-    def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec, AgentToolSpec]]:
+    def get_tool(self, name: str) -> Optional[Union[ToolSpec, McpToolSpec]]:
         """Get a tool by name"""
         logger.debug(f"Getting tool by name: {name}")
         return self.tools.get(name, None)
@@ -765,9 +763,6 @@ class ToolManager:
             if isinstance(tool, McpToolSpec):
                 tool_type = "mcp"
                 source = f"MCP Server: {tool.server_name}"
-            elif isinstance(tool, AgentToolSpec):
-                tool_type = "agent"
-                source = "专业智能体"
             elif isinstance(tool, SageMcpToolSpec):
                 tool_type = "sage_mcp"
                 source = f"内置MCP: {tool.server_name}"
@@ -999,11 +994,6 @@ class ToolManager:
                     # Remove session_id from kwargs to avoid duplication, _execute_standard_tool_async will inject it
                     kwargs.pop("session_id", None)
                     final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
-            elif isinstance(tool, AgentToolSpec):
-                # For AgentToolSpec, return a generator for streaming
-                return self._execute_agent_tool_streaming_async(
-                    tool, session_context, session_id
-                )
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
@@ -1221,80 +1211,6 @@ class ToolManager:
         except Exception as e:
             logger.error(f"Standard tool execution failed: {tool.name} - {str(e)}")
             raise
-
-    async def _execute_agent_tool_streaming_async(
-        self, tool: AgentToolSpec, session_context: SessionContext, session_id: str
-    ):
-        """
-        执行AgentToolSpec并返回流式结果 (async version)
-
-        Args:
-            tool: AgentToolSpec实例
-            session_context: 会话上下文
-            session_id: 会话ID
-
-        Yields:
-            流式返回的结果
-        """
-        logger.info(f"Executing agent tool with streaming: {tool.name}")
-        execution_start = time.time()
-
-        try:
-            # 检查agent是否有run_stream方法
-            agent_instance = (
-                tool.func.__self__ if hasattr(tool.func, "__self__") else None
-            )
-
-            if agent_instance and hasattr(agent_instance, "run_stream"):
-                logger.debug(f"Using run_stream method for agent: {tool.name}")
-                # 使用流式方法
-                stream_generator = agent_instance.run_stream(
-                    session_context=session_context,
-                    tool_manager=self,
-                    session_id=session_id,
-                )
-
-                # 流式返回结果
-                async for chunk in stream_generator:
-                    yield chunk
-
-            else:
-                logger.debug(f"Using non-streaming method for agent: {tool.name}")
-                # 回退到非流式方法
-                result = await tool.func(
-                    session_context=session_context, session_id=session_id
-                )
-
-                # 将结果包装为流式格式
-                if isinstance(result, list):
-                    for message in result:
-                        yield [message]
-                else:
-                    yield [{"role": "assistant", "content": str(result)}]
-
-            # 记录执行统计
-            execution_time = time.time() - execution_start
-            logger.info(
-                f"Agent tool '{tool.name}' completed streaming in {execution_time:.2f}s"
-            )
-
-        except Exception as e:
-            execution_time = time.time() - execution_start
-            error_msg = (
-                f"Agent tool '{tool.name}' failed after {execution_time:.2f}s: {str(e)}"
-            )
-            logger.error(error_msg)
-            logger.error(f"Exception details: {type(e).__name__}")
-            logger.debug(f"Full traceback: {traceback.format_exc()}")
-
-            # 返回错误消息作为流
-            error_response = {
-                "role": "assistant",
-                "content": f"工具执行失败: {error_msg}",
-                "error": True,
-                "error_type": "EXECUTION_ERROR",
-            }
-            yield [error_response]
 
     def _format_error_response(
         self,

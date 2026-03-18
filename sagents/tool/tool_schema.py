@@ -49,20 +49,8 @@ class SageMcpToolSpec(ToolSpec):
     """Spec for built-in MCP tools (annotated with @sage_mcp_tool)"""
     pass
 
-@dataclass
-class AgentToolSpec:
-    name: str
-    description: str
-    description_i18n: Dict[str, str]
-    func: Callable
-    parameters: Dict[str, Dict[str, Any]]
-    required: List[str]
-    return_data : Optional[Dict[str, Any]] = None # 返回数据格式
-    return_properties_i18n: Optional[Dict[str, Dict[str, Any]]] = None # 返回对象属性描述的多语言
-    param_description_i18n: Optional[Dict[str, Dict[str, str]]] = None # 参数描述多语言映射 param -> {lang: text}
-
 def convert_spec_to_openai_format(
-    tool_spec: Union[McpToolSpec, ToolSpec, AgentToolSpec],
+    tool_spec: Union[McpToolSpec, ToolSpec],
     lang: Optional[str] = None,
     fallback_chain: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
