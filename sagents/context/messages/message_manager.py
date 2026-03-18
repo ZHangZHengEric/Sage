@@ -239,12 +239,37 @@ class MessageManager:
         
         # 否则使用静态规则计算
         token_length = 0
+        total_chars = 0
+        image_count = 0
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk.from_dict(message)
-            # 提取文本内容（处理多模态格式）
-            content = MessageManager._extract_text_from_content(message.get_content())
-            token_length += MessageManager._calculate_str_token_length_static(content)
+            content = message.get_content()
+            # 使用 calculate_str_token_length 处理多模态消息（包含图片）
+            msg_tokens = MessageManager.calculate_str_token_length(content)
+            token_length += msg_tokens
+            
+            # 统计字符数（用于日志）
+            if isinstance(content, str):
+                total_chars += len(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get('type') == 'text':
+                            total_chars += len(item.get('text', ''))
+                        elif item.get('type') == 'image_url':
+                            image_count += 1
+                            # 估算 base64 图片的字符数（用于日志）
+                            image_url = item.get('image_url', {})
+                            if isinstance(image_url, dict):
+                                url = image_url.get('url', '')
+                            else:
+                                url = str(image_url)
+                            if url.startswith('data:'):
+                                base64_data = url.split(',')[-1] if ',' in url else url
+                                total_chars += len(base64_data)
+        
+        logger.info(f"[TokenCalc] 静态计算: chars={total_chars}, tokens={token_length}, msg_count={len(messages)}, images={image_count}")
         return token_length
 
     @staticmethod
@@ -404,7 +429,7 @@ class MessageManager:
         if len(_global_token_ratio_samples) > _global_max_ratio_samples:
             _global_token_ratio_samples.pop(0)
 
-        logger.debug(f"MessageManager: 更新 token 比例样本，当前比例={ratio:.4f}，样本数={len(_global_token_ratio_samples)}")
+        logger.info(f"[TokenRatio] 更新 token 比例样本: chars={char_count}, tokens={actual_token_count}, ratio={ratio:.4f}, 总样本数={len(_global_token_ratio_samples)}")
 
     @staticmethod
     def get_dynamic_token_ratio() -> float:
@@ -439,6 +464,7 @@ class MessageManager:
     def _calculate_messages_token_length_dynamic(messages: Sequence[Union[MessageChunk, Dict]]) -> int:
         """
         使用动态比例计算消息列表的 token 长度（静态方法）
+        注意：动态比例只适用于文本内容，图片使用固定估算
 
         Args:
             messages: 消息列表
@@ -447,15 +473,42 @@ class MessageManager:
             int: 估算的 token 长度
         """
         ratio = MessageManager.get_dynamic_token_ratio()
-        total_chars = 0
+        text_chars = 0
+        image_tokens = 0
+        image_count = 0
 
         for message in messages:
             if isinstance(message, dict):
                 message = MessageChunk.from_dict(message)
-            content = message.get_content() or ''
-            total_chars += len(content)
+            content = message.get_content()
 
-        return int(total_chars * ratio)
+            if isinstance(content, str):
+                text_chars += len(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get('type') == 'text':
+                            text_chars += len(item.get('text', ''))
+                        elif item.get('type') == 'image_url':
+                            image_count += 1
+                            # 图片使用固定估算（与静态计算一致）
+                            image_url = item.get('image_url', {})
+                            if isinstance(image_url, dict):
+                                url = image_url.get('url', '')
+                            else:
+                                url = str(image_url)
+                            if url.startswith('data:'):
+                                base64_data = url.split(',')[-1] if ',' in url else url
+                                estimated = max(500, int(len(base64_data) * 0.2))
+                                image_tokens += min(estimated, 2000)
+                            else:
+                                image_tokens += 1000
+
+        # 文本使用动态比例，图片使用固定估算
+        text_tokens = int(text_chars * ratio)
+        estimated_tokens = text_tokens + image_tokens
+        logger.info(f"[TokenCalc] 动态计算: text_chars={text_chars}, image_tokens={image_tokens}, ratio={ratio:.4f}, estimated_tokens={estimated_tokens}, msg_count={len(messages)}, images={image_count}")
+        return estimated_tokens
 
     @staticmethod
     def merge_new_message_old_messages(new_message: MessageChunk, old_messages: List[MessageChunk]) -> List[MessageChunk]:
@@ -988,11 +1041,11 @@ class MessageManager:
         def current_usage():
             return MessageManager.calculate_messages_token_length(working_messages)
 
-        current_tokens = current_usage() 
-        logger.info(f"MessageManager: compress_messages 初始token长度为{current_tokens}")
+        current_tokens = current_usage()
+        logger.info(f"MessageManager: compress_messages 初始token长度为{current_tokens}, budget_limit={budget_limit}")
         if current_tokens <= budget_limit:
             return working_messages
-            
+
         # --- 1. 分组与保护区识别 ---
         # 将消息按 User 分组，每组包含一个 User 和其后的 Followers (Assistant/Tool)
         groups = MessageManager._group_messages_indices(working_messages)
@@ -1027,24 +1080,28 @@ class MessageManager:
         # 这里的保护意味着：不被 Level 1/2 压缩，也不被 Level 3 丢弃
         recent_token_limit = budget_limit * 0.2
         current_accumulated_tokens = 0
-        
+
         # 倒序遍历 Groups
         for gi in range(len(groups) - 1, -1, -1):
             group_indices = groups[gi]
             # 计算该组 Token
             group_msgs = [working_messages[k] for k in group_indices]
             group_token_count = MessageManager.calculate_messages_token_length(group_msgs)
-            
+
             if current_accumulated_tokens + group_token_count <= recent_token_limit:
                 # 标记为保护
                 protected_group_indices.add(gi)
                 for idx in group_indices:
                     protected_indices.add(idx)
-                
+
                 current_accumulated_tokens += group_token_count
             else:
                 # 一旦超过，就不再继续向前保护了（保持最近的连续性）
                 break
+
+        # 调试日志：显示保护信息
+        logger.info(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
+        logger.info(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可删除组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
 
         # --- Level 0.5 & 1 & 2: 消息级压缩 ---
         now = time.time()
@@ -1091,7 +1148,8 @@ class MessageManager:
         # --- Level 3: 历史丢弃 (基于组) ---
         # 目标: 未在 protected_group_indices 中的组
         droppable_group_indices = [gi for gi in range(len(groups)) if gi not in protected_group_indices]
-        
+        logger.info(f"MessageManager: Level 3 可删除组数={len(droppable_group_indices)}, 索引={droppable_group_indices}")
+
         for gi in droppable_group_indices:
             group_msgs_indices = groups[gi]
             
@@ -1131,10 +1189,13 @@ class MessageManager:
 
         # 清理已标记为删除的消息 (Content 为 None 的)
         final_messages = [
-            m for m in working_messages 
+            m for m in working_messages
             if m.content is not None or (m.tool_calls and len(m.tool_calls) > 0)
         ]
-        
+
+        final_tokens = MessageManager.calculate_messages_token_length(final_messages)
+        logger.info(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(final_messages)}")
+
         return final_messages
 
     def compress_messages_if_needed(self, messages: List[MessageChunk]) -> List[MessageChunk]:

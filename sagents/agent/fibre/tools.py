@@ -49,9 +49,9 @@ class FibreTools:
         return f"Agent spawned successfully. ID: {new_agent_id}. Ready to receive messages."
 
     @tool(
-        description_i18n={"zh": "给子agent 分配具体任务并执行，支持并发执行多个子任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。"},
+        description_i18n={"zh": "给子agent 分配具体任务并执行，tasks 列表中的任务是并发执行的。如果有前后顺序依赖的任务，应该分两次调用本工具，先执行前置任务，再执行后置任务。具体任务细节（如'写贪吃蛇'）应在这里通过 content 指定。"},
         param_description_i18n={
-            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。'session_id' 为可选项，仅在需要继续之前的会话时才填写。"}
+            "tasks": {"zh": "任务列表，每个任务包含 'agent_id', 'content' 等字段。'content' 必须包含详细的具体任务描述、上下文信息、具体要求以及期望的返回格式。'session_id' 为可选项，仅在需要继续之前的会话时才填写。注意：列表中的任务是并发执行的，如果有依赖关系请分多次调用。"}
         },
         param_schema={
             "tasks": {

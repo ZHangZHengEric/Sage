@@ -6,7 +6,7 @@
     <!-- Header -->
     <div class="p-4 flex items-center justify-between" :class="{'justify-center': isCollapsed}">
       <div v-if="!isCollapsed" class="flex items-center gap-2 overflow-hidden">
-        <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
+        <img :src="themeStore.isDark ? '/sage_logo.svg' : '/sage_logo_white.svg'" alt="Sage Logo" class="h-8 w-8 shrink-0" />
         <h2 
           class="text-xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent truncate"
         >
@@ -14,7 +14,7 @@
         </h2>
       </div>
       <div v-else class="flex justify-center w-full">
-         <img src="/sage_logo.svg" alt="Sage Logo" class="h-8 w-8 shrink-0" />
+         <img :src="themeStore.isDark ? '/sage_logo.svg' : '/sage_logo_white.svg'" alt="Sage Logo" class="h-8 w-8 shrink-0" />
       </div>
 
     </div>
@@ -226,6 +226,19 @@
       </div>
     </ScrollArea>
 
+    <!-- Collapse Toggle Button -->
+    <div class="p-2 border-t flex justify-center">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-8 w-8 text-muted-foreground hover:text-foreground transition-all duration-200"
+        @click="isCollapsed = !isCollapsed"
+        :title="isCollapsed ? '展开' : '收起'"
+      >
+        <ChevronLeft v-if="!isCollapsed" class="h-4 w-4" />
+        <ChevronRight v-else class="h-4 w-4" />
+      </Button>
+    </div>
 
   </div>
   
@@ -260,7 +273,9 @@ import {
   Users,
   KeyRound,
   LoaderCircle,
-  CircleCheckBig
+  CircleCheckBig,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-vue-next'
 import { useLanguage } from '../utils/i18n.js'
 
@@ -269,6 +284,7 @@ import { userAPI } from '@/api/user'
 import { chatAPI } from '@/api/chat'
 import { toast } from 'vue-sonner'
 import { useSidebarActiveSessions } from '@/composables/sidebar/useSidebarActiveSessions'
+import { useThemeStore } from '@/stores/theme'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
@@ -302,6 +318,8 @@ import {
 import { cn } from '@/utils/cn'
 
 import { useTour } from '../utils/tour'
+
+const themeStore = useThemeStore()
 
 const router = useRouter()
 const route = useRoute()
