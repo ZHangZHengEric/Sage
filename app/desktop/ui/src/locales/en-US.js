@@ -209,7 +209,7 @@ export default {
   'agent.name': 'Name',
   'agent.description': 'Description',
   'agent.model': 'Model',
-  'agent.modelProvider': 'Model Source',
+  'agent.modelProvider': 'LLM Model',
   'agent.selectProvider': 'Select Model Source',
   'agent.useSystemDefault': 'System Default',
   'agent.noProviders': 'No model providers available. Please add one in Model Source Management.',
