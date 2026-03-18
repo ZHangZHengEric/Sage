@@ -205,7 +205,7 @@ class IMServiceManager:
                     }
                     logger.info(f"[ServiceManager] Using Agent-level config for {key}")
             except Exception as e:
-                logger.debug(f"[ServiceManager] Failed to get Agent config for {key}: {e}")
+                logger.info(f"[ServiceManager] Failed to get Agent config for {key}: {e}", exc_info=True)
             
             # Fallback to database config
             if not config_data:
