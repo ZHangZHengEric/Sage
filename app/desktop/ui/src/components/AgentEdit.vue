@@ -223,7 +223,32 @@
                 </FormItem>
               </div>
 
-              <!-- Row 3: Model Provider -->
+            </div>
+          </section>
+
+          <!-- Model Provider Section -->
+          <section id="model" class="scroll-mt-6">
+            <div class="flex items-center gap-2 mb-5">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Server class="h-4 w-4 text-primary" />
+              </div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">{{ t('agent.modelProvider') }}</h2>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button class="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs hover:bg-muted/80 transition-colors">
+                        ?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p class="text-xs">选择Agent使用的语言模型提供商，不同的模型具有不同的能力和特性。</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </div>
+            <div class="pl-10">
               <FormItem :label="t('agent.modelProvider')">
                 <Select v-model="llmProviderSelectValue">
                   <SelectTrigger class="h-10">
@@ -244,9 +269,33 @@
                   </SelectContent>
                 </Select>
               </FormItem>
+            </div>
+          </section>
 
-              <!-- Row 4: Sub Agent Selection (Only for Fibre Mode) - Moved to bottom -->
-              <FormItem v-if="store.formData.agentMode === 'fibre'" label="子智能体" class="pt-4 border-t">
+          <!-- Sub Agent Section -->
+          <section id="subAgents" class="scroll-mt-6" v-if="store.formData.agentMode === 'fibre'">
+            <div class="flex items-center gap-2 mb-5">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Bot class="h-4 w-4 text-primary" />
+              </div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">子智能体</h2>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button class="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs hover:bg-muted/80 transition-colors">
+                        ?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p class="text-xs">选择当前Agent可以调用的子智能体，仅在Fibre模式下有效。</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </div>
+            <div class="pl-10">
+              <FormItem label="子智能体">
                 <div class="border rounded-lg overflow-hidden bg-background">
                   <div class="px-3 py-2 border-b bg-muted/30 flex items-center justify-between">
                     <span class="text-xs font-medium text-muted-foreground">可选子智能体 ({{ filteredAgents.length }})</span>
@@ -770,15 +819,28 @@ const handleToolsUpdated = async () => {
 }
 
 // Navigation sections
-const sections = [
-  { id: 'basic', label: t('agent.basicInfo'), icon: User },
-  { id: 'strategy', label: t('agent.strategy'), icon: Cpu },
-  { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
-  { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
-  { id: 'paths', label: '可访问文件夹', icon: FolderOpen },
-  { id: 'context', label: t('agent.systemContext'), icon: Database },
-  { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
-]
+const sections = computed(() => {
+  const baseSections = [
+    { id: 'basic', label: t('agent.basicInfo'), icon: User },
+    { id: 'strategy', label: t('agent.strategy'), icon: Cpu },
+    { id: 'model', label: t('agent.modelProvider'), icon: Server },
+    { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
+    { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
+    { id: 'paths', label: '可访问文件夹', icon: FolderOpen },
+    { id: 'context', label: t('agent.systemContext'), icon: Database },
+    { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
+  ]
+  
+  // 仅在Fibre模式下显示子智能体导航
+  if (store.formData.agentMode === 'fibre') {
+    const subAgentSection = { id: 'subAgents', label: '子智能体', icon: Bot }
+    // 在model之后插入subAgents
+    const modelIndex = baseSections.findIndex(s => s.id === 'model')
+    baseSections.splice(modelIndex + 1, 0, subAgentSection)
+  }
+  
+  return baseSections
+})
 
 const isEditMode = computed(() => !!store.formData.id)
 
@@ -800,7 +862,7 @@ const handleScroll = () => {
   if (!contentRef.value) return
   
   const scrollTop = contentRef.value.scrollTop
-  const sectionElements = sections.map(s => ({
+  const sectionElements = sections.value.map(s => ({
     id: s.id,
     element: document.getElementById(s.id)
   })).filter(s => s.element)
