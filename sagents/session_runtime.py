@@ -22,6 +22,7 @@ from sagents.agent import (
     TaskSummaryAgent,
     WorkflowSelectAgent,
     ToolSuggestionAgent,
+    MemoryRecallAgent,
 )
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import (
@@ -93,6 +94,7 @@ class Session:
             "tool_suggestion": ToolSuggestionAgent,
             "task_router": TaskRouterAgent,
             "fibre": FibreAgent,
+            "memory_recall": MemoryRecallAgent,
         }
 
     def configure_runtime(
@@ -333,13 +335,12 @@ class Session:
             if load_recent_skill_cost > 0.2:
                 logger.warning(f"SAgent: load_recent_skill_to_context slow, cost={load_recent_skill_cost:.3f}s")
 
-            history_context_start = time.perf_counter()
-            
+            # history_context_start = time.perf_counter()
             # 设置会话历史上下文
-            session_context.set_session_history_context()
-            history_context_cost = time.perf_counter() - history_context_start
-            if history_context_cost > 0.2:
-                logger.warning(f"SAgent: set_session_history_context slow, cost={history_context_cost:.3f}s")
+            # session_context.set_session_history_context()
+            # history_context_cost = time.perf_counter() - history_context_start
+            # if history_context_cost > 0.2:
+            #     logger.warning(f"SAgent: set_session_history_context slow, cost={history_context_cost:.3f}s")
 
             # --- 新的 Flow 执行逻辑 ---
             # 1. 预处理状态 (兼容旧逻辑)

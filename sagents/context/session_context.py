@@ -477,11 +477,14 @@ class SessionContext:
             for skill_name, arguments in found_skills.items():
                 try:
                     logger.info(f"SessionContext: Loading skill '{skill_name}' via ToolManager...")
+                    # 移除 arguments 中的 session_id，避免重复传递
+                    args = arguments.copy()
+                    args.pop('session_id', None)
                     await self.tool_manager.run_tool_async(
                         tool_name='load_skill',
                         session_context=self,
                         session_id=self.session_id,
-                        **arguments
+                        **args
                     )
                 except Exception as e:
                     logger.error(f"SessionContext: Failed to load skill '{skill_name}': {e}")
@@ -1009,14 +1012,6 @@ class SessionContext:
             f"检索历史消息{len(history_messages)}条消息到system_context, "
             f"总耗时: {time.time() - t_start:.3f}s (准备: {t_prepare - t_start:.3f}s, 检索: {t_retrieve - t_prepare:.3f}s)"
         )
-
-# def get_sub_session_messages(parent_session_id: str, sub_session_id: str) -> List[MessageChunk]:
-#     # 同样使用 SessionManager，但 SessionManager 目前的 get_session_messages 是基于 session_id 查找
-#     # 如果 sub_session_id 也是全局唯一的，并且被 scan 到了，可以直接用
-#     from sagents.session_runtime import get_global_session_manager
-#     manager = get_global_session_manager()
-#     return manager.get_session_messages(sub_session_id)
-
 
 def get_session_run_lock(session_id: str) -> UnifiedLock:
     return lock_manager.get_lock(session_id)

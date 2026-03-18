@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SageAI",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "identifier": "com.sage.desktop",
   "build": {
-    "beforeDevCommand": "cd /Users/zhangzheng/zavixai/Sage/app/desktop/ui && npm run dev",
-    "beforeBuildCommand": "cd /Users/zhangzheng/zavixai/Sage/app/desktop/ui && npm run build",
+    "beforeDevCommand": "cd ui && npm run dev",
+    "beforeBuildCommand": "cd ui && npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../ui/dist"
   },

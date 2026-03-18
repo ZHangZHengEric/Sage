@@ -64,6 +64,8 @@ class ToolSuggestionAgent(AgentBase):
             history_messages = MessageManager.compress_messages(history_messages, max(budget_info.get('active_budget', 8000),2000))
         available_tools = tool_manager.list_tools_simplified()
 
+            
+        
         if len(available_tools) <= 15:
             logger.info("ToolSuggestionAgent: 可用工具数量小于等于15个，返回所有工具")
             tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
@@ -97,6 +99,11 @@ class ToolSuggestionAgent(AgentBase):
 
        
         try:
+            if session_context.agent_config.get("agent_mode",'fibre') == 'fibre':
+                session_context.tool_manager._available_tools.add('sys_spawn_agent')
+                session_context.tool_manager._available_tools.add('sys_delegate_task')
+                session_context.tool_manager._available_tools.add('sys_finish_task')
+
             available_tools = session_context.tool_manager.list_tools_simplified()
             # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
             available_tools_str = "\n".join([
@@ -164,9 +171,9 @@ class ToolSuggestionAgent(AgentBase):
                 for tool_name in necessary_tools:
                     if tool_name not in suggested_tool_names:
                         suggested_tool_names.append(tool_name)
-
+    
             # 添加系统工具
-            system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task', 'send_message_through_im']
+            system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task', 'send_message_through_im','search_memory']
             for tool_name in system_tools:
                 if tool_name not in suggested_tool_names:
                     for tool in available_tools:

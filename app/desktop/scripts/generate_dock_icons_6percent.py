@@ -43,7 +43,11 @@ def generate_all_icons():
     """生成所有尺寸的图标"""
 
     # 图标目录
-    icons_dir = "/Users/zhangzheng/zavixai/Sage/app/desktop/tauri/icons"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Go up two levels to reach app/desktop
+    base_dir = os.path.dirname(os.path.dirname(script_dir))
+    
+    icons_dir = os.path.join(base_dir, "tauri", "icons")
     backup_dir = os.path.join(icons_dir, "backup")
 
     # 使用备份的 icon.png 作为源文件

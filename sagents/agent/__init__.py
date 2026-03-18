@@ -12,6 +12,9 @@ from .query_suggest_agent import QuerySuggestAgent
 from .task_router_agent import TaskRouterAgent
 from .tool_suggestion_agent import ToolSuggestionAgent
 from .fibre.fibre_agent import FibreAgent
+from .memory_recall_agent import MemoryRecallAgent
+
+
 
 __all__ = [
     "AgentBase",
@@ -28,4 +31,5 @@ __all__ = [
     "TaskRouterAgent",
     "ToolSuggestionAgent",
     "FibreAgent",
+    "MemoryRecallAgent",
 ]
