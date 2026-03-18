@@ -303,10 +303,11 @@ class AgentClient:
             try:
                 logger.info(f"[AgentClient] Sending file to {provider}: {host_path}")
                 result = await send_file_through_im(
+                    file_path=host_path,
                     provider=provider,
+                    agent_id=agent_id,
                     user_id=user_id,
-                    chat_id=chat_id,
-                    file_path=host_path
+                    chat_id=chat_id
                 )
                 results.append({
                     "virtual_path": virtual_path,
@@ -322,7 +323,63 @@ class AgentClient:
                     "error": str(e)
                 })
         
+        # Send confirmation message after files are sent
+        success_count = len([r for r in results if not r.get("error")])
+        if success_count > 0:
+            try:
+                await self._send_confirmation_message(
+                    agent_id=agent_id,
+                    provider=provider,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    success_count=success_count,
+                    failed_count=len(results) - success_count
+                )
+            except Exception as e:
+                logger.error(f"[AgentClient] Failed to send confirmation message: {e}")
+        
         return results
+    
+    async def _send_confirmation_message(self, agent_id: str, provider: str, 
+                                         user_id: str, chat_id: Optional[str],
+                                         success_count: int, failed_count: int) -> None:
+        """
+        Send confirmation message after files are sent.
+        
+        Args:
+            agent_id: Agent ID for configuration lookup
+            provider: IM provider name
+            user_id: User ID
+            chat_id: Chat ID (optional)
+            success_count: Number of successfully sent files
+            failed_count: Number of failed file sends
+        """
+        try:
+            from mcp_servers.im_server.im_server import send_message_through_im
+            
+            # Construct confirmation message
+            if success_count == 1:
+                message = "📎 文件已发送成功！请查收。"
+            else:
+                message = f"📎 {success_count} 个文件已发送成功！请查收。"
+            
+            if failed_count > 0:
+                message += f"\n⚠️ {failed_count} 个文件发送失败，请稍后重试。"
+            
+            logger.info(f"[AgentClient] Sending confirmation message to {provider}, user={user_id}")
+            
+            # Call send_message_through_im with correct parameter order
+            result = await send_message_through_im(
+                message,      # content
+                provider,     # provider
+                agent_id,     # agent_id
+                user_id,      # user_id
+                chat_id       # chat_id
+            )
+            logger.info(f"[AgentClient] Confirmation message result: {result}")
+            
+        except Exception as e:
+            logger.error(f"[AgentClient] Failed to send confirmation message: {e}", exc_info=True)
     
     def _create_message_chunk(self, data: Dict[str, Any]) -> Optional[Any]:
         """Create MessageChunk from response data."""
@@ -522,8 +579,7 @@ class AgentClient:
                 return {
                     "success": True,
                     "has_im_tool": True,
-                    "response": None,
-                    "sent_files": sent_files
+                    "response": None
                 }
             else:
                 logger.info(f"[AgentClient] Agent response received. Length: {len(response_text)}")
@@ -532,8 +588,7 @@ class AgentClient:
                 return {
                     "success": True,
                     "has_im_tool": False,
-                    "response": response_text,
-                    "sent_files": sent_files
+                    "response": response_text
                 }
             
         except Exception as e:
