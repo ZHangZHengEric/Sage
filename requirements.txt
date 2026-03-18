@@ -46,6 +46,8 @@ httpx>=0.24.0
 aiohttp>=3.9.0
 websockets
 nest-asyncio
+scrapling[all]>=0.2.0  # 智能网页抓取框架，支持自适应解析和反爬虫绕过（包含所有依赖）
+rank-bm25>=0.2.2  # BM25 文本检索算法，用于记忆索引
 
 ##############################
 # IM 平台 SDK

@@ -71,7 +71,7 @@ class ContentProcessor:
         return data
 
     @classmethod
-    def _truncate_large_fields(cls, data: Any, max_len: int = 1000) -> None:
+    def _truncate_large_fields(cls, data: Any, max_len: int = 5000) -> None:
         """裁剪 tool results 中过长的文本字段"""
         if isinstance(data, dict) and 'results' in data and isinstance(data['results'], list):
             for item in data['results']:
