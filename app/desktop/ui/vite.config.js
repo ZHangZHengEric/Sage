@@ -1,6 +1,23 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+import fs from 'fs'
+import os from 'os'
+
+// Read SAGE_PORT from .sage_env file
+function getSagePort() {
+  try {
+    const envPath = resolve(os.homedir(), '.sage/.sage_env')
+    const content = fs.readFileSync(envPath, 'utf-8')
+    const match = content.match(/SAGE_PORT=(\d+)/)
+    if (match) return parseInt(match[1])
+  } catch (e) {
+    // ignore
+  }
+  return process.env.SAGE_PORT || 8080
+}
+
+const SAGE_PORT = getSagePort()
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -15,9 +32,13 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/dev-api': {
-        target: 'http://127.0.0.1:8080',
+        target: `http://127.0.0.1:${SAGE_PORT}`,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/dev-api/, '')
+      },
+      '/api': {
+        target: `http://127.0.0.1:${SAGE_PORT}`,
+        changeOrigin: true
       }
     }
   },
