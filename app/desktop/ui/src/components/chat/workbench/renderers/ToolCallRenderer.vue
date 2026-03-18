@@ -507,14 +507,14 @@
               </div>
             </div>
             <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              <div 
-                v-for="(image, index) in searchImageResults" 
+              <div
+                v-for="(image, index) in searchImageResults"
                 :key="index"
                 class="search-image-item relative group aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors cursor-pointer"
                 @click="openImagePreview(image.url)"
               >
-                <img 
-                  :src="image.url" 
+                <img
+                  :src="image.url"
                   :alt="image.title"
                   class="w-full h-full object-cover"
                   @error="handleImageError($event, index)"
@@ -529,7 +529,15 @@
         </div>
       </template>
 
-      <!-- 12. 其他工具 - 统一显示 -->
+      <!-- 12. search_memory - 记忆搜索结果显示 -->
+      <template v-else-if="isSearchMemory">
+        <MemoryToolRenderer
+          :tool-call="item"
+          :tool-result="toolResultData"
+        />
+      </template>
+
+      <!-- 13. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -592,10 +600,13 @@ import {
   User,
   Eye,
   EyeOff,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Brain,
+  Bot
 } from 'lucide-vue-next'
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
+import { MemoryToolRenderer } from './toolcall'
 import { skillAPI } from '@/api/skill.js'
 import { useLanguage } from '@/utils/i18n'
 
@@ -627,6 +638,21 @@ const toolCall = computed(() => {
 
 const toolResult = computed(() => {
   return props.item.toolResult || props.item.data?.toolResult || null
+})
+
+// 提取工具结果数据（用于传递给子组件）
+const toolResultData = computed(() => {
+  if (!toolResult.value) return null
+  
+  let result = toolResult.value.content
+  if (typeof result === 'string') {
+    try {
+      result = JSON.parse(result)
+    } catch {
+      return result
+    }
+  }
+  return result
 })
 
 const toolName = computed(() => {
@@ -671,6 +697,7 @@ const isSysDelegateTask = computed(() => toolName.value === 'sys_delegate_task')
 const isSysFinishTask = computed(() => toolName.value === 'sys_finish_task')
 const isSearchWebPage = computed(() => toolName.value === 'search_web_page')
 const isSearchImageFromWeb = computed(() => toolName.value === 'search_image_from_web')
+const isSearchMemory = computed(() => toolName.value === 'search_memory')
 
 // 显示名称映射
 const displayToolName = computed(() => {
@@ -682,7 +709,8 @@ const displayToolName = computed(() => {
     'execute_python_code': t('workbench.tool.pythonCode'),
     'execute_javascript_code': t('workbench.tool.jsCode'),
     'search_web_page': t('workbench.tool.searchWebPage'),
-    'search_image_from_web': t('workbench.tool.searchImageFromWeb')
+    'search_image_from_web': t('workbench.tool.searchImageFromWeb'),
+    'search_memory': t('workbench.tool.searchMemory')
   }
   return nameMap[toolName.value] || toolName.value
 })
@@ -956,6 +984,7 @@ const toolIcon = computed(() => {
   const name = toolName.value.toLowerCase()
   if (name.includes('terminal') || name.includes('command') || name.includes('shell')) return Terminal
   if (name.includes('file') || name.includes('read') || name.includes('write')) return FileText
+  if (name === 'search_memory' || name.includes('memory')) return Brain
   if (name.includes('search')) return Search
   if (name.includes('code') || name.includes('python') || name.includes('javascript')) return Code
   if (name.includes('db') || name.includes('sql') || name.includes('query')) return Database
@@ -1250,6 +1279,7 @@ const handleImageError = (event, index) => {
   // 图片加载失败时显示占位符
   event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23f3f4f6"/%3E%3Ctext x="50" y="50" font-family="Arial" font-size="12" fill="%239ca3af" text-anchor="middle" dy=".3em"%3EImage Error%3C/text%3E%3C/svg%3E'
 }
+
 </script>
 
 <style scoped>
