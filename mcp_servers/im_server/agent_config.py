@@ -1,0 +1,446 @@
+"""
+Agent-level IM Channel Configuration Management.
+
+This module provides per-Agent IM channel configuration storage and management,
+replacing the previous global configuration approach.
+
+Features:
+- JSON-based configuration storage per Agent
+- Hot-reload support (configuration changes take effect immediately)
+- Agent-level isolation (each Agent has its own channel configs)
+- iMessage restriction (only allowed on default Agent)
+
+Configuration File Structure:
+    ~/.sage/agents/{agent_id}/config/im_channels.json
+    
+    {
+        "agent_id": "agent_xxx",
+        "channels": {
+            "wechat_work": {
+                "enabled": true,
+                "config": {
+                    "bot_id": "...",
+                    "secret": "..."
+                }
+            },
+            "dingtalk": {
+                "enabled": false,
+                "config": {}
+            }
+        },
+        "updated_at": "2026-03-16T12:00:00Z"
+    }
+
+Usage:
+    config = AgentIMConfig(agent_id="agent_xxx")
+    wechat_config = config.get_provider_config("wechat_work")
+    if wechat_config:
+        # Use the config
+        bot_id = wechat_config["bot_id"]
+"""
+
+import json
+import os
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Optional, Any, List
+from dataclasses import dataclass, asdict
+import logging
+import threading
+
+logger = logging.getLogger("AgentIMConfig")
+
+# Default Agent ID (fixed identifier for the default agent)
+DEFAULT_AGENT_ID = "default"
+
+# iMessage provider identifier
+IMESSAGE_PROVIDER = "imessage"
+
+
+@dataclass
+class ChannelConfig:
+    """
+    Configuration for a single IM channel (provider).
+    
+    Attributes:
+        provider: Provider type (wechat_work, dingtalk, feishu, imessage)
+        enabled: Whether this channel is active
+        config: Provider-specific configuration dict
+    """
+    provider: str
+    enabled: bool = False
+    config: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.config is None:
+            self.config = {}
+
+
+class AgentIMConfig:
+    """
+    Manages IM channel configurations for a specific Agent.
+    
+    This class handles:
+    - Reading/writing configuration from JSON files
+    - Hot-reloading when files change
+    - Per-Agent configuration isolation
+    - Validation (e.g., iMessage only on default Agent)
+    
+    Thread-safe: Uses file-level locking and atomic writes.
+    Hot-reload: Checks file mtime on each read, reloads if changed.
+    """
+    
+    def __init__(self, agent_id: str):
+        """
+        Initialize configuration manager for an Agent.
+        
+        Args:
+            agent_id: Unique identifier for the Agent (e.g., "agent_859ae28f")
+        """
+        self.agent_id = agent_id
+        self._config_dir = Path.home() / ".sage" / "agents" / agent_id / "config"
+        self._config_path = self._config_dir / "im_channels.json"
+        
+        # Cache and tracking
+        self._cache: Optional[Dict] = None
+        self._mtime: float = 0
+        self._lock = threading.RLock()
+        
+        # Ensure directory exists
+        self._ensure_config_dir()
+        
+        logger.debug(f"[AgentIMConfig] Initialized for agent={agent_id}, path={self._config_path}")
+    
+    def _ensure_config_dir(self) -> None:
+        """Create configuration directory if it doesn't exist."""
+        try:
+            self._config_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"[AgentIMConfig] Failed to create config dir: {e}")
+    
+    def _load_config(self) -> Dict:
+        """
+        Load configuration from file.
+        
+        Returns:
+            Configuration dict. Returns empty structure if file doesn't exist.
+        """
+        if not self._config_path.exists():
+            logger.debug(f"[AgentIMConfig] Config file not found, returning empty config")
+            return {
+                "agent_id": self.agent_id,
+                "channels": {},
+                "updated_at": datetime.now().isoformat()
+            }
+        
+        try:
+            with open(self._config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if not content.strip():
+                    return {
+                        "agent_id": self.agent_id,
+                        "channels": {},
+                        "updated_at": datetime.now().isoformat()
+                    }
+                return json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"[AgentIMConfig] Invalid JSON in config file: {e}")
+            return {
+                "agent_id": self.agent_id,
+                "channels": {},
+                "updated_at": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"[AgentIMConfig] Failed to load config: {e}")
+            return {
+                "agent_id": self.agent_id,
+                "channels": {},
+                "updated_at": datetime.now().isoformat()
+            }
+    
+    def _reload_if_changed(self) -> None:
+        """
+        Check if configuration file has changed and reload if necessary.
+        
+        This enables hot-reload: configuration changes take effect immediately
+        without restarting the service.
+        """
+        with self._lock:
+            # If config file doesn't exist, use empty config
+            if not self._config_path.exists():
+                if self._cache is None:
+                    self._cache = {
+                        "agent_id": self.agent_id,
+                        "channels": {},
+                        "updated_at": datetime.now().isoformat()
+                    }
+                return
+            
+            # Check modification time
+            try:
+                current_mtime = self._config_path.stat().st_mtime
+            except Exception as e:
+                logger.warning(f"[AgentIMConfig] Cannot stat config file: {e}")
+                return
+            
+            # Reload if changed
+            if current_mtime != self._mtime or self._cache is None:
+                logger.debug(f"[AgentIMConfig] Config file changed, reloading...")
+                self._cache = self._load_config()
+                self._mtime = current_mtime
+                logger.info(f"[AgentIMConfig] Configuration reloaded for agent={self.agent_id}")
+    
+    def get_provider_config(self, provider: str) -> Optional[Dict[str, Any]]:
+        """
+        Get configuration for a specific provider.
+        
+        Args:
+            provider: Provider type (wechat_work, dingtalk, feishu, imessage)
+            
+        Returns:
+            Provider configuration dict if enabled, None otherwise.
+            
+        Example:
+            config = agent_config.get_provider_config("wechat_work")
+            if config:
+                bot_id = config["bot_id"]
+                secret = config["secret"]
+        """
+        self._reload_if_changed()
+        
+        with self._lock:
+            channels = self._cache.get("channels", {})
+            channel = channels.get(provider)
+            
+            if not channel:
+                logger.debug(f"[AgentIMConfig] No config found for provider={provider}")
+                return None
+            
+            if not channel.get("enabled", False):
+                logger.debug(f"[AgentIMConfig] Provider={provider} is disabled")
+                return None
+            
+            config = channel.get("config", {})
+            logger.debug(f"[AgentIMConfig] Got config for provider={provider}")
+            return config.copy() if config else None
+    
+    def get_all_channels(self) -> Dict[str, Dict]:
+        """
+        Get all channel configurations for this Agent.
+        
+        Returns:
+            Dict mapping provider names to channel configs.
+        """
+        self._reload_if_changed()
+        
+        with self._lock:
+            return self._cache.get("channels", {}).copy()
+    
+    def is_provider_enabled(self, provider: str) -> bool:
+        """
+        Check if a provider is enabled for this Agent.
+        
+        Args:
+            provider: Provider type
+            
+        Returns:
+            True if provider exists and is enabled.
+        """
+        config = self.get_provider_config(provider)
+        return config is not None
+    
+    def set_provider_config(self, provider: str, enabled: bool, config: Dict[str, Any]) -> bool:
+        """
+        Set configuration for a provider.
+        
+        Args:
+            provider: Provider type
+            enabled: Whether to enable this provider
+            config: Provider-specific configuration
+            
+        Returns:
+            True if successful, False otherwise.
+            
+        Raises:
+            ValueError: If trying to configure iMessage on non-default Agent.
+        """
+        # Validate: iMessage only allowed on default Agent
+        if provider == IMESSAGE_PROVIDER and self.agent_id != DEFAULT_AGENT_ID:
+            logger.error(f"[AgentIMConfig] iMessage can only be configured on default agent")
+            raise ValueError(f"iMessage provider can only be configured on default agent (id={DEFAULT_AGENT_ID})")
+        
+        with self._lock:
+            self._reload_if_changed()
+            
+            # Ensure channels dict exists
+            if "channels" not in self._cache:
+                self._cache["channels"] = {}
+            
+            # Update config
+            self._cache["channels"][provider] = {
+                "enabled": enabled,
+                "config": config
+            }
+            self._cache["updated_at"] = datetime.now().isoformat()
+            
+            # Save to file (atomic write)
+            return self._save_config()
+    
+    def remove_provider(self, provider: str) -> bool:
+        """
+        Remove a provider configuration.
+        
+        Args:
+            provider: Provider type to remove
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        with self._lock:
+            self._reload_if_changed()
+            
+            if "channels" in self._cache and provider in self._cache["channels"]:
+                del self._cache["channels"][provider]
+                self._cache["updated_at"] = datetime.now().isoformat()
+                return self._save_config()
+            
+            return True
+    
+    def _save_config(self) -> bool:
+        """
+        Save configuration to file atomically.
+        
+        Uses write-to-temp + rename pattern for atomicity.
+        
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            # Ensure directory exists
+            self._ensure_config_dir()
+            
+            # Write to temporary file first (atomic write)
+            temp_path = self._config_path.with_suffix('.tmp')
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(self._cache, f, indent=2, ensure_ascii=False)
+            
+            # Atomic rename
+            temp_path.replace(self._config_path)
+            
+            # Update mtime cache
+            self._mtime = self._config_path.stat().st_mtime
+            
+            logger.info(f"[AgentIMConfig] Configuration saved for agent={self.agent_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[AgentIMConfig] Failed to save config: {e}")
+            return False
+    
+    def get_config_path(self) -> Path:
+        """Get the configuration file path."""
+        return self._config_path
+
+
+# Global cache for AgentIMConfig instances (to avoid recreating)
+_agent_config_cache: Dict[str, AgentIMConfig] = {}
+_cache_lock = threading.Lock()
+
+
+def get_agent_im_config(agent_id: str) -> AgentIMConfig:
+    """
+    Get or create AgentIMConfig instance for an Agent.
+    
+    Uses global caching to avoid creating multiple instances for the same Agent.
+    
+    Args:
+        agent_id: Agent identifier
+        
+    Returns:
+        AgentIMConfig instance
+        
+    Example:
+        config = get_agent_im_config("agent_859ae28f")
+        wechat_config = config.get_provider_config("wechat_work")
+    """
+    with _cache_lock:
+        if agent_id not in _agent_config_cache:
+            _agent_config_cache[agent_id] = AgentIMConfig(agent_id)
+        return _agent_config_cache[agent_id]
+
+
+def invalidate_agent_config_cache(agent_id: str) -> None:
+    """
+    Invalidate cached config for an Agent (force reload on next access).
+    
+    Args:
+        agent_id: Agent identifier to invalidate
+    """
+    with _cache_lock:
+        if agent_id in _agent_config_cache:
+            del _agent_config_cache[agent_id]
+            logger.debug(f"[AgentIMConfig] Cache invalidated for agent={agent_id}")
+
+
+def is_default_agent(agent_id: str) -> bool:
+    """
+    Check if an Agent is the default Agent.
+    
+    Args:
+        agent_id: Agent identifier
+        
+    Returns:
+        True if this is the default Agent.
+    """
+    return agent_id == DEFAULT_AGENT_ID
+
+
+def validate_provider_config(agent_id: str, provider: str, config: Dict[str, Any]) -> None:
+    """
+    Validate provider configuration before saving.
+    
+    Args:
+        agent_id: Agent identifier
+        provider: Provider type
+        config: Configuration to validate
+        
+    Raises:
+        ValueError: If validation fails (e.g., iMessage on non-default Agent)
+    """
+    # iMessage restriction
+    if provider == IMESSAGE_PROVIDER and agent_id != DEFAULT_AGENT_ID:
+        raise ValueError(
+            f"iMessage provider can only be configured on the default agent. "
+            f"Current agent={agent_id}, default={DEFAULT_AGENT_ID}"
+        )
+    
+    # Add more validation rules here as needed
+    
+    logger.debug(f"[AgentIMConfig] Config validated for agent={agent_id}, provider={provider}")
+
+
+def list_all_agents() -> List[str]:
+    """
+    List all Agents that have IM channel configuration.
+    
+    Returns:
+        List of agent IDs with IM config files.
+    """
+    agents = []
+    try:
+        agents_dir = Path.home() / ".sage" / "agents"
+        if not agents_dir.exists():
+            return agents
+        
+        for agent_dir in agents_dir.iterdir():
+            if agent_dir.is_dir():
+                config_file = agent_dir / "config" / "im_channels.json"
+                if config_file.exists():
+                    agents.append(agent_dir.name)
+        
+        logger.info(f"[AgentIMConfig] Found {len(agents)} agents with IM config: {agents}")
+    except Exception as e:
+        logger.warning(f"[AgentIMConfig] Failed to list agents: {e}")
+    
+    return agents

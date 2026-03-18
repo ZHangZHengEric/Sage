@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 
 from .db import get_im_db
+from .agent_config import get_agent_im_config, DEFAULT_AGENT_ID, list_all_agents
 
 logger = logging.getLogger("IMServiceManager")
 
@@ -114,28 +115,54 @@ class IMServiceManager:
             logger.info("[ServiceManager] Stopped")
     
     async def _auto_start_channels(self):
-        """Auto-start all enabled channels from database."""
+        """Auto-start all enabled channels from database and Agent configs."""
         logger.info("[ServiceManager] Auto-starting enabled channels...")
 
         try:
-            # Get default user configs from database
+            # 1. Start default user configs from database (backward compatibility)
             db = get_im_db()
             from .im_server import DEFAULT_SAGE_USER_ID
             configs = db.list_user_configs(DEFAULT_SAGE_USER_ID)
 
-            logger.info(f"[ServiceManager] Found {len(configs)} configs for user {DEFAULT_SAGE_USER_ID}")
+            logger.info(f"[ServiceManager] Found {len(configs)} legacy configs for user {DEFAULT_SAGE_USER_ID}")
 
             for config in configs:
                 provider = config.get('provider')
                 enabled = config.get('enabled', False)
-                logger.info(f"[ServiceManager] Config: provider={provider}, enabled={enabled}")
+                logger.info(f"[ServiceManager] Legacy config: provider={provider}, enabled={enabled}")
 
                 if enabled and provider:
-                    logger.info(f"[ServiceManager] Auto-starting {provider} channel...")
+                    logger.info(f"[ServiceManager] Auto-starting legacy {provider} channel...")
                     try:
                         await self.start_channel(DEFAULT_SAGE_USER_ID, provider)
                     except Exception as e:
-                        logger.error(f"[ServiceManager] Failed to auto-start {provider}: {e}")
+                        logger.error(f"[ServiceManager] Failed to auto-start legacy {provider}: {e}")
+
+            # 2. Start Agent-level configs
+            try:
+                agents = list_all_agents()
+                logger.info(f"[ServiceManager] Found {len(agents)} agents with IM config: {agents}")
+                
+                for agent_id in agents:
+                    try:
+                        from .agent_config import get_agent_im_config
+                        agent_config = get_agent_im_config(agent_id)
+                        all_channels = agent_config.get_all_channels()
+                        logger.info(f"[ServiceManager] Agent {agent_id} channels: {list(all_channels.keys())}")
+                        
+                        for provider, channel_data in all_channels.items():
+                            logger.info(f"[ServiceManager] Checking {provider} for {agent_id}: enabled={channel_data.get('enabled')}")
+                            if channel_data.get('enabled'):
+                                logger.info(f"[ServiceManager] Auto-starting {provider} for agent={agent_id}")
+                                try:
+                                    await self.start_channel(agent_id, provider)
+                                except Exception as e:
+                                    logger.error(f"[ServiceManager] Failed to auto-start {provider} for {agent_id}: {e}")
+                    except Exception as e:
+                        logger.warning(f"[ServiceManager] Failed to process agent {agent_id}: {e}", exc_info=True)
+                        
+            except Exception as e:
+                logger.warning(f"[ServiceManager] Failed to auto-start Agent configs: {e}", exc_info=True)
 
         except Exception as e:
             logger.error(f"[ServiceManager] Auto-start error: {e}", exc_info=True)
@@ -165,8 +192,27 @@ class IMServiceManager:
                     logger.warning(f"[ServiceManager] Channel {key} was in ERROR state, will retry")
                     del self._connections[key]
             
-            # Get config from database
-            config_data = self._db.get_user_config(sage_user_id, provider_type)
+            # Get config: try Agent-level config first, then fallback to database
+            config_data = None
+            try:
+                from .agent_config import get_agent_im_config
+                agent_config = get_agent_im_config(sage_user_id)
+                provider_config = agent_config.get_provider_config(provider_type)
+                if provider_config:
+                    config_data = {
+                        'enabled': True,
+                        'config': provider_config
+                    }
+                    logger.info(f"[ServiceManager] Using Agent-level config for {key}")
+            except Exception as e:
+                logger.debug(f"[ServiceManager] Failed to get Agent config for {key}: {e}")
+            
+            # Fallback to database config
+            if not config_data:
+                config_data = self._db.get_user_config(sage_user_id, provider_type)
+                if config_data:
+                    logger.info(f"[ServiceManager] Using database config for {key}")
+            
             if not config_data:
                 logger.error(f"[ServiceManager] No config found for {key}")
                 return False
@@ -719,30 +765,42 @@ class IMServiceManager:
     
     async def _send_response_back(
         self,
-        sage_user_id: str,
+        agent_id: str,
         provider_type: str,
         user_id: Optional[str],
         chat_id: Optional[str],
         content: str
     ):
-        """Send agent response back to user via IM."""
+        """
+        Send agent response back to user via IM.
+        
+        Args:
+            agent_id: Agent ID for configuration lookup
+            provider_type: IM provider type
+            user_id: User ID in IM platform
+            chat_id: Chat/Group ID
+            content: Message content to send
+        """
         try:
-            # 首先尝试通过 provider + user_id 获取正在运行的 provider 实例
-            provider = self.find_provider_by_user(provider_type, user_id)
+            # First try to find running provider by agent_id + provider
+            provider = self.find_provider_by_agent(agent_id, provider_type)
             
             if not provider:
-                # 如果没有运行的 provider，尝试从数据库创建新的（原有逻辑）
-                logger.warning(f"[ServiceManager] No running provider for {provider_type}:{user_id}, creating new instance")
+                # No running provider, create new instance from Agent config
+                logger.warning(f"[ServiceManager] No running provider for agent={agent_id}, provider={provider_type}, creating new instance")
                 from .im_providers import get_im_provider
                 
-                config_data = self._db.get_user_config(sage_user_id, provider_type)
-                if not config_data:
-                    logger.error(f"[ServiceManager] No config found for {sage_user_id}:{provider_type}")
+                # Get config from AgentIMConfig (new system)
+                agent_config = get_agent_im_config(agent_id)
+                provider_config = agent_config.get_provider_config(provider_type)
+                
+                if not provider_config:
+                    logger.error(f"[ServiceManager] No config found for agent={agent_id}, provider={provider_type}")
                     return
                 
-                provider = get_im_provider(provider_type, config_data['config'])
+                provider = get_im_provider(provider_type, provider_config)
             else:
-                logger.info(f"[ServiceManager] Reusing existing provider for {provider_type}:{user_id}")
+                logger.info(f"[ServiceManager] Reusing existing provider for agent={agent_id}, provider={provider_type}")
             
             # Send message
             result = await provider.send_message(
@@ -758,7 +816,33 @@ class IMServiceManager:
                 logger.error(f"[ServiceManager] Failed to send response: {result.get('error')}")
                 
         except Exception as e:
-            logger.error(f"[ServiceManager] Error sending response back: {e}")
+            logger.error(f"[ServiceManager] Error sending response back: {e}", exc_info=True)
+    
+    def find_provider_by_agent(self, agent_id: str, provider_type: str) -> Optional[Any]:
+        """
+        Find running provider instance by agent_id + provider_type.
+        
+        Args:
+            agent_id: Agent identifier
+            provider_type: IM provider type (wechat_work, feishu, etc.)
+            
+        Returns:
+            Provider instance if found and connected, None otherwise
+        """
+        with self._lock:
+            # In the new architecture, we use agent_id as the key component
+            # The connection key format is: "{agent_id}:{provider_type}"
+            target_key = f"{agent_id}:{provider_type}"
+            
+            for key, state in self._connections.items():
+                if (key == target_key or 
+                    (state.provider_type == provider_type and 
+                     state.status == ChannelStatus.CONNECTED and 
+                     state.provider)):
+                    logger.debug(f"[ServiceManager] Found provider for agent={agent_id}, provider={provider_type}")
+                    return state.provider
+        
+        return None
 
 
 # Global service manager instance
