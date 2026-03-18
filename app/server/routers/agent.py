@@ -286,7 +286,7 @@ async def auto_generate(request: AutoGenAgentRequest):
         available_tools=request.available_tools,
     )
     return await Response.succ(
-        data={"agent": agent_config}, message="Agent自动生成成功"
+        data={agent_config}, message="Agent自动生成成功"
     )
 
 
