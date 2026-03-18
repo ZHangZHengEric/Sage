@@ -9,7 +9,6 @@ from sagents.utils.logger import logger
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
-from sagents.tool.tool_schema import AgentToolSpec
 
 # 通用可自定义agent
 

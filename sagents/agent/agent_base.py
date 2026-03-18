@@ -5,7 +5,6 @@ import uuid
 import asyncio
 from app.server.models import User
 from sagents.utils.logger import logger
-from sagents.tool.tool_schema import AgentToolSpec
 from sagents.tool.tool_manager import ToolManager
 from sagents.context.session_context import  SessionContext, SessionStatus
 from sagents.context.messages.message import MessageChunk, MessageRole, MessageType
@@ -57,26 +56,6 @@ class AgentBase(ABC):
         self.max_model_input_len = 1000000
 
         logger.debug(f"AgentBase: 初始化 {self.__class__.__name__}，模型配置: {model_config}, 最大输入长度（安全阈值）: {self.max_model_input_len}")
-
-    def to_tool(self) -> AgentToolSpec:
-        """
-        将智能体转换为工具格式
-
-        Returns:
-            AgentToolSpec: 包含智能体运行方法的工具规范
-        """
-        logger.debug(f"AgentBase: 将 {self.__class__.__name__} 转换为工具格式")
-
-        tool_spec = AgentToolSpec(
-            name=self.__class__.__name__,
-            description=self.agent_description + '\n\n Agent类型的工具，可以自动读取历史对话，所需不需要运行的参数',
-            description_i18n={},
-            func=self.run_stream,
-            parameters={},
-            required=[]
-        )
-
-        return tool_spec
 
     @abstractmethod
     async def run_stream(self,
@@ -1130,50 +1109,39 @@ class AgentBase(ABC):
                 **call_kwargs
             )
 
-            # 检查是否为流式响应（AgentToolSpec）
+            # 检查是否为流式响应
             if hasattr(tool_response, '__iter__') and not isinstance(tool_response, (str, bytes)):
-                # 检查是否为专业agent工具
-                tool_spec = tool_manager.get_tool(tool_name) if tool_manager else None
-                is_agent_tool = isinstance(tool_spec, AgentToolSpec)
-
                 # 处理流式响应
-                logger.debug(f"{self.agent_name}: 收到流式工具响应，工具类型: {'专业Agent' if is_agent_tool else '普通工具'}")
+                logger.debug(f"{self.agent_name}: 收到流式工具响应")
                 try:
                     for chunk in tool_response:
-                        if is_agent_tool:
-                            # 专业agent工具：直接返回原始结果，不做任何处理
-                            if isinstance(chunk, list):
-                                yield chunk
-                            else:
-                                yield [chunk]
-                        else:
-                            # 普通工具：添加必要的元数据
-                            if isinstance(chunk, list):
-                                # 转化成message chunk
-                                message_chunks = []
-                                for message in chunk:
-                                    if isinstance(message, dict):
-                                        message_chunks.append(MessageChunk(
-                                            role=MessageRole.TOOL.value,
-                                            content=message['content'],
-                                            tool_call_id=tool_call['id'],
-                                            message_id=str(uuid.uuid4()),
-                                            message_type=MessageType.TOOL_CALL_RESULT.value,
-                                            agent_name=self.agent_name
-                                        ))
-                                yield message_chunks
-                            else:
-                                # 单个消息
-                                if isinstance(chunk, dict):
-                                    message_chunk_ = MessageChunk(
+                        # 普通工具：添加必要的元数据
+                        if isinstance(chunk, list):
+                            # 转化成message chunk
+                            message_chunks = []
+                            for message in chunk:
+                                if isinstance(message, dict):
+                                    message_chunks.append(MessageChunk(
                                         role=MessageRole.TOOL.value,
-                                        content=chunk['content'],
+                                        content=message['content'],
                                         tool_call_id=tool_call['id'],
                                         message_id=str(uuid.uuid4()),
                                         message_type=MessageType.TOOL_CALL_RESULT.value,
                                         agent_name=self.agent_name
-                                    )
-                                    yield [message_chunk_]
+                                    ))
+                            yield message_chunks
+                        else:
+                            # 单个消息
+                            if isinstance(chunk, dict):
+                                message_chunk_ = MessageChunk(
+                                    role=MessageRole.TOOL.value,
+                                    content=chunk['content'],
+                                    tool_call_id=tool_call['id'],
+                                    message_id=str(uuid.uuid4()),
+                                    message_type=MessageType.TOOL_CALL_RESULT.value,
+                                    agent_name=self.agent_name
+                                )
+                                yield [message_chunk_]
                 except Exception as e:
                     logger.error(f"{self.agent_name}: 处理流式工具响应时发生错误: {str(e)}")
                     async for chunk in self._handle_tool_error(tool_call['id'], tool_name, e):
