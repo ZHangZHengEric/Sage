@@ -725,12 +725,14 @@ class IMServiceManager:
                 from .im_server import handle_incoming_message
 
                 # Call the centralized message handler
+                # Pass sage_user_id as default_agent_id to route to the correct agent
                 await handle_incoming_message(
                     provider=provider_type,
                     user_id=user_id,
                     content=text,
                     chat_id=chat_id,
                     user_name=user_name,
+                    default_agent_id=sage_user_id,  # Use the agent this channel belongs to
                     file_info=file_info
                 )
 
