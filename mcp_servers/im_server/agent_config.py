@@ -265,8 +265,8 @@ class AgentIMConfig:
         Raises:
             ValueError: If trying to configure iMessage on non-default Agent.
         """
-        # Validate: iMessage only allowed on default Agent
-        if provider == IMESSAGE_PROVIDER and self.agent_id != DEFAULT_AGENT_ID:
+        # Validate: iMessage only allowed on default Agent (only when enabled)
+        if provider == IMESSAGE_PROVIDER and enabled and self.agent_id != DEFAULT_AGENT_ID:
             logger.error(f"[AgentIMConfig] iMessage can only be configured on default agent")
             raise ValueError(f"iMessage provider can only be configured on default agent (id={DEFAULT_AGENT_ID})")
         
@@ -396,7 +396,7 @@ def is_default_agent(agent_id: str) -> bool:
     return agent_id == DEFAULT_AGENT_ID
 
 
-def validate_provider_config(agent_id: str, provider: str, config: Dict[str, Any]) -> None:
+def validate_provider_config(agent_id: str, provider: str, config: Dict[str, Any], enabled: bool = False) -> None:
     """
     Validate provider configuration before saving.
     
@@ -404,18 +404,26 @@ def validate_provider_config(agent_id: str, provider: str, config: Dict[str, Any
         agent_id: Agent identifier
         provider: Provider type
         config: Configuration to validate
+        enabled: Whether this provider is enabled
         
     Raises:
         ValueError: If validation fails (e.g., iMessage on non-default Agent)
     """
-    # iMessage restriction
-    if provider == IMESSAGE_PROVIDER and agent_id != DEFAULT_AGENT_ID:
+    # iMessage restriction (only check if enabled)
+    if provider == IMESSAGE_PROVIDER and enabled and agent_id != DEFAULT_AGENT_ID:
         raise ValueError(
             f"iMessage provider can only be configured on the default agent. "
             f"Current agent={agent_id}, default={DEFAULT_AGENT_ID}"
         )
     
-    # Add more validation rules here as needed
+    # iMessage allowed_senders validation
+    if provider == IMESSAGE_PROVIDER and enabled:
+        allowed_senders = config.get('allowed_senders', []) if config else []
+        if not allowed_senders or len(allowed_senders) == 0:
+            raise ValueError(
+                "iMessage must have at least one allowed sender configured. "
+                "Please add phone numbers to the '监听发送者' field."
+            )
     
     logger.debug(f"[AgentIMConfig] Config validated for agent={agent_id}, provider={provider}")
 
