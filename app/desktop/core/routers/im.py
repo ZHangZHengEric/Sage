@@ -425,6 +425,28 @@ async def save_agent_im_channels(
             try:
                 validate_provider_config(agent_id, provider, config_request.config)
                 
+                # Check for duplicate provider ID (bot_id/client_id/app_id) across agents
+                if config_request.enabled:
+                    from mcp_servers.im_server.agent_config import find_agent_by_provider_id
+                    
+                    id_field_map = {
+                        "wechat_work": "bot_id",
+                        "dingtalk": "client_id",
+                        "feishu": "app_id"
+                    }
+                    id_field = id_field_map.get(provider)
+                    
+                    if id_field and config_request.config:
+                        id_value = config_request.config.get(id_field)
+                        if id_value:
+                            existing_agent = find_agent_by_provider_id(provider, id_value, exclude_agent_id=agent_id)
+                            if existing_agent:
+                                error_msg = f"{provider} 的 {id_field} '{id_value}' 已被 Agent '{existing_agent}' 使用，不能重复配置"
+                                logger.warning(f"[IM Agent] Duplicate {provider} {id_field} detected: {id_value} "
+                                             f"between agents {agent_id} and {existing_agent}")
+                                results.append({"provider": provider, "status": "skipped", "error": error_msg})
+                                continue
+                
                 # Save config
                 success = agent_config.set_provider_config(
                     provider=provider,

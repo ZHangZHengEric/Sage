@@ -444,3 +444,55 @@ def list_all_agents() -> List[str]:
         logger.warning(f"[AgentIMConfig] Failed to list agents: {e}")
     
     return agents
+
+
+def find_agent_by_provider_id(provider: str, id_value: str, exclude_agent_id: str = None) -> Optional[str]:
+    """
+    Find which Agent is using a specific provider ID (bot_id/client_id/app_id).
+    
+    Args:
+        provider: Provider type (wechat_work/dingtalk/feishu)
+        id_value: The ID value to search for (bot_id/client_id/app_id)
+        exclude_agent_id: Optional agent_id to exclude from search (for update scenarios)
+        
+    Returns:
+        Agent ID that is using this provider ID, or None if not found
+    """
+    if not id_value:
+        return None
+    
+    # Map provider to the config field name
+    id_field_map = {
+        "wechat_work": "bot_id",
+        "dingtalk": "client_id",
+        "feishu": "app_id"
+    }
+    
+    id_field = id_field_map.get(provider)
+    if not id_field:
+        return None
+    
+    try:
+        agents = list_all_agents()
+        for agent_id in agents:
+            if agent_id == exclude_agent_id:
+                continue
+            
+            try:
+                agent_config = get_agent_im_config(agent_id)
+                provider_config = agent_config.get_provider_config(provider)
+                
+                if provider_config:
+                    existing_id = provider_config.get(id_field)
+                    if existing_id and existing_id == id_value:
+                        logger.warning(f"[AgentIMConfig] Found duplicate {provider} {id_field}='{id_value}' "
+                                     f"between agents: {agent_id} and {exclude_agent_id or 'new'}")
+                        return agent_id
+            except Exception as e:
+                logger.debug(f"[AgentIMConfig] Failed to check agent {agent_id}: {e}")
+                continue
+        
+        return None
+    except Exception as e:
+        logger.warning(f"[AgentIMConfig] Failed to search for provider ID: {e}")
+        return None
