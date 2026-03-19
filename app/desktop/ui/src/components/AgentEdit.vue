@@ -1048,7 +1048,14 @@ const saveIMConfig = async () => {
     
     const result = await response.json()
     if (result.success) {
-      alert('IM 配置已保存')
+      // Check for any skipped configs with errors
+      const skipped = result.data?.results?.filter(r => r.status === 'skipped') || []
+      if (skipped.length > 0) {
+        const errors = skipped.map(s => `${s.provider}: ${s.error}`).join('\n')
+        alert('部分配置未保存:\n' + errors)
+      } else {
+        alert('IM 配置已保存')
+      }
     } else {
       alert('保存失败: ' + result.message)
     }
