@@ -21,6 +21,41 @@ export const MODEL_PROVIDERS = [
     model_list_url: 'https://www.volcengine.com/docs/82379/1099475'
   },
   {
+    name: 'Moonshot',
+    base_url: 'https://api.moonshot.cn/v1',
+    models: ['kimi-k2-0905-preview', 'kimi-k2-turbo-preview', 'kimi-k2-0711-preview', 'kimi-thinking-preview', 'kimi-latest', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
+    website: 'https://platform.moonshot.cn',
+    model_list_url: 'https://platform.moonshot.cn/docs'
+  },
+  {
+    name: 'MiniMax',
+    base_url: 'https://api.minimaxi.com/v1',
+    models: ['MiniMax-M2.5-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.1-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
+    website: 'https://platform.minimaxi.com',
+    model_list_url: 'https://platform.minimaxi.com/docs/api-reference/api-overview'
+  },
+  {
+    name: 'iFLYTEK',
+    base_url: 'https://spark-api-open.xf-yun.com/v1',
+    models: ['4.0Ultra', 'generalv3.5', 'max-32k', 'pro-128k', 'generalv3', 'lite'],
+    website: 'https://console.xfyun.cn/services/bm35',
+    model_list_url: 'https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html'
+  },
+  {
+    name: 'Tencent Hunyuan',
+    base_url: 'https://api.hunyuan.cloud.tencent.com/v1',
+    models: ['hunyuan-2.0-instruct-20251111', 'hunyuan-2.0-thinking-20251109', 'hunyuan-t1-latest', 'hunyuan-turbos-latest', 'hunyuan-a13b', 'hunyuan-lite'],
+    website: 'https://console.cloud.tencent.com/hunyuan',
+    model_list_url: 'https://cloud.tencent.com/document/product/1729/104753'
+  },
+  {
+    name: 'Zhipu',
+    base_url: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],
+    website: 'https://open.bigmodel.cn',
+    model_list_url: 'https://docs.bigmodel.cn/cn/guide/models/text/glm-4.5'
+  },
+  {
     name: 'OpenAI',
     base_url: 'https://api.openai.com/v1',
     models: ['gpt-5.4', 'gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'gpt-5-nano-2025-08-07'],
