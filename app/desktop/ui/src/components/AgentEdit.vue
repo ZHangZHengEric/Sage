@@ -711,10 +711,21 @@
 
                     <!-- iMessage -->
                     <template v-if="provider.key === 'imessage'">
-                      <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                        <p class="text-sm text-blue-800 dark:text-blue-200">
-                          iMessage 使用本地数据库轮询模式，无需额外配置。启用后系统会自动读取本地 iMessage 数据库。
-                        </p>
+                      <div class="space-y-4">
+                        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                          <p class="text-sm text-blue-800 dark:bg-blue-200">
+                            iMessage 使用本地数据库轮询模式。需要授予完全磁盘访问权限才能读取 Messages 数据库。
+                          </p>
+                        </div>
+                        <div class="space-y-2">
+                          <Label>监听发送者 <span class="text-red-500">*</span></Label>
+                          <p class="text-xs text-muted-foreground">每行输入一个手机号（+86 开头或纯号码），只有这些发送者的消息会被处理</p>
+                          <Textarea
+                            v-model="imConfig.imessage.config.allowed_senders_text"
+                            placeholder="+86138xxxxxxxx&#10;+86139xxxxxxxx"
+                            rows="4"
+                          />
+                        </div>
                       </div>
                     </template>
 
@@ -990,7 +1001,7 @@ const imConfig = ref({
   wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
   dingtalk: { enabled: false, config: { client_id: '', client_secret: '' } },
   feishu: { enabled: false, config: { app_id: '', app_secret: '' } },
-  imessage: { enabled: false, config: {} }
+  imessage: { enabled: false, config: { allowed_senders_text: '' } }
 })
 
 const enabledIMChannelsCount = computed(() => {
@@ -1011,6 +1022,11 @@ const loadIMConfig = async () => {
         if (imConfig.value[provider]) {
           imConfig.value[provider].enabled = data.enabled || false
           imConfig.value[provider].config = { ...imConfig.value[provider].config, ...data.config }
+          
+          // Convert allowed_senders array to text for iMessage
+          if (provider === 'imessage' && data.config?.allowed_senders) {
+            imConfig.value[provider].config.allowed_senders_text = data.config.allowed_senders.join('\n')
+          }
         }
       }
     }
@@ -1030,13 +1046,34 @@ const saveIMConfig = async () => {
     return
   }
   
+  // Validate iMessage config
+  if (imConfig.value.imessage?.enabled) {
+    const sendersText = imConfig.value.imessage.config?.allowed_senders_text || ''
+    const senders = sendersText.split('\n').map(s => s.trim()).filter(s => s)
+    if (senders.length === 0) {
+      alert('iMessage 必须配置至少一个监听发送者')
+      return
+    }
+  }
+  
   savingIM.value = true
   try {
     const channels = {}
     for (const [provider, data] of Object.entries(imConfig.value)) {
+      let config = { ...data.config }
+      
+      // Convert allowed_senders_text to array for iMessage
+      if (provider === 'imessage' && config.allowed_senders_text) {
+        config.allowed_senders = config.allowed_senders_text
+          .split('\n')
+          .map(s => s.trim())
+          .filter(s => s)
+        delete config.allowed_senders_text
+      }
+      
       channels[provider] = {
         enabled: data.enabled,
-        config: data.config
+        config: config
       }
     }
     

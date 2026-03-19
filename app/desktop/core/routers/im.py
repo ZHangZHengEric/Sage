@@ -423,7 +423,7 @@ async def save_agent_im_channels(
         for provider, config_request in channels.items():
             # Validate (especially for iMessage)
             try:
-                validate_provider_config(agent_id, provider, config_request.config)
+                validate_provider_config(agent_id, provider, config_request.config, config_request.enabled)
                 
                 # Check for duplicate provider ID (bot_id/client_id/app_id) across agents
                 if config_request.enabled:
@@ -554,7 +554,7 @@ async def update_agent_im_channel(
     
     try:
         # Validate (especially for iMessage)
-        validate_provider_config(agent_id, provider, config_request.config)
+        validate_provider_config(agent_id, provider, config_request.config, config_request.enabled)
         
         # Save config
         agent_config = get_agent_im_config(agent_id)
