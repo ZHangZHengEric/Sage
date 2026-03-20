@@ -110,7 +110,7 @@ class WebFetcherTool:
         timeout: int,
         retries: int
     ) -> Dict[str, Any]:
-        """抓取单个URL，带重试机制"""
+        """抓取单个URL，带重试机制和严格超时控制"""
         from scrapling.fetchers import AsyncFetcher
 
         last_error = None
@@ -120,10 +120,14 @@ class WebFetcherTool:
                 fetcher = AsyncFetcher()
 
                 # 抓取页面（始终使用隐身模式）
-                page = await fetcher.get(
-                    url,
-                    stealthy_headers=True,
-                    timeout=timeout
+                # 使用 asyncio.wait_for 包装，确保整体超时控制
+                page = await asyncio.wait_for(
+                    fetcher.get(
+                        url,
+                        stealthy_headers=True,
+                        timeout=timeout
+                    ),
+                    timeout=timeout + 5  # 给一些缓冲时间
                 )
 
                 # 提取标题
@@ -193,6 +197,9 @@ class WebFetcherTool:
                     }
                 }
 
+            except asyncio.TimeoutError:
+                last_error = f"请求超时（超过 {timeout} 秒）"
+                logger.warning(f"WebFetcher: {url} 请求超时 (尝试 {attempt + 1}/{retries + 1})")
             except Exception as e:
                 last_error = str(e)
                 logger.warning(f"WebFetcher: {url} 抓取失败 (尝试 {attempt + 1}/{retries + 1}): {last_error}")
