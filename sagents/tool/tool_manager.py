@@ -800,7 +800,6 @@ class ToolManager:
     async def run_tool_async(
         self,
         tool_name: str,
-        session_context: SessionContext,
         session_id: str = "",
         **kwargs,
     ) -> Any:
