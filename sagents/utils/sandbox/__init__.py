@@ -1,17 +1,30 @@
-from sagents.utils.sandbox.sandbox import Sandbox
-from sagents.utils.sandbox.filesystem import SandboxFileSystem
-from sagents.utils.sandbox.sandbox_utils import (
-    get_sandbox_python_path,
-    get_sandbox_workdir,
-    get_sandbox_venv_bin,
-    is_in_sandbox,
-)
+"""
+沙箱模块 - 提供统一的沙箱接口
+
+支持多种沙箱实现:
+- 本地沙箱 (Local): 本地进程隔离
+- 远程沙箱 (Remote): OpenSandbox、Kubernetes、Firecracker 等
+- 直通模式 (Passthrough): 无隔离，直接执行
+"""
+
+from .interface import ISandboxHandle, SandboxType, CommandResult, ExecutionResult, FileInfo
+from .config import SandboxConfig, MountPath
+from .factory import SandboxProviderFactory
+
+# 向后兼容性导出
+from .providers.local import Sandbox, SandboxFileSystem, VenvManager
 
 __all__ = [
-    'Sandbox', 
+    'ISandboxHandle',
+    'SandboxType',
+    'CommandResult',
+    'ExecutionResult',
+    'FileInfo',
+    'SandboxConfig',
+    'MountPath',
+    'SandboxProviderFactory',
+    # 向后兼容性
+    'Sandbox',
     'SandboxFileSystem',
-    'get_sandbox_python_path',
-    'get_sandbox_workdir',
-    'get_sandbox_venv_bin',
-    'is_in_sandbox',
+    'VenvManager',
 ]

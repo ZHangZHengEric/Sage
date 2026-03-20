@@ -1,5 +1,8 @@
 <template>
-  <div class="todo-task-message w-full max-w-[600px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80">
+  <div 
+    class="todo-task-message w-full max-w-[600px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
+    @click="handleClick"
+  >
     <!-- Header Section -->
     <div class="flex items-center justify-between p-3 border-b bg-muted/20">
       <div class="flex items-center gap-2">
@@ -70,8 +73,14 @@ const props = defineProps({
   isLatest: {
     type: Boolean,
     default: false
+  },
+  openWorkbench: {
+    type: Function,
+    default: null
   }
 })
+
+const emit = defineEmits(['click'])
 
 const { t } = useLanguage()
 
@@ -98,4 +107,8 @@ const parsedContent = computed(() => {
 const summary = computed(() => parsedContent.value.summary || '')
 const tasks = computed(() => parsedContent.value.tasks || [])
 
+const handleClick = () => {
+  // 触发点击事件，让父组件打开工作台
+  emit('click', props.toolCall, props.toolResult)
+}
 </script>

@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from loguru import logger
 
 from .bootstrap import (
@@ -15,8 +18,20 @@ from .bootstrap import (
 from .services.chat.stream_manager import StreamManager
 from .utils.async_utils import create_safe_task
 
+
+def _setup_memory_root_path():
+    """设置 MEMORY_ROOT_PATH 环境变量为 ~/.sage/memory"""
+    user_home = Path.home()
+    sage_home = user_home / ".sage"
+    memory_path = sage_home / "memory"
+    memory_path.mkdir(parents=True, exist_ok=True)
+    os.environ["MEMORY_ROOT_PATH"] = str(memory_path)
+    logger.info(f"MEMORY_ROOT_PATH 已设置为: {memory_path}")
+
+
 async def initialize_system():
     logger.info("sage-desktop：开始初始化")
+    _setup_memory_root_path()
     await initialize_db_connection()
     await initialize_tool_manager()
     await initialize_skill_manager()

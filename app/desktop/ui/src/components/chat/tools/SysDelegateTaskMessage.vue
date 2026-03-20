@@ -1,5 +1,8 @@
 <template>
-  <div class="sys-delegate-task-message w-full max-w-[600px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80">
+  <div 
+    class="sys-delegate-task-message w-full max-w-[600px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
+    @click="handleClick"
+  >
     <!-- Header Section -->
     <div class="flex items-center justify-between p-3 border-b bg-muted/20">
       <div class="flex items-center gap-2">
@@ -355,10 +358,14 @@ const props = defineProps({
   currentAgent: {
     type: Object,
     default: null
+  },
+  openWorkbench: {
+    type: Function,
+    default: null
   }
 })
 
-const emit = defineEmits(['openSubSession'])
+const emit = defineEmits(['openSubSession', 'click'])
 const { t } = useLanguage()
 
 // Dialog states
@@ -467,6 +474,11 @@ const taskResult = computed(() => {
 
 const openSubSession = (sessionId) => {
   emit('openSubSession', sessionId)
+}
+
+const handleClick = () => {
+  // 触发点击事件，让父组件打开工作台
+  emit('click', props.toolCall, props.toolResult)
 }
 </script>
 

@@ -47,7 +47,7 @@ class CommonAgent(AgentBase):
         tools_json = [tools_json[tool_name] for tool_name in self.tools_name if tool_name in tools_json]
 
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language())
+            await self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language())
         ]
         llm_request_message.extend(all_messages)
         async for msg in self._call_llm_and_process_response(

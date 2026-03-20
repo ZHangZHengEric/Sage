@@ -65,15 +65,8 @@ class FibreOrchestrator:
 
     async def run_loop(
         self,
-        input_messages: Union[List[Dict[str, Any]], List[MessageChunk]],
-        tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
-        skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        system_context: Optional[Dict[str, Any]] = None,
-        context_budget_config: Optional[Dict[str, Any]] = None,
+        session_context: SessionContext,
         max_loop_count: int = 10,
-        session_context: Optional[SessionContext] = None,
     ) -> AsyncGenerator[List[MessageChunk], None]:
         """
         Main orchestration loop.
@@ -85,34 +78,12 @@ class FibreOrchestrator:
         
         # Initialize Main Session Context
         main_session = None
-        if session_context is None:
-            from sagents.session_runtime import get_global_session_manager
-            workspace_root = (
-                os.environ.get("SAGE_SESSION_DIR")
-                or os.environ.get("PREFIX_FILE_WORKSPACE")
-                or os.path.abspath("agent_workspace")
-            )
-            manager = get_global_session_manager(session_root_space=workspace_root)
-            main_session = manager.get_or_create(session_id)
-            if main_session.session_context is None:
-                main_session.session_context = SessionContext(
-                    session_id=session_id,
-                    user_id=user_id,
-                    system_context=system_context,
-                    session_space=workspace_root,
-                    agent_workspace=os.path.join(workspace_root, session_id, "agent_workspace"),
-                    context_budget_config=context_budget_config,
-                    tool_manager=tool_manager,
-                    skill_manager=skill_manager,
-                )
-            session_context = main_session.session_context
-        
+
         # Register orchestrator in session context
         session_context.orchestrator = self
 
         # Log tool_manager status for debugging
         logger.info(f"run_loop: session_context.tool_manager={session_context.tool_manager}")
-        logger.info(f"run_loop: tool_manager param={tool_manager}")
 
         # Register main session in sub_session_manager (actually just SessionManager now)
         # Main session is already created via SessionContext, but let's ensure it's tracked if needed
@@ -220,7 +191,7 @@ class FibreOrchestrator:
                     continue
 
                 await self.spawn_agent(
-                    parent_session_id=session_id,
+                    parent_session_id=session_context.session_id,
                     agent_id=agent_id,
                     system_prompt=agent_system_prompt,
                     description=agent_description,
@@ -247,8 +218,8 @@ class FibreOrchestrator:
             
             # 2.2 Inject Fibre Tools
             fibre_tools_impl = FibreTools()
-            if tool_manager:
-                tool_manager.register_tools_from_object(fibre_tools_impl)
+            if session_context.tool_manager:
+                session_context.tool_manager.register_tools_from_object(fibre_tools_impl)
             
             # 2.3 Initialize Container Agent
             # Use the complete fibre_prompt which already includes base_desc + system_mechanics + main_agent_rules
@@ -262,30 +233,7 @@ class FibreOrchestrator:
             if self.observability_manager:
                 from sagents.observability import AgentRuntime
                 container_agent = AgentRuntime(container_agent, self.observability_manager)
-            
-            # 2.4 Process input messages
-            # if input_messages:
-                #     for msg in input_messages:
-                #         if isinstance(msg, dict):
-                #             from sagents.context.messages.message import MessageChunk
-            #             msg_chunk = MessageChunk(
-            #                 role=msg.get('role', 'user'),
-            #                 content=msg.get('content', ''),
-            #                 session_id=session_id
-            #             )
-            #             session_context.add_messages(msg_chunk)
-            #         else:
-            #             session_context.add_messages(msg)
-            
-            # 2.5 Run container agent
-            # if tool_manager:
-            #     # Exclude sys_finish_task for main agent
-            #     all_tools = tool_manager.list_all_tools_name()
-            #     if 'sys_finish_task' in all_tools:
-            #         allowed_tools = [t for t in all_tools if t != 'sys_finish_task']
-            #         tool_manager = ToolProxy(tool_manager, allowed_tools)
-            #         logger.info("FibreOrchestrator: Using ToolProxy to exclude sys_finish_task for Main Agent")
-            
+                        
             # Set max_loop_count
             if session_context.agent_config is None:
                 session_context.agent_config = {}
@@ -323,12 +271,12 @@ class FibreOrchestrator:
                     main_session.update_status("completed")
                     
             except asyncio.CancelledError:
-                logger.warning(f"FibreOrchestrator: Session {session_id} interrupted")
+                logger.warning(f"FibreOrchestrator: Session {session_context.session_id} interrupted")
                 if main_session:
                     main_session.update_status("interrupted")
                 raise
             except Exception as e:
-                logger.error(f"FibreOrchestrator: Session {session_id} failed: {e}", exc_info=True)
+                logger.error(f"FibreOrchestrator: Session {session_context.session_id} failed: {e}", exc_info=True)
                 if main_session:
                     main_session.update_status("error")
                 raise
@@ -1296,7 +1244,7 @@ class FibreOrchestrator:
                 if key not in excluded_keys and key not in sub_agent_system_context:
                     sub_agent_system_context[key] = copy.deepcopy(value)
         
-        sub_session.session_context = sub_session._ensure_session_context(
+        sub_session.session_context = await sub_session._ensure_session_context(
              session_id=session_id,
              user_id=parent_session.session_context.user_id if parent_session else "unknown",
              system_context=sub_agent_system_context,

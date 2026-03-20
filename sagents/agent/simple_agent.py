@@ -82,17 +82,22 @@ class SimpleAgent(AgentBase):
              history_messages = MessageManager.compress_messages(history_messages, budget_info.get('active_budget', 8000))
              logger.info(f'SimpleAgent: 压缩历史消息的条数:{len(history_messages)}，压缩后历史消息的content长度：{MessageManager.calculate_messages_token_length(cast(List[Union[MessageChunk, Dict[str, Any]]], history_messages))}')
         # 获取后续可能使用到的工具建议
+        # 如果 audit_status 中有建议的工具，使用建议的工具；否则使用所有可用工具
         if tool_manager:
-            if session_context.audit_status.get('suggested_tools', []):
-                suggested_tools = session_context.audit_status['suggested_tools']
-            else:
-                suggested_tools = await self._get_suggested_tools(history_messages, tool_manager, session_id or "", session_context)
+            suggested_tools = session_context.audit_status.get('suggested_tools', [])
+            if not suggested_tools:
+                # 使用所有可用工具名称列表
+                try:
+                    tools_list = tool_manager.list_tools_simplified()
+                    suggested_tools = [t.get('name', '') for t in tools_list if t.get('name')]
+                except Exception:
+                    suggested_tools = []
         else:
             suggested_tools = []
         # 准备工具列表
         tools_json = self._prepare_tools(tool_manager, suggested_tools, session_context)
         # 将system 加入到到messages中
-        system_message = self.prepare_unified_system_message(
+        system_message = await self.prepare_unified_system_message(
             session_id,
             custom_prefix=current_system_prefix,
             language=session_context.get_language(),
@@ -183,18 +188,17 @@ class SimpleAgent(AgentBase):
         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_for_complete)
 
         task_complete_template = PromptManager().get_agent_prompt_auto('task_complete_template', language=session_context.get_language())
-        prompt = task_complete_template.format(
-            system_prompt=self.prepare_unified_system_message(
-                session_id,
-                custom_prefix=PromptManager().get_agent_prompt_auto(
-                                                _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
-                                            ),
-                language=session_context.get_language(),
-                include_sections=["role_definition"]
-            ),
-            session_id=session_id,
-            messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+        system_msg = await self.prepare_unified_system_message(
+            session_id,
+            custom_prefix=PromptManager().get_agent_prompt_auto(
+                                            _get_system_prefix(tool_manager, session_context.get_language()), language=session_context.get_language()
+                                        ),
+            language=session_context.get_language(),
         )
+        prompt = task_complete_template.format(
+                system_prompt=system_msg,
+                messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
+            )
         messages_input = [{'role': 'user', 'content': prompt}]
         # 使用基类的流式调用方法，自动处理LLM request日志
         response = self._call_llm_streaming(
@@ -266,7 +270,7 @@ class SimpleAgent(AgentBase):
 
             # 更新system message，确保包含最新的子智能体列表等上下文信息
             if messages_input and messages_input[0].role == MessageRole.SYSTEM.value:
-                system_message = self.prepare_unified_system_message(
+                system_message = await self.prepare_unified_system_message(
                     session_id,
                     custom_prefix=current_system_prefix,
                     language=session_context.get_language(),
