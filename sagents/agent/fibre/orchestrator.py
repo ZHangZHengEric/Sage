@@ -662,7 +662,7 @@ class FibreOrchestrator:
             sanitized = sanitized[:50]
         return sanitized.strip() or "unnamed_task"
 
-    def _create_task_workspace(
+    async def _create_task_workspace(
         self,
         session_id: str,
         task_name: str,
@@ -670,7 +670,7 @@ class FibreOrchestrator:
         session_context: SessionContext
     ) -> str:
         """
-        创建任务工作目录（使用真实 host 路径）
+        创建任务工作目录（在沙箱内创建）
 
         Args:
             session_id: 会话 ID
@@ -679,12 +679,12 @@ class FibreOrchestrator:
             session_context: 会话上下文
 
         Returns:
-            任务工作目录的真实 host 路径
+            任务工作目录的虚拟路径（沙箱内路径）
         """
         # 1. 清理任务名
         task_name = self._sanitize_task_name(task_name)
 
-        # 2. 确定父目录
+        # 2. 确定父目录（使用沙箱虚拟路径）
         if parent_session_id:
             # 子任务：在父任务的 sub_tasks 下创建
             # 从 parent session 的 system_context 中获取 task_workspace
@@ -696,24 +696,35 @@ class FibreOrchestrator:
             if parent_workspace:
                 base_path = os.path.join(parent_workspace, "sub_tasks")
             else:
-                # 回退到 session_context 的 agent_workspace
-                base_path = os.path.join(session_context.agent_workspace, "tasks")
+                # 回退到 session_context 的 virtual_workspace
+                base_path = os.path.join(session_context.virtual_workspace, "tasks")
         else:
-            # 根任务：直接在 agent_workspace/tasks 下创建
-            base_path = os.path.join(session_context.agent_workspace, "tasks")
+            # 根任务：直接在 virtual_workspace/tasks 下创建
+            base_path = os.path.join(session_context.virtual_workspace, "tasks")
 
-        # 3. 获取任务路径（复用已存在的文件夹）
+        # 3. 获取任务路径
         task_path = os.path.join(base_path, task_name)
-        if os.path.exists(task_path):
-            logger.info(f"Reusing existing task workspace: {task_path} for session {session_id}")
 
-        # 4. 创建真实目录
-        os.makedirs(task_path, exist_ok=True)
-        os.makedirs(os.path.join(task_path, "execution"), exist_ok=True)
-        os.makedirs(os.path.join(task_path, "results"), exist_ok=True)
-        os.makedirs(os.path.join(task_path, "sub_tasks"), exist_ok=True)
+        # 4. 使用沙箱接口创建目录
+        try:
+            # 检查目录是否已存在
+            exists = await session_context.sandbox.file_exists(task_path)
+            if exists:
+                logger.info(f"Reusing existing task workspace: {task_path} for session {session_id}")
+            else:
+                logger.info(f"Creating task workspace: {task_path}")
 
-        logger.info(f"Created task workspace: {task_path}")
+            # 创建任务目录结构
+            await session_context.sandbox.ensure_directory(task_path)
+            await session_context.sandbox.ensure_directory(os.path.join(task_path, "execution"))
+            await session_context.sandbox.ensure_directory(os.path.join(task_path, "results"))
+            await session_context.sandbox.ensure_directory(os.path.join(task_path, "sub_tasks"))
+
+            logger.info(f"Created task workspace: {task_path}")
+        except Exception as e:
+            logger.error(f"Failed to create task workspace {task_path}: {e}")
+            raise
+
         return task_path
 
     async def delegate_task(
@@ -795,9 +806,9 @@ class FibreOrchestrator:
             parent_session_context = parent_session.session_context
 
         # Create task workspace using the same logic as internal execution
-        # For backend calls, we also create the directory and use real host path
+        # For backend calls, we also create the directory in sandbox
         if parent_session_context:
-            task_workspace = self._create_task_workspace(
+            task_workspace = await self._create_task_workspace(
                 session_id=session_id,
                 task_name=task_name,
                 parent_session_id=caller_session_id,
@@ -806,8 +817,8 @@ class FibreOrchestrator:
             # Record task_workspace to parent session's system_context for sub-agents to access
             parent_session_context.system_context['task_workspace'] = task_workspace
         else:
-            # Fallback: use a default path
-            task_workspace = os.path.join("/tmp", "sage_tasks", f"{task_name}_{session_id}")
+            # Fallback: use a default virtual path
+            task_workspace = os.path.join("/sage-workspace", "tasks", f"{task_name}_{session_id}")
 
         # Build enhanced content with workspace info
         original_task_section = f"【用户最初任务需求】\n{original_task}\n\n" if original_task else ""
@@ -1003,7 +1014,7 @@ class FibreOrchestrator:
             return sub_session
 
         # Create task workspace using task_name
-        task_workspace = self._create_task_workspace(
+        task_workspace = await self._create_task_workspace(
             session_id=session_id,
             task_name=task_name,
             parent_session_id=caller_session_id,
@@ -1171,14 +1182,14 @@ class FibreOrchestrator:
         # Get parent session
         parent_session = self.session_manager.get(parent_session_id)
         
-        # Prepare system_context with shared agent_workspace
-        # Use parent's agent_workspace if available
-        agent_workspace = None
+        # Prepare system_context with shared workspace
+        # Use parent's virtual_workspace if available
+        parent_virtual_workspace = None
         tool_manager = None
         skill_manager = None
         
         if parent_session:
-            agent_workspace = parent_session.session_context.agent_workspace
+            parent_virtual_workspace = parent_session.session_context.virtual_workspace
             parent_tool_manager = parent_session.session_context.tool_manager
             skill_manager = parent_session.session_context.skill_manager
 
@@ -1206,20 +1217,20 @@ class FibreOrchestrator:
 
         else:
              # Handle orphaned sub-sessions (no parent)
-             # For now we leave agent_workspace as None or we could initialize a new one if needed
-             # agent_workspace = ...
+             # For now we leave parent_virtual_workspace as None or we could initialize a new one if needed
+             # parent_virtual_workspace = ...
              pass
-        
+
         # Create sub-session via global manager
         # We pass the parent_session's session_space as the workspace root for the sub-session
-        
+
         sub_session = self.session_manager.get_or_create(session_id, session_space=self.session_manager.session_root_space) # Pass root space
         sub_session.configure_runtime(
             model=self.agent.model,
             model_config=self.agent.model_config,
             system_prefix=agent_def.system_prompt or "",
             session_root_space=self.session_manager.session_root_space,
-            agent_workspace=agent_workspace,
+            host_workspace=parent_virtual_workspace,
             default_memory_type="session"
         )
 
