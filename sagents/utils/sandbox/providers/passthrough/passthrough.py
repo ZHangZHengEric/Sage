@@ -22,8 +22,6 @@
 import os
 import re
 import shutil
-import subprocess
-from datetime import timedelta
 from typing import Dict, List, Optional
 
 from ...interface import (
@@ -191,24 +189,39 @@ class PassthroughSandboxProvider(ISandboxHandle):
         if env_vars:
             env.update(env_vars)
 
-        # 同步执行 - 合并 stdout 和 stderr 以保持原始输出顺序
-        result = subprocess.run(
-            converted_command,
-            shell=True,
-            cwd=actual_workdir,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=timeout,
-        )
-        return CommandResult(
-            success=result.returncode == 0,
-            stdout=result.stdout,
-            stderr="",  # 已合并到 stdout
-            return_code=result.returncode,
-            execution_time=0,  # 可以添加计时
-        )
+        # 使用异步 subprocess 执行命令，避免阻塞
+        import asyncio
+        try:
+            proc = await asyncio.wait_for(
+                asyncio.create_subprocess_shell(
+                    converted_command,
+                    cwd=actual_workdir,
+                    env=env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                ),
+                timeout=timeout,
+            )
+            stdout, _ = await proc.communicate()
+            stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
+            return CommandResult(
+                success=proc.returncode == 0,
+                stdout=stdout_text,
+                stderr="",  # 已合并到 stdout
+                return_code=proc.returncode,
+                execution_time=0,
+            )
+        except asyncio.TimeoutError:
+            if proc:
+                proc.kill()
+                await proc.wait()
+            return CommandResult(
+                success=False,
+                stdout="",
+                stderr=f"Command timed out after {timeout} seconds",
+                return_code=-1,
+                execution_time=timeout,
+            )
 
     async def execute_python(
         self,
@@ -230,21 +243,41 @@ class PassthroughSandboxProvider(ISandboxHandle):
             temp_file = f.name
 
         try:
-            result = subprocess.run(
-                ["python", temp_file],
-                cwd=actual_workdir,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            # 使用异步 subprocess 执行，避免阻塞
+            import asyncio
+            try:
+                proc = await asyncio.wait_for(
+                    asyncio.create_subprocess_exec(
+                        "python",
+                        temp_file,
+                        cwd=actual_workdir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    ),
+                    timeout=timeout,
+                )
+                stdout, stderr = await proc.communicate()
+                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
+                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
 
-            return ExecutionResult(
-                success=result.returncode == 0,
-                output=result.stdout,
-                error=result.stderr if result.returncode != 0 else None,
-                execution_time=0,
-                installed_packages=requirements or [],
-            )
+                return ExecutionResult(
+                    success=proc.returncode == 0,
+                    output=stdout_text,
+                    error=stderr_text if proc.returncode != 0 else None,
+                    execution_time=0,
+                    installed_packages=requirements or [],
+                )
+            except asyncio.TimeoutError:
+                if proc:
+                    proc.kill()
+                    await proc.wait()
+                return ExecutionResult(
+                    success=False,
+                    output="",
+                    error=f"Python execution timed out after {timeout} seconds",
+                    execution_time=timeout,
+                    installed_packages=requirements or [],
+                )
         finally:
             os.unlink(temp_file)
 
@@ -267,21 +300,41 @@ class PassthroughSandboxProvider(ISandboxHandle):
             temp_file = f.name
 
         try:
-            result = subprocess.run(
-                ["node", temp_file],
-                cwd=actual_workdir,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            # 使用异步 subprocess 执行，避免阻塞
+            import asyncio
+            try:
+                proc = await asyncio.wait_for(
+                    asyncio.create_subprocess_exec(
+                        "node",
+                        temp_file,
+                        cwd=actual_workdir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    ),
+                    timeout=timeout,
+                )
+                stdout, stderr = await proc.communicate()
+                stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
+                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
 
-            return ExecutionResult(
-                success=result.returncode == 0,
-                output=result.stdout,
-                error=result.stderr if result.returncode != 0 else None,
-                execution_time=0,
-                installed_packages=packages or [],
-            )
+                return ExecutionResult(
+                    success=proc.returncode == 0,
+                    output=stdout_text,
+                    error=stderr_text if proc.returncode != 0 else None,
+                    execution_time=0,
+                    installed_packages=packages or [],
+                )
+            except asyncio.TimeoutError:
+                if proc:
+                    proc.kill()
+                    await proc.wait()
+                return ExecutionResult(
+                    success=False,
+                    output="",
+                    error=f"JavaScript execution timed out after {timeout} seconds",
+                    execution_time=timeout,
+                    installed_packages=packages or [],
+                )
         finally:
             os.unlink(temp_file)
 
