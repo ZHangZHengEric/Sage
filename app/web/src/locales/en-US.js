@@ -227,6 +227,7 @@ export default {
   'common.return': 'Return',
   'common.all': 'All',
   'common.viewDetails': 'View Details',
+  'common.id': 'ID',
   'common.success': 'Success',
   'common.fail': 'Fail',
   'common.default': 'Default',
