@@ -23,16 +23,17 @@
         <!-- Messages Area -->
         <div ref="messagesListRef" class="flex-1 overflow-y-auto p-4 custom-scrollbar">
           <div class="space-y-6">
-            <MessageRenderer 
-              v-for="(message, index) in messages" 
-              :key="message.id || index" 
+            <MessageRenderer
+              v-for="(message, index) in messages"
+              :key="message.id || index"
               :message="message"
-              :messages="messages" 
+              :messages="messages"
               :message-index="index"
               :is-loading="isLoading && index === messages.length - 1"
               :extract-workbench-items="extractWorkbenchItems"
+              :agent-id="agentId"
               @download-file="handleDownloadFile"
-              @toolClick="handleToolClick" 
+              @toolClick="handleToolClick"
               @openSubSession="handleOpenSubSession"
             />
             
@@ -75,6 +76,10 @@ const props = defineProps({
   extractWorkbenchItems: {
     type: Boolean,
     default: false  // 子会话面板默认不提取工作台项目，避免重复
+  },
+  agentId: {
+    type: String,
+    default: ''
   }
 })
 

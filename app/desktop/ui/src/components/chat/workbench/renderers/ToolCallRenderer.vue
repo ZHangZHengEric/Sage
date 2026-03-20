@@ -567,7 +567,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -608,6 +608,7 @@ import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
 import { MemoryToolRenderer } from './toolcall'
 import { skillAPI } from '@/api/skill.js'
+import { agentAPI } from '@/api/agent.js'
 import { useLanguage } from '@/utils/i18n'
 
 const { t } = useLanguage()
@@ -630,6 +631,10 @@ const skillInfo = ref({
 })
 const skillLoading = ref(false)
 const skillError = ref('')
+
+// Agent 列表缓存
+const agentList = ref([])
+const agentListLoaded = ref(false)
 
 // 从 item 中提取工具调用信息
 const toolCall = computed(() => {
@@ -831,6 +836,8 @@ watch(isLoadSkill, (newVal) => {
   }
 }, { immediate: true })
 
+
+
 // 监听 skillName 变化，重置 skillInfo
 watch(skillName, (newVal, oldVal) => {
   console.log('[ToolCallRenderer] skillName changed:', oldVal, '->', newVal)
@@ -851,23 +858,16 @@ watch(skillName, (newVal, oldVal) => {
 })
 
 // 监听 item 变化，确保组件复用时重置状态
-watch(() => props.item, (newVal, oldVal) => {
-  console.log('[ToolCallRenderer] item changed:', oldVal?.id, '->', newVal?.id)
-  if (newVal?.id !== oldVal?.id) {
+watch(() => props.item?.id, (newId, oldId) => {
+  if (newId !== oldId) {
     // 重置 skillInfo
-    skillInfo.value = {
-      name: '',
-      description: '',
-      content: ''
-    }
+    skillInfo.value = { name: '', description: '', content: '' }
     skillError.value = ''
-    console.log('[ToolCallRenderer] item changed, skillInfo reset')
-    // 如果是 load_skill，获取新 skill 的信息
-    if (isLoadSkill.value && skillName.value) {
-      fetchSkillInfo()
-    }
+    // 重置 agentList 加载状态
+    agentListLoaded.value = false
+    agentList.value = []
   }
-}, { deep: true })
+})
 
 // ============ 3. File Read ============
 const readFilePath = computed(() => toolArgs.value.file_path || '')
@@ -1114,33 +1114,84 @@ const getTodoStatusLabel = (status) => {
 const delegateTasks = computed(() => toolArgs.value.tasks || [])
 const showDelegationResult = ref(false)
 
-// Get current agent info from item
-const currentAgentId = computed(() => {
-  // Try to get agent_id from item metadata or data
-  return props.item?.agent_id || props.item?.data?.agent_id || ''
-})
-
-const currentAgentName = computed(() => {
-  // Try to get from item metadata or use default
-  return props.item?.agent_name || props.item?.data?.agent_name || t('workbench.tool.delegator')
-})
-
-const currentAgentAvatar = computed(() => {
-  const agentId = currentAgentId.value
-  if (!agentId) {
-    return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=current`
-  }
-  return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agentId)}`
-})
-
-const getAgentAvatar = (agentId) => {
+// 统一的 avatar 生成函数
+const generateAvatarUrl = (agentId) => {
   if (!agentId) return ''
   return `https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,smile02,square01,square02&seed=${encodeURIComponent(agentId)}`
 }
 
+// 获取 agent 名称
+const getAgentNameById = (agentIdOrName) => {
+  if (!agentIdOrName) return t('workbench.tool.unknownAgent')
+  // 先通过 ID 查找
+  let agent = agentList.value.find(a => a.id === agentIdOrName)
+  // 如果没找到，通过 name 查找
+  if (!agent) {
+    agent = agentList.value.find(a => a.name === agentIdOrName)
+  }
+  return agent?.name || agentIdOrName
+}
+
+// 获取 agent 头像 URL
+const getAgentAvatarUrl = (agentIdOrName) => {
+  if (!agentIdOrName) return ''
+  // 先通过 ID 查找
+  let agent = agentList.value.find(a => a.id === agentIdOrName)
+  // 如果没找到，通过 name 查找
+  if (!agent) {
+    agent = agentList.value.find(a => a.name === agentIdOrName)
+  }
+  if (agent?.avatar_url) {
+    return agent.avatar_url
+  }
+  // 使用传入的 ID 或 name 作为 seed 生成头像
+  return generateAvatarUrl(agentIdOrName)
+}
+
+// Get current agent info from item
+const currentAgentId = computed(() => {
+  // Try to get agent_id from various possible locations
+  return props.item?.agent_id ||
+         props.item?.data?.agent_id ||
+         props.item?.data?.source_agent_id ||
+         ''
+})
+
+const currentAgentName = computed(() => {
+  // Try to get from various possible locations
+  return props.item?.agent_name ||
+         props.item?.data?.agent_name ||
+         props.item?.data?.source_agent_name ||
+         props.item?.role || // 如果都没有，使用 role
+         t('workbench.tool.delegator')
+})
+
+const currentAgentAvatar = computed(() => {
+  const agentId = currentAgentId.value
+  const agentName = currentAgentName.value
+  // 使用 agentId 或 agentName 作为 seed，与 SysDelegateTaskMessage.vue 保持一致
+  const seed = agentId || agentName || 'current'
+  return getAgentAvatarUrl(seed)
+})
+
+const getAgentAvatar = (agentId) => {
+  return getAgentAvatarUrl(agentId)
+}
+
 const getAgentName = (agentId) => {
-  if (!agentId) return 'Unknown'
-  return agentId.length > 15 ? agentId.slice(0, 12) + '...' : agentId
+  return getAgentNameById(agentId)
+}
+
+// 加载 agent 列表
+const loadAgentList = async () => {
+  if (agentListLoaded.value) return
+  try {
+    const agents = await agentAPI.getAgents()
+    agentList.value = agents || []
+    agentListLoaded.value = true
+  } catch (error) {
+    console.error('[ToolCallRenderer] Failed to load agent list:', error)
+  }
 }
 
 const delegationError = computed(() => {
@@ -1279,6 +1330,19 @@ const handleImageError = (event, index) => {
   // 图片加载失败时显示占位符
   event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23f3f4f6"/%3E%3Ctext x="50" y="50" font-family="Arial" font-size="12" fill="%239ca3af" text-anchor="middle" dy=".3em"%3EImage Error%3C/text%3E%3C/svg%3E'
 }
+
+// 组件挂载时加载需要的数据
+onMounted(() => {
+  // 使用 nextTick 确保 DOM 已更新
+  nextTick(() => {
+    if (isSysDelegateTask.value) {
+      loadAgentList()
+    }
+    if (isLoadSkill.value && skillName.value) {
+      fetchSkillInfo()
+    }
+  })
+})
 
 </script>
 

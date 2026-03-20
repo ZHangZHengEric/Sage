@@ -663,6 +663,8 @@ onMounted(() => {
         timestamp: timestamp,
         sessionId: sessionId,
         messageId: messageId,
+        agent_id: props.agentId,
+        agent_name: currentAgentName.value,
         data: toolCall
         // toolResult 会在 watch 中更新
       })
