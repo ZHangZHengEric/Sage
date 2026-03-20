@@ -18,6 +18,44 @@ from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
 
+def _ensure_search_memory_available(session_context: SessionContext) -> Any:
+    """
+    确保 search_memory 工具在可用工具列表中
+    
+    如果 tool_manager 是 ToolProxy 且 search_memory 不在白名单中，
+    则创建一个新的 ToolProxy 包含 search_memory
+    
+    Args:
+        session_context: 会话上下文
+        
+    Returns:
+        可用的 tool_manager
+    """
+    tool_manager = session_context.tool_manager
+    if not tool_manager:
+        return None
+    
+    # 检查是否是 ToolProxy
+    from sagents.tool.tool_proxy import ToolProxy
+    from sagents.tool.tool_manager import ToolManager
+    
+    if isinstance(tool_manager, ToolProxy):
+        # 检查 search_memory 是否可用
+        available_tools = set(tool_manager.list_all_tools_name())
+        if 'search_memory' not in available_tools:
+            # 获取底层 ToolManager 并添加 search_memory
+            base_manager = tool_manager.tool_manager
+            if isinstance(base_manager, ToolManager):
+                # 检查底层 manager 是否有 search_memory
+                if 'search_memory' in base_manager.list_all_tools_name():
+                    # 创建新的 ToolProxy，包含原有工具 + search_memory
+                    new_available_tools = list(available_tools) + ['search_memory']
+                    logger.info("MemoryRecallAgent: 添加 search_memory 到可用工具列表")
+                    return ToolProxy(base_manager, new_available_tools)
+    
+    return tool_manager
+
+
 class MemoryRecallAgent(AgentBase):
     """
     记忆召回 Agent
@@ -309,13 +347,15 @@ class MemoryRecallAgent(AgentBase):
         logger.debug(f"MemoryRecallAgent: 调用 search_memory 工具，查询: {query}")
 
         try:
-            # 获取 tool_manager 并调用 search_memory
-            tool_manager = session_context.tool_manager
+            # 获取 tool_manager 并确保 search_memory 可用
+            tool_manager = _ensure_search_memory_available(session_context)
+            if not tool_manager:
+                logger.warning("MemoryRecallAgent: tool_manager 不可用")
+                return []
             
             # 调用 search_memory 工具（使用 run_tool_async 方法）
             result_raw = await tool_manager.run_tool_async(
                 'search_memory',
-                session_context=session_context,
                 session_id=session_context.session_id,
                 query=query,
                 top_k=5
