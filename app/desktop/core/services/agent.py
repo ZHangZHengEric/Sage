@@ -46,32 +46,72 @@ async def list_agents() -> List[models.Agent]:
     return all_configs
 
 
+def _enforce_required_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    根据 Agent 配置强制添加必要的工具
+
+    - 如果记忆类型选择了"用户"，强制添加 search_memory 工具
+    - 如果 Agent 策略是 fibre，强制添加 sys_spawn_agent、sys_delegate_task、sys_finish_task 工具
+    """
+    available_tools = agent_config.get("available_tools", []) or agent_config.get("availableTools", [])
+    if not available_tools:
+        available_tools = []
+
+    # 转换为集合便于操作
+    tools_set = set(available_tools)
+    original_tools = tools_set.copy()
+
+    # 检查记忆类型
+    memory_type = agent_config.get("memoryType") or agent_config.get("memory_type")
+    if memory_type == "user":
+        tools_set.add("search_memory")
+        logger.info("Agent 记忆类型为用户，强制添加 search_memory 工具")
+
+    # 检查 Agent 策略/模式
+    agent_mode = agent_config.get("agentMode") or agent_config.get("agent_mode")
+    if agent_mode == "fibre":
+        fibre_tools = {"sys_spawn_agent", "sys_delegate_task", "sys_finish_task"}
+        tools_set.update(fibre_tools)
+        logger.info(f"Agent 策略为 fibre，强制添加 fibre 工具: {fibre_tools}")
+
+    # 如果有变化，更新配置
+    if tools_set != original_tools:
+        new_tools = list(tools_set)
+        if "available_tools" in agent_config:
+            agent_config["available_tools"] = new_tools
+        if "availableTools" in agent_config:
+            agent_config["availableTools"] = new_tools
+        logger.info(f"Agent 工具列表已更新: {original_tools} -> {tools_set}")
+
+    return agent_config
+
+
 def _validate_and_filter_tools(agent_config: Dict[str, Any]) -> Dict[str, Any]:
     """验证并过滤掉不可用的工具"""
     tm = get_tool_manager()
     if not tm:
         return agent_config
-    
+
     available_tools = agent_config.get("available_tools", []) or agent_config.get("availableTools", [])
     if not available_tools:
         return agent_config
-    
+
     # 获取当前可用的工具名称列表
     valid_tool_names = set(tm.list_all_tools_name())
-    
+
     # 过滤掉不可用的工具
     filtered_tools = [t for t in available_tools if t in valid_tool_names]
-    
+
     if len(filtered_tools) != len(available_tools):
         removed_tools = set(available_tools) - set(filtered_tools)
         logger.warning(f"以下工具不可用，已自动移除: {removed_tools}")
-        
+
         # 更新配置
         if "available_tools" in agent_config:
             agent_config["available_tools"] = filtered_tools
         if "availableTools" in agent_config:
             agent_config["availableTools"] = filtered_tools
-    
+
     return agent_config
 
 
@@ -81,7 +121,10 @@ async def create_agent(
     """创建新的 Agent，返回创建的 Agent 对象"""
     agent_id = generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
-    
+
+    # 强制添加必要的工具
+    agent_config = _enforce_required_tools(agent_config)
+
     # 验证并过滤工具
     agent_config = _validate_and_filter_tools(agent_config)
     
@@ -118,7 +161,10 @@ async def update_agent(
 ) -> models.Agent:
     """更新指定 Agent 的配置，返回 Agent 对象"""
     logger.info(f"开始更新Agent: {agent_id}")
-    
+
+    # 强制添加必要的工具
+    agent_config = _enforce_required_tools(agent_config)
+
     # 验证并过滤工具
     agent_config = _validate_and_filter_tools(agent_config)
     
