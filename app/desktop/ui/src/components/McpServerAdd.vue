@@ -35,47 +35,10 @@
                 <SelectValue placeholder="Select protocol" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="stdio">stdio</SelectItem>
                 <SelectItem value="sse">SSE</SelectItem>
                 <SelectItem value="streamable_http">Streamable HTTP</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-
-          <!-- stdio -->
-          <div v-if="form.protocol === 'stdio'" class="space-y-4 animate-in slide-in-from-top-2 duration-200">
-            <div class="space-y-2">
-              <Label for="command">{{ t('tools.command') }}</Label>
-              <Input 
-                id="command" 
-                v-model="form.command" 
-                type="text" 
-                :placeholder="t('tools.enterCommand')"
-                required 
-              />
-            </div>
-
-            <div class="space-y-2">
-              <Label for="args">{{ t('tools.arguments') }}</Label>
-              <Input 
-                id="args" 
-                v-model="form.args" 
-                type="text" 
-                :placeholder="t('tools.enterArguments')"
-              />
-            </div>
-
-            <div class="space-y-2">
-              <Label for="env">{{ t('tools.environmentVariables') }}</Label>
-              <Textarea 
-                id="env" 
-                v-model="form.env" 
-                :placeholder="t('tools.enterEnvironmentVariables')"
-                rows="3"
-                class="resize-y min-h-[80px] font-mono text-sm"
-              />
-              <p class="text-xs text-muted-foreground">{{ t('tools.envFormatHint') }}</p>
-            </div>
           </div>
 
           <!-- SSE -->
@@ -175,9 +138,6 @@ const { t } = useLanguage()
 const form = reactive({
   name: '',
   protocol: 'sse',
-  command: '',
-  args: '',
-  env: '',
   sse_url: '',
   streamable_http_url: '',
   description: ''
@@ -192,27 +152,7 @@ const handleSubmit = () => {
   }
 
   // 根据协议类型添加相应字段
-  if (form.protocol === 'stdio') {
-    payload.command = form.command
-    if (form.args) {
-      payload.args = Array.isArray(form.args)
-        ? form.args
-        : form.args.split(' ').filter(arg => arg.trim())
-    }
-    // 解析环境变量
-    if (form.env && form.env.trim()) {
-      const envObj = {}
-      form.env.split('\n').forEach(line => {
-        const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-        if (match) {
-          envObj[match[1]] = match[2]
-        }
-      })
-      if (Object.keys(envObj).length > 0) {
-        payload.env = envObj
-      }
-    }
-  } else if (form.protocol === 'sse') {
+  if (form.protocol === 'sse') {
     payload.sse_url = form.sse_url
   } else if (form.protocol === 'streamable_http') {
     payload.streamable_http_url = form.streamable_http_url
@@ -226,17 +166,8 @@ const setFormData = (data) => {
   form.name = data.name || ''
   form.protocol = data.protocol || 'sse'
   form.description = data.description || ''
-  
-  if (data.protocol === 'stdio') {
-    form.command = data.command || ''
-    form.args = Array.isArray(data.args) ? data.args.join(' ') : (data.args || '')
-    // 将 env 对象转换为字符串
-    if (data.env && typeof data.env === 'object') {
-      form.env = Object.entries(data.env).map(([key, value]) => `${key}=${value}`).join('\n')
-    } else {
-      form.env = ''
-    }
-  } else if (data.protocol === 'sse') {
+
+  if (data.protocol === 'sse') {
     form.sse_url = data.sse_url || ''
   } else if (data.protocol === 'streamable_http') {
     form.streamable_http_url = data.streamable_http_url || ''
@@ -247,9 +178,6 @@ const setFormData = (data) => {
 const resetForm = () => {
   form.name = ''
   form.protocol = 'sse'
-  form.command = ''
-  form.args = ''
-  form.env = ''
   form.sse_url = ''
   form.streamable_http_url = ''
   form.description = ''
