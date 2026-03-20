@@ -363,6 +363,7 @@ const loadContent = async () => {
 
     // 获取 Agent ID
     const agentId = props.item?.agentId
+    const sessionId = props.item?.sessionId
     if (!agentId) {
         throw new Error('未找到Agent ID，无法下载文件')
     }
@@ -377,7 +378,7 @@ const loadContent = async () => {
     }
 
     // 下载文件 Blob
-    const blob = await agentAPI.downloadFile(agentId, safePath)
+    const blob = await agentAPI.downloadFile(agentId, safePath, sessionId)
 
     // 创建 Blob URL 用于预览（图片、PDF）
     if (blobUrl.value) {
@@ -450,6 +451,7 @@ const openFile = async () => {
     // 如果没有加载过，尝试触发下载
     try {
        const agentId = props.item?.agentId
+       const sessionId = props.item?.sessionId
        if (agentId) {
            let safePath = props.filePath
            if (safePath.startsWith('/sage-workspace/')) {
@@ -458,7 +460,7 @@ const openFile = async () => {
            if (safePath.startsWith('/')) {
              safePath = safePath.substring(1)
            }
-           const blob = await agentAPI.downloadFile(agentId, safePath)
+           const blob = await agentAPI.downloadFile(agentId, safePath, sessionId)
            const url = URL.createObjectURL(blob)
            const a = document.createElement('a')
            a.href = url

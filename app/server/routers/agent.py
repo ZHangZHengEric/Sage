@@ -347,11 +347,18 @@ async def get_workspace(agent_id: str, request: Request, session_id: Optional[st
     return await Response.succ(message=result.get("message", "获取文件列表成功"), data={**result, "user_id": user_id})
 
 @agent_router.get("/{agent_id}/file_workspace/download")
-async def download_file(agent_id: str, request: Request):
+async def download_file(agent_id: str, request: Request, session_id: Optional[str] = None):
     """获取指定会话的文件工作空间"""
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
+    role = claims.get("role") or "user"
 
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
+            
     file_path = request.query_params.get("file_path")
     logger.info(f"Download request: file_path={file_path}")
     try:
@@ -366,11 +373,18 @@ async def download_file(agent_id: str, request: Request):
 
 
 @agent_router.delete("/{agent_id}/file_workspace/delete")
-async def delete_file(agent_id: str, request: Request):
+async def delete_file(agent_id: str, request: Request, session_id: Optional[str] = None):
     """删除指定会话的文件"""
     claims = getattr(request.state, "user_claims", {}) or {}
     user_id = claims.get("userid") or ""
-
+    role = claims.get("role") or "user"
+    
+    if role == "admin" and session_id:
+        dao = ConversationDao()
+        conversation = await dao.get_by_session_id(session_id)
+        if conversation:
+            user_id = conversation.user_id
+            
     file_path = request.query_params.get("file_path")
     logger.info(f"Delete request: file_path={file_path}")
     try:
