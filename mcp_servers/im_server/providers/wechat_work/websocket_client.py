@@ -302,7 +302,7 @@ class WeChatWorkWebSocketClient:
             data = json.loads(message)
             cmd = data.get("cmd")
             
-            logger.debug(f"[WeChatWork] 收到消息: {cmd}")
+            logger.info(f"[WeChatWork] 收到消息: {cmd}")
 
             if cmd == "aibot_msg_callback":
                 # 用户消息回调
@@ -430,6 +430,7 @@ class WeChatWorkWebSocketClient:
                 }
 
             logger.info(f"[WeChatWork] 收到消息 来自 {user_id} ({chat_type}): {content[:80]}...")
+            logger.info(f"[WeChatWork] 准备调用 message_handler: {self.message_handler}")
 
             # 调用消息处理器
             self._call_message_handler(parsed_message)
@@ -487,7 +488,9 @@ class WeChatWorkWebSocketClient:
             message: 标准化后的消息/事件对象
         """
         try:
+            logger.info(f"[WeChatWork] _call_message_handler 开始调用, message_type={message.get('type')}")
             result = self.message_handler(message)
+            logger.info(f"[WeChatWork] message_handler 返回类型: {type(result)}, iscoroutine={asyncio.iscoroutine(result)}")
             # 如果处理函数返回协程, 需要异步执行
             if asyncio.iscoroutine(result):
                 try:

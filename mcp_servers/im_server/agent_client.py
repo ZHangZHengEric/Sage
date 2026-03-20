@@ -525,8 +525,8 @@ class AgentClient:
             file_write_path = ""
             # 统一添加工具使用提示
             full_content += f"\n\n【可用工具】"
-            full_content += f"\n- 发送文本: send_message_through_im(provider='{provider}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', content='消息内容')"
-            full_content += f"\n- 发送文件: send_file_through_im(provider='{provider}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', file_path='文件的绝对路径')"
+            full_content += f"\n- 发送文本: send_message_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', content='消息内容')"
+            full_content += f"\n- 发送文件: send_file_through_im(provider='{provider}', agent_id='{agent_id}', user_id='{user_id or ''}', chat_id='{chat_id or ''}', file_path='文件的绝对路径')"
             # full_content += f"\n\n【提示】创建文件请保存到 /sage-workspace/outputs/ 目录，发送文件时使用相同的绝对路径。"
             
             payload = {
