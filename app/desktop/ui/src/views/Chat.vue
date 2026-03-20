@@ -246,6 +246,7 @@
         :session-id="activeSubSessionId"
         :messages="subSessionMessages"
         :is-loading="isLoading"
+        :agent-id="selectedAgentId"
         @close="handleCloseSubSession"
         @download-file="downloadWorkspaceFile"
         @openSubSession="handleOpenSubSession"
