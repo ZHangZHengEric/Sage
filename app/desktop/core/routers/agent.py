@@ -54,6 +54,7 @@ class AgentConfigDTO(BaseModel):
     multiAgent: Optional[bool] = False
     agentMode: Optional[str] = None
     description: Optional[str] = None
+    is_default: Optional[bool] = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -71,7 +72,7 @@ class SystemPromptOptimizeRequest(BaseModel):
 
 
 def convert_config_to_agent(
-    agent_id: str, config: Dict[str, Any]
+    agent_id: str, config: Dict[str, Any], is_default: bool = False
 ) -> AgentConfigDTO:
     """将配置字典转换为 AgentConfigResp 对象"""
 
@@ -93,6 +94,7 @@ def convert_config_to_agent(
         multiAgent=config.get("multiAgent") or config.get("multi_agent", False),
         agentMode=config.get("agentMode") or config.get("agent_mode"),
         description=config.get("description"),
+        is_default=is_default,
         created_at=config.get("created_at"),
         updated_at=config.get("updated_at"),
         llm_provider_id=config.get("llm_provider_id"),
@@ -116,6 +118,7 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "multiAgent": agent.multiAgent,
         "agentMode": agent.agentMode,
         "description": agent.description,
+        "is_default": agent.is_default,
         "created_at": agent.created_at,
         "updated_at": agent.updated_at,
         "llm_provider_id": agent.llm_provider_id,
@@ -156,7 +159,7 @@ async def list(http_request: Request):
     agents_data: List[Dict[str, Any]] = []
     for agent in all_configs:
         agent_id = agent.agent_id
-        agent_resp = convert_config_to_agent(agent_id, agent.config)
+        agent_resp = convert_config_to_agent(agent_id, agent.config, agent.is_default)
         agents_data.append(agent_resp.model_dump())
     # 根据agent名称排序
     agents_data.sort(key=lambda x: x["name"])
@@ -227,7 +230,7 @@ async def get(agent_id: str, http_request: Request):
         StandardResponse: 包含Agent配置的标准响应
     """
     agent = await get_agent(agent_id)
-    agent_resp = convert_config_to_agent(agent.agent_id, agent.config)
+    agent_resp = convert_config_to_agent(agent.agent_id, agent.config, agent.is_default)
     return await Response.succ(data=agent_resp.model_dump(), message="成功获取Agent配置")
 
 

@@ -523,11 +523,12 @@ const createDefaultAgent = async (providerId = null) => {
       id: 'default_agent',
       name: 'Zavix',
       description: '默认智能体',
+      is_default: true,
       maxLoopCount: 100,
       memoryType: "session",
       agentMode: "fibre",
       availableTools: [
-        'todo_write', 'todo_read', 'execute_shell_command', 
+        'todo_write', 'todo_read', 'execute_shell_command',
         'file_read', 'file_write',
         'file_update', 'load_skill', 'add_task', 'delete_task', 'complete_task',
         'enable_task', 'get_task_details', 'fetch_webpages', 'search_web_page', 'search_image_from_web'
