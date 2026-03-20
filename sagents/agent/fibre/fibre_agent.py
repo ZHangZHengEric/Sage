@@ -58,32 +58,21 @@ class FibreAgent(AgentBase):
         if not session_context.tool_manager:
             raise ValueError("ToolManager is not initialized in SessionContext")
         
-        tool_manager = session_context.tool_manager
         session_id = session_context.session_id or str(uuid.uuid4())
-        input_messages = list(session_context.message_manager.messages)
-        skill_manager = getattr(session_context, "skill_manager", None) if session_context else None
-        user_id = getattr(session_context, "user_id", None) if session_context else None
-        system_context = getattr(session_context, "system_context", None) if session_context else None
         max_loop_count = 50
         if session_context and isinstance(getattr(session_context, "agent_config", None), dict):
             max_loop_count = session_context.agent_config.get("max_loop_count", 100)
         
         if self.observability_manager:
-            self.observability_manager.on_chain_start(session_id=session_id, input_data=input_messages)
+            self.observability_manager.on_chain_start(session_id=session_id, input_data=list(session_context.message_manager.messages))
             
         try:
             _start_time = time.time()
             
             # Delegate to Orchestrator
             async for message_chunks in self.orchestrator.run_loop(
-                input_messages=input_messages,
-                tool_manager=tool_manager,
-                skill_manager=skill_manager,
-                session_id=session_id,
-                user_id=user_id,
-                system_context=system_context,
+                session_context=session_context,
                 max_loop_count=max_loop_count,
-                session_context=session_context
             ):
                 # Basic filtering similar to SAgent
                 if message_chunks:

@@ -3,6 +3,7 @@ import json
 import os
 import time
 import traceback
+import uuid
 import contextvars
 from contextlib import contextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union, Type
@@ -65,17 +66,17 @@ def delete_session_run_lock(session_id: str):
 
 
 class Session:
-    def __init__(self, session_id: str, enable_obs: bool = True, use_sandbox: bool = True):
+    def __init__(self, session_id: str, enable_obs: bool = True, sandbox_type: str = "local"):
         self.session_id = session_id
         self.enable_obs = enable_obs
-        self.use_sandbox = use_sandbox
+        self.sandbox_type = sandbox_type
         self.session_context: Optional[SessionContext] = None
         self._agents: Dict[str, AgentBase] = {}
         self.model: Any = None
         self.model_config: Dict[str, Any] = {}
         self.system_prefix: str = ""
         self.session_space: str = "./sage_sessions"
-        self.agent_workspace: Optional[str] = None
+        self.host_workspace: Optional[str] = None  # 代理工作区的宿主机路径（本地/直通沙箱需要）
         self.default_memory_type: str = "session"
         self.user_memory_manager: Optional[UserMemoryManager] = None
         self.observability_manager: Optional[ObservabilityManager] = None
@@ -103,16 +104,20 @@ class Session:
         model_config: Optional[Dict[str, Any]] = None,
         system_prefix: str = "",
         session_root_space: str = "./sage_sessions",
-        agent_workspace: Optional[str] = None,
+        host_workspace: Optional[str] = None,
+        virtual_workspace: str = "/sage-workspace",
         default_memory_type: str = "session",
+        agent_id: Optional[str] = None,
     ):
         runtime_signature = (
             id(model),
             str(model_config or {}),
             system_prefix,
             str(session_root_space),
-            str(agent_workspace or ""),
+            str(host_workspace or ""),
+            str(virtual_workspace),
             default_memory_type,
+            str(agent_id or ""),
         )
         if self._runtime_signature != runtime_signature:
             self._agents = {}
@@ -121,10 +126,14 @@ class Session:
         self.model_config = model_config or {}
         self.system_prefix = system_prefix or ""
         self.session_root_space = str(session_root_space)
-        self.agent_workspace = str(agent_workspace) if agent_workspace else None
+        self.host_workspace = str(host_workspace) if host_workspace else None
+        self.virtual_workspace = str(virtual_workspace)
         self.default_memory_type = default_memory_type or "session"
+        # agent_id 为 None 时生成随机 UUID
+        self.agent_id = agent_id or str(uuid.uuid4())
 
-        # os.environ["SAGE_USE_SANDBOX"] = "true" if self.use_sandbox else "false"
+        # 设置沙箱类型环境变量，供 SessionContext 和其他组件使用
+        os.environ["SAGE_SANDBOX_MODE"] = self.sandbox_type
 
         if self.default_memory_type == "user":
             self.user_memory_manager = UserMemoryManager(model=self.model, workspace=self.session_root_space)
@@ -173,7 +182,7 @@ class Session:
             
         return None
 
-    def _ensure_session_context(
+    async def _ensure_session_context(
         self,
         session_id: str,
         user_id: Optional[str],
@@ -212,8 +221,10 @@ class Session:
         self.session_context = SessionContext(
             session_id=session_id,
             user_id=user_id,
+            agent_id=self.agent_id,
             session_root_space=self.session_root_space,
-            agent_workspace=self.agent_workspace,
+            virtual_workspace=getattr(self, 'virtual_workspace', "/sage-workspace"),
+            host_workspace=self.host_workspace,
             context_budget_config=context_budget_config,
             system_context=merged_system_context,
             user_memory_manager=user_memory_manager,
@@ -221,6 +232,10 @@ class Session:
             skill_manager=skill_manager,
             parent_session_id=parent_session_id,
         )
+        
+        # 异步初始化 SessionContext
+        await self.session_context.init_more()
+        
         self._cache_session_workspace(session_id, self.session_context)
         return self.session_context
 
@@ -266,7 +281,7 @@ class Session:
         merged_system_context = dict(system_context or {})
         with session_scope(session_id):
             # 确保SessionContext存在，并进行初始化
-            session_context = self._ensure_session_context(
+            session_context = await self._ensure_session_context(
                 session_id=session_id,
                 user_id=user_id,
                 system_context=merged_system_context,
@@ -646,45 +661,45 @@ class SessionManager:
         self._all_session_paths[session_id] = os.path.abspath(session_workspace)
 
     def get_or_create(
-        self, 
-        session_id: str, 
-        use_sandbox: bool = True, 
+        self,
+        session_id: str,
+        sandbox_type: str = "local",
         session_space: Optional[str] = None
     ) -> Session:
         """
         获取或创建 Session
-        
+
         Args:
             session_id: 会话 ID（全局唯一）
-            use_sandbox: 是否使用沙箱
+            sandbox_type: 沙箱类型 (local|remote|passthrough)
             session_space: 会话空间路径
-        
+
         Returns:
             Session 实例
         """
         # 判断是否为子会话
         is_sub_session = self._is_sub_session(session_id)
-        
+
         # 子会话：总是创建新实例，不保留在 _sessions 中
         if is_sub_session:
             session = Session(
-                session_id=session_id, 
-                enable_obs=self.enable_obs, 
-                use_sandbox=use_sandbox
+                session_id=session_id,
+                enable_obs=self.enable_obs,
+                sandbox_type=sandbox_type
             )
             return session
-        
+
         # 根会话：保留在内存中
         if session_id not in self._sessions:
             self._sessions[session_id] = Session(
-                session_id=session_id, 
-                enable_obs=self.enable_obs, 
-                use_sandbox=use_sandbox
+                session_id=session_id,
+                enable_obs=self.enable_obs,
+                sandbox_type=sandbox_type
             )
-                 
+
         else:
-            self._sessions[session_id].use_sandbox = use_sandbox
-            
+            self._sessions[session_id].sandbox_type = sandbox_type
+
         return self._sessions[session_id]
 
     def get(self, session_id: str) -> Optional[Session]:

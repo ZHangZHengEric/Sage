@@ -6,7 +6,7 @@ import shutil
 
 from sagents.utils.logger import logger
 from sagents.skill.skill_schema import SkillSchema
-from sagents.utils.sandbox.filesystem import SANDBOX_WORKSPACE_ROOT
+
 
 _GLOBAL_SKILL_MANAGER: Optional["SkillManager"] = None
 
@@ -22,29 +22,35 @@ def set_skill_manager(tm: Optional["SkillManager"]) -> None:
 class SkillManager:
     """
     SkillManager (技能管理器)
-    Manages the discovery, registration, and loading of skills.
-    负责技能的发现、注册和加载。
+    Manages the discovery, registration, and loading of skills on the HOST machine.
+    负责在宿主机上管理技能的发现、注册和加载。
 
     Core Responsibilities (核心职责):
-    1. Discovery (发现): Scans the 'skills' directory for valid skill packages. (扫描 'skills' 目录以查找有效的技能包)
-    2. Registration (注册): Validates and registers skills into memory. (验证并将技能注册到内存中)
-    3. Loading (加载): Loads skill metadata and instructions (SKILL.md). (加载技能元数据和说明)
-    4. Workspace Preparation (工作区准备): Copies skill files to the agent's workspace for execution. (将技能文件复制到智能体的工作区以供执行)
+    1. Discovery (发现): Scans the 'skills' directory on host for valid skill packages.
+                       (扫描宿主机上的 'skills' 目录以查找有效的技能包)
+    2. Registration (注册): Validates and registers skills into memory.
+                          (验证并将技能注册到内存中)
+    3. Loading (加载): Loads skill metadata and instructions (SKILL.md).
+                      (加载技能元数据和说明)
+
+    Note: This class only manages skills on the HOST. Copying skills to sandbox
+    is handled by SessionContext via the sandbox interface.
+    (注意：此类只管理宿主机上的技能。将技能复制到沙箱由 SessionContext 通过沙箱接口处理。)
     """
     _instance = None
 
-    def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False, include_global_skills: bool = True):
+    def __new__(cls, skill_dirs: List[str] = None, isolated: bool = False):
         if isolated:
             return super(SkillManager, cls).__new__(cls)
         if cls._instance is None:
             cls._instance = super(SkillManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, skill_dirs: List[str] = None, isolated: bool = False, include_global_skills: bool = True):
+    def __init__(self, skill_dirs: List[str] = None, isolated: bool = False):
         if not isolated and getattr(self, '_initialized', False):
             return
 
-        self._initialize(skill_dirs, include_global_skills)
+        self._initialize(skill_dirs)
         self._initialized = True
 
     def add_skill_dir(self, path: str):
@@ -58,16 +64,13 @@ class SkillManager:
             self._skills_cache_valid = False
             self.reload()
 
-    def _initialize(self, skill_dirs: List[str] = None, include_global_skills: bool = True):
+    def _initialize(self, skill_dirs: List[str] = None):
         logger.debug("Initializing SkillManager")
         self.skills: Dict[str, SkillSchema] = {}
         # Base directory resolution (基础目录解析)
-        self.skill_workspace = os.environ.get("SAGE_SKILL_WORKSPACE", "skills")
         
         # Combine custom directories with the default workspace (合并自定义目录和默认工作区)
         dirs = skill_dirs or []
-        if include_global_skills:
-             dirs.append(self.skill_workspace)
              
         self.skill_dirs = list(dict.fromkeys(dirs))
         # Flag to track if skills cache is valid (标志：跟踪技能缓存是否有效)
@@ -147,10 +150,13 @@ class SkillManager:
             return self.skills[name].instructions
         return ""
 
-    def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
+    def get_skill_resource_path(self, name: str, resource_name: str) -> Optional[str]:
         """
-        Get the path to a resource file within a skill.
-        获取技能中资源文件的路径。
+        Get the path to a resource file within a skill on the HOST.
+        获取宿主机上技能中资源文件的路径。
+
+        Note: This returns the path on the HOST machine, not in sandbox.
+        (注意：这返回宿主机上的路径，不是沙箱内的路径。)
         """
         if name not in self.skills:
             return None
@@ -294,7 +300,7 @@ class SkillManager:
 
     def _load_skill_from_dir(self, skill_path: str, skip_if_loaded: bool = False) -> Optional[str]:
         """
-        Load a skill from a directory.
+        Load a skill from a directory on the HOST.
         Returns skill name if successful, None otherwise.
         """
         skill_md_path = os.path.join(skill_path, "SKILL.md")
@@ -414,104 +420,21 @@ class SkillManager:
         skill = self.skills.get(name)
         return skill.instructions or ""
 
-    def prepare_skill_in_workspace(self, skill_name: str, agent_workspace: str) -> Optional[str]:
-        """
-        Copy skill to agent workspace for execution.
-        Returns the new absolute path of the skill directory in the workspace.
-        """
-        skill = self.skills.get(skill_name)
-        if not skill:
-            return None
-
-        # Target path: workspace/skills/<skill_name>
-        target_dir = os.path.join(agent_workspace, "skills", skill_name)
-
-        # Always copy to ensure fresh state or update if needed
-        # Using dirs_exist_ok=True to allow overwriting/merging
-        try:
-            if not os.path.exists(target_dir):
-                shutil.copytree(skill.path, target_dir, dirs_exist_ok=True, symlinks=False)
-                logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
-            else:
-                pass
-        except shutil.Error as e:
-            # 处理部分复制成功但部分文件失败的情况
-            errors = e.args[0] if e.args else []
-            copied_files = []
-            failed_files = []
-            
-            for src, dst, err in errors:
-                if 'socket' in str(err).lower() or 'lock' in str(err).lower():
-                    # 忽略 socket 和 lock 文件错误
-                    logger.debug(f"Skipped socket/lock file: {src}")
-                    continue
-                failed_files.append((src, dst, err))
-            
-            # 如果有非 socket/lock 错误，重新抛出
-            if failed_files:
-                logger.warning(f"部分文件复制失败: {failed_files}")
-                # 继续返回目标目录，部分文件应该已经复制成功
-                
-            logger.debug(f"Copied skill {skill_name} to workspace: {target_dir}")
-        except Exception as e:
-            logger.error(f"Failed to copy skill {skill_name} to workspace: {e}")
-            return None
-
-        return target_dir
-
-    def prepare_skills_in_workspace(self, agent_workspace: str) -> None:
-        """
-        Copy all registered skills to the agent's workspace.
-        将所有已注册的技能复制到智能体的工作区。
-        """
-        for skill_name in self.skills:
-            self.prepare_skill_in_workspace(skill_name, agent_workspace)
-
-    def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
-        """
-        Level 3: Get path to a skill resource (e.g., scripts/fill_form.py).
-        If agent_workspace is provided, returns path relative to workspace copy.
-        """
-        skill = self.skills.get(name)
-        if skill:
-            base_path = skill.path
-
-            if agent_workspace:
-                # Ensure agent_workspace is absolute
-                agent_workspace = os.path.abspath(agent_workspace)
-                workspace_path = self.prepare_skill_in_workspace(name, agent_workspace)
-                if workspace_path:
-                    base_path = workspace_path
-
-            normalized_resource_name = resource_name.replace("\\", "/")
-            if normalized_resource_name.startswith("skills/"):
-                normalized_resource_name = normalized_resource_name[len("skills/"):]
-            if normalized_resource_name.startswith(f"{name}/"):
-                normalized_resource_name = normalized_resource_name[len(f"{name}/"):]
-
-            # If resource_name is already absolute, os.path.join will use it directly
-            resource_path = os.path.join(base_path, normalized_resource_name)
-            if os.path.exists(resource_path):
-                return resource_path
-        return None
-
-    def get_skill_file_list(self, name: str, agent_workspace: Optional[str] = None) -> List[str]:
+    def get_skill_file_list(self, name: str) -> List[str]:
         """
         Get a list of relative paths for all files in the skill.
         e.g., ["scripts/script.py", "data/config.json"]
+        
+        Returns relative paths from the skill root directory.
+        To get the sandbox path, use: {sandbox.workspace_path}/skills/{skill_name}/{relative_path}
+        
+        (返回相对于技能根目录的相对路径。要获取沙箱路径，使用: {sandbox.workspace_path}/skills/{skill_name}/{relative_path})
         """
         skill = self.skills.get(name)
         if not skill:
             return []
 
         base_path = skill.path
-        if agent_workspace:
-            # Ensure agent_workspace is absolute
-            agent_workspace = os.path.abspath(agent_workspace)
-            workspace_path = self.prepare_skill_in_workspace(name, agent_workspace)
-            if workspace_path:
-                base_path = workspace_path
-
         file_list = []
         if os.path.exists(base_path):
             for root, _, files in os.walk(base_path):

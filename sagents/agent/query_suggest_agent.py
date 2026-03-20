@@ -38,7 +38,7 @@ class QuerySuggestAgent(AgentBase):
             task_description=recent_message_str
         )
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            await self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

@@ -515,7 +515,7 @@ class AgentBase(ABC):
                         else:
                             logger.warning(f"{self.__class__.__name__}: session_context is None for session_id={session_id}, skip add_llm_request")
 
-    def prepare_unified_system_message(self,
+    async def prepare_unified_system_message(self,
                                        session_id: Optional[str] = None,
                                        custom_prefix: Optional[str] = None,
                                        language: Optional[str] = None,
@@ -557,11 +557,17 @@ class AgentBase(ABC):
             elif self.system_prefix:
                 role_content = self.system_prefix
             else:
-                if session_context:
-                    if session_context.sandbox.file_system.exists(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md')):
-                        role_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
-                        use_identity = True
-                else:
+                if session_context and session_context.sandbox:
+                    # 使用新的沙箱接口读取 IDENTITY.md
+                    identity_path = os.path.join(session_context.virtual_workspace, 'IDENTITY.md')
+                    try:
+                        if await session_context.sandbox.file_exists(identity_path):
+                            role_content = await session_context.sandbox.read_file(identity_path)
+                            use_identity = True
+                    except Exception as e:
+                        logger.warning(f"AgentBase: Failed to read IDENTITY.md: {e}")
+                
+                if not role_content:
                     role_content = prompt_manager.get_prompt(
                         'agent_intro_template',
                         agent='common',
@@ -583,36 +589,58 @@ class AgentBase(ABC):
                 if isinstance(use_claw_mode, str):
                     use_claw_mode = use_claw_mode.lower() == "true"
             logger.debug(f"{self.__class__.__name__}: use_claw_mode: {use_claw_mode}")
-            if "AGENT.MD" in include_sections and use_claw_mode:
-                # 读取workspace 下的AGENT.MD 文件，如果存在的话，需要用session context 的沙箱来进行读取
-                agent_md_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'AGENT.md'))
-                if agent_md_content:
-                    system_prefix += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
+            if "AGENT.MD" in include_sections and use_claw_mode and session_context.sandbox:
+                # 使用新的沙箱接口读取各种 .md 文件
+                workspace = session_context.virtual_workspace
+                
+                # 读取 AGENT.md
+                try:
+                    agent_md_content = await session_context.sandbox.read_file(os.path.join(workspace, 'AGENT.md'))
+                    if agent_md_content:
+                        system_prefix += f"<agent_md>\n{agent_md_content}\n</agent_md>\n"
+                except Exception as e:
+                    logger.debug(f"AgentBase: AGENT.md not found or error reading: {e}")
 
-                soul_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'SOUL.md'))
-                if soul_content:
-                    if len(soul_content) > 300:
-                        soul_content = soul_content[:300]+"……"
-                    system_prefix += f"<soul>\n{soul_content}\n</soul>\n"
+                # 读取 SOUL.md
+                try:
+                    soul_content = await session_context.sandbox.read_file(os.path.join(workspace, 'SOUL.md'))
+                    if soul_content:
+                        if len(soul_content) > 300:
+                            soul_content = soul_content[:300]+"……"
+                        system_prefix += f"<soul>\n{soul_content}\n</soul>\n"
+                except Exception as e:
+                    logger.debug(f"AgentBase: SOUL.md not found or error reading: {e}")
 
-                user_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'USER.md'))
-                if user_content:
-                    if len(user_content) > 300: 
-                        user_content = user_content[:300]+"……"  
-                    system_prefix += f"<user>\n{user_content}\n</user>\n"
+                # 读取 USER.md
+                try:
+                    user_content = await session_context.sandbox.read_file(os.path.join(workspace, 'USER.md'))
+                    if user_content:
+                        if len(user_content) > 300:
+                            user_content = user_content[:300]+"……"
+                        system_prefix += f"<user>\n{user_content}\n</user>\n"
+                except Exception as e:
+                    logger.debug(f"AgentBase: USER.md not found or error reading: {e}")
 
-                memory_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'MEMORY.md'))
-                if memory_content:
-                    if len(memory_content) > 500:
-                        memory_content = memory_content[:500]+"……"
-                    system_prefix += f"<memory>\n{memory_content}\n</memory>\n"
+                # 读取 MEMORY.md
+                try:
+                    memory_content = await session_context.sandbox.read_file(os.path.join(workspace, 'MEMORY.md'))
+                    if memory_content:
+                        if len(memory_content) > 500:
+                            memory_content = memory_content[:500]+"……"
+                        system_prefix += f"<memory>\n{memory_content}\n</memory>\n"
+                except Exception as e:
+                    logger.debug(f"AgentBase: MEMORY.md not found or error reading: {e}")
 
-                if use_identity==False:
-                    identity_content = session_context.sandbox.file_system.read_file(os.path.join(session_context.sandbox.virtual_workspace, 'IDENTITY.md'))
-                    if identity_content:
-                        if len(identity_content) > 300:
-                            identity_content = identity_content[:300]+"……"
-                        system_prefix += f"<identity>\n{identity_content}\n</identity>\n"
+                # 读取 IDENTITY.md（如果之前没有读取过）
+                if not use_identity:
+                    try:
+                        identity_content = await session_context.sandbox.read_file(os.path.join(workspace, 'IDENTITY.md'))
+                        if identity_content:
+                            if len(identity_content) > 300:
+                                identity_content = identity_content[:300]+"……"
+                            system_prefix += f"<identity>\n{identity_content}\n</identity>\n"
+                    except Exception as e:
+                        logger.debug(f"AgentBase: IDENTITY.md not found or error reading: {e}")
 
             # 处理 active_skills (无论是否包含system_context，都先提取出来，避免污染通用context)
             active_skills = None
@@ -659,16 +687,8 @@ class AgentBase(ABC):
 
             # 4. Workspace Files
             if 'workspace_files' in include_sections:
-                # 补充当前工作空间中的文件情况
-                # 优先使用 session_context.sandbox.file_system 获取文件树信息
-                # 为了兼容性，也可以检查 session_context.file_system
-                file_system = None
-                if hasattr(session_context, 'sandbox') and session_context.sandbox and session_context.sandbox.file_system:
-                    file_system = session_context.sandbox.file_system
-                elif hasattr(session_context, 'file_system') and session_context.file_system:
-                    file_system = session_context.file_system
-
-                if file_system:
+                # 使用新沙箱接口获取文件树
+                if hasattr(session_context, 'sandbox') and session_context.sandbox:
                     workspace_name = session_context.system_context.get('private_workspace', '')
 
                     system_prefix += "<workspace_files>\n"
@@ -681,62 +701,25 @@ class AgentBase(ABC):
                     )
                     system_prefix += workspace_files.format(workspace=workspace_name)
 
-                    file_tree = file_system.get_file_tree_compact(include_hidden=True, max_depth=2)
-                    if not file_tree:
-                        no_files = prompt_manager.get_prompt(
-                            'no_files_message',
-                            agent='common',
-                            language=language,
-                            default="当前工作空间下没有文件。\n"
-                        )
-                        system_prefix += no_files
-                    else:
-                        system_prefix += file_tree
-                    system_prefix += "</workspace_files>\n"
-
-                # Fallback: 如果没有 file_system 对象但有 agent_workspace 路径 (兼容旧代码)
-                elif session_context.agent_workspace:
-                    current_agent_workspace = session_context.agent_workspace
-                    workspace_name = session_context.system_context.get('private_workspace', '')
-
-                    system_prefix += "<workspace_files>\n"
-                    # 使用PromptManager获取多语言文本
-                    workspace_files = prompt_manager.get_prompt(
-                        'workspace_files_label',
-                        agent='common',
-                        language=language,
-                        default=f"当前工作空间 {workspace_name} 的文件情况：\n"
-                    )
-                    system_prefix += workspace_files.format(workspace=workspace_name)
-
-                    # 尝试使用临时 SandboxFileSystem 获取文件树，保持行为一致性
-                    # 即使没有全局 Sandbox，我们也使用 SandboxFileSystem 的安全逻辑来展示文件
                     try:
-                        from sagents.utils.sandbox.filesystem import SandboxFileSystem
-
-                        fs_obj = None
-                        if isinstance(current_agent_workspace, SandboxFileSystem):
-                            fs_obj = current_agent_workspace
-                        elif isinstance(current_agent_workspace, str):
-                            # 假设虚拟路径就是 /workspace
-                            fs_obj = SandboxFileSystem(host_path=current_agent_workspace, virtual_path="/workspace")
-
-                        if fs_obj:
-                            file_tree = fs_obj.get_file_tree_compact(include_hidden=True,max_depth=2)
-
-                            if not file_tree:
-                                no_files = prompt_manager.get_prompt(
-                                    'no_files_message',
-                                    agent='common',
-                                    language=language,
-                                    default="当前工作空间下没有文件。\n"
-                                )
-                                system_prefix += no_files
-                            else:
-                                system_prefix += file_tree
+                        # 使用新沙箱接口获取文件树
+                        file_tree = await session_context.sandbox.get_file_tree(
+                            include_hidden=True,
+                            max_depth=2,
+                            max_items_per_dir=5
+                        )
+                        if not file_tree:
+                            no_files = prompt_manager.get_prompt(
+                                'no_files_message',
+                                agent='common',
+                                language=language,
+                                default="当前工作空间下没有文件。\n"
+                            )
+                            system_prefix += no_files
+                        else:
+                            system_prefix += file_tree
                     except Exception as e:
                         logger.error(f"AgentBase: 获取工作空间文件树时出错: {e}")
-                        # 如果发生错误，仅显示无文件提示，避免暴露宿主机路径
                         no_files = prompt_manager.get_prompt(
                             'no_files_message',
                             agent='common',
@@ -748,11 +731,9 @@ class AgentBase(ABC):
                     system_prefix += "</workspace_files>\n"
 
                 # 4.1 External/Additional Paths
-                # Support accessing other directories on the host machine if specified in system_context
-                # Key: 'external_paths'
                 external_paths = session_context.system_context.get('external_paths')
 
-                if external_paths and isinstance(external_paths, list):
+                if external_paths and isinstance(external_paths, list) and hasattr(session_context, 'sandbox') and session_context.sandbox:
                     system_prefix += "<external_paths>\n"
                     ext_paths_intro = prompt_manager.get_prompt(
                         'external_paths_intro',
@@ -762,36 +743,24 @@ class AgentBase(ABC):
                     )
                     system_prefix += ext_paths_intro
 
-                    # Ensure we have a file system object
-                    fs_for_external = file_system
-                    if not fs_for_external:
-                        # Try to create a temporary one
-                        try:
-                            from sagents.utils.sandbox.filesystem import SandboxFileSystem
-                            # We just need it for reading, host_path doesn't matter much if we provide root_path
-                            # Use current working directory as a safe default if available, else /
-                            fs_for_external = SandboxFileSystem(host_path=os.getcwd(), virtual_path="/workspace") 
-                        except Exception as e:
-                            logger.error(f"AgentBase: 创建外部路径文件系统时出错: {e}")
-                            pass
-
-                    if fs_for_external:
-                        for ext_path in external_paths:
-                            if isinstance(ext_path, str):
-                                if os.path.exists(ext_path):
-                                    system_prefix += f"Path: {ext_path}\n"
-                                    try:
-                                        # Limit depth to 1 to avoid context overflow
-                                        ext_tree = fs_for_external.get_file_tree_compact(include_hidden=True, root_path=ext_path, max_depth=2)
-                                        if ext_tree:
-                                            system_prefix += ext_tree
-                                        else:
-                                            system_prefix += "(Empty)\n"
-                                    except Exception as e:
-                                        system_prefix += f"(Error listing files: {e})\n"
+                    for ext_path in external_paths:
+                        if isinstance(ext_path, str):
+                            system_prefix += f"Path: {ext_path}\n"
+                            try:
+                                # 使用新沙箱接口获取外部路径文件树
+                                ext_tree = await session_context.sandbox.get_file_tree(
+                                    root_path=ext_path,
+                                    include_hidden=True,
+                                    max_depth=2,
+                                    max_items_per_dir=5
+                                )
+                                if ext_tree:
+                                    system_prefix += ext_tree
                                 else:
-                                    system_prefix += f"Path: {ext_path} (Not found)\n"
-                                system_prefix += "\n"
+                                    system_prefix += "(Empty)\n"
+                            except Exception as e:
+                                system_prefix += f"(Error listing files: {e})\n"
+                            system_prefix += "\n"
 
                     system_prefix += "</external_paths>\n"
 
@@ -1303,159 +1272,6 @@ class AgentBase(ABC):
             ],
             usage=usage,
         )
-
-    # async def _get_suggested_tools(self,
-    #                                messages_input: List[MessageChunk],
-    #                                tool_manager: ToolManager,
-    #                                session_id: str,
-    #                                session_context: SessionContext) -> List[str]:
-    #     """
-    #     基于用户输入和历史对话获取建议工具
-
-    #     Args:
-    #         messages_input: 消息列表
-    #         tool_manager: 工具管理器
-    #         session_id: 会话ID
-
-    #     Returns:
-    #         List[str]: 建议工具名称列表
-    #     """
-    #     logger.info("AgentBase: 开始获取建议工具")
-
-    #     if not messages_input or not tool_manager:
-    #         logger.warning("AgentBase: 未提供消息或工具管理器，返回空列表")
-    #         return []
-    #     try:
-    #         # 获取可用工具，只提取工具名称和ID
-    #         available_tools = tool_manager.list_tools_simplified()
-
-    #         if len(available_tools) <= 15:
-    #             logger.info("AgentBase: 可用工具数量小于等于15个，直接返回所有工具")
-    #             # 移除complete_task工具
-    #             tool_names = [tool['name'] for tool in available_tools if tool['name'] != 'complete_task']
-    #             return tool_names
-
-    #         # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
-    #         available_tools_str = "\n".join([f"{i+1}. {tool['name']} - {tool['description'][:100]}" for i, tool in enumerate(available_tools)]) if available_tools else '无可用工具'    
-
-    #         # 准备消息
-    #         # messages_input = MessageManager.compress_messages(messages_input, budget_limit=10000)
-    #         logger.info(f"AgentBase: messages_input 的token长度为{MessageManager.calculate_messages_token_length(messages_input)}")
-    #         clean_messages = MessageManager.convert_messages_to_dict_for_request(messages_input)
-
-    #         logger.info(f"AgentBase: clean_messages的字符长度为{len(json.dumps(clean_messages, ensure_ascii=False, indent=2))}")
-
-    #         # 重新获取agent_custom_system_prefix以支持动态语言切换
-    #         current_system_prefix = prompt_manager.get_agent_prompt_auto("agent_custom_system_prefix", language=session_context.get_language(),default='')
-
-    #         # 生成提示
-    #         tool_suggestion_template = prompt_manager.get_agent_prompt_auto('tool_suggestion_template', language=session_context.get_language())
-    #         prompt = tool_suggestion_template.format(
-    #             session_id=session_id,
-    #             available_tools_str=available_tools_str,
-    #             agent_config=self.prepare_unified_system_message(
-    #                 session_id,
-    #                 custom_prefix=current_system_prefix,
-    #                 language=session_context.get_language(),
-    #             ).content,
-    #             messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
-    #         )
-
-    #         # 调用LLM获取建议,一定要有返回list的结果，如果没有则最大重试3次，依旧没有，使用全量的工具列表
-    #         max_retries = 3
-    #         retry_count = 0
-    #         while retry_count < max_retries:
-    #             suggested_tool_ids = await self._get_tool_suggestions(prompt, session_id)
-    #             if suggested_tool_ids:
-    #                 break
-    #             retry_count += 1
-    #         if not suggested_tool_ids:
-    #             logger.warning(f"AgentBase: 最大重试{max_retries}次后仍未获取到建议工具，使用全量工具列表")
-    #             suggested_tool_ids = [str(i+1) for i in range(len(available_tools))]
-
-    #         # 将工具ID转换为工具名称
-    #         suggested_tool_names = []
-    #         for tool_id in suggested_tool_ids:
-    #             try:
-    #                 index = int(tool_id) - 1
-    #                 if 0 <= index < len(available_tools):
-    #                     suggested_tool_names.append(available_tools[index]['name'])
-    #             except (ValueError, IndexError):
-    #                 pass
-
-    #         # 确保有必要的工具
-    #         if session_context.skill_manager is not None and session_context.skill_manager.list_skills():
-    #             # 添加必要的工具
-    #             necessary_tools = ['file_read', 'execute_python_code', 'execute_javascript_code', 'execute_shell_command', 'file_write', 'file_update', 'load_skill']
-    #             for tool_name in necessary_tools:
-    #                 if tool_name not in suggested_tool_names:
-    #                     suggested_tool_names.append(tool_name)
-
-    #         # 添加系统工具'add_task','todo_write','delete_task','complete_task','enable_task','get_task_details','update_task'
-    #         system_tools = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task','send_message_through_im']
-    #         for tool_name in system_tools:
-    #             if tool_name not in suggested_tool_names:
-    #                 # 检查工具是否存在
-    #                 for tool in available_tools:
-    #                     if tool['name'] == tool_name:
-    #                         suggested_tool_names.append(tool_name)
-    #                         break
-
-    #         # 移除complete_task工具
-    #         if 'complete_task' in suggested_tool_names:
-    #             suggested_tool_names.remove('complete_task')
-
-    #         # 去重
-    #         suggested_tool_names = list(set(suggested_tool_names))    
-
-    #         logger.info(f"AgentBase: 获取到建议工具: {suggested_tool_names}")
-    #         return suggested_tool_names
-
-    #     except Exception as e:
-    #         logger.error(traceback.format_exc())
-    #         logger.error(f"AgentBase: 获取建议工具时发生错误: {str(e)}")
-    #         return []
-
-    # async def _get_tool_suggestions(self, prompt: str, session_id: str) -> List[str]:
-    #     """
-    #     调用LLM获取工具建议（流式调用）
-
-    #     Args:
-    #         prompt: 提示文本
-
-    #     Returns:
-    #         List[str]: 建议工具ID列表
-    #     """
-    #     logger.debug("AgentBase: 调用LLM获取工具建议（流式）")
-
-    #     messages_input = [{'role': 'user', 'content': prompt}]
-    #     # 使用基类的流式调用方法，自动处理LLM request日志
-    #     response = self._call_llm_streaming(
-    #         messages=messages_input,
-    #         session_id=session_id,
-    #         step_name="tool_suggestion"
-    #     )
-    #     # 收集流式响应内容
-    #     all_content = ""
-    #     async for chunk in response:
-    #         if len(chunk.choices) == 0:
-    #             continue
-    #         if chunk.choices[0].delta.content:
-    #             all_content += chunk.choices[0].delta.content
-    #     try:
-    #         result_clean = MessageChunk.extract_json_from_markdown(all_content)
-    #         suggested_tool_ids = json.loads(result_clean)
-    #         if isinstance(suggested_tool_ids, list):
-    #             # 确保返回的工具ID列表是数字列表，不是字符串列表，并且不是数字的item要过滤掉
-    #             # 过滤掉非数字的item，确保返回的是数字列表
-    #             suggested_tool_ids = [int(item) for item in suggested_tool_ids if isinstance(item, (int, str)) and str(item).isdigit()]
-    #             return suggested_tool_ids
-    #         else:
-    #             logger.warning(f"AgentBase: 解析工具建议响应时JSON格式错误, 响应内容: {result_clean}")
-    #             return []
-    #     except json.JSONDecodeError:
-    #         logger.warning(f"AgentBase: 解析工具建议响应时JSON解码错误, 响应内容: {result_clean}")
-    #         return []
 
     async def _handle_tool_calls(self,
                                  tool_calls: Dict[str, Any],
