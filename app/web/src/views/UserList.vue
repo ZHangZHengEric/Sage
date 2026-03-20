@@ -43,7 +43,7 @@
                   </TableCell>
                   <TableCell>{{ formatDate(user.created_at) }}</TableCell>
                   <TableCell class="text-right">
-                    <Button variant="ghost" size="icon" class="text-destructive hover:text-destructive" @click="confirmDelete(user)" :disabled="user.role === 'admin'">
+                    <Button variant="ghost" size="icon" class="text-destructive hover:text-destructive" @click="openDeleteDialog(user)" :disabled="user.role === 'admin'">
                       <Trash2 class="w-4 h-4" />
                     </Button>
                   </TableCell>
@@ -65,7 +65,7 @@
                   </div>
                   <div class="text-sm text-muted-foreground mt-0.5">{{ user.nickname || '-' }}</div>
                 </div>
-                <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive -mr-2 -mt-2" @click="confirmDelete(user)" :disabled="user.role === 'admin'">
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive -mr-2 -mt-2" @click="openDeleteDialog(user)" :disabled="user.role === 'admin'">
                   <Trash2 class="w-4 h-4" />
                 </Button>
               </div>
@@ -137,6 +137,22 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- Delete User Dialog -->
+    <Dialog v-model:open="showDeleteDialog">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t('user.deleteConfirm') }}</DialogTitle>
+        </DialogHeader>
+        <div class="py-4">
+          <p>{{ t('user.deleteConfirmMessage', { username: userToDelete?.username }) }}</p>
+        </div>
+        <DialogFooter>
+            <Button variant="outline" @click="showDeleteDialog = false">{{ t('common.cancel') }}</Button>
+            <Button variant="destructive" @click="confirmDelete">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -161,6 +177,8 @@ const page = ref(1)
 const pageSize = ref(10)
 const loading = ref(false)
 const showAddUserDialog = ref(false)
+const showDeleteDialog = ref(false)
+const userToDelete = ref(null)
 const newUser = ref({ username: '', password: '', role: 'user' })
 
 const fetchUsers = async () => {
@@ -203,6 +221,11 @@ const handleAddUser = async () => {
     }
 }
 
+const openDeleteDialog = (user) => {
+    userToDelete.value = user
+    showDeleteDialog.value = true
+}
+
 const confirmDelete = async () => {
     if (!userToDelete.value) return
     
@@ -210,6 +233,7 @@ const confirmDelete = async () => {
         await userAPI.deleteUser(userToDelete.value.id)
         toast.success(t('user.deleteSuccess'))
         showDeleteDialog.value = false
+        userToDelete.value = null
         fetchUsers()
     } catch (e) {
         toast.error(e.message || t('user.deleteError'))
