@@ -63,12 +63,14 @@ export const useChatStream = ({
     }
   }
 
-  const checkAndResumeStream = async (sessionId, abortControllerRef) => {
+  const checkAndResumeStream = async (sessionId, abortControllerRef, resumeFromIndex = null) => {
     let resumedAndCompleted = false
     isLoading.value = true
     loadingSessionId.value = sessionId
     shouldAutoScroll.value = true
-    let resumeLastIndex = getSessionLastIndex(sessionId)
+    let resumeLastIndex = Number.isFinite(resumeFromIndex)
+      ? Math.max(0, Math.floor(resumeFromIndex))
+      : getSessionLastIndex(sessionId)
     
     if (abortControllerRef) {
       abortControllerRef.value = new AbortController()
@@ -132,8 +134,8 @@ export const useChatStream = ({
     currentSessionId.value = sessionId
     isHistoryLoading.value = true
     try {
-      await loadConversationMessages(sessionId)
-      await checkAndResumeStream(sessionId, abortControllerRef)
+      const conversationData = await loadConversationMessages(sessionId)
+      await checkAndResumeStream(sessionId, abortControllerRef, Number(conversationData?.next_stream_index))
     } catch (e) {
       toast.error(t('chat.loadConversationError') || 'Failed to load conversation')
     } finally {

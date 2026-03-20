@@ -166,13 +166,18 @@ export const useChatPage = (props) => {
     console.log('[ChatPage] Cleared workbench for session:', sessionId)
 
     const res = await chatAPI.getConversationMessages(sessionId)
-    if (!res || !res.messages) return
+    if (!res) return null
     const normalizedMessages = (res.messages || []).map(msg => ({
       ...msg,
       session_id: msg.session_id || sessionId
     }))
     messages.value = normalizedMessages
     rebuildMessageIdIndexMap()
+
+    const nextStreamIndex = Number(res.next_stream_index)
+    if (Number.isFinite(nextStreamIndex) && nextStreamIndex >= 0) {
+      updateActiveSessionLastIndex(sessionId, nextStreamIndex)
+    }
 
     // 只有在有消息且有工作台 item 时，才自动打开工作台
     if (normalizedMessages.length > 0 && workbenchStore.filteredItems.length > 0) {
@@ -188,6 +193,7 @@ export const useChatPage = (props) => {
     if (res.conversation_info && activeSessions.value[sessionId]?.status === 'running') {
       updateActiveSession(sessionId, true, res.conversation_info.title)
     }
+    return res
   }
 
   const handleMessage = (messageData) => {
