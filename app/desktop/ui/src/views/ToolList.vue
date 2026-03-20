@@ -10,12 +10,12 @@
         class="flex flex-col border-b bg-background py-2"
       >
         <div class="px-6 py-2 flex items-center justify-begin">
-           <span class="text-sm font-medium text-muted-foreground">{{ t('tools.sourceGroups') || 'Source Groups' }}</span>
+           <span class="text-sm font-medium text-muted-foreground">{{ t('tools.sourceGroups') }}</span>
            <CollapsibleTrigger as-child>
             <Button variant="ghost" size="sm" class="h-8 w-8 p-0">
               <ChevronDown v-if="!isGridExpanded" class="h-4 w-4" />
               <ChevronUp v-else class="h-4 w-4" />
-              <span class="sr-only">Toggle Grid</span>
+              <span class="sr-only">{{ t('tools.toggleGrid') }}</span>
             </Button>
           </CollapsibleTrigger>
         </div>
@@ -47,7 +47,7 @@
                     {{ getToolSourceLabel(group.source) }}
                   </h3>
                   <Badge v-if="group.disabled" variant="destructive" class="h-5 px-1.5 text-[10px] shrink-0">
-                    {{ t('tools.disabled') || 'Disabled' }}
+                    {{ t('tools.disabled') }}
                   </Badge>
                   <Badge v-else variant="secondary" class="h-5 px-1.5 text-[10px] bg-background/80 backdrop-blur shrink-0">
                     {{ group.tools.length }}
@@ -66,7 +66,7 @@
                 <div class="flex items-center gap-2 text-muted-foreground group-hover:text-primary">
                   <Plus class="h-4 w-4" />
                   <span class="text-sm font-medium">
-                    {{ t('tools.addMcpServer') || 'Add MCP Server' }}
+                    {{ t('tools.addMcpServer') }}
                   </span>
                 </div>
               </div>
@@ -84,37 +84,37 @@
           <span>{{ displayedTools.length }} {{ t('tools.count') }}</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button 
-            v-if="getGroupCategoryLabel(selectedGroupSource) === '外部MCP'"
-            variant="outline" 
-            size="sm" 
-            class="h-8" 
+          <Button
+            v-if="getGroupCategoryLabel(selectedGroupSource) === t('tools.externalMCP')"
+            variant="outline"
+            size="sm"
+            class="h-8"
             @click="showMcpDetails(selectedGroupSource)"
           >
             <Info class="mr-2 h-3.5 w-3.5" />
-            {{ t('tools.details') || 'Details' }}
+            {{ t('tools.details') }}
           </Button>
 
-          <Button 
+          <Button
             v-if="canEditGroup(selectedGroupSource)"
-            variant="outline" 
-            size="sm" 
-            class="h-8" 
+            variant="outline"
+            size="sm"
+            class="h-8"
             @click="handleEditMcpTool(selectedGroupSource)"
           >
             <Edit class="mr-2 h-3.5 w-3.5" />
-            {{ t('tools.edit') || 'Edit' }}
+            {{ t('tools.edit') }}
           </Button>
 
-          <Button 
-            variant="outline" 
-            size="sm" 
-            class="h-8" 
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8"
             :class="getCurrentGroupDisabled() ? 'text-emerald-600 hover:text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:text-amber-600 hover:bg-amber-50'"
             @click="handleToggleMcpTool(selectedGroupSource)"
           >
             <component :is="getCurrentGroupDisabled() ? Power : PowerOff" class="mr-2 h-3.5 w-3.5" />
-            {{ getCurrentGroupDisabled() ? (t('tools.enable') || '启用') : (t('tools.disable') || '禁用') }}
+            {{ getCurrentGroupDisabled() ? t('tools.enable') : t('tools.disable') }}
           </Button>
 
           <Button variant="outline" size="sm" class="h-8" @click="handleRefreshMcpTool(selectedGroupSource)">
@@ -168,7 +168,7 @@
                     <span class="truncate" :title="getToolSourceLabel(tool.source)">{{ getToolSourceLabel(tool.source) }}</span>
                   </div>
                   <Badge variant="secondary" class="text-[10px] h-5 px-1.5 font-normal">
-                    {{ formatParameters(tool.parameters).length }} 参数
+                    {{ formatParameters(tool.parameters).length }} {{ t('tools.params') }}
                   </Badge>
                 </div>
               </CardContent>
@@ -181,9 +181,9 @@
     <Dialog v-model:open="isAddMcpDialogOpen">
       <DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader class="px-6 py-4 border-b">
-          <DialogTitle>{{ isEditMode ? (t('tools.editMcpServer') || 'Edit MCP Server') : (t('tools.addMcpServer') || 'Add MCP Server') }}</DialogTitle>
+          <DialogTitle>{{ isEditMode ? t('tools.editMcpServer') : t('tools.addMcpServer') }}</DialogTitle>
           <DialogDescription class="hidden">
-             {{ isEditMode ? 'Edit existing MCP server' : 'Add a new MCP server' }}
+             {{ isEditMode ? t('tools.editMcpServerDesc') : t('tools.addMcpServerDesc') }}
           </DialogDescription>
         </DialogHeader>
         <div class="flex-1 overflow-y-auto">
@@ -202,9 +202,9 @@
     <Dialog v-model:open="isDetailsDialogOpen">
       <DialogContent class="sm:max-w-[600px] max-h-[85vh] overflow-hidden flex flex-col p-0 gap-0">
         <DialogHeader class="px-6 py-4 border-b">
-          <DialogTitle>{{ t('tools.mcpDetails') || 'MCP Server Details' }}</DialogTitle>
+          <DialogTitle>{{ t('tools.mcpDetails') }}</DialogTitle>
           <DialogDescription class="hidden">
-             Details of the MCP server
+             {{ t('tools.mcpDetailsDesc') }}
           </DialogDescription>
         </DialogHeader>
         <div class="flex-1 overflow-y-auto p-6 space-y-6">
@@ -256,7 +256,7 @@
              <div class="grid grid-cols-4 items-center gap-4">
                <span class="font-medium text-right text-muted-foreground">{{ t('tools.status') }}</span>
                <Badge :variant="mcpDetails.status === 'disabled' ? 'destructive' : 'default'" class="w-fit col-span-3">
-                 {{ mcpDetails.status === 'disabled' ? (t('tools.disabled') || 'Disabled') : (t('tools.enabled') || 'Enabled') }}
+                 {{ mcpDetails.status === 'disabled' ? t('tools.disabled') : t('tools.enabled') }}
                </Badge>
              </div>
            </div>
@@ -599,7 +599,7 @@ const getToolIcon = (type) => {
 
 const getGroupIcon = (source) => {
     if (source.includes('MCP')) return Server
-    if (['基础工具', '内置工具', '系统工具'].includes(source)) return Code
+    if ([t('tools.source.basic'), t('tools.source.builtin'), t('tools.source.system')].includes(source)) return Code
     return Wrench
 }
 
@@ -645,9 +645,9 @@ const isMcpGroup = (source) => {
 }
 
 const getGroupCategoryLabel = (source) => {
-  if (source.startsWith('内置MCP:')) return '内置MCP'
-  if (source.startsWith('MCP Server:')) return '外部MCP'
-  return '基础工具'
+  if (source.startsWith('内置MCP:')) return t('tools.builtinMCP')
+  if (source.startsWith('MCP Server:')) return t('tools.externalMCP')
+  return t('tools.basicTools')
 }
 
 const getCurrentGroupDisabled = () => {
