@@ -697,6 +697,7 @@ class IMServiceManager:
         async def handler(message: Dict[str, Any]):
             """Handle incoming message from IM provider."""
             try:
+                logger.info(f"[ServiceManager] ====== Message handler START ======")
                 logger.info(f"[ServiceManager] Message from {sage_user_id}:{provider_type}: {message}")
 
                 # Extract message details
@@ -726,6 +727,7 @@ class IMServiceManager:
 
                 # Call the centralized message handler
                 # Pass sage_user_id as default_agent_id to route to the correct agent
+                logger.info(f"[ServiceManager] Calling handle_incoming_message with agent_id={sage_user_id}")
                 await handle_incoming_message(
                     provider=provider_type,
                     user_id=user_id,
@@ -735,6 +737,7 @@ class IMServiceManager:
                     default_agent_id=sage_user_id,  # Use the agent this channel belongs to
                     file_info=file_info
                 )
+                logger.info(f"[ServiceManager] ====== Message handler END ======")
 
             except Exception as e:
                 logger.error(f"[ServiceManager] Error handling message: {e}", exc_info=True)
