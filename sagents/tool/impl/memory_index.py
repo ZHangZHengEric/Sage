@@ -177,6 +177,7 @@ class MemoryIndex:
     async def _get_dir_mtime(self, dir_path: str) -> float:
         """Get directory modification time through sandbox"""
         try:
+            # 在沙箱内执行命令，使用虚拟路径
             logger.info(f"MemoryIndex: Executing stat command for: {dir_path}")
             result = await self.sandbox.execute_command(
                 command=f"stat -c %Y {dir_path} 2>/dev/null || stat -f %m {dir_path}",
