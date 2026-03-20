@@ -16,6 +16,7 @@ from sagents.session_runtime import get_global_session_manager
 
 from .. import models
 from ..core.exceptions import SageHTTPException
+from .chat.stream_manager import StreamManager
 from .chat.processor import ContentProcessor
 
 
@@ -118,10 +119,13 @@ async def get_conversation_messages(session_id: str, user_id: Optional[str] = No
                     except Exception as e:
                         logger.warning(f"处理子任务消息失败: {e}")
 
+    next_stream_index = StreamManager.get_instance().get_history_length(session_id)
+
     return {
         "conversation_id": session_id,
         "messages": messages,
         "message_count": len(messages),
+        "next_stream_index": next_stream_index,
         "conversation_info": {
             "session_id": conversation.session_id,
             "agent_id": conversation.agent_id,
