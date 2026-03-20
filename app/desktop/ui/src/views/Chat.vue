@@ -3,14 +3,57 @@
     <div class="flex-none h-16 flex items-center px-6 justify-end bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-10 sticky top-0">
 
       <div class="flex items-center gap-2 ">
+        <!-- Agent 选择器 - 紧凑网格布局 -->
         <Select :model-value="selectedAgentId" @update:model-value="handleAgentChange">
-          <SelectTrigger class="w-[180px] h-9 text-xs border-muted-foreground/20 bg-muted/50 focus:ring-1 focus:ring-primary/20">
-            <SelectValue :placeholder="t('chat.selectAgent') || 'Select Agent'" />
+          <SelectTrigger class="w-[160px] h-9 px-2.5 border-muted-foreground/20 bg-muted/50 hover:bg-muted/80 transition-colors focus:ring-1 focus:ring-primary/20 rounded-full">
+            <div class="flex items-center gap-2 w-full">
+              <!-- Agent 头像 -->
+              <div class="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10">
+                <img
+                  v-if="selectedAgent"
+                  :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(selectedAgent.id)}`"
+                  :alt="selectedAgent.name"
+                  class="w-full h-full object-cover"
+                />
+                <Bot v-else class="w-full h-full p-0.5 text-primary/60" />
+              </div>
+              <!-- Agent 名称 -->
+              <span class="text-sm font-medium text-foreground truncate flex-1">
+                {{ selectedAgent?.name || t('chat.selectAgent') || '选择智能体' }}
+              </span>
+            </div>
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="agent in (agents || [])" :key="agent.id" :value="agent.id" class="text-xs">
-              {{ agent.name }}
-            </SelectItem>
+          <SelectContent class="w-[240px] p-2">
+            <div class="grid grid-cols-4 gap-1.5">
+              <SelectItem
+                v-for="agent in (agents || [])"
+                :key="agent.id"
+                :value="agent.id"
+                class="relative p-1.5 cursor-pointer rounded-lg hover:bg-muted/80 focus:bg-muted/80 data-[state=checked]:bg-primary/10 transition-colors"
+              >
+                <div class="flex flex-col items-center gap-1 w-full">
+                  <!-- Agent 头像 -->
+                  <div class="relative w-9 h-9 rounded-lg overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-primary/5">
+                    <img
+                      :src="`https://api.dicebear.com/9.x/bottts/svg?eyes=round,roundFrame01,roundFrame02&mouth=smile01,square01,square02&seed=${encodeURIComponent(agent.id)}`"
+                      :alt="agent.name"
+                      class="w-full h-full object-cover"
+                    />
+                  </div>
+                  <!-- Agent 名称 -->
+                  <div class="flex items-center justify-center gap-1 w-full">
+                    <!-- 选中状态指示器 - 绿色圆点 -->
+                    <span
+                      v-if="selectedAgentId === agent.id"
+                      class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"
+                    />
+                    <span class="text-[10px] font-medium text-foreground text-center truncate leading-none">
+                      {{ agent.name }}
+                    </span>
+                  </div>
+                </div>
+              </SelectItem>
+            </div>
           </SelectContent>
         </Select>
 
