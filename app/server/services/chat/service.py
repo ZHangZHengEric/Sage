@@ -297,7 +297,6 @@ class SageStreamService:
         self.sage_engine = SAgent(
                 session_root_space=cfg.session_dir,
                 enable_obs=cfg.trace_jaeger_endpoint is not None,
-                use_sandbox=True # Server 默认开启沙箱
             )
         self.model_client = model_client
 
@@ -321,7 +320,8 @@ class SageStreamService:
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
-                agent_workspace=self.agent_workspace,
+                agent_id=self.request.agent_id,
+                host_workspace=self.agent_workspace,
                 default_memory_type=self.request.memory_type,
                 user_id=self.request.user_id,
                 deep_thinking=self.request.deep_thinking,
