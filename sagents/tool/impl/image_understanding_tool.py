@@ -31,6 +31,20 @@ class ImageUnderstandingTool:
     def __init__(self):
         self.supported_formats = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 
+    def _get_sandbox(self, session_id: str):
+        """通过 session_id 获取沙箱"""
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or not session.session_context:
+            raise ImageUnderstandingError(f"Invalid session_id={session_id}")
+
+        sandbox = session.session_context.sandbox
+        if not sandbox:
+            raise ImageUnderstandingError(f"No sandbox available for session_id={session_id}")
+
+        return sandbox
+
     def _get_mime_type(self, file_extension: str) -> str:
         """根据文件扩展名获取 MIME 类型"""
         mime_types = {
@@ -43,137 +57,170 @@ class ImageUnderstandingTool:
         }
         return mime_types.get(file_extension.lower(), 'image/jpeg')
 
-    def _resize_image_if_needed(self, image_path: str, max_resolution: int = 512) -> bytes:
+    async def _read_image_base64_from_sandbox(self, sandbox, image_path: str) -> str:
+        """
+        从沙箱读取图片文件并返回 base64 编码
+
+        使用 base64 命令读取图片，避免二进制数据通过文本接口传输的问题
+
+        Args:
+            sandbox: 沙箱实例
+            image_path: 图片虚拟路径
+
+        Returns:
+            str: base64 编码的图片数据
+        """
+        try:
+            # 使用 base64 命令读取图片
+            result = await sandbox.execute_command(
+                command=f"base64 -w 0 {image_path}",
+                timeout=30
+            )
+
+            if not result.success:
+                raise ImageUnderstandingError(f"读取图片命令失败: {result.stderr}")
+
+            return result.stdout.strip()
+
+        except Exception as e:
+            raise ImageUnderstandingError(f"从沙箱读取图片失败: {e}")
+
+    def _resize_image_if_needed(self, image_data: bytes, max_resolution: int = 512) -> bytes:
         """
         调整图片大小，确保总分辨率不超过 max_resolution * max_resolution
-        
+
         Args:
-            image_path: 图片文件路径
+            image_data: 图片二进制数据
             max_resolution: 最大分辨率（默认512，即总分辨率不超过512*512）
-            
+
         Returns:
             bytes: 调整后的图片数据
         """
         if not PIL_AVAILABLE:
-            # 如果 PIL 不可用，直接返回原始文件内容
-            with open(image_path, 'rb') as f:
-                return f.read()
-        
+            # 如果 PIL 不可用，直接返回原始数据
+            return image_data
+
         try:
-            with Image.open(image_path) as img:
-                # 转换为 RGB 模式（处理 RGBA 等模式）
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    # 创建白色背景
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    if img.mode == 'P':
-                        img = img.convert('RGBA')
-                    if img.mode in ('RGBA', 'LA'):
-                        background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                        img = background
-                    else:
-                        img = img.convert('RGB')
-                elif img.mode != 'RGB':
+            # 从 bytes 加载图片
+            img = Image.open(io.BytesIO(image_data))
+
+            # 转换为 RGB 模式（处理 RGBA 等模式）
+            if img.mode in ('RGBA', 'LA', 'P'):
+                # 创建白色背景
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                if img.mode in ('RGBA', 'LA'):
+                    background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = background
+                else:
                     img = img.convert('RGB')
-                
-                # 计算当前总分辨率
-                current_resolution = img.width * img.height
-                max_total_resolution = max_resolution * max_resolution
-                
-                # 如果当前分辨率已经小于等于最大允许分辨率，直接返回
-                if current_resolution <= max_total_resolution:
-                    logger.info(f"图片分辨率 {img.width}x{img.height} ({current_resolution}) 在限制范围内，无需压缩")
-                    buffer = io.BytesIO()
-                    # 保存为 JPEG 格式，质量85%
-                    img.save(buffer, format='JPEG', quality=85, optimize=True)
-                    return buffer.getvalue()
-                
-                # 计算缩放比例
-                scale_factor = (max_total_resolution / current_resolution) ** 0.5
-                new_width = int(img.width * scale_factor)
-                new_height = int(img.height * scale_factor)
-                
-                logger.info(f"图片压缩: {img.width}x{img.height} ({current_resolution}) -> {new_width}x{new_height} ({new_width * new_height})")
-                
-                # 调整图片大小
-                resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                
-                # 保存到内存
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            # 计算当前总分辨率
+            current_resolution = img.width * img.height
+            max_total_resolution = max_resolution * max_resolution
+
+            # 如果当前分辨率已经小于等于最大允许分辨率，直接返回
+            if current_resolution <= max_total_resolution:
+                logger.info(f"图片分辨率 {img.width}x{img.height} ({current_resolution}) 在限制范围内，无需压缩")
                 buffer = io.BytesIO()
-                resized_img.save(buffer, format='JPEG', quality=85, optimize=True)
+                # 保存为 JPEG 格式，质量85%
+                img.save(buffer, format='JPEG', quality=85, optimize=True)
                 return buffer.getvalue()
-                
+
+            # 计算缩放比例
+            scale_factor = (max_total_resolution / current_resolution) ** 0.5
+            new_width = int(img.width * scale_factor)
+            new_height = int(img.height * scale_factor)
+
+            logger.info(f"图片压缩: {img.width}x{img.height} ({current_resolution}) -> {new_width}x{new_height} ({new_width * new_height})")
+
+            # 调整图片大小
+            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # 保存到内存
+            buffer = io.BytesIO()
+            resized_img.save(buffer, format='JPEG', quality=85, optimize=True)
+            return buffer.getvalue()
+
         except Exception as e:
             logger.warning(f"图片压缩失败: {e}，将使用原始图片")
-            # 压缩失败时返回原始文件内容
-            with open(image_path, 'rb') as f:
-                return f.read()
+            # 压缩失败时返回原始数据
+            return image_data
 
-    def _encode_image_to_base64(self, image_path: str, max_resolution: int = 512) -> tuple[str, str]:
+    async def _encode_image_to_base64(self, sandbox, image_path: str, max_resolution: int = 512) -> tuple[str, str]:
         """
         将图片文件转换为 base64 编码，并在需要时压缩图片
 
         Args:
-            image_path: 图片文件路径
+            sandbox: 沙箱实例
+            image_path: 图片虚拟路径
             max_resolution: 最大分辨率限制（默认512，即总分辨率不超过512*512）
 
         Returns:
             tuple: (base64编码的数据, mime类型)
         """
-        path_obj = Path(image_path)
-
-        if not path_obj.exists():
-            raise ImageUnderstandingError(f"图片文件不存在: {image_path}")
-
         # 检查文件格式
-        file_extension = path_obj.suffix.lower()
+        file_extension = Path(image_path).suffix.lower()
         if file_extension not in self.supported_formats:
             raise ImageUnderstandingError(f"不支持的图片格式: {file_extension}，支持的格式: {', '.join(self.supported_formats)}")
 
-        # 读取并压缩图片，然后转换为 base64
-        try:
-            # 压缩图片（如果需要）
-            image_data = self._resize_image_if_needed(image_path, max_resolution)
-            base64_data = base64.b64encode(image_data).decode('utf-8')
-            # 压缩后的图片统一使用 JPEG 格式
-            mime_type = 'image/jpeg'
-            return base64_data, mime_type
-        except Exception as e:
-            raise ImageUnderstandingError(f"读取或压缩图片文件失败: {e}")
+        # 从沙箱读取图片（返回 base64）
+        base64_data = await self._read_image_base64_from_sandbox(sandbox, image_path)
+
+        # 如果需要压缩，先 decode -> resize -> encode
+        if PIL_AVAILABLE:
+            try:
+                # 解码为 bytes
+                image_data = base64.b64decode(base64_data)
+                # 压缩
+                compressed_data = self._resize_image_if_needed(image_data, max_resolution)
+                # 重新编码
+                base64_data = base64.b64encode(compressed_data).decode('utf-8')
+            except Exception as e:
+                logger.warning(f"图片压缩失败: {e}，使用原始图片")
+
+        # 压缩后的图片统一使用 JPEG 格式
+        mime_type = 'image/jpeg'
+
+        return base64_data, mime_type
 
     async def _call_llm_with_image(self, messages: list, session_id: Optional[str] = None) -> str:
         """
         调用 LLM 进行图片理解
-        
+
         通过 session_id 获取当前会话的 agent 配置，然后调用模型
         """
         from sagents.session_runtime import get_global_session_manager, get_current_session_id
-        
+
         # 获取当前 session_id
         current_session_id = session_id or get_current_session_id()
         if not current_session_id:
             raise ImageUnderstandingError("无法获取当前会话 ID")
-        
+
         # 获取 session manager 和 session
         session_manager = get_global_session_manager()
         session = session_manager.get(current_session_id)
-        
+
         if not session:
             raise ImageUnderstandingError(f"无法获取会话: {current_session_id}")
-        
+
         # 获取 session 的 model 和 model_config
         model = session.model
         model_config = session.model_config.copy()
-        
+
         if not model:
             raise ImageUnderstandingError("会话模型未初始化")
-        
+
         # 移除非标准参数
         model_config.pop('max_model_len', None)
         model_config.pop('api_key', None)
         model_config.pop('maxTokens', None)
         model_config.pop('base_url', None)
         model_name = model_config.pop('model', 'gpt-3.5-turbo')
-        
+
         # 调用模型
         try:
             response = await model.chat.completions.create(
@@ -182,13 +229,13 @@ class ImageUnderstandingTool:
                 stream=False,
                 **model_config
             )
-            
+
             # 提取响应内容
             if response.choices and len(response.choices) > 0:
                 return response.choices[0].message.content or ""
             else:
                 return ""
-                
+
         except Exception as e:
             error_msg = str(e).lower()
             # 检查是否是模型不支持图片的错误
@@ -206,18 +253,23 @@ class ImageUnderstandingTool:
             "en": "Analyze image content and return detailed description and text on the image. Uses the current session's multimodal model.",
         },
         param_description_i18n={
-            "image_path": {"zh": "图片文件的绝对路径或 HTTP/HTTPS URL", "en": "Absolute path to the image file or HTTP/HTTPS URL"},
-            "session_id": {"zh": "当前会话 ID", "en": "Current session ID"},
+            "image_path": {"zh": "图片文件的虚拟路径（沙箱内路径）或 HTTP/HTTPS URL", "en": "Virtual path to the image file (in sandbox) or HTTP/HTTPS URL"},
+            "session_id": {"zh": "当前会话 ID（必填，自动注入）", "en": "Current session ID (Required, Auto-injected)"},
             "prompt": {"zh": "可选的自定义提示词，用于指导模型如何分析图片", "en": "Optional custom prompt to guide how the model analyzes the image"},
+        },
+        param_schema={
+            "image_path": {"type": "string", "description": "Virtual path to the image file or HTTP/HTTPS URL"},
+            "session_id": {"type": "string", "description": "Session ID"},
+            "prompt": {"type": "string", "description": "Custom prompt for image analysis"},
         }
     )
-    async def analyze_image(self, image_path: str, session_id:str, prompt: Optional[str] = None) -> Dict[str, Any]:
+    async def analyze_image(self, image_path: str, session_id: str, prompt: Optional[str] = None) -> Dict[str, Any]:
         """
         分析图片内容，使用当前会话的多模态大模型
 
         Args:
-            image_path: 图片文件的绝对路径或 HTTP/HTTPS URL
-            session_id: 当前会话 ID
+            image_path: 图片文件的虚拟路径（沙箱内路径）或 HTTP/HTTPS URL
+            session_id: 当前会话 ID（必填）
             prompt: 可选的自定义提示词
 
         Returns:
@@ -228,15 +280,8 @@ class ImageUnderstandingTool:
         try:
             # 1. 检查是否为 HTTP/HTTPS URL
             is_url = image_path.startswith(('http://', 'https://'))
-            
-            # 2. 验证图片路径
-            if not is_url and not os.path.isabs(image_path):
-                return {
-                    "status": "error",
-                    "message": f"请提供图片的绝对路径或有效的 HTTP/HTTPS URL，当前路径: {image_path}"
-                }
 
-            # 3. 构建默认提示词
+            # 2. 构建默认提示词
             default_prompt = """请详细分析这张图片，并提供以下信息：
 
 1. 图片整体描述：描述图片的主要内容、场景、风格等
@@ -247,7 +292,7 @@ class ImageUnderstandingTool:
 
             user_prompt = prompt if prompt else default_prompt
 
-            # 4. 构建消息格式（OpenAI 多模态格式）
+            # 3. 构建消息格式（OpenAI 多模态格式）
             mime_type = "image/jpeg"  # 默认值
             if is_url:
                 # 对于 URL 图片，直接使用 URL
@@ -266,9 +311,10 @@ class ImageUnderstandingTool:
                 elif image_path.lower().endswith('.webp'):
                     mime_type = "image/webp"
             else:
-                # 对于本地图片，转换为 base64
+                # 对于沙箱内的本地图片，通过沙箱读取并转换为 base64
                 try:
-                    base64_data, mime_type = self._encode_image_to_base64(image_path)
+                    sandbox = self._get_sandbox(session_id)
+                    base64_data, mime_type = await self._encode_image_to_base64(sandbox, image_path)
                     image_content = {
                         "type": "image_url",
                         "image_url": {
@@ -291,7 +337,7 @@ class ImageUnderstandingTool:
                 }
             ]
 
-            # 5. 调用 LLM 进行图片理解
+            # 4. 调用 LLM 进行图片理解
             try:
                 analysis_result = await self._call_llm_with_image(messages, session_id)
 

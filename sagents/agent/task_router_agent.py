@@ -59,7 +59,7 @@ class TaskRouterAgent(AgentBase):
         router_template = PromptManager().get_agent_prompt_auto("router_template", language=session_context.get_language())
         prompt = router_template.format(tool_list=available_tools_str, task_desc=task_desc)
         llm_request_message = [
-            self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
+            await self.prepare_unified_system_message(session_id=session_id, language=session_context.get_language()),
             MessageChunk(
                 role=MessageRole.USER.value,
                 content=prompt,

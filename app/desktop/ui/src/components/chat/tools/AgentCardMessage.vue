@@ -1,5 +1,8 @@
 <template>
-  <div class="agent-card-message w-full max-w-[600px] mb-3 rounded-2xl border bg-card overflow-hidden transition-all hover:shadow-lg hover:border-primary/20">
+  <div 
+    class="agent-card-message w-full max-w-[600px] mb-3 rounded-2xl border bg-card overflow-hidden transition-all hover:shadow-lg hover:border-primary/20 cursor-pointer"
+    @click="handleClick"
+  >
     <!-- Header with Avatar and Basic Info -->
     <div class="relative bg-gradient-to-br from-primary/5 via-primary/10 to-primary/5 p-5">
       <!-- Background Pattern -->
@@ -126,8 +129,14 @@ const props = defineProps({
   isLatest: {
     type: Boolean,
     default: false
+  },
+  openWorkbench: {
+    type: Function,
+    default: null
   }
 })
+
+const emit = defineEmits(['click'])
 
 const { t } = useLanguage()
 const router = useRouter()
@@ -193,6 +202,11 @@ const openAgentChat = () => {
   console.log('[AgentCardMessage] Saved agent to localStorage:', agentId.value)
   // 使用 window.location.href 强制刷新页面，确保 onMounted 执行
   window.location.href = `/chat?agent=${agentId.value}`
+}
+
+const handleClick = () => {
+  // 触发点击事件，让父组件打开工作台
+  emit('click', props.toolCall, props.toolResult)
 }
 </script>
 

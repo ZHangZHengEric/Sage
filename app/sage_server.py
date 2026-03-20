@@ -91,6 +91,10 @@ if server_args.workspace:
     server_args.workspace = os.path.abspath(server_args.workspace)
 os.environ['PREFIX_FILE_WORKSPACE'] = server_args.workspace if server_args.workspace.endswith('/') else server_args.workspace+'/'
 
+# 设置 MEMORY_ROOT_PATH 环境变量
+memory_root_path = os.path.join(os.path.dirname(os.path.abspath(server_args.workspace)), 'memory')
+os.environ.setdefault('MEMORY_ROOT_PATH', memory_root_path)
+
 # 处理 memory_root 兼容性
 if server_args.memory_root:
     os.environ["MEMORY_ROOT_PATH"] = server_args.memory_root
@@ -137,7 +141,9 @@ class SageStreamService:
                         preset_running_config: Optional[Dict[str, Any]] = None,
                         workspace: Optional[str] = None,
                         memory_type: Optional[str] = "session",
-                        context_budget_config: Optional[Dict[str, Any]] = None):
+                        context_budget_config: Optional[Dict[str, Any]] = None,
+                        agent_id: Optional[str] = None,
+                        virtual_workspace: Optional[str] = None):
         """
         初始化服务
         
@@ -228,6 +234,10 @@ class SageStreamService:
 
         # 设置context_budget_config
         self.context_budget_config = context_budget_config
+        
+        # 设置 agent_id 和 virtual_workspace
+        self.agent_id = agent_id or "server_agent"
+        self.virtual_workspace = virtual_workspace or workspace or "/sage-workspace"
 
         # workspace 有可能是相对路径
         if workspace:
@@ -250,7 +260,7 @@ class SageStreamService:
         self.sage_controller = SAgent(
             session_root_space=self.session_root_space,
             enable_obs=True,
-            use_sandbox=True
+            sandbox_type='local'
         )
         self.tool_manager = tool_manager
         if self.preset_available_tools:
@@ -304,9 +314,11 @@ class SageStreamService:
                 model=self.model,
                 model_config=self.model_config,
                 system_prefix=self.preset_system_prefix,
-                agent_workspace=self.agent_workspace, # 显式传入 agent_workspace
+                host_workspace=self.agent_workspace,
+                virtual_workspace=self.virtual_workspace,
                 default_memory_type=self.memory_type,
                 user_id=user_id,
+                agent_id=self.agent_id,
                 deep_thinking=deep_thinking if deep_thinking is not None else self.preset_deep_thinking,
                 max_loop_count = max_loop_count if max_loop_count is not None else self.preset_max_loop_count ,
                 agent_mode=agent_mode if agent_mode is not None else self.preset_agent_mode,

@@ -312,7 +312,7 @@ class SageStreamService:
         self.sage_engine = SAgent(
                 session_root_space=str(sessions_root),
                 enable_obs=True,
-                use_sandbox=False
+                sandbox_type="local"
             )
         self.model_client = model_client
 
@@ -329,6 +329,8 @@ class SageStreamService:
 
         await _ensure_conversation(self.request)
         try:
+            # 计算 host_workspace 和 virtual_workspace（本地模式下保持一致）
+            host_workspace = str(self.agent_workspace_root / self.request.agent_id)
             stream_result = self.sage_engine.run_stream(
                 session_id=session_id,
                 input_messages=messages,
@@ -337,16 +339,18 @@ class SageStreamService:
                 model=self.model_client,
                 model_config=self.request.llm_model_config,
                 system_prefix=self.request.system_prefix,
-                agent_workspace=str(self.agent_workspace_root / self.request.agent_id),
+                host_workspace=host_workspace,
+                virtual_workspace=host_workspace,  # 本地模式下与宿主机路径一致
                 default_memory_type=self.request.memory_type,
+                agent_id=self.request.agent_id,
                 user_id="default_user",
                 deep_thinking=self.request.deep_thinking,
                 max_loop_count=self.request.max_loop_count,
                 agent_mode=self.request.agent_mode,
                 more_suggest=self.request.more_suggest,
+                force_summary=self.request.force_summary,
                 system_context=self.request.system_context,
                 available_workflows=self.request.available_workflows,
-                force_summary=self.request.force_summary,
                 context_budget_config=self.request.context_budget_config,
                 custom_sub_agents=[{"agent_id": agent.agent_id, "name": agent.name, "description": agent.description} for agent in self.request.custom_sub_agents] if self.request.custom_sub_agents else None
             )

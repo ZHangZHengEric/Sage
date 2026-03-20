@@ -201,7 +201,7 @@ class MemoryRecallAgent(AgentBase):
         )
         
         llm_request_messages = [
-            self.prepare_unified_system_message(
+            await self.prepare_unified_system_message(
                 session_id=session_context.session_id,
                 language=session_context.get_language(),
                 include_sections=['role_definition', 'system_context']
@@ -256,7 +256,8 @@ class MemoryRecallAgent(AgentBase):
         response = self._call_llm_streaming(
             messages=llm_request_messages,
             session_id=session_id,
-            step_name="memory_recall"
+            step_name="memory_recall",
+            model_config_override={'max_tokens':128}
         )
 
         # 收集流式响应内容
@@ -323,14 +324,25 @@ class MemoryRecallAgent(AgentBase):
             # run_tool_async 返回的是 JSON 字符串，需要解析
             if isinstance(result_raw, str):
                 result = json.loads(result_raw)
+                logger.debug(f"MemoryRecallAgent: Parsed result from JSON: {result}")
                 # 有些工具返回 {"content": {...}} 的包装格式
-                if 'content' in result and isinstance(result['content'], dict):
-                    result = result['content']
+                if 'content' in result:
+                    content = result['content']
+                    logger.info(f"MemoryRecallAgent: content type: {type(content)}, content: {content[:200] if isinstance(content, str) else content}")
+                    if isinstance(content, dict):
+                        result = content
+                    elif isinstance(content, str):
+                        # content 是 JSON 字符串，需要再次解析
+                        result = json.loads(content)
+                    logger.debug(f"MemoryRecallAgent: Unwrapped content: {result}")
             elif isinstance(result_raw, dict):
                 result = result_raw
+                logger.debug(f"MemoryRecallAgent: Result is dict: {result}")
             else:
                 logger.warning(f"MemoryRecallAgent: 未知的返回类型: {type(result_raw)}")
                 return []
+            
+            logger.info(f"MemoryRecallAgent: Final result keys: {result.keys() if isinstance(result, dict) else 'N/A'}, status: {result.get('status') if isinstance(result, dict) else 'N/A'}")
             
             if result.get('status') == 'success':
                 # 获取长期记忆和会话历史

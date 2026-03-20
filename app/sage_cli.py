@@ -21,6 +21,10 @@ from prompt_toolkit.filters import to_filter
 sys.path.append((os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 print(f'添加路径：{(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))}')
 
+# 设置 Sage 环境变量
+os.environ.setdefault('SAGE_ROOT', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault('SAGE_USE_CLAW_MODE', 'true')
+
 from sagents.context.messages.message import MessageChunk, MessageType
 from sagents.context.messages.message_manager import MessageManager
 from sagents.sagents import SAgent
@@ -159,7 +163,7 @@ async def chat_simple(
     model: Any,
     model_config: Dict[str, Any],
     system_prefix: str,
-    agent_workspace: str,
+    host_workspace: str,
     default_memory_type: str,
     tool_manager: Union[ToolManager, ToolProxy],
     skill_manager: Optional[Union[SkillManager, SkillProxy]],
@@ -225,12 +229,14 @@ async def chat_simple(
                 model=model,
                 model_config=model_config,
                 system_prefix=system_prefix,
-                agent_workspace=agent_workspace,
+                host_workspace=host_workspace,
                 default_memory_type=default_memory_type,
                 tool_manager=tool_manager,
                 skill_manager=skill_manager,
                 session_id=session_id,
                 user_id=config.get('user_id'),
+                agent_id=config.get('agent_id'),
+                virtual_workspace=config.get('virtual_workspace', '/sage-workspace'),
                 deep_thinking=config.get('use_deepthink'),
                 agent_mode=config.get('agent_mode'), # 传入 agent_mode
                 available_workflows=config.get('available_workflows'),
@@ -321,7 +327,7 @@ async def chat_fibre_simple(
     model: Any,
     model_config: Dict[str, Any],
     system_prefix: str,
-    agent_workspace: str,
+    host_workspace: str,
     default_memory_type: str,
     tool_manager: Union[ToolManager, ToolProxy],
     skill_manager: Optional[Union[SkillManager, SkillProxy]],
@@ -439,23 +445,25 @@ async def chat_fibre_simple(
             all_chunks = []
             try:
                 async for chunks in agent.run_stream(
-                    session_id=session_id,
-                    input_messages=messages,
-                    tool_manager=tool_manager,
-                    skill_manager=skill_manager,
-                    model=model,
-                    model_config=model_config,
-                    system_prefix=system_prefix,
-                    agent_workspace=agent_workspace,
-                    default_memory_type=default_memory_type,
-                    user_id=config.get('user_id'),
-                    deep_thinking=config.get('use_deepthink'),
-                    agent_mode=config.get('agent_mode'),
-                    available_workflows=config.get('available_workflows'),
-                    system_context=config.get('system_context'),
-                    context_budget_config=context_budget_config,
-                    max_loop_count=config.get('max_loop_count', 100)
-                ):
+                input_messages=messages,
+                model=model,
+                model_config=model_config,
+                system_prefix=system_prefix,
+                host_workspace=host_workspace,
+                default_memory_type=default_memory_type,
+                tool_manager=tool_manager,
+                skill_manager=skill_manager,
+                session_id=session_id,
+                user_id=config.get('user_id'),
+                agent_id=config.get('agent_id'),
+                virtual_workspace=config.get('virtual_workspace', '/sage-workspace'),
+                deep_thinking=config.get('use_deepthink'),
+                agent_mode=config.get('agent_mode'),
+                available_workflows=config.get('available_workflows'),
+                system_context=config.get('system_context'),
+                context_budget_config=context_budget_config,
+                max_loop_count=config.get('max_loop_count', 100)
+            ):
                     for chunk in chunks:
                         if isinstance(chunk, MessageChunk):
                             all_chunks.append(deepcopy(chunk))
@@ -514,7 +522,7 @@ async def chat_fibre(
     model: Any,
     model_config: Dict[str, Any],
     system_prefix: str,
-    agent_workspace: str,
+    host_workspace: str,
     default_memory_type: str,
     tool_manager: Union[ToolManager, ToolProxy],
     skill_manager: Optional[Union[SkillManager, SkillProxy]],
@@ -681,16 +689,18 @@ async def chat_fibre(
         all_chunks = []
         try:
             async for chunks in agent.run_stream(
-                session_id=session_id,
                 input_messages=messages,
-                tool_manager=tool_manager,
-                skill_manager=skill_manager,
                 model=model,
                 model_config=model_config,
                 system_prefix=system_prefix,
-                agent_workspace=agent_workspace,
+                host_workspace=host_workspace,
                 default_memory_type=default_memory_type,
+                tool_manager=tool_manager,
+                skill_manager=skill_manager,
+                session_id=session_id,
                 user_id=config.get('user_id'),
+                agent_id=config.get('agent_id'),
+                virtual_workspace=config.get('virtual_workspace', '/sage-workspace'),
                 deep_thinking=config.get('use_deepthink'),
                 agent_mode=config.get('agent_mode'),
                 available_workflows=config.get('available_workflows'),
@@ -836,9 +846,12 @@ def parse_arguments() -> Dict[str, Any]:
     
     parser.add_argument('--no_terminal_log', action='store_true', default=True, help='停止终端打印log (默认开启)')
     parser.add_argument('--show_terminal_log', action='store_false', dest='no_terminal_log', help='开启终端打印log')
-    parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录')
+    parser.add_argument('--sandbox_type', type=str, default='local', choices=['local', 'passthrough'], help='沙箱类型: local (本地沙箱), passthrough (直通模式)')
+    parser.add_argument('--workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='工作目录（宿主机路径）')
+    parser.add_argument('--virtual_workspace', type=str, default=os.path.join(os.getcwd(), 'agent_workspace'), help='虚拟工作区路径（沙箱内）')
     parser.add_argument('--session_root', type=str, default=None, help='会话根目录（默认在工作目录下的 agent_sessions 文件夹）')
     parser.add_argument('--session_id', type=str, default=None, help='指定会话 ID（可选）')
+    parser.add_argument('--agent_id', type=str, default='eric', help='指定 Agent ID（可选，默认使用 session_id）')
     parser.add_argument('--mcp_setting_path', type=str, default=os.path.join(os.path.dirname(__file__), 'mcp_setting.json'),
                         help="""MCP 设置文件路径，文件内容为json格式""")
     parser.add_argument('--preset_running_agent_config_path', type=str, default=os.path.join(os.path.dirname(__file__), 'preset_running_agent_config.json'),
@@ -871,7 +884,8 @@ def parse_arguments() -> Dict[str, Any]:
         use_deepthink = args.deepthink
     elif args.no_deepthink is not None:
         use_deepthink = not args.no_deepthink
-            
+    
+    os.environ.setdefault('MEMORY_ROOT_PATH', os.path.join(os.path.dirname(os.path.abspath(args.workspace)), 'memory'))
     # 合并命令行参数和配置文件内容，命令行参数优先
     config = {
         'api_key': args.default_llm_api_key,
@@ -886,8 +900,11 @@ def parse_arguments() -> Dict[str, Any]:
         'presence_penalty': args.default_llm_presence_penalty,
         'use_deepthink': use_deepthink,
         'agent_mode': agent_mode,
+        'sandbox_type': args.sandbox_type,
         'workspace': args.workspace,
+        'virtual_workspace': args.virtual_workspace,
         'session_id': args.session_id,
+        'agent_id': args.agent_id,
         'mcp_setting_path': args.mcp_setting_path,
         'available_workflows': preset_running_agent_config.get('availableWorkflows', {}),
         'system_context': preset_running_agent_config.get('systemContext', {}),
@@ -1004,21 +1021,21 @@ if __name__ == '__main__':
             "top_p": config['top_p'],
             "presence_penalty": config['presence_penalty']
         }
-        # session_root_space 独立于 agent_workspace
-        agent_workspace = config['workspace']
+        # session_root_space 独立于 host_workspace
+        host_workspace = config['workspace']
         
         # 优先使用命令行参数指定的 session_root，否则使用默认值
         if config['session_root']:
              session_root_space = os.path.abspath(config['session_root'])
         else:
-             session_root_space = os.path.join(os.path.dirname(os.path.abspath(agent_workspace)), "agent_sessions")
+             session_root_space = os.path.join(os.path.dirname(os.path.abspath(host_workspace)), "agent_sessions")
              
         os.makedirs(session_root_space, exist_ok=True)
 
         sagent = SAgent(
             session_root_space=session_root_space,
             enable_obs=True,
-            use_sandbox=config.get('use_sandbox', True)
+            sandbox_type=config.get('sandbox_type', 'local')
         )
 
         # 根据模式选择不同的 chat 函数

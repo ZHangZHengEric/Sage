@@ -63,7 +63,10 @@ class ComponentManager:
                  context_active_ratio: Optional[float] = None,
                  context_max_new_message_ratio: Optional[float] = None,
                  context_recent_turns: Optional[int] = None,
-                 session_root: Optional[str] = None):
+                 session_root: Optional[str] = None,
+                 agent_id: Optional[str] = None,
+                 virtual_workspace: Optional[str] = None,
+                 sandbox_type: Optional[str] = "local"):
         logger.debug(f"使用配置 - 模型: {model_name}, 温度: {temperature}")
         self.api_key = api_key
         self.model_name = model_name
@@ -84,6 +87,9 @@ class ComponentManager:
         self.logs_dir = logs_dir
         self.skills_path = skills_path
         self.session_root = session_root
+        self.agent_id = agent_id or "demo_agent"
+        self.virtual_workspace = virtual_workspace or workspace or "/sage-workspace"
+        self.sandbox_type = sandbox_type
 
         # 处理preset_running_config（参考sage_server.py的实现）
         self.preset_config_dict = {}
@@ -247,7 +253,7 @@ class ComponentManager:
             controller = SAgent(
                 session_root_space=session_root_space,
                 enable_obs=True,
-                use_sandbox=True
+                sandbox_type=self.sandbox_type
             )
             return controller
 
@@ -345,9 +351,11 @@ class StreamingHandler:
                 model=model_client,
                 model_config=model_config,
                 system_prefix=self.component_manager.system_prefix,
-                agent_workspace=self.component_manager.workspace, # 显式传入 agent_workspace
+                host_workspace=self.component_manager.workspace,
+                virtual_workspace=self.component_manager.virtual_workspace,
                 default_memory_type=self.component_manager.memory_type,
                 user_id="default_user",
+                agent_id=self.component_manager.agent_id,
                 deep_thinking=use_deepthink,
                 max_loop_count=max_loop_count,
                 agent_mode=agent_mode,
@@ -739,6 +747,10 @@ def parse_arguments() -> Dict[str, Any]:
     # 处理workspace路径
     if args.workspace:
         args.workspace = os.path.abspath(args.workspace)
+    
+    # 设置 MEMORY_ROOT_PATH 环境变量
+    memory_root_path = os.path.join(os.path.dirname(os.path.abspath(args.workspace)), 'memory')
+    os.environ.setdefault('MEMORY_ROOT_PATH', memory_root_path)
         
     # 处理 memory_root 兼容性
     if args.memory_root:

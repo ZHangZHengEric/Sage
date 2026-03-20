@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Memory tool based on BM25 file system - search version
+Memory tool based on BM25 file system - Sandbox version
 Get workspace through session_id, build file index and support search
 """
 import os
@@ -16,11 +16,95 @@ class MemoryTool:
     Agent memory tool - BM25 index search based on file system and session history
     
     Features:
-    1. Auto build/update BM25 index of workspace files
+    1. Auto build/update BM25 index of workspace files through sandbox
     2. Search related files based on filename and content
     3. Search session history messages
     4. Use file extension whitelist and directory blacklist managed by MemoryIndex
     """
+
+    def _get_sandbox(self, session_id: str):
+        """通过 session_id 获取沙箱"""
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or not session.session_context:
+            raise ValueError(f"MemoryTool: Invalid session_id={session_id}")
+
+        sandbox = session.session_context.sandbox
+        if not sandbox:
+            raise ValueError(f"MemoryTool: No sandbox available for session_id={session_id}")
+
+        return sandbox
+
+    def _get_workspace_path(self, session_id: str) -> Optional[str]:
+        """Get workspace virtual path from session"""
+        try:
+            from sagents.session_runtime import get_global_session_manager
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            
+            if not session:
+                logger.warning(f"MemoryTool: Session not found: {session_id}")
+                return None
+            
+            session_context = session.session_context
+            
+            # Get virtual workspace path
+            if hasattr(session_context, 'virtual_workspace') and session_context.virtual_workspace:
+                return session_context.virtual_workspace
+            
+            # Fallback to default
+            return "/sage-workspace"
+            
+        except Exception as e:
+            logger.error(f"MemoryTool: Get workspace failed: {e}")
+            return None
+
+    def _get_agent_id(self, session_id: str) -> Optional[str]:
+        """Get agent_id from session"""
+        try:
+            from sagents.session_runtime import get_global_session_manager
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            
+            if not session:
+                logger.warning(f"MemoryTool: Session not found: {session_id}")
+                return None
+            
+            session_context = session.session_context
+            
+            # Get agent_id from session_context
+            if hasattr(session_context, 'agent_id') and session_context.agent_id:
+                return session_context.agent_id
+            
+            logger.warning(f"MemoryTool: agent_id not found for session {session_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"MemoryTool: Get agent_id failed: {e}")
+            return None
+
+    def _get_index_path(self, agent_id: str) -> str:
+        """Get index file path for agent (stored on host)
+        
+        Args:
+            agent_id: Agent ID (not session_id)
+        """
+        # Get MEMORY_ROOT_PATH from environment variable
+        memory_root = os.environ.get('MEMORY_ROOT_PATH')
+        if not memory_root:
+            # 默认使用用户主目录下的 .sage/memory
+            user_home = Path.home()
+            memory_root = user_home / ".sage" / "memory"
+        
+        # Create memory directory
+        memory_dir = Path(memory_root)
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        
+        index_path = memory_dir / f"{agent_id}.pkl"
+        logger.debug(f"MemoryTool: Index path: {index_path}")
+        
+        return str(index_path)
 
     @tool(
         description_i18n={
@@ -37,8 +121,8 @@ class MemoryTool:
                 "en": "Number of results to return, default 5"
             },
             "session_id": {
-                "zh": "会话 ID（可选，自动注入，无需填写）",
-                "en": "Session ID (Optional, Auto-injected)"
+                "zh": "会话 ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)"
             }
         }
     )
@@ -46,7 +130,7 @@ class MemoryTool:
         self,
         query: str,
         top_k: int = 5,
-        session_id: Optional[str] = None
+        session_id: str = None
     ) -> Dict[str, Any]:
         """
         Search memory (files and session history)
@@ -54,7 +138,7 @@ class MemoryTool:
         Args:
             query: Search query
             top_k: Number of results to return
-            session_id: Session ID
+            session_id: Session ID (required)
         
         Returns:
             Search results including files and history messages
@@ -100,23 +184,29 @@ class MemoryTool:
             }
 
     async def _search_file_memory(self, query: str, top_k: int, session_id: str) -> List[Dict[str, Any]]:
-        """Search file memory using BM25 index"""
+        """Search file memory using BM25 index through sandbox"""
         try:
-            # Get workspace path
+            # Get sandbox and workspace path
+            sandbox = self._get_sandbox(session_id)
             workspace_path = self._get_workspace_path(session_id)
             if not workspace_path:
                 logger.warning(f"MemoryTool: Cannot get workspace path for session {session_id}")
                 return []
             
-            # Get index path for this workspace
-            index_path = self._get_index_path(session_id)
+            # Get agent_id and index path (stored on host, keyed by agent_id)
+            agent_id = self._get_agent_id(session_id)
+            if not agent_id:
+                logger.warning(f"MemoryTool: Cannot get agent_id for session {session_id}")
+                return []
+            
+            index_path = self._get_index_path(agent_id)
             
             # Load/build index
             from .memory_index import MemoryIndex
-            index = MemoryIndex(workspace_path, index_path)
+            index = MemoryIndex(sandbox, workspace_path, index_path)
             
             # Auto update index (fast check if no changes)
-            stats = index.update_index()
+            stats = await index.update_index()
             logger.info(f"MemoryTool: Index update stats: {stats}")
             
             # Search
@@ -243,80 +333,3 @@ class MemoryTool:
             snippet = snippet + "..."
         
         return snippet.strip()
-
-    def _get_workspace_path(self, session_id: str) -> Optional[str]:
-        """
-        Get workspace path of session
-        
-        Priority:
-        1. session_context.agent_workspace
-        2. session_context.working_dir
-        3. session.workspace
-        4. Default path: ~/.sage/workspaces/{session_id}
-        """
-        try:
-            from sagents.session_runtime import get_global_session_manager
-            session_manager = get_global_session_manager()
-            session = session_manager.get(session_id)
-            
-            if not session:
-                logger.warning(f"MemoryTool: Session not found: {session_id}")
-                return None
-            
-            session_context = session.session_context
-            
-            # Priority 1: agent_workspace
-            if hasattr(session_context, 'agent_workspace') and session_context.agent_workspace:
-                path = session_context.agent_workspace
-                if os.path.exists(path):
-                    logger.debug(f"MemoryTool: Using agent_workspace: {path}")
-                    return path
-            
-            # Priority 2: working_dir
-            if hasattr(session_context, 'working_dir') and session_context.working_dir:
-                path = session_context.working_dir
-                if os.path.exists(path):
-                    logger.debug(f"MemoryTool: Using working_dir: {path}")
-                    return path
-            
-            # Priority 3: session's workspace
-            if hasattr(session, 'workspace') and session.workspace:
-                path = session.workspace
-                if os.path.exists(path):
-                    logger.debug(f"MemoryTool: Using session.workspace: {path}")
-                    return path
-            
-            # Priority 4: Default path
-            home = os.path.expanduser("~")
-            workspace = os.path.join(home, ".sage", "workspaces", session_id)
-            if os.path.exists(workspace):
-                logger.debug(f"MemoryTool: Using default workspace: {workspace}")
-                return workspace
-            
-            logger.warning(f"MemoryTool: No valid workspace found for session {session_id}")
-            return None
-            
-        except Exception as e:
-            logger.error(f"MemoryTool: Get workspace failed: {e}")
-            return None
-    
-    def _get_index_path(self, session_id: str) -> str:
-        """
-        Get index file path for session
-        
-        Index is stored in: $SAGE_ROOT/memory/{session_id}.pkl
-        Fallback to: ~/.sage/memory/{session_id}.pkl
-        """
-        # Get SAGE_ROOT from environment variable
-        user_home = Path.home()
-        sage_home = user_home / ".sage"
-        sage_root = os.environ.get('SAGE_ROOT', str(sage_home))
-        
-        # Create memory directory
-        memory_dir = Path(sage_root) / 'memory'
-        memory_dir.mkdir(parents=True, exist_ok=True)
-        
-        index_path = memory_dir / f"{session_id}.pkl"
-        logger.debug(f"MemoryTool: Index path: {index_path}")
-        
-        return str(index_path)
