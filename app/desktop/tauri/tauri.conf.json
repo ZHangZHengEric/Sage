@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SageAI",
+  "productName": "Sage",
   "version": "1.0.7",
   "identifier": "com.sage.desktop",
   "build": {
@@ -15,7 +15,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "SageAI",
+        "title": "Sage",
         "width": 1024,
         "height": 768,
         "minWidth": 1024,
