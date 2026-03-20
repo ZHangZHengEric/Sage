@@ -27,6 +27,7 @@ from .utils import (
     create_skill_proxy,
     create_tool_proxy,
 )
+from sagents.session_runtime import get_global_session_manager
 
 _SAGENT_CACHE = {}
 
