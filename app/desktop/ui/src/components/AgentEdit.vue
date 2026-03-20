@@ -1100,13 +1100,36 @@ const searchQueries = reactive({ tools: '', skills: '' })
 const selectedGroupSource = ref('')
 
 const REQUIRED_TOOLS_FOR_SKILLS = [
-  'file_read', 'execute_python_code', 'execute_javascript_code', 
+  'file_read', 'execute_python_code', 'execute_javascript_code',
   'execute_shell_command', 'file_write', 'file_update', 'load_skill'
 ]
 
+// 记忆类型为用户时必需的工具
+const REQUIRED_TOOLS_FOR_USER_MEMORY = ['search_memory']
+
+// Fibre 策略必需的工具
+const REQUIRED_TOOLS_FOR_FIBRE = ['sys_spawn_agent', 'sys_delegate_task', 'sys_finish_task']
+
 const isRequiredTool = (toolName) => {
+  // 检查是否是技能必需的工具
   const hasSkills = store.formData.availableSkills?.length > 0
-  return hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)
+  if (hasSkills && REQUIRED_TOOLS_FOR_SKILLS.includes(toolName)) {
+    return true
+  }
+
+  // 检查是否是用户记忆类型必需的工具
+  const memoryType = store.formData.memoryType
+  if (memoryType === 'user' && REQUIRED_TOOLS_FOR_USER_MEMORY.includes(toolName)) {
+    return true
+  }
+
+  // 检查是否是 Fibre 策略必需的工具
+  const agentMode = store.formData.agentMode
+  if (agentMode === 'fibre' && REQUIRED_TOOLS_FOR_FIBRE.includes(toolName)) {
+    return true
+  }
+
+  return false
 }
 
 const filteredTools = computed(() => {
@@ -1177,6 +1200,28 @@ watch(() => store.formData.availableSkills, (newSkills) => {
     })
   }
 }, { deep: true })
+
+// 监听记忆类型变化，自动添加 search_memory 工具
+watch(() => store.formData.memoryType, (newMemoryType) => {
+  if (newMemoryType === 'user') {
+    REQUIRED_TOOLS_FOR_USER_MEMORY.forEach(toolName => {
+      if (!store.formData.availableTools.includes(toolName)) {
+        store.formData.availableTools.push(toolName)
+      }
+    })
+  }
+})
+
+// 监听 Agent 模式变化，自动添加 Fibre 必需工具
+watch(() => store.formData.agentMode, (newAgentMode) => {
+  if (newAgentMode === 'fibre') {
+    REQUIRED_TOOLS_FOR_FIBRE.forEach(toolName => {
+      if (!store.formData.availableTools.includes(toolName)) {
+        store.formData.availableTools.push(toolName)
+      }
+    })
+  }
+})
 
 // 监听工具列表变化，自动清理已不存在（被禁用）的工具
 watch(() => props.tools, (newTools) => {
