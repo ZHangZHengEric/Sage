@@ -19,6 +19,7 @@
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,6 +73,8 @@ class LocalSandboxProvider(ISandboxHandle):
         """确保沙箱已初始化"""
         if self._file_system is None:
             from .filesystem import SandboxFileSystem
+
+            logger.info(f"LocalSandboxProvider: Initializing with host_workspace={self._host_workspace}, virtual_workspace={self._virtual_workspace}")
 
             self._file_system = SandboxFileSystem(
                 host_path=self._host_workspace,
@@ -197,7 +200,10 @@ class LocalSandboxProvider(ISandboxHandle):
         """虚拟路径转宿主机路径"""
         self._ensure_initialized()
         if self._file_system:
-            return self._file_system.to_host_path(virtual_path)
+            host_path = self._file_system.to_host_path(virtual_path)
+            if host_path != virtual_path:
+                logger.debug(f"LocalSandboxProvider: Path conversion: {virtual_path} -> {host_path}")
+            return host_path
         return virtual_path
 
     def to_virtual_path(self, host_path: str) -> str:
@@ -206,6 +212,48 @@ class LocalSandboxProvider(ISandboxHandle):
         if self._file_system:
             return self._file_system.to_virtual_path(host_path)
         return host_path
+
+    def _convert_paths_in_command(self, command: str) -> str:
+        """Convert virtual paths to host paths in command string
+        
+        This method finds path-like patterns in the command and converts
+        virtual paths to host paths.
+        """
+        if not command:
+            return command
+            
+        # Pattern to match common path patterns:
+        # - Absolute paths starting with / (e.g., /sage-workspace, /tmp)
+        # - Paths in quotes (single or double)
+        # This is a simple heuristic and may need refinement
+        
+        converted_command = command
+        
+        # Find all potential paths (simplified approach)
+        # Look for patterns like: /path/to/file, "/path/to/file", '/path/to/file'
+        path_pattern = r'["\']?(/[a-zA-Z0-9_\-./]+)["\']?'
+        
+        def replace_path(match):
+            full_match = match.group(0)
+            path = match.group(1)
+            
+            # Check if this looks like a virtual path we should convert
+            # Convert the path
+            host_path = self.to_host_path(path)
+            
+            # If conversion changed the path, replace it
+            if host_path != path:
+                # Preserve quotes if they existed
+                if full_match.startswith('"') and full_match.endswith('"'):
+                    return f'"{host_path}"'
+                elif full_match.startswith("'") and full_match.endswith("'"):
+                    return f"'{host_path}'"
+                else:
+                    return host_path
+            return full_match
+        
+        converted_command = re.sub(path_pattern, replace_path, converted_command)
+        return converted_command
 
     async def execute_command(
         self,
@@ -219,6 +267,13 @@ class LocalSandboxProvider(ISandboxHandle):
 
         # 转换工作目录
         actual_workdir = self.to_host_path(workdir) if workdir else self._host_workspace
+
+        # 转换命令中的虚拟路径为宿主机路径
+        converted_command = self._convert_paths_in_command(command)
+        if converted_command != command:
+            logger.info(f"LocalSandboxProvider: Command path conversion: {command} -> {converted_command}")
+
+        logger.info(f"LocalSandboxProvider: Executing command in {actual_workdir}: {converted_command[:100]}{'...' if len(converted_command) > 100 else ''}")
 
         # 准备环境变量
         env = os.environ.copy()
@@ -238,7 +293,7 @@ class LocalSandboxProvider(ISandboxHandle):
             try:
                 payload = {
                     'mode': 'shell',
-                    'command': command,
+                    'command': converted_command,
                     'cwd': actual_workdir,
                 }
                 result = self._isolation.execute(payload, cwd=actual_workdir)
@@ -264,7 +319,7 @@ class LocalSandboxProvider(ISandboxHandle):
 
         # 直接执行命令 - 合并 stdout 和 stderr 以保持原始输出顺序
         result = subprocess.run(
-            command,
+            converted_command,
             shell=True,
             cwd=actual_workdir,
             env=env,

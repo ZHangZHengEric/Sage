@@ -24,18 +24,18 @@ class ObservableToolManager:
         # Delegate all other calls to the original tool manager
         return getattr(self._tool_manager, name)
 
-    async def run_tool_async(self, tool_name: str, session_context: Any, session_id: str, **kwargs) -> Any:
+    async def run_tool_async(self, tool_name: str, session_id: str, **kwargs) -> Any:
         """
         Intercepts tool execution to log start/end events.
         """
         # Note: The agent might pass session_id, but we also have self.session_id.
         # We use the passed one if available, else ours.
         sid = session_id or self.session_id
-        
+
         self.observability_manager.on_tool_start(sid, tool_name, kwargs)
-        
+
         try:
-            result = await self._tool_manager.run_tool_async(tool_name, session_context, session_id=session_id, **kwargs)
+            result = await self._tool_manager.run_tool_async(tool_name, session_id=session_id, **kwargs)
             
             # Check for streaming response
             output_to_log = result

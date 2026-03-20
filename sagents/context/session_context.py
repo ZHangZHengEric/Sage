@@ -591,7 +591,6 @@ class SessionContext:
                     args.pop('session_id', None)
                     await self.tool_manager.run_tool_async(
                         tool_name='load_skill',
-                        session_context=self,
                         session_id=self.session_id,
                         **args
                     )

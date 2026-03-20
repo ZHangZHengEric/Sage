@@ -250,17 +250,19 @@ class Logger:
                 session_manager = get_global_session_manager()
                 session = session_manager.get(session_id)
                 if session and session.session_context:
-                    session_workspace = session.session_context.session_workspace
+                    # 检查 session_workspace 属性是否存在（init_more 完成后才有）
+                    if hasattr(session.session_context, 'session_workspace'):
+                        session_workspace = session.session_context.session_workspace
 
-                    # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
-                    session_log_file = os.path.join(session_workspace, f'session_{session_id}.log')
-                    # 使用FileHandler的追加模式，而不是RotatingFileHandler
-                    session_file_handler = logging.FileHandler(session_log_file, mode='a', encoding='utf-8')
-                    session_file_handler.setLevel(logging.DEBUG)
-                    session_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
-                    session_file_handler.setFormatter(session_format)
+                        # 创建session专用的日志文件 - 使用普通FileHandler以确保追加模式
+                        session_log_file = os.path.join(session_workspace, f'session_{session_id}.log')
+                        # 使用FileHandler的追加模式，而不是RotatingFileHandler
+                        session_file_handler = logging.FileHandler(session_log_file, mode='a', encoding='utf-8')
+                        session_file_handler.setLevel(logging.DEBUG)
+                        session_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(caller_filename)s:%(caller_lineno)d] - %(message)s')
+                        session_file_handler.setFormatter(session_format)
 
-                    session_logger.addHandler(session_file_handler)
+                        session_logger.addHandler(session_file_handler)
             except Exception as e:
                 # 如果无法创建session专用日志文件，记录错误但不影响主要功能
                 print(f"Warning: Failed to create session log file for {session_id}: {e}")

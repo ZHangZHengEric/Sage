@@ -20,6 +20,7 @@
 """
 
 import os
+import re
 import shutil
 import subprocess
 from datetime import timedelta
@@ -82,12 +83,16 @@ class PassthroughSandboxProvider(ISandboxHandle):
         for sandbox_path, host_path in self._dynamic_mounts.items():
             if virtual_path.startswith(sandbox_path):
                 rel_path = virtual_path[len(sandbox_path):].lstrip("/")
-                return os.path.join(host_path, rel_path)
+                result = os.path.join(host_path, rel_path)
+                logger.debug(f"PassthroughSandboxProvider: Dynamic mount conversion: {virtual_path} -> {result}")
+                return result
 
         # 默认工作区映射
         if virtual_path.startswith("/sage-workspace"):
             rel_path = virtual_path[len("/sage-workspace"):].lstrip("/")
-            return os.path.join(self._workspace, rel_path)
+            result = os.path.join(self._workspace, rel_path)
+            logger.debug(f"PassthroughSandboxProvider: Workspace conversion: {virtual_path} -> {result}")
+            return result
 
         return virtual_path
 
@@ -123,6 +128,48 @@ class PassthroughSandboxProvider(ISandboxHandle):
         # 直通模式没有访问限制，返回空列表
         return []
 
+    def _convert_paths_in_command(self, command: str) -> str:
+        """Convert virtual paths to host paths in command string
+        
+        This method finds path-like patterns in the command and converts
+        virtual paths to host paths.
+        """
+        if not command:
+            return command
+            
+        # Pattern to match common path patterns:
+        # - Absolute paths starting with / (e.g., /sage-workspace, /tmp)
+        # - Paths in quotes (single or double)
+        # This is a simple heuristic and may need refinement
+        
+        converted_command = command
+        
+        # Find all potential paths (simplified approach)
+        # Look for patterns like: /path/to/file, "/path/to/file", '/path/to/file'
+        path_pattern = r'["\']?(/[a-zA-Z0-9_\-./]+)["\']?'
+        
+        def replace_path(match):
+            full_match = match.group(0)
+            path = match.group(1)
+            
+            # Check if this looks like a virtual path we should convert
+            # Convert the path
+            host_path = self.to_host_path(path)
+            
+            # If conversion changed the path, replace it
+            if host_path != path:
+                # Preserve quotes if they existed
+                if full_match.startswith('"') and full_match.endswith('"'):
+                    return f'"{host_path}"'
+                elif full_match.startswith("'") and full_match.endswith("'"):
+                    return f"'{host_path}'"
+                else:
+                    return host_path
+            return full_match
+        
+        converted_command = re.sub(path_pattern, replace_path, converted_command)
+        return converted_command
+
     async def execute_command(
         self,
         command: str,
@@ -133,13 +180,20 @@ class PassthroughSandboxProvider(ISandboxHandle):
         """直接在本机执行命令"""
         actual_workdir = self.to_host_path(workdir) if workdir else self._workspace
 
+        # 转换命令中的虚拟路径为宿主机路径
+        converted_command = self._convert_paths_in_command(command)
+        if converted_command != command:
+            logger.info(f"PassthroughSandboxProvider: Command path conversion: {command} -> {converted_command}")
+
+        logger.info(f"PassthroughSandboxProvider: Executing command in {actual_workdir}: {converted_command[:100]}{'...' if len(converted_command) > 100 else ''}")
+
         env = os.environ.copy()
         if env_vars:
             env.update(env_vars)
 
         # 同步执行 - 合并 stdout 和 stderr 以保持原始输出顺序
         result = subprocess.run(
-            command,
+            converted_command,
             shell=True,
             cwd=actual_workdir,
             env=env,
