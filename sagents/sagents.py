@@ -53,7 +53,7 @@ class SAgent:
             raise ValueError("run_stream 参数 host_workspace 不能为空")
         if default_memory_type is None or str(default_memory_type).strip() == "":
             raise ValueError("run_stream 参数 default_memory_type 不能为空")
-
+        default_memory_type = "session"
         logger.info(f"run_stream: system_context: {system_context}")
         start_time = time.time()
         first_show_time = None
