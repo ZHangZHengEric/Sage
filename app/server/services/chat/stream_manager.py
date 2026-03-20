@@ -34,6 +34,12 @@ class StreamManager:
             cls._instance = cls()
         return cls._instance
 
+    def get_history_length(self, session_id: str) -> int:
+        session = self._sessions.get(session_id)
+        if not session:
+            return 0
+        return len(session.history)
+
     def _notify_active_sessions_changed(self):
         """通知所有订阅者活跃会话列表已变更"""
         sessions = self.get_active_sessions()

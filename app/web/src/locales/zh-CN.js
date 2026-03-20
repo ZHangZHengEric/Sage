@@ -278,6 +278,7 @@ export default {
   'common.return': '返回',
   'common.all': '所有',
   'common.viewDetails': '查看详情',
+  'common.id': 'ID',
   'common.success': '成功',
   'common.fail': '失败',
   'common.default': '默认',
