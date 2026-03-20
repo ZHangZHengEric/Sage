@@ -121,7 +121,9 @@ async def create_agent(
     """创建新的 Agent，返回创建的 Agent 对象"""
     # 如果配置中包含 id，使用指定的 id，否则生成随机 id
     agent_id = agent_config.pop("id", None) or generate_agent_id()
-    logger.info(f"开始创建Agent: {agent_id}")
+    # 检查是否指定为默认 Agent
+    is_default = agent_config.pop("is_default", False)
+    logger.info(f"开始创建Agent: {agent_id}, is_default={is_default}")
 
     # 强制添加必要的工具
     agent_config = _enforce_required_tools(agent_config)
@@ -137,9 +139,22 @@ async def create_agent(
             detail=f"Agent '{agent_name}' 已存在",
             error_detail=f"Agent '{agent_name}' 已存在",
         )
-    orm_obj = models.Agent(agent_id=agent_id, name=agent_name, config=agent_config)
+
+    # 检查是否已有默认 Agent
+    existing_default = await dao.get_default()
+    if is_default and existing_default:
+        # 如果已存在默认 Agent，新 Agent 不设为默认
+        logger.warning(f"已存在默认 Agent '{existing_default.agent_id}'，新 Agent 不设为默认")
+        is_default = False
+
+    orm_obj = models.Agent(
+        agent_id=agent_id,
+        name=agent_name,
+        config=agent_config,
+        is_default=is_default
+    )
     await dao.save(orm_obj)
-    logger.info(f"Agent {agent_id} 创建成功")
+    logger.info(f"Agent {agent_id} 创建成功, is_default={is_default}")
     return orm_obj
 
 
