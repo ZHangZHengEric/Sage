@@ -119,7 +119,8 @@ async def create_agent(
     agent_name: str, agent_config: Dict[str, Any]
 ) -> models.Agent:
     """创建新的 Agent，返回创建的 Agent 对象"""
-    agent_id = generate_agent_id()
+    # 如果配置中包含 id，使用指定的 id，否则生成随机 id
+    agent_id = agent_config.pop("id", None) or generate_agent_id()
     logger.info(f"开始创建Agent: {agent_id}")
 
     # 强制添加必要的工具
@@ -127,7 +128,7 @@ async def create_agent(
 
     # 验证并过滤工具
     agent_config = _validate_and_filter_tools(agent_config)
-    
+
     dao = models.AgentConfigDao()
     existing_config = await dao.get_by_name(agent_name)
     if existing_config:
