@@ -186,23 +186,33 @@ class PassthroughSandboxProvider(ISandboxHandle):
         logger.info(f"PassthroughSandboxProvider: Executing command in {actual_workdir}: {converted_command[:100]}{'...' if len(converted_command) > 100 else ''}")
 
         env = os.environ.copy()
+
+        # 配置 npm 使用国内镜像源
+        env["NPM_CONFIG_REGISTRY"] = "https://registry.npmmirror.com"
+
+        # 配置 pip 使用阿里镜像源
+        env["PIP_INDEX_URL"] = "https://mirrors.aliyun.com/pypi/simple/"
+        env["PIP_TRUSTED_HOST"] = "mirrors.aliyun.com"
+
         if env_vars:
             env.update(env_vars)
 
         # 使用异步 subprocess 执行命令，避免阻塞
         import asyncio
+        proc = None
         try:
-            proc = await asyncio.wait_for(
-                asyncio.create_subprocess_shell(
-                    converted_command,
-                    cwd=actual_workdir,
-                    env=env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                ),
+            proc = await asyncio.create_subprocess_shell(
+                converted_command,
+                cwd=actual_workdir,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            # 使用 wait_for 包装 communicate 来限制整个执行时间
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(),
                 timeout=timeout,
             )
-            stdout, _ = await proc.communicate()
             stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
             return CommandResult(
                 success=proc.returncode == 0,
@@ -213,8 +223,11 @@ class PassthroughSandboxProvider(ISandboxHandle):
             )
         except asyncio.TimeoutError:
             if proc:
-                proc.kill()
-                await proc.wait()
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
             return CommandResult(
                 success=False,
                 stdout="",
@@ -245,18 +258,20 @@ class PassthroughSandboxProvider(ISandboxHandle):
         try:
             # 使用异步 subprocess 执行，避免阻塞
             import asyncio
+            proc = None
             try:
-                proc = await asyncio.wait_for(
-                    asyncio.create_subprocess_exec(
-                        "python",
-                        temp_file,
-                        cwd=actual_workdir,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    ),
+                proc = await asyncio.create_subprocess_exec(
+                    "python",
+                    temp_file,
+                    cwd=actual_workdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                # 使用 wait_for 包装 communicate 来限制整个执行时间
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(),
                     timeout=timeout,
                 )
-                stdout, stderr = await proc.communicate()
                 stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
                 stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
 
@@ -269,8 +284,11 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 )
             except asyncio.TimeoutError:
                 if proc:
-                    proc.kill()
-                    await proc.wait()
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
                 return ExecutionResult(
                     success=False,
                     output="",
@@ -302,18 +320,20 @@ class PassthroughSandboxProvider(ISandboxHandle):
         try:
             # 使用异步 subprocess 执行，避免阻塞
             import asyncio
+            proc = None
             try:
-                proc = await asyncio.wait_for(
-                    asyncio.create_subprocess_exec(
-                        "node",
-                        temp_file,
-                        cwd=actual_workdir,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    ),
+                proc = await asyncio.create_subprocess_exec(
+                    "node",
+                    temp_file,
+                    cwd=actual_workdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                # 使用 wait_for 包装 communicate 来限制整个执行时间
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(),
                     timeout=timeout,
                 )
-                stdout, stderr = await proc.communicate()
                 stdout_text = stdout.decode('utf-8', errors='replace') if stdout else ""
                 stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
 
@@ -326,8 +346,11 @@ class PassthroughSandboxProvider(ISandboxHandle):
                 )
             except asyncio.TimeoutError:
                 if proc:
-                    proc.kill()
-                    await proc.wait()
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
                 return ExecutionResult(
                     success=False,
                     output="",
