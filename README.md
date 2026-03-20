@@ -254,3 +254,10 @@ We are grateful to our sponsors for their support in making Sage better:
 <div align="center">
 Built with ❤️ by the Sage Team
 </div>
+
+
+## Usage
+
+```python
+# Usage examples
+```
