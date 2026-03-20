@@ -179,32 +179,16 @@ class SkillProxy:
                 return sm.get_skill_instructions(name)
         raise ValueError(f"Skill {name} not found in any manager")
 
-    def get_skill_resource_path(self, name: str, resource_name: str, agent_workspace: Optional[str] = None) -> Optional[str]:
+    def get_skill_file_list(self, name: str) -> List[str]:
+        """
+        Get a list of relative paths for all files in the skill.
+        e.g., ["scripts/script.py", "data/config.json"]
+        
+        Returns relative paths from the skill root directory.
+        To get the sandbox path, use: {sandbox.workspace_path}/skills/{skill_name}/{relative_path}
+        """
         self._check_skill_available(name)
         for sm in self.skill_managers:
             if name in sm.skills:
-                return sm.get_skill_resource_path(name, resource_name, agent_workspace)
-        return None
-
-    def prepare_skill_in_workspace(self, skill_name: str, agent_workspace: str) -> Optional[str]:
-        self._check_skill_available(skill_name)
-        for sm in self.skill_managers:
-            if skill_name in sm.skills:
-                return sm.prepare_skill_in_workspace(skill_name, agent_workspace)
-        return None
-
-    def get_skill_file_list(self, name: str, agent_workspace: Optional[str] = None) -> List[str]:
-        self._check_skill_available(name)
-        for sm in self.skill_managers:
-            if name in sm.skills:
-                return sm.get_skill_file_list(name, agent_workspace)
+                return sm.get_skill_file_list(name)
         return []
-
-    def prepare_skills_in_workspace(self, agent_workspace: str) -> None:
-        """
-        Copy all available skills to the agent's workspace.
-        将所有可用的技能复制到智能体的工作区。
-        """
-        for skill_name in self.list_skills():
-            self.prepare_skill_in_workspace(skill_name, agent_workspace)
-

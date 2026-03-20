@@ -846,154 +846,43 @@ class ToolManager:
                         "provided_params": list(kwargs.keys())
                     }, ensure_ascii=False, indent=2)
                 
-                # Check for sandbox execution
-                # Define sandbox tools (can be moved to config later)
-                SANDBOX_TOOLS = [
-                    "execute_shell_command", 
-                    "execute_python_code", 
-                    "execute_javascript_code",
-                    "file_read", 
-                    "file_write", 
-                    "search_content_in_file", 
-                    "download_file_from_url", 
-                    "file_update",
-                    "extract_text_from_non_text_file",
-                    "todo_read",
-                    "todo_write",
-                    "analyze_image"
-                ]
-                
-                if tool.name in SANDBOX_TOOLS:
+                # Tools run directly, they use sandbox internally if needed
+                try:
+                    # Inject session_id if the tool function expects it
+                    import inspect
+                    func_to_inspect = tool.func
+                    
+                    has_session_id_param = False
+                    
+                    # For bound methods, check the bound method's signature directly
                     try:
-                        # Use sandbox if available
-                        if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
-                            # Check if pip/npm is needed
-                            needs_pip = False
-                            needs_npm = False
-                            if tool.name == "execute_python_code" and kwargs.get("requirement_list"):
-                                needs_pip = True
-                            elif tool.name == "execute_javascript_code" and kwargs.get("npm_packages"):
-                                needs_npm = True
-                            elif tool.name == "execute_shell_command":
-                                cmd = kwargs.get("command", "")
-                                if "pip " in cmd or "pip3 " in cmd:
-                                    needs_pip = True
-                                if "npm " in cmd or "node " in cmd:
-                                    needs_npm = True
-                            
-                            # Note: pip is automatically available in the sandbox venv
-                            # No need to explicitly call ensure_pip()
-                            # We might want to ensure npm here too in future if sandbox environment management supports it
-                            # session_context.sandbox.ensure_npm() 
+                        sig = inspect.signature(func_to_inspect)
+                        has_session_id_param = "session_id" in sig.parameters
+                        logger.debug(f"[Tool] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}")
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"[Tool] Failed to get signature for {tool.name}: {e}")
+                        pass
+                    
+                    # Also check from tool spec as fallback
+                    if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
+                        has_session_id_param = 'session_id' in tool.parameters
+                        logger.debug(f"[Tool] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}")
+                    if not has_session_id_param and hasattr(tool, 'required') and tool.required:
+                        has_session_id_param = 'session_id' in tool.required
+                        logger.debug(f"[Tool] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}")
+                    
+                    if has_session_id_param:
+                        kwargs["session_id"] = session_id
+                        logger.debug(f"[Tool] Injected session_id for {tool.name}")
 
-                            # Inject session_id if the tool function expects it
-                            import inspect
-                            func_to_inspect = tool.func
-                            
-                            has_session_id_param = False
-                            
-                            # For bound methods, check the bound method's signature directly
-                            # Don't unwrap __wrapped__ because we need to see the actual signature
-                            # that will be used when calling the method
-                            try:
-                                sig = inspect.signature(func_to_inspect)
-                                has_session_id_param = "session_id" in sig.parameters
-                                logger.debug(f"[Sandbox] Checking {tool.name} signature: {list(sig.parameters.keys())}, has_session_id: {has_session_id_param}")
-                            except (ValueError, TypeError) as e:
-                                logger.debug(f"[Sandbox] Failed to get signature for {tool.name}: {e}")
-                                pass
-                            
-                            # Also check from tool spec as fallback
-                            if not has_session_id_param and hasattr(tool, 'parameters') and tool.parameters:
-                                has_session_id_param = 'session_id' in tool.parameters
-                                logger.debug(f"[Sandbox] Checked tool.parameters for {tool.name}: has_session_id={has_session_id_param}")
-                            if not has_session_id_param and hasattr(tool, 'required') and tool.required:
-                                has_session_id_param = 'session_id' in tool.required
-                                logger.debug(f"[Sandbox] Checked tool.required for {tool.name}: has_session_id={has_session_id_param}")
-                            
-                            if has_session_id_param:
-                                kwargs["session_id"] = session_id
-                                logger.debug(f"[Sandbox] Injected session_id for {tool.name}")
+                    # Execute tool directly (tools use sandbox internally if needed)
+                    result = await self._execute_standard_tool_async(tool, **kwargs)
+                    # _execute_standard_tool_async 已经返回 JSON 字符串，直接使用
+                    final_result = result
 
-                            # Use run_tool which handles path mapping and execution
-                            # We pass the function object from the tool spec
-                            # And try to pass the tool instance if available (though ToolSpec might not store it directly, 
-                            # usually it's bound method if created from class)
-                            result = await session_context.agent_workspace_sandbox.run_tool(tool.func, kwargs)
-                            
-                            # Preserve skill_name for load_skill tool
-                            if tool_name == 'load_skill':
-                                try:
-                                    result_dict = json.loads(result) if isinstance(result, str) else result
-                                    # Get skill_name from result_dict, fallback to kwargs (the original input parameter)
-                                    skill_name_from_result = result_dict.get("skill_name") or kwargs.get("skill_name", "unknown")
-                                    final_result = json.dumps({
-                                        "skill_name": skill_name_from_result,
-                                        "content": make_serializable(result_dict.get("content", result))
-                                    }, ensure_ascii=False, indent=2)
-                                except Exception:
-                                    final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
-                            else:
-                                final_result = json.dumps({"content": make_serializable(result)}, ensure_ascii=False, indent=2)
-
-                            # Sync context for ToDo tools after successful sandbox execution
-                            if tool.name in ["todo_write", "todo_read", "todo_update"]:
-                                try:
-                                    # logger.info(f"Syncing session_context for {tool.name} after sandbox execution")
-                                    # Get tool class directly
-                                    from sagents.tool.impl.todo_tool import ToDoTool
-                                    
-                                    # Read directly from sandbox file system
-                                    if hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
-                                         # Use the same path logic as todo_write to ensure consistency
-                                         ws = session_context.agent_workspace_sandbox.file_system
-                                         filename = f"TODO_LIST_{session_id}.md"
-                                         if isinstance(ws, str):
-                                             host_todo_path = os.path.join(ws, filename)
-                                         elif hasattr(ws, 'host_path'):  # SandboxFileSystem
-                                             host_todo_path = os.path.join(ws.host_path, filename)
-                                         else:
-                                             # Fallback to agent_workspace
-                                             host_todo_path = os.path.join(session_context.agent_workspace, filename)
-                                         
-                                         if host_todo_path and os.path.exists(host_todo_path):
-                                             with open(host_todo_path, 'r', encoding='utf-8') as f:
-                                                 content = f.read()
-                                             
-                                             tasks = ToDoTool.parse_todo_list(content)
-                                             
-                                             # Update main process memory directly
-                                             if not hasattr(session_context, 'system_context') or not isinstance(session_context.system_context, dict):
-                                                 logger.warning("session_context.system_context is invalid")
-                                             else:
-                                                 if 'todo_list' not in session_context.system_context:
-                                                     session_context.system_context.update({'todo_list': []})
-                                                 session_context.system_context.update({'todo_list': tasks})
-                                                 logger.info(f"Session context synced successfully via file read. Tasks: {len(tasks)}")
-                                         else:
-                                             # File was deleted (all tasks completed), clear todo_list in session_context
-                                             if hasattr(session_context, 'system_context') and isinstance(session_context.system_context, dict):
-                                                 session_context.system_context.update({'todo_list': []})
-                                                 logger.info(f"Todo file deleted, cleared todo_list in session context")
-                                             else:
-                                                 logger.warning(f"Could not locate todo_list.md at {host_todo_path}")
-                                except Exception as e:
-                                    logger.warning(f"Failed to sync session context after sandbox execution: {e}")
-
-                        else:
-                             # Fallback to standard execution if no sandbox found (should not happen in new setup)
-                            logger.warning(f"No sandbox found in session_context for {tool.name}, executing directly.")
-                            # Remove session_id from kwargs to avoid duplication, _execute_standard_tool_async will inject it
-                            kwargs.pop("session_id", None)
-                            final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
-
-                    except Exception as e:
-                        logger.error(f"Sandbox execution failed for {tool.name}, aborting.")
-                        raise e
-                else:
-                    # Remove session_id from kwargs to avoid duplication, _execute_standard_tool_async will inject it
-                    kwargs.pop("session_id", None)
-                    final_result = await self._execute_standard_tool_async(tool, session_id=session_id, **kwargs)
+                except Exception as e:
+                    logger.error(f"Tool execution failed for {tool.name}: {e}")
+                    raise e
             else:
                 error_msg = f"Unknown tool type: {type(tool).__name__}"
                 logger.error(error_msg)
@@ -1020,72 +909,6 @@ class ToolManager:
                     tool_name,
                     "INVALID_JSON",
                 )
-
-            # Special handling for load_skill: Intercept output and update session_context
-            if tool_name == 'load_skill':
-                try:
-                    result_data = json.loads(final_result)
-                    skill_content = result_data.get("content", "")
-                    # Get skill_name from result_data, fallback to kwargs (the original input parameter)
-                    skill_name = result_data.get("skill_name") or kwargs.get("skill_name", "unknown")
-                    
-                    # Update SessionContext: Store skill instruction in system_context as a list
-                    # Initialize active_skills list if not exists
-                    if 'active_skills' not in session_context.system_context:
-                        session_context.system_context['active_skills'] = []
-                    
-                    active_skills = session_context.system_context['active_skills']
-                    
-                    # Check if skill already exists, remove old entry
-                    active_skills = [s for s in active_skills if s.get('skill_name') != skill_name]
-                    
-                    # Add new skill to the end (newest)
-                    active_skills.append({
-                        'skill_name': skill_name,
-                        'skill_content': skill_content
-                    })
-                    
-                    # Limit total tokens to 8000, remove oldest if exceeded
-                    # But always keep at least one skill, even if it exceeds the limit
-                    MAX_SKILL_TOKENS = 8000
-                    total_tokens = 0
-                    # Use calculate_str_token_length for accurate token calculation
-                    for skill in active_skills:
-                        skill_content = skill.get('skill_content', '')
-                        skill_tokens = MessageManager.calculate_str_token_length(skill_content)
-                        total_tokens += skill_tokens
-                    
-                    # Remove oldest skills if total exceeds limit, but keep at least one
-                    while total_tokens > MAX_SKILL_TOKENS and len(active_skills) > 1:
-                        removed_skill = active_skills.pop(0)  # Remove oldest (first)
-                        removed_content = removed_skill.get('skill_content', '')
-                        removed_tokens = MessageManager.calculate_str_token_length(removed_content)
-                        total_tokens -= removed_tokens
-                        logger.info(f"Removed skill '{removed_skill.get('skill_name')}' due to token limit. Total tokens: {total_tokens}")
-                    
-                    # Ensure at least one skill remains (even if it exceeds token limit)
-                    if len(active_skills) == 0:
-                        logger.warning("All skills were removed due to token limit, but at least one skill should remain")
-                    
-                    session_context.system_context['active_skills'] = active_skills
-                    
-                    # Also update legacy field for backward compatibility
-                    # Concatenate all active skills
-                    all_instructions = "\n\n".join([
-                        f"=== {s.get('skill_name', 'Unknown')} ===\n{s.get('skill_content', '')}"
-                        for s in active_skills
-                    ])
-                    session_context.system_context['active_skill_instruction'] = all_instructions
-                    
-                    # Modify the return result to be a simple confirmation
-                    skill_list = ", ".join([s.get('skill_name', 'Unknown') for s in active_skills])
-                    new_message = f"Skill '{skill_name}' loaded successfully. Current Active skills: {skill_list}. Total skills: {len(active_skills)}. Please follow the instructions in the System Prompt."
-                    final_result = json.dumps({"content": new_message}, ensure_ascii=False, indent=2)
-                    
-                    logger.info(f"Intercepted load_skill output and updated session_context for session {session_id}. Active skills: {skill_list}")
-                except Exception as e:
-                    logger.error(f"Failed to process load_skill interception: {e}")
-                    # If interception fails, we continue with original result but log the error
 
             return final_result
 

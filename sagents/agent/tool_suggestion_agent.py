@@ -16,6 +16,7 @@ from sagents.context.messages.message import MessageChunk, MessageRole, MessageT
 from sagents.context.messages.message_manager import MessageManager
 from sagents.context.session_context import SessionContext
 from sagents.tool.tool_manager import ToolManager
+from sagents.tool.tool_proxy import ToolProxy
 from sagents.utils.logger import logger
 from sagents.utils.prompt_manager import PromptManager
 
@@ -99,10 +100,12 @@ class ToolSuggestionAgent(AgentBase):
 
        
         try:
-            if session_context.agent_config.get("agent_mode",'fibre') == 'fibre':
-                session_context.tool_manager._available_tools.add('sys_spawn_agent')
-                session_context.tool_manager._available_tools.add('sys_delegate_task')
-                session_context.tool_manager._available_tools.add('sys_finish_task')
+            # 如果是 ToolProxy 且处于 fibre 模式，动态添加 fibre 特有工具
+            if isinstance(session_context.tool_manager, ToolProxy):
+                if session_context.agent_config.get("agent_mode", "fibre") == "fibre":
+                    session_context.tool_manager._available_tools.add("sys_spawn_agent")
+                    session_context.tool_manager._available_tools.add("sys_delegate_task")
+                    session_context.tool_manager._available_tools.add("sys_finish_task")
 
             available_tools = session_context.tool_manager.list_tools_simplified()
             # 准备工具列表字符串，包含ID和名称，以及描述的前100个字符
@@ -125,7 +128,7 @@ class ToolSuggestionAgent(AgentBase):
                 messages=json.dumps(clean_messages, ensure_ascii=False, indent=2)
             )
             llm_request_messages = [
-                self.prepare_unified_system_message(session_id=session_context.session_id, 
+                await self.prepare_unified_system_message(session_id=session_context.session_id, 
                                 language=session_context.get_language(),
                                 include_sections = ['role_definition', 'system_context', 'available_skills']),
                 MessageChunk(

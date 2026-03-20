@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-File-based memory index using BM25 algorithm
-Supports incremental updates and fast search
+File-based memory index using BM25 algorithm - Sandbox version
+Supports incremental updates and fast search through sandbox interface
 """
 import os
 import pickle
@@ -18,7 +18,7 @@ from sagents.utils.logger import logger
 @dataclass
 class FileDocument:
     """File document"""
-    path: str           # Absolute file path
+    path: str           # Virtual file path (in sandbox)
     content: str        # File content (text for BM25)
     mtime: float        # Modification time
     size: int           # File size
@@ -29,7 +29,7 @@ class FileDocument:
 @dataclass
 class SearchResult:
     """Search result"""
-    path: str           # File path
+    path: str           # File virtual path
     score: float        # BM25 score
     content: str        # Content preview
     line_number: int    # Line number (if applicable)
@@ -37,13 +37,14 @@ class SearchResult:
 
 class MemoryIndex:
     """
-    BM25-based memory index manager
+    BM25-based memory index manager - Sandbox version
 
     Features:
     1. Incremental updates - only process changed files
     2. Fast folder mtime check - skip scanning if no changes
     3. Smart tokenization - supports Chinese and English
     4. Blacklist filtering - skip unwanted directories
+    5. Sandbox integration - all file operations through sandbox
     """
 
     # Default blacklist directories
@@ -75,28 +76,31 @@ class MemoryIndex:
         '.rb', '.php', '.pl',
     ]
 
-    def __init__(self, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
+    def __init__(self, sandbox, workspace_path: str, index_path: str, blacklist: Optional[Set[str]] = None):
         """
         Initialize memory index
 
         Args:
-            workspace_path: Workspace path to index (folder)
-            index_path: Index file save path (.pkl file)
+            sandbox: Sandbox instance for file operations
+            workspace_path: Workspace virtual path to index (folder)
+            index_path: Index file save path (.pkl file) on host
             blacklist: Additional blacklist directory set
         """
         start_time = time.time()
-        
-        self.workspace_path = Path(workspace_path)
+
+        self.sandbox = sandbox
+        self.workspace_path = workspace_path.rstrip('/')
         self.index_path = Path(index_path)
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
-
+        logger.info(f"MemoryIndex: Index path created: {self.index_path},workspace_path: {self.workspace_path}")
         # In-memory data
         self.bm25 = None
         self.documents: Dict[int, FileDocument] = {}
         self.path_to_id: Dict[str, int] = {}
         self._next_doc_id = 0
-        self._last_folder_mtime: float = 0  # Last known folder mtime
-        self._last_file_count: int = 0  # Last known file count
+
+        # Directory mtime cache for incremental updates
+        self._dir_mtime_cache: Dict[str, float] = {}
 
         # Blacklist
         self.blacklist = self.DEFAULT_BLACKLIST.copy()
@@ -105,14 +109,14 @@ class MemoryIndex:
 
         # Load existing index
         self._load_index()
-        
+
         elapsed = time.time() - start_time
         logger.info(f"MemoryIndex: Initialized in {elapsed:.3f}s")
 
     def _load_index(self) -> bool:
         """Load saved index from single pkl file"""
         start_time = time.time()
-        
+
         try:
             if self.index_path.exists():
                 with open(self.index_path, 'rb') as f:
@@ -120,8 +124,7 @@ class MemoryIndex:
 
                 self.bm25 = data.get('bm25')
                 self.documents = data.get('documents', {})
-                self._last_folder_mtime = data.get('last_folder_mtime', 0)
-                self._last_file_count = data.get('last_file_count', 0)
+                self._dir_mtime_cache = data.get('dir_mtime_cache', {})
 
                 # Rebuild path -> id mapping
                 self.path_to_id = {doc.path: doc.doc_id for doc in self.documents.values()}
@@ -132,6 +135,12 @@ class MemoryIndex:
 
                 elapsed = time.time() - start_time
                 logger.info(f"MemoryIndex: Loaded {len(self.documents)} documents from {self.index_path} in {elapsed:.3f}s")
+                
+                # If documents is empty but mtime cache exists, clear mtime cache to force rescan
+                if not self.documents and self._dir_mtime_cache:
+                    logger.info(f"MemoryIndex: Documents empty but mtime cache exists, clearing mtime cache to force rescan")
+                    self._dir_mtime_cache = {}
+                
                 return True
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to load index: {e}")
@@ -139,21 +148,19 @@ class MemoryIndex:
             self.documents = {}
             self.path_to_id = {}
             self._next_doc_id = 0
-            self._last_folder_mtime = 0
-            self._last_file_count = 0
+            self._dir_mtime_cache = {}
 
         return False
 
     def _save_index(self) -> bool:
         """Save index to single pkl file"""
         start_time = time.time()
-        
+
         try:
             data = {
                 'bm25': self.bm25,
                 'documents': self.documents,
-                'last_folder_mtime': self._last_folder_mtime,
-                'last_file_count': self._last_file_count,
+                'dir_mtime_cache': self._dir_mtime_cache,
                 'document_count': len(self.documents)
             }
 
@@ -167,24 +174,65 @@ class MemoryIndex:
             logger.error(f"MemoryIndex: Failed to save index: {e}")
             return False
 
-    def _compute_file_hash(self, filepath: str) -> str:
-        """Compute file content hash"""
+    async def _get_dir_mtime(self, dir_path: str) -> float:
+        """Get directory modification time through sandbox"""
         try:
-            with open(filepath, 'rb') as f:
-                return hashlib.md5(f.read()).hexdigest()
+            logger.info(f"MemoryIndex: Executing stat command for: {dir_path}")
+            result = await self.sandbox.execute_command(
+                command=f"stat -c %Y {dir_path} 2>/dev/null || stat -f %m {dir_path}",
+                timeout=5
+            )
+            logger.info(f"MemoryIndex: Stat result for {dir_path}: success={result.success}, stdout={result.stdout.strip() if result.success else 'N/A'}")
+            if result.success:
+                return float(result.stdout.strip())
+        except Exception as e:
+            logger.warning(f"MemoryIndex: Error getting mtime for {dir_path}: {e}")
+        return 0
+
+    async def _compute_file_hash(self, filepath: str) -> str:
+        """Compute file content hash through sandbox using md5sum command"""
+        try:
+            result = await self.sandbox.execute_command(
+                command=f"md5sum {filepath}",
+                timeout=10
+            )
+            if result.success:
+                # md5sum output format: "hash  filename"
+                hash_value = result.stdout.strip().split()[0]
+                return hash_value
+            return ""
         except Exception:
             return ""
 
-    def _read_file_content(self, filepath: str, max_size: int = 100 * 1024) -> str:
-        """Read file content with size limit"""
+    async def _read_file_content(self, filepath: str, max_size: int = 10 * 1024 * 1024) -> str:
+        """Read file content with size limit through sandbox"""
         try:
-            size = os.path.getsize(filepath)
-            if size > max_size:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                    return f.read(max_size) + "\n[File too large, truncated]"
+            # Get file info
+            entries = await self.sandbox.list_directory(os.path.dirname(filepath))
+            file_info = None
+            for entry in entries:
+                if entry.path == filepath or entry.path.endswith(os.path.basename(filepath)):
+                    file_info = entry
+                    break
+
+            if not file_info:
+                return ""
+
+            if file_info.size > max_size:
+                # For large files, read first max_size bytes
+                # Use head command through sandbox
+                result = await self.sandbox.execute_command(
+                    command=f"head -c {max_size} {filepath}",
+                    timeout=10
+                )
+                if result.success:
+                    return result.stdout + "\n[File too large, truncated]"
+                return ""
             else:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                    return f.read()
+                content = await self.sandbox.read_file(filepath)
+                if isinstance(content, bytes):
+                    return content.decode('utf-8', errors='ignore')
+                return content
         except Exception as e:
             logger.warning(f"MemoryIndex: Failed to read file {filepath}: {e}")
             return ""
@@ -204,7 +252,7 @@ class MemoryIndex:
     def _build_bm25(self) -> None:
         """Build BM25 index"""
         start_time = time.time()
-        
+
         try:
             from rank_bm25 import BM25Okapi
 
@@ -234,14 +282,16 @@ class MemoryIndex:
             logger.error(f"MemoryIndex: Failed to build BM25: {e}")
             raise
 
-    def _is_path_blacklisted(self, path: Path) -> bool:
+    def _is_path_blacklisted(self, path: str) -> bool:
         """Check if path is in blacklist"""
-        try:
-            rel_path = path.relative_to(self.workspace_path)
-        except ValueError:
+        # Remove workspace prefix to get relative path
+        if path.startswith(self.workspace_path):
+            rel_path = path[len(self.workspace_path):].lstrip('/')
+        else:
             rel_path = path
 
-        for part in rel_path.parts:
+        parts = rel_path.split('/')
+        for part in parts:
             if part in self.blacklist:
                 return True
             for pattern in self.blacklist:
@@ -251,60 +301,140 @@ class MemoryIndex:
                         return True
         return False
 
-    def _get_folder_state(self, file_extensions: List[str]) -> tuple[float, int]:
+    async def _scan_directory_recursive(
+        self,
+        dir_path: str,
+        file_extensions: List[str],
+        stats: Dict[str, Any],
+        current_files: Set[str]
+    ) -> None:
         """
-        Get folder state for change detection
-        Returns: (latest_mtime, file_count)
+        Recursively scan directory, skipping unchanged subdirectories
+
+        Args:
+            dir_path: Current directory path to scan
+            file_extensions: Allowed file extensions
+            stats: Statistics dictionary to update
+            current_files: Set to collect current file paths
         """
-        latest_mtime = 0
-        file_count = 0
-        ext_set = set(ext.lower() for ext in file_extensions)
-        
+        # Check if directory is blacklisted
+        if self._is_path_blacklisted(dir_path):
+            return
+
+        # Get current directory mtime
+        logger.info(f"MemoryIndex: Checking mtime for dir: {dir_path}")
+        current_mtime = await self._get_dir_mtime(dir_path)
+        logger.info(f"MemoryIndex: Dir {dir_path} mtime: {current_mtime}")
+
+        # Check if directory has changed
+        last_mtime = self._dir_mtime_cache.get(dir_path, 0)
+        logger.info(f"MemoryIndex: Dir {dir_path} last_mtime: {last_mtime}, current_mtime: {current_mtime}")
+        if current_mtime <= last_mtime:
+            # Directory unchanged, skip scanning
+            # But we still need to collect files from this directory from existing index
+            logger.info(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
+            # Collect files from existing index that belong to this directory
+            for filepath in self.path_to_id.keys():
+                if filepath.startswith(dir_path + '/') or filepath == dir_path:
+                    current_files.add(filepath)
+            return
+
+        # Update cache
+        self._dir_mtime_cache[dir_path] = current_mtime
+
         try:
-            for root, dirs, files in os.walk(self.workspace_path):
-                # Filter out blacklisted directories
-                dirs[:] = [d for d in dirs if d not in self.blacklist]
-                
-                for file in files:
-                    # Quick extension check
-                    if Path(file).suffix.lower() not in ext_set:
-                        continue
-                    
-                    filepath = os.path.join(root, file)
-                    try:
-                        mtime = os.path.getmtime(filepath)
-                        if mtime > latest_mtime:
-                            latest_mtime = mtime
-                        file_count += 1
-                    except OSError:
-                        continue
-        except Exception as e:
-            logger.warning(f"MemoryIndex: Error getting folder state: {e}")
-        
-        return latest_mtime, file_count
-
-    def _collect_files(self, file_extensions: List[str]) -> Set[str]:
-        """Collect all files matching extensions in workspace"""
-        current_files: Set[str] = set()
-        ext_set = set(ext.lower() for ext in file_extensions)
-        
-        for root, dirs, files in os.walk(self.workspace_path):
-            # Filter out blacklisted directories
-            dirs[:] = [d for d in dirs if d not in self.blacklist]
+            # List directory entries
+            entries = await self.sandbox.list_directory(dir_path)
             
-            for file in files:
-                # Quick extension check
-                if Path(file).suffix.lower() not in ext_set:
-                    continue
-                
-                filepath = os.path.join(root, file)
-                current_files.add(str(Path(filepath).resolve()))
-        
-        return current_files
+            ext_set = set(ext.lower() for ext in file_extensions)
 
-    def update_index(self, file_extensions: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
+            for entry in entries:
+                if entry.is_dir:
+                    # Recursively scan subdirectory
+                    await self._scan_directory_recursive(
+                        entry.path, file_extensions, stats, current_files
+                    )
+                elif entry.is_file:
+                    # Check extension
+                    ext = os.path.splitext(entry.path)[1].lower()
+                    if ext not in ext_set:
+                        continue
+
+                    # Check blacklist
+                    if self._is_path_blacklisted(entry.path):
+                        continue
+
+                    current_files.add(entry.path)
+
+                    # Process file
+                    await self._process_file(entry, stats)
+
+        except Exception as e:
+            logger.warning(f"MemoryIndex: Error scanning directory {dir_path}: {e}", exc_info=True)
+
+    async def _process_file(self, entry, stats: Dict[str, Any]) -> None:
+        """Process a single file - add, update, or skip"""
+        filepath = entry.path
+        mtime = entry.modified_time or 0
+        size = entry.size or 0
+
+        try:
+            if filepath in self.path_to_id:
+                # File exists in index, check if modified
+                doc_id = self.path_to_id[filepath]
+                old_doc = self.documents[doc_id]
+
+                # Quick check: compare mtime and size
+                if old_doc.mtime == mtime and old_doc.size == size:
+                    stats["unchanged"] += 1
+                    return
+
+                # mtime or size changed, verify with hash
+                file_hash = await self._compute_file_hash(filepath)
+
+                if old_doc.hash != file_hash:
+                    # File content changed, update
+                    content = await self._read_file_content(filepath)
+                    self.documents[doc_id] = FileDocument(
+                        path=filepath,
+                        content=content,
+                        mtime=mtime,
+                        size=size,
+                        hash=file_hash,
+                        doc_id=doc_id
+                    )
+                    stats["updated"] += 1
+                    logger.debug(f"MemoryIndex: Updated file {filepath}")
+                else:
+                    # Only mtime changed, update mtime only
+                    old_doc.mtime = mtime
+                    stats["unchanged"] += 1
+            else:
+                # New file, add to index
+                file_hash = await self._compute_file_hash(filepath)
+                content = await self._read_file_content(filepath)
+                doc_id = self._next_doc_id
+                self._next_doc_id += 1
+
+                self.documents[doc_id] = FileDocument(
+                    path=filepath,
+                    content=content,
+                    mtime=mtime,
+                    size=size,
+                    hash=file_hash,
+                    doc_id=doc_id
+                )
+                self.path_to_id[filepath] = doc_id
+                stats["added"] += 1
+                logger.debug(f"MemoryIndex: Added file {filepath}")
+
+        except Exception as e:
+            logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
+            stats["errors"] += 1
+
+    async def update_index(self, file_extensions: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
         """
-        Update index (auto incremental)
+        Update index (auto incremental with directory-level change detection)
 
         Args:
             file_extensions: File extension whitelist, None for default
@@ -314,7 +444,7 @@ class MemoryIndex:
             Update statistics with timing info
         """
         total_start_time = time.time()
-        
+
         if file_extensions is None:
             file_extensions = self.DEFAULT_EXTENSIONS
 
@@ -331,120 +461,57 @@ class MemoryIndex:
             "skipped": False
         }
 
-        if not self.workspace_path.exists():
-            logger.warning(f"MemoryIndex: Workspace does not exist: {self.workspace_path}")
-            return stats
-
-        # Fast check: compare folder state (mtime + file count)
-        if not force and self.documents:
-            folder_mtime, file_count = self._get_folder_state(file_extensions)
-            # Check if mtime changed OR file count changed (handles deletions)
-            if folder_mtime <= self._last_folder_mtime and file_count == self._last_file_count:
-                stats["skipped"] = True
-                stats["total_time"] = time.time() - total_start_time
-                logger.info(f"MemoryIndex: No changes detected, skipping scan. Total time: {stats['total_time']:.3f}s")
-                return stats
-            self._last_folder_mtime = folder_mtime
-            self._last_file_count = file_count
-
         scan_start = time.time()
+
+        # Collect current files by recursively scanning directories
+        current_files: Set[str] = set()
+
+        if force:
+            # Force full scan: clear mtime cache
+            self._dir_mtime_cache = {}
+
+        # Start recursive scan from workspace root
+        logger.info(f"MemoryIndex: Starting scan from workspace: {self.workspace_path}")
+        await self._scan_directory_recursive(
+            self.workspace_path,
+            file_extensions,
+            stats,
+            current_files
+        )
         
-        # Collect current files
-        current_files = self._collect_files(file_extensions)
-        
-        # Check added and modified files
-        files_to_check = list(current_files)
-        for filepath in files_to_check:
-            try:
-                stat = os.stat(filepath)
-                mtime = stat.st_mtime
-                size = stat.st_size
+        logger.info(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_id)} indexed files")
 
-                if filepath in self.path_to_id:
-                    # File exists, check if modified
-                    doc_id = self.path_to_id[filepath]
-                    old_doc = self.documents[doc_id]
-
-                    # Optimization: compare mtime and size first
-                    if old_doc.mtime == mtime and old_doc.size == size:
-                        stats["unchanged"] += 1
-                        continue
-
-                    # mtime or size changed, need hash to confirm
-                    file_hash = self._compute_file_hash(filepath)
-                    
-                    if old_doc.hash != file_hash:
-                        # File modified, update
-                        content = self._read_file_content(filepath)
-                        self.documents[doc_id] = FileDocument(
-                            path=filepath,
-                            content=content,
-                            mtime=mtime,
-                            size=size,
-                            hash=file_hash,
-                            doc_id=doc_id
-                        )
-                        stats["updated"] += 1
-                        logger.debug(f"MemoryIndex: Updated file {filepath}")
-                    else:
-                        # Hash same, only mtime changed
-                        old_doc.mtime = mtime
-                        stats["unchanged"] += 1
-                else:
-                    # New file, add
-                    file_hash = self._compute_file_hash(filepath)
-                    content = self._read_file_content(filepath)
-                    doc_id = self._next_doc_id
-                    self._next_doc_id += 1
-
-                    self.documents[doc_id] = FileDocument(
-                        path=filepath,
-                        content=content,
-                        mtime=mtime,
-                        size=size,
-                        hash=file_hash,
-                        doc_id=doc_id
-                    )
-                    self.path_to_id[filepath] = doc_id
-                    stats["added"] += 1
-                    logger.debug(f"MemoryIndex: Added file {filepath}")
-
-            except Exception as e:
-                logger.warning(f"MemoryIndex: Failed to process file {filepath}: {e}")
-                stats["errors"] += 1
-
-        # Check deleted files
+        # Check for deleted files
         indexed_paths = set(self.path_to_id.keys())
         deleted_paths = indexed_paths - current_files
 
         for filepath in deleted_paths:
-            doc_id = self.path_to_id[filepath]
-            del self.documents[doc_id]
-            del self.path_to_id[filepath]
-            stats["removed"] += 1
-            logger.debug(f"MemoryIndex: Removed file {filepath}")
+            try:
+                doc_id = self.path_to_id[filepath]
+                del self.documents[doc_id]
+                del self.path_to_id[filepath]
+                stats["removed"] += 1
+                logger.debug(f"MemoryIndex: Removed file {filepath}")
+            except Exception as e:
+                logger.warning(f"MemoryIndex: Failed to remove file {filepath}: {e}")
 
         stats["scan_time"] = time.time() - scan_start
 
-        # Rebuild BM25 index
+        # Rebuild BM25 index if needed
         build_start = time.time()
         has_changes = stats["added"] > 0 or stats["updated"] > 0 or stats["removed"] > 0
-        
-        if has_changes:
+
+        if has_changes or force:
             self._build_bm25()
             stats["build_time"] = time.time() - build_start
-            
+
             save_start = time.time()
             self._save_index()
             stats["save_time"] = time.time() - save_start
-            
+
             stats["total_time"] = time.time() - total_start_time
             logger.info(f"MemoryIndex: Index updated - added:{stats['added']}, updated:{stats['updated']}, removed:{stats['removed']}, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, build:{stats['build_time']:.3f}s, save:{stats['save_time']:.3f}s, total:{stats['total_time']:.3f}s")
         else:
-            # Update folder state even if no file changes
-            self._last_folder_mtime, self._last_file_count = self._get_folder_state(file_extensions)
-            self._save_index()
-            
             stats["total_time"] = time.time() - total_start_time
             logger.info(f"MemoryIndex: No file changes, unchanged:{stats['unchanged']}, scan:{stats['scan_time']:.3f}s, total:{stats['total_time']:.3f}s")
 
@@ -453,51 +520,51 @@ class MemoryIndex:
     def _extract_snippets(self, content: str, query: str, snippet_size: int = 100) -> List[Dict[str, Any]]:
         """
         Extract snippets containing query terms from content
-        
+
         Args:
             content: File content
             query: Search query
             snippet_size: Size of each snippet in characters (default 100)
-            
+
         Returns:
             List of snippets with line numbers (max 1 per file)
         """
         import re
-        
+
         # Tokenize query to get search terms
         query_tokens = self._tokenize(query)
         if not query_tokens:
             return []
-        
+
         # Build regex pattern for all query tokens
         patterns = [re.escape(token) for token in query_tokens if len(token) > 1]
         if not patterns:
             patterns = [re.escape(token) for token in query_tokens]
-        
+
         combined_pattern = '|'.join(patterns)
-        
+
         content_lower = content.lower()
-        
+
         # Find first match only (max 1 snippet per file)
         match = re.search(combined_pattern, content_lower, re.IGNORECASE)
         if not match:
             return []
-        
+
         start_pos = max(0, match.start() - snippet_size // 2)
         end_pos = min(len(content), match.end() + snippet_size // 2)
-        
+
         # Find line number
         line_num = content_lower[:match.start()].count('\n') + 1
-        
+
         # Extract snippet
         snippet = content[start_pos:end_pos]
-        
+
         # Add ellipsis if truncated
         if start_pos > 0:
             snippet = "..." + snippet
         if end_pos < len(content):
             snippet = snippet + "..."
-        
+
         return [{
             "line_number": line_num,
             "snippet": snippet.strip(),
@@ -516,7 +583,7 @@ class MemoryIndex:
             List of search results with snippets
         """
         start_time = time.time()
-        
+
         if not self.bm25 or not self.documents:
             logger.warning("MemoryIndex: Index is empty, please update index first")
             return []
@@ -544,7 +611,7 @@ class MemoryIndex:
 
                 # Extract relevant snippets
                 snippets = self._extract_snippets(doc.content, query)
-                
+
                 # Build preview from snippets or fallback to first 500 chars
                 if snippets:
                     preview = "\n\n".join([
@@ -578,13 +645,12 @@ class MemoryIndex:
     def clear_index(self) -> None:
         """Clear index"""
         start_time = time.time()
-        
+
         self.bm25 = None
         self.documents = {}
         self.path_to_id = {}
         self._next_doc_id = 0
-        self._last_folder_mtime = 0
-        self._last_file_count = 0
+        self._dir_mtime_cache = {}
 
         if self.index_path.exists():
             self.index_path.unlink()

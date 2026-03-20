@@ -1,3 +1,4 @@
+import os
 import time
 import traceback
 import uuid
@@ -12,10 +13,11 @@ from sagents.session_runtime import get_global_session_manager
 
 
 class SAgent:
-    def __init__(self, session_root_space: str, enable_obs: bool = True, use_sandbox: bool = True):
+    def __init__(self, session_root_space: str, enable_obs: bool = True, sandbox_type: Optional[str] = None):
         self.session_root_space = str(session_root_space)
         self.enable_obs = enable_obs
-        self.use_sandbox = use_sandbox
+        # 优先使用传入的参数，其次从环境变量读取，默认使用 local
+        self.sandbox_type = sandbox_type or os.environ.get("SAGE_SANDBOX_MODE", "local")
         self.session_manager = get_global_session_manager(session_root_space=self.session_root_space, enable_obs=enable_obs)
 
     async def run_stream(
@@ -24,12 +26,14 @@ class SAgent:
         model: Any,
         model_config: Dict[str, Any],
         system_prefix: str,
-        agent_workspace: str,
+        host_workspace: str,
         default_memory_type: str,
         tool_manager: Optional[Union[ToolManager, ToolProxy]] = None,
         skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        virtual_workspace: str = "/sage-workspace",
         deep_thinking: Optional[Union[bool, str]] = None,
         max_loop_count: int = 50,
         agent_mode: Optional[str] = None,
@@ -45,8 +49,8 @@ class SAgent:
             raise ValueError("run_stream 参数 model 不能为空")
         if not isinstance(model_config, dict) or not model_config:
             raise ValueError("run_stream 参数 model_config 必须是非空字典")
-        if agent_workspace is None or str(agent_workspace).strip() == "":
-            raise ValueError("run_stream 参数 agent_workspace 不能为空")
+        if host_workspace is None or str(host_workspace).strip() == "":
+            raise ValueError("run_stream 参数 host_workspace 不能为空")
         if default_memory_type is None or str(default_memory_type).strip() == "":
             raise ValueError("run_stream 参数 default_memory_type 不能为空")
 
@@ -68,14 +72,16 @@ class SAgent:
             elif isinstance(msg, dict) and not msg.get("session_id"):
                 msg["session_id"] = session_id
 
-        session = self.session_manager.get_or_create(session_id, use_sandbox=self.use_sandbox)
+        session = self.session_manager.get_or_create(session_id, sandbox_type=self.sandbox_type)
         session.configure_runtime(
             model=model,
             model_config=model_config,
             system_prefix=system_prefix,
             session_root_space=self.session_root_space,
-            agent_workspace=str(agent_workspace),
+            host_workspace=str(host_workspace),  # 宿主机工作区路径
+            virtual_workspace=virtual_workspace,  # 虚拟工作区路径（沙箱内）
             default_memory_type=default_memory_type,
+            agent_id=agent_id,
         )
 
         if session.observability_manager:

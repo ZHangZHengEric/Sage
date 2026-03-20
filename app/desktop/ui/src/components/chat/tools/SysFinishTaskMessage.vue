@@ -1,5 +1,8 @@
 <template>
-  <div class="sys-finish-task-message w-full max-w-[800px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80">
+  <div 
+    class="sys-finish-task-message w-full max-w-[800px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
+    @click="handleClick"
+  >
     <!-- Header Section -->
     <div class="flex items-center justify-between p-3 border-b bg-muted/20">
       <div class="flex items-center gap-2">
@@ -133,8 +136,14 @@ const props = defineProps({
   isLatest: {
     type: Boolean,
     default: false
+  },
+  openWorkbench: {
+    type: Function,
+    default: null
   }
 })
+
+const emit = defineEmits(['click'])
 
 const { t } = useLanguage()
 
@@ -233,6 +242,11 @@ const rawData = computed(() => {
 const hasRawData = computed(() => {
   return Object.keys(args.value).length > 0 || props.toolResult
 })
+
+const handleClick = () => {
+  // 触发点击事件，让父组件打开工作台
+  emit('click', props.toolCall, props.toolResult)
+}
 </script>
 
 <style scoped>

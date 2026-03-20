@@ -1,6 +1,5 @@
 from typing import Dict, Any
 from sagents.tool.tool_base import tool
-from sagents.skill.skill_manager import get_skill_manager
 from sagents.utils.logger import logger
 
 class SkillTool:
@@ -33,29 +32,23 @@ class SkillTool:
         Returns:
             str: A message indicating the result of the operation.
         """
-        skill_manager = None
-        session_context = None
+        if not session_id:
+            raise ValueError("session_id is required for load_skill")
 
-        if session_id:
-            try:
-                # Use local import to avoid circular dependency
-                from sagents.session_runtime import get_global_session_manager
-                session_manager = get_global_session_manager()
-                session = session_manager.get(session_id)
-                if session and session.session_context:
-                    session_context = session.session_context
-                    if session_context.skill_manager:
-                        skill_manager = session_context.skill_manager
-            except Exception as e:
-                logger.warning(f"Failed to get skill manager from session context for {session_id}: {e}")
+        # Use local import to avoid circular dependency
+        from sagents.session_runtime import get_global_session_manager
+        session_manager = get_global_session_manager()
+        session = session_manager.get(session_id)
+        if not session or not session.session_context:
+            raise ValueError(f"Invalid session_id: {session_id}")
 
-        # Fallback to default getter if not found in session
-        if not skill_manager:
-            logger.warning(f"Using default get_skill_manager() for skill loading. Session ID: {session_id}")
-            skill_manager = get_skill_manager()
+        session_context = session.session_context
 
-        if not skill_manager:
-            return "Error: SkillManager not initialized."
+        # Use sandbox skill manager if available, otherwise raise error
+        if hasattr(session_context, 'sandbox_skill_manager') and session_context.sandbox_skill_manager:
+            skill_manager = session_context.sandbox_skill_manager
+        else:
+            raise ValueError("Sandbox skill manager not available")
 
         # 检查技能是否存在
         if skill_name not in skill_manager.skills:
@@ -64,25 +57,12 @@ class SkillTool:
         # 获取技能信息
         skill = skill_manager.skills[skill_name]
 
-        # 获取沙箱虚拟路径
+        # 获取沙箱虚拟路径（通过统一接口）
         sandbox_virtual_path = "/sage-workspace"  # 默认值
-        if session_context and hasattr(session_context, 'agent_workspace_sandbox') and session_context.agent_workspace_sandbox:
-            if hasattr(session_context.agent_workspace_sandbox, 'file_system') and session_context.agent_workspace_sandbox.file_system:
-                if hasattr(session_context.agent_workspace_sandbox.file_system, 'virtual_path'):
-                    sandbox_virtual_path = session_context.agent_workspace_sandbox.file_system.virtual_path
+        if session_context and hasattr(session_context, 'sandbox') and session_context.sandbox:
+            sandbox_virtual_path = session_context.sandbox.workspace_path
 
-        # 构建返回信息
-        # 这里返回的信息会被作为工具执行结果，最终可能会被添加到系统上下文中（取决于调用者的处理方式）
-        # 但根据用户需求，这个工具的主要目的是"加载"，即返回内容给Agent看，Agent再根据内容决定如何行动
-        # 或者系统自动将这些内容注入到 System Prompt 中？
-        # 用户说："只返回成功加载skill，并添加到系统指令。" -> 这通常意味着我们需要某种机制来修改 System Prompt
-        # 但在 Tool 执行上下文中，Tool 很难直接修改 System Prompt。
-        # 通常的做法是 Tool 返回详细信息，这些信息作为 Tool Output 进入 History，Agent 就能看到了。
-        # 用户提到的 "添加到系统指令" 可能是指在 Tool Output 中包含 "System Notification: Skill Loaded..."
-        # 或者是在 Agent 框架层面有机制去监听 Tool Call 并更新 System Prompt。
-        # 鉴于 Agent 框架的通常实现，Tool Output 本身就是 Context 的一部分。
-        # 所以我们把 SKILL.md 的内容和文件树作为 Tool Output 返回即可。
-
+        # 构建技能内容
         result_content = [
             f"## Skill: {skill.name}",
             "",
@@ -96,9 +76,65 @@ class SkillTool:
             skill.instructions
         ]
 
-        # 返回包含 skill_name 和 content 的字典，方便 tool_manager 处理
-        import json
-        return json.dumps({
-            "skill_name": skill.name,
-            "content": "\n".join(result_content)
-        }, ensure_ascii=False, indent=2)
+        skill_content = "\n".join(result_content)
+
+        # 更新 session_context 中的 active_skills
+        if session_context:
+            try:
+                self._update_active_skills(session_context, skill.name, skill_content)
+            except Exception as e:
+                logger.error(f"Failed to update active_skills for skill '{skill_name}': {e}")
+
+        # 返回简洁的成功消息
+        active_skills = session_context.system_context.get('active_skills', []) if session_context else []
+        skill_list = ", ".join([s.get('skill_name', 'Unknown') for s in active_skills])
+        return f"Skill '{skill.name}' loaded successfully. Current Active skills: {skill_list}. Total skills: {len(active_skills)}. Please follow the instructions in the System Prompt."
+
+    def _update_active_skills(self, session_context, skill_name: str, skill_content: str):
+        """
+        更新 session_context 中的 active_skills 列表
+        """
+        from sagents.context.messages.message_manager import MessageManager
+
+        # Initialize active_skills list if not exists
+        if 'active_skills' not in session_context.system_context:
+            session_context.system_context['active_skills'] = []
+
+        active_skills = session_context.system_context['active_skills']
+
+        # Check if skill already exists, remove old entry
+        active_skills = [s for s in active_skills if s.get('skill_name') != skill_name]
+
+        # Add new skill to the end (newest)
+        active_skills.append({
+            'skill_name': skill_name,
+            'skill_content': skill_content
+        })
+
+        # Limit total tokens to 8000, remove oldest if exceeded
+        MAX_SKILL_TOKENS = 8000
+        total_tokens = 0
+
+        for skill in active_skills:
+            content = skill.get('skill_content', '')
+            tokens = MessageManager.calculate_str_token_length(content)
+            total_tokens += tokens
+
+        # Remove oldest skills if total exceeds limit, but keep at least one
+        while total_tokens > MAX_SKILL_TOKENS and len(active_skills) > 1:
+            removed_skill = active_skills.pop(0)
+            removed_content = removed_skill.get('skill_content', '')
+            removed_tokens = MessageManager.calculate_str_token_length(removed_content)
+            total_tokens -= removed_tokens
+            logger.info(f"Removed skill '{removed_skill.get('skill_name')}' due to token limit. Total tokens: {total_tokens}")
+
+        session_context.system_context['active_skills'] = active_skills
+
+        # Also update legacy field for backward compatibility
+        all_instructions = "\n\n".join([
+            f"=== {s.get('skill_name', 'Unknown')} ===\n{s.get('skill_content', '')}"
+            for s in active_skills
+        ])
+        session_context.system_context['active_skill_instruction'] = all_instructions
+
+        logger.info(f"Updated active_skills in session_context. Active skills: {', '.join([s.get('skill_name', 'Unknown') for s in active_skills])}")

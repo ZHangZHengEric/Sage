@@ -87,7 +87,7 @@ class Sandbox:
         
         # 始终创建 SandboxFileSystem
         # 当 host_path == virtual_workspace 时，创建"无沙箱功能的沙箱"
-        from sagents.utils.sandbox.filesystem import SandboxFileSystem
+        from .filesystem import SandboxFileSystem
         
         # host_workspace 是必填参数
         # 检查是否与 virtual_workspace 相同
@@ -161,7 +161,7 @@ class Sandbox:
         logger.info(f"虚拟环境创建任务已启动（后台）: {self.venv_dir}")
     
     def _init_isolation(self):
-        from sagents.utils.sandbox.isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
+        from .isolation import SubprocessIsolation, SeatbeltIsolation, BwrapIsolation
         
         logger.info(f"初始化隔离策略: {self.isolation_mode}")
         
@@ -315,20 +315,15 @@ class Sandbox:
         
         # 保存原始环境变量
         original_path = _os.environ.get('PATH', '')
-        original_virtenv = _os.environ.get('VIRTUAL_ENV', '')
         
         try:
             # 设置环境变量使用沙箱 venv
             if _sys.platform == 'win32':
                 venv_bin = _os.path.join(self.venv_dir, 'Scripts')
-                python_exe = _os.path.join(venv_bin, 'python.exe')
             else:
                 venv_bin = _os.path.join(self.venv_dir, 'bin')
-                python_exe = _os.path.join(venv_bin, 'python')
                 
             _os.environ['PATH'] = venv_bin + _os.pathsep + original_path
-            _os.environ['VIRTUAL_ENV'] = self.venv_dir
-            _os.environ['SANDBOX_PYTHON_PATH'] = python_exe
             
             logger.info(f"[_run_with_venv] 使用 venv: {self.venv_dir}")
             
@@ -342,8 +337,3 @@ class Sandbox:
         finally:
             # 恢复原始环境变量
             _os.environ['PATH'] = original_path
-            if original_virtenv:
-                _os.environ['VIRTUAL_ENV'] = original_virtenv
-            else:
-                _os.environ.pop('VIRTUAL_ENV', None)
-            _os.environ.pop('SANDBOX_PYTHON_PATH', None)
