@@ -116,9 +116,10 @@ export const agentAPI = {
    * 下载文件
    * @param {string} agentId - 会话ID
    * @param {string} filePath - 文件路径
+   * @param {string} sessionId - 会话ID (可选)
    * @returns {Promise<Blob>}
    */
-  downloadFile: async (agentId, filePath) => {
+  downloadFile: async (agentId, filePath, sessionId) => {
     // 如果是 http/https 链接，直接下载
     if (filePath && (filePath.startsWith('http://') || filePath.startsWith('https://'))) {
       const response = await fetch(filePath, {
@@ -132,7 +133,13 @@ export const agentAPI = {
     }
 
     const apiPrefix = import.meta.env.VITE_BACKEND_API_PREFIX || '';
-    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?file_path=${encodeURIComponent(filePath)}`
+    const params = new URLSearchParams({
+      file_path: filePath
+    })
+    if (sessionId) {
+      params.set('session_id', sessionId)
+    }
+    const url = `${apiPrefix}/api/agent/${agentId}/file_workspace/download?${params.toString()}`
 
     // 准备请求头
     const headers = {
