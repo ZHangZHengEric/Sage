@@ -1,7 +1,6 @@
 from typing import List, Dict, Any, Optional, Union
 from .tool_manager import ToolManager
 from sagents.utils.logger import logger
-from sagents.context.session_context import SessionContext
 
 class ToolProxy:
     """
@@ -132,16 +131,22 @@ class ToolProxy:
         except ValueError:
             return None
     
-    async def run_tool_async(self, tool_name: str, session_context: SessionContext, **kwargs) -> Any:
+    async def run_tool_async(self, tool_name: str, session_id: str, **kwargs) -> Any:
         """
         异步执行工具（仅限可用工具）
+        
+        Args:
+            tool_name: 工具名称
+            session_id: 会话ID
+            **kwargs: 其他工具参数
         """
         self._check_tool_available(tool_name)
-        
+
         for tm in self.tool_managers:
             if tm.get_tool(tool_name):
-                return await tm.run_tool_async(tool_name, session_context, **kwargs)
-                
+                # 只传递 session_id，不传递 session_context
+                return await tm.run_tool_async(tool_name, session_id=session_id, **kwargs)
+
         raise ValueError(f"Tool {tool_name} not found")
 
     async def register_mcp_server(self, server_name: str, config: dict) -> Any:

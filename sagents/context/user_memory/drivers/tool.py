@@ -65,14 +65,13 @@ class ToolMemoryDriver(IMemoryDriver):
 
         return True
 
-    async def remember(self, user_id: str, memory_key: str, content: str, memory_type: str, tags: str, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> str:
+    async def remember(self, user_id: str, memory_key: str, content: str, memory_type: str, tags: str, session_id: Optional[str] = None) -> str:
         if not self._available:
             return "记忆功能不可用"
 
         try:
             return await self.tool_manager.run_tool_async(
                 tool_name='remember_user_memory',
-                session_context=session_context,
                 session_id=session_id,
                 user_id=user_id,
                 memory_key=memory_key,
@@ -84,14 +83,13 @@ class ToolMemoryDriver(IMemoryDriver):
             logger.error(f"记住记忆失败: {e}")
             return f"记住记忆失败：{str(e)}"
 
-    async def forget(self, user_id: str, memory_key: str, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> str:
+    async def forget(self, user_id: str, memory_key: str, session_id: Optional[str] = None) -> str:
         if not self._available:
             return "记忆功能不可用"
 
         try:
             return await self.tool_manager.run_tool_async(
                 tool_name='forget_user_memory',
-                session_context=session_context,
                 session_id=session_id,
                 user_id=user_id,
                 memory_key=memory_key
@@ -170,14 +168,13 @@ class ToolMemoryDriver(IMemoryDriver):
             logger.warning(f"解析记忆搜索结果失败: {e}")
             return []
 
-    async def recall(self, user_id: str, query: str, limit: int, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> List[MemoryEntry]:
+    async def recall(self, user_id: str, query: str, limit: int, session_id: Optional[str] = None) -> List[MemoryEntry]:
         if not self._available:
             return []
 
         try:
             result = await self.tool_manager.run_tool_async(
                 tool_name='recall_user_memory',
-                session_context=session_context,
                 session_id=session_id,
                 user_id=user_id,
                 query=query,
@@ -191,14 +188,13 @@ class ToolMemoryDriver(IMemoryDriver):
             logger.error(f"回忆记忆失败: {e}")
             return []
 
-    async def recall_by_type(self, user_id: str, memory_type: str, query: str, limit: int, session_id: Optional[str] = None, session_context: Optional[Any] = None) -> List[MemoryEntry]:
+    async def recall_by_type(self, user_id: str, memory_type: str, query: str, limit: int, session_id: Optional[str] = None) -> List[MemoryEntry]:
         if not self._available:
             return []
 
         try:
             result = await self.tool_manager.run_tool_async(
                 tool_name='recall_user_memory_by_type',
-                session_context=session_context,
                 session_id=session_id,
                 user_id=user_id,
                 memory_type=memory_type,

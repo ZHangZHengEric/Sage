@@ -1066,14 +1066,8 @@ class AgentBase(ABC):
             # 如果 arguments 中有 session_id，移除它（因为会作为显式参数传递）
             call_kwargs.pop('session_id', None)
 
-            from sagents.session_runtime import get_global_session_manager
-            session_manager = get_global_session_manager()
-            session = session_manager.get(session_id)
-            session_context = session.session_context if session else None
-
             tool_response = await tool_manager.run_tool_async(
                 tool_name,
-                session_context=session_context,
                 session_id=session_id,
                 **call_kwargs
             )
