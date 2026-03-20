@@ -21,7 +21,7 @@
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
+                  <TableHead>{{ t('common.id') }}</TableHead>
                   <TableHead>{{ t('user.username') }}</TableHead>
                   <TableHead>{{ t('user.nickname') }}</TableHead>
                   <TableHead>{{ t('user.email') }}</TableHead>
@@ -31,11 +31,11 @@
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow v-for="user in userList" :key="user.id">
-                  <TableCell>{{ user.id }}</TableCell>
+                <TableRow v-for="user in userList" :key="user.user_id">
+                  <TableCell>{{ user.user_id }}</TableCell>
                   <TableCell>{{ user.username }}</TableCell>
-                  <TableCell>{{ user.nickname }}</TableCell>
-                  <TableCell>{{ user.email }}</TableCell>
+                  <TableCell>{{ user.nickname || '-' }}</TableCell>
+                  <TableCell>{{ user.email || '-' }}</TableCell>
                   <TableCell>
                     <Badge :variant="user.role === 'admin' ? 'default' : 'secondary'">
                       {{ user.role }}
@@ -54,7 +54,7 @@
 
           <!-- Mobile View -->
           <div class="md:hidden p-4 space-y-4">
-            <div v-for="user in userList" :key="user.id" class="border rounded-lg p-4 space-y-3 bg-card text-card-foreground shadow-sm">
+            <div v-for="user in userList" :key="user.user_id" class="border rounded-lg p-4 space-y-3 bg-card text-card-foreground shadow-sm">
               <div class="flex justify-between items-start">
                 <div>
                   <div class="font-medium flex items-center gap-2">
@@ -72,16 +72,16 @@
               
               <div class="text-sm space-y-1 text-muted-foreground">
                 <div class="flex items-center gap-2">
-                  <span class="w-12 shrink-0">Email:</span>
-                  <span class="text-foreground truncate">{{ user.email }}</span>
+                  <span class="w-20 shrink-0">{{ t('user.email') }}:</span>
+                  <span class="text-foreground truncate">{{ user.email || '-' }}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="w-12 shrink-0">Date:</span>
+                  <span class="w-20 shrink-0">{{ t('user.createdAt') }}:</span>
                   <span class="text-foreground">{{ formatDate(user.created_at) }}</span>
                 </div>
                 <div class="flex items-center gap-2 text-xs text-muted-foreground/70">
-                   <span class="w-12 shrink-0">ID:</span>
-                   <span>{{ user.id }}</span>
+                   <span class="w-20 shrink-0">{{ t('common.id') }}:</span>
+                   <span>{{ user.user_id }}</span>
                 </div>
               </div>
             </div>
@@ -142,10 +142,10 @@
     <Dialog v-model:open="showDeleteDialog">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{{ t('user.deleteConfirm') }}</DialogTitle>
+          <DialogTitle>{{ t('common.delete') }}</DialogTitle>
         </DialogHeader>
         <div class="py-4">
-          <p>{{ t('user.deleteConfirmMessage', { username: userToDelete?.username }) }}</p>
+          <p>{{ t('user.deleteConfirm', { name: userToDelete?.username || '' }) }}</p>
         </div>
         <DialogFooter>
             <Button variant="outline" @click="showDeleteDialog = false">{{ t('common.cancel') }}</Button>
@@ -158,8 +158,8 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { userAPI } from '../api/user'
-import { useLanguage } from '../utils/i18n'
+import { userAPI } from '../api/user.js'
+import { useLanguage } from '../utils/i18n.js'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -179,7 +179,7 @@ const loading = ref(false)
 const showAddUserDialog = ref(false)
 const showDeleteDialog = ref(false)
 const userToDelete = ref(null)
-const newUser = ref({ username: '', password: '', role: 'user' })
+const newUser = ref({ username: '', password: '', role: 'user', email: '', phonenum: '' })
 
 const fetchUsers = async () => {
     try {
@@ -212,6 +212,7 @@ const handleAddUser = async () => {
         newUser.value = {
             username: '',
             password: '',
+            role: 'user',
             email: '',
             phonenum: ''
         }
@@ -230,7 +231,7 @@ const confirmDelete = async () => {
     if (!userToDelete.value) return
     
     try {
-        await userAPI.deleteUser(userToDelete.value.id)
+        await userAPI.deleteUser(userToDelete.value.user_id)
         toast.success(t('user.deleteSuccess'))
         showDeleteDialog.value = false
         userToDelete.value = null
