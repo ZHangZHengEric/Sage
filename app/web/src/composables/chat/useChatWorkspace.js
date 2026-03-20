@@ -42,6 +42,7 @@ export const useChatWorkspace = ({
   const downloadWorkspaceFile = async (id, itemOrPath) => {
     if (!id || !itemOrPath) return
     let filePath = typeof itemOrPath === 'string' ? itemOrPath : itemOrPath.path
+    const sid = typeof sessionId?.value === 'string' ? sessionId.value : sessionId
     
     // Clean path: remove /sage-workspace/ prefix and leading slash
     if (filePath) {
@@ -56,7 +57,7 @@ export const useChatWorkspace = ({
     const isDirectory = typeof itemOrPath === 'object' ? itemOrPath.is_directory : false
     if (!filePath) return
     try {
-      const blob = await agentAPI.downloadFile(id, filePath)
+      const blob = await agentAPI.downloadFile(id, filePath, sid)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.style.display = 'none'
