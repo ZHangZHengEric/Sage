@@ -88,7 +88,13 @@ class MemoryRecallAgent(AgentBase):
         
         session_id = session_context.session_id
         message_manager = session_context.message_manager
-
+        tool_manager = session_context.tool_manager
+        # 如果 search_memory 不可用，则不进行记忆召回
+        if 'search_memory' not in tool_manager.list_all_tools_name():
+            logger.warning("MemoryRecallAgent: search_memory 工具不可用，无法进行记忆召回")
+            yield []
+            return
+        
         logger.info(f"MemoryRecallAgent: 开始为会话 {session_id} 召回记忆")
 
         # 获取历史消息
