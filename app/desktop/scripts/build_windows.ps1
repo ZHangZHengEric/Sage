@@ -14,7 +14,7 @@ $CoreDir = Join-Path $AppDir "core"
 $UiDir = Join-Path $AppDir "ui"
 $TauriDir = Join-Path $AppDir "tauri"
 $TauriSidecarDir = Join-Path $TauriDir "sidecar"
-$TauriNodeResourcesDir = Join-Path $TauriDir "resources/node"
+$TauriNodeSidecarDir = Join-Path $TauriSidecarDir "node"
 $TauriBinDir = Join-Path $TauriDir "bin"
 $DistDir = Join-Path $AppDir "dist"
 $CacheDir = Join-Path $AppDir ".build_cache"
@@ -279,22 +279,19 @@ function Build-Frontend {
 }
 
 function Prepare-BundledNodeRuntime {
-    param($TauriNodeResourcesDirParam)
+    param($TauriNodeSidecarDirParam)
 
     Write-Host "[Node Runtime] Preparing bundled Node runtime..." -ForegroundColor Cyan
 
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Host "[ERROR] node not found. Cannot prepare resources/node." -ForegroundColor Red
+        Write-Host "[ERROR] node not found. Cannot prepare sidecar/node." -ForegroundColor Red
         exit 1
     }
 
-    if (-not (Test-Path $TauriNodeResourcesDirParam)) {
-        New-Item -ItemType Directory -Force -Path $TauriNodeResourcesDirParam | Out-Null
+    if (Test-Path $TauriNodeSidecarDirParam) {
+        Remove-Item -Recurse -Force $TauriNodeSidecarDirParam
     }
-
-    Get-ChildItem -Force $TauriNodeResourcesDirParam -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notin @("README.md", ".gitignore") } |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $TauriNodeSidecarDirParam | Out-Null
 
     if ($env:SAGE_BUNDLED_NODE_SOURCE) {
         $NodeRoot = $env:SAGE_BUNDLED_NODE_SOURCE
@@ -304,13 +301,12 @@ function Prepare-BundledNodeRuntime {
         }
 
         Get-ChildItem -Force $NodeRoot |
-            Where-Object { $_.Name -notin @("README.md", ".gitignore") } |
             ForEach-Object {
-                Copy-Item -Path $_.FullName -Destination $TauriNodeResourcesDirParam -Recurse -Force
+                Copy-Item -Path $_.FullName -Destination $TauriNodeSidecarDirParam -Recurse -Force
             }
 
         Write-Host "[Node Runtime] Using custom source: $NodeRoot" -ForegroundColor Green
-        Write-Host "[Node Runtime] Synced to: $TauriNodeResourcesDirParam" -ForegroundColor Green
+        Write-Host "[Node Runtime] Synced to: $TauriNodeSidecarDirParam" -ForegroundColor Green
         return
     }
 
@@ -336,15 +332,15 @@ function Prepare-BundledNodeRuntime {
         exit 1
     }
 
-    $TargetNodeModulesDir = Join-Path $TauriNodeResourcesDirParam "node_modules"
+    $TargetNodeModulesDir = Join-Path $TauriNodeSidecarDirParam "node_modules"
     New-Item -ItemType Directory -Force -Path $TargetNodeModulesDir | Out-Null
 
-    Copy-Item -Path $NodeExe -Destination (Join-Path $TauriNodeResourcesDirParam "node.exe") -Force
+    Copy-Item -Path $NodeExe -Destination (Join-Path $TauriNodeSidecarDirParam "node.exe") -Force
     Copy-Item -Path $NpmPackageDir -Destination (Join-Path $TargetNodeModulesDir "npm") -Recurse -Force
 
     Write-Host "[Node Runtime] Node executable: $NodeExe" -ForegroundColor Green
     Write-Host "[Node Runtime] npm package dir: $NpmPackageDir" -ForegroundColor Green
-    Write-Host "[Node Runtime] Synced minimal runtime to: $TauriNodeResourcesDirParam" -ForegroundColor Green
+    Write-Host "[Node Runtime] Synced minimal runtime to: $TauriNodeSidecarDirParam" -ForegroundColor Green
 }
 
 Write-Host ">>> Starting build tasks..." -ForegroundColor Cyan
@@ -365,7 +361,7 @@ Write-Host ">>> Build completed." -ForegroundColor Green
 
 Set-Location $RootDir
 
-Prepare-BundledNodeRuntime -TauriNodeResourcesDirParam $TauriNodeResourcesDir
+Prepare-BundledNodeRuntime -TauriNodeSidecarDirParam $TauriNodeSidecarDir
 
 Write-Host "Building Tauri Windows executable..." -ForegroundColor Cyan
 Set-Location $TauriDir

@@ -86,12 +86,16 @@ fn build_prepended_path(path: &Path, current_path: Option<OsString>) -> Result<O
 fn resolve_bundled_node_runtime(app_handle: &tauri::AppHandle) -> Option<NodeRuntime> {
     let node_dir = app_handle
         .path()
-        .resolve("node", BaseDirectory::Resource)
-        .ok()?;
-
-    if !node_dir.exists() {
-        return None;
-    }
+        .resolve("sidecar/node", BaseDirectory::Resource)
+        .ok()
+        .filter(|path| path.exists())
+        .or_else(|| {
+            app_handle
+                .path()
+                .resolve("node", BaseDirectory::Resource)
+                .ok()
+                .filter(|path| path.exists())
+        })?;
 
     let node_executable = first_existing_path([
         node_dir.join("node"),
@@ -231,8 +235,12 @@ async fn initialize_sage_node_modules(
 
     // 安装预设的 npx 包
     println!("Installing preset npx packages...");
-    println!("Using Node.js: {:?}", node_executable);
-    println!("Using NPM CLI: {:?}", npm_cli_path);
+    if let Some(runtime) = node_runtime.as_ref() {
+        println!("Using Node.js: {:?}", runtime.node_executable);
+        println!("Using NPM CLI: {:?}", runtime.npm_cli);
+    } else {
+        println!("Using system npm to install preset npx packages");
+    }
     
     for package in PRESET_NPX_PACKAGES {
         let package_name = package;
@@ -826,6 +834,9 @@ fn main() {
             // Initialize .sage_node_modules and set environment variable
             let app_handle_clone = app.handle().clone();
             let node_runtime_for_init = bundled_node_runtime.clone();
+            let bundled_node_path = bundled_node_runtime
+                .as_ref()
+                .map(|runtime| runtime.bin_dir.to_string_lossy().to_string());
             tauri::async_runtime::spawn(async move {
                 match initialize_sage_node_modules(node_runtime_for_init).await {
                     Ok(node_modules_dir) => {
