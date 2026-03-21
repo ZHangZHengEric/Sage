@@ -36,6 +36,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          architecture: ${{ matrix.arch == 'x86_64' && 'x64' || 'arm64' }}
           cache: 'npm'
           cache-dependency-path: app/desktop/ui/package-lock.json
 
