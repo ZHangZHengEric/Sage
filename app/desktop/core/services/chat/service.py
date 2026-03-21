@@ -31,6 +31,50 @@ from .utils import (
 _SAGENT_CACHE = {}
 
 
+async def _copy_sage_usage_docs_to_agent_workspace(agent_id: str, agent_workspace_base: str) -> None:
+    """将 sage-usage-docs 复制到 agent workspace 下的 sage_usage_docs 目录"""
+    try:
+        import shutil
+        from pathlib import Path
+        
+        # 源文档目录
+        sage_docs_source = Path.home() / ".sage" / "sage-usage-docs"
+        if not sage_docs_source.exists():
+            logger.debug(f"sage-usage-docs 目录不存在: {sage_docs_source}")
+            return
+        
+        # 目标路径：workspace/agent_id/sage_usage_docs/
+        agent_workspace = Path(agent_workspace_base) / agent_id
+        target_dir = agent_workspace / "sage_usage_docs"
+        
+        # 检查是否需要复制（目标不存在或源文件有更新）
+        need_copy = False
+        if not target_dir.exists():
+            need_copy = True
+            logger.info(f"sage_usage_docs 不存在，需要复制到: {target_dir}")
+        else:
+            # 简单检查：比较文件数量
+            source_files = list(sage_docs_source.rglob("*.md"))
+            target_files = list(target_dir.rglob("*.md"))
+            if len(source_files) > len(target_files):
+                need_copy = True
+                logger.info(f"sage_usage_docs 文件数量不匹配，需要更新: {len(source_files)} vs {len(target_files)}")
+        
+        if need_copy:
+            # 创建目标目录
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 复制文档
+            shutil.copytree(sage_docs_source, target_dir, dirs_exist_ok=True)
+            logger.info(f"已将 sage-usage-docs 复制到 agent workspace: {target_dir}")
+        else:
+            logger.debug(f"sage_usage_docs 已存在于 agent workspace: {target_dir}")
+            
+    except Exception as e:
+        # 复制失败不应影响主流程
+        logger.warning(f"复制 sage-usage-docs 到 agent workspace 失败: {e}")
+
+
 async def populate_request_from_agent_config(
     request: StreamRequest, *, require_agent_id: bool = False
 ) -> None:
@@ -176,14 +220,17 @@ async def populate_request_from_agent_config(
         agent_workspace = os.path.join(sage_home, "agents")
         # _merge_dict("system_context", {"agent_host_workspace_path": os.path.join(agent_workspace, request.agent_id)})
         
-        # 添加 sage-usage-docs 到 external_paths
-        sage_usage_docs = os.path.join(sage_home, "sage-usage-docs")
-        if os.path.exists(sage_usage_docs):
-            current_external_paths = request.system_context.get("external_paths", []) if request.system_context else []
-            if sage_usage_docs not in current_external_paths:
-                current_external_paths.append(sage_usage_docs)
-                _merge_dict("system_context", {"external_paths": current_external_paths})
-                logger.info(f"[Chat] Added sage-usage-docs to external_paths: {sage_usage_docs}")
+        # # 添加 sage-usage-docs 到 external_paths
+        # sage_usage_docs = os.path.join(sage_home, "sage-usage-docs")
+        # if os.path.exists(sage_usage_docs):
+        #     current_external_paths = request.system_context.get("external_paths", []) if request.system_context else []
+        #     if sage_usage_docs not in current_external_paths:
+        #         current_external_paths.append(sage_usage_docs)
+        #         _merge_dict("system_context", {"external_paths": current_external_paths})
+        #         logger.info(f"[Chat] Added sage-usage-docs to external_paths: {sage_usage_docs}")
+        # 将 sage-usage-docs 复制到 agent workspace 下的 sage_usage_docs 目录
+        # 这样 agent 可以直接访问文档
+        await _copy_sage_usage_docs_to_agent_workspace(request.agent_id, agent_workspace)
     # 处理可用技能
     available_skills = request.available_skills
     if available_skills:

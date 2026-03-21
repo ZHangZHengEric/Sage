@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 下载 Node.js 运行时用于打包
-# 这个脚本在 build 之前运行，将 Node.js 二进制文件放入 sidecar 目录
+# 设置 Node.js 运行时用于打包
+# 下载完整的 Node.js 发行版（包含 npm）到 sidecar 目录
 
 set -e
 
@@ -10,105 +10,147 @@ TAURI_DIR="$SCRIPT_DIR/../tauri"
 SIDECAR_DIR="$TAURI_DIR/sidecar"
 NODE_DIR="$SIDECAR_DIR/node"
 
-# Node.js 版本
-NODE_VERSION="20.11.0"
+# Node.js 版本 - 需要 20.19+ 或 22.12+ 以支持 Vite 等现代工具
+NODE_VERSION="v22.14.0"
 
-# 检测平台
-PLATFORM=$(uname -s)
-ARCH=$(uname -m)
+# 检测平台和架构
+OS="$(uname -s)"
+ARCH="$(uname -m)"
 
-case "$PLATFORM" in
-    Darwin)
+# 根据平台和架构设置下载 URL
+ case "$OS" in
+    Linux*)
+        PLATFORM="linux"
         case "$ARCH" in
-            x86_64)
-                NODE_PLATFORM="darwin-x64"
-                ;;
-            arm64)
-                NODE_PLATFORM="darwin-arm64"
-                ;;
-            *)
-                echo "Unsupported architecture: $ARCH"
-                exit 1
-                ;;
+            x86_64) NODE_ARCH="x64" ;;
+            aarch64|arm64) NODE_ARCH="arm64" ;;
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
         esac
         ;;
-    Linux)
+    Darwin*)
+        PLATFORM="darwin"
         case "$ARCH" in
-            x86_64)
-                NODE_PLATFORM="linux-x64"
-                ;;
-            aarch64)
-                NODE_PLATFORM="linux-arm64"
-                ;;
-            *)
-                echo "Unsupported architecture: $ARCH"
-                exit 1
-                ;;
+            x86_64) NODE_ARCH="x64" ;;
+            arm64) NODE_ARCH="arm64" ;;
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
         esac
         ;;
-    MINGW*|MSYS*|CYGWIN*)
-        NODE_PLATFORM="win-x64"
+    MINGW*|CYGWIN*|MSYS*)
+        PLATFORM="win"
+        case "$ARCH" in
+            x86_64) NODE_ARCH="x64" ;;
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+        esac
         ;;
     *)
-        echo "Unsupported platform: $PLATFORM"
+        echo "Unsupported platform: $OS"
         exit 1
         ;;
 esac
 
+# 构建下载 URL 和解压目录名
+NODE_DIST_NAME="node-${NODE_VERSION}-${PLATFORM}-${NODE_ARCH}"
+if [ "$PLATFORM" = "win" ]; then
+    NODE_DOWNLOAD_URL="https://nodejs.org/dist/${NODE_VERSION}/${NODE_DIST_NAME}.zip"
+else
+    NODE_DOWNLOAD_URL="https://nodejs.org/dist/${NODE_VERSION}/${NODE_DIST_NAME}.tar.gz"
+fi
+
 echo "Setting up Node.js runtime..."
-echo "Version: $NODE_VERSION"
-echo "Platform: $NODE_PLATFORM"
+echo "Node version: $NODE_VERSION"
+echo "Platform: $PLATFORM"
+echo "Architecture: $NODE_ARCH"
+echo "Download URL: $NODE_DOWNLOAD_URL"
 
 # 创建目录
 mkdir -p "$NODE_DIR"
 
-# 下载 URL
-NODE_DIST="node-v${NODE_VERSION}-${NODE_PLATFORM}"
-if [[ "$NODE_PLATFORM" == win-* ]]; then
-    NODE_TARBALL="${NODE_DIST}.zip"
+# 下载并解压 Node.js
+# 注意：必须完全删除旧目录再复制，避免旧版本文件残留导致模块冲突
+NODE_VERSION_FILE="$NODE_DIR/.node-version"
+NEED_DOWNLOAD=false
+
+if [ ! -f "$NODE_DIR/bin/node" ] && [ ! -f "$NODE_DIR/node.exe" ]; then
+    NEED_DOWNLOAD=true
+    echo "Node.js not found, need to download."
+elif [ -f "$NODE_VERSION_FILE" ]; then
+    INSTALLED_VERSION=$(cat "$NODE_VERSION_FILE")
+    if [ "$INSTALLED_VERSION" != "$NODE_VERSION" ]; then
+        NEED_DOWNLOAD=true
+        echo "Node.js version mismatch (installed: $INSTALLED_VERSION, required: $NODE_VERSION), need to re-download."
+    fi
 else
-    NODE_TARBALL="${NODE_DIST}.tar.gz"
+    NEED_DOWNLOAD=true
+    echo "Node.js version file not found, need to re-download."
 fi
 
-NODE_URL="https://npmmirror.com/mirrors/node/v${NODE_VERSION}/${NODE_TARBALL}"
-
-echo "Downloading from: $NODE_URL"
-
-# 下载并解压
-cd "$NODE_DIR"
-
-# 设置环境变量避免创建 macOS 扩展属性
-if [[ "$PLATFORM" == "Darwin" ]]; then
-    export CURL_SSL_BACKEND="secure-transport"
-fi
-
-if command -v curl &> /dev/null; then
-    curl -L -o "$NODE_TARBALL" "$NODE_URL"
-elif command -v wget &> /dev/null; then
-    wget -O "$NODE_TARBALL" "$NODE_URL"
+if [ "$NEED_DOWNLOAD" = true ]; then
+    echo "Downloading Node.js ${NODE_VERSION}..."
+    
+    # 完全删除旧目录，避免文件残留导致模块冲突
+    if [ -d "$NODE_DIR" ]; then
+        echo "Removing old Node.js directory..."
+        rm -rf "$NODE_DIR"
+    fi
+    mkdir -p "$NODE_DIR"
+    
+    TEMP_DIR=$(mktemp -d)
+    
+    if [ "$PLATFORM" = "win" ]; then
+        # Windows: 下载 zip 并使用 unzip
+        curl -L -o "$TEMP_DIR/node.zip" "$NODE_DOWNLOAD_URL"
+        unzip -q "$TEMP_DIR/node.zip" -d "$TEMP_DIR"
+        # Windows 版本直接复制到 NODE_DIR
+        cp -R "$TEMP_DIR/${NODE_DIST_NAME}/"* "$NODE_DIR/"
+    else
+        # macOS/Linux: 下载 tar.gz 并使用 tar
+        curl -L -o "$TEMP_DIR/node.tar.gz" "$NODE_DOWNLOAD_URL"
+        tar -xzf "$TEMP_DIR/node.tar.gz" -C "$TEMP_DIR"
+        # 复制下载的 Node.js 到 sidecar 目录
+        cp -R "$TEMP_DIR/${NODE_DIST_NAME}/"* "$NODE_DIR/"
+    fi
+    
+    # 记录版本号
+    echo "$NODE_VERSION" > "$NODE_VERSION_FILE"
+    
+    rm -rf "$TEMP_DIR"
+    echo "Node.js downloaded successfully"
 else
-    echo "Error: curl or wget is required"
-    exit 1
+    echo "Node.js ${NODE_VERSION} already exists, skipping download"
 fi
 
-echo "Extracting..."
-if [[ "$NODE_TARBALL" == *.zip ]]; then
-    unzip -q "$NODE_TARBALL"
-    mv "${NODE_DIST}"/* .
-    rm -rf "${NODE_DIST}"
-else
-    tar -xzf "$NODE_TARBALL" --strip-components=1
+# 创建 npm 和 npx 包装脚本（使用相对路径，这样目录被复制后也能正常工作）
+if [ -f "$NODE_DIR/bin/node" ]; then
+    echo "Creating npm wrapper scripts..."
+    
+    NPM_CLI_DST="$NODE_DIR/bin/npm"
+    NPX_CLI_DST="$NODE_DIR/bin/npx"
+    
+    # 删除原来的 npm/npx（如果是符号链接或文件）
+    rm -f "$NPM_CLI_DST" "$NPX_CLI_DST"
+    
+    # 创建包装脚本 - 使用相对路径
+    cat > "$NPM_CLI_DST" << 'EOF'
+#!/bin/sh
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npm-cli.js" "$@"
+EOF
+    
+    cat > "$NPX_CLI_DST" << 'EOF'
+#!/bin/sh
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/node" "$SCRIPT_DIR/../lib/node_modules/npm/bin/npx-cli.js" "$@"
+EOF
+    
+    chmod +x "$NPM_CLI_DST" "$NPX_CLI_DST"
+    echo "NPM wrapper scripts created (using relative paths)"
 fi
-
-rm "$NODE_TARBALL"
-
-# 添加执行权限
-echo "Setting permissions..."
-chmod -R +x "$NODE_DIR/bin/"
 
 echo "Node.js runtime setup complete!"
 echo "Location: $NODE_DIR"
 echo "Node version:"
 "$NODE_DIR/bin/node" --version
 echo "NPM version:"
-"$NODE_DIR/bin/npm" --version
+"$NODE_DIR/bin/npm" --version 2>/dev/null || echo "NPM version: (failed to get version)"

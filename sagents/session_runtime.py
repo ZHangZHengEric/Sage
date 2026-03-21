@@ -127,6 +127,7 @@ class Session:
         self.system_prefix = system_prefix or ""
         self.session_root_space = str(session_root_space)
         self.host_workspace = str(host_workspace) if host_workspace else None
+        logger.info(f"SessionRuntime: configure_runtime 设置 host_workspace={self.host_workspace}")
         self.virtual_workspace = str(virtual_workspace)
         self.default_memory_type = default_memory_type or "session"
         # agent_id 为 None 时生成随机 UUID
@@ -218,6 +219,11 @@ class Session:
                 merged_system_context = saved_system_context
                 logger.info(f"SessionContext: Using saved system_context for session {session_id}")
 
+        # 调试：检查 host_workspace 是否有值
+        logger.info(f"SessionRuntime: 创建 SessionContext，host_workspace={self.host_workspace}")
+        if not self.host_workspace:
+            logger.error("SessionRuntime: host_workspace 为 None，这会导致沙箱 venv 创建在错误的位置！")
+        
         self.session_context = SessionContext(
             session_id=session_id,
             user_id=user_id,
@@ -233,8 +239,8 @@ class Session:
             parent_session_id=parent_session_id,
         )
         
-        # 异步初始化 SessionContext
-        await self.session_context.init_more()
+        # 异步初始化 SessionContext，传递 host_workspace 确保沙箱工作区正确设置
+        await self.session_context.init_more(host_workspace=self.host_workspace)
         
         self._cache_session_workspace(session_id, self.session_context)
         return self.session_context

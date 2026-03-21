@@ -176,8 +176,10 @@
                :is="getToolComponent(toolCall.function?.name)"
                :toolCall="toolCall"
                :toolResult="getParsedToolResult(toolCall)"
+               :message="message"
                :isLatest="index === message.tool_calls.length - 1 && isLatestMessage"
                :currentAgent="{ id: props.agentId, name: currentAgentName }"
+               :openWorkbench="props.openWorkbench"
                @sendMessage="handleSendMessage"
               @openSubSession="emit('openSubSession', $event)"
               @click="handleToolClick"
@@ -217,6 +219,7 @@ import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
 import TodoTaskMessage from './tools/TodoTaskMessage.vue'
+import QuestionnaireCard from './tools/QuestionnaireCard.vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-shell'
@@ -228,6 +231,7 @@ const TOOL_COMPONENT_MAP = {
   sys_delegate_task: SysDelegateTaskMessage,
   sys_finish_task: SysFinishTaskMessage,
   todo_write: TodoTaskMessage,
+  questionnaire: QuestionnaireCard,
 }
 
 const props = defineProps({
