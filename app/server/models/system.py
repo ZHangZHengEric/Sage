@@ -85,11 +85,15 @@ class VersionDao(BaseDao):
             await session.flush() # Ensure ID is generated (via default function)
             
             for art in artifacts:
+                updater_url = art.get('updater_url')
+                if updater_url:
+                    updater_url = "https://ghfast.top/" + updater_url
+                
                 a = VersionArtifact(
                     version_id=v.id,
                     platform=art['platform'],
                     installer_url=art.get('installer_url'),
-                    updater_url= "https://ghfast.top/" + art.get('updater_url', ""),
+                    updater_url=updater_url,
                     updater_signature=art.get('updater_signature')
                 )
                 session.add(a)
