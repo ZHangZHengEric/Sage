@@ -4,6 +4,7 @@ from .memory_tool import MemoryTool
 from .web_fetcher_tool import WebFetcherTool
 from .image_understanding_tool import ImageUnderstandingTool
 from .todo_tool import ToDoTool
+from .questionnaire_tool import QuestionnaireTool
 
 __all__ = [
     'ExecuteCommandTool',
@@ -12,4 +13,5 @@ __all__ = [
     'WebFetcherTool',
     'ImageUnderstandingTool',
     'ToDoTool',
+    'QuestionnaireTool',
 ]
