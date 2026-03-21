@@ -985,6 +985,9 @@ export default {
   'permission.openSettings': '打开设置',
   'permission.cancel': '取消',
 
+  // Workbench Code Output
+  'workbench.codeOutput.title': '代码片段',
+
   // Workbench ToolCall
   'workbench.tool.arguments': '输入参数',
   'workbench.tool.result': '输出结果',
