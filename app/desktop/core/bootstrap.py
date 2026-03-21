@@ -329,14 +329,27 @@ async def initialize_im_service():
         
         logger.info(f"[IM] 正在启动 IM 服务，启用的 provider: {enabled_providers}")
         
-        # 启动 IM 服务
+        # 启动 IM 服务 - 使用延迟启动避免事件循环冲突
         from mcp_servers.im_server.im_server import initialize_im_server
-        asyncio.create_task(initialize_im_server())
         
-        logger.info("[IM] IM 服务启动任务已创建")
+        # 延迟启动 IM 服务，确保主事件循环已完全初始化
+        async def delayed_im_start():
+            try:
+                # 等待 5 秒，确保 FastAPI 完全启动
+                await asyncio.sleep(5)
+                logger.info("[IM] 开始延迟启动 IM 服务...")
+                await initialize_im_server()
+                logger.info("[IM] IM 服务启动完成")
+            except Exception as e:
+                logger.error(f"[IM] IM 服务启动失败: {e}", exc_info=True)
+        
+        # 创建后台任务，不阻塞主流程
+        asyncio.create_task(delayed_im_start())
+        
+        logger.info("[IM] IM 服务延迟启动任务已创建")
         
     except Exception as e:
-        logger.error(f"[IM] IM 服务初始化失败: {e}")
+        logger.error(f"[IM] IM 服务初始化失败: {e}", exc_info=True)
 
 
 async def validate_and_disable_mcp_servers():
