@@ -34,6 +34,9 @@
           "path": "$HOME/.sage/**"
         },
         {
+          "path": "$HOME/.agent-browser/**"
+        },
+        {
           "path": "$DOWNLOAD/**"
         },
         {
