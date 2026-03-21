@@ -235,13 +235,13 @@ We are grateful to our sponsors for their support in making Sage better:
   <tr>
     <td align="center" width="50%">
       <a href="#" target="_blank">
-        <img src="assets/dudubashi.png" width="200" alt="Dudu Bus"/>
+        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="Dudu Bus"/>
       </a>
       <br/>
     </td>
     <td align="center" width="50%">
       <a href="#" target="_blank">
-        <img src="assets/xunhuanzhineng.svg" width="200" alt="RcrAI"/>
+        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="RcrAI"/>
       </a>
     </td>
   </tr>
