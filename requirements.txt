@@ -47,6 +47,7 @@ aiohttp>=3.9.0
 websockets
 nest-asyncio
 scrapling[all]>=0.2.0  # 智能网页抓取框架，支持自适应解析和反爬虫绕过（包含所有依赖）
+undetected-playwright  # 用于绕过浏览器检测的反爬虫工具
 rank-bm25>=0.2.2  # BM25 文本检索算法，用于记忆索引
 
 ##############################
