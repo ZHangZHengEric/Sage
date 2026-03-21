@@ -243,7 +243,20 @@
         </div>
       </template>
 
-      <!-- 6. 其他工具 - 统一显示 -->
+      <!-- 6. questionnaire - 问卷表单 -->
+      <template v-else-if="isQuestionnaire">
+        <div class="questionnaire-container h-full overflow-auto p-4">
+          <QuestionnaireForm
+            :questionnaire-id="questionnaireId"
+            :title="questionnaireTitle"
+            :questions="questionnaireQuestions"
+            :wait-time="questionnaireWaitTime"
+            @submit="handleQuestionnaireSubmit"
+          />
+        </div>
+      </template>
+
+      <!-- 7. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -303,6 +316,7 @@ import {
 } from 'lucide-vue-next'
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
+import QuestionnaireForm from '../../tools/QuestionnaireForm.vue'
 import { skillAPI } from '@/api/skill.js'
 import { useLanguage } from '@/utils/i18n'
 
@@ -373,6 +387,7 @@ const isCodeExecution = computed(() =>
   toolName.value === 'execute_javascript_code'
 )
 const isTodoWrite = computed(() => toolName.value === 'todo_write')
+const isQuestionnaire = computed(() => toolName.value === 'questionnaire')
 
 // 显示名称映射
 const displayToolName = computed(() => {
@@ -633,7 +648,28 @@ const executionError = computed(() => {
   }
 })
 
-// ============ 6. 其他工具 ============
+// ============ 6. Questionnaire ============
+const questionnaireId = computed(() => {
+  return toolArgs.value.questionnaire_id || ''
+})
+
+const questionnaireTitle = computed(() => {
+  return toolArgs.value.title || '问卷'
+})
+
+const questionnaireQuestions = computed(() => {
+  return toolArgs.value.questions || []
+})
+
+const questionnaireWaitTime = computed(() => {
+  return toolArgs.value.wait_time || 300
+})
+
+const handleQuestionnaireSubmit = (result) => {
+  console.log('[ToolCallRenderer] Questionnaire submitted:', result)
+}
+
+// ============ 7. 其他工具 ============
 const hasArguments = computed(() => Object.keys(toolArgs.value).length > 0)
 const hasResult = computed(() => !!toolResult.value)
 const isErrorResult = computed(() => toolResult.value?.is_error)

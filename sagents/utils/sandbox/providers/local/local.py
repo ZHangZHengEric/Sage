@@ -124,13 +124,50 @@ class LocalSandboxProvider(ISandboxHandle):
                 return python_path
         return None
 
+    def _ensure_python3_link(self):
+        """确保 venv 中同时存在 python 和 python3 命令"""
+        if sys.platform == "win32":
+            # Windows 下不需要创建符号链接，venv 会自动处理
+            return
+
+        venv_bin = os.path.join(self._venv_dir, "bin")
+        python_path = os.path.join(venv_bin, "python")
+        python3_path = os.path.join(venv_bin, "python3")
+
+        # 如果 python3 不存在，但 python 存在，则创建 python3 -> python 的符号链接
+        if os.path.exists(python_path) and not os.path.exists(python3_path):
+            try:
+                os.symlink("python", python3_path)
+                logger.info(f"[LocalSandboxProvider] 创建 python3 符号链接: {python3_path}")
+            except Exception as e:
+                logger.warning(f"[LocalSandboxProvider] 创建 python3 符号链接失败: {e}")
+
+        # 如果 python 不存在，但 python3 存在，则创建 python -> python3 的符号链接
+        if os.path.exists(python3_path) and not os.path.exists(python_path):
+            try:
+                os.symlink("python3", python_path)
+                logger.info(f"[LocalSandboxProvider] 创建 python 符号链接: {python_path}")
+            except Exception as e:
+                logger.warning(f"[LocalSandboxProvider] 创建 python 符号链接失败: {e}")
+
     def _ensure_venv(self):
         """确保 venv 存在"""
         if not os.path.exists(self._venv_dir):
             import venv
+            from sagents.utils.common_utils import get_system_python_path
 
             os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
-            venv.create(self._venv_dir, with_pip=True)
+
+            # 获取正确的 Python 解释器路径（处理 PyInstaller 打包环境）
+            system_python = get_system_python_path()
+            if not system_python:
+                raise RuntimeError("无法找到系统 Python 解释器")
+
+            # 创建虚拟环境，指定正确的 Python 解释器
+            venv.create(self._venv_dir, with_pip=True, executable=system_python)
+
+            # 确保 venv 中同时存在 python 和 python3 命令
+            self._ensure_python3_link()
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -349,7 +386,11 @@ class LocalSandboxProvider(ISandboxHandle):
         import asyncio
         proc = None
         try:
-            proc = await asyncio.create_subprocess_shell(
+            # 使用 exec 模式避免 shell 配置文件覆盖 PATH
+            # 通过显式传递 PATH 环境变量确保 venv 的 Python 优先
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/sh",
+                "-c",
                 converted_command,
                 cwd=actual_workdir,
                 env=env,

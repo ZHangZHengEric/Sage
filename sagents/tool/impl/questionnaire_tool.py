@@ -1,0 +1,266 @@
+import uuid
+import asyncio
+import json
+from typing import List, Dict, Any, Optional
+
+from ..tool_base import tool
+from sagents.utils.logger import logger
+
+
+class QuestionnaireTool:
+    """问卷工具 - 向用户展示问卷表单并收集答案"""
+
+    def _get_session_context(self, session_id: Optional[str] = None):
+        """通过 session_id 获取 session_context"""
+        if not session_id:
+            return None
+        try:
+            from sagents.session_runtime import get_global_session_manager
+            session_manager = get_global_session_manager()
+            session = session_manager.get(session_id)
+            if session:
+                return session.session_context
+        except Exception as e:
+            logger.warning(f"通过 session_id 获取 session_context 失败: {e}")
+        return None
+
+    def _get_backend_client(self, session_id: Optional[str] = None):
+        """获取后端 API 客户端"""
+        session_context = self._get_session_context(session_id)
+        if session_context:
+            try:
+                return getattr(session_context, 'backend_client', None)
+            except Exception as e:
+                logger.warning(f"获取 backend_client 失败: {e}")
+        return None
+
+    @tool(
+        description_i18n={
+            "zh": "向用户展示问卷表单并收集答案。支持单选题、多选题和文本问答题。工具会等待用户提交或超时，然后返回答案。",
+            "en": "Display a questionnaire form to the user and collect answers. Supports single choice, multiple choice, and text questions. Waits for user submission or timeout, then returns answers."
+        },
+        param_description_i18n={
+            "title": {
+                "zh": "问卷标题",
+                "en": "Questionnaire title"
+            },
+            "questions": {
+                "zh": "问题列表，每个问题包含 id, type, title, options, default 等字段",
+                "en": "List of questions, each containing id, type, title, options, default, etc."
+            },
+            "wait_time": {
+                "zh": "等待用户回答的最大时间(秒)，超时自动提交。默认300秒(5分钟)。设置为0表示不等待轮询，等待用户主动发送消息。",
+                "en": "Maximum time to wait for user response in seconds. Auto-submit on timeout. Default is 300 seconds (5 minutes). Set to 0 to disable polling and wait for user to send message actively."
+            },
+            "session_id": {
+                "zh": "会话ID，用于定位工作区和关联问卷",
+                "en": "Session ID, used to locate workspace and associate questionnaire"
+            }
+        },
+        param_schema={
+            "title": {
+                "type": "string",
+                "description": "问卷标题"
+            },
+            "questions": {
+                "type": "array",
+                "description": "问题列表",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "问题唯一标识符"
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": ["single_choice", "multiple_choice", "text"],
+                            "description": "问题类型: single_choice(单选), multiple_choice(多选), text(文本)"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "问题标题"
+                        },
+                        "options": {
+                            "type": "array",
+                            "description": "选项列表(单选/多选必填)",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "label": {
+                                        "type": "string",
+                                        "description": "选项显示文本"
+                                    },
+                                    "value": {
+                                        "type": "string",
+                                        "description": "选项值"
+                                    }
+                                },
+                                "required": ["label", "value"]
+                            }
+                        },
+                        "default": {
+                            "type": ["string", "array"],
+                            "description": "默认值，单选为字符串，多选为字符串数组，文本题为空字符串"
+                        },
+                        "placeholder": {
+                            "type": "string",
+                            "description": "文本输入框的占位提示(仅文本题)"
+                        },
+                        "max_length": {
+                            "type": "integer",
+                            "description": "最大输入长度(仅文本题)",
+                            "default": 1000
+                        }
+                    },
+                    "required": ["id", "type", "title"]
+                }
+            },
+            "wait_time": {
+                "type": "integer",
+                "description": "等待时间(秒)",
+                "default": 300,
+                "minimum": 0,
+                "maximum": 3600
+            },
+            "session_id": {
+                "type": "string",
+                "description": "会话ID"
+            }
+        }
+    )
+    async def questionnaire(
+        self,
+        title: str,
+        questions: List[Dict[str, Any]],
+        session_id: str,
+        wait_time: int = 300
+    ) -> str:
+        """
+        向用户展示问卷表单并收集答案。
+
+        Args:
+            title: 问卷标题
+            questions: 问题列表
+            session_id: 会话ID
+            wait_time: 等待时间(秒)，默认300秒
+
+        Returns:
+            JSON 格式的用户答案
+        """
+        logger.info(f"QuestionnaireTool: 创建问卷. session_id={session_id}, title={title}, wait_time={wait_time}")
+
+        # 验证问题格式
+        self._validate_questions(questions)
+
+        # 生成问卷会话ID
+        questionnaire_id = str(uuid.uuid4())
+
+        # 如果 wait_time 为 0，不等待轮询，直接返回问卷ID
+        if wait_time == 0:
+            logger.info(f"QuestionnaireTool: wait_time=0，不等待轮询，等待用户主动发送消息. questionnaire_id={questionnaire_id}")
+            return json.dumps({
+                "success": True,
+                "questionnaire_id": questionnaire_id,
+                "status": "waiting",
+                "message": "问卷已创建，等待用户提交答案"
+            }, ensure_ascii=False, indent=2)
+
+        # 获取后端客户端
+        backend_client = self._get_backend_client(session_id)
+        if not backend_client:
+            raise ValueError("Backend client not available")
+
+        # 轮询等待用户提交（轮询到结果后后端自动删除会话）
+        logger.info(f"QuestionnaireTool: 开始轮询等待用户提交. questionnaire_id={questionnaire_id}")
+        result = await self._poll_for_result(backend_client, questionnaire_id, wait_time)
+
+        if result is None:
+            # 超时，使用默认值作为答案
+            logger.warning(f"QuestionnaireTool: 问卷超时，使用默认值. questionnaire_id={questionnaire_id}")
+            default_answers = self._get_default_answers(questions)
+            return json.dumps({
+                "success": True,
+                "status": "timeout",
+                "message": "用户未在指定时间内提交，使用默认值",
+                "answers": default_answers
+            }, ensure_ascii=False, indent=2)
+
+        logger.info(f"QuestionnaireTool: 成功获取问卷答案. questionnaire_id={questionnaire_id}")
+        return json.dumps({
+            "success": True,
+            "status": "submitted",
+            "message": "用户已提交答案",
+            "answers": result.get("answers", {}),
+            "submitted_at": result.get("submitted_at")
+        }, ensure_ascii=False, indent=2)
+
+    def _validate_questions(self, questions: List[Dict[str, Any]]):
+        """验证问题格式"""
+        if not questions:
+            raise ValueError("问题列表不能为空")
+
+        for idx, q in enumerate(questions):
+            if "id" not in q:
+                raise ValueError(f"第 {idx + 1} 个问题缺少 id 字段")
+            if "type" not in q:
+                raise ValueError(f"第 {idx + 1} 个问题缺少 type 字段")
+            if "title" not in q:
+                raise ValueError(f"第 {idx + 1} 个问题缺少 title 字段")
+
+            qtype = q["type"]
+            if qtype not in ["single_choice", "multiple_choice", "text"]:
+                raise ValueError(f"第 {idx + 1} 个问题类型无效: {qtype}")
+
+            if qtype in ["single_choice", "multiple_choice"]:
+                if "options" not in q or not q["options"]:
+                    raise ValueError(f"第 {idx + 1} 个选择题缺少 options 字段")
+                for opt_idx, opt in enumerate(q["options"]):
+                    if "label" not in opt:
+                        raise ValueError(f"第 {idx + 1} 个问题第 {opt_idx + 1} 个选项缺少 label 字段")
+                    if "value" not in opt:
+                        raise ValueError(f"第 {idx + 1} 个问题第 {opt_idx + 1} 个选项缺少 value 字段")
+
+    def _get_default_answers(self, questions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """获取所有问题的默认值"""
+        default_answers = {}
+        for q in questions:
+            qid = q["id"]
+            qtype = q["type"]
+            default_value = q.get("default")
+            
+            if qtype == "multiple_choice":
+                # 多选题：默认值为数组或空数组
+                default_answers[qid] = default_value if default_value is not None else []
+            else:
+                # 单选题或文本题：默认值为字符串或空字符串
+                default_answers[qid] = default_value if default_value is not None else ""
+        
+        return default_answers
+
+    async def _poll_for_result(
+        self,
+        backend_client,
+        questionnaire_id: str,
+        wait_time: int
+    ) -> Optional[Dict[str, Any]]:
+        """轮询等待用户提交结果"""
+        poll_interval = 1  # 每秒检查一次
+        elapsed = 0
+
+        while elapsed < wait_time:
+            try:
+                response = await backend_client.get(f"/api/questionnaires/{questionnaire_id}/results")
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get("status") == "submitted":
+                    return result
+
+            except Exception as e:
+                logger.warning(f"轮询问卷结果失败: {e}")
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        return None

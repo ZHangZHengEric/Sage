@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
 # Add cargo to PATH
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -105,6 +105,11 @@ prepare_bundled_node_runtime() {
             chmod +x "$TAURI_NODE_SIDECAR_DIR/node"
         fi
 
+        # 清除 macOS 扩展属性，避免 "Permission denied" 错误
+        if [ "$OS_TYPE" = "macos" ]; then
+            xattr -rc "$TAURI_NODE_SIDECAR_DIR" 2>/dev/null || true
+        fi
+
         echo "[Node Runtime] 使用自定义目录: $custom_source"
         echo "[Node Runtime] 已同步到: $TAURI_NODE_SIDECAR_DIR"
         return
@@ -137,6 +142,11 @@ prepare_bundled_node_runtime() {
     cp -L "$node_exec" "$TAURI_NODE_SIDECAR_DIR/bin/node"
     chmod +x "$TAURI_NODE_SIDECAR_DIR/bin/node"
     cp -R "$npm_package_dir" "$TAURI_NODE_SIDECAR_DIR/lib/node_modules/npm"
+
+    # 清除 macOS 扩展属性，避免 "Permission denied" 错误
+    if [ "$OS_TYPE" = "macos" ]; then
+        xattr -rc "$TAURI_NODE_SIDECAR_DIR" 2>/dev/null || true
+    fi
 
     echo "[Node Runtime] Node 可执行文件: $node_exec"
     echo "[Node Runtime] npm 包目录: $npm_package_dir"
@@ -389,20 +399,36 @@ build_python_sidecar() {
     echo "[Node.js] 正在设置 Node.js 运行时..."
     
     local NODE_DIR="$TAURI_SIDECAR_DIR/node"
-    local SETUP_SCRIPT="$APP_DIR/scripts/setup-node-runtime.sh"
     
-    # Check if Node.js already exists
+    # 使用系统 Node.js 复制到 sidecar，避免下载的 Node.js 有 macOS 扩展属性问题
     if [ -f "$NODE_DIR/bin/node" ]; then
-        echo "[Node.js] Node.js 运行时已存在，跳过下载。"
-    elif [ -f "$SETUP_SCRIPT" ]; then
-        echo "[Node.js] 执行 Node.js 下载脚本..."
-        chmod +x "$SETUP_SCRIPT"
-        "$SETUP_SCRIPT"
-        if [ $? -ne 0 ]; then
-            echo "[Node.js] 警告: Node.js 下载失败，继续构建..."
+        echo "[Node.js] Node.js 运行时已存在，跳过设置。"
+    elif command -v node >/dev/null 2>&1; then
+        echo "[Node.js] 使用系统 Node.js..."
+        local node_exec
+        local npm_cli
+        local npm_package_dir
+        
+        node_exec="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v node)")"
+        npm_cli="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v npm)")"
+        npm_package_dir="$(cd "$(dirname "$npm_cli")/.." && pwd)"
+        
+        if [ -f "$node_exec" ] && [ -f "$npm_cli" ] && [ -d "$npm_package_dir" ]; then
+            mkdir -p "$NODE_DIR/bin"
+            mkdir -p "$NODE_DIR/lib/node_modules"
+            
+            cp -L "$node_exec" "$NODE_DIR/bin/node"
+            chmod +x "$NODE_DIR/bin/node"
+            cp -R "$npm_package_dir" "$NODE_DIR/lib/node_modules/npm"
+            
+            echo "[Node.js] 已复制系统 Node.js 到: $NODE_DIR"
+        else
+            echo "[Node.js] 错误: 无法找到系统 Node.js 组件"
+            exit 1
         fi
     else
-        echo "[Node.js] 警告: 未找到下载脚本 $SETUP_SCRIPT，跳过..."
+        echo "[Node.js] 错误: 未找到系统 Node.js，请确保已安装 Node.js"
+        exit 1
     fi
 }
 
@@ -502,6 +528,12 @@ echo "Tauri CLI: $TAURI_CMD"
 
 # Skip signature for updater artifacts as keys are not provided
 # export TAURI_SKIP_SIGNATURE=true
+
+# 在 Tauri 构建前清除 sidecar 的扩展属性，避免 bundling 时权限错误
+if [ "$OS_TYPE" = "macos" ]; then
+    echo "[Tauri Build] 清除 sidecar 扩展属性..."
+    xattr -rc "$TAURI_SIDECAR_DIR" 2>/dev/null || true
+fi
 
 if [ "$MODE" = "release" ]; then
   # Cargo.toml now has [profile.release] for optimization
