@@ -73,7 +73,8 @@
       "../../skills",
       "../../../mcp_servers",
       "sidecar",
-      "../../wiki"
+      "../../wiki",
+      "sidecar/node"
     ],
     "shortDescription": "",
     "targets": [

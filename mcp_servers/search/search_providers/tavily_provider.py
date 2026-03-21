@@ -14,7 +14,24 @@ class TavilyProvider(BaseSearchProvider):
     env_key = "TAVILY_API_KEY"
     supports_images = True
     supports_time_range = False  # Tavily 不直接支持时间范围筛选
-    
+
+    @classmethod
+    def get_required_env_vars(cls) -> dict:
+        """获取必需的环境变量说明"""
+        return {
+            cls.env_key: {
+                "description": "Tavily 搜索 API Key",
+                "required": True,
+                "url": "https://tavily.com",
+            },
+        }
+
+    @classmethod
+    def get_config_example(cls) -> str:
+        """获取配置示例"""
+        return """# Tavily 搜索
+export TAVILY_API_KEY=your_api_key_here"""
+
     async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
         """使用 Tavily 搜索"""
         endpoint = "https://api.tavily.com/search"

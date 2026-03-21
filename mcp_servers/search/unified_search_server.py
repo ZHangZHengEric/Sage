@@ -31,166 +31,191 @@ from sagents.utils.logger import logger
 mcp = FastMCP("Unified Search Service")
 
 
-class SearchEngineManager:
-    """搜索引擎管理器，自动检测并管理可用的搜索引擎"""
+# Provider 类映射
+PROVIDER_CLASSES = {
+    SearchProviderEnum.SERPAPI: SerpApiProvider,
+    SearchProviderEnum.SERPER: SerperProvider,
+    SearchProviderEnum.TAVILY: TavilyProvider,
+    SearchProviderEnum.BRAVE: BraveProvider,
+    SearchProviderEnum.ZHIPU: ZhipuProvider,
+    SearchProviderEnum.BOCHA: BochaProvider,
+    SearchProviderEnum.SHUYAN: ShuyanProvider,
+}
+
+
+def get_available_providers() -> List[BaseSearchProvider]:
+    """每次调用时重新检测可用的搜索引擎提供商"""
+    available_providers = []
+    for provider_enum, provider_class in PROVIDER_CLASSES.items():
+        api_key = os.environ.get(provider_class.env_key)
+        if api_key:
+            try:
+                provider_instance = provider_class(api_key)
+                available_providers.append(provider_instance)
+                logger.info(f"检测到可用搜索引擎: {provider_enum.value}")
+            except Exception as e:
+                logger.warning(f"初始化搜索引擎 {provider_enum.value} 失败: {e}")
     
-    # Provider 类映射
-    PROVIDER_CLASSES = {
-        SearchProviderEnum.SERPAPI: SerpApiProvider,
-        SearchProviderEnum.SERPER: SerperProvider,
-        SearchProviderEnum.TAVILY: TavilyProvider,
-        SearchProviderEnum.BRAVE: BraveProvider,
-        SearchProviderEnum.ZHIPU: ZhipuProvider,
-        SearchProviderEnum.BOCHA: BochaProvider,
-        SearchProviderEnum.SHUYAN: ShuyanProvider,
-    }
+    if not available_providers:
+        logger.warning("未检测到任何可用的搜索引擎API密钥")
     
-    def __init__(self):
-        self.available_providers: List[BaseSearchProvider] = []
-        self._detect_available_providers()
+    return available_providers
+
+
+def get_config_error() -> str:
+    """获取配置错误提示信息"""
+    lines = [
+        "未配置任何搜索引擎API密钥。",
+        "",
+        "请检查以下环境变量设置:",
+        "=" * 60,
+        ""
+    ]
+
+    # 从每个 provider 获取配置信息
+    for provider_enum, provider_class in PROVIDER_CLASSES.items():
+        provider_name = provider_enum.value
+
+        try:
+            env_vars = provider_class.get_required_env_vars()
+            lines.append(f"【{provider_name}】")
+
+            for var_name, var_info in env_vars.items():
+                description = var_info.get("description", "")
+                url = var_info.get("url", "")
+
+                lines.append(f"  - {var_name}")
+                lines.append(f"    说明: {description}")
+                if url:
+                    lines.append(f"    获取地址: {url}")
+                lines.append("")
+        except Exception:
+            pass
+
+    lines.extend([
+        "=" * 60,
+        "",
+        "配置示例:",
+        "",
+    ])
+
+    # 从每个 provider 获取配置示例
+    for provider_enum, provider_class in PROVIDER_CLASSES.items():
+        try:
+            example = provider_class.get_config_example()
+            lines.append(example)
+            lines.append("")
+        except Exception:
+            pass
+
+    # 获取支持图片搜索的引擎
+    image_providers = []
+    for provider_enum, provider_class in PROVIDER_CLASSES.items():
+        if provider_class.supports_images:
+            image_providers.append(provider_enum.value)
+
+    # 获取支持时间范围筛选的引擎
+    time_range_providers = []
+    for provider_enum, provider_class in PROVIDER_CLASSES.items():
+        if provider_class.supports_time_range:
+            time_range_providers.append(provider_enum.value)
+
+    lines.extend([
+        f"支持图片搜索的引擎: {', '.join(image_providers)}",
+        f"支持时间范围筛选的引擎: {', '.join(time_range_providers)}",
+    ])
+
+    return "\n".join(lines)
+
+
+async def search_web(
+    query: str,
+    count: int = 10,
+    time_range: str = ""
+) -> Tuple[List[SearchResult], Optional[str]]:
+    """
+    执行网页搜索
     
-    def _detect_available_providers(self):
-        """检测可用的搜索引擎提供商"""
-        for provider_enum, provider_class in self.PROVIDER_CLASSES.items():
-            api_key = os.environ.get(provider_class.env_key)
-            if api_key:
-                try:
-                    provider_instance = provider_class(api_key)
-                    self.available_providers.append(provider_instance)
-                    logger.info(f"检测到可用搜索引擎: {provider_enum.value}")
-                except Exception as e:
-                    logger.warning(f"初始化搜索引擎 {provider_enum.value} 失败: {e}")
+    Args:
+        query: 搜索查询
+        count: 返回结果数量
+        time_range: 时间范围 (day, week, month, year, 空字符串表示不限)
         
-        if not self.available_providers:
-            logger.warning("未检测到任何可用的搜索引擎API密钥")
+    Returns:
+        (搜索结果列表, 错误信息)
+    """
+    available_providers = get_available_providers()
     
-    def get_available_providers(self) -> List[BaseSearchProvider]:
-        """获取可用的搜索引擎列表"""
-        return self.available_providers.copy()
+    if not available_providers:
+        return [], get_config_error()
     
-    def get_provider_names(self) -> List[str]:
-        """获取可用的搜索引擎名称列表"""
-        return [p.name for p in self.available_providers]
+    # 尝试每个可用的搜索引擎
+    last_error = None
+    for provider in available_providers:
+        try:
+            results = await provider.search_web(query, count, time_range)
+            if results:
+                logger.info(f"使用 {provider.name} 搜索成功，返回 {len(results)} 条结果")
+                return results, None
+        except Exception as e:
+            logger.warning(f"搜索引擎 {provider.name} 失败: {e}")
+            last_error = str(e)
+            continue
     
-    def get_image_providers(self) -> List[BaseSearchProvider]:
-        """获取支持图片搜索的搜索引擎列表"""
-        return [p for p in self.available_providers if p.supports_images]
+    error_msg = "所有搜索引擎都失败了"
+    if last_error:
+        error_msg += f"。最后一个错误: {last_error}"
+    return [], error_msg
+
+
+async def search_images(
+    query: str,
+    count: int = 10,
+    time_range: str = ""
+) -> Tuple[List[ImageResult], Optional[str]]:
+    """
+    执行图片搜索
     
-    def get_image_provider_names(self) -> List[str]:
-        """获取支持图片搜索的搜索引擎名称列表"""
-        return [p.name for p in self.available_providers if p.supports_images]
+    Args:
+        query: 搜索查询
+        count: 返回结果数量
+        time_range: 时间范围 (day, week, month, year, 空字符串表示不限)
+        
+    Returns:
+        (图片结果列表, 错误信息)
+    """
+    available_providers = get_available_providers()
+    image_providers = [p for p in available_providers if p.supports_images]
     
-    def get_config_error(self) -> str:
-        """获取配置错误提示信息"""
-        env_vars = [cls.env_key for cls in self.PROVIDER_CLASSES.values()]
-        env_list = "\n".join([f"- {v}" for v in env_vars])
-        return (
-            f"未配置任何搜索引擎API密钥。请设置以下任一环境变量:\n"
-            f"{env_list}\n\n"
-            f"支持的搜索引擎:\n"
-            f"- SERPAPI_API_KEY: SerpApi Google搜索 (searchapi.io)\n"
-            f"- SERPER_API_KEY: Serper Google搜索 (serper.dev)\n"
-            f"- TAVILY_API_KEY: Tavily搜索 (tavily.com)\n"
-            f"- BRAVE_API_KEY: Brave搜索 (brave.com/search/api)\n"
-            f"- ZHIPU_API_KEY: 智谱AI搜索 (bigmodel.cn)\n"
-            f"- BOCHA_API_KEY: 博查搜索 (bochaai.com)\n"
-            f"- SHUYAN_API_KEY: 数眼搜索 (shuyanai.com)\n\n"
-            f"支持图片搜索的引擎: serpapi, serper, tavily, brave, bocha\n"
-            f"不支持图片搜索的引擎: zhipu, shuyan\n\n"
-            f"支持时间范围筛选的引擎: serpapi, serper, brave, bocha, shuyan\n"
-            f"不支持时间范围筛选的引擎: tavily, zhipu"
+    if not image_providers:
+        return [], (
+            "未配置支持图片搜索的搜索引擎API密钥。\n"
+            "支持图片搜索的引擎: serpapi, serper, tavily, brave, bocha\n"
+            "请设置以下任一环境变量:\n"
+            "- SERPAPI_API_KEY: SerpApi (searchapi.io)\n"
+            "- SERPER_API_KEY: Serper (serper.dev)\n"
+            "- TAVILY_API_KEY: Tavily (tavily.com)\n"
+            "- BRAVE_API_KEY: Brave (brave.com/search/api)\n"
+            "- BOCHA_API_KEY: 博查 (bochaai.com)"
         )
     
-    async def search_web(
-        self,
-        query: str,
-        count: int = 10,
-        time_range: str = ""
-    ) -> Tuple[List[SearchResult], Optional[str]]:
-        """
-        执行网页搜索
-        
-        Args:
-            query: 搜索查询
-            count: 返回结果数量
-            time_range: 时间范围 (day, week, month, year, 空字符串表示不限)
-            
-        Returns:
-            (搜索结果列表, 错误信息)
-        """
-        if not self.available_providers:
-            return [], self.get_config_error()
-        
-        # 尝试每个可用的搜索引擎
-        last_error = None
-        for provider in self.available_providers:
-            try:
-                results = await provider.search_web(query, count, time_range)
-                if results:
-                    logger.info(f"使用 {provider.name} 搜索成功，返回 {len(results)} 条结果")
-                    return results, None
-            except Exception as e:
-                logger.warning(f"搜索引擎 {provider.name} 失败: {e}")
-                last_error = str(e)
-                continue
-        
-        error_msg = "所有搜索引擎都失败了"
-        if last_error:
-            error_msg += f"。最后一个错误: {last_error}"
-        return [], error_msg
+    # 尝试每个可用的搜索引擎
+    last_error = None
+    for provider in image_providers:
+        try:
+            results = await provider.search_images(query, count, time_range)
+            if results:
+                logger.info(f"使用 {provider.name} 图片搜索成功，返回 {len(results)} 条结果")
+                return results, None
+        except Exception as e:
+            logger.warning(f"搜索引擎 {provider.name} 图片搜索失败: {e}")
+            last_error = str(e)
+            continue
     
-    async def search_images(
-        self,
-        query: str,
-        count: int = 10,
-        time_range: str = ""
-    ) -> Tuple[List[ImageResult], Optional[str]]:
-        """
-        执行图片搜索
-        
-        Args:
-            query: 搜索查询
-            count: 返回结果数量
-            time_range: 时间范围 (day, week, month, year, 空字符串表示不限)
-            
-        Returns:
-            (图片结果列表, 错误信息)
-        """
-        image_providers = self.get_image_providers()
-        
-        if not image_providers:
-            return [], (
-                "未配置支持图片搜索的搜索引擎API密钥。\n"
-                "支持图片搜索的引擎: serpapi, serper, tavily, brave, bocha\n"
-                "请设置以下任一环境变量:\n"
-                "- SERPAPI_API_KEY: SerpApi (searchapi.io)\n"
-                "- SERPER_API_KEY: Serper (serper.dev)\n"
-                "- TAVILY_API_KEY: Tavily (tavily.com)\n"
-                "- BRAVE_API_KEY: Brave (brave.com/search/api)\n"
-                "- BOCHA_API_KEY: 博查 (bochaai.com)"
-            )
-        
-        # 尝试每个可用的搜索引擎
-        last_error = None
-        for provider in image_providers:
-            try:
-                results = await provider.search_images(query, count, time_range)
-                if results:
-                    logger.info(f"使用 {provider.name} 图片搜索成功，返回 {len(results)} 条结果")
-                    return results, None
-            except Exception as e:
-                logger.warning(f"搜索引擎 {provider.name} 图片搜索失败: {e}")
-                last_error = str(e)
-                continue
-        
-        error_msg = "所有搜索引擎都失败了"
-        if last_error:
-            error_msg += f"。最后一个错误: {last_error}"
-        return [], error_msg
-
-
-# 全局搜索引擎管理器实例
-search_manager = SearchEngineManager()
+    error_msg = "所有搜索引擎都失败了"
+    if last_error:
+        error_msg += f"。最后一个错误: {last_error}"
+    return [], error_msg
 
 
 @mcp.tool(
@@ -215,7 +240,7 @@ async def search_web_page(
         JSON格式的搜索结果列表
     """
     # 执行搜索
-    results, error = await search_manager.search_web(query, count, time_range)
+    results, error = await search_web(query, count, time_range)
     
     if error:
         return json.dumps({
@@ -264,7 +289,7 @@ async def search_image_from_web(
         JSON格式的图片搜索结果列表
     """
     # 执行搜索
-    results, error = await search_manager.search_images(query, count, time_range)
+    results, error = await search_images(query, count, time_range)
     
     if error:
         return json.dumps({

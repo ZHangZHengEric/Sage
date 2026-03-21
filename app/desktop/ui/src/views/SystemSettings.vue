@@ -337,6 +337,13 @@ const presetEnvVars = [
     { key: 'ZHIPU_API_KEY', description: '智谱AI搜索 (bigmodel.cn)', category: 'search' },
     { key: 'BOCHA_API_KEY', description: '博查搜索 (bochaai.com)', category: 'search' },
     { key: 'SHUYAN_API_KEY', description: '数眼搜索 (shuyanai.com)', category: 'search' },
+    // 图片生成 API Keys (Unified Image Generation Server 使用)
+    { key: 'MINIMAX_API_KEY', description: 'Minimax(海螺AI)图片生成 API Key (platform.minimaxi.com)', category: 'image' },
+    { key: 'MINIMAX_MODEL', description: 'Minimax图片生成模型 (如: image-01)', category: 'image' },
+    { key: 'QWEN_API_KEY', description: '阿里云百炼图片生成 API Key (bailian.console.aliyun.com)', category: 'image' },
+    { key: 'QWEN_MODEL', description: '阿里云图片生成模型 (如: wanx2.1-t2i-plus)', category: 'image' },
+    { key: 'SEEDREAM_API_KEY', description: '火山引擎Seedream图片生成 API Key (console.volcengine.com/ark)', category: 'image' },
+    { key: 'SEEDREAM_MODEL', description: 'Seedream图片生成模型 (如: doubao-seedream-5.0-lite)', category: 'image' },
     // 代理设置 (Tauri 读取用于系统代理配置)
     { key: 'HTTP_PROXY', description: 'HTTP代理地址 (如: http://127.0.0.1:7890)', category: 'proxy' },
     { key: 'HTTPS_PROXY', description: 'HTTPS代理地址 (如: http://127.0.0.1:7890)', category: 'proxy' },

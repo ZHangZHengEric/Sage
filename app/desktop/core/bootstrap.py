@@ -226,9 +226,9 @@ async def copy_wiki_docs():
                     current_file = Path(__file__).resolve()
                     wiki_docs_dir = current_file.parent.parent.parent.parent / "docs"
                 
-                # 如果找不到，尝试相对于可执行文件的位置
+                # 如果找不到，尝试相对于可执行文件的位置（PyInstaller 打包环境）
                 if not wiki_docs_dir.exists():
-                    wiki_docs_dir = Path(sys.executable).parent / "_internal" / "docs"
+                    wiki_docs_dir = Path(sys.executable).parent / "_internal" / "wiki"
             else:
                 # 开发环境：使用相对路径
                 current_file = Path(__file__).resolve()
