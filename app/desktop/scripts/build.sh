@@ -14,7 +14,7 @@ TAURI_DIR="$APP_DIR/tauri"
 DIST_DIR="$APP_DIR/dist"
 # Standardized Sidecar Directory
 TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
-TAURI_NODE_RESOURCES_DIR="$TAURI_DIR/resources/node"
+TAURI_NODE_SIDECAR_DIR="$TAURI_SIDECAR_DIR/node"
 # Build Cache Directory
 CACHE_DIR="$APP_DIR/.build_cache"
 
@@ -75,12 +75,12 @@ prepare_bundled_node_runtime() {
     echo "[Node Runtime] 正在准备内置 Node 运行时..."
 
     if ! command -v node >/dev/null 2>&1; then
-        echo "错误: 未找到 node，无法准备 resources/node。"
+        echo "错误: 未找到 node，无法准备 sidecar/node。"
         exit 1
     fi
 
-    mkdir -p "$TAURI_NODE_RESOURCES_DIR"
-    find "$TAURI_NODE_RESOURCES_DIR" -mindepth 1 ! -name "README.md" ! -name ".gitignore" -exec rm -rf {} +
+    rm -rf "$TAURI_NODE_SIDECAR_DIR"
+    mkdir -p "$TAURI_NODE_SIDECAR_DIR"
 
     local custom_source="${SAGE_BUNDLED_NODE_SOURCE:-}"
     if [ -n "$custom_source" ]; then
@@ -94,22 +94,19 @@ prepare_bundled_node_runtime() {
         shopt -s dotglob nullglob
         for item in "$custom_source"/*; do
             name="$(basename "$item")"
-            if [ "$name" = "README.md" ] || [ "$name" = ".gitignore" ]; then
-                continue
-            fi
-            cp -R "$item" "$TAURI_NODE_RESOURCES_DIR/"
+            cp -R "$item" "$TAURI_NODE_SIDECAR_DIR/"
         done
         shopt -u dotglob nullglob
 
-        if [ -f "$TAURI_NODE_RESOURCES_DIR/bin/node" ]; then
-            chmod +x "$TAURI_NODE_RESOURCES_DIR/bin/node"
+        if [ -f "$TAURI_NODE_SIDECAR_DIR/bin/node" ]; then
+            chmod +x "$TAURI_NODE_SIDECAR_DIR/bin/node"
         fi
-        if [ -f "$TAURI_NODE_RESOURCES_DIR/node" ]; then
-            chmod +x "$TAURI_NODE_RESOURCES_DIR/node"
+        if [ -f "$TAURI_NODE_SIDECAR_DIR/node" ]; then
+            chmod +x "$TAURI_NODE_SIDECAR_DIR/node"
         fi
 
         echo "[Node Runtime] 使用自定义目录: $custom_source"
-        echo "[Node Runtime] 已同步到: $TAURI_NODE_RESOURCES_DIR"
+        echo "[Node Runtime] 已同步到: $TAURI_NODE_SIDECAR_DIR"
         return
     fi
 
@@ -134,16 +131,16 @@ prepare_bundled_node_runtime() {
         exit 1
     fi
 
-    mkdir -p "$TAURI_NODE_RESOURCES_DIR/bin"
-    mkdir -p "$TAURI_NODE_RESOURCES_DIR/lib/node_modules"
+    mkdir -p "$TAURI_NODE_SIDECAR_DIR/bin"
+    mkdir -p "$TAURI_NODE_SIDECAR_DIR/lib/node_modules"
 
-    cp -L "$node_exec" "$TAURI_NODE_RESOURCES_DIR/bin/node"
-    chmod +x "$TAURI_NODE_RESOURCES_DIR/bin/node"
-    cp -R "$npm_package_dir" "$TAURI_NODE_RESOURCES_DIR/lib/node_modules/npm"
+    cp -L "$node_exec" "$TAURI_NODE_SIDECAR_DIR/bin/node"
+    chmod +x "$TAURI_NODE_SIDECAR_DIR/bin/node"
+    cp -R "$npm_package_dir" "$TAURI_NODE_SIDECAR_DIR/lib/node_modules/npm"
 
     echo "[Node Runtime] Node 可执行文件: $node_exec"
     echo "[Node Runtime] npm 包目录: $npm_package_dir"
-    echo "[Node Runtime] 已同步最小运行时到: $TAURI_NODE_RESOURCES_DIR"
+    echo "[Node Runtime] 已同步最小运行时到: $TAURI_NODE_SIDECAR_DIR"
 }
 
 ########################################
