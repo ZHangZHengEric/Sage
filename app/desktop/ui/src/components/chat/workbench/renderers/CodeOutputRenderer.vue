@@ -8,7 +8,7 @@
         <span class="text-sm text-muted-foreground">{{ formatTime(item?.timestamp) }}</span>
         <span class="text-muted-foreground/50">|</span>
         <span class="text-xl">🖥️</span>
-        <span class="text-sm font-medium">代码执行</span>
+        <span class="text-sm font-medium">{{ t('workbench.codeOutput.title') }}</span>
         <Badge variant="secondary" class="text-xs">{{ language || 'text' }}</Badge>
       </div>
       <div class="flex items-center gap-1 flex-shrink-0">
@@ -21,7 +21,7 @@
         >
           <Check v-if="copied" class="w-4 h-4 mr-1 text-green-500" />
           <Copy v-else class="w-4 h-4 mr-1" />
-          {{ copied ? '已复制' : '复制' }}
+          {{ copied ? t('common.copied') : t('common.copy') }}
         </Button>
       </div>
     </div>
