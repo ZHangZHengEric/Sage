@@ -14,6 +14,7 @@ TAURI_DIR="$APP_DIR/tauri"
 DIST_DIR="$APP_DIR/dist"
 # Standardized Sidecar Directory
 TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
+TAURI_NODE_RESOURCES_DIR="$TAURI_DIR/resources/node"
 # Build Cache Directory
 CACHE_DIR="$APP_DIR/.build_cache"
 
@@ -68,6 +69,50 @@ echo "目标平台: $TARGET"
 
 calc_hash() {
     python3 -c "import hashlib; print(hashlib.sha256(open('$1', 'rb').read()).hexdigest())" 2>/dev/null || echo "unknown"
+}
+
+prepare_bundled_node_runtime() {
+    echo "[Node Runtime] 正在准备内置 Node 运行时..."
+
+    if ! command -v node >/dev/null 2>&1; then
+        echo "错误: 未找到 node，无法准备 resources/node。"
+        exit 1
+    fi
+
+    local node_root="${SAGE_BUNDLED_NODE_SOURCE:-}"
+    if [ -z "$node_root" ]; then
+        node_root="$(node -p "require('path').dirname(require('path').dirname(process.execPath))")"
+    fi
+
+    if [ ! -d "$node_root" ]; then
+        echo "错误: Node 运行时目录不存在: $node_root"
+        exit 1
+    fi
+
+    mkdir -p "$TAURI_NODE_RESOURCES_DIR"
+    find "$TAURI_NODE_RESOURCES_DIR" -mindepth 1 ! -name "README.md" ! -name ".gitignore" -exec rm -rf {} +
+
+    local item
+    local name
+    shopt -s dotglob nullglob
+    for item in "$node_root"/*; do
+        name="$(basename "$item")"
+        if [ "$name" = "README.md" ] || [ "$name" = ".gitignore" ]; then
+            continue
+        fi
+        cp -R "$item" "$TAURI_NODE_RESOURCES_DIR/"
+    done
+    shopt -u dotglob nullglob
+
+    if [ -f "$TAURI_NODE_RESOURCES_DIR/bin/node" ]; then
+        chmod +x "$TAURI_NODE_RESOURCES_DIR/bin/node"
+    fi
+    if [ -f "$TAURI_NODE_RESOURCES_DIR/node" ]; then
+        chmod +x "$TAURI_NODE_RESOURCES_DIR/node"
+    fi
+
+    echo "[Node Runtime] 来源目录: $node_root"
+    echo "[Node Runtime] 已同步到: $TAURI_NODE_RESOURCES_DIR"
 }
 
 ########################################
@@ -327,6 +372,8 @@ fi
 echo ">>> 构建完成。"
 
 cd "$ROOT_DIR"
+
+prepare_bundled_node_runtime
 
 ########################################
 # 5. Setup Code Signing (Self-Signed)
