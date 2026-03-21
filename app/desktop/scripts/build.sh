@@ -419,7 +419,13 @@ build_python_sidecar() {
             
             cp -L "$node_exec" "$NODE_DIR/bin/node"
             chmod +x "$NODE_DIR/bin/node"
+            
+            # 复制 npm 包到 lib/node_modules/npm
             cp -R "$npm_package_dir" "$NODE_DIR/lib/node_modules/npm"
+            
+            # 创建 npm 命令的符号链接到 bin 目录
+            ln -sf "../lib/node_modules/npm/bin/npm-cli.js" "$NODE_DIR/bin/npm"
+            ln -sf "../lib/node_modules/npm/bin/npx-cli.js" "$NODE_DIR/bin/npx"
             
             echo "[Node.js] 已复制系统 Node.js 到: $NODE_DIR"
         else

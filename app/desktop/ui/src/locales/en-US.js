@@ -979,6 +979,9 @@ export default {
   'permission.openSettings': 'Open Settings',
   'permission.cancel': 'Cancel',
 
+  // Workbench Code Output
+  'workbench.codeOutput.title': 'Code Snippet',
+
   // Workbench ToolCall
   'workbench.tool.arguments': 'Arguments',
   'workbench.tool.result': 'Result',
