@@ -14,6 +14,7 @@ $CoreDir = Join-Path $AppDir "core"
 $UiDir = Join-Path $AppDir "ui"
 $TauriDir = Join-Path $AppDir "tauri"
 $TauriSidecarDir = Join-Path $TauriDir "sidecar"
+$TauriNodeResourcesDir = Join-Path $TauriDir "resources/node"
 $TauriBinDir = Join-Path $TauriDir "bin"
 $DistDir = Join-Path $AppDir "dist"
 $CacheDir = Join-Path $AppDir ".build_cache"
@@ -269,6 +270,45 @@ function Build-Frontend {
     Set-Location $RootDirParam
 }
 
+function Prepare-BundledNodeRuntime {
+    param($TauriNodeResourcesDirParam)
+
+    Write-Host "[Node Runtime] Preparing bundled Node runtime..." -ForegroundColor Cyan
+
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "[ERROR] node not found. Cannot prepare resources/node." -ForegroundColor Red
+        exit 1
+    }
+
+    $NodeRoot = if ($env:SAGE_BUNDLED_NODE_SOURCE) {
+        $env:SAGE_BUNDLED_NODE_SOURCE
+    } else {
+        Split-Path -Parent (node -p "process.execPath")
+    }
+
+    if (-not (Test-Path $NodeRoot)) {
+        Write-Host "[ERROR] Node runtime directory not found: $NodeRoot" -ForegroundColor Red
+        exit 1
+    }
+
+    if (-not (Test-Path $TauriNodeResourcesDirParam)) {
+        New-Item -ItemType Directory -Force -Path $TauriNodeResourcesDirParam | Out-Null
+    }
+
+    Get-ChildItem -Force $TauriNodeResourcesDirParam -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin @("README.md", ".gitignore") } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    Get-ChildItem -Force $NodeRoot |
+        Where-Object { $_.Name -notin @("README.md", ".gitignore") } |
+        ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $TauriNodeResourcesDirParam -Recurse -Force
+        }
+
+    Write-Host "[Node Runtime] Source: $NodeRoot" -ForegroundColor Green
+    Write-Host "[Node Runtime] Synced to: $TauriNodeResourcesDirParam" -ForegroundColor Green
+}
+
 Write-Host ">>> Starting build tasks..." -ForegroundColor Cyan
 
 Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode
@@ -286,6 +326,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ">>> Build completed." -ForegroundColor Green
 
 Set-Location $RootDir
+
+Prepare-BundledNodeRuntime -TauriNodeResourcesDirParam $TauriNodeResourcesDir
 
 Write-Host "Building Tauri Windows executable..." -ForegroundColor Cyan
 Set-Location $TauriDir

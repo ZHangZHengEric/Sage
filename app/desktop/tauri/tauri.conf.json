@@ -70,6 +70,7 @@
       }
     },
     "resources": [
+      "resources/node",
       "../../skills",
       "../../../mcp_servers",
       "sidecar",
