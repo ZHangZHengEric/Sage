@@ -188,12 +188,33 @@ fn build_npm_command(node_runtime: Option<&NodeRuntime>) -> Result<Command, Stri
     Ok(cmd)
 }
 
+/// 检查用户是否选择跳过 npx 包安装
+fn should_skip_npx_install() -> bool {
+    let skip_flag_file = get_sage_root_dir().join(".skip_npx_install");
+    skip_flag_file.exists()
+}
+
+/// 创建跳过安装的标记文件
+fn create_skip_npx_install_flag() -> Result<(), String> {
+    let skip_flag_file = get_sage_root_dir().join(".skip_npx_install");
+    std::fs::write(&skip_flag_file, "")
+        .map_err(|e| format!("Failed to create skip flag file: {}", e))
+}
+
 /// 初始化 .sage_node_modules 目录并安装预设的 npx 包
 async fn initialize_sage_node_modules(
     node_runtime: Option<NodeRuntime>,
+    app_handle: &tauri::AppHandle,
 ) -> Result<PathBuf, String> {
     let sage_root = get_sage_root_dir();
     let node_modules_dir = sage_root.join(SAGE_NODE_MODULES_DIR);
+
+    // 检查用户是否选择跳过安装
+    if should_skip_npx_install() {
+        println!("User chose to skip npx package installation");
+        let _ = app_handle.emit("sage-npx-install-skipped", ());
+        return Ok(node_modules_dir);
+    }
 
     // 创建目录
     if !node_modules_dir.exists() {
@@ -235,6 +256,14 @@ async fn initialize_sage_node_modules(
 
     // 安装预设的 npx 包
     println!("Installing preset npx packages...");
+    
+    // 发送开始安装事件
+    let total_packages = PRESET_NPX_PACKAGES.len();
+    let _ = app_handle.emit("sage-npx-install-started", serde_json::json!({
+        "total": total_packages,
+        "packages": PRESET_NPX_PACKAGES,
+    }));
+    
     if let Some(runtime) = node_runtime.as_ref() {
         println!("Using Node.js: {:?}", runtime.node_executable);
         println!("Using NPM CLI: {:?}", runtime.npm_cli);
@@ -242,9 +271,20 @@ async fn initialize_sage_node_modules(
         println!("Using system npm to install preset npx packages");
     }
     
-    for package in PRESET_NPX_PACKAGES {
-        let package_name = package;
+    let mut installed_count = 0;
+    let mut failed_packages: Vec<String> = Vec::new();
+    
+    for (index, package) in PRESET_NPX_PACKAGES.iter().enumerate() {
+        let package_name = *package;
         println!("Checking package: {}", package_name);
+
+        // 发送进度事件
+        let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
+            "current": index + 1,
+            "total": total_packages,
+            "package": package_name,
+            "status": "checking",
+        }));
 
         // 检查包是否已安装 (对于 scoped packages，检查 scope 目录)
         let scoped_package_dir = node_modules_dir
@@ -253,10 +293,26 @@ async fn initialize_sage_node_modules(
 
         if scoped_package_dir.exists() {
             println!("Package {} already installed, skipping", package_name);
+            installed_count += 1;
+            let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
+                "current": index + 1,
+                "total": total_packages,
+                "package": package_name,
+                "status": "skipped",
+            }));
             continue;
         }
 
         println!("Installing package: {}", package_name);
+        
+        // 发送开始安装事件
+        let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
+            "current": index + 1,
+            "total": total_packages,
+            "package": package_name,
+            "status": "installing",
+        }));
+
         let mut install_command = build_npm_command(node_runtime.as_ref())?;
         let install_result = install_command
             .args(["install", package_name, "--save"])
@@ -267,14 +323,37 @@ async fn initialize_sage_node_modules(
 
         if install_result.status.success() {
             println!("Successfully installed {}", package_name);
+            installed_count += 1;
+            let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
+                "current": index + 1,
+                "total": total_packages,
+                "package": package_name,
+                "status": "success",
+            }));
         } else {
             let stderr = String::from_utf8_lossy(&install_result.stderr);
             eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
+            failed_packages.push(package_name.to_string());
+            let _ = app_handle.emit("sage-npx-install-progress", serde_json::json!({
+                "current": index + 1,
+                "total": total_packages,
+                "package": package_name,
+                "status": "failed",
+                "error": stderr.to_string(),
+            }));
             // 继续安装其他包，不中断
         }
     }
 
     println!("Preset npx packages installation completed");
+    
+    // 发送完成事件
+    let _ = app_handle.emit("sage-npx-install-completed", serde_json::json!({
+        "total": total_packages,
+        "installed": installed_count,
+        "failed": failed_packages,
+    }));
+    
     Ok(node_modules_dir)
 }
 
@@ -401,6 +480,17 @@ fn get_sage_node_modules_path() -> Result<String, String> {
 #[tauri::command]
 fn get_sage_node_path() -> Option<String> {
     std::env::var("SAGE_NODE_PATH").ok()
+}
+
+#[tauri::command]
+fn skip_npx_installation() -> Result<(), String> {
+    println!("User requested to skip npx package installation");
+    create_skip_npx_install_flag()
+}
+
+#[tauri::command]
+fn is_npx_installation_skipped() -> bool {
+    should_skip_npx_install()
 }
 
 #[tauri::command]
@@ -838,7 +928,7 @@ fn main() {
                 .as_ref()
                 .map(|runtime| runtime.bin_dir.to_string_lossy().to_string());
             tauri::async_runtime::spawn(async move {
-                match initialize_sage_node_modules(node_runtime_for_init).await {
+                match initialize_sage_node_modules(node_runtime_for_init, &app_handle_clone).await {
                     Ok(node_modules_dir) => {
                         let node_modules_path = node_modules_dir.to_string_lossy().to_string();
                         std::env::set_var("SAGE_NODE_MODULES_DIR", &node_modules_path);
@@ -1042,11 +1132,25 @@ fn main() {
                 });
 
                 let mut reader = BufReader::new(stdout).lines();
+                let mut backend_started = false;
+                let start_time = std::time::Instant::now();
+                let timeout = std::time::Duration::from_secs(60); // 60秒超时
 
-                // Read events from sidecar
+                // Read events from sidecar with timeout
                 while let Ok(Some(line)) = reader.next_line().await {
                     let line: String = line;
                     println!("PYTHON: {}", line);
+                    
+                    // Check for startup timeout
+                    if !backend_started && start_time.elapsed() > timeout {
+                        eprintln!("Backend startup timeout after 60 seconds");
+                        app_handle.emit("sage-backend-startup-failed", serde_json::json!({
+                            "reason": "timeout",
+                            "message": "后端服务启动超时，请检查应用是否完整安装"
+                        })).unwrap();
+                        break;
+                    }
+                    
                     if line.contains("Starting Sage Desktop Server on port") {
                         // Extract port. Line format: "Starting Sage Desktop Server on port 12345..."
                         if let Some(last_word) = line.split_whitespace().rev().next() {
@@ -1054,11 +1158,30 @@ fn main() {
                             if let Ok(port) = clean_port.parse::<u16>() {
                                 println!("Detected port: {}", port);
                                 println!("Emitting sage-desktop-ready event...");
+                                backend_started = true;
                                 // Emit event to frontend
                                 app_handle.emit("sage-desktop-ready", Payload { port }).unwrap();
                             }
                         }
+                    } else if line.contains("Error:") || line.contains("Traceback") {
+                        // Backend reported an error during startup
+                        if !backend_started {
+                            eprintln!("Backend startup error detected: {}", line);
+                            app_handle.emit("sage-backend-startup-failed", serde_json::json!({
+                                "reason": "error",
+                                "message": format!("后端启动错误: {}", line)
+                            })).unwrap();
+                        }
                     }
+                }
+
+                // If backend never started and we exited the loop, notify frontend
+                if !backend_started {
+                    eprintln!("Backend process exited without starting successfully");
+                    app_handle.emit("sage-backend-startup-failed", serde_json::json!({
+                        "reason": "crashed",
+                        "message": "后端进程异常退出，请检查日志或尝试重启应用"
+                    })).unwrap();
                 }
 
                 // Wait for child to exit
@@ -1070,7 +1193,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_port, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path])
+        .invoke_handler(tauri::generate_handler![get_server_port, get_sage_env_content, save_sage_env_content, handle_close_dialog_result, get_sage_node_modules_path, get_sage_node_path, skip_npx_installation, is_npx_installation_skipped])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

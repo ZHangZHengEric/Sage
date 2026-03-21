@@ -91,6 +91,9 @@ class LocalSandboxProvider(ISandboxHandle):
             if self._linux_isolation_mode != "subprocess" or self._macos_isolation_mode != "subprocess":
                 self._init_isolation()
 
+            # 确保 venv 存在（同步初始化）
+            self._ensure_venv()
+
     def _init_isolation(self):
         """初始化隔离层"""
         from .isolation import SeatbeltIsolation, BwrapIsolation
@@ -153,7 +156,7 @@ class LocalSandboxProvider(ISandboxHandle):
     def _ensure_venv(self):
         """确保 venv 存在"""
         if not os.path.exists(self._venv_dir):
-            import venv
+            import subprocess
             from sagents.utils.common_utils import get_system_python_path
 
             os.makedirs(os.path.dirname(self._venv_dir), exist_ok=True)
@@ -163,8 +166,15 @@ class LocalSandboxProvider(ISandboxHandle):
             if not system_python:
                 raise RuntimeError("无法找到系统 Python 解释器")
 
-            # 创建虚拟环境，指定正确的 Python 解释器
-            venv.create(self._venv_dir, with_pip=True, executable=system_python)
+            # 使用 subprocess 调用 python -m venv 创建虚拟环境
+            logger.info(f"[LocalSandboxProvider] 创建虚拟环境: {self._venv_dir} 使用 Python: {system_python}")
+            result = subprocess.run(
+                [system_python, "-m", "venv", self._venv_dir],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"创建虚拟环境失败: {result.stderr}")
 
             # 确保 venv 中同时存在 python 和 python3 命令
             self._ensure_python3_link()
