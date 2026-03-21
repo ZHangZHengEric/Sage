@@ -3,27 +3,36 @@
     windows_subsystem = "windows"
 )]
 
-use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
-    path::BaseDirectory,
-    tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    image::Image,
-    Emitter, Manager, WindowEvent,
-};
 #[cfg(target_os = "macos")]
 use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
-use sysinfo::{System, Pid};
-use serde::{Deserialize, Serialize};
+use sysinfo::{Pid, System};
+use tauri::{
+    image::Image,
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
+    path::BaseDirectory,
+    tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, WindowEvent,
+};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 
 const MAX_MEMORY_MB: u64 = 2048;
 
 struct SidecarPid(Mutex<Option<u32>>);
 struct Tray(Mutex<Option<TrayIcon>>);
+
+#[derive(Debug, Clone)]
+struct NodeRuntime {
+    node_executable: PathBuf,
+    npm_cli: Option<PathBuf>,
+    bin_dir: PathBuf,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 enum CloseAction {
@@ -44,10 +53,9 @@ const SAGE_NODE_MODULES_DIR: &str = ".sage_node_env";
 
 // 预设的 npx 包列表
 const PRESET_NPX_PACKAGES: &[&str] = &[
-
     // Skill 依赖
-    "agent-browser",          // social-push, agent-browser skills
-    "docx",                   // docx skill - 创建 Word 文档
+    "agent-browser", // social-push, agent-browser skills
+    "docx",          // docx skill - 创建 Word 文档
 ];
 
 fn get_sage_root_dir() -> PathBuf {
@@ -61,143 +69,143 @@ fn get_sage_node_modules_dir() -> PathBuf {
     get_sage_root_dir().join(SAGE_NODE_MODULES_DIR)
 }
 
-/// 获取打包的 Node.js 可执行文件路径
-fn get_bundled_node_path() -> Option<PathBuf> {
-    // 在开发模式下，尝试从 sidecar/node 目录获取
-    let dev_path = std::env::current_dir()
-        .ok()?
-        .join("sidecar")
-        .join("node")
-        .join("bin")
-        .join("node");
-    
-    if dev_path.exists() {
-        return Some(dev_path);
-    }
-    
-    // 在生产模式下，从应用资源目录获取
-    // 注意：这里需要在 Tauri 应用启动后才能正确获取
-    None
+fn first_existing_path(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|path| path.exists())
 }
 
-/// 获取打包的 Node.js bin 目录路径（用于 Python 后端）
-fn get_bundled_node_bin_path(app_handle: &tauri::AppHandle) -> Option<String> {
-    // 首先尝试从资源目录获取打包的 Node
-    if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        let bundled_node_bin = resource_dir
-            .join("sidecar")
-            .join("node")
-            .join("bin");
-        
-        if bundled_node_bin.exists() {
-            return Some(bundled_node_bin.to_string_lossy().to_string());
-        }
+fn build_prepended_path(path: &Path, current_path: Option<OsString>) -> Result<OsString, String> {
+    let mut paths = vec![path.to_path_buf()];
+    if let Some(current_path) = current_path {
+        paths.extend(std::env::split_paths(&current_path));
     }
-    
-    // 在开发模式下，尝试从 sidecar/node/bin 目录获取
-    if let Ok(current_dir) = std::env::current_dir() {
-        let dev_node_bin = current_dir
-            .join("sidecar")
-            .join("node")
-            .join("bin");
-        
-        if dev_node_bin.exists() {
-            return Some(dev_node_bin.to_string_lossy().to_string());
-        }
-    }
-    
-    None
+
+    std::env::join_paths(paths)
+        .map_err(|e| format!("Failed to construct PATH with bundled Node runtime: {}", e))
 }
 
-/// 获取 Node.js 可执行文件路径（优先使用打包的，否则使用系统的）
-async fn get_node_executable(app_handle: &tauri::AppHandle) -> PathBuf {
-    // 首先尝试从资源目录获取打包的 Node
-    if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        let bundled_node = resource_dir
-            .join("sidecar")
-            .join("node")
-            .join("bin")
-            .join("node");
-        
-        if bundled_node.exists() {
-            println!("Using bundled Node.js: {:?}", bundled_node);
-            return bundled_node;
-        }
-    }
-    
-    // 在开发模式下，尝试从 sidecar/node/bin 目录获取
-    if let Ok(current_dir) = std::env::current_dir() {
-        let dev_node = current_dir
-            .join("sidecar")
-            .join("node")
-            .join("bin")
-            .join("node");
-        
-        if dev_node.exists() {
-            println!("Using bundled Node.js (dev mode): {:?}", dev_node);
-            return dev_node;
-        }
-    }
-    
-    // 回退到系统 Node
-    println!("Bundled Node.js not found, falling back to system node");
-    PathBuf::from("node")
-}
+fn resolve_bundled_node_runtime(app_handle: &tauri::AppHandle) -> Option<NodeRuntime> {
+    let node_dir = app_handle
+        .path()
+        .resolve("node", BaseDirectory::Resource)
+        .ok()?;
 
-/// 获取 NPM CLI 脚本路径（直接使用 node 执行，避免符号链接问题）
-async fn get_npm_cli_path(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
-    // 首先尝试从资源目录获取
-    if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        let npm_cli = resource_dir
-            .join("sidecar")
-            .join("node")
+    if !node_dir.exists() {
+        return None;
+    }
+
+    let node_executable = first_existing_path([
+        node_dir.join("node"),
+        node_dir.join("node.exe"),
+        node_dir.join("bin").join("node"),
+        node_dir.join("bin").join("node.exe"),
+    ])?;
+
+    let npm_cli = first_existing_path([
+        node_dir
             .join("lib")
             .join("node_modules")
             .join("npm")
             .join("bin")
-            .join("npm-cli.js");
-        
-        if npm_cli.exists() {
-            return Some(npm_cli);
-        }
-    }
-    
-    // 在开发模式下
-    if let Ok(current_dir) = std::env::current_dir() {
-        let dev_npm_cli = current_dir
-            .join("sidecar")
-            .join("node")
-            .join("lib")
+            .join("npm-cli.js"),
+        node_dir
             .join("node_modules")
             .join("npm")
             .join("bin")
-            .join("npm-cli.js");
-        
-        if dev_npm_cli.exists() {
-            return Some(dev_npm_cli);
-        }
+            .join("npm-cli.js"),
+    ]);
+
+    let bin_dir = node_executable
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| node_dir.clone());
+
+    Some(NodeRuntime {
+        node_executable,
+        npm_cli,
+        bin_dir,
+    })
+}
+
+fn apply_bundled_node_runtime(runtime: &NodeRuntime) -> Result<(), String> {
+    let path_with_node = build_prepended_path(&runtime.bin_dir, std::env::var_os("PATH"))?;
+    std::env::set_var("PATH", &path_with_node);
+    std::env::set_var(
+        "SAGE_NODE_EXECUTABLE",
+        runtime.node_executable.to_string_lossy().to_string(),
+    );
+    if let Some(npm_cli) = &runtime.npm_cli {
+        std::env::set_var("SAGE_NPM_CLI", npm_cli.to_string_lossy().to_string());
     }
-    
-    None
+    println!(
+        "Using bundled Node runtime at {:?}",
+        runtime.node_executable
+    );
+    Ok(())
+}
+
+fn configure_sage_node_environment() -> PathBuf {
+    let node_modules_dir = get_sage_node_modules_dir();
+    let node_modules_path = node_modules_dir.to_string_lossy().to_string();
+    let node_modules_lib = node_modules_dir.join("node_modules");
+    let node_path = node_modules_lib.to_string_lossy().to_string();
+
+    std::env::set_var("SAGE_NODE_MODULES_DIR", &node_modules_path);
+    std::env::set_var("SAGE_NODE_PATH", &node_path);
+    std::env::set_var("NODE_PATH", &node_path);
+
+    println!("Prepared SAGE_NODE_MODULES_DIR: {}", node_modules_path);
+    println!("Prepared SAGE_NODE_PATH: {}", node_path);
+
+    node_modules_dir
+}
+
+fn build_npm_command(node_runtime: Option<&NodeRuntime>) -> Result<Command, String> {
+    let mut cmd = if let Some(runtime) = node_runtime {
+        if let Some(npm_cli) = &runtime.npm_cli {
+            let mut cmd = Command::new(&runtime.node_executable);
+            cmd.arg(npm_cli);
+            cmd
+        } else {
+            eprintln!(
+                "Bundled Node runtime found at {:?}, but npm-cli.js is missing. Falling back to system npm.",
+                runtime.node_executable
+            );
+            Command::new("npm")
+        }
+    } else {
+        Command::new("npm")
+    };
+
+    if let Some(runtime) = node_runtime {
+        let path_with_node = build_prepended_path(&runtime.bin_dir, std::env::var_os("PATH"))?;
+        cmd.env("PATH", path_with_node);
+    }
+
+    Ok(cmd)
 }
 
 /// 初始化 .sage_node_modules 目录并安装预设的 npx 包
-async fn initialize_sage_node_modules(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+async fn initialize_sage_node_modules(
+    node_runtime: Option<NodeRuntime>,
+) -> Result<PathBuf, String> {
     let sage_root = get_sage_root_dir();
     let node_modules_dir = sage_root.join(SAGE_NODE_MODULES_DIR);
-    
+
     // 创建目录
     if !node_modules_dir.exists() {
-        println!("Creating .sage_node_modules directory at {:?}", node_modules_dir);
+        println!(
+            "Creating .sage_node_modules directory at {:?}",
+            node_modules_dir
+        );
         std::fs::create_dir_all(&node_modules_dir)
             .map_err(|e| format!("Failed to create .sage_node_modules directory: {}", e))?;
     }
-    
+
     // 检查是否需要初始化 npm
     let package_json_path = node_modules_dir.join("package.json");
     if !package_json_path.exists() {
         println!("Initializing npm in .sage_node_modules...");
-        
+
         // 手动创建 package.json，因为目录名以点开头，npm init 会报错
         let package_json_content = serde_json::json!({
             "name": "sage-node-modules",
@@ -205,10 +213,10 @@ async fn initialize_sage_node_modules(app_handle: &tauri::AppHandle) -> Result<P
             "description": "Sage npx packages environment",
             "private": true
         });
-        
+
         std::fs::write(&package_json_path, package_json_content.to_string())
             .map_err(|e| format!("Failed to create package.json: {}", e))?;
-        
+
         // 创建 .npmrc 文件配置国内镜像源
         let npmrc_path = node_modules_dir.join(".npmrc");
         let npmrc_content = r#"registry=https://registry.npmmirror.com
@@ -217,14 +225,10 @@ async fn initialize_sage_node_modules(app_handle: &tauri::AppHandle) -> Result<P
 "#;
         std::fs::write(&npmrc_path, npmrc_content)
             .map_err(|e| format!("Failed to create .npmrc: {}", e))?;
-        
+
         println!("package.json and .npmrc created successfully");
     }
-    
-    // 获取 Node.js 和 NPM CLI 路径
-    let node_executable = get_node_executable(app_handle).await;
-    let npm_cli_path = get_npm_cli_path(app_handle).await;
-    
+
     // 安装预设的 npx 包
     println!("Installing preset npx packages...");
     println!("Using Node.js: {:?}", node_executable);
@@ -233,58 +237,35 @@ async fn initialize_sage_node_modules(app_handle: &tauri::AppHandle) -> Result<P
     for package in PRESET_NPX_PACKAGES {
         let package_name = package;
         println!("Checking package: {}", package_name);
-        
+
         // 检查包是否已安装 (对于 scoped packages，检查 scope 目录)
-        let scoped_package_dir = node_modules_dir.join("node_modules").join(package_name.split('/').next().unwrap_or(""));
-        
+        let scoped_package_dir = node_modules_dir
+            .join("node_modules")
+            .join(package_name.split('/').next().unwrap_or(""));
+
         if scoped_package_dir.exists() {
             println!("Package {} already installed, skipping", package_name);
             continue;
         }
-        
-        // 检查 Node.js 是否可执行
-        if !node_executable.exists() {
-            eprintln!("Error: Node.js executable does not exist: {:?}", node_executable);
-            continue;
-        }
-        
-        let install_result = if let Some(ref npm_cli) = npm_cli_path {
-            // 使用 node 直接执行 npm-cli.js（避免符号链接问题）
-            println!("Installing package: {} using node + npm-cli.js", package_name);
-            Command::new(&node_executable)
-                .args(&[npm_cli.to_str().unwrap(), "install", package_name, "--save"])
-                .current_dir(&node_modules_dir)
-                .output()
-                .await
+
+        println!("Installing package: {}", package_name);
+        let mut install_command = build_npm_command(node_runtime.as_ref())?;
+        let install_result = install_command
+            .args(["install", package_name, "--save"])
+            .current_dir(&node_modules_dir)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to install package {}: {}", package_name, e))?;
+
+        if install_result.status.success() {
+            println!("Successfully installed {}", package_name);
         } else {
-            // 回退到系统 npm
-            println!("Installing package: {} using system npm", package_name);
-            Command::new("npm")
-                .args(&["install", package_name, "--save"])
-                .current_dir(&node_modules_dir)
-                .output()
-                .await
-        };
-        
-        match install_result {
-            Ok(output) => {
-                if output.status.success() {
-                    println!("Successfully installed {}", package_name);
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
-                    eprintln!("stdout: {}", stdout);
-                    // 继续安装其他包，不中断
-                }
-            }
-            Err(e) => {
-                eprintln!("Error: Failed to execute npm for package {}: {}", package_name, e);
-                // 继续安装其他包，不中断
-            }
+            let stderr = String::from_utf8_lossy(&install_result.stderr);
+            eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
+            // 继续安装其他包，不中断
         }
     }
-    
+
     println!("Preset npx packages installation completed");
     Ok(node_modules_dir)
 }
@@ -345,12 +326,12 @@ fn save_close_preference(preference: &ClosePreference) -> Result<(), String> {
 fn load_sage_env_file() {
     let sage_root = get_sage_root_dir();
     let env_file_path = sage_root.join(SAGE_ENV_FILE);
-    
+
     if !env_file_path.exists() {
         println!(".sage_env file not found at {:?}", env_file_path);
         return;
     }
-    
+
     match std::fs::read_to_string(&env_file_path) {
         Ok(content) => {
             println!("Loading .sage_env from {:?}", env_file_path);
@@ -359,7 +340,7 @@ fn load_sage_env_file() {
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
-                
+
                 if let Some((key, value)) = line.split_once('=') {
                     let key = key.trim();
                     let value = value.trim();
@@ -475,7 +456,7 @@ fn handle_close_dialog_result(result: CloseDialogResult, app: tauri::AppHandle) 
 //         .or_else(|_| std::env::var("HTTPS_PROXY"))
 //         .or_else(|_| std::env::var("https_proxy"))
 //         .or_else(|_| std::env::var("ALL_PROXY"))
-//         .or_else(|_| std::env::var("all_proxy")) 
+//         .or_else(|_| std::env::var("all_proxy"))
 //     {
 //         return Some(proxy);
 //     }
@@ -486,11 +467,11 @@ fn handle_close_dialog_result(result: CloseDialogResult, app: tauri::AppHandle) 
 //         use std::process::Command;
 //         if let Ok(output) = Command::new("scutil").arg("--proxy").output() {
 //             let output_str = String::from_utf8_lossy(&output.stdout);
-            
+
 //             let mut host = String::new();
 //             let mut port = String::new();
 //             let mut enabled = false;
-            
+
 //             for line in output_str.lines() {
 //                 let line = line.trim();
 //                 if line.starts_with("HTTPEnable") && line.contains("1") {
@@ -507,7 +488,7 @@ fn handle_close_dialog_result(result: CloseDialogResult, app: tauri::AppHandle) 
 //                     }
 //                 }
 //             }
-            
+
 //             if enabled && !host.is_empty() && !port.is_empty() {
 //                 return Some(format!("http://{}:{}", host, port));
 //             }
@@ -549,11 +530,11 @@ fn handle_close_dialog_result(result: CloseDialogResult, app: tauri::AppHandle) 
 fn get_sage_env_content() -> Result<String, String> {
     let sage_root = get_sage_root_dir();
     let env_file_path = sage_root.join(SAGE_ENV_FILE);
-    
+
     if !env_file_path.exists() {
         return Ok(String::new());
     }
-    
+
     std::fs::read_to_string(&env_file_path)
         .map_err(|e| format!("Failed to read .sage_env file: {}", e))
 }
@@ -561,14 +542,14 @@ fn get_sage_env_content() -> Result<String, String> {
 #[tauri::command]
 fn save_sage_env_content(content: String) -> Result<(), String> {
     let sage_root = get_sage_root_dir();
-    
+
     if !sage_root.exists() {
         std::fs::create_dir_all(&sage_root)
             .map_err(|e| format!("Failed to create .sage directory: {}", e))?;
     }
-    
+
     let env_file_path = sage_root.join(SAGE_ENV_FILE);
-    
+
     std::fs::write(&env_file_path, content)
         .map_err(|e| format!("Failed to write .sage_env file: {}", e))
 }
@@ -633,7 +614,7 @@ fn show_window(app: &tauri::AppHandle) {
 fn main() {
     // Load .sage_env file first before setting other environment variables
     load_sage_env_file();
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 当检测到已有实例运行时，显示原有窗口
@@ -671,16 +652,16 @@ fn main() {
                 }
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    
+
                     let app_handle = window.app_handle().clone();
                     let window = window.clone();
-                    
+
                     tauri::async_runtime::spawn(async move {
                         let state = app_handle.state::<ClosePreferenceState>();
                         let preference = state.0.lock().unwrap().clone();
-                        
+
                         println!("Close requested, preference: {:?}", preference);
-                        
+
                         if let Some(pref) = preference {
                             println!("Found preference: remember_choice={}, action={:?}", pref.remember_choice, pref.action);
                             if pref.remember_choice {
@@ -716,7 +697,7 @@ fn main() {
                                 return;
                             }
                         }
-                        
+
                         // 发射事件给前端，让前端显示自定义关闭对话框
                         let _ = app_handle.emit("show-close-dialog", ());
                     });
@@ -809,7 +790,7 @@ fn main() {
             }
 
             let app_handle = app.handle().clone();
-            
+
             // Set default environment variables
             std::env::set_var("SAGE_USE_SANDBOX", "False");
 
@@ -830,32 +811,35 @@ fn main() {
                 .expect("failed to find free port");
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
-            
-            // Set bundled Node.js path for Python backend and sandbox to use
-            let bundled_node_path = get_bundled_node_bin_path(app.handle());
-            if let Some(ref node_bin) = bundled_node_path {
-                std::env::set_var("SAGE_BUNDLED_NODE_BIN", node_bin);
-                println!("Set SAGE_BUNDLED_NODE_BIN: {}", node_bin);
+
+            let bundled_node_runtime = resolve_bundled_node_runtime(&app_handle);
+            if let Some(runtime) = bundled_node_runtime.as_ref() {
+                if let Err(e) = apply_bundled_node_runtime(runtime) {
+                    eprintln!("Failed to prepare bundled Node runtime: {}", e);
+                }
+            } else {
+                println!("Bundled Node runtime not found, falling back to system Node/npm");
             }
-            
+
+            configure_sage_node_environment();
+
             // Initialize .sage_node_modules and set environment variable
             let app_handle_clone = app.handle().clone();
-            let app_handle_for_node = app.handle().clone();
+            let node_runtime_for_init = bundled_node_runtime.clone();
             tauri::async_runtime::spawn(async move {
-                match initialize_sage_node_modules(&app_handle_for_node).await {
+                match initialize_sage_node_modules(node_runtime_for_init).await {
                     Ok(node_modules_dir) => {
                         let node_modules_path = node_modules_dir.to_string_lossy().to_string();
                         std::env::set_var("SAGE_NODE_MODULES_DIR", &node_modules_path);
                         println!("Set SAGE_NODE_MODULES_DIR: {}", node_modules_path);
-                        
+
                         // Also set NODE_PATH to include the node_modules
                         let node_modules_lib = node_modules_dir.join("node_modules");
-                        if node_modules_lib.exists() {
-                            let node_path = node_modules_lib.to_string_lossy().to_string();
-                            std::env::set_var("SAGE_NODE_PATH", &node_path);
-                            println!("Set SAGE_NODE_PATH: {}", node_path);
-                        }
-                        
+                        let node_path = node_modules_lib.to_string_lossy().to_string();
+                        std::env::set_var("SAGE_NODE_PATH", &node_path);
+                        std::env::set_var("NODE_PATH", &node_path);
+                        println!("Set SAGE_NODE_PATH: {}", node_path);
+
                         // Emit event to notify frontend that node_modules is ready
                         let _ = app_handle_clone.emit("sage-node-modules-ready", node_modules_path);
                     }
@@ -864,7 +848,7 @@ fn main() {
                     }
                 }
             });
-            
+
             tauri::async_runtime::spawn(async move {
                 // Determine how to run the backend
                 let (command, args) = if cfg!(debug_assertions) {
@@ -880,9 +864,9 @@ fn main() {
                     } else if script_path.ends_with("src-tauri") {
                         script_path.pop(); // app/desktop (if named src-tauri)
                     }
-                    
+
                     let entry_py = script_path.join("entry.py");
-                    
+
                     if entry_py.exists() {
                         println!("Running python script directly: {:?}", entry_py);
                         // Use environment variable SAGE_PYTHON if set, otherwise try common conda paths
@@ -955,7 +939,7 @@ fn main() {
                             .path()
                             .resolve("sidecar", BaseDirectory::Resource)
                             .expect("failed to resolve sidecar resource");
-                        
+
                         let sidecar_executable = if cfg!(target_os = "windows") {
                             sidecar_dir.join("sage-desktop.exe")
                         } else {
@@ -969,7 +953,7 @@ fn main() {
                         .path()
                         .resolve("sidecar", BaseDirectory::Resource)
                         .expect("failed to resolve sidecar resource");
-                    
+
                     let sidecar_executable = if cfg!(target_os = "windows") {
                         sidecar_dir.join("sage-desktop.exe")
                     } else {
@@ -1010,14 +994,14 @@ fn main() {
                 if let Some(id) = child.id() {
                     let state = app_handle.state::<SidecarPid>();
                     *state.0.lock().unwrap() = Some(id);
-                    
+
                     let sidecar_pid = Pid::from_u32(id);
                     tauri::async_runtime::spawn(async move {
                         let mut sys = System::new_all();
                         loop {
                             tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                             sys.refresh_all();
-                            
+
                             if let Some(process) = sys.process(sidecar_pid) {
                                 let memory_mb = process.memory() / 1024 / 1024;
                                 if memory_mb > MAX_MEMORY_MB {
@@ -1029,9 +1013,9 @@ fn main() {
                         }
                     });
                 }
-                
+
                 println!("Python sidecar spawned");
-                
+
                 let stdout = child.stdout.take().expect("Failed to capture stdout");
                 let stderr = child.stderr.take().expect("Failed to capture stderr");
 
@@ -1065,11 +1049,11 @@ fn main() {
                         }
                     }
                 }
-                
+
                 // Wait for child to exit
                 let status = child.wait().await;
                 println!("Sidecar exited with status: {:?}", status);
-                
+
                 eprintln!("Sidecar process exited, application will need to be restarted");
                 app_handle.emit("sage-sidecar-exited", ()).ok();
             });
