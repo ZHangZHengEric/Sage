@@ -77,6 +77,11 @@ echo "Downloading from: $NODE_URL"
 # 下载并解压
 cd "$NODE_DIR"
 
+# 设置环境变量避免创建 macOS 扩展属性
+if [[ "$PLATFORM" == "Darwin" ]]; then
+    export CURL_SSL_BACKEND="secure-transport"
+fi
+
 if command -v curl &> /dev/null; then
     curl -L -o "$NODE_TARBALL" "$NODE_URL"
 elif command -v wget &> /dev/null; then
@@ -96,6 +101,10 @@ else
 fi
 
 rm "$NODE_TARBALL"
+
+# 添加执行权限
+echo "Setting permissions..."
+chmod -R +x "$NODE_DIR/bin/"
 
 echo "Node.js runtime setup complete!"
 echo "Location: $NODE_DIR"

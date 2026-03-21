@@ -1,0 +1,119 @@
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
+from fastapi import APIRouter, HTTPException, Path, Body
+from pydantic import BaseModel, Field
+
+from ..models.questionnaire import QuestionnaireSession, QuestionnaireDao
+
+questionnaire_router = APIRouter(prefix="/questionnaires", tags=["Questionnaires"])
+
+
+class QuestionOption(BaseModel):
+    """问题选项"""
+    label: str = Field(..., description="选项显示文本")
+    value: str = Field(..., description="选项值")
+
+
+class Question(BaseModel):
+    """问题定义"""
+    id: str = Field(..., description="问题唯一标识符")
+    type: str = Field(..., description="问题类型: single_choice, multiple_choice, text")
+    title: str = Field(..., description="问题标题")
+    options: Optional[list[QuestionOption]] = Field(None, description="选项列表(单选/多选必填)")
+    default: Optional[Any] = Field(None, description="默认值，单选为字符串，多选为字符串数组，文本题为空字符串")
+    placeholder: Optional[str] = Field(None, description="文本输入框占位提示")
+    max_length: Optional[int] = Field(1000, description="最大输入长度")
+
+
+class SubmitAnswersRequest(BaseModel):
+    """提交答案请求 - 如果不存在则自动创建会话"""
+    answers: Dict[str, Any] = Field(..., description="用户答案")
+    title: Optional[str] = Field(None, description="问卷标题(首次提交时创建会话)")
+    questions: Optional[list[Question]] = Field(None, description="问题列表(首次提交时创建会话)")
+    wait_time: int = Field(300, description="等待时间(秒)")
+
+
+class QuestionnaireResponse(BaseModel):
+    """问卷响应"""
+    id: str
+    status: str
+    answers: Optional[Dict[str, Any]] = None
+    submitted_at: Optional[datetime] = None
+    expires_at: datetime
+
+
+class SubmitResponse(BaseModel):
+    """提交答案响应"""
+    success: bool
+
+
+# DAO 实例
+dao = QuestionnaireDao()
+
+
+@questionnaire_router.post("/{questionnaire_id}/submit", response_model=SubmitResponse)
+async def submit_questionnaire(
+    questionnaire_id: str = Path(..., description="问卷ID"),
+    data: SubmitAnswersRequest = Body(...)
+):
+    """提交问卷答案 - 如果会话不存在则自动创建"""
+    # 先检查会话是否存在
+    session = await dao.get_session(questionnaire_id)
+    
+    if not session:
+        # 会话不存在，自动创建
+        if not data.title or not data.questions:
+            raise HTTPException(status_code=400, detail="会话不存在，需要提供 title 和 questions 来创建会话")
+        
+        expires_at = datetime.utcnow() + timedelta(seconds=data.wait_time)
+        session = QuestionnaireSession(
+            id=questionnaire_id,
+            title=data.title,
+            questions=[q.model_dump() for q in data.questions],
+            status="pending",
+            wait_time=data.wait_time,
+            expires_at=expires_at
+        )
+        await dao.create_session(session)
+    
+    # 提交答案
+    success = await dao.submit_answers(questionnaire_id, data.answers)
+    if not success:
+        raise HTTPException(status_code=400, detail="问卷已提交或已过期")
+    return SubmitResponse(success=True)
+
+
+@questionnaire_router.get("/{questionnaire_id}/results", response_model=QuestionnaireResponse)
+async def get_questionnaire_results(
+    questionnaire_id: str = Path(..., description="问卷ID")
+):
+    """获取问卷结果（轮询使用）"""
+    session = await dao.get_session(questionnaire_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="问卷不存在")
+
+    # 检查是否过期
+    if session.status == "pending" and datetime.now() > session.expires_at:
+        session.status = "expired"
+        await dao.save(session)
+
+    # 如果已提交，获取结果后删除会话
+    if session.status == "submitted":
+        result = QuestionnaireResponse(
+            id=session.id,
+            status=session.status,
+            answers=session.answers,
+            submitted_at=session.submitted_at,
+            expires_at=session.expires_at
+        )
+        # 删除会话
+        await dao.delete_session(questionnaire_id)
+        return result
+
+    return QuestionnaireResponse(
+        id=session.id,
+        status=session.status,
+        answers=session.answers,
+        submitted_at=session.submitted_at,
+        expires_at=session.expires_at
+    )
