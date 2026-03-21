@@ -537,15 +537,12 @@
         />
       </template>
 
-      <!-- 13. questionnaire - 问卷表单 -->
+      <!-- 13. questionnaire - 问卷只读预览（工作台不允许提交） -->
       <template v-else-if="isQuestionnaire">
-        <div class="questionnaire-container h-full overflow-auto p-4">
-          <QuestionnaireForm
-            :questionnaire-id="questionnaireId"
-            :title="questionnaireTitle"
-            :questions="questionnaireQuestions"
-            :wait-time="questionnaireWaitTime"
-            @submit="handleQuestionnaireSubmit"
+        <div class="questionnaire-container h-full overflow-auto p-6">
+          <QuestionnaireReadonly
+            :tool-call="toolCall"
+            :tool-result="toolResult"
           />
         </div>
       </template>
@@ -620,7 +617,7 @@ import {
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
 import { MemoryToolRenderer } from './toolcall'
-import QuestionnaireForm from '../../tools/QuestionnaireForm.vue'
+import QuestionnaireReadonly from './toolcall/QuestionnaireReadonly.vue'
 import { skillAPI } from '@/api/skill.js'
 import { agentAPI } from '@/api/agent.js'
 import { useLanguage } from '@/utils/i18n'
@@ -730,7 +727,9 @@ const displayToolName = computed(() => {
     'execute_javascript_code': t('workbench.tool.jsCode'),
     'search_web_page': t('workbench.tool.searchWebPage'),
     'search_image_from_web': t('workbench.tool.searchImageFromWeb'),
-    'search_memory': t('workbench.tool.searchMemory')
+    'search_memory': t('workbench.tool.searchMemory'),
+    'questionnaire': t('tools.questionnaire'),
+    'todo_write': t('tools.todoWrite')
   }
   return nameMap[toolName.value] || toolName.value
 })
@@ -1344,29 +1343,6 @@ const openImagePreview = (url) => {
 const handleImageError = (event, index) => {
   // 图片加载失败时显示占位符
   event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23f3f4f6"/%3E%3Ctext x="50" y="50" font-family="Arial" font-size="12" fill="%239ca3af" text-anchor="middle" dy=".3em"%3EImage Error%3C/text%3E%3C/svg%3E'
-}
-
-// ============ 13. Questionnaire ============
-const questionnaireId = computed(() => {
-  // 从 toolArgs 或 toolResult 中获取问卷ID
-  return toolArgs.value.questionnaire_id || ''
-})
-
-const questionnaireTitle = computed(() => {
-  return toolArgs.value.title || '问卷'
-})
-
-const questionnaireQuestions = computed(() => {
-  return toolArgs.value.questions || []
-})
-
-const questionnaireWaitTime = computed(() => {
-  return toolArgs.value.wait_time || 300
-})
-
-const handleQuestionnaireSubmit = (result) => {
-  console.log('[ToolCallRenderer] Questionnaire submitted:', result)
-  // 提交成功后可以显示提示
 }
 
 // 组件挂载时加载需要的数据

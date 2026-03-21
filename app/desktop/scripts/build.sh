@@ -71,88 +71,6 @@ calc_hash() {
     python3 -c "import hashlib; print(hashlib.sha256(open('$1', 'rb').read()).hexdigest())" 2>/dev/null || echo "unknown"
 }
 
-prepare_bundled_node_runtime() {
-    echo "[Node Runtime] 正在准备内置 Node 运行时..."
-
-    if ! command -v node >/dev/null 2>&1; then
-        echo "错误: 未找到 node，无法准备 sidecar/node。"
-        exit 1
-    fi
-
-    rm -rf "$TAURI_NODE_SIDECAR_DIR"
-    mkdir -p "$TAURI_NODE_SIDECAR_DIR"
-
-    local custom_source="${SAGE_BUNDLED_NODE_SOURCE:-}"
-    if [ -n "$custom_source" ]; then
-        if [ ! -d "$custom_source" ]; then
-            echo "错误: 自定义 Node 运行时目录不存在: $custom_source"
-            exit 1
-        fi
-
-        local item
-        local name
-        shopt -s dotglob nullglob
-        for item in "$custom_source"/*; do
-            name="$(basename "$item")"
-            cp -R "$item" "$TAURI_NODE_SIDECAR_DIR/"
-        done
-        shopt -u dotglob nullglob
-
-        if [ -f "$TAURI_NODE_SIDECAR_DIR/bin/node" ]; then
-            chmod +x "$TAURI_NODE_SIDECAR_DIR/bin/node"
-        fi
-        if [ -f "$TAURI_NODE_SIDECAR_DIR/node" ]; then
-            chmod +x "$TAURI_NODE_SIDECAR_DIR/node"
-        fi
-
-        # 清除 macOS 扩展属性，避免 "Permission denied" 错误
-        if [ "$OS_TYPE" = "macos" ]; then
-            xattr -rc "$TAURI_NODE_SIDECAR_DIR" 2>/dev/null || true
-        fi
-
-        echo "[Node Runtime] 使用自定义目录: $custom_source"
-        echo "[Node Runtime] 已同步到: $TAURI_NODE_SIDECAR_DIR"
-        return
-    fi
-
-    local node_exec
-    local npm_cli
-    local npm_package_dir
-
-    node_exec="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v node)")"
-    npm_cli="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v npm)")"
-    npm_package_dir="$(cd "$(dirname "$npm_cli")/.." && pwd)"
-
-    if [ ! -f "$node_exec" ]; then
-        echo "错误: Node 可执行文件不存在: $node_exec"
-        exit 1
-    fi
-    if [ ! -f "$npm_cli" ]; then
-        echo "错误: npm CLI 不存在: $npm_cli"
-        exit 1
-    fi
-    if [ ! -d "$npm_package_dir" ]; then
-        echo "错误: npm 包目录不存在: $npm_package_dir"
-        exit 1
-    fi
-
-    mkdir -p "$TAURI_NODE_SIDECAR_DIR/bin"
-    mkdir -p "$TAURI_NODE_SIDECAR_DIR/lib/node_modules"
-
-    cp -L "$node_exec" "$TAURI_NODE_SIDECAR_DIR/bin/node"
-    chmod +x "$TAURI_NODE_SIDECAR_DIR/bin/node"
-    cp -R "$npm_package_dir" "$TAURI_NODE_SIDECAR_DIR/lib/node_modules/npm"
-
-    # 清除 macOS 扩展属性，避免 "Permission denied" 错误
-    if [ "$OS_TYPE" = "macos" ]; then
-        xattr -rc "$TAURI_NODE_SIDECAR_DIR" 2>/dev/null || true
-    fi
-
-    echo "[Node Runtime] Node 可执行文件: $node_exec"
-    echo "[Node Runtime] npm 包目录: $npm_package_dir"
-    echo "[Node Runtime] 已同步最小运行时到: $TAURI_NODE_SIDECAR_DIR"
-}
-
 ########################################
 # 1. Python Environment Setup (Conda)
 ########################################
@@ -399,42 +317,35 @@ build_python_sidecar() {
     echo "[Node.js] 正在设置 Node.js 运行时..."
     
     local NODE_DIR="$TAURI_SIDECAR_DIR/node"
+    local SETUP_SCRIPT="$APP_DIR/scripts/setup-node-runtime.sh"
     
-    # 使用系统 Node.js 复制到 sidecar，避免下载的 Node.js 有 macOS 扩展属性问题
+    # Check if Node.js already exists
     if [ -f "$NODE_DIR/bin/node" ]; then
-        echo "[Node.js] Node.js 运行时已存在，跳过设置。"
-    elif command -v node >/dev/null 2>&1; then
-        echo "[Node.js] 使用系统 Node.js..."
-        local node_exec
-        local npm_cli
-        local npm_package_dir
-        
-        node_exec="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v node)")"
-        npm_cli="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v npm)")"
-        npm_package_dir="$(cd "$(dirname "$npm_cli")/.." && pwd)"
-        
-        if [ -f "$node_exec" ] && [ -f "$npm_cli" ] && [ -d "$npm_package_dir" ]; then
-            mkdir -p "$NODE_DIR/bin"
-            mkdir -p "$NODE_DIR/lib/node_modules"
-            
-            cp -L "$node_exec" "$NODE_DIR/bin/node"
-            chmod +x "$NODE_DIR/bin/node"
-            
-            # 复制 npm 包到 lib/node_modules/npm
-            cp -R "$npm_package_dir" "$NODE_DIR/lib/node_modules/npm"
-            
-            # 创建 npm 命令的符号链接到 bin 目录
-            ln -sf "../lib/node_modules/npm/bin/npm-cli.js" "$NODE_DIR/bin/npm"
-            ln -sf "../lib/node_modules/npm/bin/npx-cli.js" "$NODE_DIR/bin/npx"
-            
-            echo "[Node.js] 已复制系统 Node.js 到: $NODE_DIR"
-        else
-            echo "[Node.js] 错误: 无法找到系统 Node.js 组件"
+        echo "[Node.js] Node.js 运行时已存在，跳过下载。"
+    elif [ -f "$SETUP_SCRIPT" ]; then
+        echo "[Node.js] 执行 Node.js 下载脚本..."
+        chmod +x "$SETUP_SCRIPT"
+        "$SETUP_SCRIPT"
+        if [ $? -ne 0 ]; then
+            echo "[Node.js] 错误: Node.js 下载失败"
             exit 1
         fi
     else
-        echo "[Node.js] 错误: 未找到系统 Node.js，请确保已安装 Node.js"
+        echo "[Node.js] 错误: 未找到下载脚本 $SETUP_SCRIPT"
         exit 1
+    fi
+    
+    # 对于 macOS，使用复制去除扩展属性（避免 Tauri 构建时的权限错误）
+    if [ "$OS_TYPE" = "macos" ] && [ -d "$NODE_DIR" ]; then
+        echo "[Node.js] 清除 macOS 扩展属性..."
+        local NODE_TEMP_DIR="${NODE_DIR}.tmp"
+        rm -rf "$NODE_TEMP_DIR"
+        mkdir -p "$NODE_TEMP_DIR"
+        # 使用 tar 打包再解压来去除扩展属性
+        tar -C "$NODE_DIR" -cf - . | tar -C "$NODE_TEMP_DIR" -xf -
+        rm -rf "$NODE_DIR"
+        mv "$NODE_TEMP_DIR" "$NODE_DIR"
+        chmod -R +x "$NODE_DIR/bin/"
     fi
 }
 
@@ -483,7 +394,8 @@ echo ">>> 构建完成。"
 
 cd "$ROOT_DIR"
 
-prepare_bundled_node_runtime
+# Node.js 运行时已在 build_python_sidecar 中通过 setup-node-runtime.sh 下载
+# 无需额外处理
 
 ########################################
 # 5. Setup Code Signing (Self-Signed)

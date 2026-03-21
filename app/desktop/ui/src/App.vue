@@ -1,9 +1,94 @@
 <template>
   <div v-if="!isBackendReady" class="flex h-screen w-full items-center justify-center bg-background text-foreground flex-col gap-4">
-    <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-    <div class="text-sm text-muted-foreground animate-pulse">正在启动Sage...</div>
+    <template v-if="isBackendFailed">
+      <AlertCircle class="h-12 w-12 text-red-500" />
+      <div class="text-lg font-medium text-red-600">后端启动失败</div>
+      <div class="text-sm text-muted-foreground max-w-md text-center">{{ backendError || '无法连接到后端服务，请检查应用是否完整安装或尝试重启应用' }}</div>
+      <Button variant="outline" size="sm" @click="retryBackendConnection">
+        <RefreshCw class="h-4 w-4 mr-2" />
+        重试连接
+      </Button>
+    </template>
+    <template v-else>
+      <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+      <div class="text-sm text-muted-foreground animate-pulse">正在启动Sage...</div>
+      <div v-if="retryCount > 5" class="text-xs text-muted-foreground">
+        启动时间较长，请耐心等待 ({{ retryCount }}/{{ MAX_RETRIES }})
+      </div>
+    </template>
   </div>
   <div v-else class="app flex h-screen overflow-hidden bg-background text-foreground">
+    <!-- NPX Install Progress Dialog -->
+    <Dialog :open="showNpxInstallDialog" @update:open="showNpxInstallDialog = $event">
+      <DialogContent class="sm:max-w-[420px] p-6" :closeable="false">
+        <DialogHeader class="pb-4">
+          <DialogTitle class="flex items-center gap-2 text-base">
+            <Package class="h-5 w-5 text-primary" />
+            {{ npxInstallStatus === 'installing' ? '正在安装依赖包...' : npxInstallStatus === 'completed' ? '依赖包安装完成' : '安装依赖包' }}
+          </DialogTitle>
+          <DialogDescription class="text-sm text-muted-foreground pt-1">
+            {{ npxInstallDescription }}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="space-y-4">
+          <!-- Progress Bar -->
+          <div v-if="npxInstallStatus === 'installing'" class="space-y-2">
+            <div class="flex justify-between text-xs text-muted-foreground">
+              <span>{{ npxCurrentPackage || '准备中...' }}</span>
+              <span>{{ npxInstallProgress }}%</span>
+            </div>
+            <Progress :value="npxInstallProgress" class="h-2" />
+          </div>
+          
+          <!-- Package List -->
+          <div class="max-h-[200px] overflow-y-auto space-y-1.5">
+            <div 
+              v-for="(pkg, index) in npxPackages" 
+              :key="pkg.name"
+              class="flex items-center justify-between p-2 rounded-md text-sm"
+              :class="pkg.status === 'installing' ? 'bg-primary/10 border border-primary/20' : pkg.status === 'success' ? 'bg-green-50 dark:bg-green-950/20' : pkg.status === 'failed' ? 'bg-red-50 dark:bg-red-950/20' : 'bg-muted/50'"
+            >
+              <div class="flex items-center gap-2">
+                <div v-if="pkg.status === 'installing'" class="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                <CheckCircle v-else-if="pkg.status === 'success'" class="h-4 w-4 text-green-500" />
+                <XCircle v-else-if="pkg.status === 'failed'" class="h-4 w-4 text-red-500" />
+                <MinusCircle v-else-if="pkg.status === 'skipped'" class="h-4 w-4 text-muted-foreground" />
+                <Circle v-else class="h-4 w-4 text-muted-foreground" />
+                <span :class="pkg.status === 'installing' ? 'font-medium' : ''">{{ pkg.name }}</span>
+              </div>
+              <span class="text-xs text-muted-foreground">
+                {{ pkg.status === 'installing' ? '安装中...' : pkg.status === 'success' ? '已安装' : pkg.status === 'failed' ? '失败' : pkg.status === 'skipped' ? '已存在' : '等待中' }}
+              </span>
+            </div>
+          </div>
+          
+          <!-- Error Message -->
+          <div v-if="npxInstallError" class="p-3 rounded-md bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 text-xs">
+            {{ npxInstallError }}
+          </div>
+        </div>
+        
+        <DialogFooter class="gap-2 pt-4">
+          <Button 
+            v-if="npxInstallStatus === 'installing'" 
+            variant="outline" 
+            size="sm" 
+            @click="skipNpxInstall"
+            :disabled="isSkipping"
+          >
+            {{ isSkipping ? '跳过中...' : '跳过安装' }}
+          </Button>
+          <Button 
+            v-if="npxInstallStatus === 'completed' || npxInstallStatus === 'skipped'" 
+            size="sm" 
+            @click="showNpxInstallDialog = false"
+          >
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <!-- Desktop Sidebar -->
     <Sidebar 
       v-if="!isSharedPage && !isOnboarding"
@@ -90,11 +175,12 @@ import { useRouter, useRoute } from 'vue-router'
 import Sidebar from './views/Sidebar.vue'
 import MobileTabBar from './components/mobile/MobileTabBar.vue'
 import { Toaster } from '@/components/ui/sonner'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { AlertCircle } from 'lucide-vue-next'
+import { Progress } from '@/components/ui/progress'
+import { AlertCircle, Package, CheckCircle, XCircle, MinusCircle, Circle, RefreshCw } from 'lucide-vue-next'
 // import { isLoggedIn } from './utils/auth.js'
 import request, { setBaseURL } from './utils/request.js'
 import { systemAPI } from './api/system'
@@ -113,6 +199,33 @@ const isBackendReady = ref(false)
 const currentApiPrefix = ref(import.meta.env.VITE_BACKEND_API_PREFIX || '')
 const retryCount = ref(0)
 const MAX_RETRIES = 30 // 1 minute timeout (2s * 30)
+const backendError = ref('')
+const isBackendFailed = ref(false)
+
+// NPX Install Dialog State
+const showNpxInstallDialog = ref(false)
+const npxInstallStatus = ref('idle') // 'idle' | 'installing' | 'completed' | 'skipped'
+const npxInstallProgress = ref(0)
+const npxCurrentPackage = ref('')
+const npxPackages = ref([])
+const npxInstallError = ref('')
+const npxInstallDescription = ref('正在准备安装依赖包...')
+const isSkipping = ref(false)
+
+const skipNpxInstall = async () => {
+  try {
+    isSkipping.value = true
+    await invoke('skip_npx_installation')
+    npxInstallStatus.value = 'skipped'
+    npxInstallDescription.value = '已跳过依赖包安装，部分功能可能无法使用'
+    showNpxInstallDialog.value = false
+  } catch (e) {
+    console.error('Failed to skip npx installation:', e)
+    npxInstallError.value = '跳过安装失败: ' + e.message
+  } finally {
+    isSkipping.value = false
+  }
+}
 
 const checkSystemInitialization = async () => {
   try {
@@ -145,8 +258,10 @@ const checkBackend = async () => {
     return
   }
 
-  // If failed too many times, stop checking
-  if (retryCount.value > MAX_RETRIES) {
+  // If failed too many times, show error
+  if (retryCount.value >= MAX_RETRIES) {
+    isBackendFailed.value = true
+    backendError.value = '后端服务启动超时，请检查应用是否完整安装或尝试重启应用'
     console.warn('Backend check failed too many times, please restart app or check backend status.')
     return
   }
@@ -161,17 +276,27 @@ const checkBackend = async () => {
     const response = await fetch(url)
     if (response.ok) {
       isBackendReady.value = true
+      isBackendFailed.value = false
       retryCount.value = 0 // Reset retry count
       checkSystemInitialization()
       return
+    } else {
+      console.warn('Backend returned error status:', response.status)
     }
   } catch (e) {
-    // 忽略错误
+    console.warn('Backend connection error:', e.message)
   }
   
   retryCount.value++
   // 失败重试
   setTimeout(checkBackend, 2000)
+}
+
+const retryBackendConnection = () => {
+  isBackendFailed.value = false
+  backendError.value = ''
+  retryCount.value = 0
+  checkBackend()
 }
 
 const isSharedPage = computed(() => route.name === 'SharedChat' || route.path?.startsWith('/share/'))
@@ -225,6 +350,11 @@ const handleSelectConversation = (conversation) => {
   let unlistenCloseDialog = null
   let unlistenResize = null
   let unlistenScaleFactor = null
+  let unlistenNpxStarted = null
+  let unlistenNpxProgress = null
+  let unlistenNpxCompleted = null
+  let unlistenNpxSkipped = null
+  let unlistenBackendFailed = null
 
   onMounted(async () => {
     // Listen for Tauri backend ready event
@@ -243,6 +373,64 @@ const handleSelectConversation = (conversation) => {
       unlisten = await listen('sage-desktop-ready', (event) => {
          updatePort(event.payload.port)
       })
+      
+      // Listen for NPX install events
+      unlistenNpxStarted = await listen('sage-npx-install-started', (event) => {
+        showNpxInstallDialog.value = true
+        npxInstallStatus.value = 'installing'
+        npxInstallDescription.value = `正在安装 ${event.payload.total} 个依赖包，请稍候...`
+        npxPackages.value = event.payload.packages.map(name => ({ name, status: 'pending' }))
+      })
+      
+      unlistenNpxProgress = await listen('sage-npx-install-progress', (event) => {
+        const { current, total, package: pkgName, status, error } = event.payload
+        npxInstallProgress.value = Math.round((current / total) * 100)
+        npxCurrentPackage.value = pkgName
+        
+        const pkg = npxPackages.value.find(p => p.name === pkgName)
+        if (pkg) {
+          pkg.status = status
+        }
+        
+        if (status === 'installing') {
+          npxInstallDescription.value = `正在安装 ${pkgName} (${current}/${total})...`
+        } else if (status === 'failed' && error) {
+          npxInstallError.value = `${pkgName} 安装失败: ${error}`
+        }
+      })
+      
+      unlistenNpxCompleted = await listen('sage-npx-install-completed', (event) => {
+        npxInstallStatus.value = 'completed'
+        const { installed, failed, total } = event.payload
+        if (failed.length > 0) {
+          npxInstallDescription.value = `安装完成: ${installed}/${total} 成功, ${failed.length} 失败`
+          npxInstallError.value = `以下包安装失败: ${failed.join(', ')}`
+        } else {
+          npxInstallDescription.value = `所有依赖包安装完成 (${installed}/${total})`
+        }
+        npxInstallProgress.value = 100
+      })
+      
+      unlistenNpxSkipped = await listen('sage-npx-install-skipped', () => {
+        showNpxInstallDialog.value = false
+      })
+      
+      // Listen for backend startup failure
+      unlistenBackendFailed = await listen('sage-backend-startup-failed', (event) => {
+        isBackendFailed.value = true
+        backendError.value = event.payload.message || '后端服务启动失败'
+        console.error('Backend startup failed:', event.payload)
+      })
+      
+      // Check if already skipped
+      try {
+        const isSkipped = await invoke('is_npx_installation_skipped')
+        if (!isSkipped) {
+          // Will show dialog when install starts
+        }
+      } catch (e) {
+        console.log('Failed to check npx skip status:', e)
+      }
       
       let permissionDialogShown = false
        
@@ -313,5 +501,10 @@ const handleSelectConversation = (conversation) => {
     if (unlistenCloseDialog) unlistenCloseDialog()
     if (unlistenResize) unlistenResize()
     if (unlistenScaleFactor) unlistenScaleFactor()
+    if (unlistenNpxStarted) unlistenNpxStarted()
+    if (unlistenNpxProgress) unlistenNpxProgress()
+    if (unlistenNpxCompleted) unlistenNpxCompleted()
+    if (unlistenNpxSkipped) unlistenNpxSkipped()
+    if (unlistenBackendFailed) unlistenBackendFailed()
   })
 </script>
