@@ -202,6 +202,12 @@ build_python_sidecar() {
       --hidden-import=aiosqlite
       --hidden-import=greenlet
       --hidden-import=sqlalchemy.dialects.sqlite.aiosqlite
+      # SSL certificates for HTTPS requests
+      --hidden-import=certifi
+      --collect-all=certifi
+      # Task scheduler dependencies
+      --hidden-import=croniter
+      --collect-all=croniter
       # Scrapling and its dependencies for web fetching
         --hidden-import=scrapling
         --hidden-import=scrapling.fetchers
@@ -266,6 +272,15 @@ build_python_sidecar() {
     find "$TARGET_MCP_DIR/skills" -name ".git" -type d -exec rm -rf {} +
     find "$TARGET_MCP_DIR/skills" -name ".DS_Store" -delete
 
+    # Copy wiki to distribution directory
+    echo "[Sidecar] 正在复制 wiki 到分发目录..."
+    cp -r "$ROOT_DIR/app/wiki" "$TARGET_MCP_DIR/"
+
+    # Clean up wiki in dist
+    find "$TARGET_MCP_DIR/wiki" -name ".DS_Store" -delete
+    find "$TARGET_MCP_DIR/wiki" -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$TARGET_MCP_DIR/wiki" -name ".vitepress" -type d -exec rm -rf {} + 2>/dev/null || true
+
     cd "$ROOT_DIR"
 
     # Move Binary to Tauri
@@ -293,6 +308,29 @@ build_python_sidecar() {
     fi
 
     echo "[Sidecar] Sidecar 已复制到: $TAURI_SIDECAR_DIR"
+    
+    ########################################
+    # Setup Node.js Runtime
+    ########################################
+    
+    echo "[Node.js] 正在设置 Node.js 运行时..."
+    
+    local NODE_DIR="$TAURI_SIDECAR_DIR/node"
+    local SETUP_SCRIPT="$APP_DIR/scripts/setup-node-runtime.sh"
+    
+    # Check if Node.js already exists
+    if [ -f "$NODE_DIR/bin/node" ]; then
+        echo "[Node.js] Node.js 运行时已存在，跳过下载。"
+    elif [ -f "$SETUP_SCRIPT" ]; then
+        echo "[Node.js] 执行 Node.js 下载脚本..."
+        chmod +x "$SETUP_SCRIPT"
+        "$SETUP_SCRIPT"
+        if [ $? -ne 0 ]; then
+            echo "[Node.js] 警告: Node.js 下载失败，继续构建..."
+        fi
+    else
+        echo "[Node.js] 警告: 未找到下载脚本 $SETUP_SCRIPT，跳过..."
+    fi
 }
 
 build_frontend() {

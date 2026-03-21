@@ -194,6 +194,29 @@ class PassthroughSandboxProvider(ISandboxHandle):
         env["PIP_INDEX_URL"] = "https://mirrors.aliyun.com/pypi/simple/"
         env["PIP_TRUSTED_HOST"] = "mirrors.aliyun.com"
 
+        # 配置 Sage 打包的 Node.js 运行时（优先使用）
+        bundled_node_bin = os.environ.get("SAGE_BUNDLED_NODE_BIN")
+        if bundled_node_bin and os.path.exists(bundled_node_bin):
+            # 将打包的 Node.js bin 目录添加到 PATH 最前面
+            env["PATH"] = bundled_node_bin + os.pathsep + env.get("PATH", "")
+            logger.info(f"PassthroughSandboxProvider: Added bundled Node.js bin to PATH: {bundled_node_bin}")
+            # 设置 SAGE_USING_BUNDLED_NODE 标记
+            env["SAGE_USING_BUNDLED_NODE"] = "1"
+
+        # 配置 Sage 独立的 node 环境（如果已设置）
+        sage_node_modules_dir = os.environ.get("SAGE_NODE_MODULES_DIR")
+        if sage_node_modules_dir and os.path.exists(sage_node_modules_dir):
+            # 将 Sage 的 node_modules/.bin 添加到 PATH
+            sage_bin = os.path.join(sage_node_modules_dir, ".bin")
+            if os.path.exists(sage_bin):
+                # 避免重复添加
+                if sage_bin not in env.get("PATH", ""):
+                    env["PATH"] = sage_bin + os.pathsep + env.get("PATH", "")
+                    logger.info(f"PassthroughSandboxProvider: Added Sage node bin to PATH: {sage_bin}")
+            # 设置 NODE_PATH 以便 require 能找到模块
+            env["NODE_PATH"] = sage_node_modules_dir
+            logger.info(f"PassthroughSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}")
+
         if env_vars:
             env.update(env_vars)
 
