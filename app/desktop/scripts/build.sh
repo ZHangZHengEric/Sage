@@ -14,6 +14,7 @@ TAURI_DIR="$APP_DIR/tauri"
 DIST_DIR="$APP_DIR/dist"
 # Standardized Sidecar Directory
 TAURI_SIDECAR_DIR="$TAURI_DIR/sidecar"
+TAURI_NODE_RESOURCES_DIR="$TAURI_DIR/resources/node"
 # Build Cache Directory
 CACHE_DIR="$APP_DIR/.build_cache"
 
@@ -68,6 +69,81 @@ echo "目标平台: $TARGET"
 
 calc_hash() {
     python3 -c "import hashlib; print(hashlib.sha256(open('$1', 'rb').read()).hexdigest())" 2>/dev/null || echo "unknown"
+}
+
+prepare_bundled_node_runtime() {
+    echo "[Node Runtime] 正在准备内置 Node 运行时..."
+
+    if ! command -v node >/dev/null 2>&1; then
+        echo "错误: 未找到 node，无法准备 resources/node。"
+        exit 1
+    fi
+
+    mkdir -p "$TAURI_NODE_RESOURCES_DIR"
+    find "$TAURI_NODE_RESOURCES_DIR" -mindepth 1 ! -name "README.md" ! -name ".gitignore" -exec rm -rf {} +
+
+    local custom_source="${SAGE_BUNDLED_NODE_SOURCE:-}"
+    if [ -n "$custom_source" ]; then
+        if [ ! -d "$custom_source" ]; then
+            echo "错误: 自定义 Node 运行时目录不存在: $custom_source"
+            exit 1
+        fi
+
+        local item
+        local name
+        shopt -s dotglob nullglob
+        for item in "$custom_source"/*; do
+            name="$(basename "$item")"
+            if [ "$name" = "README.md" ] || [ "$name" = ".gitignore" ]; then
+                continue
+            fi
+            cp -R "$item" "$TAURI_NODE_RESOURCES_DIR/"
+        done
+        shopt -u dotglob nullglob
+
+        if [ -f "$TAURI_NODE_RESOURCES_DIR/bin/node" ]; then
+            chmod +x "$TAURI_NODE_RESOURCES_DIR/bin/node"
+        fi
+        if [ -f "$TAURI_NODE_RESOURCES_DIR/node" ]; then
+            chmod +x "$TAURI_NODE_RESOURCES_DIR/node"
+        fi
+
+        echo "[Node Runtime] 使用自定义目录: $custom_source"
+        echo "[Node Runtime] 已同步到: $TAURI_NODE_RESOURCES_DIR"
+        return
+    fi
+
+    local node_exec
+    local npm_cli
+    local npm_package_dir
+
+    node_exec="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v node)")"
+    npm_cli="$(node -p "require('fs').realpathSync(process.argv[1])" "$(command -v npm)")"
+    npm_package_dir="$(cd "$(dirname "$npm_cli")/.." && pwd)"
+
+    if [ ! -f "$node_exec" ]; then
+        echo "错误: Node 可执行文件不存在: $node_exec"
+        exit 1
+    fi
+    if [ ! -f "$npm_cli" ]; then
+        echo "错误: npm CLI 不存在: $npm_cli"
+        exit 1
+    fi
+    if [ ! -d "$npm_package_dir" ]; then
+        echo "错误: npm 包目录不存在: $npm_package_dir"
+        exit 1
+    fi
+
+    mkdir -p "$TAURI_NODE_RESOURCES_DIR/bin"
+    mkdir -p "$TAURI_NODE_RESOURCES_DIR/lib/node_modules"
+
+    cp -L "$node_exec" "$TAURI_NODE_RESOURCES_DIR/bin/node"
+    chmod +x "$TAURI_NODE_RESOURCES_DIR/bin/node"
+    cp -R "$npm_package_dir" "$TAURI_NODE_RESOURCES_DIR/lib/node_modules/npm"
+
+    echo "[Node Runtime] Node 可执行文件: $node_exec"
+    echo "[Node Runtime] npm 包目录: $npm_package_dir"
+    echo "[Node Runtime] 已同步最小运行时到: $TAURI_NODE_RESOURCES_DIR"
 }
 
 ########################################
@@ -377,6 +453,8 @@ fi
 echo ">>> 构建完成。"
 
 cd "$ROOT_DIR"
+
+prepare_bundled_node_runtime
 
 ########################################
 # 5. Setup Code Signing (Self-Signed)

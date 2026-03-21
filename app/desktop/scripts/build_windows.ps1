@@ -14,6 +14,7 @@ $CoreDir = Join-Path $AppDir "core"
 $UiDir = Join-Path $AppDir "ui"
 $TauriDir = Join-Path $AppDir "tauri"
 $TauriSidecarDir = Join-Path $TauriDir "sidecar"
+$TauriNodeResourcesDir = Join-Path $TauriDir "resources/node"
 $TauriBinDir = Join-Path $TauriDir "bin"
 $DistDir = Join-Path $AppDir "dist"
 $CacheDir = Join-Path $AppDir ".build_cache"
@@ -277,6 +278,75 @@ function Build-Frontend {
     Set-Location $RootDirParam
 }
 
+function Prepare-BundledNodeRuntime {
+    param($TauriNodeResourcesDirParam)
+
+    Write-Host "[Node Runtime] Preparing bundled Node runtime..." -ForegroundColor Cyan
+
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "[ERROR] node not found. Cannot prepare resources/node." -ForegroundColor Red
+        exit 1
+    }
+
+    if (-not (Test-Path $TauriNodeResourcesDirParam)) {
+        New-Item -ItemType Directory -Force -Path $TauriNodeResourcesDirParam | Out-Null
+    }
+
+    Get-ChildItem -Force $TauriNodeResourcesDirParam -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin @("README.md", ".gitignore") } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    if ($env:SAGE_BUNDLED_NODE_SOURCE) {
+        $NodeRoot = $env:SAGE_BUNDLED_NODE_SOURCE
+        if (-not (Test-Path $NodeRoot)) {
+            Write-Host "[ERROR] Custom Node runtime directory not found: $NodeRoot" -ForegroundColor Red
+            exit 1
+        }
+
+        Get-ChildItem -Force $NodeRoot |
+            Where-Object { $_.Name -notin @("README.md", ".gitignore") } |
+            ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination $TauriNodeResourcesDirParam -Recurse -Force
+            }
+
+        Write-Host "[Node Runtime] Using custom source: $NodeRoot" -ForegroundColor Green
+        Write-Host "[Node Runtime] Synced to: $TauriNodeResourcesDirParam" -ForegroundColor Green
+        return
+    }
+
+    $NodeExe = (Resolve-Path ((Get-Command node -ErrorAction Stop).Source)).Path
+    $NodeDir = Split-Path -Parent $NodeExe
+    $NpmPackageDir = Join-Path $NodeDir "node_modules/npm"
+
+    if (-not (Test-Path $NpmPackageDir)) {
+        $NpmCmd = (Get-Command npm -ErrorAction Stop).Source
+        $NpmDir = Split-Path -Parent $NpmCmd
+        $Candidate = Join-Path $NpmDir "node_modules/npm"
+        if (Test-Path $Candidate) {
+            $NpmPackageDir = $Candidate
+        }
+    }
+
+    if (-not (Test-Path $NodeExe)) {
+        Write-Host "[ERROR] Node executable not found: $NodeExe" -ForegroundColor Red
+        exit 1
+    }
+    if (-not (Test-Path $NpmPackageDir)) {
+        Write-Host "[ERROR] npm package directory not found: $NpmPackageDir" -ForegroundColor Red
+        exit 1
+    }
+
+    $TargetNodeModulesDir = Join-Path $TauriNodeResourcesDirParam "node_modules"
+    New-Item -ItemType Directory -Force -Path $TargetNodeModulesDir | Out-Null
+
+    Copy-Item -Path $NodeExe -Destination (Join-Path $TauriNodeResourcesDirParam "node.exe") -Force
+    Copy-Item -Path $NpmPackageDir -Destination (Join-Path $TargetNodeModulesDir "npm") -Recurse -Force
+
+    Write-Host "[Node Runtime] Node executable: $NodeExe" -ForegroundColor Green
+    Write-Host "[Node Runtime] npm package dir: $NpmPackageDir" -ForegroundColor Green
+    Write-Host "[Node Runtime] Synced minimal runtime to: $TauriNodeResourcesDirParam" -ForegroundColor Green
+}
+
 Write-Host ">>> Starting build tasks..." -ForegroundColor Cyan
 
 Build-PythonSidecar -DistDirParam $DistDir -TauriSidecarDirParam $TauriSidecarDir -AppDirParam $AppDir -RootDirParam $RootDir -ModeParam $Mode
@@ -294,6 +364,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ">>> Build completed." -ForegroundColor Green
 
 Set-Location $RootDir
+
+Prepare-BundledNodeRuntime -TauriNodeResourcesDirParam $TauriNodeResourcesDir
 
 Write-Host "Building Tauri Windows executable..." -ForegroundColor Cyan
 Set-Location $TauriDir
