@@ -235,13 +235,13 @@ Sage/
   <tr>
     <td align="center" width="50%">
       <a href="#" target="_blank">
-        <img src="assets/dudubashi.png" width="200" alt="嘟嘟巴士"/>
+        <img src="assets/sponsors/dudubashi_logo.png" height="50" alt="嘟嘟巴士"/>
       </a>
       <br/>
     </td>
     <td align="center" width="50%">
       <a href="#" target="_blank">
-        <img src="assets/xunhuanzhineng.svg" width="200" alt="循环智能"/>
+        <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="50" alt="循环智能"/>
       </a>
     </td>
   </tr>
