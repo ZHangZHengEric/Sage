@@ -1,11 +1,13 @@
 import asyncio
 import json
 import os
+import shutil
 import time
 import traceback
 import uuid
 import random
 import string
+from pathlib import Path
 from typing import List
 from loguru import logger
 from sagents.context.session_context import (
@@ -268,6 +270,35 @@ async def populate_request_from_agent_config(request: StreamRequest, *, require_
         else:
             logger.warning("ToolManager not available, cannot register MCP servers")
             
+def _copy_sage_usage_docs_to_workspace(agent_workspace: str) -> None:
+    """将 sage-usage-docs 复制到 agent workspace，方便 agent 阅读"""
+    try:
+        sage_docs_source = Path.home() / ".sage" / "sage-usage-docs"
+        if not sage_docs_source.exists():
+            logger.debug(f"sage-usage-docs 目录不存在: {sage_docs_source}")
+            return
+
+        # 目标路径：workspace/.sage-docs/
+        target_dir = Path(agent_workspace) / ".sage-docs"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # 复制文档（如果目标目录为空或源目录有更新）
+        if target_dir.exists() and any(target_dir.iterdir()):
+            # 检查是否需要更新（简单比较文件数量）
+            source_files = list(sage_docs_source.rglob("*"))
+            target_files = list(target_dir.rglob("*"))
+            if len(source_files) <= len(target_files):
+                logger.debug(f"sage-usage-docs 已存在于 workspace: {target_dir}")
+                return
+
+        # 执行复制
+        shutil.copytree(sage_docs_source, target_dir, dirs_exist_ok=True)
+        logger.info(f"已将 sage-usage-docs 复制到 agent workspace: {target_dir}")
+    except Exception as e:
+        # 复制失败不应影响主流程
+        logger.warning(f"复制 sage-usage-docs 到 workspace 失败: {e}")
+
+
 class SageStreamService:
     """Sage 流式服务类"""
 
@@ -279,6 +310,10 @@ class SageStreamService:
         user_id = self.request.user_id or "default_user"
         agent_id = self.request.agent_id or ''.join(random.choices(string.ascii_letters, k=8))
         self.agent_workspace = os.path.join(cfg.agents_dir, user_id, agent_id)
+
+        # 创建 workspace 目录并复制 sage-usage-docs
+        os.makedirs(self.agent_workspace, exist_ok=True)
+        _copy_sage_usage_docs_to_workspace(self.agent_workspace)
 
         # 2. 工具代理
         tool_proxy = create_tool_proxy(request.available_tools)
