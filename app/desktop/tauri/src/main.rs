@@ -61,8 +61,128 @@ fn get_sage_node_modules_dir() -> PathBuf {
     get_sage_root_dir().join(SAGE_NODE_MODULES_DIR)
 }
 
+/// 获取打包的 Node.js 可执行文件路径
+fn get_bundled_node_path() -> Option<PathBuf> {
+    // 在开发模式下，尝试从 sidecar/node 目录获取
+    let dev_path = std::env::current_dir()
+        .ok()?
+        .join("sidecar")
+        .join("node")
+        .join("bin")
+        .join("node");
+    
+    if dev_path.exists() {
+        return Some(dev_path);
+    }
+    
+    // 在生产模式下，从应用资源目录获取
+    // 注意：这里需要在 Tauri 应用启动后才能正确获取
+    None
+}
+
+/// 获取打包的 Node.js bin 目录路径（用于 Python 后端）
+fn get_bundled_node_bin_path(app_handle: &tauri::AppHandle) -> Option<String> {
+    // 首先尝试从资源目录获取打包的 Node
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let bundled_node_bin = resource_dir
+            .join("sidecar")
+            .join("node")
+            .join("bin");
+        
+        if bundled_node_bin.exists() {
+            return Some(bundled_node_bin.to_string_lossy().to_string());
+        }
+    }
+    
+    // 在开发模式下，尝试从 sidecar/node/bin 目录获取
+    if let Ok(current_dir) = std::env::current_dir() {
+        let dev_node_bin = current_dir
+            .join("sidecar")
+            .join("node")
+            .join("bin");
+        
+        if dev_node_bin.exists() {
+            return Some(dev_node_bin.to_string_lossy().to_string());
+        }
+    }
+    
+    None
+}
+
+/// 获取 Node.js 可执行文件路径（优先使用打包的，否则使用系统的）
+async fn get_node_executable(app_handle: &tauri::AppHandle) -> PathBuf {
+    // 首先尝试从资源目录获取打包的 Node
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let bundled_node = resource_dir
+            .join("sidecar")
+            .join("node")
+            .join("bin")
+            .join("node");
+        
+        if bundled_node.exists() {
+            println!("Using bundled Node.js: {:?}", bundled_node);
+            return bundled_node;
+        }
+    }
+    
+    // 在开发模式下，尝试从 sidecar/node/bin 目录获取
+    if let Ok(current_dir) = std::env::current_dir() {
+        let dev_node = current_dir
+            .join("sidecar")
+            .join("node")
+            .join("bin")
+            .join("node");
+        
+        if dev_node.exists() {
+            println!("Using bundled Node.js (dev mode): {:?}", dev_node);
+            return dev_node;
+        }
+    }
+    
+    // 回退到系统 Node
+    println!("Bundled Node.js not found, falling back to system node");
+    PathBuf::from("node")
+}
+
+/// 获取 NPM CLI 脚本路径（直接使用 node 执行，避免符号链接问题）
+async fn get_npm_cli_path(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    // 首先尝试从资源目录获取
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let npm_cli = resource_dir
+            .join("sidecar")
+            .join("node")
+            .join("lib")
+            .join("node_modules")
+            .join("npm")
+            .join("bin")
+            .join("npm-cli.js");
+        
+        if npm_cli.exists() {
+            return Some(npm_cli);
+        }
+    }
+    
+    // 在开发模式下
+    if let Ok(current_dir) = std::env::current_dir() {
+        let dev_npm_cli = current_dir
+            .join("sidecar")
+            .join("node")
+            .join("lib")
+            .join("node_modules")
+            .join("npm")
+            .join("bin")
+            .join("npm-cli.js");
+        
+        if dev_npm_cli.exists() {
+            return Some(dev_npm_cli);
+        }
+    }
+    
+    None
+}
+
 /// 初始化 .sage_node_modules 目录并安装预设的 npx 包
-async fn initialize_sage_node_modules() -> Result<PathBuf, String> {
+async fn initialize_sage_node_modules(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let sage_root = get_sage_root_dir();
     let node_modules_dir = sage_root.join(SAGE_NODE_MODULES_DIR);
     
@@ -101,8 +221,15 @@ async fn initialize_sage_node_modules() -> Result<PathBuf, String> {
         println!("package.json and .npmrc created successfully");
     }
     
+    // 获取 Node.js 和 NPM CLI 路径
+    let node_executable = get_node_executable(app_handle).await;
+    let npm_cli_path = get_npm_cli_path(app_handle).await;
+    
     // 安装预设的 npx 包
     println!("Installing preset npx packages...");
+    println!("Using Node.js: {:?}", node_executable);
+    println!("Using NPM CLI: {:?}", npm_cli_path);
+    
     for package in PRESET_NPX_PACKAGES {
         let package_name = package;
         println!("Checking package: {}", package_name);
@@ -115,20 +242,46 @@ async fn initialize_sage_node_modules() -> Result<PathBuf, String> {
             continue;
         }
         
-        println!("Installing package: {}", package_name);
-        let install_result = Command::new("npm")
-            .args(&["install", package_name, "--save"])
-            .current_dir(&node_modules_dir)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to install package {}: {}", package_name, e))?;
+        // 检查 Node.js 是否可执行
+        if !node_executable.exists() {
+            eprintln!("Error: Node.js executable does not exist: {:?}", node_executable);
+            continue;
+        }
         
-        if install_result.status.success() {
-            println!("Successfully installed {}", package_name);
+        let install_result = if let Some(ref npm_cli) = npm_cli_path {
+            // 使用 node 直接执行 npm-cli.js（避免符号链接问题）
+            println!("Installing package: {} using node + npm-cli.js", package_name);
+            Command::new(&node_executable)
+                .args(&[npm_cli.to_str().unwrap(), "install", package_name, "--save"])
+                .current_dir(&node_modules_dir)
+                .output()
+                .await
         } else {
-            let stderr = String::from_utf8_lossy(&install_result.stderr);
-            eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
-            // 继续安装其他包，不中断
+            // 回退到系统 npm
+            println!("Installing package: {} using system npm", package_name);
+            Command::new("npm")
+                .args(&["install", package_name, "--save"])
+                .current_dir(&node_modules_dir)
+                .output()
+                .await
+        };
+        
+        match install_result {
+            Ok(output) => {
+                if output.status.success() {
+                    println!("Successfully installed {}", package_name);
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    eprintln!("Warning: Failed to install {}: {}", package_name, stderr);
+                    eprintln!("stdout: {}", stdout);
+                    // 继续安装其他包，不中断
+                }
+            }
+            Err(e) => {
+                eprintln!("Error: Failed to execute npm for package {}: {}", package_name, e);
+                // 继续安装其他包，不中断
+            }
         }
     }
     
@@ -678,10 +831,18 @@ fn main() {
             std::env::set_var("SAGE_PORT", port.to_string());
             println!("Set SAGE_PORT: {}", port);
             
+            // Set bundled Node.js path for Python backend and sandbox to use
+            let bundled_node_path = get_bundled_node_bin_path(app.handle());
+            if let Some(ref node_bin) = bundled_node_path {
+                std::env::set_var("SAGE_BUNDLED_NODE_BIN", node_bin);
+                println!("Set SAGE_BUNDLED_NODE_BIN: {}", node_bin);
+            }
+            
             // Initialize .sage_node_modules and set environment variable
             let app_handle_clone = app.handle().clone();
+            let app_handle_for_node = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match initialize_sage_node_modules().await {
+                match initialize_sage_node_modules(&app_handle_for_node).await {
                     Ok(node_modules_dir) => {
                         let node_modules_path = node_modules_dir.to_string_lossy().to_string();
                         std::env::set_var("SAGE_NODE_MODULES_DIR", &node_modules_path);
@@ -828,6 +989,11 @@ fn main() {
                     .env("RAYON_NUM_THREADS", "4")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
+                
+                // Pass bundled Node.js path to Python backend
+                if let Some(ref node_bin) = bundled_node_path {
+                    cmd.env("SAGE_BUNDLED_NODE_BIN", node_bin);
+                }
 
                 #[cfg(target_os = "windows")]
                 {

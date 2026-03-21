@@ -24,7 +24,24 @@ class SerpApiProvider(BaseSearchProvider):
         "month": "month",
         "year": "year",
     }
-    
+
+    @classmethod
+    def get_required_env_vars(cls) -> dict:
+        """获取必需的环境变量说明"""
+        return {
+            cls.env_key: {
+                "description": "SerpApi Google搜索 API Key (searchapi.io)",
+                "required": True,
+                "url": "https://www.searchapi.io",
+            },
+        }
+
+    @classmethod
+    def get_config_example(cls) -> str:
+        """获取配置示例"""
+        return """# SerpApi (Google搜索)
+export SERPAPI_API_KEY=your_api_key_here"""
+
     async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
         """使用 SerpApi 搜索网页"""
         endpoint = "https://www.searchapi.io/api/v1/search"

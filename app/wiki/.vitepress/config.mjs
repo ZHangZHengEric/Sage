@@ -28,7 +28,16 @@ export default defineConfig({
       { text: '任务调度', link: '/tasks/' },
       { text: '模型提供商', link: '/providers/' },
       { text: 'IM 渠道', link: '/im/' },
-      { text: '系统设置', link: '/settings/' }
+      { text: '系统设置', link: '/settings/' },
+      {
+        text: '开发者文档',
+        collapsed: false,
+        items: [
+          { text: '环境变量配置', link: '/guide/environment-variables' },
+          { text: '数据库结构', link: '/guide/database-schema' },
+          { text: 'Node.js 环境', link: '/guide/node-environment' }
+        ]
+      }
     ],
 
     search: {

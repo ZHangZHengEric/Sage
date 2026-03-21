@@ -9,12 +9,12 @@ from .base import BaseSearchProvider, SearchResult, ImageResult
 
 class SerperProvider(BaseSearchProvider):
     """Serper (Google) 搜索 Provider"""
-    
+
     name = "serper"
     env_key = "SERPER_API_KEY"
     supports_images = True
     supports_time_range = True  # 支持时间范围筛选
-    
+
     # 时间范围映射 (Serper 使用 tbs 参数)
     TIME_RANGE_MAP = {
         "day": "qdr:d",
@@ -22,7 +22,24 @@ class SerperProvider(BaseSearchProvider):
         "month": "qdr:m",
         "year": "qdr:y",
     }
-    
+
+    @classmethod
+    def get_required_env_vars(cls) -> dict:
+        """获取必需的环境变量说明"""
+        return {
+            cls.env_key: {
+                "description": "Serper Google搜索 API Key",
+                "required": True,
+                "url": "https://serper.dev",
+            },
+        }
+
+    @classmethod
+    def get_config_example(cls) -> str:
+        """获取配置示例"""
+        return """# Serper (Google搜索)
+export SERPER_API_KEY=your_api_key_here"""
+
     async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
         """使用 Serper (Google) 搜索"""
         endpoint = "https://google.serper.dev/search"
