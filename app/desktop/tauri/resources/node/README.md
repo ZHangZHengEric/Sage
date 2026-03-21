@@ -1,7 +1,10 @@
 Place the full Node.js runtime for the target platform in this directory before building the desktop app.
 
-The desktop build scripts now auto-populate this directory from the current Node installation before `tauri build`.
-If you want to override that source, set `SAGE_BUNDLED_NODE_SOURCE` to a prepared Node runtime directory.
+The desktop build scripts now auto-populate this directory with a minimal runtime before `tauri build`:
+- macOS/Linux: `bin/node` plus `lib/node_modules/npm`
+- Windows: `node.exe` plus `node_modules/npm`
+
+If you want to override that source, set `SAGE_BUNDLED_NODE_SOURCE` to a prepared runtime directory in one of the layouts below.
 
 Recommended layouts that the Tauri runtime code supports:
 
