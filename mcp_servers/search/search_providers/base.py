@@ -26,15 +26,35 @@ class ImageResult:
 
 class BaseSearchProvider:
     """搜索引擎 Provider 基类"""
-    
+
     name: str = ""
     env_key: str = ""
     supports_images: bool = False  # 是否支持图片搜索
     supports_time_range: bool = False  # 是否支持时间范围筛选
-    
+
     def __init__(self, api_key: str):
         self.api_key = api_key
-    
+
+    @classmethod
+    def get_required_env_vars(cls) -> dict:
+        """
+        获取必需的环境变量说明
+
+        Returns:
+            dict: 环境变量名 -> {description, required, url}
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_config_example(cls) -> str:
+        """
+        获取配置示例，子类应该重写此方法
+
+        Returns:
+            str: 配置示例字符串
+        """
+        raise NotImplementedError
+
     async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
         """
         执行网页搜索，子类必须实现

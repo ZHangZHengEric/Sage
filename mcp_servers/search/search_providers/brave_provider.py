@@ -22,7 +22,24 @@ class BraveProvider(BaseSearchProvider):
         "month": "month",
         "year": "year",
     }
-    
+
+    @classmethod
+    def get_required_env_vars(cls) -> dict:
+        """获取必需的环境变量说明"""
+        return {
+            cls.env_key: {
+                "description": "Brave 搜索 API Key",
+                "required": True,
+                "url": "https://brave.com/search/api",
+            },
+        }
+
+    @classmethod
+    def get_config_example(cls) -> str:
+        """获取配置示例"""
+        return """# Brave 搜索
+export BRAVE_API_KEY=your_api_key_here"""
+
     async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
         """使用 Brave 搜索"""
         endpoint = "https://api.search.brave.com/res/v1/web/search"

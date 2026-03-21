@@ -23,7 +23,24 @@ class BochaProvider(BaseSearchProvider):
         "month": "oneMonth",
         "year": "oneYear",
     }
-    
+
+    @classmethod
+    def get_required_env_vars(cls) -> dict:
+        """获取必需的环境变量说明"""
+        return {
+            cls.env_key: {
+                "description": "博查搜索 API Key",
+                "required": True,
+                "url": "https://bochaai.com",
+            },
+        }
+
+    @classmethod
+    def get_config_example(cls) -> str:
+        """获取配置示例"""
+        return """# 博查搜索
+export BOCHA_API_KEY=your_api_key_here"""
+
     async def search_web(self, query: str, count: int, time_range: str = "") -> List[SearchResult]:
         """使用博查搜索网页"""
         endpoint = "https://api.bocha.cn/v1/web-search"
