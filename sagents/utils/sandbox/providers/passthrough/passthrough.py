@@ -217,6 +217,15 @@ class PassthroughSandboxProvider(ISandboxHandle):
             env["NODE_PATH"] = sage_node_modules_dir
             logger.info(f"PassthroughSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}")
 
+        # 添加 Sage node_modules/.bin 到 PATH（优先使用真正安装的包）
+        # 使用环境变量 NODE_PATH 的值（通常是 ~/.sage/.sage_node_env）
+        node_path_env = env.get("NODE_PATH") or os.environ.get("NODE_PATH")
+        if node_path_env:
+            sage_node_env_bin = os.path.join(node_path_env, "node_modules", ".bin")
+            if os.path.exists(sage_node_env_bin) and sage_node_env_bin not in env.get("PATH", ""):
+                env["PATH"] = sage_node_env_bin + os.pathsep + env.get("PATH", "")
+                logger.info(f"PassthroughSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}")
+
         if env_vars:
             env.update(env_vars)
 
