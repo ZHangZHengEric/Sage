@@ -13,6 +13,7 @@ from .llm_provider import router as llm_provider_router
 from .task import task_router
 from .oss import oss_router
 from .im import im_router
+from .questionnaire import questionnaire_router
 
 # Export all routers for easy import
 __all__ = [
@@ -32,3 +33,4 @@ def register_routes(app):
     app.include_router(task_router)
     app.include_router(oss_router)
     app.include_router(im_router)
+    app.include_router(questionnaire_router)

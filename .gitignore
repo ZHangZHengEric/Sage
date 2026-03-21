@@ -8,6 +8,7 @@ sage_demo_workspace/
 app/fastapi_react_demo/backend/config.yaml
 mcp_servers/mcp_setting.json
 app/fastapi_react_demo/frontend/node_modules/
+app/desktop/tauri/resources/node/bin/node
 .DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
