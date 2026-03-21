@@ -247,13 +247,25 @@ build_python_sidecar() {
       --hidden-import=aiosqlite
       --hidden-import=greenlet
       --hidden-import=sqlalchemy.dialects.sqlite.aiosqlite
+      # Scrapling and its dependencies for web fetching
+        --hidden-import=scrapling
+        --hidden-import=scrapling.fetchers
+        --hidden-import=apify_fingerprint_datapoints
+        --hidden-import=browserforge
+        --hidden-import=undetected_playwright
+        --collect-all=scrapling
+        --collect-all=apify_fingerprint_datapoints
+        --collect-all=browserforge
+        --collect-all=undetected_playwright
+        # Exclude browserforge's undetected_playwright injector (incompatible with current version)
+        --exclude-module=browserforge.injectors.undetected_playwright
       # Exclusions
       --exclude-module=tkinter
       --exclude-module=unittest
       --exclude-module=email.test
       --exclude-module=test
       --exclude-module=tests
-      --exclude-module=distutils
+      # Note: distutils excluded via hook to avoid conflicts with undetected_playwright
       --exclude-module=setuptools
       --exclude-module=xmlrpc
       # Common large unused libs in standard envs
