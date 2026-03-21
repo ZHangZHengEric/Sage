@@ -102,7 +102,8 @@ export const toolLabelKeys = {
   'generate_image': 'tools.generateImage',
   'fetch_webpage': 'tools.fetchWebpage',
   'web_fetcher': 'tools.webFetcher',
-  'todo_write': 'tools.todoWrite'
+  'todo_write': 'tools.todoWrite',
+  'questionnaire': 'tools.questionnaire'
 }
 
 // 工具名称标签映射 - 中文回退
@@ -174,7 +175,8 @@ export const toolLabels = {
   'execute_python_code': '执行Python',
   'fetch_webpage': '抓取网页',
   'web_fetcher': '网页抓取',
-  'todo_write': '待办任务'
+  'todo_write': '待办任务',
+  'questionnaire': '信息收集'
 }
 
 /**

@@ -128,19 +128,48 @@ if ! command -v pyinstaller >/dev/null; then
 fi
 
 ########################################
-# 2. Build Python Sidecar (Wrapper Script)
+# 2. Setup Node.js Runtime
 ########################################
 
-echo "正在设置 Python Sidecar 包装器..."
+echo "正在设置 Node.js 运行时..."
 
 mkdir -p "$TAURI_BIN_DIR"
 mkdir -p "$TAURI_SIDECAR_DIR"
+
+# 使用 setup-node-runtime.sh 下载 Node.js
+NODE_DIR="$TAURI_SIDECAR_DIR/node"
+SETUP_SCRIPT="$APP_DIR/scripts/setup-node-runtime.sh"
+
+if [ -f "$NODE_DIR/bin/node" ]; then
+    echo "[Node.js] Node.js 运行时已存在，跳过下载。"
+elif [ -f "$SETUP_SCRIPT" ]; then
+    echo "[Node.js] 执行 Node.js 下载脚本..."
+    chmod +x "$SETUP_SCRIPT"
+    "$SETUP_SCRIPT"
+    if [ $? -ne 0 ]; then
+        echo "[Node.js] 错误: Node.js 下载失败"
+        exit 1
+    fi
+else
+    echo "[Node.js] 错误: 未找到下载脚本 $SETUP_SCRIPT"
+    exit 1
+fi
+
+# 设置 PATH，优先使用 sidecar 中的 Node.js
+export PATH="$NODE_DIR/bin:$PATH"
+echo "[Node.js] PATH 已更新: $NODE_DIR/bin"
 
 # Link resources for dev mode
 echo "正在链接开发模式资源..."
 rm -rf "$TAURI_SIDECAR_DIR/skills" "$TAURI_SIDECAR_DIR/mcp_servers"
 ln -sf "$ROOT_DIR/app/skills" "$TAURI_SIDECAR_DIR/skills"
 ln -sf "$ROOT_DIR/mcp_servers" "$TAURI_SIDECAR_DIR/mcp_servers"
+
+########################################
+# 3. Build Python Sidecar (Wrapper Script)
+########################################
+
+echo "正在设置 Python Sidecar 包装器..."
 
 # Get current python executable path
 PYTHON_EXEC=$(python -c "import sys; print(sys.executable)")
