@@ -1,114 +1,65 @@
 <template>
   <div 
-    class="sys-finish-task-message w-full max-w-[800px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
+    class="sys-finish-task-message w-full max-w-[800px] mb-1.5 rounded-lg border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
     @click="handleClick"
   >
-    <!-- Header Section -->
-    <div class="flex items-center justify-between p-3 border-b bg-muted/20">
-      <div class="flex items-center gap-2">
-        <div class="p-1.5 rounded-lg bg-green-500/10 text-green-600">
-          <CheckCircle class="w-4 h-4" />
+    <!-- Header Section - 更紧凑 -->
+    <div class="flex items-center justify-between px-2.5 py-1.5 border-b bg-muted/20">
+      <div class="flex items-center gap-1.5">
+        <div class="p-1 rounded bg-green-500/10 text-green-600">
+          <CheckCircle class="w-3 h-3" />
         </div>
-        <span class="font-medium text-sm">{{ t('chat.taskCompleted') }}</span>
+        <span class="font-medium text-xs">{{ t('chat.taskCompleted') }}</span>
       </div>
       
-      <!-- Status Indicator -->
-      <div class="flex items-center gap-2">
-        <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
-          :class="[
-            isError ? 'bg-destructive/10 text-destructive' : 
-            'bg-green-500/10 text-green-600'
-          ]">
-          <AlertCircle v-if="isError" class="w-3 h-3" />
-          <Check v-else class="w-3 h-3" />
-          <span>{{ statusText }}</span>
-        </div>
+      <!-- Status Indicator - 简化 -->
+      <div class="flex items-center gap-1 text-[10px]" :class="isError ? 'text-destructive' : 'text-green-600'">
+        <AlertCircle v-if="isError" class="w-2.5 h-2.5" />
+        <Check v-else class="w-2.5 h-2.5" />
+        <span>{{ statusText }}</span>
       </div>
     </div>
 
-    <!-- Content Section -->
-    <div class="p-4 space-y-4">
-      <!-- Status Badge -->
-      <!-- <div class="flex items-center gap-2">
-        <Badge :variant="isError ? 'destructive' : 'default'" class="text-xs">
-          {{ statusLabel }}
-        </Badge>
-        <span v-if="finishStatus" class="text-xs text-muted-foreground">
-          {{ finishStatus }}
-        </span>
-      </div> -->
-
-      <!-- Result Content - Full Markdown Rendering -->
-      <div v-if="resultContent" class="space-y-3">
-        <div class="flex items-center justify-between">
-          <h4 class="text-sm font-medium">{{ t('chat.executionResult') }}</h4>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            class="h-7 text-xs gap-1"
-            @click="isExpanded = !isExpanded"
-          >
-            <Eye v-if="!isExpanded" class="w-3.5 h-3.5" />
-            <EyeOff v-else class="w-3.5 h-3.5" />
-            {{ isExpanded ? t('chat.collapse') : t('chat.expand') }}
-          </Button>
-        </div>
-        
+    <!-- Content Section - 更紧凑 -->
+    <div class="px-2.5 py-2 space-y-2">
+      <!-- Result Content -->
+      <div v-if="resultContent" class="space-y-1.5">
         <!-- Expandable Result with Markdown -->
         <div 
-          class="bg-muted/30 rounded-lg border border-border/50 overflow-hidden transition-all duration-300"
-          :class="isExpanded ? 'max-h-none' : 'max-h-[400px]'"
+          class="bg-muted/30 rounded border border-border/50 overflow-hidden transition-all duration-300"
+          :class="isExpanded ? 'max-h-none' : 'max-h-[300px]'"
         >
-          <div class="p-4 overflow-y-auto custom-scrollbar" :class="!isExpanded ? 'max-h-[400px]' : ''">
-            <MarkdownRenderer :content="resultContent" class="text-sm" />
+          <div class="p-2.5 overflow-y-auto custom-scrollbar" :class="!isExpanded ? 'max-h-[300px]' : ''">
+            <MarkdownRenderer :content="resultContent" class="text-xs" />
           </div>
           
           <!-- Gradient overlay when collapsed -->
           <div 
             v-if="!isExpanded" 
-            class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background to-transparent pointer-events-none"
+            class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent pointer-events-none"
           ></div>
         </div>
         
         <!-- Expand hint -->
         <div v-if="!isExpanded && contentTooLong" class="text-center">
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            class="text-xs gap-1"
+          <button 
+            class="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 mx-auto transition-colors"
             @click="isExpanded = true"
           >
-            <ChevronDown class="w-3.5 h-3.5" />
+            <ChevronDown class="w-3 h-3" />
             {{ t('chat.showMore') }}
-          </Button>
+          </button>
         </div>
       </div>
 
       <!-- Error Message -->
-      <div v-if="isError && errorMessage" class="text-destructive text-sm bg-destructive/5 p-4 rounded-lg border border-destructive/20">
-        <div class="flex items-start gap-2">
-          <AlertCircle class="w-4 h-4 mt-0.5 flex-shrink-0" />
+      <div v-if="isError && errorMessage" class="text-destructive text-xs bg-destructive/5 p-2.5 rounded border border-destructive/20">
+        <div class="flex items-start gap-1.5">
+          <AlertCircle class="w-3 h-3 mt-0.5 flex-shrink-0" />
           <div>
             <p class="font-medium">{{ t('chat.executionFailed') }}</p>
-            <p class="mt-1 opacity-90">{{ errorMessage }}</p>
+            <p class="mt-0.5 opacity-90">{{ errorMessage }}</p>
           </div>
-        </div>
-      </div>
-
-      <!-- Raw Data Toggle -->
-      <div v-if="hasRawData" class="pt-2 border-t border-border/30">
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          class="h-7 text-xs gap-1 text-muted-foreground"
-          @click="showRawData = !showRawData"
-        >
-          <Code class="w-3.5 h-3.5" />
-          {{ showRawData ? t('chat.hideRawData') : t('chat.showRawData') }}
-        </Button>
-        
-        <div v-if="showRawData" class="mt-2">
-          <JsonDataViewer :data="rawData" />
         </div>
       </div>
     </div>
@@ -117,12 +68,9 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { CheckCircle, Check, AlertCircle, Eye, EyeOff, ChevronDown, Code } from 'lucide-vue-next'
+import { CheckCircle, Check, AlertCircle, ChevronDown } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import MarkdownRenderer from '../MarkdownRenderer.vue'
-import JsonDataViewer from './JsonDataViewer.vue'
 
 const props = defineProps({
   toolCall: {
@@ -149,7 +97,6 @@ const { t } = useLanguage()
 
 // Toggle states
 const isExpanded = ref(false)
-const showRawData = ref(false)
 
 const args = computed(() => {
   try {
@@ -192,7 +139,7 @@ const resultContent = computed(() => {
 })
 
 const contentTooLong = computed(() => {
-  return resultContent.value && resultContent.value.length > 1000
+  return resultContent.value && resultContent.value.length > 800
 })
 
 const isError = computed(() => {
@@ -227,22 +174,6 @@ const statusText = computed(() => {
   return t('status.completed')
 })
 
-const statusLabel = computed(() => {
-  if (isError.value) return t('chat.failed')
-  return t('chat.success')
-})
-
-const rawData = computed(() => {
-  return {
-    arguments: args.value,
-    result: props.toolResult
-  }
-})
-
-const hasRawData = computed(() => {
-  return Object.keys(args.value).length > 0 || props.toolResult
-})
-
 const handleClick = () => {
   // 触发点击事件，让父组件打开工作台
   emit('click', props.toolCall, props.toolResult)
@@ -251,7 +182,7 @@ const handleClick = () => {
 
 <style scoped>
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -260,7 +191,7 @@ const handleClick = () => {
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.3);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
@@ -269,23 +200,23 @@ const handleClick = () => {
 
 /* Ensure markdown content is properly styled */
 :deep(.markdown-body) {
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 :deep(.markdown-body h1),
 :deep(.markdown-body h2),
 :deep(.markdown-body h3),
 :deep(.markdown-body h4) {
-  margin-top: 1em;
-  margin-bottom: 0.5em;
+  margin-top: 0.75em;
+  margin-bottom: 0.375em;
 }
 
 :deep(.markdown-body table) {
-  margin: 1em 0;
+  margin: 0.75em 0;
 }
 
 :deep(.markdown-body pre) {
-  margin: 1em 0;
+  margin: 0.75em 0;
 }
 </style>

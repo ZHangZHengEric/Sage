@@ -1,47 +1,57 @@
 <template>
   <div 
-    class="todo-task-message w-full max-w-[600px] mb-2 rounded-xl border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
+    class="todo-task-message w-full max-w-[600px] mb-1.5 rounded-lg border bg-card/50 overflow-hidden transition-all hover:border-border/80 cursor-pointer"
     @click="handleClick"
   >
     <!-- Header Section -->
-    <div class="flex items-center justify-between p-3 border-b bg-muted/20">
-      <div class="flex items-center gap-2">
-        <div class="p-1.5 rounded-lg bg-primary/10 text-primary">
-          <ListTodo class="w-4 h-4" />
+    <div class="flex items-center justify-between px-2.5 py-1.5 border-b bg-muted/20">
+      <div class="flex items-center gap-1.5">
+        <div class="p-1 rounded bg-primary/10 text-primary">
+          <ListTodo class="w-3 h-3" />
         </div>
-        <span class="font-medium text-sm">{{ t('chat.todoList') || '任务清单' }}</span>
+        <span class="font-medium text-xs">{{ t('chat.todoList') || '任务清单' }}</span>
+      </div>
+      <!-- Summary Icons -->
+      <div v-if="hasSummary" class="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <div v-if="addedCount > 0" class="flex items-center gap-0.5 text-green-600">
+          <Plus class="w-2.5 h-2.5" />
+          <span>{{ addedCount }}</span>
+        </div>
+        <div v-if="updatedCount > 0" class="flex items-center gap-0.5 text-blue-600">
+          <RefreshCw class="w-2.5 h-2.5" />
+          <span>{{ updatedCount }}</span>
+        </div>
+        <div v-if="pendingCount > 0" class="flex items-center gap-0.5 text-orange-600">
+          <Circle class="w-2.5 h-2.5" />
+          <span>{{ pendingCount }}</span>
+        </div>
       </div>
     </div>
 
     <!-- Content Section -->
-    <div class="p-4 space-y-4">
-      <!-- Summary -->
-      <div v-if="summary" class="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">
-        {{ summary }}
-      </div>
-
+    <div class="px-2.5 py-2 space-y-2">
       <!-- Tasks List -->
-      <div v-if="tasks.length > 0" class="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+      <div v-if="tasks.length > 0" class="space-y-1 max-h-[200px] overflow-y-auto pr-0.5">
         <div 
           v-for="(task, index) in tasks" 
           :key="index" 
-          class="flex items-start gap-3 p-2 rounded-md transition-colors hover:bg-muted/40"
-          :class="{'opacity-60': task.status === 'completed'}"
+          class="flex items-start gap-2 px-1.5 py-1 rounded transition-colors hover:bg-muted/40"
+          :class="{'opacity-50': task.status === 'completed'}"
         >
           <div class="pt-0.5 flex-shrink-0">
             <div 
-              class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
+              class="w-3 h-3 rounded-sm border flex items-center justify-center transition-colors"
               :class="[
                 task.status === 'completed' 
                   ? 'bg-primary border-primary text-primary-foreground' 
                   : 'border-muted-foreground/40 bg-background'
               ]"
             >
-              <Check v-if="task.status === 'completed'" class="w-3 h-3" />
+              <Check v-if="task.status === 'completed'" class="w-2 h-2" />
             </div>
           </div>
           <span 
-            class="text-sm leading-tight break-words"
+            class="text-xs leading-tight break-words flex-1"
             :class="{'line-through text-muted-foreground': task.status === 'completed'}"
           >
             {{ task.name }}
@@ -49,7 +59,7 @@
         </div>
       </div>
       
-      <div v-else class="text-center text-muted-foreground text-sm py-2">
+      <div v-else class="text-center text-muted-foreground text-xs py-1">
         {{ t('chat.noTasks') || '暂无任务' }}
       </div>
     </div>
@@ -58,7 +68,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ListTodo, Check } from 'lucide-vue-next'
+import { ListTodo, Check, Plus, RefreshCw, Circle } from 'lucide-vue-next'
 import { useLanguage } from '@/utils/i18n.js'
 
 const props = defineProps({
@@ -104,8 +114,27 @@ const parsedContent = computed(() => {
   return content || {}
 })
 
-const summary = computed(() => parsedContent.value.summary || '')
 const tasks = computed(() => parsedContent.value.tasks || [])
+
+// 解析 summary 信息
+const summaryInfo = computed(() => {
+  const summary = parsedContent.value.summary || ''
+  // 匹配 "新增: X, 更新: Y。当前未完成任务数: Z" 格式
+  const match = summary.match(/新增:\s*(\d+).*更新:\s*(\d+).*未完成.*:\s*(\d+)/)
+  if (match) {
+    return {
+      added: parseInt(match[1]) || 0,
+      updated: parseInt(match[2]) || 0,
+      pending: parseInt(match[3]) || 0
+    }
+  }
+  return null
+})
+
+const hasSummary = computed(() => summaryInfo.value !== null)
+const addedCount = computed(() => summaryInfo.value?.added || 0)
+const updatedCount = computed(() => summaryInfo.value?.updated || 0)
+const pendingCount = computed(() => summaryInfo.value?.pending || 0)
 
 const handleClick = () => {
   // 触发点击事件，让父组件打开工作台
