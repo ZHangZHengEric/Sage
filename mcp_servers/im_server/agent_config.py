@@ -58,6 +58,71 @@ DEFAULT_AGENT_ID = "default"
 IMESSAGE_PROVIDER = "imessage"
 
 
+# Cache for default agent ID
+_default_agent_id_cache: Optional[str] = None
+
+
+def get_default_agent_id() -> str:
+    """
+    Get the default Agent ID.
+    
+    Returns:
+        The agent_id of the default Agent.
+    """
+    global _default_agent_id_cache
+    
+    if _default_agent_id_cache is not None:
+        return _default_agent_id_cache
+    
+    try:
+        # Try to read from database
+        import asyncio
+        from app.desktop.core.models.agent import AgentConfigDao
+        
+        dao = AgentConfigDao()
+        
+        # Run async query in sync context
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Use run_coroutine_threadsafe for thread-safe execution
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, dao.get_default())
+                    agent = future.result(timeout=5)
+            else:
+                agent = asyncio.run(dao.get_default())
+        except RuntimeError:
+            agent = asyncio.run(dao.get_default())
+        
+        if agent:
+            _default_agent_id_cache = agent.agent_id
+            return _default_agent_id_cache
+    except Exception as e:
+        logger.warning(f"[AgentIMConfig] Failed to get default agent from DB: {e}")
+    
+    # Fallback: return the first agent from filesystem or default
+    try:
+        agents_dir = Path.home() / ".sage" / "agents"
+        if agents_dir.exists():
+            agent_dirs = [d for d in agents_dir.iterdir() if d.is_dir()]
+            if agent_dirs:
+                _default_agent_id_cache = agent_dirs[0].name
+                return _default_agent_id_cache
+    except Exception as e:
+        logger.warning(f"[AgentIMConfig] Failed to get agent from filesystem: {e}")
+    
+    # Ultimate fallback
+    _default_agent_id_cache = DEFAULT_AGENT_ID
+    return _default_agent_id_cache
+
+
+def reset_default_agent_cache():
+    """Reset the default agent cache."""
+    global _default_agent_id_cache
+    _default_agent_id_cache = None
+
+
 @dataclass
 class ChannelConfig:
     """

@@ -76,6 +76,16 @@
                 
                 <!-- Info row -->
                 <div class="flex items-center gap-3 mt-3 flex-wrap">
+                  <!-- Default badge -->
+                  <Badge 
+                    v-if="agent.is_default"
+                    variant="default"
+                    class="text-xs font-medium px-2 py-0.5 shrink-0 bg-primary text-primary-foreground"
+                  >
+                    <Star class="w-3 h-3 mr-1" />
+                    默认
+                  </Badge>
+                  
                   <!-- Mode badge -->
                   <Badge 
                     :variant="getModeBadgeVariant(agent.agentMode)"
@@ -128,6 +138,16 @@
               </CardHeader>
 
               <CardContent class="flex-1 flex flex-col items-center justify-center gap-2 py-2 px-4">
+                <Button 
+                  v-if="!agent.is_default"
+                  variant="outline" 
+                  class="w-full max-w-[140px] justify-center gap-2 text-primary hover:text-primary hover:bg-primary/10"
+                  @click.stop="handleSetDefault(agent); toggleFlip(agent.id)"
+                >
+                  <Star class="w-4 h-4" />
+                  设为默认
+                </Button>
+                
                 <Button 
                   variant="outline" 
                   class="w-full max-w-[140px] justify-center gap-2"
@@ -294,7 +314,7 @@ import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { 
   Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, 
-  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X
+  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X, Star
 } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
@@ -452,10 +472,11 @@ const loadAgents = async () => {
     loading.value = true
     error.value = null
     const response = await agentAPI.getAgents()
-    if (response.agents) {
-      agents.value = response.agents
-    } else if (Array.isArray(response)) {
+    // request.js 已经处理了响应，返回的是 response.data
+    if (Array.isArray(response)) {
       agents.value = response
+    } else if (response && Array.isArray(response.data)) {
+      agents.value = response.data
     } else {
       agents.value = []
     }
@@ -497,9 +518,21 @@ const removeAgent = async (agentId) => {
   }
 }
 
+const handleSetDefault = async (agent) => {
+  try {
+    await agentAPI.setDefaultAgent(agent.id)
+    toast.success(`Agent '${agent.name}' 已设为默认`)
+    // 重新加载列表以更新状态
+    await loadAgents()
+  } catch (err) {
+    console.error('设置默认 Agent 失败:', err)
+    toast.error('设置默认 Agent 失败: ' + (err.message || '未知错误'))
+  }
+}
+
 const handleDelete = async (agent) => {
-  if (agent.id === 'default') {
-    alert(t('agent.defaultCannotDelete'))
+  if (agent.is_default) {
+    alert('默认 Agent 不能删除')
     return
   }
 
