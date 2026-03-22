@@ -68,6 +68,10 @@ export const useChatLifecycle = ({
         selectAgent(targetAgent, true)
         console.log('[ChatLifecycle] onMounted - Auto-selected agent:', targetAgentId)
       }
+    } else if (agents.value.length > 0) {
+      // 如果没有指定 agent，但有可用的 agents，自动选择第一个（默认 agent）
+      console.log('[ChatLifecycle] onMounted - No targetAgentId, selecting first agent')
+      restoreSelectedAgent(agents.value)
     }
 
     // 清除 URL 中的 agent 参数和 localStorage（只使用一次）
