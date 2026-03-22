@@ -9,13 +9,13 @@
         <span class="text-sm text-muted-foreground">{{ formatTime(item?.timestamp) }}</span>
         <span class="text-muted-foreground/50">|</span>
         <!-- 文件信息 -->
-        <span class="text-xl">{{ fileIcon }}</span>
+        <span class="text-xl">{{ isDirectory ? '📁' : fileIcon }}</span>
         <span class="text-sm font-medium truncate">{{ displayFileName }}</span>
-        <Badge variant="secondary" class="text-xs">{{ fileTypeLabel }}</Badge>
+        <Badge variant="secondary" class="text-xs">{{ isDirectory ? '文件夹' : fileTypeLabel }}</Badge>
       </div>
       <div class="flex items-center gap-1 flex-shrink-0">
         <Button 
-          v-if="canCopy"
+          v-if="!isDirectory && canCopy"
           variant="ghost" 
           size="sm"
           @click="copyContent"
@@ -30,7 +30,7 @@
           size="sm"
           @click="downloadFile"
           class="h-7 px-2"
-          title="下载文件"
+          :title="isDirectory ? '下载文件夹' : '下载文件'"
         >
           <Download class="w-4 h-4 mr-1" />
           下载
@@ -40,7 +40,7 @@
           size="sm"
           @click="openFile"
           class="h-7 px-2"
-          title="打开文件"
+          :title="isDirectory ? '打开文件夹' : '打开文件'"
         >
           <ExternalLink class="w-4 h-4 mr-1" />
           打开
@@ -50,8 +50,14 @@
 
     <!-- 内容区域 -->
     <div class="flex-1 overflow-auto">
+      <!-- 无文件路径 -->
+      <div v-if="!filePath" class="h-full flex flex-col items-center justify-center p-4 text-muted-foreground bg-muted/20">
+        <File class="w-16 h-16 mb-3 opacity-50" />
+        <p class="text-sm mb-1">未指定文件路径</p>
+      </div>
+
       <!-- 加载中 -->
-      <div v-if="loading" class="flex items-center justify-center h-full">
+      <div v-else-if="loading" class="flex items-center justify-center h-full">
         <Loader2 class="w-6 h-6 animate-spin text-primary" />
         <span class="ml-2 text-sm text-muted-foreground">加载中...</span>
       </div>
@@ -69,6 +75,24 @@
           <RefreshCw class="w-4 h-4 mr-1" />
           重试
         </Button>
+      </div>
+
+      <!-- 文件夹视图 - 使用 WorkspaceFileTree -->
+      <div v-else-if="isDirectory" class="h-full p-4">
+        <div v-if="directoryTree.length > 0" class="space-y-1">
+          <WorkspaceFileTree
+            v-for="node in directoryTree"
+            :key="node.path"
+            :item="node"
+            @download="handleDownload"
+            @delete="handleDelete"
+            @quote="handleQuote"
+          />
+        </div>
+        <div v-else class="flex flex-col items-center justify-center h-full text-muted-foreground">
+          <FolderOpen class="w-12 h-12 mb-2 opacity-50" />
+          <p class="text-sm">空文件夹</p>
+        </div>
       </div>
 
       <!-- PDF 预览 -->
@@ -155,10 +179,11 @@ import {
   Globe,
   FileText,
   Image as ImageIcon,
-  Download
+  Download,
+  FolderOpen
 } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-shell'
-import { readTextFile, readFile } from '@tauri-apps/plugin-fs'
+import { readTextFile, readFile, exists, readDir } from '@tauri-apps/plugin-fs'
 import { save } from '@tauri-apps/plugin-dialog'
 import { toast } from 'vue-sonner'
 import { marked } from 'marked'
@@ -180,11 +205,12 @@ import TextRenderer from './filerender/TextRenderer.vue'
 import DocxRenderer from './filerender/DocxRenderer.vue'
 import XlsxRenderer from './filerender/XlsxRenderer.vue'
 import PptxRenderer from './filerender/PptxRenderer.vue'
+import WorkspaceFileTree from '../../WorkspaceFileTree.vue'
 
 const props = defineProps({
   filePath: {
     type: String,
-    required: true
+    default: ''
   },
   fileName: {
     type: String,
@@ -192,9 +218,11 @@ const props = defineProps({
   },
   item: {
     type: Object,
-    default: null
+    default: () => ({})
   }
 })
+
+const emit = defineEmits(['downloadFile', 'deleteFile', 'quotePath'])
 
 // 状态
 const loading = ref(false)
@@ -202,6 +230,8 @@ const error = ref(null)
 const fileContent = ref('')
 const copied = ref(false)
 const htmlDataUrl = ref('')
+const isDirectory = ref(false)
+const directoryTree = ref([])
 
 // Office 文件状态
 const officeLoading = ref(false)
@@ -288,6 +318,9 @@ const formatTime = (timestamp) => {
 // 文件信息
 const displayFileName = computed(() => {
   // 优先从 filePath 提取文件名，因为 fileName 可能是链接文本
+  if (!props.filePath) {
+    return props.fileName || '未命名文件'
+  }
   let pathName = props.filePath.split('/').pop()
   // 移除查询参数（如 ?t=123）
   pathName = pathName.split('?')[0]
@@ -511,8 +544,90 @@ const generateExcalidrawSvg = (data) => {
   return svgElements
 }
 
+// 加载文件夹内容
+const loadDirectory = async () => {
+  try {
+    loading.value = true
+    error.value = null
+    
+    const entries = await readDir(props.filePath)
+    
+    // 构建文件树
+    const buildTree = async (entries, basePath) => {
+      const nodes = []
+      
+      for (const entry of entries) {
+        const fullPath = `${basePath}/${entry.name}`
+        const node = {
+          name: entry.name,
+          path: fullPath,
+          is_directory: entry.isDirectory,
+          size: 0,
+          children: []
+        }
+        
+        if (entry.isDirectory) {
+          try {
+            const childEntries = await readDir(fullPath)
+            node.children = await buildTree(childEntries, fullPath)
+          } catch (e) {
+            console.warn('Failed to read directory:', fullPath, e)
+          }
+        }
+        
+        nodes.push(node)
+      }
+      
+      // 排序：文件夹在前，按名称排序
+      nodes.sort((a, b) => {
+        if (a.is_directory !== b.is_directory) {
+          return a.is_directory ? -1 : 1
+        }
+        return a.name.localeCompare(b.name)
+      })
+      
+      return nodes
+    }
+    
+    directoryTree.value = await buildTree(entries, props.filePath)
+    loading.value = false
+  } catch (err) {
+    console.error('加载文件夹失败:', err)
+    error.value = `加载文件夹失败: ${err.message}`
+    loading.value = false
+  }
+}
+
 // 加载文件内容
 const loadContent = async () => {
+  // 检查文件路径是否存在
+  if (!props.filePath) {
+    error.value = '未指定文件路径'
+    return
+  }
+
+  // 首先检查是否是文件夹
+  try {
+    const dirExists = await exists(props.filePath)
+    if (!dirExists) {
+      error.value = '路径不存在'
+      return
+    }
+    
+    // 尝试读取文件夹
+    try {
+      const entries = await readDir(props.filePath)
+      isDirectory.value = true
+      await loadDirectory()
+      return
+    } catch (e) {
+      // 不是文件夹，继续按文件处理
+      isDirectory.value = false
+    }
+  } catch (err) {
+    console.error('检查路径失败:', err)
+  }
+  
   if (fileType.value === 'other') return
   
   try {
@@ -954,6 +1069,19 @@ const handleResize = () => {
     console.log('[FileRenderer] Window resized, re-rendering PPTX...')
     renderPptxWithSize(pptxFileData.value)
   }, 300)
+}
+
+// 文件夹操作处理
+const handleDownload = (item) => {
+  emit('downloadFile', item)
+}
+
+const handleDelete = (item) => {
+  emit('deleteFile', item)
+}
+
+const handleQuote = (path) => {
+  emit('quotePath', path)
 }
 
 // 自动加载

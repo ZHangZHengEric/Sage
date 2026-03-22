@@ -87,7 +87,8 @@ const workbenchStore = useWorkbenchStore()
 
 // 本地缓存过滤后的列表，避免频繁访问 store 的计算属性
 const filteredItemsList = computed(() => {
-  return workbenchStore.filteredItems || []
+  // 过滤掉 null 或 undefined 的项
+  return (workbenchStore.filteredItems || []).filter(item => item && item.type)
 })
 
 // 当前选中的 item

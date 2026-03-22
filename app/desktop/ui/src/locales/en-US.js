@@ -121,6 +121,7 @@ export default {
   'chat.noResult': 'No result',
   'chat.untitledConversation': 'Untitled Conversation',
   'chat.sendError': 'Failed to send message',
+  'chat.interruptFailed': 'Failed to interrupt current session, please try again later',
   'chat.settings': 'Settings',
   'chat.loadAgentsError': 'Failed to load agents',
   'chat.loadConversationError': 'Failed to load conversation',
@@ -747,10 +748,12 @@ export default {
 
   // Message Input
   'messageInput.placeholder': 'Type a message... (Shift+Enter for new line)',
+  'messageInput.placeholderGenerating': 'AI is generating response, you can type a new message...',
   'messageInput.send': 'Send',
   'messageInput.stop': 'Stop',
   'messageInput.sendTitle': 'Send',
   'messageInput.stopTitle': 'Stop',
+  'messageInput.stopAndSendTitle': 'Stop and send new message',
   'messageInput.uploadFile': 'Upload',
   'messageInput.removeFile': 'Remove',
 

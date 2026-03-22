@@ -1,16 +1,16 @@
 <template>
-  <div v-if="shouldRenderMessage" class="flex flex-col gap-6 mb-6">
+  <div v-if="shouldRenderMessage" class="flex flex-col gap-1 mb-1">
     <!-- 错误消息 -->
     <div v-if="isErrorMessage" class="flex flex-row gap-4 px-4">
       <div class="flex-none">
         <MessageAvatar messageType="error" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-1.5 ml-1 text-xs font-medium text-muted-foreground">
+        <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground">
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
         </div>
-        <div class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-6 py-4 shadow-sm overflow-hidden break-words w-full">
-          <div class="opacity-90 text-[15px] leading-7 font-medium">{{ message.content || t('error.unknown') }}</div>
+        <div class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words w-full">
+          <div class="opacity-90 text-[15px] leading-6 font-medium">{{ message.content || t('error.unknown') }}</div>
         </div>
       </div>
     </div>
@@ -26,7 +26,7 @@
         <MessageAvatar :messageType="message.type || message.message_type" role="user" />
       </div>
       <div class="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-1 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
+        <div class="mb-0.5 mr-1 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity select-none flex items-center gap-2">
           <button
             @click="handleCopy"
             class="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
@@ -37,9 +37,9 @@
           </button>
           {{ getLabel({ role: 'user', type: message.type, messageType: message.message_type }) }}
         </div>
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-1">
           <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-6 py-4 shadow-sm overflow-hidden break-all text-[15px] leading-7 tracking-wide font-sans">
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-[15px] leading-6 tracking-wide font-sans">
             <MarkdownRenderer
               :content="formatMessageContent(getTextContent(message.content))"
             />
@@ -100,7 +100,7 @@
         <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%]">
-        <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+        <div class="mb-0.5 ml-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
           {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type }) }}
           <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
             {{ formatTime(message.timestamp) }}
@@ -114,9 +114,9 @@
             <Copy v-else class="w-3 h-3" />
           </button>
         </div>
-        <div class="flex flex-col gap-2 w-full">
+        <div class="flex flex-col gap-1 w-full">
           <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-7 font-sans py-1">
+          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-6 font-sans">
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
             />
@@ -155,7 +155,7 @@
     </div>
 
     <!-- 工具渲染 -->
-    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4 mb-2" data-message-type="tool">
+    <div v-else-if="hasToolCalls" class="flex flex-row items-start gap-3 px-4" data-message-type="tool">
       <div class="flex-none mt-1">
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>

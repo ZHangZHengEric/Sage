@@ -232,8 +232,24 @@ export const useChatStream = ({
   }
 
   const handleSendMessage = async (content, options = {}) => {
-    const { displayContent, multimodalContent } = options
-    if (!content.trim() || isLoading.value || !selectedAgent.value) return
+    const { displayContent, multimodalContent, needInterrupt } = options
+    if (!content.trim() || !selectedAgent.value) return
+    
+    // 如果需要中断（用户正在生成回复时发送新消息）
+    if (needInterrupt && isLoading.value) {
+      console.log('[ChatStream] Interrupting current generation before sending new message')
+      await stopGeneration()
+      // 等待一小段时间确保中断完成
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+    
+    // 如果中断后 isLoading 仍然是 true，说明中断失败，不继续发送
+    if (isLoading.value) {
+      console.warn('[ChatStream] Failed to interrupt, cannot send new message')
+      toast.error(t('chat.interruptFailed') || '中断当前会话失败，请稍后重试')
+      return
+    }
+    
     let sessionId = currentSessionId.value
     if (!sessionId) {
       sessionId = await createSession(selectedAgent.value.id)
