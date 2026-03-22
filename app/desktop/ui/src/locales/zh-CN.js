@@ -121,6 +121,7 @@ export default {
   'chat.noResult': '暂无结果',
   'chat.untitledConversation': '未命名对话',
   'chat.sendError': '发送消息失败',
+  'chat.interruptFailed': '中断当前会话失败，请稍后重试',
   'chat.settings': '设置',
   'chat.loadAgentsError': '加载Agent失败',
   'chat.loadConversationError': '加载对话失败',
@@ -753,10 +754,12 @@ export default {
 
   // 消息输入
   'messageInput.placeholder': '输入您的消息... (Shift+Enter 换行)',
+  'messageInput.placeholderGenerating': 'AI正在生成回复，可直接输入新消息...',
   'messageInput.send': '发送',
   'messageInput.stop': '停止',
   'messageInput.sendTitle': '发送消息',
   'messageInput.stopTitle': '停止生成',
+  'messageInput.stopAndSendTitle': '停止生成并发送新消息',
   'messageInput.uploadFile': '上传文件',
   'messageInput.removeFile': '移除文件',
 

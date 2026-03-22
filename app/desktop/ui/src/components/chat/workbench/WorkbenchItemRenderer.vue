@@ -2,18 +2,23 @@
   <div class="workbench-item h-full flex flex-col overflow-hidden">
     <!-- 根据类型渲染不同内容 - 占满整个区域 -->
     <div class="workbench-content flex-1 overflow-hidden">
+      <!-- 空值检查 -->
+      <div v-if="!item || !item.type" class="h-full flex items-center justify-center text-muted-foreground">
+        <p class="text-sm">无效的工作台项</p>
+      </div>
+
       <!-- 工具调用 -->
       <ToolCallRenderer
-        v-if="item.type === 'tool_call'"
+        v-else-if="item.type === 'tool_call'"
         :item="item"
       />
 
       <!-- 文件预览 -->
       <FileRenderer
         v-else-if="item.type === 'file'"
-        :key="item.id || item.data.filePath"
-        :file-path="item.data.filePath"
-        :file-name="item.data.fileName"
+        :key="item.id || item.data?.filePath"
+        :file-path="item.data?.filePath"
+        :file-name="item.data?.fileName"
         :item="item"
       />
 

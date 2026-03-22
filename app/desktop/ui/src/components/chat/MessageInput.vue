@@ -98,36 +98,29 @@
         @compositionstart="handleCompositionStart"
         @compositionend="handleCompositionEnd"
         @paste="handlePaste"
-        :placeholder="t('messageInput.placeholder')"
+        :placeholder="isLoading ? t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...' : t('messageInput.placeholder')"
         class="flex-1 min-h-[24px] max-h-[200px] py-2 px-0 bg-transparent border-0 focus-visible:ring-0 resize-none shadow-none text-base"
-        :disabled="isLoading"
         rows="1"
       />
 
       <div class="flex items-center gap-2 pb-0.5">
         <Button
-          v-if="isLoading"
-          type="button"
-          variant="destructive"
-          size="sm"
-          @click="handleStop"
-          class="h-8 rounded-full px-3"
-          :title="t('messageInput.stopTitle')"
-        >
-          <span class="mr-1">⏹️</span> {{ t('messageInput.stop') }}
-        </Button>
-        <Button
-          v-else
           type="submit"
           size="icon"
           :disabled="!inputValue.trim() && uploadedFiles.length === 0"
           class="h-9 w-9 rounded-full transition-all duration-200"
-          :class="{ 'opacity-50 cursor-not-allowed': !inputValue.trim() && uploadedFiles.length === 0 }"
-          :title="t('messageInput.sendTitle')"
+          :class="[
+            !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
+            isLoading ? 'bg-destructive hover:bg-destructive/90' : ''
+          ]"
+          :title="isLoading ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.sendTitle')"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg v-if="!isLoading" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="6" width="12" height="12" fill="currentColor"/>
           </svg>
         </Button>
       </div>
@@ -410,7 +403,7 @@ watch(inputValue, async (newVal) => {
 // 处理表单提交
 const handleSubmit = (e) => {
   e.preventDefault()
-  if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value) && !props.isLoading) {
+  if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value)) {
     let messageContent = inputValue.value.trim()
 
     // 如果有选中的技能，添加到消息头部
@@ -465,12 +458,20 @@ const handleSubmit = (e) => {
 
     // 发送消息，同时传递普通格式和多模态格式
     if (messageContent || multimodalContent.length > 0) {
-      emit('sendMessage', messageContent, {
-        multimodalContent: multimodalContent.length > 0 ? multimodalContent : null
-      })
+      // 如果正在生成，先中断再发送
+      const pendingMessage = messageContent
+      const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
+      
+      // 清空输入框，准备发送
       inputValue.value = ''
       uploadedFiles.value = []
       currentSkill.value = null
+      
+      // 发送消息，传入 needInterrupt 标志
+      emit('sendMessage', pendingMessage, {
+        multimodalContent: pendingMultimodal,
+        needInterrupt: props.isLoading
+      })
     }
   }
 }
