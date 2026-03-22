@@ -99,7 +99,14 @@
     },
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [
+          "libwebkit2gtk-4.0-37",
+          "libgtk-3-0",
+          "libglib2.0-0",
+          "libssl3",
+          "librsvg2-2",
+          "libayatana-appindicator3-1 | libappindicator3-1"
+        ]
       }
     }
   },
