@@ -72,7 +72,7 @@ def create_skill_proxy(
     if agent_workspace:
         agent_skills_dir = os.path.join(agent_workspace, "skills")
         if os.path.exists(agent_skills_dir):
-            agent_skill_manager = SkillManager(skill_dirs=[agent_skills_dir], isolated=True, include_global_skills=False)
+            agent_skill_manager = SkillManager(skill_dirs=[agent_skills_dir], isolated=True)
             skill_managers.append(agent_skill_manager)
             logger.info(f"Agent工作区技能目录已加载: {agent_skills_dir}")
 
@@ -80,13 +80,13 @@ def create_skill_proxy(
     if user_id:
         user_skills_dir = os.path.join(user_dir, user_id, "skills")
         if os.path.exists(user_skills_dir):
-            user_skill_manager = SkillManager(skill_dirs=[user_skills_dir], isolated=True, include_global_skills=False)
+            user_skill_manager = SkillManager(skill_dirs=[user_skills_dir], isolated=True)
             skill_managers.append(user_skill_manager)
             logger.info(f"用户技能目录已加载: {user_skills_dir}")
 
     # 3. 系统技能: skills/
     if os.path.exists(skill_dir):
-        system_skill_manager = SkillManager(skill_dirs=[skill_dir], isolated=True, include_global_skills=False)
+        system_skill_manager = SkillManager(skill_dirs=[skill_dir], isolated=True)
         skill_managers.append(system_skill_manager)
         logger.info(f"系统技能目录已加载: {skill_dir}")
 
