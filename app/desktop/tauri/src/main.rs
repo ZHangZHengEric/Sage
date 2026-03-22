@@ -51,6 +51,21 @@ struct ClosePreferenceState(Mutex<Option<ClosePreference>>);
 const SAGE_ENV_FILE: &str = ".sage_env";
 const SAGE_NODE_MODULES_DIR: &str = ".sage_node_env";
 
+#[cfg(target_os = "linux")]
+fn apply_linux_webkit_env_defaults() {
+    // Work around white screen issues on some Linux GPU/WebKitGTK setups.
+    // Respect user overrides if they already set these env vars.
+    if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_linux_webkit_env_defaults() {}
+
 // 预设的 npx 包列表
 const PRESET_NPX_PACKAGES: &[&str] = &[
     // Skill 依赖
@@ -622,6 +637,7 @@ fn show_window(app: &tauri::AppHandle) {
 fn main() {
     // Load .sage_env file first before setting other environment variables
     load_sage_env_file();
+    apply_linux_webkit_env_defaults();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
