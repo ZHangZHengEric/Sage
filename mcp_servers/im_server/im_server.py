@@ -26,7 +26,7 @@ from .db import get_im_db
 from .session_manager import get_session_manager
 from .agent_client import get_agent_client
 from .service_manager import get_service_manager
-from .agent_config import get_agent_im_config, AgentIMConfig, DEFAULT_AGENT_ID
+from .agent_config import get_agent_im_config, AgentIMConfig, get_default_agent_id
 
 # Constants
 logger = logging.getLogger("IMServer")
@@ -58,7 +58,8 @@ async def ensure_config_migrated() -> bool:
     
     try:
         # Check if default agent already has configurations
-        agent_config = get_agent_im_config(DEFAULT_AGENT_ID)
+        default_agent_id = get_default_agent_id()
+        agent_config = get_agent_im_config(default_agent_id)
         existing_channels = agent_config.get_all_channels()
         
         if existing_channels:
@@ -88,8 +89,11 @@ async def ensure_config_migrated() -> bool:
             provider_config = config.get("config", {})
             
             # Validate (especially for iMessage)
-            if provider == "imessage" and DEFAULT_AGENT_ID != "default":
-                logger.warning(f"[IM Migration] Skipping iMessage for non-default agent: {DEFAULT_AGENT_ID}")
+            # Skip iMessage migration - it should only be on default agent
+            if provider == "imessage":
+                logger.warning(f"[IM Migration] Skipping iMessage for migration - configure it manually on default agent")
+                skipped_count += 1
+                continue
                 skipped_count += 1
                 continue
             
@@ -140,7 +144,7 @@ DEFAULT_SAGE_USER_ID = "desktop_default_user"
 async def _send_file_via_provider(
     file_path: str,
     provider: str,
-    agent_id: str = DEFAULT_AGENT_ID,
+    agent_id: Optional[str] = None,
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
     file_type: str = "file"
@@ -203,8 +207,19 @@ async def _send_file_via_provider(
                     user_id=user_id
                 )
         elif provider == "feishu":
-            # 飞书 (暂不支持文件，返回提示)
-            return f"飞书文件发送功能开发中，请使用企业微信发送文件"
+            # 飞书
+            if file_type == "image":
+                result = await provider_instance.send_image(
+                    image_path=file_path,
+                    chat_id=chat_id,
+                    user_id=user_id
+                )
+            else:
+                result = await provider_instance.send_file(
+                    file_path=file_path,
+                    chat_id=chat_id,
+                    user_id=user_id
+                )
         elif provider == "dingtalk":
             # 钉钉 (暂不支持文件，返回提示)
             return f"钉钉文件发送功能开发中，请使用企业微信发送文件"
@@ -267,7 +282,7 @@ async def send_file_through_im(
     """
     # Resolve agent_id (use default if not specified)
     if not agent_id:
-        agent_id = DEFAULT_AGENT_ID
+        agent_id = get_default_agent_id()
     
     logger.info(f"[IM Tool] send_file_through_im called: agent={agent_id}, provider={provider}, file={file_path}")
     
@@ -329,7 +344,7 @@ async def send_image_through_im(
     """
     # Resolve agent_id
     if not agent_id:
-        agent_id = DEFAULT_AGENT_ID
+        agent_id = get_default_agent_id()
     
     logger.info(f"[IM Tool] send_image_through_im called: agent={agent_id}, provider={provider}, image={file_path}")
     
@@ -361,34 +376,38 @@ async def send_image_through_im(
 logger.info("[IM Server] File tools registered")
 
 
-def is_provider_enabled(provider: str, agent_id: str = DEFAULT_AGENT_ID) -> bool:
+def is_provider_enabled(provider: str, agent_id: Optional[str] = None) -> bool:
     """
     Check if a provider is enabled for an Agent.
     
     Args:
         provider: Provider type (wechat_work, dingtalk, etc.)
-        agent_id: Agent identifier (default: DEFAULT_AGENT_ID)
+        agent_id: Agent identifier (default: uses database default agent)
         
     Returns:
         True if provider is enabled for this Agent.
     """
+    if not agent_id:
+        agent_id = get_default_agent_id()
     config = get_agent_im_config(agent_id)
     enabled = config.is_provider_enabled(provider)
     logger.info(f"[IM Tool] Checking provider {provider} for agent={agent_id}: enabled={enabled}")
     return enabled
 
 
-def get_provider_config(provider: str, agent_id: str = DEFAULT_AGENT_ID) -> Optional[Dict[str, Any]]:
+def get_provider_config(provider: str, agent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Get provider configuration for an Agent.
     
     Args:
         provider: Provider type (wechat_work, dingtalk, etc.)
-        agent_id: Agent identifier (default: DEFAULT_AGENT_ID)
+        agent_id: Agent identifier (default: uses database default agent)
         
     Returns:
         Provider configuration dict, or None if not configured/disabled.
     """
+    if not agent_id:
+        agent_id = get_default_agent_id()
     config = get_agent_im_config(agent_id)
     provider_config = config.get_provider_config(provider)
     if provider_config:
@@ -459,7 +478,7 @@ async def send_message_through_im(
     """
     # Resolve agent_id (use default if not specified)
     if not agent_id:
-        agent_id = DEFAULT_AGENT_ID
+        agent_id = get_default_agent_id()
     
     logger.info(f"[IM Tool] send_message_through_im called: agent={agent_id}, provider={provider}, "
                 f"user_id={user_id}, chat_id={chat_id}, content_length={len(content) if content else 0}")
@@ -532,65 +551,9 @@ async def send_message_through_im(
 
 # --- Default Agent Resolution ---
 
-# Cache for default agent ID
-_default_agent_id: Optional[str] = None
-
-
-async def get_default_agent_id() -> str:
-    """
-    Get the default agent ID from API.
-    Gets first available agent from /api/agent/list.
-    Falls back to 'default' if no agent found.
-    """
-    global _default_agent_id
-
-    if _default_agent_id is not None:
-        return _default_agent_id
-
-    # Try to get first available agent from API
-    try:
-        import httpx
-        port = os.getenv("SAGE_PORT", "8080")
-        base_url = f"http://localhost:{port}"
-
-        logger.info(f"[IM] Fetching agent list from {base_url}/api/agent/list")
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{base_url}/api/agent/list")
-            logger.info(f"[IM] Agent list response status: {response.status_code}")
-
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"[IM] Agent list response: {data}")
-
-                if (data.get("success") or data.get("code") == 200) and data.get("data"):
-                    agents = data["data"]
-                    if len(agents) > 0:
-                        # Use first agent as default
-                        first_agent = agents[0]
-                        _default_agent_id = first_agent.get("id") or first_agent.get("agent_id", "default")
-                        logger.info(f"[IM] Using first available agent as default: {_default_agent_id}")
-                        return _default_agent_id
-                    else:
-                        logger.warning("[IM] Agent list is empty")
-                else:
-                    logger.warning(f"[IM] Agent list response invalid: success={data.get('success')}, has_data={data.get('data') is not None}")
-            else:
-                logger.warning(f"[IM] Agent list request failed: {response.status_code} - {response.text}")
-    except Exception as e:
-        logger.error(f"[IM] Failed to get agent list: {e}", exc_info=True)
-
-    # Fallback to default
-    logger.info("[IM] No agent found, using 'default' as fallback")
-    _default_agent_id = "default"
-    return _default_agent_id
-
-
-def reset_default_agent_cache():
-    """Reset the default agent cache. Call this when agents are modified."""
-    global _default_agent_id
-    _default_agent_id = None
-    logger.info("[IM] Default agent cache reset")
+# Note: get_default_agent_id() is imported from agent_config module
+# which queries the database directly for is_default=True
+# No caching needed - database is the single source of truth
 
 
 # --- Incoming Message Handlers ---

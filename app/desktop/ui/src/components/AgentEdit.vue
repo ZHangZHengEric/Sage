@@ -988,7 +988,7 @@ const activeIMProvider = ref('wechat_work')
 const savingIM = ref(false)
 const testingIM = ref({})
 
-const isDefaultAgent = computed(() => store.formData.id === 'default')
+const isDefaultAgent = computed(() => store.formData.is_default === true)
 
 const imProviders = [
   { key: 'wechat_work', label: '企业微信' },

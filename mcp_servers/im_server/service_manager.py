@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 
 from .db import get_im_db
-from .agent_config import get_agent_im_config, DEFAULT_AGENT_ID, list_all_agents
+from .agent_config import get_agent_im_config, list_all_agents, get_default_agent_id
 
 logger = logging.getLogger("IMServiceManager")
 
