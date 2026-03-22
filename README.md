@@ -4,12 +4,12 @@
 
 ![logo](assets/logo.png)
 
-[![English](https://deepwiki.com/badge.svg)](README.md)
-[![简体中文](https://deepwiki.com/badge.svg)](README_CN.md)
-[![License: MIT](https://deepwiki.com/badge.svg)](LICENSE)
-[![Python 3.11+](https://deepwiki.com/badge.svg)](https://python.org)
-[![Version](https://deepwiki.com/badge.svg)](https://github.com/ZHangZHengEric/Sage)
-[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
+[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 
 # 🧠 **Sage Multi-Agent Framework**
 
