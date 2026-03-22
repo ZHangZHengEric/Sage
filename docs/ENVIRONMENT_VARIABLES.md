@@ -88,6 +88,13 @@
   - `sagents/context/session_context.py:364` - 创建远程沙箱时使用
   - `sagents/utils/sandbox/config.py:94` - SandboxConfig 从环境变量创建时读取
 
+### SAGE\_OPENSANDBOX\_APPEND\_MAX\_BYTES
+
+- **用途**: OpenSandbox 远程沙箱 append 写入的单次最大字节数（通过环境变量传输时的安全上限）
+- **默认值**: `262144` (256KB)
+- **使用位置**:
+  - `sagents/utils/sandbox/providers/remote/opensandbox.py:18` - append 模式大小限制
+
 ### SAGE\_REMOTE\_PROVIDER
 
 - **用途**: 远程沙箱提供者类型
@@ -181,4 +188,3 @@
 2. **远程沙箱配置**: 使用 OpenSandbox 时需要配置 `OPENSANDBOX_URL` 和 `OPENSANDBOX_API_KEY`
 3. **资源限制**: 根据实际需求调整 `SAGE_LOCAL_CPU_TIME_LIMIT` 和 `SAGE_LOCAL_MEMORY_LIMIT_MB`
 4. **调试**: 启用 `SAGENTS_PROFILING_TOOL_DECORATOR` 进行性能分析
-

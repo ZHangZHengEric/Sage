@@ -2,8 +2,13 @@
 OpenSandbox 远程沙箱实现
 """
 
+import ast
+import base64
+import json
 import logging
 import os
+import re
+import shlex
 from datetime import timedelta
 from typing import Dict, List, Optional
 
@@ -12,6 +17,23 @@ from ...interface import CommandResult, ExecutionResult, FileInfo
 from ...config import MountPath
 
 logger = logging.getLogger(__name__)
+
+
+def _get_max_append_bytes() -> int:
+    default_bytes = 256 * 1024  # 256KB safety limit for env-based append payloads
+    raw = os.environ.get("SAGE_OPENSANDBOX_APPEND_MAX_BYTES")
+    if not raw:
+        return default_bytes
+    try:
+        value = int(raw)
+        if value <= 0:
+            return default_bytes
+        return value
+    except Exception:
+        return default_bytes
+
+
+MAX_APPEND_BYTES = _get_max_append_bytes()
 
 
 class OpenSandboxProvider(RemoteSandboxProvider):
@@ -117,9 +139,13 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         if not self._is_initialized:
             await self.initialize()
 
+        effective_command = command
+        if workdir:
+            effective_command = f"cd {shlex.quote(workdir)} && {command}"
+
         async with self._sdk:
             execution = await self._sdk.commands.run(
-                command, timeout=timeout, env=env_vars or {}
+                effective_command, timeout=timeout, env=env_vars or {}
             )
 
             return CommandResult(
@@ -140,6 +166,9 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         """在远程沙箱执行 Python 代码"""
         if not self._is_initialized:
             await self.initialize()
+
+        if workdir:
+            code = self._inject_workdir(code, workdir)
 
         try:
             from code_interpreter import CodeInterpreter, SupportedLanguage
@@ -208,6 +237,38 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         except ImportError:
             raise ImportError("opensandbox package is required")
 
+        if mode == "append":
+            data = content.encode(encoding) if isinstance(content, str) else content
+            if len(data) > MAX_APPEND_BYTES:
+                raise ValueError(
+                    f"append content too large ({len(data)} bytes). "
+                    f"Limit is {MAX_APPEND_BYTES} bytes. "
+                    "Use overwrite or chunked append."
+                )
+            data_b64 = base64.b64encode(data).decode("ascii")
+            append_cmd = (
+                "python - <<'PY'\n"
+                "import os, base64\n"
+                "path = os.environ.get('SAGE_APPEND_PATH')\n"
+                "data = base64.b64decode(os.environ.get('SAGE_APPEND_B64',''))\n"
+                "if not path:\n"
+                "    raise RuntimeError('Missing SAGE_APPEND_PATH')\n"
+                "dir_path = os.path.dirname(path)\n"
+                "if dir_path:\n"
+                "    os.makedirs(dir_path, exist_ok=True)\n"
+                "with open(path, 'ab') as f:\n"
+                "    f.write(data)\n"
+                "PY"
+            )
+            await self.execute_command(
+                append_cmd,
+                env_vars={
+                    "SAGE_APPEND_PATH": path,
+                    "SAGE_APPEND_B64": data_b64,
+                },
+            )
+            return
+
         async with self._sdk:
             await self._sdk.files.write_files(
                 [WriteEntry(path=path, data=content, mode=644)]
@@ -227,11 +288,118 @@ class OpenSandboxProvider(RemoteSandboxProvider):
         include_hidden: bool = False,
     ) -> List[FileInfo]:
         """列出目录内容"""
-        # OpenSandbox 可能不直接支持 list_directory
-        # 这里通过命令实现
-        result = await self.execute_command(f"ls -la {path}")
-        # 解析 ls 输出... (简化实现)
-        return []
+        # OpenSandbox 可能不直接支持 list_directory，这里通过 Python 输出 JSON 实现，避免解析 ls 文本
+        list_cmd = (
+            "python - <<'PY'\n"
+            "import json, os\n"
+            "path = os.environ.get('SAGE_LS_PATH')\n"
+            "include_hidden = os.environ.get('SAGE_LS_HIDDEN') == '1'\n"
+            "entries = []\n"
+            "if path and os.path.isdir(path):\n"
+            "    for entry in os.scandir(path):\n"
+            "        name = entry.name\n"
+            "        if not include_hidden and name.startswith('.'):\n"
+            "            continue\n"
+            "        try:\n"
+            "            st = entry.stat(follow_symlinks=False)\n"
+            "        except FileNotFoundError:\n"
+            "            continue\n"
+            "        entries.append({\n"
+            "            'name': name,\n"
+            "            'is_file': entry.is_file(follow_symlinks=False),\n"
+            "            'is_dir': entry.is_dir(follow_symlinks=False),\n"
+            "            'size': st.st_size,\n"
+            "            'modified_time': st.st_mtime,\n"
+            "        })\n"
+            "print(json.dumps(entries))\n"
+            "PY"
+        )
+        result = await self.execute_command(
+            list_cmd,
+            env_vars={
+                "SAGE_LS_PATH": path,
+                "SAGE_LS_HIDDEN": "1" if include_hidden else "0",
+            },
+        )
+        if not result.success:
+            sample = (result.stderr or result.stdout or "").strip()
+            if len(sample) > 300:
+                sample = sample[:300] + "..."
+            logger.warning(
+                "OpenSandboxProvider.list_directory failed for %s: %s",
+                path,
+                sample or "no output",
+            )
+            return []
+
+        if not result.stdout.strip():
+            return []
+
+        try:
+            payload = json.loads(result.stdout.strip())
+        except Exception:
+            sample = result.stdout.strip()
+            if len(sample) > 300:
+                sample = sample[:300] + "..."
+            logger.warning(
+                "OpenSandboxProvider.list_directory JSON parse failed for %s: %s",
+                path,
+                sample or "empty output",
+            )
+            return []
+
+        entries: List[FileInfo] = []
+        for item in payload:
+            try:
+                name = item.get("name")
+                if not name:
+                    continue
+                entry_path = os.path.join(path, name)
+                entries.append(
+                    FileInfo(
+                        path=entry_path,
+                        is_file=bool(item.get("is_file")),
+                        is_dir=bool(item.get("is_dir")),
+                        size=int(item.get("size", 0)),
+                        modified_time=float(item.get("modified_time", 0.0)),
+                    )
+                )
+            except Exception:
+                continue
+
+        return entries
+
+    def _inject_workdir(self, code: str, workdir: str) -> str:
+        """在不破坏 future imports / 模块 docstring 的情况下插入 chdir。"""
+        if not workdir:
+            return code
+
+        lines = code.splitlines(keepends=True)
+
+        prefix_end = 0
+        if lines and lines[0].startswith("#!"):
+            prefix_end = 1
+        if len(lines) > prefix_end and re.match(r"^#.*coding[:=]\s*[-\w.]+", lines[prefix_end]):
+            prefix_end += 1
+
+        insert_after = 0
+        try:
+            tree = ast.parse(code)
+            if tree.body:
+                first = tree.body[0]
+                if isinstance(first, ast.Expr) and isinstance(getattr(first, "value", None), ast.Constant) and isinstance(first.value.value, str):
+                    insert_after = max(insert_after, getattr(first, "end_lineno", first.lineno))
+                for node in tree.body:
+                    if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                        insert_after = max(insert_after, getattr(node, "end_lineno", node.lineno))
+        except Exception:
+            insert_after = 0
+
+        insert_line = max(insert_after, prefix_end)
+        insert_idx = min(insert_line, len(lines))
+        inject = f"import os\nos.chdir({workdir!r})\n"
+        lines.insert(insert_idx, inject)
+        return "".join(lines)
 
     async def ensure_directory(self, path: str) -> None:
         """确保目录存在"""
