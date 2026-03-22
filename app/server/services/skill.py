@@ -102,7 +102,7 @@ def _collect_all_skills() -> List[Any]:
     # 1. 系统技能
     if os.path.exists(skill_dir):
         try:
-            tm = SkillManager(skill_dirs=[skill_dir], isolated=True, include_global_skills=False)
+            tm = SkillManager(skill_dirs=[skill_dir], isolated=True)
             all_skills.extend(list(tm.list_skill_info()))
         except Exception as e:
             logger.warning(f"加载系统技能失败: {e}")
@@ -114,7 +114,7 @@ def _collect_all_skills() -> List[Any]:
                 user_skills_path = os.path.join(user_dir, user_folder, "skills")
                 if os.path.isdir(user_skills_path):
                     try:
-                        tm = SkillManager(skill_dirs=[user_skills_path], isolated=True, include_global_skills=False)
+                        tm = SkillManager(skill_dirs=[user_skills_path], isolated=True)
                         all_skills.extend(list(tm.list_skill_info()))
                     except Exception as e:
                         logger.warning(f"加载用户 {user_folder} 技能失败: {e}")
@@ -131,7 +131,7 @@ def _collect_all_skills() -> List[Any]:
                         agent_skills_path = os.path.join(user_agents_path, agent_folder, "skills")
                         if os.path.isdir(agent_skills_path):
                             try:
-                                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True, include_global_skills=False)
+                                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
                                 all_skills.extend(list(tm.list_skill_info()))
                             except Exception as e:
                                 logger.warning(f"加载 Agent {user_folder}/{agent_folder} 技能失败: {e}")
@@ -298,7 +298,7 @@ async def get_agent_available_skills(
     # 1. 系统技能（最低优先级）
     if os.path.exists(skill_dir):
         try:
-            tm = SkillManager(skill_dirs=[skill_dir], isolated=True, include_global_skills=False)
+            tm = SkillManager(skill_dirs=[skill_dir], isolated=True)
             for skill in tm.list_skill_info():
                 skills_map[skill.name] = {
                     "name": skill.name,
@@ -313,7 +313,7 @@ async def get_agent_available_skills(
         user_skills_path = os.path.join(user_dir, agent_user_id, "skills")
         if os.path.isdir(user_skills_path):
             try:
-                tm = SkillManager(skill_dirs=[user_skills_path], isolated=True, include_global_skills=False)
+                tm = SkillManager(skill_dirs=[user_skills_path], isolated=True)
                 for skill in tm.list_skill_info():
                     skills_map[skill.name] = {
                         "name": skill.name,
@@ -328,7 +328,7 @@ async def get_agent_available_skills(
         agent_skills_path = os.path.join(agents_dir, agent_user_id, agent_id, "skills")
         if os.path.isdir(agent_skills_path):
             try:
-                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True, include_global_skills=False)
+                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
                 for skill in tm.list_skill_info():
                     skills_map[skill.name] = {
                         "name": skill.name,

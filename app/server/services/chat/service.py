@@ -500,7 +500,7 @@ async def _check_and_update_agent_skills(request: StreamRequest, original_skills
         if os.path.exists(agent_skills_path) and os.path.isdir(agent_skills_path):
             try:
                 from sagents.skill.skill_manager import SkillManager
-                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True, include_global_skills=False)
+                tm = SkillManager(skill_dirs=[agent_skills_path], isolated=True)
                 for skill in tm.list_skill_info():
                     actual_skills.add(skill.name)
             except Exception as e:
