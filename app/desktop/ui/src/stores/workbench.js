@@ -14,8 +14,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   // Getters
   // 按当前会话过滤的 items
   const filteredItems = computed(() => {
-    if (!currentSessionId.value) return items.value
-    return items.value.filter(item => item.sessionId === currentSessionId.value)
+    // 过滤掉 null/undefined 项，并按当前会话过滤
+    const validItems = items.value.filter(item => item && item.type)
+    if (!currentSessionId.value) return validItems
+    return validItems.filter(item => item.sessionId === currentSessionId.value)
   })
 
   const totalItems = computed(() => filteredItems.value.length)
@@ -268,6 +270,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     // 处理工具调用
     if (message.tool_calls && message.tool_calls.length > 0) {
       message.tool_calls.forEach((toolCall, idx) => {
+        // 跳过无效的 toolCall
+        if (!toolCall || !toolCall.function) {
+          console.warn('[Workbench] Skipping invalid toolCall:', idx, toolCall)
+          return
+        }
         console.log('[Workbench] Adding tool_call:', idx, toolCall.function?.name)
         addItem({
           type: 'tool_call',

@@ -235,6 +235,7 @@
 
         <WorkbenchPreview
           v-else-if="showWorkbench && currentSessionId"
+          :key="`workbench-${currentSessionId}`"
           :messages="filteredMessages"
           :session-id="currentSessionId"
           @close="showWorkbench = false"
