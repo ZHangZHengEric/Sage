@@ -26,12 +26,57 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from mcp_servers.im_server.agent_config import (
     get_agent_im_config, 
     AgentIMConfig,
-    DEFAULT_AGENT_ID,
     IMESSAGE_PROVIDER,
     validate_provider_config
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Async helper functions
+# ============================================================================
+
+async def is_agent_default_async(agent_id: str) -> bool:
+    """
+    Check if an Agent is the default Agent by querying database.
+    Async version for use in FastAPI routes.
+    """
+    try:
+        from app.desktop.core.models.agent import AgentConfigDao
+        dao = AgentConfigDao()
+        agent = await dao.get_by_id(agent_id)
+        if agent:
+            return agent.is_default
+        return False
+    except Exception as e:
+        logger.warning(f"[IM Agent] Failed to check is_default for {agent_id}: {e}")
+        return False
+
+
+async def validate_provider_config_async(agent_id: str, provider: str, config: Dict, enabled: bool = False):
+    """
+    Async version of validate_provider_config.
+    Validates config, with iMessage only allowed on default agent.
+    """
+    from mcp_servers.im_server.agent_config import IMESSAGE_PROVIDER
+    
+    # iMessage restriction (only check if enabled)
+    if provider == IMESSAGE_PROVIDER and enabled:
+        is_default = await is_agent_default_async(agent_id)
+        if not is_default:
+            raise ValueError(
+                f"iMessage provider can only be configured on the default agent. "
+                f"Current agent={agent_id}"
+            )
+        
+        # iMessage allowed_senders validation
+        allowed_senders = config.get('allowed_senders', []) if config else []
+        if not allowed_senders or len(allowed_senders) == 0:
+            raise ValueError(
+                "iMessage must have at least one allowed sender configured. "
+                "Please add phone numbers to the '监听发送者' field."
+            )
 
 # Default Sage user ID for desktop app (backward compatibility)
 DEFAULT_SAGE_USER_ID = "desktop_default_user"
@@ -366,8 +411,8 @@ async def get_agent_im_channels(agent_id: str = FastApiPath(..., description="Ag
     """
     Get all IM channel configurations for an Agent.
     
-    Returns the complete IM channel configuration for the specified Agent,
-    including all providers (wechat_work, dingtalk, feishu, imessage).
+    Returns the complete IM channel configuration for the specified Agent.
+    Note: iMessage is only returned for the default Agent.
     """
     logger.info(f"[IM Agent] GET /api/agent/{agent_id}/im_channels")
     
@@ -376,9 +421,17 @@ async def get_agent_im_channels(agent_id: str = FastApiPath(..., description="Ag
         agent_config = get_agent_im_config(agent_id)
         channels = agent_config.get_all_channels()
         
+        # Check if this is the default agent
+        is_default = await is_agent_default_async(agent_id)
+        
         # Convert to response format
         result_channels = {}
         for provider, channel_data in channels.items():
+            # Skip iMessage for non-default agents
+            if provider == IMESSAGE_PROVIDER and not is_default:
+                logger.debug(f"[IM Agent] Hiding iMessage config for non-default agent={agent_id}")
+                continue
+            
             result_channels[provider] = ProviderConfigResponse(
                 provider=provider,
                 enabled=channel_data.get("enabled", False),
@@ -389,6 +442,7 @@ async def get_agent_im_channels(agent_id: str = FastApiPath(..., description="Ag
         return await Response.succ(
             data={
                 "agent_id": agent_id,
+                "is_default": is_default,
                 "channels": result_channels
             },
             message="获取成功"
@@ -423,7 +477,7 @@ async def save_agent_im_channels(
         for provider, config_request in channels.items():
             # Validate (especially for iMessage)
             try:
-                validate_provider_config(agent_id, provider, config_request.config, config_request.enabled)
+                await validate_provider_config_async(agent_id, provider, config_request.config, config_request.enabled)
                 
                 # Check for duplicate provider ID (bot_id/client_id/app_id) across agents
                 if config_request.enabled:
@@ -554,7 +608,7 @@ async def update_agent_im_channel(
     
     try:
         # Validate (especially for iMessage)
-        validate_provider_config(agent_id, provider, config_request.config, config_request.enabled)
+        await validate_provider_config_async(agent_id, provider, config_request.config, config_request.enabled)
         
         # Save config
         agent_config = get_agent_im_config(agent_id)
@@ -741,15 +795,114 @@ async def test_agent_im_connection(
             )
         
         elif provider == "feishu":
-            # TODO: Implement Feishu connection test
-            return await Response.succ(
-                data=TestConnectionResponse(
-                    success=False,
-                    message="飞书连接测试功能开发中",
-                    details={}
-                ),
-                message="功能开发中"
-            )
+            # Test Feishu connection by getting access token
+            import httpx
+            
+            app_id = config.get("app_id")
+            app_secret = config.get("app_secret")
+            
+            if not app_id or not app_secret:
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message="缺少 App ID 或 App Secret 配置",
+                        details={}
+                    ),
+                    message="配置不完整"
+                )
+            
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(
+                        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                        json={"app_id": app_id, "app_secret": app_secret}
+                    )
+                    data = resp.json()
+                    
+                    if data.get("code") == 0:
+                        # Also try to get app info to verify permissions
+                        token = data.get("tenant_access_token")
+                        try:
+                            info_resp = await client.get(
+                                "https://open.feishu.cn/open-apis/application/v3/apps/",
+                                headers={"Authorization": f"Bearer {token}"}
+                            )
+                            info_data = info_resp.json()
+                            
+                            return await Response.succ(
+                                data=TestConnectionResponse(
+                                    success=True,
+                                    message="飞书连接测试成功，凭证有效",
+                                    details={
+                                        "app_id": app_id,
+                                        "expire": data.get("expire"),
+                                        "token_preview": token[:10] + "..." if token else None
+                                    }
+                                ),
+                                message="连接测试成功"
+                            )
+                        except Exception as e:
+                            # Token works but can't get app info (permissions may be insufficient)
+                            return await Response.succ(
+                                data=TestConnectionResponse(
+                                    success=True,
+                                    message="飞书凭证验证成功，但应用信息查询失败（可能需要添加权限）",
+                                    details={
+                                        "app_id": app_id,
+                                        "token_preview": token[:10] + "..." if token else None,
+                                        "warning": str(e)
+                                    }
+                                ),
+                                message="连接测试成功（有警告）"
+                            )
+                    elif data.get("code") == 10003:
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=False,
+                                message="App ID 无效，请检查配置",
+                                details={"error": data.get("msg"), "code": data.get("code")}
+                            ),
+                            message="连接测试失败"
+                        )
+                    elif data.get("code") == 10012:
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=False,
+                                message="App Secret 无效，请检查配置",
+                                details={"error": data.get("msg"), "code": data.get("code")}
+                            ),
+                            message="连接测试失败"
+                        )
+                    else:
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=False,
+                                message=f"连接测试失败: {data.get('msg', '未知错误')} (错误码: {data.get('code')})",
+                                details={"code": data.get("code")}
+                            ),
+                            message="连接测试失败"
+                        )
+                        
+            except httpx.TimeoutException:
+                logger.error("[IM Agent] Feishu test connection timeout")
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message="连接超时，请检查网络连接",
+                        details={}
+                    ),
+                    message="连接测试失败"
+                )
+            except Exception as e:
+                logger.error(f"[IM Agent] Feishu test failed: {e}", exc_info=True)
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message=f"连接测试失败: {str(e)}",
+                        details={}
+                    ),
+                    message="连接测试失败"
+                )
         
         elif provider == "imessage":
             # iMessage doesn't need connection test (uses local database)

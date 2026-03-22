@@ -41,8 +41,8 @@ from mcp_servers.im_server.db import get_im_db
 from mcp_servers.im_server.agent_config import (
     get_agent_im_config,
     AgentIMConfig,
-    DEFAULT_AGENT_ID,
-    validate_provider_config
+    validate_provider_config,
+    get_default_agent_id
 )
 
 
@@ -75,12 +75,30 @@ def backup_existing_config(agent_id: str) -> Optional[Path]:
         return None
 
 
-def migrate_global_config(agent_id: str = DEFAULT_AGENT_ID, dry_run: bool = False) -> Dict[str, Any]:
+def migrate_global_config(agent_id: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
     """
     Migrate global IM configurations to Agent-level configuration.
     
     Args:
-        agent_id: Target Agent ID (default: DEFAULT_AGENT_ID)
+        agent_id: Target Agent ID (default: uses database default agent)
+        dry_run: If True, only preview changes without applying
+        
+    Returns:
+        Migration result statistics
+    """
+    # Get default agent from database if not specified
+    if agent_id is None:
+        agent_id = get_default_agent_id()
+        if not agent_id:
+            raise ValueError(
+                "No default agent found in database. "
+                "Please create an agent first or specify --agent-id."
+            )
+    """
+    Migrate global IM configurations to Agent-level configuration.
+    
+    Args:
+        agent_id: Target Agent ID (default: uses database default agent)
         dry_run: If True, only preview changes without applying
         
     Returns:
@@ -234,8 +252,8 @@ def main():
     )
     parser.add_argument(
         "--agent-id",
-        default=DEFAULT_AGENT_ID,
-        help=f"Target Agent ID (default: {DEFAULT_AGENT_ID})"
+        default=None,
+        help="Target Agent ID (default: uses database default agent)"
     )
     parser.add_argument(
         "--dry-run",

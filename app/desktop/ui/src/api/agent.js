@@ -119,5 +119,14 @@ export const agentAPI = {
     })
     // 后端标准响应的 data 部分应为 { items: AbilityItem[] }
     return data?.items || []
+  },
+
+  /**
+   * 设置指定 Agent 为默认 Agent
+   * @param {string} agentId - Agent ID
+   * @returns {Promise<Object>}
+   */
+  setDefaultAgent: async (agentId) => {
+    return await request.post(`/api/agent/${agentId}/set-default`)
   }
 }
