@@ -25,6 +25,10 @@ jobs:
             platform: macos
             arch: x86_64
             target: x86_64-apple-darwin
+          - runner: ubuntu-22.04
+            platform: linux
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
           - runner: windows-latest
             platform: windows
             arch: x86_64
@@ -85,6 +89,20 @@ jobs:
         run: |
           brew install create-dmg
 
+      - name: Install System Dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config \
+            libssl-dev \
+            libglib2.0-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev || sudo apt-get install -y libwebkit2gtk-4.0-dev
+          sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
+
       - name: Build Application (macOS)
         if: matrix.platform == 'macos'
         shell: bash -l {0}
@@ -95,6 +113,17 @@ jobs:
         run: |
           chmod +x app/desktop/scripts/build.sh
           chmod +x app/desktop/scripts/generate_cert.sh
+          app/desktop/scripts/build.sh release
+
+      - name: Build Application (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash -l {0}
+        env:
+          PIP_INDEX_URL: https://pypi.org/simple
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          chmod +x app/desktop/scripts/build.sh
           app/desktop/scripts/build.sh release
 
       - name: Build Application (Windows)
@@ -185,3 +214,10 @@ jobs:
             app/desktop/tauri/target/release/bundle/msi/*.msi
             app/desktop/tauri/target/release/bundle/msi/*.zip
             app/desktop/tauri/target/release/bundle/msi/*.zip.sig
+
+      - name: Release (Linux)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'linux'
+        with:
+          files: |
+            app/desktop/tauri/target/release/bundle/deb/*.deb
