@@ -236,6 +236,24 @@ fi
 
 echo "======================================"
 echo " 开发服务器运行中"
+echo " 固定端口: 8080"
 echo "======================================"
 
+# 确保 sage_env 文件存在且端口为 8080
+mkdir -p "$HOME/.sage"
+echo "SAGE_PORT=8080" > "$HOME/.sage/.sage_env"
+
+# 设置环境变量，强制使用 8080 端口
+export SAGE_PORT=8080
+
+# 检查 8080 端口是否被占用，如果被占用则杀死占用进程
+echo "检查 8080 端口..."
+PORT_PID=$(lsof -ti:8080 2>/dev/null)
+if [ -n "$PORT_PID" ]; then
+  echo "警告: 端口 8080 被进程 $PORT_PID 占用，正在终止..."
+  kill -9 "$PORT_PID" 2>/dev/null || true
+  sleep 1
+fi
+
+echo "启动 Sage 桌面应用 (端口: 8080)..."
 cargo tauri dev
