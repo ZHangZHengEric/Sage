@@ -2,6 +2,7 @@
 远程沙箱提供者基类
 """
 
+import fnmatch
 import os
 from abc import abstractmethod
 from datetime import timedelta
@@ -27,6 +28,10 @@ class RemoteSandboxProvider(ISandboxHandle):
         self.timeout = timeout
         self._workspace_path = "/sage-workspace"
         self._is_initialized = False
+        self._allowed_paths: List[str] = []
+        if self.workspace_mount:
+            self._allowed_paths.append(self.workspace_mount)
+        self._allowed_paths.extend(mp.host_path for mp in self.mount_paths)
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -58,6 +63,20 @@ class RemoteSandboxProvider(ISandboxHandle):
     async def kill(self) -> None:
         """强制删除沙箱"""
         pass
+
+    def add_allowed_paths(self, paths: List[str]) -> None:
+        """记录允许访问的宿主机路径。"""
+        for path in paths:
+            if path not in self._allowed_paths:
+                self._allowed_paths.append(path)
+
+    def remove_allowed_paths(self, paths: List[str]) -> None:
+        """移除允许访问的宿主机路径。"""
+        self._allowed_paths = [path for path in self._allowed_paths if path not in paths]
+
+    def get_allowed_paths(self) -> List[str]:
+        """获取当前允许访问的宿主机路径列表。"""
+        return list(self._allowed_paths)
 
     # 远程沙箱文件操作接口
     async def upload_file(self, host_path: str, sandbox_path: str) -> None:
@@ -105,6 +124,76 @@ class RemoteSandboxProvider(ISandboxHandle):
         """
         # 子类可以实现更高效的批量下载
         raise NotImplementedError("This provider does not support directory sync")
+
+    async def copy_from_host(
+        self,
+        host_source_path: str,
+        sandbox_dest_path: str,
+        ignore_patterns: Optional[List[str]] = None
+    ) -> bool:
+        """
+        从宿主机复制文件/目录到远程沙箱。
+        """
+        if not os.path.exists(host_source_path):
+            return False
+
+        ignore_patterns = ignore_patterns or []
+
+        if os.path.isdir(host_source_path):
+            for root, dirs, files in os.walk(host_source_path):
+                dirs[:] = [d for d in dirs if not any(fnmatch.fnmatch(d, pattern) for pattern in ignore_patterns)]
+                for file_name in files:
+                    if any(fnmatch.fnmatch(file_name, pattern) for pattern in ignore_patterns):
+                        continue
+                    source_file = os.path.join(root, file_name)
+                    rel_path = os.path.relpath(source_file, host_source_path)
+                    target_file = os.path.join(sandbox_dest_path, rel_path)
+                    await self.upload_file(source_file, target_file)
+            return True
+
+        await self.upload_file(host_source_path, sandbox_dest_path)
+        return True
+
+    async def get_file_tree(
+        self,
+        root_path: Optional[str] = None,
+        include_hidden: bool = False,
+        max_depth: Optional[int] = None,
+        max_items_per_dir: int = 5
+    ) -> str:
+        """
+        基于 list_directory 生成紧凑文件树。
+        """
+        root = root_path or self.workspace_path
+        root_name = os.path.basename(root.rstrip("/")) or "workspace"
+        lines = [f"{root_name}/"]
+
+        async def walk(path: str, depth: int, indent: str) -> None:
+            if max_depth is not None and depth >= max_depth:
+                return
+
+            entries = await self.list_directory(path, include_hidden=include_hidden)
+            entries.sort(key=lambda entry: (not entry.is_dir, os.path.basename(entry.path)))
+
+            if depth > 0 and len(entries) > max_items_per_dir:
+                shown_entries = entries[:max_items_per_dir]
+                hidden_count = len(entries) - max_items_per_dir
+            else:
+                shown_entries = entries
+                hidden_count = 0
+
+            for entry in shown_entries:
+                name = os.path.basename(entry.path.rstrip("/"))
+                suffix = "/" if entry.is_dir else ""
+                lines.append(f"{indent}  {name}{suffix}")
+                if entry.is_dir:
+                    await walk(entry.path, depth + 1, indent + "  ")
+
+            if hidden_count > 0:
+                lines.append(f"{indent}  ... (and {hidden_count} more items)")
+
+        await walk(root, 0, "")
+        return "\n".join(lines)
 
     def to_host_path(self, virtual_path: str) -> str:
         """虚拟路径转宿主机路径"""
