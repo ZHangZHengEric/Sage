@@ -216,7 +216,8 @@ class ToolSuggestionAgent(AgentBase):
         response = self._call_llm_streaming(
             messages=messages_input,
             session_id=session_id,
-            step_name="tool_suggestion"
+            step_name="tool_suggestion",
+            enable_thinking=False
         )
 
         # 收集流式响应内容

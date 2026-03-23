@@ -85,8 +85,26 @@
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
         <div class="w-full">
-           <TaskAnalysisMessage 
-             :content="message.content" 
+           <TaskAnalysisMessage
+             :content="message.content"
+             :isStreaming="isStreaming"
+             :timestamp="message.timestamp"
+           />
+        </div>
+      </div>
+    </div>
+
+    <!-- 推理思考消息 -->
+    <div
+      v-else-if="message.role === 'assistant' && (message.type === 'reasoning_content' || message.message_type === 'reasoning_content')"
+      class="flex flex-row items-start gap-3 px-4">
+      <div class="flex-none mt-1">
+        <MessageAvatar :messageType="message.message_type" role="assistant" :agentId="agentId" />
+      </div>
+      <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
+        <div class="w-full">
+           <ReasoningContentMessage
+             :content="message.content"
              :isStreaming="isStreaming"
              :timestamp="message.timestamp"
            />
@@ -160,19 +178,13 @@
         <MessageAvatar :messageType="message.message_type" role="assistant" :toolName="getToolName(message)" :agentId="agentId" />
       </div>
       <div class="flex flex-col items-start max-w-[85%] sm:max-w-[75%] w-full">
-         <div class="mb-1 ml-1 text-xs font-medium text-muted-foreground">
-            {{ getLabel({ role: 'assistant', type: message.type, messageType: message.message_type, toolName: getToolName(message) }) }}
-            <span v-if="message.timestamp" class="text-[10px] opacity-60 font-normal">
-            {{ formatTime(message.timestamp) }}
-          </span>
-         </div>
          <div class="tool-calls-bubble w-full" :class="{ 'custom-tool-bubble': isCustomToolMessage }">
            <div v-for="(toolCall, index) in message.tool_calls" :key="toolCall.id || index">
              <!-- Global Error Card -->
              <ToolErrorCard v-if="checkIsToolError(getParsedToolResult(toolCall))" :toolResult="getParsedToolResult(toolCall)" />
-             <!-- Dynamic Tool Component -->
+             <!-- Custom Tool Component (定制化工具) -->
              <component
-               v-else
+               v-else-if="isCustomTool(toolCall.function?.name)"
                :is="getToolComponent(toolCall.function?.name)"
                :toolCall="toolCall"
                :toolResult="getParsedToolResult(toolCall)"
@@ -182,6 +194,14 @@
                :openWorkbench="props.openWorkbench"
                @sendMessage="handleSendMessage"
               @openSubSession="emit('openSubSession', $event)"
+              @click="handleToolClick"
+            />
+            <!-- Standard Tool Call Message (普通工具调用) -->
+            <ToolCallMessage
+              v-else
+              :toolCall="toolCall"
+              :toolResult="getParsedToolResult(toolCall)"
+              :timestamp="message.timestamp"
               @click="handleToolClick"
             />
            </div>
@@ -213,8 +233,10 @@ import { Terminal, FileText, Search, Zap, Copy, Check, Image } from 'lucide-vue-
 import { getMessageLabel } from '@/utils/messageLabels'
 import ToolErrorCard from './tools/ToolErrorCard.vue'
 import ToolDefaultCard from './tools/ToolDefaultCard.vue'
+import ToolCallMessage from './ToolCallMessage.vue'
 import ToolDetailsPanel from './tools/ToolDetailsPanel.vue'
 import TaskAnalysisMessage from './TaskAnalysisMessage.vue'
+import ReasoningContentMessage from './ReasoningContentMessage.vue'
 import AgentCardMessage from './tools/AgentCardMessage.vue'
 import SysDelegateTaskMessage from './tools/SysDelegateTaskMessage.vue'
 import SysFinishTaskMessage from './tools/SysFinishTaskMessage.vue'
@@ -614,6 +636,12 @@ const handleCopy = async () => {
 const getToolComponent = (toolName) => {
   if (!toolName) return ToolDefaultCard
   return TOOL_COMPONENT_MAP[toolName] || ToolDefaultCard
+}
+
+// 判断是否为定制化工具
+const isCustomTool = (toolName) => {
+  if (!toolName) return false
+  return !!TOOL_COMPONENT_MAP[toolName]
 }
 
 // 发送工作台事件
