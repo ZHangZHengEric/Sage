@@ -260,19 +260,71 @@ class _DingTalkMessageHandler(ChatbotHandler):
             message = ChatbotMessage.from_dict(callback.data)
             
             logger.info(f"[DingTalk] Parsed message: {message}")
+            logger.info(f"[DingTalk] Message type: {message.message_type}")
+            
+            # Handle different message types
+            msg_type = message.message_type or "text"
+            content = {}
+            file_info = None
+            
+            if msg_type == "text" and message.text:
+                # Text message
+                content = {"text": message.text.content or ""}
+                logger.info(f"[DingTalk] Text message: {content['text'][:50]}...")
+                
+            elif msg_type == "picture" and message.image_content:
+                # Image message
+                download_code = message.image_content.download_code
+                content = {"text": f"[图片消息]"}
+                file_info = {
+                    "type": "image",
+                    "download_code": download_code,
+                    "message_id": message.message_id
+                }
+                logger.info(f"[DingTalk] Image message with download_code: {download_code}")
+                
+            elif msg_type == "file":
+                # File message - extract download code from raw data
+                # File content is in callback.data['content']['downloadCode']
+                raw_content = callback.data.get("content", {})
+                download_code = raw_content.get("downloadCode") if isinstance(raw_content, dict) else None
+                file_name = raw_content.get("fileName", "unknown") if isinstance(raw_content, dict) else "unknown"
+                
+                content = {"text": f"[文件: {file_name}]"}
+                file_info = {
+                    "type": "file",
+                    "download_code": download_code,
+                    "file_name": file_name,
+                    "message_id": message.message_id
+                }
+                logger.info(f"[DingTalk] File message: {file_name}, download_code: {download_code}")
+                
+            elif msg_type == "richText" and message.rich_text_content:
+                # Rich text message
+                content = {"text": "[富文本消息]"}
+                logger.info("[DingTalk] Rich text message")
+                
+            else:
+                # Unknown or unsupported message type
+                content = {"text": f"[{msg_type}消息]"}
+                logger.warning(f"[DingTalk] Unknown message type: {msg_type}, data: {callback.data}")
             
             # Extract relevant info including session_webhook for reply
             msg_data = {
                 "user_id": message.sender_staff_id,
                 "user_name": message.sender_nick,
-                "content": {"text": message.text.content},
+                "content": content,
                 "chat_id": message.conversation_id,
-                "msg_type": "text",
+                "msg_type": msg_type,
                 "session_webhook": message.session_webhook,  # Save for reply
                 "session_webhook_expired_time": message.session_webhook_expired_time,
                 "sender_staff_id": message.sender_staff_id,
                 "conversation_type": message.conversation_type,
             }
+            
+            # Add file info if present
+            if file_info:
+                msg_data["file_info"] = file_info
             
             logger.info(f"[DingTalk] Calling message_handler with: {msg_data}")
 

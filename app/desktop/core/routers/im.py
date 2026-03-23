@@ -799,15 +799,94 @@ async def test_agent_im_connection(
                 )
         
         elif provider == "dingtalk":
-            # TODO: Implement DingTalk connection test
-            return await Response.succ(
-                data=TestConnectionResponse(
-                    success=False,
-                    message="钉钉连接测试功能开发中",
-                    details={}
-                ),
-                message="功能开发中"
-            )
+            # Test DingTalk connection by getting access token
+            import httpx
+            
+            client_id = config.get("client_id") or config.get("app_key")
+            client_secret = config.get("client_secret") or config.get("app_secret")
+            
+            if not client_id or not client_secret:
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message="缺少 Client ID 或 Client Secret 配置",
+                        details={}
+                    ),
+                    message="配置不完整"
+                )
+            
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(
+                        "https://oapi.dingtalk.com/gettoken",
+                        params={"appkey": client_id, "appsecret": client_secret}
+                    )
+                    data = resp.json()
+                    
+                    if data.get("errcode") == 0:
+                        access_token = data.get("access_token")
+                        expires_in = data.get("expires_in")
+                        
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=True,
+                                message="钉钉连接测试成功，凭证有效",
+                                details={
+                                    "client_id": client_id,
+                                    "token_expire": f"{expires_in}秒" if expires_in else "未知",
+                                    "token_preview": access_token[:10] + "..." if access_token else None
+                                }
+                            ),
+                            message="连接测试成功"
+                        )
+                    elif data.get("errcode") == 40089:
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=False,
+                                message="Client Secret 无效，请检查配置",
+                                details={"error": data.get("errmsg"), "errcode": data.get("errcode")}
+                            ),
+                            message="连接测试失败"
+                        )
+                    elif data.get("errcode") == 40014:
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=False,
+                                message="Client ID 无效，请检查配置",
+                                details={"error": data.get("errmsg"), "errcode": data.get("errcode")}
+                            ),
+                            message="连接测试失败"
+                        )
+                    else:
+                        return await Response.succ(
+                            data=TestConnectionResponse(
+                                success=False,
+                                message=f"连接测试失败: {data.get('errmsg', '未知错误')} (错误码: {data.get('errcode')})",
+                                details={"errcode": data.get("errcode")}
+                            ),
+                            message="连接测试失败"
+                        )
+                        
+            except httpx.TimeoutException:
+                logger.error("[IM Agent] DingTalk test connection timeout")
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message="连接超时，请检查网络连接",
+                        details={}
+                    ),
+                    message="连接测试失败"
+                )
+            except Exception as e:
+                logger.error(f"[IM Agent] DingTalk test failed: {e}", exc_info=True)
+                return await Response.succ(
+                    data=TestConnectionResponse(
+                        success=False,
+                        message=f"连接测试失败: {str(e)}",
+                        details={}
+                    ),
+                    message="连接测试失败"
+                )
         
         elif provider == "feishu":
             # Test Feishu connection by getting access token

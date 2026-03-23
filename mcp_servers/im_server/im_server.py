@@ -623,6 +623,7 @@ async def handle_incoming_message(
         has_im_tool = result.get("has_im_tool", False)
 
         logger.info(f"[IM] Agent response: success=True, has_im_tool={has_im_tool}, response_length={len(response) if response else 0}")
+        logger.info(f"[IM] Response content preview: {response[:200] if response else 'EMPTY'}...")
 
         if has_im_tool:
             logger.info("[IM] Agent used send_message_through_im tool, skipping automatic response")
@@ -665,8 +666,8 @@ async def handle_incoming_message(
 
                     # Add session_webhook for DingTalk (if available)
                     if provider == "dingtalk":
-                        # Default to markdown for DingTalk
-                        send_params["msg_type"] = "markdown"
+                        # Default to text for DingTalk (markdown may cause display issues)
+                        send_params["msg_type"] = "text"
                         if session_webhook:
                             send_params["session_webhook"] = session_webhook
                         if sender_staff_id:
