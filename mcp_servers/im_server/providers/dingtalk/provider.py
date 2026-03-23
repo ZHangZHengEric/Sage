@@ -507,3 +507,138 @@ class DingTalkProvider(IMProviderBase):
         except Exception as e:
             logger.error(f"[DingTalk] Media upload failed: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+    async def send_file(
+        self,
+        file_path: str,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send file to DingTalk user or group.
+        
+        Note: DingTalk enterprise robot (Stream mode) does NOT support sending file messages.
+        This method sends the file content as a text message instead.
+        
+        Args:
+            file_path: Path to the file to send
+            chat_id: Chat/Group ID (optional)
+            user_id: User ID (optional)
+            
+        Returns:
+            Dict with success status and message_id or error
+        """
+        import os
+        
+        logger.info(f"[DingTalk] send_file called: file={file_path}, chat_id={chat_id}, user_id={user_id}")
+        
+        if not os.path.exists(file_path):
+            return {"success": False, "error": f"File not found: {file_path}"}
+        
+        file_name = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
+        
+        # Try to read text file content
+        content_preview = ""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                # Limit to 2000 chars for DingTalk message
+                if len(content) > 2000:
+                    content_preview = content[:2000] + "\n\n[文件已截断，完整内容请在工作区查看]"
+                else:
+                    content_preview = content
+        except Exception:
+            content_preview = "[二进制文件，无法预览文本内容]"
+        
+        # Build message - include file info and content
+        text_content = f"📄 {file_name}\n大小: {file_size} 字节\n\n{content_preview}"
+        
+        return await self.send_message(
+            content=text_content,
+            chat_id=chat_id,
+            user_id=user_id,
+            msg_type="text"
+        )
+
+    async def send_image(
+        self,
+        image_path: str,
+        chat_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send image to DingTalk user or group.
+        
+        Args:
+            image_path: Path to the image to send
+            chat_id: Chat/Group ID (optional)
+            user_id: User ID (optional)
+            
+        Returns:
+            Dict with success status and message_id or error
+        """
+        logger.info(f"[DingTalk] send_image called: image={image_path}, chat_id={chat_id}, user_id={user_id}")
+        
+        # Step 1: Upload image to get media_id
+        upload_result = await self.upload_media(image_path, file_type="image")
+        if not upload_result.get("success"):
+            return upload_result
+        
+        media_id = upload_result.get("media_id")
+        logger.info(f"[DingTalk] Image uploaded, media_id: {media_id}")
+        
+        # Step 2: Send image message using media_id
+        access_token = await self._get_access_token()
+        if not access_token:
+            return {"success": False, "error": "Failed to get access token"}
+        
+        robot_code = self.config.get("app_key") or self.config.get("client_id")
+        
+        # Build message payload for image
+        # 钉钉图片消息格式: msgKey=sampleImageMsg, msgParam={"photoURL": "xxx"}
+        msg_param = {"photoURL": media_id}
+        
+        if user_id:
+            # Send to user via API
+            url = f"{self.API_URL}/v1.0/robot/oToMessages/batchSend"
+            payload = {
+                "robotCode": robot_code,
+                "userIds": [user_id],
+                "msgKey": "sampleImageMsg",
+                "msgParam": json.dumps(msg_param)
+            }
+        elif chat_id:
+            # Send to group chat
+            url = f"{self.API_URL}/v1.0/robot/groupMessages/send"
+            payload = {
+                "robotCode": robot_code,
+                "openConversationId": chat_id,
+                "msgKey": "sampleImageMsg",
+                "msgParam": json.dumps(msg_param)
+            }
+        else:
+            return {"success": False, "error": "No user_id or chat_id provided"}
+        
+        logger.info(f"[DingTalk] Sending image message: url={url}, payload={payload}")
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    headers={"x-acs-dingtalk-access-token": access_token},
+                    json=payload
+                )
+                data = resp.json()
+                logger.info(f"[DingTalk] Send image API response: {data}")
+                
+                code = data.get("code")
+                errcode = data.get("errcode")
+                if (code is not None and code != "0") or (errcode is not None and errcode != 0):
+                    error_msg = data.get("message") or data.get("errmsg") or str(data)
+                    logger.error(f"[DingTalk] Send image failed: {error_msg}")
+                    return {"success": False, "error": f"Send image failed: {error_msg}"}
+                
+                return {"success": True, "message_id": data.get("processQueryKey")}
+                
+        except Exception as e:
+            logger.error(f"[DingTalk] Send image failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
