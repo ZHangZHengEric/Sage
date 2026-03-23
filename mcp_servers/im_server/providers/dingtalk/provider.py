@@ -6,6 +6,7 @@ import base64
 import json
 import time
 import logging
+import os
 from typing import Optional, Dict, Any
 
 import httpx
@@ -192,6 +193,16 @@ class DingTalkProvider(IMProviderBase):
                 "msgtype": "markdown",
                 "markdown": {"title": "Message", "text": content},
             }
+        elif msg_type == "rich_text":
+            # Rich text message - content should be a list of elements
+            # Format: [{"type": "text", "text": "..."}, {"type": "image", "path": "..."}]
+            rich_text_elements = self._build_rich_text_content(content)
+            payload = {
+                "msgtype": "richText",
+                "content": {
+                    "richText": rich_text_elements
+                }
+            }
         else:
             payload = {
                 "msgtype": "text", 
@@ -299,18 +310,25 @@ class DingTalkProvider(IMProviderBase):
         import os
         from pathlib import Path
         
-        logger.info(f"[DingTalk] Downloading file with download_code: {download_code}")
+        logger.info(f"[DingTalk] Downloading file with download_code: {download_code}, file_name: {file_name}")
         
         if not download_code:
+            logger.error("[DingTalk] download_code is required but not provided")
             return {"success": False, "error": "download_code is required"}
         
         access_token = await self._get_access_token()
         if not access_token:
+            logger.error("[DingTalk] Failed to get access token")
             return {"success": False, "error": "Failed to get access token"}
         
         # Get download URL
         robot_code = self.config.get("app_key") or self.config.get("client_id")
+        if not robot_code:
+            logger.error("[DingTalk] robot_code (app_key/client_id) not configured")
+            return {"success": False, "error": "robot_code not configured"}
+        
         url = f"{self.API_URL}/v1.0/robot/messageFiles/download"
+        logger.info(f"[DingTalk] Requesting download URL from: {url}, robot_code: {robot_code}")
         
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -326,13 +344,17 @@ class DingTalkProvider(IMProviderBase):
                 data = resp.json()
                 logger.info(f"[DingTalk] Get download URL response: {data}")
                 
-                if data.get("code") != "0" and data.get("errcode") != 0:
+                # Check for error -钉钉API返回成功时没有code/errcode字段，直接返回downloadUrl
+                code = data.get("code")
+                errcode = data.get("errcode")
+                if (code is not None and code != "0") or (errcode is not None and errcode != 0):
                     error_msg = data.get("message") or data.get("errmsg") or str(data)
                     logger.error(f"[DingTalk] Failed to get download URL: {error_msg}")
                     return {"success": False, "error": f"Failed to get download URL: {error_msg}"}
                 
                 download_url = data.get("downloadUrl")
                 if not download_url:
+                    logger.error(f"[DingTalk] No downloadUrl in response: {data}")
                     return {"success": False, "error": "No download URL in response"}
                 
                 logger.info(f"[DingTalk] Got download URL: {download_url[:50]}...")
@@ -371,4 +393,117 @@ class DingTalkProvider(IMProviderBase):
                 
         except Exception as e:
             logger.error(f"[DingTalk] Download file failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def _build_rich_text_content(self, content: Any) -> list:
+        """Build rich text content from various input formats.
+        
+        Args:
+            content: Can be:
+                - str: Plain text
+                - list: List of elements [{"type": "text", "text": "..."}, {"type": "image", "path": "..."}]
+                - dict: {"text": "...", "images": ["path1", "path2"]}
+        
+        Returns:
+            List of rich text elements for DingTalk API
+        """
+        elements = []
+        
+        if isinstance(content, str):
+            # Simple text
+            if content.strip():
+                elements.append({"text": content})
+        elif isinstance(content, list):
+            # List of elements
+            for item in content:
+                if isinstance(item, dict):
+                    item_type = item.get("type", "text")
+                    if item_type == "text":
+                        text = item.get("text", "")
+                        if text:
+                            elements.append({"text": text})
+                    elif item_type == "image":
+                        # Image element - will be processed later
+                        # For now, add placeholder text
+                        elements.append({"text": "[图片]"})
+        elif isinstance(content, dict):
+            # Dict format
+            text = content.get("text", "")
+            if text:
+                elements.append({"text": text})
+            images = content.get("images", [])
+            for img in images:
+                elements.append({"text": "[图片]"})
+        
+        if not elements:
+            elements.append({"text": "[富文本消息]"})
+        
+        return elements
+
+    async def upload_media(self, file_path: str, file_type: str = "image") -> Dict[str, Any]:
+        """Upload media file to DingTalk and get media_id.
+        
+        Args:
+            file_path: Path to the media file
+            file_type: Type of media - image, voice, video, file
+            
+        Returns:
+            Dict with success status and media_id or error
+        """
+        import mimetypes
+        
+        logger.info(f"[DingTalk] Uploading media: {file_path}, type={file_type}")
+        
+        if not os.path.exists(file_path):
+            return {"success": False, "error": f"File not found: {file_path}"}
+        
+        access_token = await self._get_access_token()
+        if not access_token:
+            return {"success": False, "error": "Failed to get access token"}
+        
+        # Map file_type to DingTalk media type
+        media_type_map = {
+            "image": "image",
+            "photo": "image",
+            "voice": "voice",
+            "audio": "voice",
+            "video": "video",
+            "file": "file",
+        }
+        media_type = media_type_map.get(file_type, "file")
+        
+        url = f"{self.BASE_URL}/media/upload"
+        
+        try:
+            # Guess mime type
+            mime_type, _ = mimetypes.guess_type(file_path)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                with open(file_path, "rb") as f:
+                    files = {"media": (os.path.basename(file_path), f, mime_type)}
+                    resp = await client.post(
+                        url,
+                        params={"access_token": access_token, "type": media_type},
+                        files=files
+                    )
+                
+                data = resp.json()
+                logger.info(f"[DingTalk] Media upload response: {data}")
+                
+                if data.get("errcode") == 0:
+                    return {
+                        "success": True,
+                        "media_id": data.get("media_id"),
+                        "type": media_type,
+                        "created_at": data.get("created_at")
+                    }
+                else:
+                    error_msg = data.get("errmsg", "Unknown error")
+                    logger.error(f"[DingTalk] Media upload failed: {error_msg}")
+                    return {"success": False, "error": error_msg}
+                    
+        except Exception as e:
+            logger.error(f"[DingTalk] Media upload failed: {e}", exc_info=True)
             return {"success": False, "error": str(e)}

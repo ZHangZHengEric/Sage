@@ -287,8 +287,14 @@ class _DingTalkMessageHandler(ChatbotHandler):
                 # File message - extract download code from raw data
                 # File content is in callback.data['content']['downloadCode']
                 raw_content = callback.data.get("content", {})
-                download_code = raw_content.get("downloadCode") if isinstance(raw_content, dict) else None
-                file_name = raw_content.get("fileName", "unknown") if isinstance(raw_content, dict) else "unknown"
+                logger.info(f"[DingTalk] File message raw content: {raw_content}")
+                
+                if isinstance(raw_content, dict):
+                    download_code = raw_content.get("downloadCode")
+                    file_name = raw_content.get("fileName", "unknown")
+                else:
+                    download_code = None
+                    file_name = "unknown"
                 
                 content = {"text": f"[文件: {file_name}]"}
                 file_info = {
@@ -297,12 +303,40 @@ class _DingTalkMessageHandler(ChatbotHandler):
                     "file_name": file_name,
                     "message_id": message.message_id
                 }
-                logger.info(f"[DingTalk] File message: {file_name}, download_code: {download_code}")
+                logger.info(f"[DingTalk] File message: file_name={file_name}, download_code={download_code}")
                 
-            elif msg_type == "richText" and message.rich_text_content:
-                # Rich text message
-                content = {"text": "[富文本消息]"}
-                logger.info("[DingTalk] Rich text message")
+            elif msg_type == "richText":
+                # Rich text message - contains mixed text and picture elements
+                # Format: {"richText": [{"text": "..."}, {"picture": {"downloadCode": "..."}}]}
+                raw_content = callback.data.get("content", {})
+                rich_text_list = raw_content.get("richText", []) if isinstance(raw_content, dict) else []
+                
+                extracted_texts = []
+                image_download_codes = []
+                
+                for item in rich_text_list if isinstance(rich_text_list, list) else []:
+                    if isinstance(item, dict):
+                        if "text" in item:
+                            extracted_texts.append(item["text"])
+                        elif "picture" in item:
+                            pic_info = item["picture"]
+                            if isinstance(pic_info, dict) and "downloadCode" in pic_info:
+                                image_download_codes.append(pic_info["downloadCode"])
+                
+                combined_text = "\n".join(extracted_texts) if extracted_texts else "[富文本消息]"
+                content = {"text": combined_text}
+                
+                # If there are images, add file_info for the first image
+                if image_download_codes:
+                    file_info = {
+                        "type": "image",
+                        "download_code": image_download_codes[0],
+                        "message_id": message.message_id,
+                        "additional_images": image_download_codes[1:] if len(image_download_codes) > 1 else []
+                    }
+                    logger.info(f"[DingTalk] Rich text message with {len(image_download_codes)} images")
+                else:
+                    logger.info(f"[DingTalk] Rich text message: {combined_text[:50]}...")
                 
             else:
                 # Unknown or unsupported message type
