@@ -98,7 +98,8 @@ class TaskDecomposeAgent(AgentBase):
         async for chunk in self._call_llm_streaming(messages=llm_request_message,
                                              session_id=session_id,
                                              step_name="task_decompose",
-                                             model_config_override=model_config_override):
+                                             model_config_override=model_config_override,
+                                             enable_thinking=False):
             if len(chunk.choices) == 0:
                 continue
                 

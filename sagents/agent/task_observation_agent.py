@@ -137,7 +137,8 @@ class TaskObservationAgent(AgentBase):
             messages=messages,
             session_id=session_id,
             step_name=step_name,
-            model_config_override=model_config_override
+            model_config_override=model_config_override,
+            enable_thinking=False
         ):
             # 处理 delta
             if chunk.choices and chunk.choices[0].delta:

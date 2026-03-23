@@ -14,7 +14,7 @@
 <script setup>
 import { computed } from 'vue'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { User, Bot, Terminal, FileText, Edit3, Save, Zap, Settings, AlertTriangle, MessageSquare, Search } from 'lucide-vue-next'
+import { User, Bot, Terminal, FileText, Edit3, Save, Zap, Settings, AlertTriangle, MessageSquare, Search, Brain, ClipboardList, CheckCircle } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 
 const props = defineProps({
@@ -79,7 +79,23 @@ const avatarContent = computed(() => {
       label: '错误'
     }
   }
-  
+
+  if (props.messageType === 'reasoning_content') {
+    return {
+      icon: Brain,
+      bgClass: 'bg-purple-500',
+      label: '推理思考'
+    }
+  }
+
+  if (props.messageType === 'task_analysis') {
+    return {
+      icon: ClipboardList,
+      bgClass: 'bg-blue-500',
+      label: '任务分析'
+    }
+  }
+
   if (props.messageType === 'system') {
     return {
       icon: Settings,
