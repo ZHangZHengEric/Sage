@@ -137,54 +137,56 @@
                 <CardTitle class="text-sm font-medium text-center">操作</CardTitle>
               </CardHeader>
 
-              <CardContent class="flex-1 flex flex-col items-center justify-center gap-2 py-2 px-4">
-                <Button 
-                  v-if="!agent.is_default"
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2 text-primary hover:text-primary hover:bg-primary/10"
-                  @click.stop="handleSetDefault(agent); toggleFlip(agent.id)"
-                >
-                  <Star class="w-4 h-4" />
-                  设为默认
-                </Button>
-                
-                <Button 
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2"
-                  @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
-                >
-                  <FileBraces class="w-4 h-4" />
-                  调用示例
-                </Button>
-                
-                <Button 
-                  v-if="canEdit(agent)"
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2"
-                  @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
-                >
-                  <Edit class="w-4 h-4" />
-                  编辑
-                </Button>
-                
-                <Button 
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2"
-                  @click.stop="handleExport(agent); toggleFlip(agent.id)"
-                >
-                  <Upload class="w-4 h-4" />
-                  导出
-                </Button>
-                
-                <Button 
-                  v-if="canDelete(agent)"
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  @click.stop="handleDelete(agent); toggleFlip(agent.id)"
-                >
-                  <Trash2 class="w-4 h-4" />
-                  删除
-                </Button>
+              <CardContent class="flex-1 flex items-center justify-center py-2 px-3">
+                <div class="grid grid-cols-2 gap-2 w-full">
+                  <Button 
+                    v-if="!agent.is_default"
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-primary hover:text-primary hover:bg-primary/10 text-xs py-2 h-auto"
+                    @click.stop="handleSetDefault(agent); toggleFlip(agent.id)"
+                  >
+                    <Star class="w-3.5 h-3.5" />
+                    <span class="truncate">设为默认</span>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
+                    @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
+                  >
+                    <FileBraces class="w-3.5 h-3.5" />
+                    <span class="truncate">调用示例</span>
+                  </Button>
+                  
+                  <Button 
+                    v-if="canEdit(agent)"
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
+                    @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
+                  >
+                    <Edit class="w-3.5 h-3.5" />
+                    <span class="truncate">编辑</span>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
+                    @click.stop="handleExport(agent); toggleFlip(agent.id)"
+                  >
+                    <Upload class="w-3.5 h-3.5" />
+                    <span class="truncate">导出</span>
+                  </Button>
+                  
+                  <Button 
+                    v-if="canDelete(agent)"
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 text-xs py-2 h-auto"
+                    @click.stop="handleDelete(agent); toggleFlip(agent.id)"
+                  >
+                    <Trash2 class="w-3.5 h-3.5" />
+                    <span class="truncate">删除</span>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
