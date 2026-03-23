@@ -59,7 +59,8 @@ class TaskPlanningAgent(AgentBase):
         all_content = ''
         async for llm_repsonse_chunk in self._call_llm_streaming(messages=llm_request_message,
                                                                  session_id=session_id,
-                                                                 step_name="planning"):
+                                                                 step_name="planning",
+                                                                 enable_thinking=False):
             if len(llm_repsonse_chunk.choices) == 0:
                 continue
             if llm_repsonse_chunk.choices[0].delta.content:

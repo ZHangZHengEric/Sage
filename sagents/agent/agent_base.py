@@ -231,7 +231,7 @@ class AgentBase(ABC):
         }
         return mime_types.get(file_extension, 'image/jpeg')
 
-    async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None):
+    async def _call_llm_streaming(self, messages: List[Union[MessageChunk, Dict[str, Any]]], session_id: Optional[str] = None, step_name: str = "llm_call", model_config_override: Optional[Dict[str, Any]] = None, enable_thinking: Optional[bool] = None):
         """
         通用的流式模型调用方法，有这个封装，主要是为了将
         模型调用和日志记录等功能统一起来，以及token 的记录等，方便后续的维护和扩展。
@@ -241,6 +241,8 @@ class AgentBase(ABC):
             session_id: 会话ID（用于请求记录）
             step_name: 步骤名称（用于请求记录）
             model_config_override: 覆盖模型配置（用于工具调用等）
+            enable_thinking: 是否启用思考模式，优先使用此参数，为None时使用deep_thinking配置。
+                           对于OpenAI推理模型(o3-mini, GPT-5.2等)，会转换为reasoning_effort参数
 
         Returns:
             Generator: 语言模型的流式响应
@@ -325,18 +327,57 @@ class AgentBase(ABC):
                 # 提取tools 的value
                 logger_final_config = {k: v for k, v in final_config.items() if k != 'tools'}
                 logger.debug(f"{self.__class__.__name__} | {step_name}: 调用语言模型进行流式生成 (尝试 {retry_count + 1}/{max_retries}) |final_config={logger_final_config}")
+
+                # 根据 enable_thinking 参数或 deep_thinking 配置决定是否启用思考模式
+                # 优先使用传入的 enable_thinking 参数
+                final_enable_thinking = False
+                if enable_thinking is not None:
+                    final_enable_thinking = enable_thinking
+                elif session is not None:
+                    deep_thinking = session.session_context.agent_config.get("deep_thinking", False)
+                    # 处理字符串 "auto" 的情况，默认为 False
+                    if isinstance(deep_thinking, str):
+                        final_enable_thinking = deep_thinking.lower() == "true"
+                    else:
+                        final_enable_thinking = bool(deep_thinking)
+
+                # 构建 extra_body，根据模型类型使用不同的参数
+                # 对于 OpenAI 推理模型 (o3-mini, GPT-5.2等) 使用 reasoning_effort
+                # 对于其他模型使用 enable_thinking/thinking 参数
+                extra_body = {
+                    "top_k": 20,
+                    "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
+                }
+
+                # 判断是否为 OpenAI 推理模型
+                is_openai_reasoning_model = (
+                    model_name.startswith("o3-") or
+                    model_name.startswith("o1-") or
+                    "gpt-5.2" in model_name.lower() or
+                    "gpt-5.1" in model_name.lower()
+                )
+
+                if is_openai_reasoning_model:
+                    # OpenAI 推理模型使用 reasoning_effort 参数
+                    # low = 最小化推理，medium = 平衡，high = 最大化推理
+                    if final_enable_thinking:
+                        extra_body["reasoning_effort"] = "medium"  # 或者 "high"
+                    else:
+                        extra_body["reasoning_effort"] = "low"  # 最小化推理
+                    logger.debug(f"{self.__class__.__name__} | {step_name}: OpenAI推理模型，reasoning_effort={extra_body['reasoning_effort']}")
+                else:
+                    # 其他模型使用 enable_thinking/thinking 参数
+                    extra_body["chat_template_kwargs"] = {"enable_thinking": final_enable_thinking}
+                    extra_body["enable_thinking"] = final_enable_thinking
+                    extra_body["thinking"] = {'type': "enabled" if final_enable_thinking else "disabled"}
+                    logger.debug(f"{self.__class__.__name__} | {step_name}: 思考模式={final_enable_thinking}")
+                
                 stream = await self.model.chat.completions.create(
                     model=model_name,
                     messages=cast(List[Any], serializable_messages),
                     stream=True,
                     stream_options={"include_usage": True},
-                    extra_body={
-                        "chat_template_kwargs": {"enable_thinking": False},
-                        "enable_thinking": False,
-                        "thinking": {'type': "disabled"},
-                        "top_k": 20,
-                        "_step_name": step_name # 观察用，记录下当前是哪个步骤的调用
-                    },
+                    extra_body=extra_body,
                     **final_config
                 )
                 async for chunk in stream:

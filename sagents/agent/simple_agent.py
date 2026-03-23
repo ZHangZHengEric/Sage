@@ -415,7 +415,7 @@ class SimpleAgent(AgentBase):
                         role='assistant',
                         content=chunk.choices[0].delta.reasoning_content,
                         message_id=reasoning_content_response_message_id,
-                        message_type=MessageType.TASK_ANALYSIS.value,
+                        message_type=MessageType.REASONING_CONTENT.value,
                         agent_name=self.agent_name
                     )]
                     yield (output_messages, False)
