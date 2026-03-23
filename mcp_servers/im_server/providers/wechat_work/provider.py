@@ -128,20 +128,26 @@ class WeChatWorkProvider(IMProviderBase):
                 "body": body
             }
             
-            # 如果当前有 WebSocket 连接，直接使用
-            if self._client and self._client.is_connected():
-                logger.info("[WeChatWork] 使用现有 WebSocket 连接发送消息")
-                result = await self._client.send_message(
-                    content=content,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    msg_type=msg_type
-                )
-                return result
+            # 使用主 WebSocket 连接发送消息
+            if not self._client:
+                return {"success": False, "error": "WebSocket 客户端未启动"}
             
-            # 否则创建临时 WebSocket 连接发送
-            logger.info("[WeChatWork] 创建临时 WebSocket 连接发送消息")
-            return await self._send_via_temporary_ws(message)
+            # 等待连接就绪（最多 10 秒）
+            for _ in range(20):
+                if self._client.is_connected():
+                    break
+                await asyncio.sleep(0.5)
+            
+            if not self._client.is_connected():
+                return {"success": False, "error": "WebSocket 连接未就绪"}
+            
+            result = await self._client.send_message(
+                content=content,
+                chat_id=chat_id,
+                user_id=user_id,
+                msg_type=msg_type
+            )
+            return result
 
         except Exception as e:
             logger.error(f"[WeChatWork] 发送消息异常: {e}", exc_info=True)

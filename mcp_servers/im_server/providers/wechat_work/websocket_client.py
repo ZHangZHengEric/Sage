@@ -78,6 +78,7 @@ class WeChatWorkWebSocketClient:
         self.running = False
         self._ws_thread: Optional[threading.Thread] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None  # WebSocket 线程的事件循环
         
         # 状态追踪
         self._last_message_time: float = 0
@@ -113,21 +114,20 @@ class WeChatWorkWebSocketClient:
         logger.info("[WeChatWork] 正在停止客户端...")
         self.running = False
 
-        # 取消心跳任务
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
+        # 注意：不要跨线程关闭 WebSocket，这会导致事件循环错误
+        # 而是让后台线程自然退出（通过设置 self.running = False）
+        # 后台线程的 _connect_and_run 会检测到 self.running=False 并退出
 
-        # 关闭 WebSocket 连接
-        if self.websocket:
-            try:
-                asyncio.get_event_loop().create_task(self.websocket.close())
-            except Exception:
-                pass
+        # 等待线程自然结束（最多 3 秒）
+        if self._ws_thread and self._ws_thread.is_alive():
+            self._ws_thread.join(timeout=3)
+            if self._ws_thread.is_alive():
+                logger.warning("[WeChatWork] WebSocket thread did not stop gracefully")
 
-        # 等待线程结束
-        if self._ws_thread:
-            self._ws_thread.join(timeout=5)
-
+        self._ws_thread = None
+        self.websocket = None
+        self._heartbeat_task = None
+        self._loop = None
         logger.info("[WeChatWork] 客户端已停止")
 
     def _run_client(self):
@@ -169,6 +169,9 @@ class WeChatWorkWebSocketClient:
 
     async def _connect_and_run(self):
         """建立连接并运行消息循环"""
+        # 保存当前事件循环引用
+        self._loop = asyncio.get_event_loop()
+        
         try:
             logger.info(f"[WeChatWork] 正在连接到 {self.WS_URL}...")
             
@@ -193,10 +196,16 @@ class WeChatWorkWebSocketClient:
                 # 启动心跳任务
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-                # 消息接收循环
-                async for message in websocket:
-                    self._last_message_time = time.time()
-                    await self._handle_message(message)
+                # 消息接收循环（带停止检查）
+                while self.running:
+                    try:
+                        # 使用 wait_for 包装 recv，以便能响应停止信号
+                        message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                        self._last_message_time = time.time()
+                        await self._handle_message(message)
+                    except asyncio.TimeoutError:
+                        # 超时继续循环，检查 self.running
+                        continue
 
         except ConnectionClosed as e:
             logger.warning(f"[WeChatWork] 连接已关闭: {e}")
