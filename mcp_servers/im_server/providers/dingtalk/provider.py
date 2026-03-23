@@ -64,7 +64,7 @@ class DingTalkProvider(IMProviderBase):
         content: str,
         chat_id: Optional[str] = None,
         user_id: Optional[str] = None,
-        msg_type: str = "markdown",
+        msg_type: str = "text",
         session_webhook: Optional[str] = None,
         sender_staff_id: Optional[str] = None,
         session_webhook_expired_time: Optional[int] = None,
@@ -84,8 +84,8 @@ class DingTalkProvider(IMProviderBase):
         # Use session_webhook if available (simplest method, no access token needed)
         if session_webhook:
             logger.info(f"[DingTalk] Using session_webhook: {session_webhook[:50]}...")
-            # Default to markdown for better formatting
-            actual_msg_type = msg_type or "markdown"
+            # Use provided msg_type or default to text
+            actual_msg_type = msg_type or "text"
             return await self._send_via_session_webhook(
                 session_webhook, content, actual_msg_type, sender_staff_id,
                 session_webhook_expired_time=session_webhook_expired_time
@@ -180,6 +180,7 @@ class DingTalkProvider(IMProviderBase):
                 logger.info(f"[DingTalk] session_webhook valid, remaining={remaining_ms/1000:.0f}s")
         
         logger.info(f"[DingTalk] Sending via session_webhook, msg_type={msg_type}")
+        logger.info(f"[DingTalk] Content preview: {content[:200] if content else 'EMPTY'}...")
         
         if msg_type == "text":
             payload = {
@@ -200,6 +201,8 @@ class DingTalkProvider(IMProviderBase):
         # @ the sender if staff_id is available
         if sender_staff_id:
             payload["at"] = {"atUserIds": [sender_staff_id]}
+        
+        logger.info(f"[DingTalk] Payload: {payload}")
         
         try:
             async with httpx.AsyncClient() as client:
@@ -281,3 +284,91 @@ class DingTalkProvider(IMProviderBase):
             "msg_type": msg_type,
             "provider": self.PROVIDER_NAME,
         }
+
+    async def download_file(self, download_code: str, save_dir: str, file_name: Optional[str] = None) -> Dict[str, Any]:
+        """Download file from DingTalk using download code.
+        
+        Args:
+            download_code: The download code from file/image message
+            save_dir: Directory to save the file
+            file_name: Optional file name, if not provided will be extracted from response
+            
+        Returns:
+            Dict with success status and file_path or error
+        """
+        import os
+        from pathlib import Path
+        
+        logger.info(f"[DingTalk] Downloading file with download_code: {download_code}")
+        
+        if not download_code:
+            return {"success": False, "error": "download_code is required"}
+        
+        access_token = await self._get_access_token()
+        if not access_token:
+            return {"success": False, "error": "Failed to get access token"}
+        
+        # Get download URL
+        robot_code = self.config.get("app_key") or self.config.get("client_id")
+        url = f"{self.API_URL}/v1.0/robot/messageFiles/download"
+        
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Step 1: Get download URL
+                resp = await client.post(
+                    url,
+                    headers={"x-acs-dingtalk-access-token": access_token},
+                    json={
+                        "robotCode": robot_code,
+                        "downloadCode": download_code
+                    }
+                )
+                data = resp.json()
+                logger.info(f"[DingTalk] Get download URL response: {data}")
+                
+                if data.get("code") != "0" and data.get("errcode") != 0:
+                    error_msg = data.get("message") or data.get("errmsg") or str(data)
+                    logger.error(f"[DingTalk] Failed to get download URL: {error_msg}")
+                    return {"success": False, "error": f"Failed to get download URL: {error_msg}"}
+                
+                download_url = data.get("downloadUrl")
+                if not download_url:
+                    return {"success": False, "error": "No download URL in response"}
+                
+                logger.info(f"[DingTalk] Got download URL: {download_url[:50]}...")
+                
+                # Step 2: Download file content
+                file_resp = await client.get(download_url, timeout=60.0)
+                file_resp.raise_for_status()
+                
+                # Determine file name
+                if not file_name:
+                    # Try to get from Content-Disposition header
+                    content_disp = file_resp.headers.get("Content-Disposition", "")
+                    if "filename=" in content_disp:
+                        file_name = content_disp.split("filename=")[-1].strip('"')
+                    else:
+                        # Generate from download code
+                        file_name = f"dingtalk_file_{download_code[:8]}"
+                
+                # Ensure directory exists
+                Path(save_dir).mkdir(parents=True, exist_ok=True)
+                file_path = os.path.join(save_dir, file_name)
+                
+                # Save file
+                with open(file_path, "wb") as f:
+                    f.write(file_resp.content)
+                
+                file_size = len(file_resp.content)
+                logger.info(f"[DingTalk] File saved to {file_path}, size: {file_size} bytes")
+                
+                return {
+                    "success": True,
+                    "file_path": file_path,
+                    "file_name": file_name,
+                    "file_size": file_size
+                }
+                
+        except Exception as e:
+            logger.error(f"[DingTalk] Download file failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
