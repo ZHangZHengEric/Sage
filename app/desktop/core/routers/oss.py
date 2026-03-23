@@ -3,7 +3,8 @@ import shutil
 import io
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from typing import Optional
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from ..utils.file import split_file_name
 from PIL import Image
 from loguru import logger
@@ -75,21 +76,38 @@ def is_image_file(filename: str) -> bool:
 
 
 @oss_router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), agent_id: Optional[str] = Form(None)):
+    """
+    上传文件
+
+    Args:
+        file: 上传的文件
+        agent_id: 可选的 Agent ID，如果提供，文件将保存到该 Agent 沙箱的 upload_files 文件夹
+    """
     try:
         user_home = Path.home()
-        sage_files_dir = user_home / ".sage" / "files"
+
+        # 如果提供了 agent_id，保存到 agent 沙箱的 upload_files 文件夹
+        if agent_id:
+            sage_files_dir = user_home / ".sage" / "agents" / agent_id / "upload_files"
+            logger.info(f"Uploading file to agent sandbox: {agent_id}, path: {sage_files_dir}")
+        else:
+            # 兼容旧逻辑，保存到默认位置
+            sage_files_dir = user_home / ".sage" / "files"
+            logger.info(f"Uploading file to default location: {sage_files_dir}")
+
+        # 确保目录存在
         sage_files_dir.mkdir(parents=True, exist_ok=True)
 
         filename_str = file.filename or "unknown_file"
         origin, ext = split_file_name(filename_str)
-        
+
         # Use a timestamp to avoid name collision
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         # Ensure ext starts with dot if not empty
         if ext and not ext.startswith("."):
             ext = "." + ext
-        
+
         # Check if it's an image file and needs compression
         if is_image_file(filename_str):
             try:
@@ -98,19 +116,19 @@ async def upload_file(file: UploadFile = File(...)):
                 logger.info(f"Original file size: {len(content)} bytes, start compress")
                 # Open image
                 image = Image.open(io.BytesIO(content))
-                
+
                 # Compress image to 1MB
                 compressed_data = compress_image_to_target_size(image, target_size_bytes=1 * 1024 * 1024)
-                
+
                 # Update extension to .jpg for compressed images
                 ext = ".jpg"
                 final_filename = f"{origin}_{timestamp}{ext}"
                 file_path = sage_files_dir / final_filename
-                
+
                 # Save compressed image
                 with open(file_path, "wb") as buffer:
                     buffer.write(compressed_data)
-                    
+
             except Exception as img_error:
                 # If image processing fails, fall back to original file
                 final_filename = f"{origin}_{timestamp}{ext}"
@@ -124,8 +142,14 @@ async def upload_file(file: UploadFile = File(...)):
             file_path = sage_files_dir / final_filename
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-        
-        return {"url": str(file_path.absolute())}
+
+        # 构建返回的 URL
+        if agent_id:
+            # 对于 agent 沙箱中的文件，返回完整的绝对路径
+            # 这样 agent_base.py 可以直接访问文件，无需路径转换
+            return {"url": str(file_path.absolute()), "agent_id": agent_id, "filename": final_filename}
+        else:
+            return {"url": str(file_path.absolute())}
     except Exception as e:
         import traceback
         traceback.print_exc()
