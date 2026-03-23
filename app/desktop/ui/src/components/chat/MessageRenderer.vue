@@ -10,7 +10,7 @@
           {{ getLabel({ role: 'assistant', type: 'error' }) }}
         </div>
         <div class="bg-destructive/5 text-destructive border border-destructive/10 rounded-[20px] rounded-tl-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-words w-full">
-          <div class="opacity-90 text-[15px] leading-6 font-medium">{{ message.content || t('error.unknown') }}</div>
+          <div class="opacity-90 text-sm leading-6 font-medium">{{ message.content || t('error.unknown') }}</div>
         </div>
       </div>
     </div>
@@ -39,7 +39,7 @@
         </div>
         <div class="flex flex-col gap-1">
           <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-[15px] leading-6 tracking-wide font-sans">
+          <div v-if="getTextContent(message.content)" class="bg-secondary/80 text-secondary-foreground rounded-[20px] rounded-tr-[4px] px-4 py-2.5 shadow-sm overflow-hidden break-all text-sm leading-6 tracking-wide font-sans">
             <MarkdownRenderer
               :content="formatMessageContent(getTextContent(message.content))"
             />
@@ -67,8 +67,8 @@
                 @click="handleLocalFileClick(imgUrl)"
                 :title="`打开文件: ${getFileName(imgUrl)}`"
               >
-                <Image class="w-5 h-5 text-muted-foreground" />
-                <span class="text-sm font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
+                <Image class="w-4 h-4 text-muted-foreground" />
+                <span class="text-xs font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
                 <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
@@ -134,7 +134,7 @@
         </div>
         <div class="flex flex-col gap-1 w-full">
           <!-- 文本内容 -->
-          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-[15px] leading-6 font-sans">
+          <div v-if="getTextContent(message.content)" class="text-foreground/90 overflow-hidden break-words w-full text-sm leading-6 font-sans">
             <MarkdownRendererWithPreview
               :content="formatMessageContent(getTextContent(message.content))"
             />
@@ -162,8 +162,8 @@
                 @click="handleLocalFileClick(imgUrl)"
                 :title="`打开文件: ${getFileName(imgUrl)}`"
               >
-                <Image class="w-5 h-5 text-muted-foreground" />
-                <span class="text-sm font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
+                <Image class="w-4 h-4 text-muted-foreground" />
+                <span class="text-xs font-medium truncate max-w-[150px]">{{ getFileName(imgUrl) }}</span>
                 <ExternalLink class="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>

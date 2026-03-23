@@ -10,7 +10,7 @@
           <component :is="getToolIcon(toolName)" class="w-4 h-4" />
         </span>
         <!-- 工具名称（多语言） -->
-        <span class="header-text text-sm font-medium text-foreground">{{ getToolLabel(toolName, t) }}</span>
+        <span class="header-text text-xs font-medium text-foreground">{{ getToolLabel(toolName, t) }}</span>
         <!-- 状态图标 -->
         <span class="status-icon flex items-center justify-center" :class="{ 'text-green-500': isCompleted, 'text-indigo-500': !isCompleted }">
           <Check v-if="isCompleted" class="w-4 h-4" />
