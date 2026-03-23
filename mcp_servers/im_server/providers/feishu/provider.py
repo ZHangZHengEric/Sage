@@ -431,6 +431,69 @@ class FeishuProvider(IMProviderBase):
             logger.error(f"[Feishu] Send image error: {e}", exc_info=True)
             return {"success": False, "error": f"Send error: {str(e)}"}
 
+    async def download_file(self, file_key: str, message_id: str, save_dir: str, file_name: Optional[str] = None) -> Dict[str, Any]:
+        """Download file from Feishu message.
+        
+        Args:
+            file_key: The file key from message content
+            message_id: The message ID (required for download API)
+            save_dir: Directory to save the file
+            file_name: Optional file name
+            
+        Returns:
+            Dict with success status and file_path or error
+        """
+        import os
+        from pathlib import Path
+        
+        logger.info(f"[Feishu] Downloading file: file_key={file_key}, message_id={message_id}")
+        
+        if not file_key or not message_id:
+            return {"success": False, "error": "file_key and message_id are required"}
+        
+        access_token = await self._get_access_token()
+        if not access_token:
+            return {"success": False, "error": "Failed to get access token"}
+        
+        # Determine file name
+        if not file_name:
+            file_name = f"feishu_file_{file_key[:16]}"
+        
+        # Ensure directory exists
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        file_path = os.path.join(save_dir, file_name)
+        
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(
+                    f"{self.BASE_URL}/im/v1/messages/{message_id}/resources/{file_key}",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={"type": "file"}
+                )
+                
+                if resp.status_code == 200:
+                    with open(file_path, "wb") as f:
+                        f.write(resp.content)
+                    
+                    file_size = len(resp.content)
+                    logger.info(f"[Feishu] File downloaded: {file_path}, size: {file_size} bytes")
+                    
+                    return {
+                        "success": True,
+                        "file_path": file_path,
+                        "file_name": file_name,
+                        "file_size": file_size
+                    }
+                else:
+                    error_data = resp.json()
+                    error_msg = error_data.get("msg", "Unknown error")
+                    logger.error(f"[Feishu] Download failed: {error_msg}")
+                    return {"success": False, "error": f"Download failed: {error_msg}"}
+                    
+        except Exception as e:
+            logger.error(f"[Feishu] Download file error: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
     async def verify_webhook(self, request_body: bytes, signature: str) -> bool:
         """Verify Feishu webhook signature."""
         return True

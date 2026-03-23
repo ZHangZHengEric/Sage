@@ -221,8 +221,19 @@ async def _send_file_via_provider(
                     user_id=user_id
                 )
         elif provider == "dingtalk":
-            # 钉钉 (暂不支持文件，返回提示)
-            return f"钉钉文件发送功能开发中，请使用企业微信发送文件"
+            # 钉钉
+            if file_type == "image":
+                result = await provider_instance.send_image(
+                    image_path=file_path,
+                    chat_id=chat_id,
+                    user_id=user_id
+                )
+            else:
+                result = await provider_instance.send_file(
+                    file_path=file_path,
+                    chat_id=chat_id,
+                    user_id=user_id
+                )
         else:
             return f"错误: 不支持的 Provider - {provider}"
         
@@ -246,32 +257,36 @@ async def _send_file_via_provider(
 async def send_file_through_im(
     file_path: str,
     provider: str,
-    agent_id: Optional[str] = None,
+    agent_id: str,
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
 ) -> str:
     """
-    Send file to IM user (supports WeChat Work).
-    发送文件给 IM 用户 (支持企业微信)
+    Send file to IM user. Supports WeChat Work, DingTalk, Feishu.
+    发送文件给 IM 用户 (支持企业微信、钉钉、飞书)
     
-    Send local files to specified user or group chat. Currently supports WeChat Work,
-    other platforms under development.
-    将本地文件发送给指定用户或群聊。目前仅支持企业微信，其他平台开发中。
+    Send local files to specified user or group chat.
+    将本地文件发送给指定用户或群聊。
+    
+    **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
+    系统提示中已提供正确的 agent_id，请直接使用，不要省略或使用其他值。
     
     Args:
         file_path: Local file path (e.g., "/path/to/document.pdf") / 本地文件路径
         provider: Platform name - wechat_work, feishu, dingtalk / 
                  平台名称 - wechat_work(企业微信)、feishu(飞书)、dingtalk(钉钉)
-        agent_id: Agent ID for configuration lookup. Uses default agent if not specified. / 
-                 Agent 标识符，用于查找对应的频道配置。不指定则使用默认 Agent。
-        user_id: User ID for private chat (required) / 用户ID（私聊必填）
-        chat_id: Chat/Group ID for group chat (required) / 群聊ID（群聊必填）
+        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. / 
+                 **必填** Agent 标识符，必须使用系统提示中提供的当前 Agent ID。
+        user_id: User ID for private chat (optional, either user_id or chat_id required) / 
+                用户ID（私聊选填，user_id 和 chat_id 至少提供一个）
+        chat_id: Chat/Group ID for group chat (optional, either user_id or chat_id required) / 
+                群聊ID（群聊选填，user_id 和 chat_id 至少提供一个）
     
     Examples:
         >>> send_file_through_im(
         ...     file_path="/tmp/report.pdf",
-        ...     provider="wechat_work",
-        ...     agent_id="agent_xxx",
+        ...     provider="dingtalk",
+        ...     agent_id="agent_5e6b9f59",  # 使用系统提示中的 agent_id
         ...     user_id="userid_xxx"
         ... )
         "✅ 文件已发送给 user userid_xxx"
@@ -280,9 +295,10 @@ async def send_file_through_im(
         - File size max 20MB
         - Supported formats: documents, images, audio, video, etc.
     """
-    # Resolve agent_id (use default if not specified)
+    # Validate agent_id is provided
     if not agent_id:
-        agent_id = get_default_agent_id()
+        logger.error("[IM Tool] send_file_through_im: agent_id is required but not provided")
+        return "错误: agent_id 是必填参数，请使用系统提示中提供的 agent_id"
     
     logger.info(f"[IM Tool] send_file_through_im called: agent={agent_id}, provider={provider}, file={file_path}")
     
@@ -311,30 +327,36 @@ async def send_file_through_im(
 async def send_image_through_im(
     file_path: str,
     provider: str,
-    agent_id: Optional[str] = None,
+    agent_id: str,
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
 ) -> str:
     """
-    Send image to IM user (supports WeChat Work).
-    发送图片给 IM 用户 (支持企业微信)
+    Send image to IM user. Supports WeChat Work, DingTalk, Feishu.
+    发送图片给 IM 用户 (支持企业微信、钉钉、飞书)
     
     Send local image to specified user or group. Images display as image messages.
     将本地图片发送给指定用户或群聊。图片会以图片消息形式显示。
     
+    **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
+    系统提示中已提供正确的 agent_id，请直接使用，不要省略或使用其他值。
+    
     Args:
         file_path: Local image path (e.g., "/path/to/image.png") / 本地图片路径
-        provider: Platform name - wechat_work / 平台名称
-        agent_id: Agent ID for configuration lookup. Uses default agent if not specified. / 
-                 Agent 标识符。不指定则使用默认 Agent。
-        user_id: User ID for private chat (required) / 用户ID（私聊必填）
-        chat_id: Chat/Group ID for group chat (required) / 群聊ID（群聊必填）
+        provider: Platform name - wechat_work, dingtalk, feishu / 
+                 平台名称 - wechat_work(企业微信)、dingtalk(钉钉)、feishu(飞书)
+        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. / 
+                 **必填** Agent 标识符，必须使用系统提示中提供的当前 Agent ID。
+        user_id: User ID for private chat (optional, either user_id or chat_id required) / 
+                用户ID（私聊选填，user_id 和 chat_id 至少提供一个）
+        chat_id: Chat/Group ID for group chat (optional, either user_id or chat_id required) / 
+                群聊ID（群聊选填，user_id 和 chat_id 至少提供一个）
     
     Examples:
         >>> send_image_through_im(
         ...     file_path="/tmp/photo.jpg",
-        ...     provider="wechat_work",
-        ...     agent_id="agent_xxx",
+        ...     provider="dingtalk",
+        ...     agent_id="agent_5e6b9f59",  # 使用系统提示中的 agent_id
         ...     user_id="userid_xxx"
         ... )
     
@@ -342,9 +364,10 @@ async def send_image_through_im(
         - Image size max 20MB
         - Supported formats: JPG, PNG, GIF, BMP, WebP
     """
-    # Resolve agent_id
+    # Validate agent_id is provided
     if not agent_id:
-        agent_id = get_default_agent_id()
+        logger.error("[IM Tool] send_image_through_im: agent_id is required but not provided")
+        return "错误: agent_id 是必填参数，请使用系统提示中提供的 agent_id"
     
     logger.info(f"[IM Tool] send_image_through_im called: agent={agent_id}, provider={provider}, image={file_path}")
     
@@ -444,7 +467,7 @@ async def _send_message_to_agent(
 async def send_message_through_im(
     content: str,
     provider: str,
-    agent_id: Optional[str] = None,
+    agent_id: str,
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
 ) -> str:
@@ -453,16 +476,19 @@ async def send_message_through_im(
     
     向 IM 用户发送消息。支持飞书、钉钉、企业微信、iMessage。
 
+    **重要**: agent_id 是必填参数，必须使用当前对话关联的 Agent ID。
+    系统提示中已提供正确的 agent_id，请直接使用，不要省略或使用其他值。
+
     Args:
         content: Message content / 消息内容
         provider: Platform name - feishu, dingtalk, wechat_work, imessage / 
                  平台名称 - feishu(飞书)、dingtalk(钉钉)、wechat_work(企业微信)、imessage
-        agent_id: Agent ID for configuration lookup. Uses default agent if not specified. / 
-                 Agent 标识符，用于查找对应的频道配置。不指定则使用默认 Agent。
-        user_id: User ID for private chat (required for private messages) / 
-                用户ID（私聊必填）
-        chat_id: Chat/Group ID for group messages (required for group messages) / 
-                群聊ID（群聊必填）
+        agent_id: **必填** Agent ID for configuration lookup. Must use the current agent ID from system prompt. / 
+                 **必填** Agent 标识符，必须使用系统提示中提供的当前 Agent ID。
+        user_id: User ID for private chat (optional, either user_id or chat_id required) / 
+                用户ID（私聊选填，user_id 和 chat_id 至少提供一个）
+        chat_id: Chat/Group ID for group messages (optional, either user_id or chat_id required) / 
+                群聊ID（群聊选填，user_id 和 chat_id 至少提供一个）
 
     Returns:
         Success message or error description / 成功消息或错误描述
@@ -470,15 +496,16 @@ async def send_message_through_im(
     Examples:
         >>> send_message_through_im(
         ...     content="Hello",
-        ...     provider="wechat_work",
-        ...     agent_id="agent_xxx",
+        ...     provider="dingtalk",
+        ...     agent_id="agent_5e6b9f59",  # 使用系统提示中的 agent_id
         ...     user_id="userid_xxx"
         ... )
-        "Message sent via wechat_work to user userid_xxx"
+        "Message sent via dingtalk to user userid_xxx"
     """
-    # Resolve agent_id (use default if not specified)
+    # Validate agent_id is provided
     if not agent_id:
-        agent_id = get_default_agent_id()
+        logger.error("[IM Tool] send_message_through_im: agent_id is required but not provided")
+        return "错误: agent_id 是必填参数，请使用系统提示中提供的 agent_id"
     
     logger.info(f"[IM Tool] send_message_through_im called: agent={agent_id}, provider={provider}, "
                 f"user_id={user_id}, chat_id={chat_id}, content_length={len(content) if content else 0}")
