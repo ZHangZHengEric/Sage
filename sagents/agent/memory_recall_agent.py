@@ -301,7 +301,8 @@ class MemoryRecallAgent(AgentBase):
             messages=llm_request_messages,
             session_id=session_id,
             step_name="memory_recall",
-            model_config_override={'max_tokens':128}
+            model_config_override={'max_tokens':128},
+            enable_thinking=False
         )
 
         # 收集流式响应内容

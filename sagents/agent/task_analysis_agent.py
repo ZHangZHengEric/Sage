@@ -1,3 +1,4 @@
+from gc import enable
 from sagents.utils.prompt_manager import PromptManager
 from sagents.context.messages.message_manager import MessageManager
 from .agent_base import AgentBase
@@ -96,6 +97,7 @@ class TaskAnalysisAgent(AgentBase):
             messages=llm_request_message,
             session_id=session_id,
             step_name="task_analysis",
+            enable_thinking=False
         ):
             if len(llm_repsonse_chunk.choices) == 0:
                 continue

@@ -33,6 +33,9 @@ class MessageType(Enum):
     TASK_ROUTER = "task_router"
     DO_SUBTASK_RESULT = "do_subtask_result"
 
+    # 推理内容
+    REASONING_CONTENT = "reasoning_content"
+
     # 工具相关
     TOOL_CALL = "tool_call"
     TOOL_CALL_RESULT = "tool_call_result"  # 兼容现有代码
