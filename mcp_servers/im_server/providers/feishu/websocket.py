@@ -36,13 +36,6 @@ class FeishuWebSocketClient:
 
     def _handle_message(self, data: P2ImMessageReceiveV1) -> None:
         """Handle incoming message event."""
-        # ===== 最开始的调试日志 =====
-        logger.info("[Feishu] ========== _handle_message CALLED ==========")
-        logger.info(f"[Feishu] data type: {type(data)}")
-        logger.info(f"[Feishu] data dir: {dir(data)}")
-        logger.info(f"[Feishu] data: {data}")
-        # =============================
-        
         try:
             import json
 
@@ -113,6 +106,19 @@ class FeishuWebSocketClient:
 
         def run_client():
             """Run client with its own event loop."""
+            import asyncio
+            
+            # CRITICAL: 确保线程有干净的事件循环
+            # 清除任何已存在的事件循环状态
+            try:
+                asyncio.set_event_loop(None)
+            except:
+                pass
+            
+            # 创建全新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
             # Create event handler
             event_handler = lark.EventDispatcherHandler.builder("", "") \
                 .register_p2_im_message_receive_v1(self._handle_message) \
@@ -128,16 +134,21 @@ class FeishuWebSocketClient:
 
             logger.info(f"[Feishu] Starting WebSocket client with app_id: {self.app_id}")
 
-            # Start client - SDK handles connection and reconnection
-            # Note: This may raise "event loop already running" initially,
-            # but SDK will auto-reconnect and work correctly
+            # Start client - SDK will use the event loop we just created
             try:
                 self.client.start()
             except RuntimeError as e:
                 if "already running" in str(e):
-                    logger.warning(f"[Feishu] Initial connection issue (will auto-reconnect): {e}")
+                    logger.warning(f"[Feishu] Event loop issue (SDK will retry): {e}")
                 else:
                     raise
+            
+            # Keep thread alive to maintain connection
+            # lark-oapi SDK runs its own event loop internally
+            try:
+                loop.run_forever()
+            except:
+                pass
 
         # Run in a new thread
         self._thread = threading.Thread(target=run_client, daemon=True)
