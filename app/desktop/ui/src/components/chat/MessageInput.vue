@@ -783,8 +783,9 @@ const processFile = async (file) => {
   uploadedFiles.value.push(fileItem)
 
   try {
-    // 调用OSS API上传
-    const url = await ossApi.uploadFile(file)
+    // 调用OSS API上传，传递当前选中的 agent_id
+    const agentId = props.selectedAgent?.id || props.selectedAgent?.agent_id
+    const url = await ossApi.uploadFile(file, agentId)
 
     // 更新文件URL
     fileItem.url = url
