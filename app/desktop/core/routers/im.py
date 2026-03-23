@@ -509,11 +509,26 @@ async def save_agent_im_channels(
                 )
                 
                 if success:
-                    results.append({"provider": provider, "status": "saved"})
-                    logger.info(f"[IM Agent] Saved {provider} config for agent={agent_id}")
+                    # Check if config actually changed
+                    old_config = agent_config.get_provider_config(provider)
+                    if old_config is None:
+                        # New config, always changed
+                        config_changed = True
+                    else:
+                        config_changed = (
+                            old_config.get('enabled') != config_request.enabled or
+                            old_config.get('config') != config_request.config
+                        )
                     
-                    # Auto-restart enabled channels
-                    if config_request.enabled:
+                    if config_changed:
+                        results.append({"provider": provider, "status": "saved"})
+                        logger.info(f"[IM Agent] Saved {provider} config for agent={agent_id}")
+                    else:
+                        results.append({"provider": provider, "status": "unchanged"})
+                        logger.info(f"[IM Agent] {provider} config unchanged for agent={agent_id}")
+                    
+                    # Auto-restart enabled channels only if config changed
+                    if config_request.enabled and config_changed:
                         try:
                             from mcp_servers.im_server.service_manager import get_service_manager
                             manager = get_service_manager()

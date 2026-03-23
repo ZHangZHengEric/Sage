@@ -293,9 +293,22 @@ class IMServiceManager:
             state = self._connections[key]
             state.status = ChannelStatus.STOPPING
             
+            # Save provider reference before cancelling
+            provider = state.provider
+            
             # Cancel the task
             if state.task and not state.task.done():
                 state.task.cancel()
+        
+        # Stop the provider (outside lock to avoid deadlock)
+        if provider:
+            try:
+                logger.info(f"[ServiceManager] Stopping provider for {key}")
+                provider.stop_client()
+                # Give time for connection to close gracefully
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.warning(f"[ServiceManager] Error stopping provider: {e}")
         
         # Wait for task to complete (outside lock)
         try:
@@ -672,13 +685,15 @@ class IMServiceManager:
                 
         except asyncio.CancelledError:
             logger.info(f"[ServiceManager] WeChat Work channel {key} cancelled")
-            # Stop the client
+            # Stop the client - use the saved provider instance
             try:
-                from .providers.wechat_work import WeChatWorkProvider
-                provider = WeChatWorkProvider(config)
-                provider.stop_client()
-            except Exception:
-                pass
+                with self._lock:
+                    saved_provider = self._connections.get(key, {}).get('provider')
+                if saved_provider:
+                    saved_provider.stop_client()
+                    logger.info(f"[ServiceManager] WeChat Work client stopped for {key}")
+            except Exception as e:
+                logger.warning(f"[ServiceManager] Error stopping WeChat Work client: {e}")
             raise
         except Exception as e:
             logger.error(f"[ServiceManager] WeChat Work channel {key} error: {e}")
