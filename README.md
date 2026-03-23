@@ -2,7 +2,7 @@
 
 # 🌟 **Experience Sage's Power**
 
-![logo](assets/logo.png)
+![cover](assets/cover.png)
 
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
@@ -10,6 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 # 🧠 **Sage Multi-Agent Framework**
 
@@ -251,6 +252,24 @@ We are grateful to our sponsors for their support in making Sage better:
 
 ---
 
+## 🦌 **Join Our Community**
+
 <div align="center">
-Built with ❤️ by the Sage Team
+
+### 💬 Connect with us
+
+[![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+
+### 📱 WeChat Group
+
+<img src="assets/WeChatGroup.jpg" width="300" alt="WeChat Group QR Code"/>
+
+*Scan to join our WeChat community 🦌*
+
+</div>
+
+---
+
+<div align="center">
+Built with ❤️ by the Sage Team 🦌
 </div>

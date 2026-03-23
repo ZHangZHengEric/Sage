@@ -2,7 +2,7 @@
 
 # 🌟 **体验 Sage 的强大能力**
 
-![logo](assets/logo.png)
+![cover](assets/cover.png)
 
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
@@ -10,6 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
 # 🧠 **Sage 多智能体框架**
 
@@ -251,6 +252,24 @@ Sage/
 
 ---
 
+## 🦌 **加入我们的社区**
+
 <div align="center">
-Built with ❤️ by the Sage Team
+
+### 💬 与我们交流
+
+[![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack&style=for-the-badge)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
+
+### 📱 微信群
+
+<img src="assets/WeChatGroup.jpg" width="300" alt="微信群二维码"/>
+
+*扫码加入我们的微信社区 🦌*
+
+</div>
+
+---
+
+<div align="center">
+Built with ❤️ by the Sage Team 🦌
 </div>
