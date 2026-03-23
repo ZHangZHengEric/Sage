@@ -1008,18 +1008,55 @@ const enabledIMChannelsCount = computed(() => {
   return Object.values(imConfig.value).filter(c => c.enabled).length
 })
 
+// Default empty IM config
+const getDefaultIMConfig = () => ({
+  wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
+  dingtalk: { enabled: false, config: { client_id: '', client_secret: '' } },
+  feishu: { enabled: false, config: { app_id: '', app_secret: '' } },
+  imessage: { enabled: false, config: { allowed_senders_text: '' } }
+})
+
 // Load IM config when agent changes
 const loadIMConfig = async () => {
-  if (!store.formData.id) return
+  const agentId = store.formData.id
+  console.log(`[AgentEdit] loadIMConfig called for agent: ${agentId}`)
+  
+  if (!agentId) {
+    console.log('[AgentEdit] No agent ID, resetting IM config')
+    imConfig.value = getDefaultIMConfig()
+    return
+  }
+  
+  // Always reset first to prevent showing stale config
+  console.log('[AgentEdit] Resetting IM config before loading')
+  imConfig.value = getDefaultIMConfig()
   
   try {
-    const response = await fetch(`/api/im/agent/${store.formData.id}/im_channels`)
+    console.log(`[AgentEdit] Fetching IM config for agent: ${agentId}`)
+    const response = await fetch(`/api/im/agent/${agentId}/im_channels`)
+    
+    // Double-check that we're still on the same agent (user might have switched while fetching)
+    if (store.formData.id !== agentId) {
+      console.log(`[AgentEdit] Agent changed during fetch, discarding results (was: ${agentId}, now: ${store.formData.id})`)
+      return
+    }
+    
     const result = await response.json()
     
+    // Check again after JSON parsing (in case of async delay)
+    if (store.formData.id !== agentId) {
+      console.log(`[AgentEdit] Agent changed after fetch, discarding results (was: ${agentId}, now: ${store.formData.id})`)
+      return
+    }
+    
+    console.log(`[AgentEdit] IM config response:`, result)
+    
     if (result.success && result.data?.channels) {
+      console.log(`[AgentEdit] Loaded channels:`, Object.keys(result.data.channels))
       // Merge loaded config with default structure
       for (const [provider, data] of Object.entries(result.data.channels)) {
         if (imConfig.value[provider]) {
+          console.log(`[AgentEdit] Setting ${provider} config:`, data)
           imConfig.value[provider].enabled = data.enabled || false
           imConfig.value[provider].config = { ...imConfig.value[provider].config, ...data.config }
           
@@ -1029,9 +1066,15 @@ const loadIMConfig = async () => {
           }
         }
       }
+    } else {
+      console.log(`[AgentEdit] No channels in response, keeping default empty config`)
     }
+    
+    console.log(`[AgentEdit] Final imConfig:`, JSON.parse(JSON.stringify(imConfig.value)))
   } catch (e) {
     console.error('[AgentEdit] Failed to load IM config:', e)
+    // On error, ensure config is reset to default
+    imConfig.value = getDefaultIMConfig()
   }
 }
 
@@ -1224,6 +1267,12 @@ const handleScroll = () => {
 
 // Initialize
 onMounted(() => {
+  console.log('[AgentEdit] Component mounted, agent:', props.agent?.id)
+  
+  // Always reset IM config on mount (component might be reused)
+  console.log('[AgentEdit] Resetting IM config on mount')
+  imConfig.value = getDefaultIMConfig()
+  
   store.initForm(props.agent)
   if (contentRef.value) {
     contentRef.value.addEventListener('scroll', handleScroll, { passive: true })
@@ -1241,6 +1290,12 @@ onBeforeUnmount(() => {
 
 // Watch agent changes
 watch(() => props.agent, (newAgent) => {
+  console.log('[AgentEdit] Agent changed:', newAgent?.id)
+  
+  // Always reset IM config when agent changes
+  console.log('[AgentEdit] Resetting IM config on agent change')
+  imConfig.value = getDefaultIMConfig()
+  
   const isIdUpdate = newAgent && newAgent.id && store.formData.id === null && newAgent.name === store.formData.name
   const isSameAgent = newAgent && store.formData.id === newAgent.id
   
