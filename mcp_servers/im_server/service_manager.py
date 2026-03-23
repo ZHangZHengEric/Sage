@@ -521,7 +521,7 @@ class IMServiceManager:
         key = self._make_key(sage_user_id, "feishu")
         
         try:
-            from .providers.feishu import FeishuWebSocketClient
+            from .providers.feishu import FeishuWebSocketClient, FeishuProvider
             
             app_id = config.get('app_id')
             app_secret = config.get('app_secret')
@@ -529,8 +529,13 @@ class IMServiceManager:
             if not app_id or not app_secret:
                 raise ValueError("Feishu app_id and app_secret required")
             
-            # Create message handler for this channel
-            message_handler = self._make_message_handler(sage_user_id, "feishu")
+            # Create provider instance for file download
+            provider_instance = FeishuProvider(config)
+            
+            # Create message handler with file download support
+            message_handler = self._make_feishu_message_handler(
+                sage_user_id, provider_instance
+            )
             
             # Create and start client
             client = FeishuWebSocketClient(app_id, app_secret, message_handler)
@@ -540,6 +545,7 @@ class IMServiceManager:
             with self._lock:
                 if key in self._connections:
                     self._connections[key].status = ChannelStatus.CONNECTED
+                    self._connections[key].provider = provider_instance
             
             logger.info(f"[ServiceManager] Feishu channel {key} connected")
             
@@ -557,6 +563,110 @@ class IMServiceManager:
                     self._connections[key].status = ChannelStatus.ERROR
                     self._connections[key].error_message = str(e)
             raise
+    
+    def _make_feishu_message_handler(self, sage_user_id: str, provider: Any):
+        """
+        Create Feishu message handler with file download support.
+        """
+        import os
+        from pathlib import Path
+        
+        async def handler(message: Dict[str, Any]):
+            """Handle incoming Feishu message with file download."""
+            try:
+                logger.info(f"[ServiceManager] Feishu handler: {message}")
+                
+                msg_type = message.get('msg_type')
+                
+                # Check if it's a file/image message that needs download
+                if msg_type == 'file':
+                    content = message.get('content', {})
+                    file_key = content.get('file_key')
+                    file_name = content.get('file_name', 'unknown')
+                    message_id = message.get('message_id')
+                    
+                    if file_key and message_id:
+                        logger.info(f"[ServiceManager] Feishu file message detected: {file_name}, file_key={file_key}")
+                        
+                        # Determine save directory
+                        sage_home = Path.home() / ".sage"
+                        chat_type = "group" if message.get('chat_id') else "private"
+                        save_dir = sage_home / "agents" / sage_user_id / "IM" / "feishu" / chat_type
+                        
+                        logger.info(f"[ServiceManager] Downloading Feishu file: {file_name}")
+                        
+                        # Download file using provider
+                        download_result = await provider.download_file(
+                            file_key=file_key,
+                            message_id=message_id,
+                            save_dir=str(save_dir),
+                            file_name=file_name
+                        )
+                        
+                        if download_result.get('success'):
+                            local_path = download_result.get('file_path')
+                            file_size = download_result.get('file_size', 0)
+                            
+                            logger.info(f"[ServiceManager] Feishu file downloaded: {local_path}, size={file_size}")
+                            
+                            # Get mime type
+                            mime_type = self._get_mime_type(local_path)
+                            
+                            # Update message with file info
+                            message['file_info'] = {
+                                'name': file_name,
+                                'size': file_size,
+                                'mime_type': mime_type,
+                                'local_path': local_path
+                            }
+                            
+                            # Build message content based on file type
+                            file_content_text = ""
+                            
+                            # For text files, read content
+                            if mime_type and (mime_type.startswith('text/') or 
+                                             mime_type == 'application/json' or
+                                             mime_type == 'application/javascript'):
+                                try:
+                                    with open(local_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                        file_content = f.read()
+                                    if file_content:
+                                        file_content_text = f"\n\n[文件内容]:\n{file_content[:10000]}"
+                                        logger.info(f"[ServiceManager] Added text file content, length={len(file_content)}")
+                                except Exception as e:
+                                    logger.warning(f"[ServiceManager] Failed to read text file: {e}")
+                            else:
+                                # For non-text files, add a note
+                                file_content_text = f"\n\n[文件类型: {mime_type or '未知'}，已保存到工作区]"
+                            
+                            # Update message content with file info
+                            message['content'] = {
+                                'text': f"[文件: {file_name}]{file_content_text}"
+                            }
+                            
+                        else:
+                            error = download_result.get('error', 'Unknown error')
+                            logger.error(f"[ServiceManager] Failed to download Feishu file: {error}")
+                            message['file_info'] = {
+                                'name': file_name,
+                                'size': 0,
+                                'mime_type': 'unknown',
+                                'local_path': 'unknown',
+                                'download_error': error
+                            }
+                            # Still provide a text content so it's not empty
+                            message['content'] = {
+                                'text': f"[文件: {file_name}]\n\n[文件下载失败: {error}]"
+                            }
+                
+                # Now call the standard message handler
+                standard_handler = self._make_message_handler(sage_user_id, "feishu")
+                await standard_handler(message)
+                
+            except Exception as e:
+                logger.error(f"[ServiceManager] Error in Feishu message handler: {e}", exc_info=True)
+        
+        return handler
     
     async def _run_dingtalk_channel(self, sage_user_id: str, config: Dict[str, Any]):
         """Run DingTalk channel."""
