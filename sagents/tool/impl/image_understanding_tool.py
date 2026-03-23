@@ -65,24 +65,49 @@ class ImageUnderstandingTool:
 
         Args:
             sandbox: 沙箱实例
-            image_path: 图片虚拟路径
+            image_path: 图片虚拟路径或主机绝对路径
 
         Returns:
             str: base64 编码的图片数据
         """
         try:
+            # 检查文件是否存在
+            exists = await sandbox.file_exists(image_path)
+            if not exists:
+                raise ImageUnderstandingError(f"图片文件不存在: {image_path}")
+
             # 使用 base64 命令读取图片
+            # macOS 的 base64 语法不同，需要使用 -i 指定输入文件
+            # Linux 可以直接使用 -w 0 文件路径
+            import sys
+            if sys.platform == 'darwin':
+                # macOS: 使用 -i 指定输入文件
+                command = f"base64 -i '{image_path}'"
+            else:
+                # Linux: 使用 -w 0 禁用换行
+                command = f"base64 -w 0 '{image_path}'"
+
+            logger.info(f"执行命令: {command}")
             result = await sandbox.execute_command(
-                command=f"base64 -w 0 {image_path}",
+                command=command,
                 timeout=30
             )
 
+            logger.info(f"命令执行结果: success={result.success}, return_code={result.return_code}, stdout长度={len(result.stdout) if result.stdout else 0}, stderr={result.stderr}")
+
             if not result.success:
-                raise ImageUnderstandingError(f"读取图片命令失败: {result.stderr}")
+                raise ImageUnderstandingError(f"读取图片命令失败: return_code={result.return_code}, stderr={result.stderr}, stdout={result.stdout[:200] if result.stdout else 'empty'}")
+
+            if not result.stdout or not result.stdout.strip():
+                raise ImageUnderstandingError(f"读取图片命令返回空数据: return_code={result.return_code}, stderr={result.stderr}")
 
             return result.stdout.strip()
 
+        except ImageUnderstandingError:
+            raise
         except Exception as e:
+            import traceback
+            logger.error(f"从沙箱读取图片失败: {e}\n{traceback.format_exc()}")
             raise ImageUnderstandingError(f"从沙箱读取图片失败: {e}")
 
     def _resize_image_if_needed(self, image_data: bytes, max_resolution: int = 512) -> bytes:
