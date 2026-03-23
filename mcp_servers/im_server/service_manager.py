@@ -620,11 +620,12 @@ class IMServiceManager:
                 
                 # Check if it's a file/image message that needs download
                 file_info = message.get('file_info')
+                logger.info(f"[ServiceManager] DingTalk file_info check: {file_info}")
                 if file_info and file_info.get('download_code'):
-                    logger.info(f"[ServiceManager] DingTalk file message detected: {file_info}")
+                    download_code = file_info.get('download_code')
+                    logger.info(f"[ServiceManager] DingTalk file message detected, download_code: {download_code}")
                     
                     # Download the file
-                    download_code = file_info.get('download_code')
                     file_name = file_info.get('file_name', 'unknown')
                     file_type = file_info.get('type', 'file')
                     
@@ -635,64 +636,104 @@ class IMServiceManager:
                     
                     logger.info(f"[ServiceManager] Downloading DingTalk file: {file_name}, code={download_code[:20]}...")
                     
-                    # Download file using provider
-                    download_result = await provider.download_file(
-                        download_code=download_code,
-                        save_dir=str(save_dir),
-                        file_name=file_name
-                    )
-                    
-                    if download_result.get('success'):
-                        local_path = download_result.get('file_path')
-                        file_size = download_result.get('file_size', 0)
+                    try:
+                        # Download file using provider
+                        download_result = await provider.download_file(
+                            download_code=download_code,
+                            save_dir=str(save_dir),
+                            file_name=file_name
+                        )
                         
-                        logger.info(f"[ServiceManager] DingTalk file downloaded: {local_path}, size={file_size}")
-                        
-                        # Update file_info with downloaded file details
-                        # This format matches what agent_client expects
+                        if download_result.get('success'):
+                            local_path = download_result.get('file_path')
+                            file_size = download_result.get('file_size', 0)
+                            
+                            logger.info(f"[ServiceManager] DingTalk file downloaded: {local_path}, size={file_size}")
+                            
+                            # Update file_info with downloaded file details
+                            # This format matches what agent_client expects
+                            message['file_info'] = {
+                                'name': file_name,
+                                'size': file_size,
+                                'mime_type': None,  # Will be detected by agent
+                                'local_path': local_path
+                            }
+                            logger.info(f"[ServiceManager] Updated file_info: {message['file_info']}")
+                            
+                            # Handle additional images from rich text messages
+                            additional_images = file_info.get('additional_images', [])
+                            if additional_images:
+                                logger.info(f"[ServiceManager] Downloading {len(additional_images)} additional images from rich text")
+                                downloaded_images = []
+                                for idx, add_download_code in enumerate(additional_images):
+                                    add_file_name = f"rich_text_image_{idx + 1}.jpg"
+                                    add_download_result = await provider.download_file(
+                                        download_code=add_download_code,
+                                        save_dir=str(save_dir),
+                                        file_name=add_file_name
+                                    )
+                                    if add_download_result.get('success'):
+                                        downloaded_images.append({
+                                            'name': add_file_name,
+                                            'size': add_download_result.get('file_size', 0),
+                                            'mime_type': 'image/jpeg',
+                                            'local_path': add_download_result.get('file_path')
+                                        })
+                                if downloaded_images:
+                                    message['file_info']['additional_files'] = downloaded_images
+                                    logger.info(f"[ServiceManager] Downloaded {len(downloaded_images)} additional images")
+                            
+                            # For text files, read content and add to message
+                            mime_type = self._get_mime_type(local_path)
+                            if mime_type and (mime_type.startswith('text/') or 
+                                             mime_type == 'application/json' or
+                                             mime_type == 'application/javascript' or
+                                             mime_type == 'application/xml'):
+                                try:
+                                    with open(local_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                        file_content = f.read()
+                                    if file_content:
+                                        # Append file content to message text
+                                        original_content = message.get('content', {})
+                                        if isinstance(original_content, dict):
+                                            original_text = original_content.get('text', '')
+                                        else:
+                                            original_text = str(original_content)
+                                        
+                                        # Truncate if too long
+                                        max_chars = 10000
+                                        if len(file_content) > max_chars:
+                                            file_content = file_content[:max_chars] + f"\n\n[文件已截断，共 {len(file_content)} 字符]"
+                                        
+                                        message['content'] = {
+                                            'text': f"{original_text}\n\n[文件内容]:\n{file_content}"
+                                        }
+                                        logger.info(f"[ServiceManager] Added text file content, length={len(file_content)}")
+                                except Exception as e:
+                                    logger.warning(f"[ServiceManager] Failed to read text file: {e}")
+                            
+                            # Update mime_type after detection
+                            message['file_info']['mime_type'] = mime_type
+                        else:
+                            error = download_result.get('error', 'Unknown error')
+                            logger.error(f"[ServiceManager] Failed to download DingTalk file: {error}")
+                            # Keep original file_info but mark as failed
+                            message['file_info'] = {
+                                'name': file_name,
+                                'size': 0,
+                                'mime_type': 'unknown',
+                                'local_path': 'unknown',
+                                'download_error': error
+                            }
+                    except Exception as download_error:
+                        logger.error(f"[ServiceManager] Exception during file download: {download_error}", exc_info=True)
                         message['file_info'] = {
                             'name': file_name,
-                            'size': file_size,
-                            'mime_type': None,  # Will be detected by agent
-                            'local_path': local_path
+                            'size': 0,
+                            'mime_type': 'unknown',
+                            'local_path': 'unknown',
+                            'download_error': str(download_error)
                         }
-                        
-                        # For text files, read content and add to message
-                        mime_type = self._get_mime_type(local_path)
-                        if mime_type and (mime_type.startswith('text/') or 
-                                         mime_type == 'application/json' or
-                                         mime_type == 'application/javascript' or
-                                         mime_type == 'application/xml'):
-                            try:
-                                with open(local_path, 'r', encoding='utf-8', errors='ignore') as f:
-                                    file_content = f.read()
-                                if file_content:
-                                    # Append file content to message text
-                                    original_content = message.get('content', {})
-                                    if isinstance(original_content, dict):
-                                        original_text = original_content.get('text', '')
-                                    else:
-                                        original_text = str(original_content)
-                                    
-                                    # Truncate if too long
-                                    max_chars = 10000
-                                    if len(file_content) > max_chars:
-                                        file_content = file_content[:max_chars] + f"\n\n[文件已截断，共 {len(file_content)} 字符]"
-                                    
-                                    message['content'] = {
-                                        'text': f"{original_text}\n\n[文件内容]:\n{file_content}"
-                                    }
-                                    logger.info(f"[ServiceManager] Added text file content, length={len(file_content)}")
-                            except Exception as e:
-                                logger.warning(f"[ServiceManager] Failed to read text file: {e}")
-                        
-                        # Update mime_type after detection
-                        message['file_info']['mime_type'] = mime_type
-                    else:
-                        error = download_result.get('error', 'Unknown error')
-                        logger.error(f"[ServiceManager] Failed to download DingTalk file: {error}")
-                        # Keep original file_info but mark as failed
-                        message['file_info']['download_error'] = error
                 
                 # Now call the standard message handler
                 standard_handler = self._make_message_handler(sage_user_id, "dingtalk")
