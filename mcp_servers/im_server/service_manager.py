@@ -563,7 +563,7 @@ class IMServiceManager:
         key = self._make_key(sage_user_id, "dingtalk")
         
         try:
-            from .providers.dingtalk import DingTalkStreamClient
+            from .providers.dingtalk import DingTalkStreamClient, DingTalkProvider
             
             client_id = config.get('client_id') or config.get('app_key')
             client_secret = config.get('client_secret') or config.get('app_secret')
@@ -571,8 +571,13 @@ class IMServiceManager:
             if not client_id or not client_secret:
                 raise ValueError("DingTalk client_id and client_secret required")
             
-            # Create message handler for this channel
-            message_handler = self._make_message_handler(sage_user_id, "dingtalk")
+            # Create provider instance for file download
+            provider_instance = DingTalkProvider(config)
+            
+            # Create message handler with file download support
+            message_handler = self._make_dingtalk_message_handler(
+                sage_user_id, provider_instance
+            )
             
             # Create and start client
             client = DingTalkStreamClient(client_id, client_secret, message_handler)
@@ -582,6 +587,7 @@ class IMServiceManager:
             with self._lock:
                 if key in self._connections:
                     self._connections[key].status = ChannelStatus.CONNECTED
+                    self._connections[key].provider = provider_instance
             
             logger.info(f"[ServiceManager] DingTalk channel {key} connected")
             
@@ -599,6 +605,109 @@ class IMServiceManager:
                     self._connections[key].status = ChannelStatus.ERROR
                     self._connections[key].error_message = str(e)
             raise
+    
+    def _make_dingtalk_message_handler(self, sage_user_id: str, provider: Any):
+        """
+        Create DingTalk message handler with file download support.
+        """
+        import os
+        from pathlib import Path
+        
+        async def handler(message: Dict[str, Any]):
+            """Handle incoming DingTalk message with file download."""
+            try:
+                logger.info(f"[ServiceManager] DingTalk handler: {message}")
+                
+                # Check if it's a file/image message that needs download
+                file_info = message.get('file_info')
+                if file_info and file_info.get('download_code'):
+                    logger.info(f"[ServiceManager] DingTalk file message detected: {file_info}")
+                    
+                    # Download the file
+                    download_code = file_info.get('download_code')
+                    file_name = file_info.get('file_name', 'unknown')
+                    file_type = file_info.get('type', 'file')
+                    
+                    # Determine save directory
+                    sage_home = Path.home() / ".sage"
+                    chat_type = "group" if message.get('chat_id') else "private"
+                    save_dir = sage_home / "agents" / sage_user_id / "IM" / "dingtalk" / chat_type
+                    
+                    logger.info(f"[ServiceManager] Downloading DingTalk file: {file_name}, code={download_code[:20]}...")
+                    
+                    # Download file using provider
+                    download_result = await provider.download_file(
+                        download_code=download_code,
+                        save_dir=str(save_dir),
+                        file_name=file_name
+                    )
+                    
+                    if download_result.get('success'):
+                        local_path = download_result.get('file_path')
+                        file_size = download_result.get('file_size', 0)
+                        
+                        logger.info(f"[ServiceManager] DingTalk file downloaded: {local_path}, size={file_size}")
+                        
+                        # Update file_info with downloaded file details
+                        # This format matches what agent_client expects
+                        message['file_info'] = {
+                            'name': file_name,
+                            'size': file_size,
+                            'mime_type': None,  # Will be detected by agent
+                            'local_path': local_path
+                        }
+                        
+                        # For text files, read content and add to message
+                        mime_type = self._get_mime_type(local_path)
+                        if mime_type and (mime_type.startswith('text/') or 
+                                         mime_type == 'application/json' or
+                                         mime_type == 'application/javascript' or
+                                         mime_type == 'application/xml'):
+                            try:
+                                with open(local_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    file_content = f.read()
+                                if file_content:
+                                    # Append file content to message text
+                                    original_content = message.get('content', {})
+                                    if isinstance(original_content, dict):
+                                        original_text = original_content.get('text', '')
+                                    else:
+                                        original_text = str(original_content)
+                                    
+                                    # Truncate if too long
+                                    max_chars = 10000
+                                    if len(file_content) > max_chars:
+                                        file_content = file_content[:max_chars] + f"\n\n[文件已截断，共 {len(file_content)} 字符]"
+                                    
+                                    message['content'] = {
+                                        'text': f"{original_text}\n\n[文件内容]:\n{file_content}"
+                                    }
+                                    logger.info(f"[ServiceManager] Added text file content, length={len(file_content)}")
+                            except Exception as e:
+                                logger.warning(f"[ServiceManager] Failed to read text file: {e}")
+                        
+                        # Update mime_type after detection
+                        message['file_info']['mime_type'] = mime_type
+                    else:
+                        error = download_result.get('error', 'Unknown error')
+                        logger.error(f"[ServiceManager] Failed to download DingTalk file: {error}")
+                        # Keep original file_info but mark as failed
+                        message['file_info']['download_error'] = error
+                
+                # Now call the standard message handler
+                standard_handler = self._make_message_handler(sage_user_id, "dingtalk")
+                await standard_handler(message)
+                
+            except Exception as e:
+                logger.error(f"[ServiceManager] Error in DingTalk message handler: {e}", exc_info=True)
+        
+        return handler
+    
+    def _get_mime_type(self, file_path: str) -> Optional[str]:
+        """Get MIME type for a file."""
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(file_path)
+        return mime_type
     
     async def _run_imessage_channel(self, sage_user_id: str, config: Dict[str, Any]):
         """Run iMessage channel."""
