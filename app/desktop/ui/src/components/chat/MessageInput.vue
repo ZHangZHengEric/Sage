@@ -107,13 +107,13 @@
         <Button
           type="submit"
           size="icon"
-          :disabled="!inputValue.trim() && uploadedFiles.length === 0"
+          :disabled="!isLoading && !inputValue.trim() && uploadedFiles.length === 0"
           class="h-9 w-9 rounded-full transition-all duration-200"
           :class="[
-            !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
+            !isLoading && !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
             isLoading ? 'bg-destructive hover:bg-destructive/90' : ''
           ]"
-          :title="isLoading ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.sendTitle')"
+          :title="isLoading ? (inputValue.trim() || uploadedFiles.length > 0 ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
         >
           <svg v-if="!isLoading" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -172,9 +172,21 @@ const skillKeyword = ref('')
 const currentSkill = ref(null)
 
 const filteredSkills = computed(() => {
-  if (!skillKeyword.value) return skills.value
+  // 获取 agent 配置的可用技能列表
+  const agentAvailableSkills = props.selectedAgent?.availableSkills || []
+  
+  // 先根据 agent 配置过滤技能
+  let filtered = skills.value
+  if (agentAvailableSkills.length > 0) {
+    filtered = skills.value.filter(skill =>
+      agentAvailableSkills.includes(skill.name)
+    )
+  }
+  
+  // 再根据关键词过滤
+  if (!skillKeyword.value) return filtered
   const lowerKeyword = skillKeyword.value.toLowerCase()
-  return skills.value.filter(skill =>
+  return filtered.filter(skill =>
     (skill.name || '').toLowerCase().startsWith(lowerKeyword)
   )
 })
@@ -403,6 +415,89 @@ watch(inputValue, async (newVal) => {
 // 处理表单提交
 const handleSubmit = (e) => {
   e.preventDefault()
+  
+  // 如果正在生成，处理中断逻辑
+  if (props.isLoading) {
+    // 有内容时：中断并发送；无内容时：仅中断
+    const hasContent = inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value
+    
+    if (hasContent) {
+      // 有内容：中断并发送新消息
+      let messageContent = inputValue.value.trim()
+
+      // 如果有选中的技能，添加到消息头部
+      if (currentSkill.value) {
+        messageContent = `<skill>${currentSkill.value}</skill> ${messageContent}`
+      }
+
+      // 构建多模态内容格式
+      const multimodalContent = []
+
+      // 添加文本内容
+      if (messageContent) {
+        multimodalContent.push({ type: 'text', text: messageContent })
+      }
+
+      // 处理文件引用链接（包括图片和非图片文件）
+      const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
+
+      if (isMultimodalEnabled) {
+        // 添加图片内容到 multimodalContent（用于多模态模式）
+        const imageFiles = uploadedFiles.value.filter(f => f.url && f.type === 'image')
+        for (const img of imageFiles) {
+          multimodalContent.push({
+            type: 'image_url',
+            image_url: { url: img.url }
+          })
+        }
+      }
+
+      // 所有文件（包括图片）都添加 Markdown 链接到 messageContent
+      const allFiles = uploadedFiles.value.filter(f => f.url)
+      if (allFiles.length > 0) {
+        const fileInfos = allFiles.map(f => {
+          let cleanName = f.name || '文件'
+          cleanName = cleanName.replace(/_\d{14}\.([^.]+)$/, '.$1')
+          cleanName = cleanName.replace(/_\d{14}_/, '_')
+          return { url: f.url, name: cleanName }
+        })
+
+        if (messageContent && fileInfos.length > 0) {
+          messageContent += '\n\n'
+        }
+        const markdownLinks = fileInfos.map(f => `[${f.name}](${f.url})`)
+        messageContent += markdownLinks.join('\n')
+
+        // 更新 multimodalContent 中的文本（如果存在）
+        if (multimodalContent.length > 0 && multimodalContent[0].type === 'text') {
+          multimodalContent[0].text = messageContent
+        }
+      }
+
+      // 发送消息，同时传递普通格式和多模态格式
+      if (messageContent || multimodalContent.length > 0) {
+        const pendingMessage = messageContent
+        const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
+        
+        // 清空输入框，准备发送
+        inputValue.value = ''
+        uploadedFiles.value = []
+        currentSkill.value = null
+        
+        // 发送消息，传入 needInterrupt 标志
+        emit('sendMessage', pendingMessage, {
+          multimodalContent: pendingMultimodal,
+          needInterrupt: true
+        })
+      }
+    } else {
+      // 无内容：仅中断
+      emit('stopGeneration')
+    }
+    return
+  }
+  
+  // 正常发送消息逻辑
   if ((inputValue.value.trim() || uploadedFiles.value.length > 0 || currentSkill.value)) {
     let messageContent = inputValue.value.trim()
 
@@ -418,7 +513,6 @@ const handleSubmit = (e) => {
     if (messageContent) {
       multimodalContent.push({ type: 'text', text: messageContent })
     }
-
 
     // 处理文件引用链接（包括图片和非图片文件）
     const isMultimodalEnabled = props.selectedAgent?.enableMultimodal === true
@@ -458,7 +552,6 @@ const handleSubmit = (e) => {
 
     // 发送消息，同时传递普通格式和多模态格式
     if (messageContent || multimodalContent.length > 0) {
-      // 如果正在生成，先中断再发送
       const pendingMessage = messageContent
       const pendingMultimodal = multimodalContent.length > 0 ? multimodalContent : null
       
@@ -467,10 +560,10 @@ const handleSubmit = (e) => {
       uploadedFiles.value = []
       currentSkill.value = null
       
-      // 发送消息，传入 needInterrupt 标志
+      // 发送消息
       emit('sendMessage', pendingMessage, {
         multimodalContent: pendingMultimodal,
-        needInterrupt: props.isLoading
+        needInterrupt: false
       })
     }
   }

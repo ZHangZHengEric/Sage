@@ -211,7 +211,7 @@
       </div>
 
       <!-- 右侧面板区域 -->
-      <TransitionGroup name="panel">
+      <Transition name="panel">
         <WorkspacePanel
           v-if="showWorkspace"
           ref="workspacePanelRef"
@@ -223,24 +223,28 @@
           @upload-files="handleUploadFiles"
           @close="showWorkspace = false"
         />
+      </Transition>
 
+      <Transition name="panel">
         <ConfigPanel
-          v-else-if="showSettings"
+          v-if="showSettings"
           :agents="agents"
           :selected-agent="selectedAgent"
           :config="config"
           @config-change="updateConfig"
           @close="showSettings = false"
         />
+      </Transition>
 
+      <Transition name="panel">
         <WorkbenchPreview
-          v-else-if="showWorkbench && currentSessionId"
+          v-if="showWorkbench && currentSessionId"
           :key="`workbench-${currentSessionId}`"
           :messages="filteredMessages"
           :session-id="currentSessionId"
           @close="showWorkbench = false"
         />
-      </TransitionGroup>
+      </Transition>
 
       <SubSessionPanel
         :is-open="!!activeSubSessionId"

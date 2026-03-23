@@ -61,7 +61,7 @@
 </template>
 
 <script setup>
-import { watch, computed } from 'vue'
+import { watch, computed, onUnmounted, ref } from 'vue'
 import { Monitor } from 'lucide-vue-next'
 import ResizablePanel from './ResizablePanel.vue'
 import WorkbenchTimeline from './workbench/WorkbenchTimeline.vue'
@@ -80,19 +80,22 @@ const props = defineProps({
   }
 })
 
-defineEmits(['close'])
+const emit = defineEmits(['close'])
 
 const { t } = useLanguage()
 const workbenchStore = useWorkbenchStore()
+const isDestroyed = ref(false)
 
 // 本地缓存过滤后的列表，避免频繁访问 store 的计算属性
 const filteredItemsList = computed(() => {
+  if (isDestroyed.value) return []
   // 过滤掉 null 或 undefined 的项
   return (workbenchStore.filteredItems || []).filter(item => item && item.type)
 })
 
 // 当前选中的 item
 const currentItemData = computed(() => {
+  if (isDestroyed.value) return null
   return workbenchStore.currentItem
 })
 
@@ -107,10 +110,15 @@ const currentSessionId = computed(() => {
 // 监听会话变化，更新工作台的 sessionId
 watch(() => currentSessionId.value, (newSessionId) => {
   console.log('[WorkbenchPreview] Session changed:', newSessionId)
-  if (newSessionId) {
+  if (newSessionId && !isDestroyed.value) {
     workbenchStore.setSessionId(newSessionId)
   }
 }, { immediate: true })
+
+// 组件销毁时标记
+onUnmounted(() => {
+  isDestroyed.value = true
+})
 
 const onStep = (index) => {
   console.log('Workbench: Step to', index)
