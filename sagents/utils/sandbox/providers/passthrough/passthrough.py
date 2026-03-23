@@ -43,12 +43,16 @@ class PassthroughSandboxProvider(ISandboxHandle):
         sandbox_id: str,
         workspace: str = ".",
         mount_paths: Optional[List[MountPath]] = None,
+        virtual_workspace: str = "/sage-workspace",
     ):
         self._sandbox_id = sandbox_id
         self._workspace = os.path.abspath(workspace)
+        self._virtual_workspace = virtual_workspace.rstrip("/") or "/"
         self._mount_paths = mount_paths or []
         # 路径映射表，支持动态修改
         self._dynamic_mounts: Dict[str, str] = {}
+        for mount in self._mount_paths:
+            self.add_mount(mount.host_path, mount.sandbox_path)
 
     @property
     def sandbox_type(self) -> SandboxType:
@@ -60,7 +64,7 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     @property
     def workspace_path(self) -> str:
-        return self._workspace
+        return self._virtual_workspace
 
     @property
     def host_workspace_path(self) -> str:
@@ -68,7 +72,17 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     def add_mount(self, host_path: str, sandbox_path: str) -> None:
         """动态添加路径映射"""
-        self._dynamic_mounts[sandbox_path] = host_path
+        normalized_virtual = sandbox_path.rstrip("/") or "/"
+        self._dynamic_mounts[normalized_virtual] = os.path.abspath(host_path)
+
+    def _iter_virtual_mappings(self) -> List[tuple[str, str]]:
+        mappings = [(self._virtual_workspace, self._workspace), *self._dynamic_mounts.items()]
+        return sorted(mappings, key=lambda item: len(item[0]), reverse=True)
+
+    def _iter_host_mappings(self) -> List[tuple[str, str]]:
+        mappings = [(self._virtual_workspace, self._workspace), *self._dynamic_mounts.items()]
+        host_first = [(host, virtual) for virtual, host in mappings]
+        return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
 
     def remove_mount(self, sandbox_path: str) -> None:
         """动态移除路径映射"""
@@ -77,28 +91,27 @@ class PassthroughSandboxProvider(ISandboxHandle):
 
     def to_host_path(self, virtual_path: str) -> str:
         """虚拟路径转宿主机路径，支持动态映射"""
-        # 先检查动态映射
-        for sandbox_path, host_path in self._dynamic_mounts.items():
-            if virtual_path.startswith(sandbox_path):
+        for sandbox_path, host_path in self._iter_virtual_mappings():
+            if virtual_path == sandbox_path:
+                logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {host_path}")
+                return host_path
+            if virtual_path.startswith(sandbox_path + "/"):
                 rel_path = virtual_path[len(sandbox_path):].lstrip("/")
                 result = os.path.join(host_path, rel_path)
-                logger.debug(f"PassthroughSandboxProvider: Dynamic mount conversion: {virtual_path} -> {result}")
+                logger.debug(f"PassthroughSandboxProvider: Path conversion: {virtual_path} -> {result}")
                 return result
-
-        # 默认工作区映射
-        if virtual_path.startswith("/sage-workspace"):
-            rel_path = virtual_path[len("/sage-workspace"):].lstrip("/")
-            result = os.path.join(self._workspace, rel_path)
-            logger.debug(f"PassthroughSandboxProvider: Workspace conversion: {virtual_path} -> {result}")
-            return result
 
         return virtual_path
 
     def to_virtual_path(self, host_path: str) -> str:
         """宿主机路径转虚拟路径"""
-        if host_path.startswith(self._workspace):
-            rel_path = host_path[len(self._workspace):].lstrip("/")
-            return os.path.join("/sage-workspace", rel_path)
+        normalized_host = os.path.abspath(host_path)
+        for mapped_host, mapped_virtual in self._iter_host_mappings():
+            if normalized_host == mapped_host:
+                return mapped_virtual
+            if normalized_host.startswith(mapped_host + os.sep):
+                rel_path = normalized_host[len(mapped_host):].lstrip("/")
+                return os.path.join(mapped_virtual, rel_path)
         return host_path
 
     async def initialize(self) -> None:
