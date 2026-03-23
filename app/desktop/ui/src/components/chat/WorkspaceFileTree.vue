@@ -56,8 +56,8 @@
 
     <div v-if="item.is_directory && isExpanded && item.children && item.children.length > 0">
       <WorkspaceFileTree
-        v-for="child in item.children"
-        :key="child?.path || Math.random()"
+        v-for="(child, index) in item.children"
+        :key="child?.path || `${level}-${index}`"
         :item="child"
         :level="level + 1"
         @download="$emit('download', $event)"

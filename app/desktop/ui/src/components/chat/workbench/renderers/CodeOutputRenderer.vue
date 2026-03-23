@@ -47,6 +47,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Copy, Check } from 'lucide-vue-next'
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
+import { useLanguage } from '../../../../utils/i18n.js'
+
+const { t } = useLanguage()
 
 const props = defineProps({
   item: {
