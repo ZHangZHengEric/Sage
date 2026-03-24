@@ -18,7 +18,7 @@ import datetime
 import time
 import re
 import uuid
-from typing import Dict, List, Optional, Any, Union, Sequence, cast
+from typing import Dict, List, Optional, Any, Union, Sequence
 from copy import deepcopy
 from sagents.utils.logger import logger
 from sagents.context.messages.context_budget import ContextBudgetManager
@@ -639,55 +639,94 @@ class MessageManager:
         logger.info(f"AgentBase: 转换后字符串长度: {MessageManager._calculate_str_token_length_static(result)}")
         return result
 
-    def filter_messages(self,context_length_limited:int=10000,
-                    accept_message_type:List[MessageType]=[],
-                    recent_turns:int=0)->List[MessageChunk]:
+    @staticmethod
+    def _is_compress_history_tool_call(msg: MessageChunk) -> bool:
         """
-        过滤消息，返回符合所有条件的消息列表,深拷贝
-        
+        判断消息是否为调用 compress_conversation_history 工具的 Assistant 消息
+
         Args:
-            context_length_limited: 上下文长度限制，0表示不限制
-            accept_message_type: 接受的消息类型集合，空表示接受所有类型
-            recent_turns: 最近的对话轮数，0表示不限制
+            msg: 消息对象
 
         Returns:
-            过滤后的消息列表
+            bool: 是否为调用压缩历史工具的消息
         """
-        chat_list = []
-        for msg in self.messages:
-            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
-                chat_list.append([msg])
-            elif msg.role != MessageRole.USER.value:
-                chat_list[-1].append(msg)
-        # 过滤最近轮数
-        if recent_turns > 0:
-            chat_list = chat_list[-recent_turns:]
-        # 过滤消息类型
-        if accept_message_type:
-            chat_list = [chat for chat in chat_list if chat[0].type in accept_message_type]
+        # 只检查 Assistant 角色的消息
+        if msg.role != MessageRole.ASSISTANT.value:
+            return False
 
-        # 上下文长度 计算 每个 chatlist 的item 的长度。倒序计算，直到超过上下文长度限制。
-        accept_chat_list = []
-        for chat in chat_list[::-1]:
-            context_length = sum([MessageManager.calculate_str_token_length(msg.content or '') for msg in chat])
-            if context_length <= context_length_limited:
-                accept_chat_list.append(chat)
-                context_length_limited -= context_length
+        # 检查 tool_calls 字段
+        if msg.tool_calls is None:
+            return False
+
+        for tool_call in msg.tool_calls:
+            # 获取工具名称
+            if hasattr(tool_call, 'function'):
+                tool_name = getattr(tool_call.function, 'name', None)
+            elif isinstance(tool_call, dict):
+                tool_name = tool_call.get('function', {}).get('name')
             else:
+                tool_name = None
+
+            if tool_name == 'compress_conversation_history':
+                return True
+
+        return False
+
+    @staticmethod
+    def extract_messages_for_inference(messages: List[MessageChunk]) -> List[MessageChunk]:
+        """
+        从消息列表中提取用于推理的消息
+        类似 extract_all_context_messages，但用于任意输入的消息列表（而非 self.messages）
+
+        策略：
+        1. 检测 compress_conversation_history 工具调用
+        2. 如果找到，保留该工具调用对应的 User 消息、最后一个压缩工具及之后的消息
+        3. 如果没找到，返回所有消息
+
+        Args:
+            messages: 原始消息列表
+
+        Returns:
+            List[MessageChunk]: 提取后的消息列表
+        """
+        if not messages:
+            return []
+
+        # 从后往前查找最新的压缩工具调用
+        compression_tool_index = None
+        compression_tool_user_index = None
+
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if MessageManager._is_compress_history_tool_call(msg):
+                compression_tool_index = i
+                # 找到该工具调用对应的 User 消息（往前找）
+                for j in range(i - 1, -1, -1):
+                    if (messages[j].role == MessageRole.USER.value and
+                        messages[j].type == MessageType.NORMAL.value):
+                        compression_tool_user_index = j
+                        break
                 break
-        accept_chat_list = accept_chat_list[::-1]
-        accept_messages = []
-        for chat in accept_chat_list:
-            accept_messages.extend(chat)
-        
-        filtered_messages = deepcopy(accept_messages)
-        return filtered_messages
+
+        # 如果找到了压缩工具调用，构建新的消息列表
+        if compression_tool_index is not None and compression_tool_user_index is not None:
+            logger.info(f"MessageManager: 检测到压缩工具调用，保留 User 索引 {compression_tool_user_index} 及最后一个压缩工具")
+            # 构建新列表：User + 最后一个压缩工具及之后
+            return (
+                [messages[compression_tool_user_index]] +  # User 消息
+                messages[compression_tool_index:]  # 最后一个压缩工具及之后
+            )
+
+        # 没找到压缩工具，返回所有消息
+        return messages
 
     def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True, allowed_message_types: Optional[List[str]] = None) -> List[MessageChunk]:
         """
         提取所有有意义的上下文消息，包括用户消息和助手消息，最后一个消息对话，可选是否只提取用户消息，如果只提取用户消息，即是本次请求的上下文，否则带上本次执行已有内容
         
         注意：消息的长度限制由 context_budget_manager 在 prepare_history_split() 中通过 active_start_index 控制
+        
+        新增：检测 compress_conversation_history 工具结果，只取最新的压缩工具对应的 User 消息及之后的消息
         
         Args:
             recent_turns: 最近的对话轮数，0表示不限制
@@ -715,6 +754,38 @@ class MessageManager:
             active_messages = self.messages[self.active_start_index:]
         else:
             active_messages = self.messages
+        
+        # --- 新增：检测 compress_conversation_history 工具调用 ---
+        # 从后往前查找最新的压缩工具调用
+        # 策略：找到最后一个压缩工具调用，然后往前找到对应的 User 消息
+        # 保留该 User 消息、最后一个压缩工具及之后的消息
+        # 过滤掉该 User 和最后一个压缩工具之间的其他消息（包括前面的压缩工具）
+        compression_tool_index = None
+        compression_tool_user_index = None
+
+        for i in range(len(active_messages) - 1, -1, -1):
+            msg = active_messages[i]
+            if self._is_compress_history_tool_call(msg):
+                compression_tool_index = i
+                # 找到该工具调用对应的 User 消息（往前找）
+                for j in range(i - 1, -1, -1):
+                    if (active_messages[j].role == MessageRole.USER.value and
+                        active_messages[j].type == MessageType.NORMAL.value):
+                        compression_tool_user_index = j
+                        break
+                break
+
+        # 如果找到了压缩工具调用，构建新的消息列表
+        # 保留：User 消息 + 最后一个压缩工具及之后的消息
+        # 过滤掉：User 和最后一个压缩工具之间的其他消息
+        if compression_tool_index is not None and compression_tool_user_index is not None:
+            logger.info(f"MessageManager: 检测到压缩工具调用，保留 User 索引 {compression_tool_user_index} 及最后一个压缩工具")
+            # 构建新列表：User + 最后一个压缩工具及之后
+            active_messages = (
+                [active_messages[compression_tool_user_index]] +  # User 消息
+                active_messages[compression_tool_index:]  # 最后一个压缩工具及之后
+            )
+        # --- 检测结束 ---
             
         for msg in active_messages:
             if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
@@ -748,156 +819,6 @@ class MessageManager:
         total_tokens = MessageManager.calculate_messages_token_length(result_messages)
         logger.info(f"MessageManager: 提取所有上下文消息完成，最近轮数：{recent_turns}，是否只提取最后一个对话轮的用户消息：{last_turn_user_only}，消息数量：{len(result_messages)}，总token长度：{total_tokens}")
         return result_messages
-    
-    # def extract_all_user_and_final_answer_messages(self,recent_turns:int=0) -> List[MessageChunk]:
-    #     """
-    #     提取最近的用户消息和最终结果消息
-        
-    #     Args:
-    #         recent_turns: 最近的对话轮数，0表示不限制
-    #         max_length: 提取的最大长度，0表示不限制
-
-    #     Returns:
-    #         提取后的消息列表
-    #     """
-    #     # 提取逻辑是：
-    #     #   1. 提取user 以及该user 后面所有的 assistant消息
-    #     #   2. 查看assistant 的list，判断最后一个是不是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
-    
-    #     user_and_final_answer_messages = []
-        
-    #     # 先分成 chat_list = [[user,assistant,assistan]]
-    #     chat_list = []
-    #     for msg in self.messages:
-    #         if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
-    #             chat_list.append([msg])
-    #         elif msg.role != MessageRole.USER.value:
-    #             chat_list[-1].append(msg)
-        
-    #     # 遍历chat_list，判断最后一个assistant 是否是final answer，如果是，就提取，否则，就提取最后一个 do_subtask_result消息
-    #     if recent_turns > 0:
-    #         chat_list = chat_list[-recent_turns:]
-        
-    #     for chat in chat_list:
-    #         user_and_final_answer_messages.append(chat[0])
-
-    #         # 如果chat[1：]  有 FINAL_ANSWER，则只保留一个FINAL_ANSWER messages。
-    #         # 否则，将所有的type 为 do_subtask_result tool_call tool_call_result 都加入进来
-    #         if len(chat)>1:
-    #             if chat[-1].type == MessageType.FINAL_ANSWER.value:
-    #                 user_and_final_answer_messages.append(chat[-1])
-    #             else:
-    #                 for msg in chat[1:]:
-    #                     if msg.type in [MessageType.DO_SUBTASK_RESULT.value,
-    #                                     MessageType.TOOL_CALL.value,
-    #                                     MessageType.TOOL_CALL_RESULT.value]:
-    #                         user_and_final_answer_messages.append(msg)
-    #     return user_and_final_answer_messages
-    
-    def extract_after_last_stage_summary_messages(self,max_length:int=0) -> List[MessageChunk]:
-        """
-        提取最后一个阶段的总结消息之后的所有消息
-        
-        Args:
-            max_length: 提取的最大长度，0表示不限制
-
-        Returns:
-            提取后的消息列表
-        """
-        messages_after_last_user: List[MessageChunk] = []
-        for msg in self.messages:
-            if msg.role == MessageRole.USER.value:
-                messages_after_last_user = []
-            else:
-                messages_after_last_user.append(msg)
-        message_after_last_stage_summary: List[MessageChunk] = []
-        for msg in messages_after_last_user:
-            if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.STAGE_SUMMARY.value:
-                message_after_last_stage_summary = []
-            else:
-                message_after_last_stage_summary.append(msg)
-        if max_length > 0:
-            # 截取从后往前的 n 条消息，n条消息的content长度 < max_content_length ,但是n+1 消息，content长度 > max_content_length
-            merged_length = 0
-            new_message_after_last_stage_summary = []
-            for msg in message_after_last_stage_summary[::-1]:
-                merged_length += MessageManager.calculate_str_token_length(msg.content or '')
-                if merged_length > max_length:
-                    break
-                new_message_after_last_stage_summary.append(msg)
-            if len(new_message_after_last_stage_summary) > 0:
-                if new_message_after_last_stage_summary[-1].type == MessageType.TOOL_CALL_RESULT.value:
-                    new_message_after_last_stage_summary = new_message_after_last_stage_summary[:-1]
-            message_after_last_stage_summary = new_message_after_last_stage_summary[::-1]
-        return message_after_last_stage_summary
-
-    def extract_after_last_observation_messages(self) -> List[MessageChunk]:
-        
-        messages_after_last_observation: List[MessageChunk] = []
-        for msg in self.messages:
-            if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
-                messages_after_last_observation = []
-            messages_after_last_observation.append(msg)
-        return messages_after_last_observation
-
-    def get_after_last_user_messages(self) -> List[MessageChunk]:
-        messages_after_last_user: List[MessageChunk] = []
-        for msg in self.messages:
-            if msg.role == MessageRole.USER.value:
-                messages_after_last_user = []
-            messages_after_last_user.append(msg)
-        return messages_after_last_user
-
-    def get_last_observation_message(self) -> Optional[MessageChunk]:
-        for msg in self.messages[::-1]:
-            if msg.role == MessageRole.ASSISTANT.value and msg.type == MessageType.OBSERVATION.value:
-                return msg
-        return None
-    
-    def get_last_user_message(self) -> Optional[MessageChunk]:
-        for msg in self.messages[::-1]:
-            if msg.role == MessageRole.USER.value and msg.type == MessageType.NORMAL.value:
-                return msg
-        return None
-
-    def get_all_execution_messages_after_last_user(self,recent_turns:int=0,max_content_length:int=0) -> List[MessageChunk]:
-        messages_after_last_user = self.get_after_last_user_messages()
-        messages_after_last_execution: List[MessageChunk] = []
-        for msg in messages_after_last_user:
-            if msg.type in [MessageType.EXECUTION.value,
-                            MessageType.DO_SUBTASK_RESULT.value,
-                            MessageType.TOOL_CALL.value,
-                            MessageType.TOOL_CALL_RESULT.value]:
-                messages_after_last_execution.append(msg)
-        if recent_turns > 0:
-            messages_after_last_execution = messages_after_last_execution[-recent_turns:]
-        
-        if max_content_length >0 :
-            # 截取从后往前的 n条消息，n条消息的content长度 < max_content_length ,但是n+1 消息，content长度 > max_content_length
-            # 则只保留 n条消息
-            new_messages_after_last_execution: List[MessageChunk] = []
-            total_length = 0
-            for msg in messages_after_last_execution[::-1]:
-                if msg.content:
-                    total_length += MessageManager.calculate_str_token_length(msg.content)
-                if total_length > max_content_length:
-                    break
-                new_messages_after_last_execution.append(msg)
-            
-            messages_after_last_execution = new_messages_after_last_execution[::-1]
-
-        # 第一条不能是role 为tool 的消息
-        if messages_after_last_execution and messages_after_last_execution[0].role == MessageRole.TOOL.value:
-            messages_after_last_execution = messages_after_last_execution[1:]
-
-        return messages_after_last_execution
-
-    def get_all_messages_content_length(self):
-        total_length = 0
-        for msg in self.messages:
-            if msg.content:
-                total_length += MessageManager.calculate_str_token_length(msg.content)
-        return total_length
 
     @staticmethod
     def _apply_compression_level(msg: MessageChunk, level: int) -> MessageChunk:
@@ -996,47 +917,40 @@ class MessageManager:
     def compress_messages(messages: List[MessageChunk], budget_limit: int, time_limit_hours: float = 24.0) -> List[MessageChunk]:
         """
         根据预算限制压缩消息列表（分层压缩策略）。
-        
+
         策略详情：
         Level 0 (保护区):
             - System Message: 永久保留，不做任何处理。
-            - Last Group (最后一组): 包含最后一个 User 及其后续所有消息，永久保留。
-            - User Message Content: User 消息的内容在 Level 1/2 阶段不被修改（受保护内容），但在 Level 3 阶段可以被整组丢弃。
+            - User Message Content: User 消息的内容在 Level 1/2 阶段不被修改（受保护内容）。
             - Recent Messages (最近消息): 从后往前计算，累积 Token 占用不超过总预算 20% 的连续消息组，受到完全保护（不压缩、不丢弃）。
-            
+
         Level 0.5 (老化策略):
             - 规则: 超过 time_limit_hours (默认24小时) 的非保护区消息。
             - 动作: 直接应用 Level 2 (强力压缩)，优先释放陈旧消息的空间。
-            
-        Level 1 (轻度压缩): 
+
+        Level 1 (轻度压缩):
             - Tool Output: 截断保留前 100 字符 + 后 100 字符，中间省略。
             - Assistant: 移除 <thinking>...</thinking> 思考过程，保留核心回复。
-            
-        Level 2 (强力压缩): 
+
+        Level 2 (强力压缩):
             - 触发: Level 1 处理后仍超出 Budget。
             - Tool Output: 仅保留前 100 字符 + 占位符 "...[Tool output omitted...]"。
             - Assistant: 仅保留前 100 字符 + 占位符 "...[Content truncated]"。
-            
-        Level 3 (历史丢弃 - 基于组): 
-            - 触发: Level 2 处理后仍超出 Budget。
-            - 策略: 按组（User + 后续 Followers）从旧到新进行丢弃。
-            - Step A (丢弃 Followers): 保留 Group Head (User)，丢弃该组内所有 Assistant/Tool 消息，插入一条 "...[Execution process omitted]..." 作为占位符。
-            - Step B (丢弃 User): 如果 Step A 后仍超标，则丢弃该组的 User 消息（及占位符），整组消失。
-            
+
         Args:
             messages: 原始消息列表。
             budget_limit: 预算限制 (Token 数)。
             time_limit_hours: 老化时间阈值 (小时)，默认 24.0。
-            
+
         Returns:
             List[MessageChunk]: 压缩后的消息列表副本。
         """
         if not messages:
             return []
-            
+
         # 复制消息列表 (浅拷贝列表，元素在修改时 deepcopy)
         working_messages = deepcopy(messages)
-        
+
         # 辅助函数：计算当前 Token
         def current_usage():
             return MessageManager.calculate_messages_token_length(working_messages)
@@ -1049,10 +963,10 @@ class MessageManager:
         # --- 1. 分组与保护区识别 ---
         # 将消息按 User 分组，每组包含一个 User 和其后的 Followers (Assistant/Tool)
         groups = MessageManager._group_messages_indices(working_messages)
-        
+
         protected_indices = set()
         protected_group_indices = set()
-        
+
         # 1.1 System Group 保护 (如果第一组以 System 开头)
         if groups and working_messages[groups[0][0]].role == MessageRole.SYSTEM.value:
             protected_group_indices.add(0)
@@ -1060,24 +974,14 @@ class MessageManager:
             for idx in groups[0]:
                 if working_messages[idx].role == MessageRole.SYSTEM.value:
                     protected_indices.add(idx)
-                    
-        # 1.2 Last Group 保护 (最后一组始终保留，不参与丢弃)
-        if groups:
-            last_group_idx = len(groups) - 1
-            protected_group_indices.add(last_group_idx)
-            # 最后一个非 Tool 消息的内容受保护
-            last_msg_idx = len(working_messages) - 1
-            if working_messages[last_msg_idx].role != MessageRole.TOOL.value:
-                protected_indices.add(last_msg_idx)
-                
-        # 1.3 User 消息内容保护 (在压缩阶段不截断 User 内容)
+
+        # 1.2 User 消息内容保护 (在压缩阶段不截断 User 内容)
         for i, msg in enumerate(working_messages):
             if msg.role == MessageRole.USER.value:
                 protected_indices.add(i)
 
-        # 1.4 近期消息保护 (20% Budget)
+        # 1.3 近期消息保护 (20% Budget)
         # 策略：从后往前遍历 Group，只要累积 Token < 20% Budget，则该 Group 及其消息均受保护
-        # 这里的保护意味着：不被 Level 1/2 压缩，也不被 Level 3 丢弃
         recent_token_limit = budget_limit * 0.2
         current_accumulated_tokens = 0
 
@@ -1101,147 +1005,90 @@ class MessageManager:
 
         # 调试日志：显示保护信息
         logger.info(f"MessageManager: 总组数={len(groups)}, 受保护组数={len(protected_group_indices)}, 受保护消息数={len(protected_indices)}")
-        logger.info(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可删除组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
+        logger.info(f"MessageManager: 受保护组索引={sorted(protected_group_indices)}, 可压缩组索引={sorted(set(range(len(groups))) - protected_group_indices)}")
 
         # --- Level 0.5 & 1 & 2: 消息级压缩 ---
         now = time.time()
         aging_threshold = now - (time_limit_hours * 3600)
         aged_indices = set()
-        
+
         def apply_levels(level_to_apply):
             # 遍历所有消息
             for i, msg in enumerate(working_messages):
-                if i in protected_indices: continue
-                
+                if i in protected_indices:
+                    continue
+
                 # Level 0.5: 老化策略 (直接应用 Level 2)
                 if level_to_apply == 0.5:
                     if msg.timestamp and msg.timestamp < aging_threshold:
-                         working_messages[i] = MessageManager._apply_compression_level(msg, 2)
-                         aged_indices.add(i)
+                        working_messages[i] = MessageManager._apply_compression_level(msg, 2)
+                        aged_indices.add(i)
                 # Level 1: 轻度压缩
                 elif level_to_apply == 1:
-                    if i in aged_indices: continue
+                    if i in aged_indices:
+                        continue
                     working_messages[i] = MessageManager._apply_compression_level(working_messages[i], 1)
                 # Level 2: 强力压缩
                 elif level_to_apply == 2:
-                    if i in aged_indices: continue
+                    if i in aged_indices:
+                        continue
                     working_messages[i] = MessageManager._apply_compression_level(working_messages[i], 2)
-        
+
         # 应用 Level 0.5 (老化)
         apply_levels(0.5)
-        current_tokens = current_usage() 
+        current_tokens = current_usage()
         logger.info(f"MessageManager: compress_messages 应用Level 0.5后的token长度为{current_tokens}")
-        if current_tokens <= budget_limit: return working_messages
-        
+        if current_tokens <= budget_limit:
+            return working_messages
+
         # 应用 Level 1 (轻度)
         apply_levels(1)
-        current_tokens = current_usage() 
+        current_tokens = current_usage()
         logger.info(f"MessageManager: compress_messages 应用Level 1后的token长度为{current_tokens}")
-        if current_tokens <= budget_limit: return working_messages
-        
+        if current_tokens <= budget_limit:
+            return working_messages
+
         # 应用 Level 2 (强力)
         apply_levels(2)
-        current_tokens = current_usage() 
+        current_tokens = current_usage()
         logger.info(f"MessageManager: compress_messages 应用Level 2后的token长度为{current_tokens}")
-        if current_tokens <= budget_limit: return working_messages
 
-        # --- Level 3: 历史丢弃 (基于组) ---
-        # 目标: 未在 protected_group_indices 中的组
-        droppable_group_indices = [gi for gi in range(len(groups)) if gi not in protected_group_indices]
-        logger.info(f"MessageManager: Level 3 可删除组数={len(droppable_group_indices)}, 索引={droppable_group_indices}")
+        # 返回压缩后的消息（不再进行 Level 3 丢弃）
+        final_tokens = MessageManager.calculate_messages_token_length(working_messages)
+        logger.info(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(working_messages)}")
 
-        for gi in droppable_group_indices:
-            group_msgs_indices = groups[gi]
-            
-            # Step A: 丢弃 Followers (保留 User 头)
-            followers = group_msgs_indices[1:]
-            
-            if followers:
-                # Replace first follower with placeholder
-                first_f = followers[0]
-                working_messages[first_f] = MessageChunk(
-                    role=MessageRole.ASSISTANT.value,
-                    content="...[Execution process omitted]...",
-                    type=MessageType.DO_SUBTASK_RESULT.value
-                )
-                # 清空其余 Followers
-                for f_idx in followers[1:]:
-                    working_messages[f_idx].content = None
-                    working_messages[f_idx].tool_calls = None
-                    
-                if current_usage() <= budget_limit: break 
-            
-            # Step B: 丢弃 User 头 (整组消失)
-            # 包括 Step A 可能产生的占位符
-            head_idx = group_msgs_indices[0]
-            working_messages[head_idx].content = None
-            working_messages[head_idx].tool_calls = None
-            
-            # 如果 Step A 产生了占位符，也一并丢弃
-            if followers:
-                working_messages[followers[0]].content = None
-                working_messages[followers[0]].tool_calls = None
-                
-            current_tokens = current_usage() 
-            if current_tokens <= budget_limit:
-                logger.info(f"MessageManager: compress_messages 应用Level 3后的token长度为{current_tokens}")
-                break
+        return working_messages
 
-        # 清理已标记为删除的消息 (Content 为 None 的)
-        final_messages = [
-            m for m in working_messages
-            if m.content is not None or (m.tool_calls and len(m.tool_calls) > 0)
-        ]
-
-        final_tokens = MessageManager.calculate_messages_token_length(final_messages)
-        logger.info(f"MessageManager: compress_messages 完成，最终token长度={final_tokens}, 消息数={len(final_messages)}")
-
-        return final_messages
-
-    def compress_messages_if_needed(self, messages: List[MessageChunk]) -> List[MessageChunk]:
+    @staticmethod
+    def should_compress_messages(messages: List[MessageChunk], max_model_len: int = 40000, max_new_tokens: int = 20000) -> tuple[bool, int, int]:
         """
-        如果上下文空间不足，则执行压缩；否则返回原列表。
-        
+        判断是否需要压缩消息（静态版本，不依赖实例）
+
         触发条件：
         1. 剩余空间 < 20% * max_model_len
         2. 或 剩余空间 < max_new_tokens
-        
-        Args:
-            messages: 原始消息列表
-            
-        Returns:
-            List[MessageChunk]: 压缩后的消息列表或原列表
-        """
-        # 计算预算 (使用缓存的预算)
-        budget_info = self.context_budget_manager.calculate_budget()
-        max_new_tokens = budget_info.get('max_new_tokens', 20000)
-        max_model_len = budget_info.get('max_model_len', 40000)
 
-        # 使用动态比例计算当前消息长度
-        current_tokens = MessageManager._calculate_messages_token_length_dynamic(messages)
-        
+        Args:
+            messages: 消息列表
+            max_model_len: 最大模型长度，默认 40000
+            max_new_tokens: 最大新token数，默认 20000
+
+        Returns:
+            tuple[bool, int, int]: (是否需要压缩, 当前token数, 最大模型长度)
+        """
+        # 计算当前消息长度
+        current_tokens = MessageManager.calculate_messages_token_length(messages)
+
         # 阈值判断
         remaining_tokens = max_model_len - current_tokens
-        
-        # 条件：剩余 < 20% 总容量 OR 剩余 < max_new_tokens
         threshold_ratio = int(max_model_len * 0.2)
-        
-        if remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens:
-            logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}), 触发压缩...")
-            logger.info(f"MessageManager: 使用动态token比例={MessageManager.get_dynamic_token_ratio():.4f}, 样本数={len(_global_token_ratio_samples)}")
-            
-            # 执行压缩
-            compressed_messages = MessageManager.compress_messages(
-                messages, 
-                int(max_new_tokens * 0.3)
-            )
-            
-            # 记录压缩效果（使用动态比例）
-            new_tokens = MessageManager._calculate_messages_token_length_dynamic(compressed_messages)
-            logger.info(f"MessageManager: 临时压缩完成，Token从 {current_tokens} 降至 {new_tokens}")
-            return compressed_messages
-            
-        return messages
+
+        should_compress = remaining_tokens < threshold_ratio or remaining_tokens < max_new_tokens
+
+        if should_compress:
+            logger.info(f"MessageManager: 上下文空间不足 (剩余 {remaining_tokens}, 当前 {current_tokens}), 需要压缩")
+
+        return should_compress, current_tokens, max_model_len
 
     @staticmethod
     def convert_messages_to_dict_for_request(messages: List[MessageChunk]) -> List[Dict[str, Any]]:
