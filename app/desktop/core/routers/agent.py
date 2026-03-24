@@ -253,11 +253,14 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
+    logger.info(f"[Agent Update] Received update for agent={agent_id}, im_channels={agent.im_channels}")
+    
     # 更新 Agent 基本信息
     await update_agent(agent_id, agent.name, convert_agent_to_config(agent))
     
     # 保存 IM 渠道配置（如果存在）
     if agent.im_channels:
+        logger.info(f"[Agent Update] Saving IM channels: {agent.im_channels}")
         try:
             from mcp_servers.im_server.agent_config import get_agent_im_config
             agent_config = get_agent_im_config(agent_id)

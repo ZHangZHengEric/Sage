@@ -1117,10 +1117,11 @@ const loadIMConfig = async () => {
     
     console.log(`[AgentEdit] IM config response:`, result)
     
-    if (result.success && result.data?.channels) {
-      console.log(`[AgentEdit] Loaded channels:`, Object.keys(result.data.channels))
+    // request.get returns response.data directly, so result is {agent_id, is_default, channels}
+    if (result.channels) {
+      console.log(`[AgentEdit] Loaded channels:`, Object.keys(result.channels))
       // Merge loaded config with default structure
-      for (const [provider, data] of Object.entries(result.data.channels)) {
+      for (const [provider, data] of Object.entries(result.channels)) {
         if (imConfig.value[provider]) {
           console.log(`[AgentEdit] Setting ${provider} config:`, data)
           const updatedConfig = { ...imConfig.value[provider].config, ...data.config }
@@ -1139,12 +1140,25 @@ const loadIMConfig = async () => {
             }
           }
           
-          // Note: We don't auto-mark as passed here
-          // The user needs to explicitly test the connection to verify the config works
+          // Auto-mark as passed if config exists (has been tested before)
+          // This allows users to enable/disable without re-testing
+          const hasConfig = Object.keys(data.config || {}).length > 0
+          if (hasConfig) {
+            imTestStatus.value = {
+              ...imTestStatus.value,
+              [provider]: { tested: true, passed: true }
+            }
+            // Freeze the loaded config so enable switch works
+            imFrozenConfig.value = {
+              ...imFrozenConfig.value,
+              [provider]: JSON.parse(JSON.stringify(updatedConfig))
+            }
+            console.log(`[AgentEdit] Auto-marked ${provider} as tested (config exists)`)
+          }
         }
       }
     } else {
-      console.log(`[AgentEdit] No channels in response, keeping default empty config`)
+      console.log(`[AgentEdit] No channels in response (result:`, result, '), keeping default empty config')
     }
     
     console.log(`[AgentEdit] Final imConfig:`, JSON.parse(JSON.stringify(imConfig.value)))
@@ -1434,6 +1448,12 @@ onMounted(() => {
     contentRef.value.addEventListener('scroll', handleScroll, { passive: true })
   }
   loadData()
+  
+  // Explicitly load IM config on mount (watch might not trigger if id hasn't changed)
+  if (props.agent?.id || store.formData.id) {
+    loadIMConfig()
+  }
+  
   window.addEventListener('tools-updated', handleToolsUpdated)
 })
 
@@ -1467,6 +1487,12 @@ watch(() => props.agent, (newAgent) => {
     store.initForm(newAgent, { preserveStep: true })
   } else {
     store.initForm(newAgent)
+  }
+  
+  // Reload IM config when agent changes (even for same agent, to get latest saved config)
+  if (newAgent?.id) {
+    console.log('[AgentEdit] Reloading IM config for agent:', newAgent.id)
+    loadIMConfig()
   }
 })
 
@@ -1576,8 +1602,16 @@ const handleSave = async (shouldExit = true) => {
     // Add IM channels to formData
     store.formData.im_channels = imChannels
     
+    console.log('[AgentEdit] Saving IM channels:', JSON.parse(JSON.stringify(imChannels)))
+    
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
+    
+    console.log('[AgentEdit] Plain data to save:', { 
+      id: plainData.id, 
+      im_channels: plainData.im_channels 
+    })
+    
     await new Promise((resolve) => {
       emit('save', plainData, shouldExit, () => resolve())
     })
