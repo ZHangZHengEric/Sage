@@ -341,7 +341,7 @@ class LocalSandboxProvider(ISandboxHandle):
         if bundled_node_bin and os.path.exists(bundled_node_bin):
             # 将打包的 Node.js bin 目录添加到 PATH 最前面
             env["PATH"] = bundled_node_bin + os.pathsep + env.get("PATH", "")
-            logger.info(f"LocalSandboxProvider: Added bundled Node.js bin to PATH: {bundled_node_bin}")
+            logger.debug(f"LocalSandboxProvider: Added bundled Node.js bin to PATH: {bundled_node_bin}")
             # 设置 SAGE_USING_BUNDLED_NODE 标记
             env["SAGE_USING_BUNDLED_NODE"] = "1"
 
@@ -354,10 +354,10 @@ class LocalSandboxProvider(ISandboxHandle):
                 # 避免重复添加
                 if sage_bin not in env.get("PATH", ""):
                     env["PATH"] = sage_bin + os.pathsep + env.get("PATH", "")
-                    logger.info(f"LocalSandboxProvider: Added Sage node bin to PATH: {sage_bin}")
+                    logger.debug(f"LocalSandboxProvider: Added Sage node bin to PATH: {sage_bin}")
             # 设置 NODE_PATH 以便 require 能找到模块
             env["NODE_PATH"] = sage_node_modules_dir
-            logger.info(f"LocalSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}")
+            logger.debug(f"LocalSandboxProvider: Set NODE_PATH: {sage_node_modules_dir}")
 
         # 添加 Sage node_modules/.bin 到 PATH（优先使用真正安装的包）
         # 使用环境变量 NODE_PATH 的值（通常是 ~/.sage/.sage_node_env）
@@ -366,7 +366,7 @@ class LocalSandboxProvider(ISandboxHandle):
             sage_node_env_bin = os.path.join(node_path_env, "node_modules", ".bin")
             if os.path.exists(sage_node_env_bin) and sage_node_env_bin not in env.get("PATH", ""):
                 env["PATH"] = sage_node_env_bin + os.pathsep + env.get("PATH", "")
-                logger.info(f"LocalSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}")
+                logger.debug(f"LocalSandboxProvider: Added Sage node_modules/.bin to PATH: {sage_node_env_bin}")
 
         # 添加额外环境变量
         if env_vars:

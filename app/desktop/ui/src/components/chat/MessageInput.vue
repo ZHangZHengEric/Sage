@@ -86,7 +86,6 @@
           :placeholder="isLoading ? t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...' : t('messageInput.placeholder')"
           class="flex-1 min-h-[44px] max-h-[200px] py-1.5 px-1 bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none resize-none shadow-none text-sm leading-relaxed outline-none !ring-0 !ring-offset-0 !border-0"
           rows="2"
-          style="box-shadow: none; outline: none;"
         />
       </div>
 
@@ -380,6 +379,12 @@ const adjustTextareaHeight = async () => {
 
 // 监听输入值变化
 watch(inputValue, async (newVal) => {
+  // 如果在输入法组合状态中，不处理技能标签
+  if (isComposing.value) {
+    adjustTextareaHeight()
+    return
+  }
+
   // 检查是否包含技能标签（粘贴或手动输入）
   const skillMatch = newVal.match(/^<skill>(.*?)<\/skill>\s*/)
   if (skillMatch) {
@@ -577,10 +582,8 @@ const handleSubmit = (e) => {
 
 // 处理键盘事件
 const handleKeyDown = (e) => {
+  // 检测是否在输入法组合状态中（中文输入等）
   const composing = isComposing.value || e.isComposing || e.keyCode === 229 || e.key === 'Process'
-  if (composing) {
-    return
-  }
 
   if (showSkillList.value && filteredSkills.value.length > 0) {
     if (e.key === 'ArrowUp') {
@@ -605,15 +608,15 @@ const handleKeyDown = (e) => {
     }
   }
 
-  // Backspace 删除技能
-  if (e.key === 'Backspace' && inputValue.value === '' && currentSkill.value) {
+  // Backspace 删除技能（不在输入法组合状态时）
+  if (!composing && e.key === 'Backspace' && inputValue.value === '' && currentSkill.value) {
     e.preventDefault()
     currentSkill.value = null
     return
   }
 
   // 检查是否在输入法组合状态中，如果是则不处理回车键
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey && !composing) {
     e.preventDefault()
     handleSubmit(e)
   }
