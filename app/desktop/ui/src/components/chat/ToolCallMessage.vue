@@ -48,7 +48,8 @@ import {
   ListTodo,
   Mail,
   Code,
-  Download
+  Download,
+  Minimize2
 } from 'lucide-vue-next'
 import { getToolLabel } from '@/utils/messageLabels'
 import { useLanguage } from '@/utils/i18n.js'
@@ -137,6 +138,8 @@ const toolIconMap = {
   'playwright_fill': Globe,
   'playwright_hover': Globe,
   'playwright_evaluate': Code,
+  // 压缩历史消息
+  'compress_conversation_history': Minimize2,
 }
 
 const getToolIcon = (name) => {
