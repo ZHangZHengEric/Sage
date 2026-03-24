@@ -219,14 +219,15 @@
                 </FormItem>
 
                 <FormItem :label="t('agent.maxLoopCount')">
-                  <Input 
-                    type="number" 
-                    v-model.number="store.formData.maxLoopCount" 
-                    min="1" 
-                    max="100" 
+                  <Input
+                    type="number"
+                    v-model.number="store.formData.maxLoopCount"
+                    min="1"
+                    max="100"
                     class="h-10"
                     @blur="validateMaxLoopCount"
                   />
+                  <p v-if="maxLoopCountError" class="text-xs text-destructive mt-1">{{ maxLoopCountError }}</p>
                 </FormItem>
               </div>
 
@@ -986,6 +987,20 @@ const { listModelProviders } = modelProviderAPI
 const saving = ref(false)
 const contentRef = ref(null)
 const activeSection = ref('basic')
+const maxLoopCountError = ref('')
+
+const validateMaxLoopCount = () => {
+  const value = store.formData.maxLoopCount
+  if (value > 100) {
+    store.formData.maxLoopCount = 100
+    maxLoopCountError.value = '最大循环次数不能超过 100'
+  } else if (value < 1) {
+    store.formData.maxLoopCount = 1
+    maxLoopCountError.value = '最大循环次数不能小于 1'
+  } else {
+    maxLoopCountError.value = ''
+  }
+}
 
 // ============================================================================
 // IM Channel Configuration
@@ -1370,28 +1385,9 @@ watch(selectedProviderSupportsMultimodal, (supportsMultimodal) => {
 }, { immediate: true })
 
 // Save handlers
-// 验证 maxLoopCount
-const validateMaxLoopCount = () => {
-  let value = store.formData.maxLoopCount
-  if (value === null || value === undefined || value === '') {
-    store.formData.maxLoopCount = 50
-  } else {
-    value = Number(value)
-    if (isNaN(value) || value < 1) {
-      store.formData.maxLoopCount = 1
-    } else if (value > 100) {
-      store.formData.maxLoopCount = 100
-    } else {
-      store.formData.maxLoopCount = value
-    }
-  }
-}
-
 const handleSave = async (shouldExit = true) => {
   saving.value = true
   try {
-    // 保存前验证 maxLoopCount
-    validateMaxLoopCount()
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
     await new Promise((resolve) => {
