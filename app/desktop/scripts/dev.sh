@@ -255,4 +255,8 @@ if [ "$OS_TYPE" = "linux" ] && [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
   TAURI_DEV_ARGS=(--target "$TARGET")
 fi
 
-cargo tauri dev "${TAURI_DEV_ARGS[@]}"
+if [ ${#TAURI_DEV_ARGS[@]} -gt 0 ]; then
+  cargo tauri dev "${TAURI_DEV_ARGS[@]}"
+else
+  cargo tauri dev
+fi
