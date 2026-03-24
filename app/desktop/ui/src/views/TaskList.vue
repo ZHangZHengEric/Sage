@@ -506,10 +506,11 @@ const toLocalISO = (date) => {
 const fetchAgents = async () => {
   try {
     const res = await agentAPI.getAgents()
-    if (res.agents) {
-      agents.value = res.agents
-    } else if (Array.isArray(res)) {
+    // request.js 已经处理了响应，返回的是 response.data
+    if (Array.isArray(res)) {
       agents.value = res
+    } else if (res && Array.isArray(res.data)) {
+      agents.value = res.data
     } else {
       agents.value = []
     }
