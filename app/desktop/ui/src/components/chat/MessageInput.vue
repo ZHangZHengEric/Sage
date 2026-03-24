@@ -28,7 +28,7 @@
     </div>
 
     <div
-      class="relative flex items-end gap-2 p-3 bg-muted/30 border border-input rounded-3xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm message-input-drop-zone"
+      class="relative flex flex-col gap-2 p-3 bg-muted/30 border border-input rounded-2xl focus-within:ring-2 focus-within:ring-ring focus-within:border-primary transition-all shadow-sm message-input-drop-zone"
       :class="{ 'bg-primary/5 border-primary/50': isDraggingOver }"
       @dragenter="handleDragEnter"
       @dragover="handleDragOver"
@@ -59,68 +59,74 @@
         </div>
       </div>
 
-      <!-- 文件上传按钮 -->
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        class="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-background"
-        @click="triggerFileInput"
-        :disabled="isLoading"
-        :title="t('messageInput.uploadFile')"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </Button>
+      <!-- 输入区域：包含技能标签和文本框 -->
+      <div class="flex items-start gap-2">
+        <!-- 选中的技能展示 -->
+        <div v-if="currentSkill" class="flex items-center gap-1 h-7 px-2.5 bg-primary/10 text-primary rounded-full text-xs font-medium whitespace-nowrap border border-primary/20 flex-shrink-0 mt-1">
+          <span class="max-w-[100px] truncate">@{{ currentSkill }}</span>
+          <button
+            type="button"
+            @click="currentSkill = null"
+            class="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-primary/20"
+          >
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
 
-      <!-- 选中的技能展示 -->
-      <div v-if="currentSkill" class="flex items-center gap-1 h-9 px-3 bg-primary/10 text-primary rounded-full text-sm font-medium whitespace-nowrap border border-primary/20">
-        <span class="max-w-[120px] truncate">@{{ currentSkill }}</span>
-        <button
-          type="button"
-          @click="currentSkill = null"
-          class="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary/20"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <Textarea
+          ref="textareaRef"
+          v-model="inputValue"
+          @keydown="handleKeyDown"
+          @compositionstart="handleCompositionStart"
+          @compositionend="handleCompositionEnd"
+          @paste="handlePaste"
+          :placeholder="isLoading ? t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...' : t('messageInput.placeholder')"
+          class="flex-1 min-h-[44px] max-h-[200px] py-1.5 px-1 bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none resize-none shadow-none text-sm leading-relaxed outline-none !ring-0 !ring-offset-0 !border-0"
+          rows="2"
+          style="box-shadow: none; outline: none;"
+        />
       </div>
 
-      <Textarea
-        ref="textareaRef"
-        v-model="inputValue"
-        @keydown="handleKeyDown"
-        @compositionstart="handleCompositionStart"
-        @compositionend="handleCompositionEnd"
-        @paste="handlePaste"
-        :placeholder="isLoading ? t('messageInput.placeholderGenerating') || 'AI正在生成回复，可直接输入新消息...' : t('messageInput.placeholder')"
-        class="flex-1 min-h-[24px] max-h-[200px] py-2 px-0 bg-transparent border-0 focus-visible:ring-0 resize-none shadow-none text-base"
-        rows="1"
-      />
+      <!-- 底部区域：附件按钮在左下角，发送按钮在右下角 -->
+      <div class="flex items-center justify-between">
+        <!-- 文件上传按钮 - 左下角 -->
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-background flex-shrink-0"
+          @click="triggerFileInput"
+          :disabled="isLoading"
+          :title="t('messageInput.uploadFile')"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </Button>
 
-      <div class="flex items-center gap-2 pb-0.5">
+        <!-- 发送按钮 - 右下角 -->
         <Button
           type="submit"
           size="icon"
           :disabled="!isLoading && !inputValue.trim() && uploadedFiles.length === 0"
-          class="h-9 w-9 rounded-full transition-all duration-200"
+          class="h-7 w-7 rounded-full transition-all duration-200"
           :class="[
             !isLoading && !inputValue.trim() && uploadedFiles.length === 0 ? 'opacity-50 cursor-not-allowed' : '',
-            isLoading ? 'bg-destructive hover:bg-destructive/90' : ''
+            isLoading ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''
           ]"
           :title="isLoading ? (inputValue.trim() || uploadedFiles.length > 0 ? t('messageInput.stopAndSendTitle') || '停止生成并发送' : t('messageInput.stopTitle') || '停止生成') : t('messageInput.sendTitle')"
         >
-          <svg v-if="!isLoading" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="6" y="6" width="12" height="12" fill="currentColor"/>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="4" width="16" height="16" rx="4" fill="currentColor"/>
           </svg>
         </Button>
       </div>
@@ -777,8 +783,9 @@ const processFile = async (file) => {
   uploadedFiles.value.push(fileItem)
 
   try {
-    // 调用OSS API上传
-    const url = await ossApi.uploadFile(file)
+    // 调用OSS API上传，传递当前选中的 agent_id
+    const agentId = props.selectedAgent?.id || props.selectedAgent?.agent_id
+    const url = await ossApi.uploadFile(file, agentId)
 
     // 更新文件URL
     fileItem.url = url

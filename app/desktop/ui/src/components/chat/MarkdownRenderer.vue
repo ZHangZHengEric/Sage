@@ -1,5 +1,5 @@
 <template>
-  <div class="prose prose-sm dark:prose-invert max-w-none break-words" v-html="renderedContent" @click="handleMarkdownClick"></div>
+  <div class="prose prose-xs dark:prose-invert max-w-none break-words text-sm" v-html="renderedContent" @click="handleMarkdownClick"></div>
 </template>
 
 <script setup>
@@ -168,7 +168,7 @@ renderer.table = function(token) {
   }
 
   return `<div class="overflow-x-auto my-4 w-full">
-    <table class="w-full text-sm border-collapse border rounded-md">
+    <table class="w-full text-xs border-collapse border rounded-md">
       <thead class="bg-muted/50">
         ${header}
       </thead>
@@ -183,13 +183,13 @@ renderer.tablecell = function(token) {
   const content = this.parser.parseInline(token.tokens)
   const tag = token.header ? 'th' : 'td'
   let className = token.header
-    ? 'border px-4 py-2 text-left font-medium text-muted-foreground'
-    : 'border px-4 py-2'
-    
+    ? 'border px-3 py-1.5 text-left font-medium text-muted-foreground'
+    : 'border px-3 py-1.5'
+
   if (token.align) {
     className += ` text-${token.align}`
   }
-  
+
   return `<${tag} class="${className}">${content}</${tag}>`
 }
 
@@ -241,11 +241,11 @@ const rehypeCodeBlockWrapper = () => {
           node.properties = {
             ...node.properties,
             className: [
-              'my-4',
-              'p-4',
+              'my-3',
+              'p-3',
               'rounded-lg',
               'overflow-auto',
-              'text-sm',
+              'text-xs',
               'font-mono',
               'leading-relaxed',
               'bg-slate-100',

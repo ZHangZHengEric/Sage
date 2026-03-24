@@ -23,7 +23,7 @@
         </div>
       </div>
     </CollapsibleTrigger>
-    <CollapsibleContent class="analysis-content text-sm text-muted-foreground pl-9">
+    <CollapsibleContent class="analysis-content text-xs text-muted-foreground pl-9">
       <div class="py-2 pr-4">
         <MarkdownRenderer :content="content" />
       </div>

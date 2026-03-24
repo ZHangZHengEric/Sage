@@ -511,10 +511,10 @@
                 v-for="(image, index) in searchImageResults"
                 :key="index"
                 class="search-image-item relative group aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors cursor-pointer"
-                @click="openImagePreview(image.url)"
+                @click="openImagePreview(image.image_url || image.url)"
               >
                 <img
-                  :src="image.url"
+                  :src="image.image_url || image.url"
                   :alt="image.title"
                   class="w-full h-full object-cover"
                   @error="handleImageError($event, index)"
