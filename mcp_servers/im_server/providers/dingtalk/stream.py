@@ -180,9 +180,14 @@ class DingTalkStreamClient:
                 retry_count += 1
                 error_msg = str(e)
                 
-                # Check if it's a network error
-                if "no close frame received or sent" in error_msg or "network" in error_msg.lower():
-                    logger.warning(f"[DingTalk Stream] Network error (attempt {retry_count}/{max_retries}): {e}")
+                # Check if it's a network/connection error (including websockets internal errors)
+                is_connection_error = any(keyword in error_msg.lower() for keyword in [
+                    "no close frame", "network", "connection", "websocket",
+                    "recv_messages", "connection reset", "broken pipe"
+                ])
+                
+                if is_connection_error:
+                    logger.warning(f"[DingTalk Stream] Connection error (attempt {retry_count}/{max_retries}): {e}")
                 else:
                     logger.error(f"[DingTalk Stream] Error (attempt {retry_count}/{max_retries}): {e}")
                 
@@ -232,8 +237,23 @@ class DingTalkStreamClient:
         try:
             await self.client.start()
             logger.info("DingTalk client.start() returned normally")
+        except AttributeError as e:
+            # Handle websockets library internal error on connection close
+            # This is a known issue with certain versions of websockets library
+            if "recv_messages" in str(e):
+                logger.warning(f"[DingTalk Stream] Connection closed with internal websockets error (ignored): {e}")
+            else:
+                logger.error(f"[DingTalk Stream] AttributeError: {e}")
         except Exception as e:
-            logger.error(f"DingTalk client.start() exception: {e}")
+            error_msg = str(e)
+            # Filter out common disconnection errors
+            if any(keyword in error_msg.lower() for keyword in [
+                "connection reset", "connection closed", "connection lost",
+                "no close frame", "websocket", "ssl", "broken pipe"
+            ]):
+                logger.warning(f"[DingTalk Stream] Connection error (will retry): {e}")
+            else:
+                logger.error(f"[DingTalk Stream] Unexpected error: {e}")
 
 
 class _DingTalkMessageHandler(ChatbotHandler):
