@@ -176,7 +176,7 @@
                     <SelectContent>
                       <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
                       <SelectItem value="simple">{{ t('agent.modeSimple') }}</SelectItem>
-                      <SelectItem value="multi">{{ t('agent.modeMulti') }}</SelectItem>
+                      <!-- <SelectItem value="multi">{{ t('agent.modeMulti') }}</SelectItem> -->
                     </SelectContent>
                   </Select>
                 </FormItem>
@@ -219,7 +219,14 @@
                 </FormItem>
 
                 <FormItem :label="t('agent.maxLoopCount')">
-                  <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="50" class="h-10" />
+                  <Input 
+                    type="number" 
+                    v-model.number="store.formData.maxLoopCount" 
+                    min="1" 
+                    max="100" 
+                    class="h-10"
+                    @blur="validateMaxLoopCount"
+                  />
                 </FormItem>
               </div>
 
@@ -1553,6 +1560,23 @@ watch(selectedProviderSupportsMultimodal, (supportsMultimodal) => {
 }, { immediate: true })
 
 // Save handlers
+// 验证 maxLoopCount
+const validateMaxLoopCount = () => {
+  let value = store.formData.maxLoopCount
+  if (value === null || value === undefined || value === '') {
+    store.formData.maxLoopCount = 50
+  } else {
+    value = Number(value)
+    if (isNaN(value) || value < 1) {
+      store.formData.maxLoopCount = 1
+    } else if (value > 100) {
+      store.formData.maxLoopCount = 100
+    } else {
+      store.formData.maxLoopCount = value
+    }
+  }
+}
+
 const handleSave = async (shouldExit = true) => {
   saving.value = true
   try {
@@ -1604,6 +1628,8 @@ const handleSave = async (shouldExit = true) => {
     
     console.log('[AgentEdit] Saving IM channels:', JSON.parse(JSON.stringify(imChannels)))
     
+    // 保存前验证 maxLoopCount
+    validateMaxLoopCount()
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
     
