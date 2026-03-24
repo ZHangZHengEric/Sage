@@ -24,9 +24,11 @@ export const useChatAgentConfig = ({
     const isAgentChange = !selectedAgent.value || selectedAgent.value.id !== agent?.id
     selectedAgent.value = agent
     if (agent && (isAgentChange || forceConfigUpdate)) {
+      // 如果后端返回的 agentMode 是 'multi'，自动改为 'simple'
+      const agentMode = agent.agentMode === 'multi' ? 'simple' : (agent.agentMode || 'simple')
       config.value = {
         deepThinking: userConfigOverrides.value.deepThinking !== undefined ? userConfigOverrides.value.deepThinking : agent.deepThinking,
-        agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : (agent.agentMode || 'simple'),
+        agentMode: userConfigOverrides.value.agentMode !== undefined ? userConfigOverrides.value.agentMode : agentMode,
         moreSuggest: userConfigOverrides.value.moreSuggest !== undefined ? userConfigOverrides.value.moreSuggest : (agent.moreSuggest ?? false),
         maxLoopCount: userConfigOverrides.value.maxLoopCount !== undefined ? userConfigOverrides.value.maxLoopCount : (agent.maxLoopCount ?? 10)
       }
