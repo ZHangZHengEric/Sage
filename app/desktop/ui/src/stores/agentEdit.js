@@ -136,7 +136,12 @@ export const useAgentEditStore = defineStore('agent-edit', () => {
     const { preserveStep = false } = options
 
     if (agentData) {
-      formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...agentData }))
+      // 如果后端返回的 agentMode 是 'multi'，自动改为 'simple'
+      const processedData = { ...agentData }
+      if (processedData.agentMode === 'multi') {
+        processedData.agentMode = 'simple'
+      }
+      formData.value = JSON.parse(JSON.stringify({ ...defaultFormData, ...processedData }))
       if (!Array.isArray(formData.value.availableTools)) formData.value.availableTools = []
       if (!Array.isArray(formData.value.availableSkills)) formData.value.availableSkills = []
       if (!Array.isArray(formData.value.availableSubAgentIds)) formData.value.availableSubAgentIds = []
