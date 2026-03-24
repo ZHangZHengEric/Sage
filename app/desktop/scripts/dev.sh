@@ -234,26 +234,44 @@ if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
   cargo install tauri-cli --version "^2"
 fi
 
-echo "======================================"
-echo " 开发服务器运行中"
-echo " 固定端口: 8080"
-echo "======================================"
+########################################
+# 5. Dynamic Port Allocation
+########################################
 
-# 确保 sage_env 文件存在且端口为 8080
-mkdir -p "$HOME/.sage"
-echo "SAGE_PORT=8080" > "$HOME/.sage/.sage_env"
+# Function to find an available port
+find_available_port() {
+    local port=8080
+    while [ $port -le 65535 ]; do
+        if ! lsof -ti:$port >/dev/null 2>&1; then
+            echo $port
+            return 0
+        fi
+        port=$((port + 1))
+    done
+    echo "错误: 无法找到可用端口" >&2
+    return 1
+}
 
-# 设置环境变量，强制使用 8080 端口
-export SAGE_PORT=8080
-
-# 检查 8080 端口是否被占用，如果被占用则杀死占用进程
-echo "检查 8080 端口..."
-PORT_PID=$(lsof -ti:8080 2>/dev/null)
-if [ -n "$PORT_PID" ]; then
-  echo "警告: 端口 8080 被进程 $PORT_PID 占用，正在终止..."
-  kill -9 "$PORT_PID" 2>/dev/null || true
-  sleep 1
+# Find available port and save to .sage_env for Vite to read
+echo "正在查找可用端口..."
+AVAILABLE_PORT=$(find_available_port)
+if [ $? -ne 0 ]; then
+    echo "$AVAILABLE_PORT"
+    exit 1
 fi
 
-echo "启动 Sage 桌面应用 (端口: 8080)..."
+mkdir -p "$HOME/.sage"
+echo "SAGE_PORT=$AVAILABLE_PORT" > "$HOME/.sage/.sage_env"
+echo "设置 SAGE_PORT=$AVAILABLE_PORT"
+
+########################################
+# 6. Start Development Server
+########################################
+
+echo "======================================"
+echo " 开发服务器运行中"
+echo " 端口: $AVAILABLE_PORT"
+echo "======================================"
+
+echo "启动 Sage 桌面应用..."
 cargo tauri dev
