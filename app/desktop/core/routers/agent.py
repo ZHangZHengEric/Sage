@@ -57,6 +57,7 @@ class AgentConfigDTO(BaseModel):
     is_default: Optional[bool] = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    im_channels: Optional[Dict[str, Dict[str, Any]]] = None  # IM 渠道配置
 
 
 class AutoGenAgentRequest(BaseModel):
@@ -252,7 +253,38 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
+    # 更新 Agent 基本信息
     await update_agent(agent_id, agent.name, convert_agent_to_config(agent))
+    
+    # 保存 IM 渠道配置（如果存在）
+    if agent.im_channels:
+        try:
+            from mcp_servers.im_server.agent_config import get_agent_im_config
+            agent_config = get_agent_im_config(agent_id)
+            
+            for provider, channel_data in agent.im_channels.items():
+                enabled = channel_data.get('enabled', False)
+                config = channel_data.get('config', {})
+                
+                # 验证 iMessage 只能在默认 Agent 上启用
+                if provider == 'imessage' and enabled:
+                    from app.desktop.core.models.agent import AgentConfigDao
+                    dao = AgentConfigDao()
+                    agent_obj = await dao.get_by_id(agent_id)
+                    if agent_obj and not agent_obj.is_default:
+                        logger.warning(f"[Agent Update] iMessage can only be configured on default agent, skipping {agent_id}")
+                        continue
+                
+                # 保存渠道配置
+                success = agent_config.set_provider_config(provider, enabled, config)
+                if success:
+                    logger.info(f"[Agent Update] Saved {provider} config for agent={agent_id}, enabled={enabled}")
+                else:
+                    logger.error(f"[Agent Update] Failed to save {provider} config for agent={agent_id}")
+        except Exception as e:
+            logger.error(f"[Agent Update] Failed to save IM channels: {e}")
+            # 不阻断主流程，仅记录错误
+    
     return await Response.succ(
         data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 更新成功"
     )
