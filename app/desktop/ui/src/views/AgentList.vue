@@ -76,6 +76,16 @@
                 
                 <!-- Info row -->
                 <div class="flex items-center gap-3 mt-3 flex-wrap">
+                  <!-- Default badge -->
+                  <Badge 
+                    v-if="agent.is_default"
+                    variant="default"
+                    class="text-xs font-medium px-2 py-0.5 shrink-0 bg-primary text-primary-foreground"
+                  >
+                    <Star class="w-3 h-3 mr-1" />
+                    默认
+                  </Badge>
+                  
                   <!-- Mode badge -->
                   <Badge 
                     :variant="getModeBadgeVariant(agent.agentMode)"
@@ -127,44 +137,56 @@
                 <CardTitle class="text-sm font-medium text-center">操作</CardTitle>
               </CardHeader>
 
-              <CardContent class="flex-1 flex flex-col items-center justify-center gap-2 py-2 px-4">
-                <Button 
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2"
-                  @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
-                >
-                  <FileBraces class="w-4 h-4" />
-                  调用示例
-                </Button>
-                
-                <Button 
-                  v-if="canEdit(agent)"
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2"
-                  @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
-                >
-                  <Edit class="w-4 h-4" />
-                  编辑
-                </Button>
-                
-                <Button 
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2"
-                  @click.stop="handleExport(agent); toggleFlip(agent.id)"
-                >
-                  <Upload class="w-4 h-4" />
-                  导出
-                </Button>
-                
-                <Button 
-                  v-if="canDelete(agent)"
-                  variant="outline" 
-                  class="w-full max-w-[140px] justify-center gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  @click.stop="handleDelete(agent); toggleFlip(agent.id)"
-                >
-                  <Trash2 class="w-4 h-4" />
-                  删除
-                </Button>
+              <CardContent class="flex-1 flex items-center justify-center py-2 px-3">
+                <div class="grid grid-cols-2 gap-2 w-full">
+                  <Button 
+                    v-if="!agent.is_default"
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-primary hover:text-primary hover:bg-primary/10 text-xs py-2 h-auto"
+                    @click.stop="handleSetDefault(agent); toggleFlip(agent.id)"
+                  >
+                    <Star class="w-3.5 h-3.5" />
+                    <span class="truncate">设为默认</span>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
+                    @click.stop="openUsageModal(agent); toggleFlip(agent.id)"
+                  >
+                    <FileBraces class="w-3.5 h-3.5" />
+                    <span class="truncate">调用示例</span>
+                  </Button>
+                  
+                  <Button 
+                    v-if="canEdit(agent)"
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
+                    @click.stop="handleEditAgent(agent); toggleFlip(agent.id)"
+                  >
+                    <Edit class="w-3.5 h-3.5" />
+                    <span class="truncate">编辑</span>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-xs py-2 h-auto"
+                    @click.stop="handleExport(agent); toggleFlip(agent.id)"
+                  >
+                    <Upload class="w-3.5 h-3.5" />
+                    <span class="truncate">导出</span>
+                  </Button>
+                  
+                  <Button 
+                    v-if="canDelete(agent)"
+                    variant="outline" 
+                    class="w-full justify-center gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 text-xs py-2 h-auto"
+                    @click.stop="handleDelete(agent); toggleFlip(agent.id)"
+                  >
+                    <Trash2 class="w-3.5 h-3.5" />
+                    <span class="truncate">删除</span>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -294,7 +316,7 @@ import { ref, onMounted, onUnmounted, computed, watch, Teleport } from 'vue'
 import { toast } from 'vue-sonner'
 import { 
   Plus, Edit, Trash2, Bot, FileBraces, Download, Upload, Copy, Loader, 
-  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X
+  Sparkles, Wrench, Zap, GitBranch, Cpu, Brain, MoreHorizontal, X, Star
 } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { useLanguage } from '../utils/i18n.js'
@@ -452,10 +474,11 @@ const loadAgents = async () => {
     loading.value = true
     error.value = null
     const response = await agentAPI.getAgents()
-    if (response.agents) {
-      agents.value = response.agents
-    } else if (Array.isArray(response)) {
+    // request.js 已经处理了响应，返回的是 response.data
+    if (Array.isArray(response)) {
       agents.value = response
+    } else if (response && Array.isArray(response.data)) {
+      agents.value = response.data
     } else {
       agents.value = []
     }
@@ -497,9 +520,21 @@ const removeAgent = async (agentId) => {
   }
 }
 
+const handleSetDefault = async (agent) => {
+  try {
+    await agentAPI.setDefaultAgent(agent.id)
+    toast.success(`Agent '${agent.name}' 已设为默认`)
+    // 重新加载列表以更新状态
+    await loadAgents()
+  } catch (err) {
+    console.error('设置默认 Agent 失败:', err)
+    toast.error('设置默认 Agent 失败: ' + (err.message || '未知错误'))
+  }
+}
+
 const handleDelete = async (agent) => {
-  if (agent.id === 'default') {
-    alert(t('agent.defaultCannotDelete'))
+  if (agent.is_default) {
+    alert('默认 Agent 不能删除')
     return
   }
 
