@@ -485,6 +485,7 @@ export default {
   'tools.sysSpawnAgent': 'Create Agent',
   'tools.sysDelegateTask': 'Delegate Task',
   'tools.sysFinishTask': 'Finish Task',
+  'tools.compressConversationHistory': 'Compress History',
   'tools.generateImage': 'Generate Image',
   'tools.fetchWebpage': 'Fetch Webpage',
   'tools.webFetcher': 'Web Fetcher',
@@ -1014,6 +1015,9 @@ export default {
   // Workbench ToolCall
   'workbench.tool.arguments': 'Arguments',
   'workbench.tool.result': 'Result',
+  'workbench.tool.compressingHistory': 'Compressing history...',
+  'workbench.tool.compressFailed': 'Compression failed',
+  'workbench.tool.historyCompressed': 'History compressed',
   'workbench.tool.error': 'Error',
   'workbench.tool.shellCommand': 'Shell Command',
   'workbench.tool.loadSkill': 'Load Skill',

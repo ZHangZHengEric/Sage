@@ -123,7 +123,8 @@ async def create_agent(
     agent_id = agent_config.pop("id", None) or generate_agent_id()
     # 检查是否指定为默认 Agent
     is_default = agent_config.pop("is_default", False)
-    logger.info(f"开始创建Agent: {agent_id}, is_default={is_default}")
+    logger.info(f"开始创建Agent: {agent_id}, is_default={is_default}, type={type(is_default)}")
+    logger.info(f"agent_config keys after pop: {list(agent_config.keys())}")
 
     # 强制添加必要的工具
     agent_config = _enforce_required_tools(agent_config)
@@ -146,6 +147,10 @@ async def create_agent(
         # 如果已存在默认 Agent，新 Agent 不设为默认
         logger.warning(f"已存在默认 Agent '{existing_default.agent_id}'，新 Agent 不设为默认")
         is_default = False
+    elif not existing_default:
+        # 如果没有默认 Agent，自动将新 Agent 设为默认
+        logger.info("没有默认 Agent，自动将新 Agent 设为默认")
+        is_default = True
 
     orm_obj = models.Agent(
         agent_id=agent_id,

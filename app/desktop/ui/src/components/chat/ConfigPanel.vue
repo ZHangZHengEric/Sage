@@ -29,7 +29,7 @@
             <SelectItem value="auto">{{ t('config.modeAuto') }}</SelectItem>
             <SelectItem value="fibre">{{ t('config.modeFibre') }}</SelectItem>
             <SelectItem value="simple">{{ t('config.modeSimple') }}</SelectItem>
-            <SelectItem value="multi">{{ t('config.modeMulti') }}</SelectItem>
+            <!-- <SelectItem value="multi">{{ t('config.modeMulti') }}</SelectItem> -->
           </SelectContent>
         </Select>
         <p class="text-xs text-muted-foreground">

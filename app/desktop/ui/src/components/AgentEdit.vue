@@ -176,7 +176,7 @@
                     <SelectContent>
                       <SelectItem value="fibre">{{ t('agent.modeFibre') }}</SelectItem>
                       <SelectItem value="simple">{{ t('agent.modeSimple') }}</SelectItem>
-                      <SelectItem value="multi">{{ t('agent.modeMulti') }}</SelectItem>
+                      <!-- <SelectItem value="multi">{{ t('agent.modeMulti') }}</SelectItem> -->
                     </SelectContent>
                   </Select>
                 </FormItem>
@@ -219,7 +219,15 @@
                 </FormItem>
 
                 <FormItem :label="t('agent.maxLoopCount')">
-                  <Input type="number" v-model.number="store.formData.maxLoopCount" min="1" max="50" class="h-10" />
+                  <Input
+                    type="number"
+                    v-model.number="store.formData.maxLoopCount"
+                    min="1"
+                    max="100"
+                    class="h-10"
+                    @blur="validateMaxLoopCount"
+                  />
+                  <p v-if="maxLoopCountError" class="text-xs text-destructive mt-1">{{ maxLoopCountError }}</p>
                 </FormItem>
               </div>
 
@@ -574,6 +582,224 @@
             </div>
           </section>
 
+          <!-- IM Channels Section -->
+          <section id="im" class="scroll-mt-6">
+            <div class="flex items-center gap-2 mb-5">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <MessageSquare class="h-4 w-4 text-primary" />
+              </div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">IM 频道</h2>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button class="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs hover:bg-muted/80 transition-colors">
+                        ?
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p class="text-xs">配置Agent的即时通讯频道，支持企业微信、钉钉、飞书等平台。配置后Agent可以通过这些渠道与用户交互。</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <div class="ml-auto flex items-center gap-2">
+                <span class="text-xs text-muted-foreground">({{ enabledIMChannelsCount }})</span>
+              </div>
+            </div>
+            <div class="pl-10 space-y-4">
+              <!-- IM Provider Tabs -->
+              <div class="flex space-x-1 border-b">
+                <button
+                  v-for="provider in imProviders"
+                  :key="provider.key"
+                  class="flex-1 py-2 px-3 text-sm transition-colors relative"
+                  :class="[
+                    activeIMProvider === provider.key
+                      ? 'text-primary font-medium'
+                      : 'text-muted-foreground hover:text-foreground'
+                  ]"
+                  @click="activeIMProvider = provider.key"
+                >
+                  <div class="flex items-center justify-center gap-2">
+                    <span>{{ provider.label }}</span>
+                    <span
+                      v-if="imConfig[provider.key]?.enabled"
+                      class="w-2 h-2 rounded-full bg-green-500"
+                    />
+                  </div>
+                  <div
+                    v-if="activeIMProvider === provider.key"
+                    class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"
+                  />
+                </button>
+              </div>
+
+              <!-- IM Provider Config -->
+              <div v-for="provider in imProviders" :key="provider.key">
+                <div v-if="activeIMProvider === provider.key" class="space-y-4">
+                  <!-- Enable Switch -->
+                  <div class="flex items-center justify-between p-4 bg-card rounded-lg border">
+                    <div class="space-y-1">
+                      <Label class="text-base">启用 {{ provider.label }}</Label>
+                      <p class="text-sm text-muted-foreground">
+                        <span v-if="provider.key === 'imessage' && !isDefaultAgent" class="text-yellow-600">iMessage 只能配置在默认智能体上</span>
+                        <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">测试失败，请检查配置后重新测试</span>
+                        <span v-else-if="!imTestStatus[provider.key]?.passed" class="text-yellow-600">请先填写配置并通过测试连接后才能启用</span>
+                        <span v-else>允许Agent通过{{ provider.label }}与用户交互</span>
+                      </p>
+                    </div>
+                    <Switch 
+                      :checked="imConfig[provider.key]?.enabled"
+                      @update:checked="(val) => handleEnableSwitch(provider.key, val)"
+                      :disabled="provider.key === 'imessage' ? !isDefaultAgent : !imTestStatus[provider.key]?.passed"
+                    />
+                  </div>
+
+                  <!-- Config Fields (always visible, editable only in edit mode or when not frozen) -->
+                  <div class="space-y-4">
+                    <!-- Status Bar -->
+                    <div class="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div class="flex items-center gap-2">
+                        <div 
+                          class="w-2 h-2 rounded-full"
+                          :class="{
+                            'bg-green-500': imTestStatus[provider.key]?.passed && !imEditMode[provider.key],
+                            'bg-yellow-500': imEditMode[provider.key],
+                            'bg-red-500': imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed && !imEditMode[provider.key],
+                            'bg-gray-400': !imTestStatus[provider.key]?.tested && !imEditMode[provider.key]
+                          }"
+                        />
+                        <span class="text-sm">
+                          <span v-if="imTestStatus[provider.key]?.passed && !imEditMode[provider.key]" class="text-green-600">配置已冻结（测试通过）</span>
+                          <span v-else-if="imEditMode[provider.key]" class="text-yellow-600">编辑模式 - 请修改配置并测试</span>
+                          <span v-else-if="imTestStatus[provider.key]?.tested && !imTestStatus[provider.key]?.passed" class="text-red-600">测试失败 - 请检查配置后重试</span>
+                          <span v-else>未测试 - 请填写配置并测试</span>
+                        </span>
+                      </div>
+                      <Button
+                        v-if="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        variant="outline"
+                        size="sm"
+                        @click="handleUpdateIMConfig(provider.key)"
+                      >
+                        <Edit class="mr-2 h-3.5 w-3.5" />
+                        更新配置
+                      </Button>
+                      <Button
+                        v-else-if="imEditMode[provider.key]"
+                        variant="outline"
+                        size="sm"
+                        @click="handleFinishIMEdit(provider.key)"
+                      >
+                        <Check class="mr-2 h-3.5 w-3.5" />
+                        完成编辑
+                      </Button>
+                    </div>
+
+                    <!-- WeChat Work -->
+                    <template v-if="provider.key === 'wechat_work'">
+                      <div class="space-y-2">
+                        <Label>Bot ID <span class="text-red-500">*</span></Label>
+                        <Input
+                          v-model="imConfig.wechat_work.config.bot_id"
+                          placeholder="输入企业微信 Bot ID"
+                          :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        />
+                      </div>
+                      <div class="space-y-2">
+                        <Label>Secret <span class="text-red-500">*</span></Label>
+                        <Input
+                          v-model="imConfig.wechat_work.config.secret"
+                          type="password"
+                          placeholder="输入 Secret"
+                          :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        />
+                      </div>
+                    </template>
+
+                    <!-- DingTalk -->
+                    <template v-if="provider.key === 'dingtalk'">
+                      <div class="space-y-2">
+                        <Label>Client ID <span class="text-red-500">*</span></Label>
+                        <Input
+                          v-model="imConfig.dingtalk.config.client_id"
+                          placeholder="输入钉钉 Client ID"
+                          :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        />
+                      </div>
+                      <div class="space-y-2">
+                        <Label>Client Secret <span class="text-red-500">*</span></Label>
+                        <Input
+                          v-model="imConfig.dingtalk.config.client_secret"
+                          type="password"
+                          placeholder="输入 Client Secret"
+                          :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        />
+                      </div>
+                    </template>
+
+                    <!-- Feishu -->
+                    <template v-if="provider.key === 'feishu'">
+                      <div class="space-y-2">
+                        <Label>App ID <span class="text-red-500">*</span></Label>
+                        <Input
+                          v-model="imConfig.feishu.config.app_id"
+                          placeholder="输入飞书 App ID"
+                          :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        />
+                      </div>
+                      <div class="space-y-2">
+                        <Label>App Secret <span class="text-red-500">*</span></Label>
+                        <Input
+                          v-model="imConfig.feishu.config.app_secret"
+                          type="password"
+                          placeholder="输入 App Secret"
+                          :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                        />
+                      </div>
+                    </template>
+
+                    <!-- iMessage -->
+                    <template v-if="provider.key === 'imessage'">
+                      <div class="space-y-4">
+                        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                          <p class="text-sm text-blue-800 dark:bg-blue-200">
+                            iMessage 使用本地数据库轮询模式。需要授予完全磁盘访问权限才能读取 Messages 数据库。
+                          </p>
+                        </div>
+                        <div class="space-y-2">
+                          <Label>监听发送者 <span class="text-red-500">*</span></Label>
+                          <p class="text-xs text-muted-foreground">每行输入一个手机号（+86 开头或纯号码），只有这些发送者的消息会被处理</p>
+                          <Textarea
+                            v-model="imConfig.imessage.config.allowed_senders_text"
+                            placeholder="+86138xxxxxxxx&#10;+86139xxxxxxxx"
+                            rows="4"
+                            :disabled="!imEditMode[provider.key] && imTestStatus[provider.key]?.passed"
+                          />
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Test Connection Button -->
+                    <div class="flex gap-2 pt-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        @click="testIMConnection(provider.key)"
+                        :disabled="testingIM[provider.key] || (!imEditMode[provider.key] && imTestStatus[provider.key]?.passed)"
+                      >
+                        <Loader v-if="testingIM[provider.key]" class="mr-2 h-4 w-4 animate-spin" />
+                        <Play v-else class="mr-2 h-4 w-4" />
+                        {{ imTestStatus[provider.key]?.passed && !imEditMode[provider.key] ? '已测试' : '测试连接' }}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- System Context Section -->
           <section id="context" class="scroll-mt-6">
             <div class="flex items-center gap-2 mb-5">
@@ -750,10 +976,11 @@ import { useAgentEditStore } from '../stores/agentEdit'
 import { useLanguage } from '../utils/i18n.js'
 import { agentAPI } from '../api/agent.js'
 import { modelProviderAPI } from '@/api/modelProvider'
+import request from '@/utils/request.js'
 import { 
   Loader, ChevronLeft, ChevronRight, ChevronDown, Save, Check, Plus, Trash2, 
   Sparkles, Bot, Wrench, Search, Server, Code, FolderOpen, User, Cpu, Database, Workflow,
-  GripVertical, X, Image as ImageIcon, AlertCircle
+  GripVertical, X, Image as ImageIcon, AlertCircle, MessageSquare, Play
 } from 'lucide-vue-next'
 import Sortable from 'sortablejs'
 
@@ -796,6 +1023,348 @@ const { listModelProviders } = modelProviderAPI
 const saving = ref(false)
 const contentRef = ref(null)
 const activeSection = ref('basic')
+const maxLoopCountError = ref('')
+
+const validateMaxLoopCount = () => {
+  const value = store.formData.maxLoopCount
+  if (value > 100) {
+    store.formData.maxLoopCount = 100
+    maxLoopCountError.value = '最大循环次数不能超过 100'
+  } else if (value < 1) {
+    store.formData.maxLoopCount = 1
+    maxLoopCountError.value = '最大循环次数不能小于 1'
+  } else {
+    maxLoopCountError.value = ''
+  }
+}
+
+// ============================================================================
+// IM Channel Configuration
+// ============================================================================
+
+const activeIMProvider = ref('wechat_work')
+const testingIM = ref({})
+
+const isDefaultAgent = computed(() => store.formData.is_default === true)
+
+const imProviders = [
+  { key: 'wechat_work', label: '企业微信' },
+  { key: 'dingtalk', label: '钉钉' },
+  { key: 'feishu', label: '飞书' },
+  { key: 'imessage', label: 'iMessage' }
+]
+
+const imConfig = ref({
+  wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
+  dingtalk: { enabled: false, config: { client_id: '', client_secret: '' } },
+  feishu: { enabled: false, config: { app_id: '', app_secret: '' } },
+  imessage: { enabled: false, config: { allowed_senders_text: '' } }
+})
+
+const enabledIMChannelsCount = computed(() => {
+  return Object.values(imConfig.value).filter(c => c.enabled).length
+})
+
+// 记录各渠道的测试连接状态
+const imTestStatus = ref({
+  wechat_work: { tested: false, passed: false },
+  dingtalk: { tested: false, passed: false },
+  feishu: { tested: false, passed: false },
+  imessage: { tested: false, passed: false }
+})
+
+// 记录各渠道测试通过时的配置快照（冻结配置）
+const imFrozenConfig = ref({
+  wechat_work: null,
+  dingtalk: null,
+  feishu: null,
+  imessage: null
+})
+
+// 记录各渠道是否处于编辑模式
+const imEditMode = ref({
+  wechat_work: false,
+  dingtalk: false,
+  feishu: false,
+  imessage: false
+})
+
+// Default empty IM config
+const getDefaultIMConfig = () => ({
+  wechat_work: { enabled: false, config: { bot_id: '', secret: '' } },
+  dingtalk: { enabled: false, config: { client_id: '', client_secret: '' } },
+  feishu: { enabled: false, config: { app_id: '', app_secret: '' } },
+  imessage: { enabled: false, config: { allowed_senders_text: '' } }
+})
+
+// Load IM config when agent changes
+const loadIMConfig = async () => {
+  const agentId = store.formData.id
+  console.log(`[AgentEdit] loadIMConfig called for agent: ${agentId}`)
+  
+  if (!agentId) {
+    console.log('[AgentEdit] No agent ID, resetting IM config')
+    imConfig.value = getDefaultIMConfig()
+    return
+  }
+  
+  // Always reset first to prevent showing stale config
+  console.log('[AgentEdit] Resetting IM config before loading')
+  imConfig.value = getDefaultIMConfig()
+  
+  // Note: Don't reset test status here to preserve test results
+  // Only reset edit mode
+  imEditMode.value = {
+    wechat_work: false,
+    dingtalk: false,
+    feishu: false,
+    imessage: false
+  }
+  
+  try {
+    console.log(`[AgentEdit] Fetching IM config for agent: ${agentId}`)
+    const result = await request.get(`/api/im/agent/${agentId}/im_channels`)
+    
+    // Double-check that we're still on the same agent (user might have switched while fetching)
+    if (store.formData.id !== agentId) {
+      console.log(`[AgentEdit] Agent changed during fetch, discarding results (was: ${agentId}, now: ${store.formData.id})`)
+      return
+    }
+    
+    // Check again after request (in case of async delay)
+    if (store.formData.id !== agentId) {
+      console.log(`[AgentEdit] Agent changed after fetch, discarding results (was: ${agentId}, now: ${store.formData.id})`)
+      return
+    }
+    
+    console.log(`[AgentEdit] IM config response:`, result)
+    
+    // request.get returns response.data directly, so result is {agent_id, is_default, channels}
+    if (result.channels) {
+      console.log(`[AgentEdit] Loaded channels:`, Object.keys(result.channels))
+      // Merge loaded config with default structure
+      for (const [provider, data] of Object.entries(result.channels)) {
+        if (imConfig.value[provider]) {
+          console.log(`[AgentEdit] Setting ${provider} config:`, data)
+          const updatedConfig = { ...imConfig.value[provider].config, ...data.config }
+          
+          // Convert allowed_senders array to text for iMessage
+          if (provider === 'imessage' && data.config?.allowed_senders) {
+            updatedConfig.allowed_senders_text = data.config.allowed_senders.join('\n')
+          }
+          
+          imConfig.value = {
+            ...imConfig.value,
+            [provider]: {
+              ...imConfig.value[provider],
+              enabled: data.enabled || false,
+              config: updatedConfig
+            }
+          }
+          
+          // Auto-mark as passed if config exists (has been tested before)
+          // This allows users to enable/disable without re-testing
+          const hasConfig = Object.keys(data.config || {}).length > 0
+          if (hasConfig) {
+            imTestStatus.value = {
+              ...imTestStatus.value,
+              [provider]: { tested: true, passed: true }
+            }
+            // Freeze the loaded config so enable switch works
+            imFrozenConfig.value = {
+              ...imFrozenConfig.value,
+              [provider]: JSON.parse(JSON.stringify(updatedConfig))
+            }
+            console.log(`[AgentEdit] Auto-marked ${provider} as tested (config exists)`)
+          }
+        }
+      }
+    } else {
+      console.log(`[AgentEdit] No channels in response (result:`, result, '), keeping default empty config')
+    }
+    
+    console.log(`[AgentEdit] Final imConfig:`, JSON.parse(JSON.stringify(imConfig.value)))
+  } catch (e) {
+    console.error('[AgentEdit] Failed to load IM config:', e)
+    // On error, ensure config is reset to default
+    imConfig.value = getDefaultIMConfig()
+  }
+}
+
+const updateIMConfig = (provider, key, value) => {
+  if (!imConfig.value[provider]) return
+  imConfig.value = {
+    ...imConfig.value,
+    [provider]: {
+      ...imConfig.value[provider],
+      [key]: value
+    }
+  }
+  // 如果配置被修改，退出编辑模式时会检查
+}
+
+// 检查当前配置是否与冻结配置一致
+const isConfigFrozen = (provider) => {
+  const frozen = imFrozenConfig.value[provider]
+  if (!frozen) return false  // 没有冻结配置，视为未冻结
+  
+  const current = imConfig.value[provider]?.config
+  if (!current) return false
+  
+  // 对比关键字段
+  return JSON.stringify(frozen) === JSON.stringify(current)
+}
+
+// 处理启用开关切换
+const handleEnableSwitch = (provider, value) => {
+  if (value) {
+    // 尝试启用，检查测试状态和配置是否被修改
+    if (!imTestStatus.value[provider]?.passed) {
+      alert('请先通过测试连接后再启用')
+      return
+    }
+    
+    // 检查配置是否被修改过（与冻结配置不一致）
+    if (!isConfigFrozen(provider)) {
+      alert('配置已修改，请重新测试连接后再启用')
+      // 重置测试状态
+      imTestStatus.value = {
+        ...imTestStatus.value,
+        [provider]: { tested: false, passed: false }
+      }
+      return
+    }
+  }
+  // 关闭开关不需要检查
+  imConfig.value = {
+    ...imConfig.value,
+    [provider]: {
+      ...imConfig.value[provider],
+      enabled: value
+    }
+  }
+}
+
+// 处理更新配置（进入编辑模式）
+const handleUpdateIMConfig = (provider) => {
+  // 如果当前已启用，先禁用
+  if (imConfig.value[provider]?.enabled) {
+    imConfig.value = {
+      ...imConfig.value,
+      [provider]: {
+        ...imConfig.value[provider],
+        enabled: false
+      }
+    }
+  }
+  // 进入编辑模式
+  imEditMode.value = {
+    ...imEditMode.value,
+    [provider]: true
+  }
+  // 重置测试状态
+  imTestStatus.value = {
+    ...imTestStatus.value,
+    [provider]: { tested: false, passed: false }
+  }
+}
+
+// 处理完成编辑（退出编辑模式）
+const handleFinishIMEdit = (provider) => {
+  imEditMode.value = {
+    ...imEditMode.value,
+    [provider]: false
+  }
+}
+
+const testIMConnection = async (provider) => {
+  if (!store.formData.id) return
+  
+  testingIM.value = {
+    ...testingIM.value,
+    [provider]: true
+  }
+  try {
+    // Get current config from form
+    const currentConfig = imConfig.value[provider]?.config || {}
+    
+    // iMessage 手机号格式验证
+    if (provider === 'imessage') {
+      const sendersText = currentConfig.allowed_senders_text || ''
+      const senders = sendersText.split('\n').map(s => s.trim()).filter(s => s)
+      
+      if (senders.length === 0) {
+        throw new Error('请至少输入一个监听手机号')
+      }
+      
+      // 验证手机号格式：+86 开头或纯 11 位号码
+      const phoneRegex = /^(\+86)?\d{11}$/
+      const invalidPhones = senders.filter(phone => !phoneRegex.test(phone))
+      
+      if (invalidPhones.length > 0) {
+        throw new Error(`手机号格式错误: ${invalidPhones.join(', ')}\n请输入 +86 开头或 11 位纯号码`)
+      }
+    }
+    
+    const result = await request.post(`/api/im/agent/${store.formData.id}/im_channels/${provider}/test`, {
+      config: currentConfig
+    })
+    console.log(`[AgentEdit] Test result for ${provider}:`, result)
+    if (result.success) {
+      // 更新测试状态为通过 - 使用 Vue.set 方式确保响应式
+      imTestStatus.value = {
+        ...imTestStatus.value,
+        [provider]: { tested: true, passed: true }
+      }
+      console.log(`[AgentEdit] Test passed, imTestStatus:`, imTestStatus.value)
+      // 冻结当前配置
+      imFrozenConfig.value = {
+        ...imFrozenConfig.value,
+        [provider]: JSON.parse(JSON.stringify(currentConfig))
+      }
+      // 退出编辑模式
+      imEditMode.value = {
+        ...imEditMode.value,
+        [provider]: false
+      }
+      alert(result.data?.message || '连接测试成功，现在可以启用该渠道')
+    } else {
+      // 更新测试状态为失败
+      imTestStatus.value = {
+        ...imTestStatus.value,
+        [provider]: { tested: true, passed: false }
+      }
+      console.log(`[AgentEdit] Test failed, imTestStatus:`, imTestStatus.value)
+      alert('连接测试失败: ' + result.message)
+    }
+  } catch (e) {
+    console.error('[AgentEdit] Failed to test IM connection:', e)
+    // 更新测试状态为失败
+    imTestStatus.value = {
+      ...imTestStatus.value,
+      [provider]: { tested: true, passed: false }
+    }
+    console.log(`[AgentEdit] Test exception, imTestStatus:`, imTestStatus.value)
+    alert('测试失败: ' + e.message)
+  } finally {
+    testingIM.value = {
+      ...testingIM.value,
+      [provider]: false
+    }
+  }
+}
+
+// Watch for agent changes to load IM config
+watch(() => store.formData.id, (newId) => {
+  if (newId) {
+    loadIMConfig()
+  }
+}, { immediate: true })
+
+// Debug: Watch imTestStatus changes
+watch(() => imTestStatus.value, (newVal, oldVal) => {
+  console.log('[AgentEdit] imTestStatus changed:', JSON.parse(JSON.stringify(newVal)))
+}, { deep: true })
 
 // 监听工具列表更新事件，重新过滤已选中的工具
 const handleToolsUpdated = async () => {
@@ -827,6 +1396,7 @@ const sections = computed(() => {
     { id: 'tools', label: t('agent.availableTools'), icon: Wrench },
     { id: 'skills', label: t('agent.availableSkills'), icon: Bot },
     { id: 'paths', label: '可访问文件夹', icon: FolderOpen },
+    { id: 'im', label: 'IM 频道', icon: MessageSquare },
     { id: 'context', label: t('agent.systemContext'), icon: Database },
     { id: 'workflows', label: t('agent.workflows'), icon: Workflow },
   ]
@@ -881,11 +1451,31 @@ const handleScroll = () => {
 
 // Initialize
 onMounted(() => {
+  console.log('[AgentEdit] Component mounted, agent:', props.agent?.id)
+  
+  // Always reset IM config on mount (component might be reused)
+  console.log('[AgentEdit] Resetting IM config on mount')
+  imConfig.value = getDefaultIMConfig()
+  
+  // Only reset edit mode, preserve test status
+  imEditMode.value = {
+    wechat_work: false,
+    dingtalk: false,
+    feishu: false,
+    imessage: false
+  }
+  
   store.initForm(props.agent)
   if (contentRef.value) {
     contentRef.value.addEventListener('scroll', handleScroll, { passive: true })
   }
   loadData()
+  
+  // Explicitly load IM config on mount (watch might not trigger if id hasn't changed)
+  if (props.agent?.id || store.formData.id) {
+    loadIMConfig()
+  }
+  
   window.addEventListener('tools-updated', handleToolsUpdated)
 })
 
@@ -898,6 +1488,20 @@ onBeforeUnmount(() => {
 
 // Watch agent changes
 watch(() => props.agent, (newAgent) => {
+  console.log('[AgentEdit] Agent changed:', newAgent?.id)
+  
+  // Always reset IM config when agent changes
+  console.log('[AgentEdit] Resetting IM config on agent change')
+  imConfig.value = getDefaultIMConfig()
+  
+  // Only reset edit mode, preserve test status
+  imEditMode.value = {
+    wechat_work: false,
+    dingtalk: false,
+    feishu: false,
+    imessage: false
+  }
+  
   const isIdUpdate = newAgent && newAgent.id && store.formData.id === null && newAgent.name === store.formData.name
   const isSameAgent = newAgent && store.formData.id === newAgent.id
   
@@ -905,6 +1509,12 @@ watch(() => props.agent, (newAgent) => {
     store.initForm(newAgent, { preserveStep: true })
   } else {
     store.initForm(newAgent)
+  }
+  
+  // Reload IM config when agent changes (even for same agent, to get latest saved config)
+  if (newAgent?.id) {
+    console.log('[AgentEdit] Reloading IM config for agent:', newAgent.id)
+    loadIMConfig()
   }
 })
 
@@ -968,8 +1578,64 @@ watch(selectedProviderSupportsMultimodal, (supportsMultimodal) => {
 const handleSave = async (shouldExit = true) => {
   saving.value = true
   try {
+    // Check all enabled channels have passed test
+    for (const [provider, data] of Object.entries(imConfig.value)) {
+      if (data.enabled) {
+        // iMessage has its own validation
+        if (provider === 'imessage') {
+          const sendersText = data.config?.allowed_senders_text || ''
+          const senders = sendersText.split('\n').map(s => s.trim()).filter(s => s)
+          if (senders.length === 0) {
+            alert('iMessage 必须配置至少一个监听发送者')
+            saving.value = false
+            return
+          }
+        } else {
+          // Other channels must pass test before saving
+          if (!imTestStatus.value[provider]?.passed) {
+            alert(`${imProviders.find(p => p.key === provider)?.label} 未通过测试连接，请先测试通过后再保存`)
+            saving.value = false
+            return
+          }
+        }
+      }
+    }
+    
+    // Prepare IM channels config
+    const imChannels = {}
+    for (const [provider, data] of Object.entries(imConfig.value)) {
+      let config = { ...data.config }
+      
+      // Convert allowed_senders_text to array for iMessage
+      if (provider === 'imessage' && config.allowed_senders_text) {
+        config.allowed_senders = config.allowed_senders_text
+          .split('\n')
+          .map(s => s.trim())
+          .filter(s => s)
+        delete config.allowed_senders_text
+      }
+      
+      imChannels[provider] = {
+        enabled: data.enabled,
+        config: config
+      }
+    }
+    
+    // Add IM channels to formData
+    store.formData.im_channels = imChannels
+    
+    console.log('[AgentEdit] Saving IM channels:', JSON.parse(JSON.stringify(imChannels)))
+    
+    // 保存前验证 maxLoopCount
+    validateMaxLoopCount()
     store.prepareForSave()
     const plainData = JSON.parse(JSON.stringify(store.formData))
+    
+    console.log('[AgentEdit] Plain data to save:', { 
+      id: plainData.id, 
+      im_channels: plainData.im_channels 
+    })
+    
     await new Promise((resolve) => {
       emit('save', plainData, shouldExit, () => resolve())
     })
