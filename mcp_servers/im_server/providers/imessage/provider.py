@@ -84,21 +84,68 @@ class iMessageProvider(IMProviderBase):
 
     def _run_applescript(self, script: str) -> tuple[bool, str]:
         """Run AppleScript and return (success, output_or_error)."""
+        import shlex
         try:
+            # Log the script for debugging (truncated if too long)
+            script_preview = script[:200] + "..." if len(script) > 200 else script
+            logger.debug(f"[iMessage] Executing AppleScript: {script_preview}")
+            
             result = subprocess.run(
                 ["osascript", "-e", script],
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=60  # Increased timeout for longer delays
             )
+            
+            logger.debug(f"[iMessage] AppleScript returncode: {result.returncode}")
+            logger.debug(f"[iMessage] AppleScript stdout: {result.stdout.strip()}")
+            logger.debug(f"[iMessage] AppleScript stderr: {result.stderr.strip()}")
+            
             if result.returncode == 0:
                 return True, result.stdout.strip()
             else:
-                return False, result.stderr.strip()
+                error_msg = result.stderr.strip()
+                # If stderr is empty but returncode is non-zero, include stdout as it might contain error
+                if not error_msg and result.stdout.strip():
+                    error_msg = result.stdout.strip()
+                return False, error_msg
         except subprocess.TimeoutExpired:
+            logger.error("[iMessage] AppleScript execution timed out")
             return False, "AppleScript execution timed out"
         except Exception as e:
+            logger.error(f"[iMessage] AppleScript execution error: {e}")
             return False, str(e)
+
+    def _normalize_phone_for_send(self, user_id: str) -> str:
+        """
+        Normalize phone number for iMessage sending.
+        
+        iMessage requires phone numbers to be in international format (+86xxxxxxxxxxx)
+        for reliable delivery. This method adds +86 prefix for Chinese phone numbers.
+        
+        Args:
+            user_id: Phone number or email address
+            
+        Returns:
+            Normalized phone number or original email
+        """
+        # If it's an email, return as-is
+        if '@' in user_id:
+            return user_id
+        
+        # Remove all non-digit characters
+        digits = ''.join(c for c in user_id if c.isdigit())
+        
+        # If already has country code (+86), return as +86...
+        if digits.startswith('86') and len(digits) == 13:
+            return f"+{digits}"
+        
+        # If it's a Chinese mobile number (11 digits, starts with 1), add +86
+        if len(digits) == 11 and digits.startswith('1'):
+            return f"+86{digits}"
+        
+        # Otherwise return original (might be landline or other format)
+        return user_id
 
     async def send_message(
         self,
@@ -121,23 +168,84 @@ class iMessageProvider(IMProviderBase):
         if not user_id:
             return {"success": False, "error": "user_id (phone/email) is required"}
 
-        # Escape quotes in content to prevent AppleScript injection
-        escaped_content = content.replace('"', '\\"').replace("'", "\\'")
+        # Normalize phone number for sending (add +86 for Chinese numbers)
+        normalized_user_id = self._normalize_phone_for_send(user_id)
+        if normalized_user_id != user_id:
+            logger.info(f"[iMessage] Normalized recipient from '{user_id}' to '{normalized_user_id}'")
+
+        # Escape quotes and special characters to prevent AppleScript injection
+        escaped_content = content.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
+        # Remove control characters that might break AppleScript
+        escaped_content = ''.join(char for char in escaped_content if ord(char) >= 32 or char in '\n\r\t')
         
-        # AppleScript to send iMessage
+        logger.info(f"[iMessage] Sending message to {normalized_user_id}, content length: {len(escaped_content)}")
+        
+        # Ensure Messages app is running and activated
+        logger.info("[iMessage] Ensuring Messages app is running...")
+        
+        # Step 1: Launch Messages if not running
+        launch_script = '''
+            tell application "Messages"
+                if not running then
+                    launch
+                    delay 3
+                end if
+            end tell
+        '''
+        self._run_applescript(launch_script)
+        
+        # Step 2: Activate Messages and wait
+        activate_script = '''
+            tell application "Messages"
+                activate
+                delay 3
+            end tell
+        '''
+        activate_success, activate_output = self._run_applescript(activate_script)
+        if not activate_success:
+            logger.warning(f"[iMessage] Failed to activate Messages app: {activate_output}")
+        
+        # AppleScript to send iMessage with better error handling
+        # Note: delay after sending is important for message delivery status
         script = f'''
             tell application "Messages"
                 set targetService to 1st service whose service type = iMessage
-                set targetBuddy to buddy "{user_id}" of targetService
+                set targetBuddy to buddy "{normalized_user_id}" of targetService
                 send "{escaped_content}" to targetBuddy
+                delay 5
+                return "Message sent successfully"
             end tell
         '''
 
+        logger.info(f"[iMessage] AppleScript:\n{script}")
         success, output = self._run_applescript(script)
+        logger.info(f"[iMessage] AppleScript result: success={success}, output={output}")
         
         if success:
+            logger.info(f"[iMessage] Message sent successfully to {normalized_user_id}")
             return {"success": True, "message_id": output}
         else:
+            logger.error(f"[iMessage] Failed to send message to {normalized_user_id}: {output}")
+            
+            # Try alternative format if first attempt failed
+            if normalized_user_id != user_id and normalized_user_id.startswith('+86'):
+                logger.info(f"[iMessage] Retrying with original format: {user_id}")
+                script = f'''
+                    tell application "Messages"
+                        set targetService to 1st service whose service type = iMessage
+                        set targetBuddy to buddy "{user_id}" of targetService
+                        send "{escaped_content}" to targetBuddy
+                        delay 5
+                        return "Message sent successfully (original format)"
+                    end tell
+                '''
+                logger.info(f"[iMessage] Retry AppleScript:\n{script}")
+                success, output = self._run_applescript(script)
+                logger.info(f"[iMessage] Retry result: success={success}, output={output}")
+                if success:
+                    logger.info(f"[iMessage] Message sent successfully with original format")
+                    return {"success": True, "message_id": output}
+            
             return {"success": False, "error": output}
 
     async def verify_webhook(self, request_body: bytes, signature: str) -> bool:
