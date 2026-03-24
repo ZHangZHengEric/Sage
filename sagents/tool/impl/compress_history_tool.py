@@ -51,23 +51,18 @@ class CompressHistoryTool:
         session_context = self._get_session_context(session_id)
         return session_context.message_manager
 
-    def _calculate_tokens(self, content: str) -> int:
-        """计算内容的 token 数（简化估算）"""
-        if not content:
-            return 0
-
-        token_count = 0
-        for char in content:
-            if '\u4e00' <= char <= '\u9fff':
-                token_count += 0.6
-            elif char.isalpha():
-                token_count += 0.25
-            elif char.isdigit():
-                token_count += 0.2
-            else:
-                token_count += 0.4
-
-        return int(token_count)
+    def _calculate_tokens(self, content) -> int:
+        """计算内容的 token 数
+        
+        Args:
+            content: 消息内容，可能是字符串或列表（多模态消息）
+        
+        Returns:
+            int: token 数量
+        """
+        # 直接使用 MessageManager 的 calculate_str_token_length 方法
+        # 它支持多模态消息格式（字符串或列表）
+        return MessageManager.calculate_str_token_length(content)
 
     def _format_messages_for_compression(self, messages: List[MessageChunk]) -> str:
         """将消息格式化为文本用于压缩"""
@@ -95,10 +90,12 @@ class CompressHistoryTool:
         if not model:
             raise CompressHistoryError("会话模型未初始化")
 
-        # 移除非标准参数
+        # 移除非标准参数和与显式参数冲突的参数
         model_config.pop('max_model_len', None)
         model_config.pop('api_key', None)
         model_config.pop('maxTokens', None)
+        model_config.pop('max_tokens', None)  # 移除可能存在的 max_tokens
+        model_config.pop('temperature', None)  # 移除可能存在的 temperature
         model_config.pop('base_url', None)
         model_name = model_config.pop('model', 'gpt-3.5-turbo')
 
