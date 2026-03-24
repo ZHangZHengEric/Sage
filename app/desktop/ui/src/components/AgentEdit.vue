@@ -1252,6 +1252,24 @@ const testIMConnection = async (provider) => {
     // Get current config from form
     const currentConfig = imConfig.value[provider]?.config || {}
     
+    // iMessage 手机号格式验证
+    if (provider === 'imessage') {
+      const sendersText = currentConfig.allowed_senders_text || ''
+      const senders = sendersText.split('\n').map(s => s.trim()).filter(s => s)
+      
+      if (senders.length === 0) {
+        throw new Error('请至少输入一个监听手机号')
+      }
+      
+      // 验证手机号格式：+86 开头或纯 11 位号码
+      const phoneRegex = /^(\+86)?\d{11}$/
+      const invalidPhones = senders.filter(phone => !phoneRegex.test(phone))
+      
+      if (invalidPhones.length > 0) {
+        throw new Error(`手机号格式错误: ${invalidPhones.join(', ')}\n请输入 +86 开头或 11 位纯号码`)
+      }
+    }
+    
     const result = await request.post(`/api/im/agent/${store.formData.id}/im_channels/${provider}/test`, {
       config: currentConfig
     })
