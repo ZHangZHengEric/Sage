@@ -282,6 +282,16 @@ async def update(agent_id: str, agent: AgentConfigDTO, http_request: Request):
                 success = agent_config.set_provider_config(provider, enabled, config)
                 if success:
                     logger.info(f"[Agent Update] Saved {provider} config for agent={agent_id}, enabled={enabled}")
+                    
+                    # 如果启用，启动 IM 渠道
+                    if enabled:
+                        try:
+                            from mcp_servers.im_server.service_manager import get_service_manager
+                            service_manager = get_service_manager()
+                            logger.info(f"[Agent Update] Starting {provider} channel for agent={agent_id}")
+                            await service_manager.start_channel(agent_id, provider)
+                        except Exception as e:
+                            logger.error(f"[Agent Update] Failed to start {provider} channel: {e}")
                 else:
                     logger.error(f"[Agent Update] Failed to save {provider} config for agent={agent_id}")
         except Exception as e:
