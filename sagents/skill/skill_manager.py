@@ -355,7 +355,13 @@ class SkillManager:
         Returns:
             Optional[str]: The skill name if successful, None otherwise
         """
-        skill_path = os.path.join(self.skill_workspace, skill_dir_name)
+        # 使用第一个 skill_dirs 作为默认工作区
+        if not self.skill_dirs:
+            logger.error("No skill directories configured")
+            return None
+        
+        skill_workspace = self.skill_dirs[0]
+        skill_path = os.path.join(skill_workspace, skill_dir_name)
         if not os.path.exists(skill_path):
             logger.error(f"Skill directory not found: {skill_path}")
             return None
