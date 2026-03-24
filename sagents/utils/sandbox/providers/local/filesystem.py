@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Optional
+from typing import Dict, Optional
 
 SANDBOX_WORKSPACE_ROOT = "/sage-workspace"
 
@@ -11,13 +11,30 @@ class SandboxFileSystem:
     providing a safe view of the file tree for the agent.
     """
     def __init__(self, host_path: str, virtual_path: str = SANDBOX_WORKSPACE_ROOT, enable_path_mapping: bool = True):
-        self.host_path = host_path
-        self.virtual_path = virtual_path
+        self.host_path = os.path.abspath(host_path)
+        self.virtual_path = virtual_path.rstrip(os.sep) or os.sep
+        self._mappings: Dict[str, str] = {}
         # 如果 host_path == virtual_path，自动禁用路径映射
         if host_path == virtual_path:
             self.enable_path_mapping = False
         else:
             self.enable_path_mapping = enable_path_mapping
+
+    def add_mapping(self, virtual_path: str, host_path: str) -> None:
+        """Add an extra virtual -> host path mapping."""
+        normalized_virtual = virtual_path.rstrip(os.sep) or os.sep
+        self._mappings[normalized_virtual] = os.path.abspath(host_path)
+
+    def _iter_virtual_mappings(self):
+        """Yield mappings ordered by longest virtual prefix first."""
+        items = [(self.virtual_path, self.host_path), *self._mappings.items()]
+        return sorted(items, key=lambda item: len(item[0]), reverse=True)
+
+    def _iter_host_mappings(self):
+        """Yield mappings ordered by longest host prefix first."""
+        items = [(self.virtual_path, self.host_path), *self._mappings.items()]
+        host_first = [(host, virtual) for virtual, host in items]
+        return sorted(host_first, key=lambda item: len(item[0]), reverse=True)
 
     def get_file_tree(self, include_hidden: bool = False, root_path: Optional[str] = None, max_depth: Optional[int] = None, max_items_per_dir: int = 5) -> str:
         """
@@ -226,12 +243,12 @@ class SandboxFileSystem:
         Converts a virtual path to a host path.
         Handles both exact matches and subpaths.
         """
-        if virtual_path == self.virtual_path:
-            return self.host_path
-        
-        if virtual_path.startswith(self.virtual_path + os.sep) or virtual_path.startswith(self.virtual_path + "/"):
-            rel_path = virtual_path[len(self.virtual_path):].lstrip(os.sep).lstrip("/")
-            return os.path.join(self.host_path, rel_path)
+        for mapped_virtual, mapped_host in self._iter_virtual_mappings():
+            if virtual_path == mapped_virtual:
+                return mapped_host
+            if virtual_path.startswith(mapped_virtual + os.sep) or virtual_path.startswith(mapped_virtual + "/"):
+                rel_path = virtual_path[len(mapped_virtual):].lstrip(os.sep).lstrip("/")
+                return os.path.join(mapped_host, rel_path)
         
         # If it's already a host path or doesn't match virtual path, return as is (or handle error)
         # For robustness, we assume if it's not virtual, it might be a relative path or something else.
@@ -241,12 +258,13 @@ class SandboxFileSystem:
         """
         Converts a host path to a virtual path.
         """
-        if host_path == self.host_path:
-            return self.virtual_path
-        
-        if host_path.startswith(self.host_path + os.sep) or host_path.startswith(self.host_path + "/"):
-            rel_path = host_path[len(self.host_path):].lstrip(os.sep).lstrip("/")
-            return os.path.join(self.virtual_path, rel_path)
+        normalized_host = os.path.abspath(host_path)
+        for mapped_host, mapped_virtual in self._iter_host_mappings():
+            if normalized_host == mapped_host:
+                return mapped_virtual
+            if normalized_host.startswith(mapped_host + os.sep) or normalized_host.startswith(mapped_host + "/"):
+                rel_path = normalized_host[len(mapped_host):].lstrip(os.sep).lstrip("/")
+                return os.path.join(mapped_virtual, rel_path)
             
         return host_path
 
@@ -337,17 +355,12 @@ class SandboxFileSystem:
         if not text:
             return text
             
-        # Escape the virtual path for regex
-        escaped_path = re.escape(self.virtual_path)
-        
-        # Regex explanation:
-        # (?<![a-zA-Z0-9_\.\-/]) : Lookbehind to ensure the preceding character is NOT a path character
-        # escaped_path           : The virtual path we want to replace
-        # (?=$|/|[^a-zA-Z0-9_\.\-]) : Lookahead to ensure the following character is either end of string, 
-        #                             a path separator, or a non-path character.
-        pattern = r'(?<![a-zA-Z0-9_\.\-/])' + escaped_path + r'(?=$|/|[^a-zA-Z0-9_\.\-])'
-        
-        return re.sub(pattern, lambda m: self.host_path, text)
+        result = text
+        for virtual_path, host_path in self._iter_virtual_mappings():
+            escaped_path = re.escape(virtual_path)
+            pattern = r'(?<![a-zA-Z0-9_\.\-/])' + escaped_path + r'(?=$|/|[^a-zA-Z0-9_\.\-])'
+            result = re.sub(pattern, lambda m, replacement=host_path: replacement, result)
+        return result
 
     def map_text_to_virtual(self, text: str) -> str:
         """
@@ -355,11 +368,13 @@ class SandboxFileSystem:
         """
         if not text:
             return text
-            
-        escaped_path = re.escape(self.host_path)
-        pattern = r'(?<![a-zA-Z0-9_\.\-/])' + escaped_path + r'(?=$|/|[^a-zA-Z0-9_\.\-])'
-        
-        return re.sub(pattern, lambda m: self.virtual_path, text)
+
+        result = text
+        for host_path, virtual_path in self._iter_host_mappings():
+            escaped_path = re.escape(host_path)
+            pattern = r'(?<![a-zA-Z0-9_\.\-/])' + escaped_path + r'(?=$|/|[^a-zA-Z0-9_\.\-])'
+            result = re.sub(pattern, lambda m, replacement=virtual_path: replacement, result)
+        return result
 
     @property
     def root(self) -> str:
