@@ -22,6 +22,14 @@ from typing import Callable, Dict, Any, Optional
 import websockets
 from websockets.exceptions import ConnectionClosed, InvalidStatusCode
 
+# Import file handler
+try:
+    from .file_handler import download_wechat_file, FileInfo
+    FILE_HANDLER_AVAILABLE = True
+except ImportError:
+    FILE_HANDLER_AVAILABLE = False
+    FileInfo = None
+
 logger = logging.getLogger("WeChatWorkWebSocket")
 
 
@@ -70,6 +78,7 @@ class WeChatWorkWebSocketClient:
         self.running = False
         self._ws_thread: Optional[threading.Thread] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None  # WebSocket 线程的事件循环
         
         # 状态追踪
         self._last_message_time: float = 0
@@ -105,21 +114,20 @@ class WeChatWorkWebSocketClient:
         logger.info("[WeChatWork] 正在停止客户端...")
         self.running = False
 
-        # 取消心跳任务
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
+        # 注意：不要跨线程关闭 WebSocket，这会导致事件循环错误
+        # 而是让后台线程自然退出（通过设置 self.running = False）
+        # 后台线程的 _connect_and_run 会检测到 self.running=False 并退出
 
-        # 关闭 WebSocket 连接
-        if self.websocket:
-            try:
-                asyncio.get_event_loop().create_task(self.websocket.close())
-            except Exception:
-                pass
+        # 等待线程自然结束（最多 3 秒）
+        if self._ws_thread and self._ws_thread.is_alive():
+            self._ws_thread.join(timeout=3)
+            if self._ws_thread.is_alive():
+                logger.warning("[WeChatWork] WebSocket thread did not stop gracefully")
 
-        # 等待线程结束
-        if self._ws_thread:
-            self._ws_thread.join(timeout=5)
-
+        self._ws_thread = None
+        self.websocket = None
+        self._heartbeat_task = None
+        self._loop = None
         logger.info("[WeChatWork] 客户端已停止")
 
     def _run_client(self):
@@ -161,6 +169,9 @@ class WeChatWorkWebSocketClient:
 
     async def _connect_and_run(self):
         """建立连接并运行消息循环"""
+        # 保存当前事件循环引用
+        self._loop = asyncio.get_event_loop()
+        
         try:
             logger.info(f"[WeChatWork] 正在连接到 {self.WS_URL}...")
             
@@ -185,10 +196,16 @@ class WeChatWorkWebSocketClient:
                 # 启动心跳任务
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-                # 消息接收循环
-                async for message in websocket:
-                    self._last_message_time = time.time()
-                    await self._handle_message(message)
+                # 消息接收循环（带停止检查）
+                while self.running:
+                    try:
+                        # 使用 wait_for 包装 recv，以便能响应停止信号
+                        message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                        self._last_message_time = time.time()
+                        await self._handle_message(message)
+                    except asyncio.TimeoutError:
+                        # 超时继续循环，检查 self.running
+                        continue
 
         except ConnectionClosed as e:
             logger.warning(f"[WeChatWork] 连接已关闭: {e}")
@@ -294,7 +311,7 @@ class WeChatWorkWebSocketClient:
             data = json.loads(message)
             cmd = data.get("cmd")
             
-            logger.debug(f"[WeChatWork] 收到消息: {cmd}")
+            logger.info(f"[WeChatWork] 收到消息: {cmd}")
 
             if cmd == "aibot_msg_callback":
                 # 用户消息回调
@@ -340,6 +357,8 @@ class WeChatWorkWebSocketClient:
 
             # 根据消息类型提取内容
             content = ""
+            file_info = None  # 初始化 file_info，用于存储下载的文件信息
+            
             if msg_type == "text":
                 # 文本消息
                 content = body.get("text", {}).get("content", "")
@@ -349,9 +368,49 @@ class WeChatWorkWebSocketClient:
                 for item in mixed_items:
                     if item.get("type") == "text":
                         content += item.get("content", "")
-            elif msg_type in ["image", "voice", "file"]:
+            elif msg_type in ["image", "voice", "file", "video"]:
                 # 媒体消息 (仅单聊支持)
-                content = f"[{msg_type.upper()} 消息]"
+                media_data = body.get(msg_type, {})
+                file_url = media_data.get("url")
+                aes_key = media_data.get("aeskey")
+                
+                # 注意: 企业微信 Smart Robot API 不提供原始文件名
+                # 文件将使用时间戳格式保存: YYYYMMDD_HHMMSS_文件类型.扩展名
+                # 扩展名会从 HTTP 响应头、URL 或文件内容中自动检测
+                # 
+                # 如果需要获取原始文件名，需要开通"会话内容存档 API"（收费）:
+                # - 办公版: 100元/账号/年
+                # - 服务版: 450元/账号/年  
+                # - 企业版: 900元/账号/年
+                # 参考文档: https://developer.work.weixin.qq.com/document/path/91774
+                
+                # 文件类型标识（用于文件名前缀）
+                file_type = msg_type  # image/voice/video/file
+                
+                content = f"[{msg_type.upper()}消息] 文件类型: {file_type}"
+                file_info = None
+                
+                # 同步下载文件（立即下载，不等待，一次性处理）
+                # 使用同步文件写入，不依赖事件循环，避免"Event loop is closed"错误
+                if FILE_HANDLER_AVAILABLE and file_url:
+                    try:
+                        logger.info(f"[WeChatWork] 开始下载 {msg_type} 文件")
+                        file_info = await download_wechat_file(
+                            url=file_url,
+                            aes_key=aes_key,
+                            filename=file_type,
+                            provider="wechat_work",
+                            chat_id=chat_id,
+                            user_id=user_id
+                        )
+                        logger.info(f"[WeChatWork] 文件下载成功: {file_info.local_path}")
+                        content += f"\n文件路径: {file_info.local_path}"
+                    except Exception as e:
+                        logger.error(f"[WeChatWork] 文件下载失败: {e}")
+                        content += f"\n[文件下载失败: {e}]"
+                elif not FILE_HANDLER_AVAILABLE:
+                    logger.warning("[WeChatWork] file_handler 模块不可用，跳过文件下载")
+                    content += "\n[文件下载功能未启用]"
             else:
                 content = str(body)
 
@@ -369,8 +428,18 @@ class WeChatWorkWebSocketClient:
                 "req_id": req_id,  # 重要: 用于回复关联
                 "raw_data": body
             }
+            
+            # 添加文件信息 (如果有)
+            if file_info:
+                parsed_message["file_info"] = {
+                    "name": file_info.name,
+                    "size": file_info.size,
+                    "mime_type": file_info.mime_type,
+                    "local_path": file_info.local_path
+                }
 
-            logger.info(f"[WeChatWork] 收到消息 来自 {user_id} ({chat_type}): {content[:50]}...")
+            logger.info(f"[WeChatWork] 收到消息 来自 {user_id} ({chat_type}): {content[:80]}...")
+            logger.info(f"[WeChatWork] 准备调用 message_handler: {self.message_handler}")
 
             # 调用消息处理器
             self._call_message_handler(parsed_message)
@@ -428,7 +497,9 @@ class WeChatWorkWebSocketClient:
             message: 标准化后的消息/事件对象
         """
         try:
+            logger.info(f"[WeChatWork] _call_message_handler 开始调用, message_type={message.get('type')}")
             result = self.message_handler(message)
+            logger.info(f"[WeChatWork] message_handler 返回类型: {type(result)}, iscoroutine={asyncio.iscoroutine(result)}")
             # 如果处理函数返回协程, 需要异步执行
             if asyncio.iscoroutine(result):
                 try:
@@ -522,23 +593,11 @@ class WeChatWorkWebSocketClient:
 
             await self.websocket.send(json.dumps(message))
             
-            # 等待响应 (5秒超时)
-            try:
-                response = await asyncio.wait_for(self.websocket.recv(), timeout=5)
-                resp_data = json.loads(response)
-                
-                if resp_data.get("errcode") == 0:
-                    logger.info(f"[WeChatWork] 消息发送成功")
-                    return {"success": True}
-                else:
-                    error_msg = resp_data.get("errmsg", "未知错误")
-                    logger.error(f"[WeChatWork] 发送失败: {error_msg}")
-                    return {"success": False, "error": error_msg}
-                    
-            except asyncio.TimeoutError:
-                # 超时但消息可能已发送
-                logger.warning("[WeChatWork] 发送响应超时, 消息可能已发送")
-                return {"success": True, "warning": "响应超时"}
+            # 注意: websockets 10+ 不支持并发 recv()
+            # 主循环的 async for 已经在 recv，这里不能再次调用
+            # 简化处理：只发送，不等待响应（企业微信会在有错误时通过事件回调通知）
+            logger.info("[WeChatWork] 消息已发送")
+            return {"success": True}
 
         except Exception as e:
             logger.error(f"[WeChatWork] 发送消息异常: {e}", exc_info=True)
@@ -550,7 +609,19 @@ class WeChatWorkWebSocketClient:
         Returns:
             bool: 已连接返回 True
         """
-        return self.websocket is not None and self.websocket.open
+        if self.websocket is None:
+            return False
+        # 兼容不同版本的 websockets 库
+        # 新版本使用 state 属性，旧版本使用 open 属性
+        if hasattr(self.websocket, 'open'):
+            return self.websocket.open
+        elif hasattr(self.websocket, 'state'):
+            # websockets 10+ 版本: State.OPEN = 1
+            from websockets.protocol import State
+            return self.websocket.state == State.OPEN
+        else:
+            # 兜底方案：尝试发送 ping 检查
+            return True
 
     def get_chat_info_by_req_id(self, req_id: str) -> Optional[Dict[str, Any]]:
         """通过 req_id 获取聊天信息 (用于回复消息时查找上下文)

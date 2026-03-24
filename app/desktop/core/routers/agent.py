@@ -103,6 +103,7 @@ def convert_config_to_agent(
 
 def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
     """将 AgentConfigResp 对象转换为配置字典"""
+    logger.info(f"[convert_agent_to_config] Input: is_default={agent.is_default}, type={type(agent.is_default)}")
     config = {
         "name": agent.name,
         "systemPrefix": agent.systemPrefix,
@@ -124,7 +125,9 @@ def convert_agent_to_config(agent: AgentConfigDTO) -> Dict[str, Any]:
         "llm_provider_id": agent.llm_provider_id,
     }
     # 去除 None 值，保持存储整洁
-    return {k: v for k, v in config.items() if v is not None}
+    result = {k: v for k, v in config.items() if v is not None}
+    logger.info(f"[convert_agent_to_config] Output: is_default={result.get('is_default')}")
+    return result
 
 
 # 创建路由器
@@ -212,7 +215,10 @@ async def create(agent: AgentConfigDTO, http_request: Request):
     Returns:
         StandardResponse: 包含操作结果的标准响应
     """
-    created_agent = await create_agent(agent.name, convert_agent_to_config(agent))
+    logger.info(f"[Agent Create] Received: id={agent.id}, name={agent.name}, is_default={agent.is_default}")
+    config_dict = convert_agent_to_config(agent)
+    logger.info(f"[Agent Create] Config dict: is_default={config_dict.get('is_default')}")
+    created_agent = await create_agent(agent.name, config_dict)
     return await Response.succ(
         data={"agent_id": created_agent.agent_id}, message=f"Agent '{created_agent.agent_id}' 创建成功"
     )
@@ -265,6 +271,34 @@ async def delete(agent_id: str, http_request: Request):
     """
     await delete_agent(agent_id)
     return await Response.succ(data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 删除成功")
+
+
+@agent_router.post("/{agent_id}/set-default")
+async def set_default_agent(agent_id: str, http_request: Request):
+    """
+    设置指定 Agent 为默认 Agent
+
+    Args:
+        agent_id: Agent ID
+
+    Returns:
+        StandardResponse: 包含操作结果的标准响应
+    """
+    from ..models.agent import AgentConfigDao
+    
+    # 先检查 Agent 是否存在
+    agent = await get_agent(agent_id)
+    if not agent:
+        return await Response.error(message=f"Agent '{agent_id}' 不存在")
+    
+    # 设置为默认
+    dao = AgentConfigDao()
+    success = await dao.set_default(agent_id)
+    
+    if success:
+        return await Response.succ(data={"agent_id": agent_id}, message=f"Agent '{agent_id}' 已设为默认")
+    else:
+        return await Response.error(message=f"设置默认 Agent 失败")
 
 
 @agent_router.post("/auto-generate")

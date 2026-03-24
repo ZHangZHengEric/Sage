@@ -323,8 +323,29 @@ async def initialize_im_service():
             if is_enabled:
                 enabled_providers.append(provider_type)
         
-        if not enabled_providers:
-            logger.info(f"[IM] 没有启用的 IM provider，跳过服务启动。所有配置: {all_configs}")
+        # Also check Agent-level configs
+        has_agent_configs = False
+        try:
+            from mcp_servers.im_server.agent_config import list_all_agents, get_agent_im_config
+            agents = list_all_agents()
+            logger.info(f"[IM] Found {len(agents)} agents with IM config files")
+            for agent_id in agents:
+                try:
+                    agent_config = get_agent_im_config(agent_id)
+                    channels = agent_config.get_all_channels()
+                    for provider, data in channels.items():
+                        if data.get('enabled'):
+                            has_agent_configs = True
+                            logger.info(f"[IM] Agent {agent_id} has enabled {provider}")
+                            if provider not in enabled_providers:
+                                enabled_providers.append(provider)
+                except Exception as e:
+                    logger.warning(f"[IM] Failed to check agent {agent_id}: {e}")
+        except Exception as e:
+            logger.warning(f"[IM] Failed to check agent configs: {e}")
+        
+        if not enabled_providers and not has_agent_configs:
+            logger.info(f"[IM] 没有启用的 IM provider（全局或Agent级），跳过服务启动")
             return
         
         logger.info(f"[IM] 正在启动 IM 服务，启用的 provider: {enabled_providers}")
