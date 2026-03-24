@@ -331,9 +331,11 @@ class AgentIMConfig:
             ValueError: If trying to configure iMessage on non-default Agent.
         """
         # Validate: iMessage only allowed on default Agent (only when enabled)
-        if provider == IMESSAGE_PROVIDER and enabled and self.agent_id != DEFAULT_AGENT_ID:
-            logger.error(f"[AgentIMConfig] iMessage can only be configured on default agent")
-            raise ValueError(f"iMessage provider can only be configured on default agent (id={DEFAULT_AGENT_ID})")
+        if provider == IMESSAGE_PROVIDER and enabled:
+            default_agent_id = get_default_agent_id()
+            if self.agent_id != default_agent_id:
+                logger.error(f"[AgentIMConfig] iMessage can only be configured on default agent (current={self.agent_id}, default={default_agent_id})")
+                raise ValueError(f"iMessage provider can only be configured on default agent (id={default_agent_id})")
         
         with self._lock:
             self._reload_if_changed()
@@ -458,7 +460,7 @@ def is_default_agent(agent_id: str) -> bool:
     Returns:
         True if this is the default Agent.
     """
-    return agent_id == DEFAULT_AGENT_ID
+    return agent_id == get_default_agent_id()
 
 
 def validate_provider_config(agent_id: str, provider: str, config: Dict[str, Any], enabled: bool = False) -> None:
@@ -475,11 +477,13 @@ def validate_provider_config(agent_id: str, provider: str, config: Dict[str, Any
         ValueError: If validation fails (e.g., iMessage on non-default Agent)
     """
     # iMessage restriction (only check if enabled)
-    if provider == IMESSAGE_PROVIDER and enabled and agent_id != DEFAULT_AGENT_ID:
-        raise ValueError(
-            f"iMessage provider can only be configured on the default agent. "
-            f"Current agent={agent_id}, default={DEFAULT_AGENT_ID}"
-        )
+    if provider == IMESSAGE_PROVIDER and enabled:
+        default_agent_id = get_default_agent_id()
+        if agent_id != default_agent_id:
+            raise ValueError(
+                f"iMessage provider can only be configured on the default agent. "
+                f"Current agent={agent_id}, default={default_agent_id}"
+            )
     
     # iMessage allowed_senders validation
     if provider == IMESSAGE_PROVIDER and enabled:
