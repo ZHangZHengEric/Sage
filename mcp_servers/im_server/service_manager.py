@@ -197,13 +197,15 @@ class IMServiceManager:
             try:
                 from .agent_config import get_agent_im_config
                 agent_config = get_agent_im_config(sage_user_id)
-                provider_config = agent_config.get_provider_config(provider_type)
-                if provider_config:
+                # Use get_all_channels to get config even if not enabled (we'll check enabled below)
+                all_channels = agent_config.get_all_channels()
+                channel_info = all_channels.get(provider_type)
+                if channel_info:
                     config_data = {
-                        'enabled': True,
-                        'config': provider_config
+                        'enabled': channel_info.get('enabled', False),
+                        'config': channel_info.get('config', {})
                     }
-                    logger.info(f"[ServiceManager] Using Agent-level config for {key}")
+                    logger.info(f"[ServiceManager] Using Agent-level config for {key}, enabled={config_data['enabled']}")
             except Exception as e:
                 logger.info(f"[ServiceManager] Failed to get Agent config for {key}: {e}", exc_info=True)
             
@@ -217,8 +219,8 @@ class IMServiceManager:
                 logger.error(f"[ServiceManager] No config found for {key}")
                 return False
             
-            if not config_data.get('enabled', True):
-                logger.info(f"[ServiceManager] Channel {key} is disabled")
+            if not config_data.get('enabled', False):
+                logger.info(f"[ServiceManager] Channel {key} is disabled, not starting")
                 return False
             
             # Create connection state
