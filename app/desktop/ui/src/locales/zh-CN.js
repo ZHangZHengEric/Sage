@@ -489,6 +489,7 @@ export default {
   'tools.sysSpawnAgent': '创建智能体',
   'tools.sysDelegateTask': '任务委派',
   'tools.sysFinishTask': '任务完成',
+  'tools.compressConversationHistory': '压缩历史消息',
   'tools.generateImage': '生成图片',
   'tools.fetchWebpage': '抓取网页',
   'tools.webFetcher': '网页抓取',
@@ -1020,6 +1021,9 @@ export default {
   // Workbench ToolCall
   'workbench.tool.arguments': '输入参数',
   'workbench.tool.result': '输出结果',
+  'workbench.tool.compressingHistory': '正在压缩历史消息...',
+  'workbench.tool.compressFailed': '压缩失败',
+  'workbench.tool.historyCompressed': '历史消息已压缩',
   'workbench.tool.error': '错误信息',
   'workbench.tool.shellCommand': 'Shell 命令',
   'workbench.tool.loadSkill': '加载 Skill',

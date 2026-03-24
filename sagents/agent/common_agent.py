@@ -36,10 +36,7 @@ class CommonAgent(AgentBase):
             return
         message_manager = session_context.message_manager
         all_messages = message_manager.extract_all_context_messages(recent_turns=10, max_length=self.max_history_context_length, last_turn_user_only=False)
-        # 根据 active_budget 压缩消息
-        budget_info = message_manager.context_budget_manager.budget_info
-        if budget_info:
-            all_messages = MessageManager.compress_messages(all_messages, budget_info.get('active_budget', 8000))
+
         # all_messages  = message_manager.messages
         tool_manager = session_context.tool_manager
         

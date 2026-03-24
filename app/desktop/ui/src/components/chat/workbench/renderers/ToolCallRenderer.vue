@@ -547,7 +547,45 @@
         </div>
       </template>
 
-      <!-- 14. 其他工具 - 统一显示 -->
+      <!-- 14. compress_conversation_history - 压缩历史消息展示 -->
+      <template v-else-if="isCompressHistory">
+        <div class="compress-history-container h-full flex flex-col overflow-hidden">
+          <!-- 加载中状态 -->
+          <div v-if="!toolResult" class="flex items-center justify-center h-full text-muted-foreground p-4">
+            <Loader2 class="w-5 h-5 animate-spin mr-2" />
+            <span>{{ t('workbench.tool.compressingHistory') }}</span>
+          </div>
+          <!-- 错误状态 -->
+          <div v-else-if="toolResult?.is_error" class="flex items-start gap-3 p-4 text-destructive">
+            <XCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p class="font-medium">{{ t('workbench.tool.compressFailed') }}</p>
+              <p class="text-sm opacity-80 mt-1">{{ compressHistoryError }}</p>
+            </div>
+          </div>
+          <!-- 成功状态 -->
+          <div v-else class="flex flex-col h-full overflow-hidden">
+            <!-- 状态头部 -->
+            <div class="flex items-center gap-3 p-4 border-b border-border/30 bg-blue-500/5 flex-shrink-0">
+              <div class="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                <Minimize2 class="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p class="font-medium text-sm">{{ t('workbench.tool.historyCompressed') }}</p>
+                <p class="text-xs text-muted-foreground">{{ compressHistoryStats }}</p>
+              </div>
+            </div>
+            <!-- 压缩结果内容 - Markdown 渲染 -->
+            <div class="flex-1 overflow-hidden">
+              <div class="h-full overflow-auto custom-scrollbar p-4">
+                <MarkdownRenderer :content="compressHistoryResult" class="text-sm" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 15. 其他工具 - 统一显示 -->
       <template v-else>
         <div class="p-4 h-full overflow-auto">
           <!-- 参数 -->
@@ -612,7 +650,8 @@ import {
   EyeOff,
   Image as ImageIcon,
   Brain,
-  Bot
+  Bot,
+  Minimize2
 } from 'lucide-vue-next'
 import SyntaxHighlighter from '../../SyntaxHighlighter.vue'
 import MarkdownRenderer from '../../MarkdownRenderer.vue'
@@ -715,6 +754,7 @@ const isSearchWebPage = computed(() => toolName.value === 'search_web_page')
 const isSearchImageFromWeb = computed(() => toolName.value === 'search_image_from_web')
 const isSearchMemory = computed(() => toolName.value === 'search_memory')
 const isQuestionnaire = computed(() => toolName.value === 'questionnaire')
+const isCompressHistory = computed(() => toolName.value === 'compress_conversation_history')
 
 // 显示名称映射
 const displayToolName = computed(() => {
@@ -729,7 +769,8 @@ const displayToolName = computed(() => {
     'search_image_from_web': t('workbench.tool.searchImageFromWeb'),
     'search_memory': t('workbench.tool.searchMemory'),
     'questionnaire': t('tools.questionnaire'),
-    'todo_write': t('tools.todoWrite')
+    'todo_write': t('tools.todoWrite'),
+    'compress_conversation_history': t('tools.compressConversationHistory')
   }
   return nameMap[toolName.value] || toolName.value
 })
@@ -953,6 +994,41 @@ const executionLanguage = computed(() => {
   if (toolName.value === 'execute_javascript_code') return 'javascript'
   return 'text'
 })
+
+// ============ 5.5 Compress History ============
+const compressHistoryResult = computed(() => {
+  if (!toolResult.value) return ''
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  try {
+    const parsed = JSON.parse(content)
+    return parsed.message || parsed.content || content
+  } catch {
+    return content
+  }
+})
+const compressHistoryStats = computed(() => {
+  // 尝试从结果中提取压缩统计信息
+  const result = compressHistoryResult.value
+  if (!result) return ''
+  // 匹配 "X tokens → Y tokens (压缩率: Z%)" 格式
+  const match = result.match(/(\d+)\s*tokens?\s*→\s*(\d+)\s*tokens?.*\((压缩率|compression):\s*([^)]+)\)/i)
+  if (match) {
+    return `${match[1]} → ${match[2]} tokens (${match[4]})`
+  }
+  return ''
+})
+const compressHistoryError = computed(() => {
+  if (!toolResult.value?.content) return ''
+  const content = toolResult.value.content
+  if (typeof content === 'string') return content
+  try {
+    const parsed = JSON.parse(content)
+    return parsed.message || parsed.error || '未知错误'
+  } catch {
+    return String(content)
+  }
+})
 const executedCode = computed(() => toolArgs.value.code || '')
 const executionResult = computed(() => {
   if (!toolResult.value) return ''
@@ -1004,6 +1080,7 @@ const toolIcon = computed(() => {
   if (name.includes('db') || name.includes('sql') || name.includes('query')) return Database
   if (name.includes('web') || name.includes('http') || name.includes('url')) return Globe
   if (name.includes('skill')) return Settings
+  if (name.includes('compress')) return Minimize2
   return Zap
 })
 
