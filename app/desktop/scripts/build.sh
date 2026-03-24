@@ -442,18 +442,18 @@ fi
 # Use tauri CLI from node_modules if available (much faster to install)
 if [ -f "$UI_DIR/node_modules/.bin/tauri" ]; then
   echo "Using local Tauri CLI..."
-  TAURI_CMD="$UI_DIR/node_modules/.bin/tauri"
+  TAURI_CMD=("$UI_DIR/node_modules/.bin/tauri")
 elif command -v cargo-tauri >/dev/null; then
   echo "Using Cargo Tauri CLI..."
-  TAURI_CMD="cargo tauri"
+  TAURI_CMD=(cargo tauri)
 else
   echo "Installing Tauri CLI (via npm)..."
   # Fallback to global npm install (faster than cargo install)
   npm install -g @tauri-apps/cli
-  TAURI_CMD="tauri"
+  TAURI_CMD=(tauri)
 fi
 
-echo "Tauri CLI: $TAURI_CMD"
+echo "Tauri CLI: ${TAURI_CMD[*]}"
 
 TAURI_TARGET_ARGS=()
 if [ "$OS_TYPE" = "linux" ] && [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
@@ -472,9 +472,9 @@ fi
 
 if [ "$MODE" = "release" ]; then
   # Cargo.toml now has [profile.release] for optimization
-  $TAURI_CMD build "${TAURI_TARGET_ARGS[@]}"
+  "${TAURI_CMD[@]}" build "${TAURI_TARGET_ARGS[@]}"
 else
-  $TAURI_CMD build --debug "${TAURI_TARGET_ARGS[@]}"
+  "${TAURI_CMD[@]}" build --debug "${TAURI_TARGET_ARGS[@]}"
 fi
 
 echo "======================================"
