@@ -42,7 +42,18 @@ case "$OS" in
     ;;
   Linux)
     OS_TYPE="linux"
-    TARGET="x86_64-unknown-linux-gnu"
+    case "$ARCH" in
+      x86_64)
+        TARGET="x86_64-unknown-linux-gnu"
+        ;;
+      aarch64|arm64)
+        TARGET="aarch64-unknown-linux-gnu"
+        ;;
+      *)
+        echo "不支持的 Linux 架构: $ARCH"
+        exit 1
+        ;;
+    esac
     ;;
   MINGW*|CYGWIN*)
     OS_TYPE="windows"
@@ -243,5 +254,19 @@ echo " 开发服务器运行中"
 echo " 端口: 由应用动态分配 (默认 8080)"
 echo "======================================"
 
+<<<<<<< HEAD
+TAURI_DEV_ARGS=()
+if [ "$OS_TYPE" = "linux" ] && [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
+  echo "使用显式 Tauri target: $TARGET"
+  TAURI_DEV_ARGS=(--target "$TARGET")
+fi
+
+if [ ${#TAURI_DEV_ARGS[@]} -gt 0 ]; then
+  cargo tauri dev "${TAURI_DEV_ARGS[@]}"
+else
+  cargo tauri dev
+fi
+=======
 echo "启动 Sage 桌面应用..."
 cargo tauri dev
+>>>>>>> upstream/main
