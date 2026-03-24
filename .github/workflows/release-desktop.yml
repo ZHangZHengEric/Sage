@@ -29,6 +29,10 @@ jobs:
             platform: linux
             arch: x86_64
             target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            platform: linux
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
           - runner: windows-latest
             platform: windows
             arch: x86_64
@@ -215,9 +219,22 @@ jobs:
             app/desktop/tauri/target/release/bundle/msi/*.zip
             app/desktop/tauri/target/release/bundle/msi/*.zip.sig
 
+      - name: Collect Linux Release Assets
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            DEB_DIR="app/desktop/tauri/target/${{ matrix.target }}/release/bundle/deb"
+          else
+            DEB_DIR="app/desktop/tauri/target/release/bundle/deb"
+          fi
+
+          mkdir -p release-assets/linux
+          cp "$DEB_DIR"/*.deb release-assets/linux/
+
       - name: Release (Linux)
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'linux'
         with:
           files: |
-            app/desktop/tauri/target/release/bundle/deb/*.deb
+            release-assets/linux/*.deb

@@ -48,7 +48,18 @@ case "$OS" in
     ;;
   Linux)
     OS_TYPE="linux"
-    TARGET="x86_64-unknown-linux-gnu"
+    case "$ARCH" in
+      x86_64)
+        TARGET="x86_64-unknown-linux-gnu"
+        ;;
+      aarch64|arm64)
+        TARGET="aarch64-unknown-linux-gnu"
+        ;;
+      *)
+        echo "不支持的 Linux 架构: $ARCH"
+        exit 1
+        ;;
+    esac
     ;;
   MINGW*|CYGWIN*)
     OS_TYPE="windows"
@@ -431,18 +442,29 @@ fi
 # Use tauri CLI from node_modules if available (much faster to install)
 if [ -f "$UI_DIR/node_modules/.bin/tauri" ]; then
   echo "Using local Tauri CLI..."
-  TAURI_CMD="$UI_DIR/node_modules/.bin/tauri"
+  TAURI_CMD=("$UI_DIR/node_modules/.bin/tauri")
 elif command -v cargo-tauri >/dev/null; then
   echo "Using Cargo Tauri CLI..."
-  TAURI_CMD="cargo tauri"
+  TAURI_CMD=(cargo tauri)
 else
   echo "Installing Tauri CLI (via npm)..."
   # Fallback to global npm install (faster than cargo install)
   npm install -g @tauri-apps/cli
-  TAURI_CMD="tauri"
+  TAURI_CMD=(tauri)
 fi
 
-echo "Tauri CLI: $TAURI_CMD"
+echo "Tauri CLI: ${TAURI_CMD[*]}"
+
+TAURI_BUILD_ARGS=(build)
+
+if [ "$OS_TYPE" = "linux" ] && [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
+  echo "使用显式 Tauri target: $TARGET"
+  TAURI_BUILD_ARGS+=(--target "$TARGET")
+fi
+
+if [ "$MODE" != "release" ]; then
+  TAURI_BUILD_ARGS+=(--debug)
+fi
 
 # Skip signature for updater artifacts as keys are not provided
 # export TAURI_SKIP_SIGNATURE=true
@@ -453,12 +475,7 @@ if [ "$OS_TYPE" = "macos" ]; then
     xattr -rc "$TAURI_SIDECAR_DIR" 2>/dev/null || true
 fi
 
-if [ "$MODE" = "release" ]; then
-  # Cargo.toml now has [profile.release] for optimization
-  $TAURI_CMD build
-else
-  $TAURI_CMD build --debug
-fi
+"${TAURI_CMD[@]}" "${TAURI_BUILD_ARGS[@]}"
 
 echo "======================================"
 echo " 构建成功完成"
