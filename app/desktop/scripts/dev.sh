@@ -234,8 +234,14 @@ if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
   cargo install tauri-cli --version "^2"
 fi
 
+########################################
+# 5. Start Development Server
+########################################
+
 echo "======================================"
 echo " 开发服务器运行中"
+echo " 端口: 由应用动态分配 (默认 8080)"
 echo "======================================"
 
+echo "启动 Sage 桌面应用..."
 cargo tauri dev
