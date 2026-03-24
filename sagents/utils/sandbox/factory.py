@@ -25,7 +25,11 @@ class SandboxProviderFactory:
     _providers: Dict[SandboxType, Type[ISandboxHandle]] = {}
 
     # 远程沙箱提供者映射
-    _remote_providers: Dict[str, Type[ISandboxHandle]] = {}
+    _remote_providers: Dict[str, Optional[Type[ISandboxHandle]]] = {
+        "opensandbox": None,
+        "kubernetes": None,
+        "firecracker": None,
+    }
 
     @classmethod
     def _get_remote_provider(cls, provider_name: str) -> Type[ISandboxHandle]:
@@ -172,6 +176,7 @@ class SandboxProviderFactory:
                 sandbox_id=sandbox_id,
                 workspace=config.workspace,
                 mount_paths=config.mount_paths,
+                virtual_workspace=config.virtual_workspace,
             )
 
     @classmethod

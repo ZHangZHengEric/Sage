@@ -47,8 +47,8 @@ class LocalSandboxProvider(ISandboxHandle):
         cpu_time_limit: int = 300,
         memory_limit_mb: int = 4096,
         allowed_paths: Optional[List[str]] = None,
-        linux_isolation_mode: str = "subprocess",
-        macos_isolation_mode: str = "subprocess",
+        linux_isolation_mode: str = "bwrap",
+        macos_isolation_mode: str = "seatbelt",
     ):
         self._sandbox_id = sandbox_id
         self._host_workspace = host_workspace

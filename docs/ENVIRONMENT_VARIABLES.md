@@ -42,7 +42,7 @@
 
 - **用途**: Linux 系统隔离模式
 - **可选值**: `subprocess` | `bwrap`
-- **默认值**: `subprocess`
+- **默认值**: `bwrap`
 - **使用位置**:
   - `sagents/utils/sandbox/config.py:87` - SandboxConfig 从环境变量创建时读取
 
@@ -50,7 +50,7 @@
 
 - **用途**: macOS 系统隔离模式
 - **可选值**: `subprocess` | `seatbelt`
-- **默认值**: `subprocess`
+- **默认值**: `seatbelt`
 - **使用位置**:
   - `sagents/utils/sandbox/config.py:88` - SandboxConfig 从环境变量创建时读取
 
