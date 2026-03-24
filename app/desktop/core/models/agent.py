@@ -82,13 +82,11 @@ class AgentConfigDao(BaseDao):
         确保只有一个 Agent 是默认
         """
         from sqlalchemy import update
-        from ..core.client.db import get_db_client
+        from ..core.client.db import get_global_db
 
-        db_client = get_db_client()
-        if db_client is None:
-            return False
+        db_client = await get_global_db()
 
-        async with db_client._async_session() as session:
+        async with db_client.get_session(autocommit=False) as session:
             try:
                 # 先将所有 Agent 设为非默认
                 await session.execute(

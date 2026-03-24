@@ -245,10 +245,16 @@ if [ -z "$TAURI_CLI_VERSION" ] || [[ "$TAURI_CLI_VERSION" != 2.* ]]; then
   cargo install tauri-cli --version "^2"
 fi
 
+########################################
+# 5. Start Development Server
+########################################
+
 echo "======================================"
 echo " 开发服务器运行中"
+echo " 端口: 由应用动态分配 (默认 8080)"
 echo "======================================"
 
+<<<<<<< HEAD
 TAURI_DEV_ARGS=()
 if [ "$OS_TYPE" = "linux" ] && [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
   echo "使用显式 Tauri target: $TARGET"
@@ -260,3 +266,7 @@ if [ ${#TAURI_DEV_ARGS[@]} -gt 0 ]; then
 else
   cargo tauri dev
 fi
+=======
+echo "启动 Sage 桌面应用..."
+cargo tauri dev
+>>>>>>> upstream/main

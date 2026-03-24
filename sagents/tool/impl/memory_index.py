@@ -5,12 +5,10 @@ Supports incremental updates and fast search through sandbox interface
 """
 import os
 import pickle
-import hashlib
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass
-from datetime import datetime
 
 from sagents.utils.logger import logger
 
@@ -138,7 +136,7 @@ class MemoryIndex:
                 
                 # If documents is empty but mtime cache exists, clear mtime cache to force rescan
                 if not self.documents and self._dir_mtime_cache:
-                    logger.info(f"MemoryIndex: Documents empty but mtime cache exists, clearing mtime cache to force rescan")
+                    logger.info("MemoryIndex: Documents empty but mtime cache exists, clearing mtime cache to force rescan")
                     self._dir_mtime_cache = {}
                 
                 return True
@@ -178,12 +176,12 @@ class MemoryIndex:
         """Get directory modification time through sandbox"""
         try:
             # 在沙箱内执行命令，使用虚拟路径
-            logger.info(f"MemoryIndex: Executing stat command for: {dir_path}")
+            # logger.debug(f"MemoryIndex: Executing stat command for: {dir_path}")
             result = await self.sandbox.execute_command(
                 command=f"stat -c %Y {dir_path} 2>/dev/null || stat -f %m {dir_path}",
                 timeout=5
             )
-            logger.info(f"MemoryIndex: Stat result for {dir_path}: success={result.success}, stdout={result.stdout.strip() if result.success else 'N/A'}")
+            # logger.debug(f"MemoryIndex: Stat result for {dir_path}: success={result.success}")
             if result.success:
                 return float(result.stdout.strip())
         except Exception as e:
@@ -323,17 +321,17 @@ class MemoryIndex:
             return
 
         # Get current directory mtime
-        logger.info(f"MemoryIndex: Checking mtime for dir: {dir_path}")
+        # logger.debug(f"MemoryIndex: Checking mtime for dir: {dir_path}")
         current_mtime = await self._get_dir_mtime(dir_path)
-        logger.info(f"MemoryIndex: Dir {dir_path} mtime: {current_mtime}")
+        # logger.debug(f"MemoryIndex: Dir {dir_path} mtime: {current_mtime}")
 
         # Check if directory has changed
         last_mtime = self._dir_mtime_cache.get(dir_path, 0)
-        logger.info(f"MemoryIndex: Dir {dir_path} last_mtime: {last_mtime}, current_mtime: {current_mtime}")
+        # logger.debug(f"MemoryIndex: Dir {dir_path} last_mtime: {last_mtime}, current_mtime: {current_mtime}")
         if current_mtime <= last_mtime:
             # Directory unchanged, skip scanning
             # But we still need to collect files from this directory from existing index
-            logger.info(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
+            # logger.debug(f"MemoryIndex: Skipping unchanged directory: {dir_path}")
             # Collect files from existing index that belong to this directory
             for filepath in self.path_to_id.keys():
                 if filepath.startswith(dir_path + '/') or filepath == dir_path:
@@ -480,7 +478,7 @@ class MemoryIndex:
             current_files
         )
         
-        logger.info(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_id)} indexed files")
+        # logger.debug(f"MemoryIndex: Scan complete. Found {len(current_files)} current files, {len(self.path_to_id)} indexed files")
 
         # Check for deleted files
         indexed_paths = set(self.path_to_id.keys())
