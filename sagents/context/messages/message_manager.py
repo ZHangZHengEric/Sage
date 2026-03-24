@@ -679,9 +679,10 @@ class MessageManager:
         类似 extract_all_context_messages，但用于任意输入的消息列表（而非 self.messages）
 
         策略：
-        1. 检测 compress_conversation_history 工具调用
-        2. 如果找到，保留该工具调用对应的 User 消息、最后一个压缩工具及之后的消息
-        3. 如果没找到，返回所有消息
+        1. 过滤掉 REASONING_CONTENT 类型的消息
+        2. 检测 compress_conversation_history 工具调用
+        3. 如果找到，保留该工具调用对应的 User 消息、最后一个压缩工具及之后的消息
+        4. 如果没找到，返回过滤后的所有消息
 
         Args:
             messages: 原始消息列表
@@ -692,18 +693,24 @@ class MessageManager:
         if not messages:
             return []
 
+        # 过滤掉 REASONING_CONTENT 类型的消息
+        filtered_messages = [
+            msg for msg in messages
+            if msg.type != MessageType.REASONING_CONTENT.value
+        ]
+
         # 从后往前查找最新的压缩工具调用
         compression_tool_index = None
         compression_tool_user_index = None
 
-        for i in range(len(messages) - 1, -1, -1):
-            msg = messages[i]
+        for i in range(len(filtered_messages) - 1, -1, -1):
+            msg = filtered_messages[i]
             if MessageManager._is_compress_history_tool_call(msg):
                 compression_tool_index = i
                 # 找到该工具调用对应的 User 消息（往前找）
                 for j in range(i - 1, -1, -1):
-                    if (messages[j].role == MessageRole.USER.value and
-                        messages[j].type == MessageType.NORMAL.value):
+                    if (filtered_messages[j].role == MessageRole.USER.value and
+                        filtered_messages[j].type == MessageType.NORMAL.value):
                         compression_tool_user_index = j
                         break
                 break
@@ -711,14 +718,26 @@ class MessageManager:
         # 如果找到了压缩工具调用，构建新的消息列表
         if compression_tool_index is not None and compression_tool_user_index is not None:
             logger.info(f"MessageManager: 检测到压缩工具调用，保留 User 索引 {compression_tool_user_index} 及最后一个压缩工具")
-            # 构建新列表：User + 最后一个压缩工具及之后
-            return (
-                [messages[compression_tool_user_index]] +  # User 消息
-                messages[compression_tool_index:]  # 最后一个压缩工具及之后
-            )
+            # 收集所有 System 消息（必须在最前面）
+            system_messages = [
+                msg for msg in filtered_messages
+                if msg.role == MessageRole.SYSTEM.value
+            ]
+            # 构建新列表：System 消息 + User + 最后一个压缩工具及之后
+            # 注意：如果 User 消息在压缩工具之后（不应该发生），避免重复
+            if compression_tool_user_index >= compression_tool_index:
+                # User 消息在压缩工具之后，只返回从 User 开始的消息
+                return system_messages + filtered_messages[compression_tool_user_index:]
+            else:
+                # 正常情况：User 消息在压缩工具之前
+                return (
+                    system_messages +  # System 消息（保留）
+                    [filtered_messages[compression_tool_user_index]] +  # User 消息
+                    filtered_messages[compression_tool_index:]  # 最后一个压缩工具及之后
+                )
 
-        # 没找到压缩工具，返回所有消息
-        return messages
+        # 没找到压缩工具，返回过滤后的所有消息
+        return filtered_messages
 
     def extract_all_context_messages(self, recent_turns: int = 0, last_turn_user_only: bool = True, allowed_message_types: Optional[List[str]] = None) -> List[MessageChunk]:
         """
@@ -781,10 +800,16 @@ class MessageManager:
         if compression_tool_index is not None and compression_tool_user_index is not None:
             logger.info(f"MessageManager: 检测到压缩工具调用，保留 User 索引 {compression_tool_user_index} 及最后一个压缩工具")
             # 构建新列表：User + 最后一个压缩工具及之后
-            active_messages = (
-                [active_messages[compression_tool_user_index]] +  # User 消息
-                active_messages[compression_tool_index:]  # 最后一个压缩工具及之后
-            )
+            # 注意：如果 User 消息在压缩工具之后（不应该发生），避免重复
+            if compression_tool_user_index >= compression_tool_index:
+                # User 消息在压缩工具之后，只保留从 User 开始的消息
+                active_messages = active_messages[compression_tool_user_index:]
+            else:
+                # 正常情况：User 消息在压缩工具之前
+                active_messages = (
+                    [active_messages[compression_tool_user_index]] +  # User 消息
+                    active_messages[compression_tool_index:]  # 最后一个压缩工具及之后
+                )
         # --- 检测结束 ---
             
         for msg in active_messages:

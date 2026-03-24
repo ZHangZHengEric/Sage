@@ -543,27 +543,41 @@ class SimpleAgent(AgentBase):
             tool = CompressHistoryTool()
             result = await tool.compress_conversation_history(messages, session_id)
 
-            # 3. yield Tool 的结果
+            # 3. yield Tool 的结果（无论成功或失败都返回）
+            compression_result = MessageChunk(
+                role=MessageRole.TOOL.value,
+                content=result.get('message', ''),
+                tool_call_id=tool_call_id,
+                type=MessageType.TOOL_CALL_RESULT.value,
+                metadata={
+                    'tool_name': 'compress_conversation_history',
+                    'auto_generated': True,
+                    'status': result.get('status', 'unknown')
+                }
+            )
             if result.get('status') == 'success':
-                compression_result = MessageChunk(
-                    role=MessageRole.TOOL.value,
-                    content=result.get('message', ''),
-                    tool_call_id=tool_call_id,
-                    type=MessageType.TOOL_CALL_RESULT.value,
-                    metadata={
-                        'tool_name': 'compress_conversation_history',
-                        'auto_generated': True
-                    }
-                )
                 logger.info("SimpleAgent: yield 压缩工具的 tool result")
-                yield [compression_result]
             else:
                 logger.warning(f"SimpleAgent: 工具压缩失败 - {result.get('message', '未知错误')}")
+            yield [compression_result]
 
         except Exception as e:
             logger.error(f"SimpleAgent: 调用压缩工具失败: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            # 即使异常也返回 tool result
+            compression_result = MessageChunk(
+                role=MessageRole.TOOL.value,
+                content=f"压缩失败: {str(e)}",
+                tool_call_id=tool_call_id,
+                type=MessageType.TOOL_CALL_RESULT.value,
+                metadata={
+                    'tool_name': 'compress_conversation_history',
+                    'auto_generated': True,
+                    'status': 'error'
+                }
+            )
+            yield [compression_result]
 
     async def _prepare_messages_for_llm(
         self,
@@ -603,7 +617,11 @@ class SimpleAgent(AgentBase):
             return
 
         # 3. 先尝试使用 compress_messages 进行压缩
-        budget_limit = int(max_model_len * 0.3)  # 压缩到 30% 目标
+        # 计算 system 消息的 token 长度
+        system_messages = [m for m in extracted_messages if m.role == MessageRole.SYSTEM.value]
+        system_tokens = MessageManager.calculate_messages_token_length(system_messages)
+        # 压缩目标：max_model_len 减去 system 消息后，剩余部分的 30%
+        budget_limit = int((max_model_len - system_tokens) * 0.3)
         compressed_messages = MessageManager.compress_messages(extracted_messages, budget_limit)
         new_tokens = MessageManager.calculate_messages_token_length(compressed_messages)
 
@@ -620,7 +638,9 @@ class SimpleAgent(AgentBase):
             return
 
         # 5. 如果仍不满足，调用 compress_conversation_history 工具进行深度压缩
-        logger.info("SimpleAgent: compress_messages 压缩后仍不满足要求，调用工具进行深度压缩")
+        # 目标与 compress_messages 一致：max_model_len 减去 system 消息后，剩余部分的 30%
+        target_tokens = int((max_model_len - system_tokens) * 0.3)
+        logger.info(f"SimpleAgent: compress_messages 压缩后仍不满足要求，调用工具进行深度压缩。当前: {new_tokens} tokens, 目标: <= {target_tokens} tokens (max_model_len: {max_model_len}, system_tokens: {system_tokens})")
 
         # 通过生成器获取工具调用的中间结果（tool_calls 和 tool result）
         tool_results = []
