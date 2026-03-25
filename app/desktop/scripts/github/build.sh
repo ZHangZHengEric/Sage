@@ -149,72 +149,34 @@ install_python_deps() {
     fi
 
     local REQ_FILE="$ROOT_DIR/requirements.txt"
-    local HASH_FILE="$CACHE_DIR/.requirements.hash"
-    local NEW_HASH=$(calc_hash "$REQ_FILE")
-    local OLD_HASH=""
-    
-    if [ -f "$HASH_FILE" ]; then
-        OLD_HASH=$(cat "$HASH_FILE")
+    local WHEELHOUSE_DIR="$CACHE_DIR/wheelhouse"
+
+    echo "正在升级构建工具..."
+    PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}"
+    echo "使用 pip 索引 URL: $PIP_INDEX_URL"
+
+    pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
+
+    # 解决 x86_64 下 llvmlite 编译报错问题：优先使用 conda 安装预编译包
+    if [ "${CONDA_DEFAULT_ENV:-}" = "$ENV_NAME" ]; then
+        echo "正在通过 Conda 预安装 llvmlite 和 numba (防止 x86 编译错误)..."
+        conda install -y -c conda-forge llvmlite numba
     fi
 
-    # 简单检查环境是否完整 (检查是否能 import 关键包)
-    local ENV_OK=false
-    if pip list | grep -q "requests"; then
-        ENV_OK=true
+    if [ ! -d "$WHEELHOUSE_DIR" ] || [ -z "$(find "$WHEELHOUSE_DIR" -type f -print -quit 2>/dev/null || true)" ]; then
+        echo "错误: 未找到可用的 wheelhouse: $WHEELHOUSE_DIR"
+        exit 1
     fi
 
-    if [ "$NEW_HASH" = "$OLD_HASH" ] && [ "$ENV_OK" = "true" ]; then
-        echo "Python 依赖未变更且环境正常，跳过安装。"
-    else
-        local WHEELHOUSE_DIR="$CACHE_DIR/wheelhouse"
-        local HAS_WHEELHOUSE=false
-        local OFFLINE_INSTALL_OK=false
+    echo "使用 wheelhouse 离线安装依赖..."
+    pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"
 
-        echo "正在升级构建工具..."
-        PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}"
-        echo "使用 pip 索引 URL: $PIP_INDEX_URL"
+    # 强制重新安装纯 Python 版本以避免 mypyc 隐式导入问题
+    echo "正在离线强制安装纯 Python 版 chardet 和 charset-normalizer..."
+    pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links "$WHEELHOUSE_DIR"
 
-        pip install --upgrade pip setuptools wheel --index-url "$PIP_INDEX_URL"
-
-        # 解决 x86_64 下 llvmlite 编译报错问题：优先使用 conda 安装预编译包
-        if [ "${CONDA_DEFAULT_ENV:-}" = "$ENV_NAME" ]; then
-            echo "正在通过 Conda 预安装 llvmlite 和 numba (防止 x86 编译错误)..."
-            conda install -y -c conda-forge llvmlite numba
-        fi
-
-        if [ -d "$WHEELHOUSE_DIR" ] && [ -n "$(find "$WHEELHOUSE_DIR" -type f -print -quit 2>/dev/null || true)" ]; then
-            HAS_WHEELHOUSE=true
-            echo "检测到 wheelhouse，优先尝试离线安装依赖..."
-
-            if pip install -r "$REQ_FILE" --no-index --find-links "$WHEELHOUSE_DIR"; then
-                # 强制重新安装纯 Python 版本以避免 mypyc 隐式导入问题
-                if pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --no-index --find-links "$WHEELHOUSE_DIR"; then
-                    OFFLINE_INSTALL_OK=true
-                    echo "离线安装依赖成功。"
-                fi
-            fi
-        fi
-
-        if [ "$OFFLINE_INSTALL_OK" != "true" ]; then
-            echo "回退到在线安装依赖..."
-            pip install -r "$REQ_FILE" --index-url "$PIP_INDEX_URL"
-
-            # 强制重新安装 chardet 和 charset-normalizer 为纯 Python 版本 (no-binary)
-            # 这样 PyInstaller 可以正确打包它们，避免 mypyc 编译模块的隐藏导入问题
-            echo "正在强制安装纯 Python 版 chardet 和 charset-normalizer..."
-            pip install --force-reinstall --no-binary=chardet,charset-normalizer chardet charset-normalizer --index-url "$PIP_INDEX_URL"
-        fi
-
-        if ! command -v pyinstaller >/dev/null; then
-            if [ "$HAS_WHEELHOUSE" = "true" ]; then
-                pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR" || pip install pyinstaller --index-url "$PIP_INDEX_URL"
-            else
-                pip install pyinstaller --index-url "$PIP_INDEX_URL"
-            fi
-        fi
-        
-        # 保存新的 hash
-        echo "$NEW_HASH" > "$HASH_FILE"
+    if ! command -v pyinstaller >/dev/null; then
+        pip install pyinstaller --no-index --find-links "$WHEELHOUSE_DIR"
     fi
 }
 
